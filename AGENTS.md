@@ -75,16 +75,16 @@ sessions; `coordination/RESULTS.md` carries the latest result.
 
 ## What this project is
 
-Ghostlight is a governed browser automation MCP server: a protocol-versioned MCP edge, a
-persistent Rust service, a browser-only relay, and a thin Chromium extension. Together they give
-any MCP client (Claude Code, Cursor, Zed, Cline, ...) controlled access to the user's authenticated
+Ghostlight is a governed browser automation MCP server: a protocol-versioned edge that is the MCP
+relay and the browser relay, a persistent Rust service, and a thin Chromium extension. Together
+they give any MCP client (Claude Code, Cursor, Zed, Cline, ...) controlled access to the user's authenticated
 browser session, with identity-bound access control, per-action capability classification (read /
 action / write / execute), and structured audit logging. The unconstrained engine is first-class
 ("all-open stays first-class"); governance is an overlay, never a tax on the ungoverned.
 
 ```
-MCP Client <--stdio--> ghostlight-mcp-connector <--typed IPC--> ghostlight orchestrator
-    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Browser adapter
+MCP Client <--stdio--> ghostlight mcp <--relay 4--> ghostlight-service
+    <--relay 4--> ghostlight chrome-extension://... <--native messaging--> Browser adapter
 ```
 
 It is a clean-room Rust build. The sole external reference is Anthropic's official Claude
@@ -93,18 +93,21 @@ in Chrome extension: we harvest its observable interface and technique, never it
 
 ## Repository layout (current truth)
 
-The tree is a Rust workspace with four process/trust concerns:
+The tree is a Rust workspace with these process/trust concerns:
 
-- `crates/orchestrator/` -- the product authority: language, workspace aggregate, governance,
-  browser coordination, presentation decisions, execution, and completion. Its
+- `crates/orchestrator/` -- the product authority, built as `ghostlight-service`: language,
+  workspace aggregate, governance, browser coordination, presentation decisions, execution, and
+  completion. Its
   `src/browser/adapter/` is the browser adapter component: one module per browser family
   (`chromium/`), holding the wire levels the extension can speak and every page asset, JavaScript
   and CSS, that runs in a page.
-- `crates/bridge/` -- small typed service contracts plus framing, and the one
-  shared local service-lifecycle seam both connectors use to demand-start the sibling authority.
-- `crates/mcp-connector/` -- the stable MCP stdio edge. It owns protocol lifecycle and generic
-  rendering, never product decisions.
-- `crates/browser-connector/` -- the stable native-messaging/browser relay executable.
+- `crates/relay/` -- the frozen relay protocol 4: endpoint, framing, start reasons, the session
+  listener and the route an edge invocation takes.
+- `crates/edge/` -- the frozen `ghostlight` executable. It is the MCP relay (`ghostlight mcp`),
+  the browser relay (a `chrome-extension://` argument) and the front door that hands every other
+  command to `ghostlight-service`. It owns protocol lifecycle and generic rendering, never
+  product decisions, and knows no verb.
+- `crates/bridge/` -- the service's typed diagnostics contracts.
 - `extension/` -- the Manifest V3 Chromium adapter. It owns Chromium APIs, DOM-local observation,
   browser-specific durability, and content-free presentation, but no policy or product journeys.
 - `docs/` -- the complete product history and current 1.0 contracts: SPEC, ADRs, guides, trust
@@ -161,13 +164,14 @@ Before committing, run the checks for what you changed. CI runs the full set on 
   `cargo test --workspace` if bridge, relay, win-peer or a manifest changed.
 - Extension: `npm test` in `extension/`.
 - Page assets: `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"`,
-  plus `cargo test -p ghostlight` and `npm test` in `extension/`, which also read the expanded bundle.
-- `crates/relay`, either connector crate, any `Cargo.toml` or `Cargo.lock`, or `tests/golden/`:
+  plus `cargo test -p ghostlight-service` and `npm test` in `extension/`, which also read the
+  expanded bundle.
+- `crates/relay`, `crates/edge`, any `Cargo.toml` or `Cargo.lock`, or `tests/golden/`:
   `node --test tests/guards/connectors.test.mjs`.
 - The model surface changes on purpose: regenerate the catalog golden with
-  `GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight the_catalog_matches` (slice f08a renames
-  the package), and the result goldens with the same variable on `work::tests::golden`
-  (`GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight work::tests::golden`).
+  `GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight-service the_catalog_matches`, and the
+  result goldens with the same variable on `work::tests::golden`
+  (`GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight-service work::tests::golden`).
 - Changed runtime JavaScript that no test runs: `node --check` on it.
 - Docs or other text: `pwsh -NoProfile -File scripts/check-repository-integrity.ps1` (ASCII and links).
 

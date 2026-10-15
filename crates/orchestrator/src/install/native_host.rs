@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 use super::browser_package::{self, BrowserPackage, BrowserPackageContext, BrowserPackageSpec};
 use super::container::{self, AppContainer, Residence};
-use super::layout::{Layout, MANIFESTS_DIRECTORY_NAME};
+use super::layout::{Layout, EDGE_COMMAND_NAME, MANIFESTS_DIRECTORY_NAME};
 
 /// Stable native-messaging identity used by every supported Chromium browser.
 pub const HOST_NAME: &str = "org.sylin.ghostlight";
@@ -38,7 +38,6 @@ pub const DEVELOPMENT_EXTENSION_ID: &str = "cjcmhepmagomefjggkcohdbfemacojoa";
 pub const NATIVE_HOST_DIR_VARIABLE: &str = "GHOSTLIGHT_NATIVE_HOST_DIR";
 
 const HOST_DESCRIPTION: &str = "Ghostlight browser connector";
-const CONNECTOR_NAME: &str = "ghostlight-browser-connector";
 
 /// Operating-system registration layout.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -304,7 +303,9 @@ impl NativeHostContext {
             &home,
         );
         let layout = Layout::current().unwrap_or_else(|_| Layout::new(PathBuf::new()));
-        let connector = layout.bin().join(executable_name(CONNECTOR_NAME, platform));
+        let connector = layout
+            .bin()
+            .join(executable_name(EDGE_COMMAND_NAME, platform));
         let manifests = if registry_isolated {
             home.join(MANIFESTS_DIRECTORY_NAME)
         } else {
@@ -1563,7 +1564,7 @@ mod tests {
             layout,
             connector: root
                 .join("Ghostlight/bin")
-                .join(executable_name(CONNECTOR_NAME, platform)),
+                .join(executable_name(EDGE_COMMAND_NAME, platform)),
             browser_packages: BrowserPackageContext::isolated(&root.join("browser-packages")),
             windows_browser_roots: vec![
                 local,
@@ -1685,7 +1686,7 @@ mod tests {
             local: PathBuf::from(r"C:\Users\test\AppData\Local"),
             layout: Layout::new("/home/test/.ghostlight"),
             manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
-            connector: PathBuf::from("/opt/ghostlight/ghostlight-browser-connector"),
+            connector: PathBuf::from("/opt/ghostlight/ghostlight"),
             browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
             windows_browser_roots: Vec::new(),
             registry_isolated: false,
@@ -1698,9 +1699,7 @@ mod tests {
             local: PathBuf::from(r"C:\Users\test\AppData\Local"),
             layout: Layout::new("/home/test/.ghostlight"),
             manifests: PathBuf::from("/home/test/.ghostlight/manifests"),
-            connector: PathBuf::from(
-                r"C:\Users\test\.ghostlight\bin\ghostlight-browser-connector.exe",
-            ),
+            connector: PathBuf::from(r"C:\Users\test\.ghostlight\bin\ghostlight.exe"),
             browser_packages: BrowserPackageContext::isolated(Path::new("/browser-packages")),
             windows_browser_roots: Vec::new(),
             registry_isolated: false,
@@ -1801,10 +1800,7 @@ mod tests {
         fs::write(&context.connector, b"connector").unwrap();
         // Joined components, not a backslash literal: Path::parent must split this path on
         // every host operating system, not only on Windows.
-        let other_connector = context
-            .local
-            .join("other-tree")
-            .join("ghostlight-browser-connector.exe");
+        let other_connector = context.local.join("other-tree").join("ghostlight.exe");
         let manifest_path = context.local.join("Ghostlight-old/host.json");
         registration_io.files().insert(
             manifest_path.clone(),
@@ -1900,7 +1896,7 @@ mod tests {
         let old_path = context.local.join("Ghostlight-old/host.json");
         registration_io.files().insert(
             old_path.clone(),
-            HostManifest::expected(Path::new(r"C:\old\ghostlight-browser-connector.exe"))
+            HostManifest::expected(Path::new(r"C:\old\ghostlight.exe"))
                 .to_json()
                 .unwrap(),
         );
@@ -1981,9 +1977,7 @@ mod tests {
 
         // Same-tree stale details are the state recovery may silently repair; a connector in
         // another installation is OwnedElsewhere and is pinned by its own test.
-        let stale_connector = context
-            .connector
-            .with_file_name("ghostlight-browser-connector-old.exe");
+        let stale_connector = context.connector.with_file_name("ghostlight-old.exe");
         registration_io.files().insert(
             occupied,
             HostManifest::expected(&stale_connector).to_json().unwrap(),

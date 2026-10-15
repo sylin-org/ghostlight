@@ -185,11 +185,11 @@ Rust 1.82 or newer, plus Chromium 125 or newer for browser validation.
 cargo build --workspace
 ```
 
-Three executables land side by side:
+Two executables land side by side:
 
-- `ghostlight` -- the orchestrator and the desktop workbench;
-- `ghostlight-mcp-connector` -- the MCP stdio edge;
-- `ghostlight-browser-connector` -- the Chromium native-messaging relay.
+- `ghostlight-service` -- the orchestrator and the desktop workbench;
+- `ghostlight` -- the edge: the MCP stdio relay (`ghostlight mcp`), the Chromium
+  native-messaging relay, and the front door that hands every other command to the service.
 
 ```sh
 target/debug/ghostlight open
@@ -238,12 +238,12 @@ them. See the [changelog](CHANGELOG.md) for release changes and upgrade conseque
 <summary><strong>How Ghostlight fits together</strong></summary>
 
 ```text
-MCP Client <--stdio--> ghostlight-mcp-connector <--typed IPC--> ghostlight orchestrator
-    <--browser IPC--> ghostlight-browser-connector <--native messaging--> Extension <--CDP--> Browser
+MCP Client <--stdio--> ghostlight mcp <--relay--> ghostlight-service
+    <--relay--> ghostlight (browser) <--native messaging--> Extension <--CDP--> Browser
 ```
 
-The orchestrator makes every product decision and owns everything the model reads. The two
-connectors carry protocol and relay lifecycle, nothing more. The extension owns Chromium, the
+The orchestrator makes every product decision and owns everything the model reads. The edge
+carries protocol and relay lifecycle, nothing more. The extension owns Chromium, the
 page, and the drawing, and never policy. Adding a feature normally means changing the orchestrator
 alone; that is a contract the shores are held to, not a happy accident.
 

@@ -5,7 +5,8 @@ import { extname, join, resolve } from "node:path";
 const repository = resolve(import.meta.dirname, "..");
 const ui = join(repository, "crates", "orchestrator", "ui");
 const port = Number(process.env.GHOSTLIGHT_PREVIEW_PORT || 41737);
-const connectorCommand = "/opt/ghostlight/ghostlight-mcp-connector";
+const connectorPath = "/opt/ghostlight/ghostlight";
+const connectorCommand = `${connectorPath} mcp`;
 
 const harnessDetail = Object.freeze({
   installed: "Ghostlight is registered for this user context.",
@@ -17,7 +18,7 @@ const harnessDetail = Object.freeze({
 });
 
 const jsonSetup = (collection = "mcpServers") => JSON.stringify({
-  [collection]: { ghostlight: { command: connectorCommand, args: [], env: {} } }
+  [collection]: { ghostlight: { command: connectorPath, args: ["mcp"], env: {} } }
 }, null, 2);
 
 const previewHarness = ({
@@ -55,32 +56,32 @@ const harnesses = [
   previewHarness({ id: "windsurf", name: "Windsurf", target: "User", state: "available", configPath: "/home/test/.codeium/windsurf/mcp_config.json" }),
   previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", icon: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
   previewHarness({ id: "crush", name: "Crush", target: "User", state: "not_detected", configPath: "/home/test/.config/crush/crush.json", manualSetup: jsonSetup("mcp") }),
-  previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorCommand}"\nargs = []\n` }),
-  previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "updatable", configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorCommand}"\n    args: []\n` }),
+  previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorPath}"\nargs = ["mcp"]\n` }),
+  previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "updatable", configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorPath}"\n    args: ["mcp"]\n` }),
   previewHarness({ id: "antigravity", name: "Antigravity", target: "CLI", state: "not_detected", configPath: "/home/test/.gemini/config/mcp_config.json" }),
   previewHarness({
     id: "cline-cursor", productId: "cline", name: "Cline", target: "Cursor", icon: "cline.svg",
     state: "needs_attention",
     configPath: "/home/test/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
-    evidence: `Found \`npx other-agent\` where Ghostlight's connector belongs; Ghostlight maintains \`${connectorCommand}\` there and changed nothing.`
+    evidence: `Found \`npx other-agent\` where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
   previewHarness({ id: "cursor", name: "Cursor", target: "User", state: "available", configPath: "/home/test/.cursor/mcp.json" }),
   previewHarness({ id: "zcode", name: "ZCode", target: "User", state: "installed", configPath: "/home/test/.zcode/cli/config.json" }),
   previewHarness({ id: "zed", name: "Zed", target: "User", state: "installed", configPath: "/home/test/.config/zed/settings.json", manualSetup: jsonSetup("context_servers") }),
-  previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "not_detected", configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorCommand}"\n    args: []\n    envs: {}\n    timeout: 300\n` }),
+  previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "not_detected", configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorPath}"\n    args: ["mcp"]\n    envs: {}\n    timeout: 300\n` }),
   previewHarness({ id: "copilot-cli", name: "GitHub Copilot CLI", target: "CLI", state: "available", configPath: "/home/test/.copilot/mcp-config.json" }),
   previewHarness({ id: "cline-cli", productId: "cline", name: "Cline", target: "CLI", icon: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
   previewHarness({
     id: "junie", name: "Junie", target: "CLI and JetBrains", state: "needs_attention",
     configPath: "/home/test/.junie/mcp/mcp.json",
-    evidence: `Found an entry without a usable command where Ghostlight's connector belongs; Ghostlight maintains \`${connectorCommand}\` there and changed nothing.`
+    evidence: `Found an entry without a usable command where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
   previewHarness({ id: "opencode", name: "OpenCode", target: "User", state: "not_detected", configPath: "/home/test/.config/opencode/opencode.json", manualSetup: jsonSetup("mcp") }),
   previewHarness({ id: "kiro", name: "Kiro", target: "CLI and IDE", state: "available", configPath: "/home/test/.kiro/settings/mcp.json" }),
   previewHarness({
     id: "kilo-code", name: "Kilo Code", target: "CLI", state: "needs_attention",
     configPath: "/home/test/.config/kilo/kilo.json", manualSetup: jsonSetup("mcp"),
-    evidence: `Found \`alien-cli --mcp\` where Ghostlight's connector belongs; Ghostlight maintains \`${connectorCommand}\` there and changed nothing.`
+    evidence: `Found \`alien-cli --mcp\` where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
   previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "available", configPath: "/home/test/.claude.json" }),
   previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", target: "Windsurf", icon: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),

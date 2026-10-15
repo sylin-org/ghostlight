@@ -32,7 +32,7 @@ struct Accepted {
     opening: Opening,
     writer: Connection,
     received: Arc<Mutex<Vec<String>>>,
-    /// Set once the connector closed its end.
+    /// Set once the edge closed its end.
     closed: Arc<AtomicBool>,
 }
 
@@ -111,7 +111,7 @@ impl FakeState {
             .unwrap_or_default()
     }
 
-    /// Whether the connector has closed its end of connection `index`.
+    /// Whether the edge has closed its end of connection `index`.
     fn closed(&self, index: usize) -> bool {
         let accepted = self.accepted.lock().unwrap();
         accepted
@@ -140,7 +140,7 @@ impl FakeState {
     }
 }
 
-/// The connector's view of the fake: connect while it is up; starting may bring it up.
+/// The edge's view of the fake: connect while it is up; starting may bring it up.
 struct FakeService(Arc<FakeState>);
 
 impl Service for FakeService {
@@ -211,7 +211,7 @@ impl Write for SharedOutput {
     }
 }
 
-/// A running connector wired to a fake service, fake stdio and a fake clock.
+/// A running edge wired to a fake service, fake stdio and a fake clock.
 struct Harness {
     fake: Arc<FakeState>,
     clock: Arc<FakeClock>,
@@ -304,7 +304,7 @@ impl Harness {
         self.answer(&json!(id));
     }
 
-    /// Take the service away while a request is outstanding, and wait until the connector has
+    /// Take the service away while a request is outstanding, and wait until the edge has
     /// answered it as cut off.
     fn go_away(&self, connection: usize) {
         let probe = format!("probe-{connection}");
@@ -330,13 +330,13 @@ impl Harness {
         assert!(condition(), "condition not met; output: {:?}", self.lines());
     }
 
-    /// Close stdin and wait for the connector to end.
+    /// Close stdin and wait for the edge to end.
     fn close(&mut self) -> io::Result<()> {
         self.input.take();
         self.finish()
     }
 
-    /// Wait for the connector to end without closing stdin.
+    /// Wait for the edge to end without closing stdin.
     fn finish(&mut self) -> io::Result<()> {
         let done = self.done.take().unwrap();
         self.wait(|| done.is_finished());
@@ -579,11 +579,11 @@ fn the_service_is_started_at_start_and_for_a_held_request_never_while_idle() {
     assert_eq!(
         *harness.fake.reasons.lock().unwrap(),
         [StartReason::Agent, StartReason::Agent],
-        "an agent start, at the connector's own start and for the held request"
+        "an agent start, at the edge's own start and for the held request"
     );
 }
 
-/// Send the service's goodbye on the newest connection and wait until the connector has acted
+/// Send the service's goodbye on the newest connection and wait until the edge has acted
 /// on it by closing its end.
 fn say_goodbye(harness: &Harness, reason: GoodbyeReason) {
     let connection = harness.fake.connections() - 1;
@@ -621,7 +621,7 @@ fn after_a_quit_goodbye_requests_are_answered_nothing_is_held_and_the_next_reque
 }
 
 #[test]
-fn after_a_replace_goodbye_lines_are_held_and_the_connector_reconnects_without_starting() {
+fn after_a_replace_goodbye_lines_are_held_and_the_edge_reconnects_without_starting() {
     let harness = Harness::connected(true);
     harness.fake.up.store(false, Ordering::SeqCst);
     say_goodbye(&harness, GoodbyeReason::Replace);
@@ -635,7 +635,7 @@ fn after_a_replace_goodbye_lines_are_held_and_the_connector_reconnects_without_s
     assert_eq!(
         harness.fake.starts.load(Ordering::SeqCst),
         0,
-        "the installer starts the replacement, not the connector"
+        "the installer starts the replacement, not the edge"
     );
 
     harness.fake.bring_up();
@@ -661,7 +661,7 @@ fn a_replacement_that_does_not_come_back_within_the_hold_limit_is_a_lost_service
 }
 
 #[test]
-fn after_an_uninstall_goodbye_requests_are_answered_and_the_connector_exits() {
+fn after_an_uninstall_goodbye_requests_are_answered_and_the_edge_exits() {
     let mut harness = Harness::connected(true);
     harness.send(&request(&json!(1), "tools/call"));
     harness.wait(|| harness.fake.received(0).len() == 1);
@@ -670,13 +670,13 @@ fn after_an_uninstall_goodbye_requests_are_answered_and_the_connector_exits() {
     assert_eq!(
         harness.answer(&json!(1))["result"]["isError"],
         json!(true),
-        "the outstanding request is answered before the connector ends"
+        "the outstanding request is answered before the edge ends"
     );
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
 }
 
 #[test]
-fn after_a_session_end_goodbye_requests_are_answered_and_the_connector_exits_without_a_start() {
+fn after_a_session_end_goodbye_requests_are_answered_and_the_edge_exits_without_a_start() {
     let mut harness = Harness::connected(true);
     harness.send(&request(&json!(1), "tools/call"));
     harness.wait(|| harness.fake.received(0).len() == 1);
@@ -685,14 +685,14 @@ fn after_a_session_end_goodbye_requests_are_answered_and_the_connector_exits_wit
     assert_eq!(
         harness.answer(&json!(1))["result"]["isError"],
         json!(true),
-        "the outstanding request is answered before the connector ends"
+        "the outstanding request is answered before the edge ends"
     );
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
     assert_eq!(harness.fake.connections(), 1, "no new connection is tried");
 }
 
 #[test]
-fn a_session_that_ends_makes_the_connector_exit_without_trying_the_service_again() {
+fn a_session_that_ends_makes_the_edge_exit_without_trying_the_service_again() {
     let mut harness = Harness::connected(true);
     harness.send(&request(&json!(1), "tools/call"));
     harness.wait(|| harness.fake.received(0).len() == 1);

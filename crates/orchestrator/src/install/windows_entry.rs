@@ -1,9 +1,11 @@
 //! The Windows Start-menu shortcut and the installed-apps entry for the installation in `bin`.
 //!
 //! Every route installs into `home/bin`, so the shortcut and the per-user Uninstall key name
-//! `bin/ghostlight.exe`. Both take the names an NSIS install used, so writing them also replaces
-//! what an NSIS install left behind; an NSIS Uninstall key is removed whole first, so none of its
-//! values survive (ADR-0197 Decisions 14 and 16).
+//! `bin/ghostlight-service.exe`: a person's launch is the service image run with no arguments, the
+//! same as `open`, and it is a GUI image, so neither entry flashes a console. Both take the names
+//! an NSIS install used, so writing them also replaces what an NSIS install left behind; an NSIS
+//! Uninstall key is removed whole first, so none of its values survive (ADR-0197 Decisions 14 and
+//! 16).
 
 use std::env;
 use std::fs;
@@ -278,7 +280,7 @@ mod tests {
 
     #[test]
     fn a_shortcut_names_its_target_and_working_directory() {
-        let target = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight\\bin\\ghostlight.exe");
+        let target = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight\\bin\\ghostlight-service.exe");
         let home = Path::new("C:\\Users\\Zoe \u{e9}\\.ghostlight");
         let id_list = [4, 0, 1, 2, 0, 0];
         let bytes = shortcut_bytes(&id_list, target, home);
@@ -322,8 +324,8 @@ mod tests {
     #[test]
     fn the_uninstall_command_runs_the_installed_service() {
         assert_eq!(
-            uninstall_command(Path::new(r"C:\h\bin\ghostlight.exe")),
-            r#""C:\h\bin\ghostlight.exe" uninstall"#
+            uninstall_command(Path::new(r"C:\h\bin\ghostlight-service.exe")),
+            r#""C:\h\bin\ghostlight-service.exe" uninstall"#
         );
     }
 }

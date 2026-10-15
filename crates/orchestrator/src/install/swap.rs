@@ -243,7 +243,7 @@ mod tests {
             "ghostlight",
             "ghostlight.old-1",
             "ghostlight.old-12",
-            "ghostlight-mcp-connector.old-3",
+            "ghostlight-service.old-3",
             "ghostlight.old-x",
             "ghostlight.new",
             "install.json",
@@ -269,7 +269,7 @@ mod tests {
         for name in [
             "ghostlight",
             "ghostlight.old-2",
-            "ghostlight-mcp-connector.old-3",
+            "ghostlight-service.old-3",
             "ghostlight.new",
         ] {
             fs::write(dir.join(name), b"x").unwrap();

@@ -13,7 +13,23 @@ and no hosted service.
 .PP
 Run with no command, it opens the desktop workbench. Nothing runs in the
 background until an agent or your browser asks for it.
+.PP
+.B ghostlight
+is a small program that does three jobs. It is the stdio server an MCP client
+launches (as
+.BR "ghostlight mcp" ),
+it is the native messaging host Chromium
+starts for the Ghostlight extension, and it hands every other command to the
+service program,
+.BR ghostlight\-service ,
+installed beside it. The service program holds all product decisions and state.
 .SH COMMANDS
+.TP
+.B mcp
+Run as a local stdio MCP server. An MCP client starts it with this argument,
+and
+.B install
+registers it in each client's configuration. It is not meant to be run by hand.
 .TP
 .B open
 Open the desktop workbench, starting the local authority if it is not running.
@@ -27,7 +43,7 @@ Remove only Ghostlight-owned registrations. Foreign configuration is preserved
 byte for byte.
 .TP
 .BR doctor " [" \-\-json "] [" \-\-fix ]
-Report the complete local chain: environment, sibling binaries, browser
+Report the complete local chain: environment, installed programs, browser
 registrations, the command entry, the Applications entry, MCP clients, and the
 service endpoint.
 .B \-\-fix
@@ -152,7 +168,4 @@ Snap and Flatpak browser packages cannot start a native messaging host, so they
 are detected and refused with a remedy rather than failing silently. Install a
 native Chrome, Edge, Brave, or Chromium package.
 .SH SEE ALSO
-.BR ghostlight-mcp-connector (1),
-.BR ghostlight-browser-connector (1)
-.PP
 https://sylin.org/ghostlight/

@@ -294,8 +294,8 @@ fn run_show(
     }
     for component in [
         Component::Orchestrator,
-        Component::McpConnector,
-        Component::BrowserConnector,
+        Component::EdgeMcp,
+        Component::EdgeBrowser,
     ] {
         let present = records.iter().any(|record| {
             record.get("component").and_then(serde_json::Value::as_str) == Some(component.as_str())

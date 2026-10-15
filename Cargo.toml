@@ -3,8 +3,7 @@ members = [
     "crates/bridge",
     "crates/orchestrator",
     "crates/relay",
-    "crates/mcp-connector",
-    "crates/browser-connector",
+    "crates/edge",
     "crates/win-peer",
     "crates/desktop",
 ]

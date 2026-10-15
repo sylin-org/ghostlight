@@ -2,9 +2,10 @@
 //!
 //! [`start`] gathers the facts [`crate::install::entry::decide`] needs from the Ghostlight home,
 //! asks it, and carries the answer out through a [`Launcher`]: run here, forward to the
-//! development build or the installed service, install from a carrier package first, or refuse
-//! to serve (ADR-0197 Decisions 10, 13 and 15). The launcher is the only part that starts
-//! processes, so tests drive the real rule with a fake one.
+//! development build or the installed service, hand the edge's own verbs to the installed edge,
+//! install from a carrier package first, or refuse to serve (ADR-0197 Decisions 10, 13 and 15,
+//! ADR-0199 Decision 2). The launcher is the only part that starts processes, so tests drive the
+//! real rule with a fake one.
 
 use std::ffi::OsString;
 use std::io;
@@ -88,6 +89,7 @@ pub fn start(
     let role = parsed.as_ref().map_or(Role::Inspect, role_of);
     let current_exe = canonical_path(current_exe);
     let installed_service = canonical_path(&layout.service_executable());
+    let installed_edge = canonical_path(&layout.edge());
     let marker = DevelopmentMarker::read(&layout.development_marker())
         .ok()
         .flatten()
@@ -96,13 +98,15 @@ pub fn start(
         });
     // Only a launch from a copy other than the installed service consults the standing, so the
     // installed image is hashed only then.
-    let standing = if role == Role::Launch && !entry::same_path(&current_exe, &installed_service) {
+    let launching = matches!(role, Role::Launch | Role::Relay);
+    let standing = if launching && !entry::same_path(&current_exe, &installed_service) {
         standing(layout, &current_exe)?
     } else {
         Standing::Same
     };
     let facts = Facts {
         installed_service,
+        installed_edge,
         development_executable_exists: marker
             .as_ref()
             .is_some_and(|marker| marker.executable.is_file()),
@@ -119,9 +123,12 @@ pub fn start(
         },
         Entry::CarrierInstall => {
             launcher.install(layout)?;
-            Ok(Start::Exit(
-                launcher.run(&layout.service_executable(), &arguments)?,
-            ))
+            let installed = if role == Role::Relay {
+                layout.edge()
+            } else {
+                layout.service_executable()
+            };
+            Ok(Start::Exit(launcher.run(&installed, &arguments)?))
         }
         Entry::Refuse(refusal) => Err(refusal.into()),
     }
@@ -132,6 +139,7 @@ fn role_of(mode: &LaunchMode) -> Role {
     match mode {
         LaunchMode::DeploymentInstall(_) => Role::Deployment,
         LaunchMode::Serve(_) => Role::Serve,
+        LaunchMode::Relay => Role::Relay,
         LaunchMode::Doctor { .. }
         | LaunchMode::Status { .. }
         | LaunchMode::Help
@@ -152,6 +160,7 @@ fn standing(layout: &Layout, current_exe: &Path) -> io::Result<Standing> {
         service_version: env!("CARGO_PKG_VERSION").to_owned(),
         relay_revision: ghostlight_relay::RELAY.to_string(),
         service_sha256: record::sha256_file(current_exe)?,
+        edge_sha256: None,
     };
     Ok(record::decide(
         installed.as_ref(),
@@ -231,13 +240,20 @@ mod tests {
 
         fn carrier(&self) -> PathBuf {
             self.executable(
-                self.scratch.path().join("package").join("ghostlight"),
+                self.scratch
+                    .path()
+                    .join("package")
+                    .join("ghostlight-service"),
                 b"carrier",
             )
         }
 
         fn installed(&self) -> PathBuf {
             self.executable(self.layout.service_executable(), b"installed")
+        }
+
+        fn edge(&self) -> PathBuf {
+            self.executable(self.layout.edge(), b"edge")
         }
 
         fn development(&self) -> PathBuf {
@@ -255,6 +271,7 @@ mod tests {
                 service_version: version.to_owned(),
                 relay_revision: ghostlight_relay::RELAY.to_string(),
                 service_sha256: record::sha256_file(&self.layout.service_executable()).unwrap(),
+                edge_sha256: None,
             }
             .write(&self.layout.install_record())
             .unwrap();
@@ -357,6 +374,53 @@ mod tests {
         let (result, calls) = home.start(&carrier, &["open"]);
         assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
         assert_eq!(calls, vec![Call::Run(installed, os(&["open"]))]);
+    }
+
+    #[test]
+    fn the_edges_verbs_go_to_the_installed_edge_from_any_service_image() {
+        let home = Home::new();
+        let carrier = home.carrier();
+        let installed = home.installed();
+        let edge = home.edge();
+        home.record(env!("CARGO_PKG_VERSION"));
+        let development = home.development();
+        for arguments in [
+            &["mcp"][..],
+            &["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"],
+            &[
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+                "--parent-window=4",
+            ],
+        ] {
+            for current in [&carrier, &installed, &development] {
+                let (result, calls) = home.start(current, arguments);
+                assert_eq!(
+                    result.unwrap(),
+                    Start::Exit(FORWARDED_EXIT),
+                    "{arguments:?}"
+                );
+                assert_eq!(
+                    calls,
+                    vec![Call::Run(edge.clone(), os(arguments))],
+                    "{arguments:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_carrier_asked_for_a_relay_installs_first_and_then_runs_the_installed_edge() {
+        let home = Home::new();
+        let carrier = home.carrier();
+        let (result, calls) = home.start(&carrier, &["mcp"]);
+        assert_eq!(result.unwrap(), Start::Exit(FORWARDED_EXIT));
+        assert_eq!(
+            calls,
+            vec![
+                Call::Install(home.layout.bin()),
+                Call::Run(home.layout.edge(), os(&["mcp"])),
+            ]
+        );
     }
 
     #[test]

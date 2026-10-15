@@ -1,7 +1,7 @@
 //! The install record and the install-or-refuse decision.
 //!
 //! `bin/install.json` says what the installer last put in `bin`: the service version, the relay
-//! revision the connectors speak, and the hash of the service image. [`decide`] compares that
+//! revision the edge speaks, and the hashes of the service image and the edge. [`decide`] compares that
 //! record with the payload being installed and answers whether to install, do nothing, repair or
 //! refuse (ADR-0197 Decision 14). Every installer write goes through [`atomic_replace`], so a
 //! reader sees the old file or the new one, never a partial one.
@@ -24,10 +24,14 @@ use thiserror::Error;
 pub struct InstallRecord {
     /// Semantic version of the installed service.
     pub service_version: String,
-    /// Relay revision spoken by the installed connectors.
+    /// Relay revision spoken by the installed edge.
     pub relay_revision: String,
     /// Lowercase hexadecimal SHA-256 of the installed service image.
     pub service_sha256: String,
+    /// Lowercase hexadecimal SHA-256 of the installed edge. A record written before the edge
+    /// existed has none, which is how the installer knows `bin` still holds the earlier layout.
+    #[serde(default)]
+    pub edge_sha256: Option<String>,
 }
 
 impl InstallRecord {
@@ -324,7 +328,27 @@ mod tests {
             service_version: version.to_owned(),
             relay_revision: "3".to_owned(),
             service_sha256: sha.to_owned(),
+            edge_sha256: None,
         }
+    }
+
+    #[test]
+    fn a_record_written_before_the_edge_existed_reads_with_no_edge() {
+        let scratch = Scratch::new();
+        let path = scratch.path().join("install.json");
+        fs::write(
+            &path,
+            r#"{"service_version":"2.0.0","relay_revision":"4","service_sha256":"ab"}"#,
+        )
+        .unwrap();
+        let read = InstallRecord::read(&path).unwrap().unwrap();
+        assert_eq!(read.edge_sha256, None);
+        let with_edge = InstallRecord {
+            edge_sha256: Some("cd".to_owned()),
+            ..read
+        };
+        with_edge.write(&path).unwrap();
+        assert_eq!(InstallRecord::read(&path).unwrap(), Some(with_edge));
     }
 
     #[cfg(unix)]

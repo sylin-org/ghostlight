@@ -1,19 +1,19 @@
 //! Carrying one Chrome native-messaging port to one service connection (ADR-0197 Decisions 3, 4
 //! and 11, ADR-0199 Decision 5).
 //!
-//! The connector reads native frames from the browser and writes them to a relay `browser`
+//! The edge reads native frames from the browser and writes them to a relay `browser`
 //! stream, and does the same in the other direction, without parsing a byte of either. The
 //! relay frame header is a little-endian `u32` length; Chrome writes the same four bytes in
 //! native order, which is the same thing on every supported target.
 //!
-//! The first frame the browser sends is the extension's hello. The connector holds it, drops
+//! The first frame the browser sends is the extension's hello. The edge holds it, drops
 //! every later frame until a service has accepted the stream, and sends the held hello first.
 //! Before that first connection it starts the service once, as a `browser` start, and keeps
 //! connecting on the [`Backoff`] schedule without starting it again. When no service has accepted
-//! within [`ABSENT_AFTER`] of the connector's own start, whatever the cause, it says so with
+//! within [`ABSENT_AFTER`] of the edge's own start, whatever the cause, it says so with
 //! [`BACKEND_UNAVAILABLE`]; the extension reads that as "not connected" and stops waiting for a
 //! hello answer, where silence would have read as an outdated service. After the first
-//! connection, and after that frame, the connector never starts the service: when the stream
+//! connection, and after that frame, the edge never starts the service: when the stream
 //! ends it tells the browser once with the same frame, drops what the browser sends, and probes
 //! with a read-only control opening. When a service answers it returns
 //! [`Ended::ServiceReturned`] and the process exits, so the extension reconnects with a fresh
@@ -21,7 +21,7 @@
 //!
 //! A service that ends the stream on purpose says goodbye first (ADR-0199 Decision 10). The
 //! goodbye is not the browser's frame and is never passed on. After `quit` and `replace` the
-//! connector behaves as it does for a lost service. After `uninstall` it returns
+//! edge behaves as it does for a lost service. After `uninstall` it returns
 //! [`Ended::ServiceUninstalled`] at once and the process exits. After `session_end`, and when its
 //! own session listener hears that the session is ending, it returns [`Ended::SessionOver`] at
 //! once, and nothing is started (ADR-0199 Decision 13).
@@ -52,29 +52,26 @@ mod tests;
 // A relay header and a Chrome header are the same four bytes only on a little-endian target.
 const _: () = assert!(
     cfg!(target_endian = "little"),
-    "the browser connector relies on native byte order matching the relay frame header"
+    "the browser edge relies on native byte order matching the relay frame header"
 );
 
-/// The one frame the connector writes to the browser itself, sent once when no service is there:
+/// The one frame the edge writes to the browser itself, sent once when no service is there:
 /// the frame kind `backend_unavailable` with the field `service` set to `absent`. A bare
 /// `backend_unavailable` is what a 1.x connector writes and says nothing about absence.
 pub const BACKEND_UNAVAILABLE: &[u8] = br#"{"kind":"backend_unavailable","service":"absent"}"#;
 
-/// How long the connector looks for a service before it tells the browser none is there. It is
+/// How long the edge looks for a service before it tells the browser none is there. It is
 /// below the extension's hello timeout, which would otherwise read the silence as an outdated
 /// service.
 pub const ABSENT_AFTER: Duration = Duration::from_secs(5);
 
-/// The diagnostics detail for a connector that found no service within [`ABSENT_AFTER`].
+/// The diagnostics detail for an edge that found no service within [`ABSENT_AFTER`].
 const ABSENT_DETAIL: &str = "absent";
 
-/// Why this connector starts the service: a browser needs it.
+/// Why this edge starts the service: a browser needs it.
 const START_REASON: StartReason = StartReason::Browser;
 
-/// The start of the origin Chrome passes a native-messaging host as its first argument.
-const EXTENSION_ORIGIN_PREFIX: &str = "chrome-extension://";
-
-/// The service the connector talks to: how to open a stream and how to start it.
+/// The service the edge talks to: how to open a stream and how to start it.
 pub trait Service: Send + Sync + 'static {
     /// Connect to the running service and present `opening`.
     fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError>;
@@ -98,13 +95,6 @@ pub struct Environment {
     pub log: Log,
 }
 
-/// The extension origin among the arguments Chrome started the connector with, which is the
-/// first one when it names an extension.
-#[must_use]
-pub fn extension_origin(first_argument: Option<String>) -> Option<String> {
-    first_argument.filter(|argument| argument.starts_with(EXTENSION_ORIGIN_PREFIX))
-}
-
 /// Something the port reacts to.
 pub enum Event {
     /// The first frame the browser sent: the extension's hello.
@@ -115,7 +105,7 @@ pub enum Event {
     InputFailed(String),
     /// Writing to the browser failed, so it is gone.
     OutputClosed,
-    /// The process that started the connector went away.
+    /// The process that started the edge went away.
     ParentGone,
     /// The service connection ended and the browser has been told.
     ServiceLost,
@@ -130,7 +120,7 @@ pub enum Event {
 pub enum Ended {
     /// The browser closed the port, in either direction.
     BrowserGone,
-    /// The process that started the connector went away.
+    /// The process that started the edge went away.
     ParentGone,
     /// A service accepted an opening after the connection was lost.
     ServiceReturned,
@@ -283,7 +273,7 @@ struct Port {
     shared: Arc<Shared>,
     events: Sender<Event>,
     inbox: Receiver<Event>,
-    /// When the connector started, which [`Environment::absent_after`] counts from.
+    /// When the edge started, which [`Environment::absent_after`] counts from.
     started: Instant,
 }
 
@@ -523,7 +513,7 @@ fn ending_event(reason: GoodbyeReason) -> Option<Event> {
     }
 }
 
-/// The program a connector presents itself as: the frozen edge, at this build.
+/// The program this edge presents itself as, at this build.
 fn edge() -> Edge {
     Edge::new(Program::Edge, env!("CARGO_PKG_VERSION").to_owned())
 }

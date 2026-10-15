@@ -1,13 +1,12 @@
 //! The entry rule: what a `ghostlight` process does before it does its job.
 //!
-//! Any copy of the executable can be started: from `bin`, from a development build, or from a
+//! Any copy of the service image can be started: from `bin`, from a development build, or from a
 //! package that only carries it. [`decide`] answers, from the process's own path, its role, the
 //! development marker and the state of the installation, whether to run, hand over to another
-//! executable, install first, or refuse (ADR-0197 Decisions 10, 13 and 15). It is pure: the
-//! caller gathers the facts and performs the answer. Links are not followed here, so the caller
+//! executable, install first, or refuse (ADR-0197 Decisions 10, 13 and 15, ADR-0199 Decisions 2
+//! and 19). It is pure: the caller gathers the facts and performs the answer. Links are not followed here, so the caller
 //! resolves every path it passes with [`canonical_path`] first.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -20,8 +19,11 @@ use super::record::Standing;
 pub enum Role {
     /// `deployment`: the installer itself. It runs from wherever its payload is.
     Deployment,
-    /// `serve`: the service a connector starts.
+    /// `serve`: the service an edge starts.
     Serve,
+    /// `mcp` and a Chrome extension origin: the edge's own verbs. A service image never runs
+    /// them; it hands them to the installed edge, installing first when it is a carrier.
+    Relay,
     /// Any role that uses the service or changes the installation: the workbench, `open`,
     /// `call`, `install`, `uninstall`, `policy`, `diagnostics` and `native-host`.
     Launch,
@@ -34,8 +36,10 @@ pub enum Role {
 /// Every path is canonical, as [`canonical_path`] returns it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Facts {
-    /// The fixed service executable, `home/bin/ghostlight`.
+    /// The fixed service executable, `home/bin/ghostlight-service`.
     pub installed_service: PathBuf,
+    /// The fixed edge, `home/bin/ghostlight`.
+    pub installed_edge: PathBuf,
     /// Whether the executable the development marker names exists.
     pub development_executable_exists: bool,
     /// How the installed copy stands against this process's own package.
@@ -50,7 +54,7 @@ pub enum Entry {
     /// Run this executable with the same arguments instead.
     Forward(PathBuf),
     /// Install from this executable's own directory, then run the installed service in its
-    /// place.
+    /// place, or the installed edge for the edge's own verbs.
     CarrierInstall,
     /// Do not run.
     Refuse(Refusal),
@@ -72,11 +76,15 @@ pub enum Refusal {
 /// executable ends in [`Entry::Run`].
 ///
 /// 1. The installer always runs.
-/// 2. While a development marker names an existing executable, that executable does everything
+/// 2. The edge's own verbs always go to the installed edge, also while a development marker is
+///    set: the development install keeps the edge in `bin` at its relay revision. A copy that is
+///    not the installed service is a carrier and installs first when the installed set is
+///    absent, older or damaged.
+/// 3. While a development marker names an existing executable, that executable does everything
 ///    else: it runs, and every other copy forwards to it. A marker whose executable is gone is
 ///    ignored, so a deleted build cannot lock out the installed one.
-/// 3. Without a marker only the installed service serves. Inspection runs from anywhere.
-/// 4. Any other launch from a copy that is not the installed service is a carrier: it installs
+/// 4. Without a marker only the installed service serves. Inspection runs from anywhere.
+/// 5. Any other launch from a copy that is not the installed service is a carrier: it installs
 ///    when the installed service is absent, older or damaged, and otherwise hands over.
 #[must_use]
 pub fn decide(
@@ -88,20 +96,23 @@ pub fn decide(
     if role == Role::Deployment {
         return Entry::Run;
     }
-    if let Some(marker) = marker.filter(|_| facts.development_executable_exists) {
+    let marked = marker.filter(|_| role != Role::Relay && facts.development_executable_exists);
+    if let Some(marker) = marked {
         return forward_unless_self(current_exe, &marker.executable);
     }
     let installed = same_path(current_exe, &facts.installed_service);
+    let needs_install = matches!(
+        facts.standing,
+        Standing::Absent | Standing::Older | Standing::Damaged
+    ) && !installed;
     match role {
         Role::Deployment | Role::Inspect => Entry::Run,
         Role::Serve if installed => Entry::Run,
         Role::Serve => Entry::Refuse(Refusal::ServeFromElsewhere),
-        Role::Launch => match facts.standing {
-            Standing::Absent | Standing::Older | Standing::Damaged if !installed => {
-                Entry::CarrierInstall
-            }
-            _ => forward_unless_self(current_exe, &facts.installed_service),
-        },
+        Role::Relay if needs_install => Entry::CarrierInstall,
+        Role::Relay => Entry::Forward(facts.installed_edge.clone()),
+        Role::Launch if needs_install => Entry::CarrierInstall,
+        Role::Launch => forward_unless_self(current_exe, &facts.installed_service),
     }
 }
 
@@ -113,11 +124,7 @@ pub fn decide(
 /// through it before [`decide`] sees them.
 #[must_use]
 pub fn canonical_path(path: &Path) -> PathBuf {
-    match fs::canonicalize(path) {
-        Ok(resolved) if cfg!(windows) => PathBuf::from(strip_verbatim(&resolved.to_string_lossy())),
-        Ok(resolved) => resolved,
-        Err(_) => path.to_path_buf(),
-    }
+    ghostlight_relay::home::canonical(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Forward to `target`, or run when `target` is the running executable, so no spelling of a path
@@ -168,6 +175,8 @@ const VERBATIM_UNC_PREFIX: &str = "\\\\?\\UNC\\";
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::super::scratch::Scratch;
     use super::*;
 
@@ -186,7 +195,8 @@ mod tests {
 
     fn facts(standing: Standing) -> Facts {
         Facts {
-            installed_service: path("bin/ghostlight"),
+            installed_service: path("bin/ghostlight-service"),
+            installed_edge: path("bin/ghostlight"),
             development_executable_exists: true,
             standing,
         }
@@ -194,7 +204,7 @@ mod tests {
 
     fn marker() -> DevelopmentMarker {
         DevelopmentMarker {
-            executable: path("dev/ghostlight"),
+            executable: path("dev/ghostlight-service"),
         }
     }
 
@@ -215,9 +225,10 @@ mod tests {
 
     #[test]
     fn decisions_follow_the_entry_rule() {
-        let installed = path("bin/ghostlight");
-        let development = path("dev/ghostlight");
-        let carrier = path("package/ghostlight");
+        let installed = path("bin/ghostlight-service");
+        let edge = path("bin/ghostlight");
+        let development = path("dev/ghostlight-service");
+        let carrier = path("package/ghostlight-service");
         let missing_build = Facts {
             development_executable_exists: false,
             ..facts(Standing::Same)
@@ -366,6 +377,54 @@ mod tests {
             missing_build.clone(),
             Entry::Run,
         );
+        for (name, standing) in [
+            ("absent", Standing::Absent),
+            ("older", Standing::Older),
+            ("damaged", Standing::Damaged),
+        ] {
+            check(
+                &format!("a carrier handed the edge's verbs installs over an {name} install"),
+                &carrier,
+                Role::Relay,
+                None,
+                facts(standing),
+                Entry::CarrierInstall,
+            );
+        }
+        for standing in [Standing::Same, Standing::Newer] {
+            check(
+                "a carrier hands the edge's verbs to the installed edge",
+                &carrier,
+                Role::Relay,
+                None,
+                facts(standing),
+                Entry::Forward(edge.clone()),
+            );
+        }
+        check(
+            "the installed service hands the edge's verbs to the installed edge",
+            &installed,
+            Role::Relay,
+            None,
+            facts(Standing::Same),
+            Entry::Forward(edge.clone()),
+        );
+        check(
+            "the edge's verbs go to the installed edge while a development build is marked",
+            &carrier,
+            Role::Relay,
+            Some(marker()),
+            facts(Standing::Same),
+            Entry::Forward(edge.clone()),
+        );
+        check(
+            "the marked build hands the edge's verbs to the installed edge too",
+            &development,
+            Role::Relay,
+            Some(marker()),
+            facts(Standing::Same),
+            Entry::Forward(edge),
+        );
         check(
             "a carrier ignores a marker naming a deleted build",
             &carrier,
@@ -379,13 +438,16 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_paths_compare_without_regard_to_spelling() {
-        let installed = path("bin/ghostlight");
+        let installed = path("bin/ghostlight-service");
         let shouted = PathBuf::from(ROOT.to_uppercase())
             .join("BIN")
-            .join("GHOSTLIGHT");
-        let slashed = PathBuf::from(format!("{}/bin/ghostlight", ROOT.replace('\\', "/")));
-        let verbatim = PathBuf::from(format!("\\\\?\\{ROOT}\\bin\\ghostlight"));
-        let trailing = PathBuf::from(format!("{ROOT}\\bin\\ghostlight\\"));
+            .join("GHOSTLIGHT-SERVICE");
+        let slashed = PathBuf::from(format!(
+            "{}/bin/ghostlight-service",
+            ROOT.replace('\\', "/")
+        ));
+        let verbatim = PathBuf::from(format!("\\\\?\\{ROOT}\\bin\\ghostlight-service"));
+        let trailing = PathBuf::from(format!("{ROOT}\\bin\\ghostlight-service\\"));
         for spelling in [&shouted, &slashed, &verbatim, &trailing] {
             assert_eq!(
                 decide(spelling, Role::Serve, None, &facts(Standing::Same)),
@@ -451,12 +513,13 @@ mod tests {
         let scratch = Scratch::new();
         let real = scratch.path().join("real");
         fs::create_dir_all(real.join("bin")).unwrap();
-        fs::write(real.join("bin").join("ghostlight"), b"x").unwrap();
+        fs::write(real.join("bin").join("ghostlight-service"), b"x").unwrap();
         let link = scratch.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        let running = canonical_path(&real.join("bin").join("ghostlight"));
+        let running = canonical_path(&real.join("bin").join("ghostlight-service"));
         let facts = Facts {
-            installed_service: canonical_path(&link.join("bin").join("ghostlight")),
+            installed_service: canonical_path(&link.join("bin").join("ghostlight-service")),
+            installed_edge: canonical_path(&link.join("bin").join("ghostlight")),
             development_executable_exists: false,
             standing: Standing::Same,
         };

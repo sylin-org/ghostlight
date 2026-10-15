@@ -23,11 +23,13 @@ second installation command.
 
 Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
 Code, Windsurf, Zed, OpenCode, and Crush. Another compatible local stdio MCP client can point
-directly at the packaged sibling `ghostlight-mcp-connector` executable with no role flag or model
-dialect.
+directly at the installed `ghostlight` executable with the argument `mcp` (the entry is
+`ghostlight mcp`), with no role flag or model dialect. An entry that names
+`ghostlight-mcp-connector` was written for an earlier build and no longer works: `ghostlight
+doctor` names it and Fix rewrites it.
 
-Do not launch the connector as a standalone background service. Its stdio lifetime belongs to the
-MCP client; it negotiates with the persistent orchestrator.
+Do not launch `ghostlight mcp` as a standalone background service. Its stdio lifetime belongs to
+the MCP client; it negotiates with the persistent service.
 
 ## 2. Test the whole chain
 
@@ -38,7 +40,7 @@ Use only the catalog returned by the client. For the first proof:
 3. Report the heading and the opaque tab handle.
 4. Do not click, type, submit, upload, or run a script during this proof.
 
-Success proves the MCP client, stdio connector, orchestrator, browser connector, native messaging,
+Success proves the MCP client, MCP relay, service, browser relay, native messaging,
 extension, and visible browser path. On failure, ask the user to open **Status** and
 **MCP integrations** in the workbench. Follow the named condition instead of inventing a second stack.
 
@@ -65,7 +67,7 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
 ## 4. Recover without guessing
 
 - **No tools:** reconnect the existing MCP server through the client. A cached catalog does not
-  prove its connector is alive.
+  prove its MCP relay is alive.
 - **Browser unavailable:** ask the user to open Status, enable the matching extension, and keep
   Ghostlight running in the tray.
 - **Ambiguous tab:** call `browser_tabs` with `{"action":"list"}`, then pass the exact `tab`.
@@ -83,4 +85,4 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
 
 Ghostlight 1.0 uses local stdio MCP at the client edge and typed local IPC behind it. It exposes no
 remote MCP endpoint. The npm launcher is a supported install and generic-stdio entry point; the
-orchestrator and both connectors remain native Rust processes.
+service and the edge remain native Rust processes.

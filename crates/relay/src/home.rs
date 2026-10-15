@@ -36,11 +36,19 @@ pub const DIAGNOSTICS_DIRECTORY_NAME: &str = "diagnostics";
 
 /// File name of the service executable on this platform.
 #[cfg(windows)]
-pub const SERVICE_EXECUTABLE_NAME: &str = "ghostlight.exe";
+pub const SERVICE_EXECUTABLE_NAME: &str = "ghostlight-service.exe";
 
 /// File name of the service executable on this platform.
 #[cfg(not(windows))]
-pub const SERVICE_EXECUTABLE_NAME: &str = "ghostlight";
+pub const SERVICE_EXECUTABLE_NAME: &str = "ghostlight-service";
+
+/// File name of the edge executable on this platform.
+#[cfg(windows)]
+pub const EDGE_EXECUTABLE_NAME: &str = "ghostlight.exe";
+
+/// File name of the edge executable on this platform.
+#[cfg(not(windows))]
+pub const EDGE_EXECUTABLE_NAME: &str = "ghostlight";
 
 /// Environment variable naming the user's home directory on this platform.
 #[cfg(windows)]
@@ -67,9 +75,15 @@ pub fn bin() -> io::Result<PathBuf> {
     Ok(home()?.join(BIN_DIRECTORY_NAME))
 }
 
-/// Installed service executable: `home/bin/ghostlight` (`ghostlight.exe` on Windows).
+/// Installed service executable: `home/bin/ghostlight-service` (`ghostlight-service.exe` on
+/// Windows).
 pub fn service_executable() -> io::Result<PathBuf> {
     Ok(bin()?.join(SERVICE_EXECUTABLE_NAME))
+}
+
+/// Installed edge executable: `home/bin/ghostlight` (`ghostlight.exe` on Windows).
+pub fn edge_executable() -> io::Result<PathBuf> {
+    Ok(bin()?.join(EDGE_EXECUTABLE_NAME))
 }
 
 /// Diagnostics marker path: `home/diagnostics.on`.

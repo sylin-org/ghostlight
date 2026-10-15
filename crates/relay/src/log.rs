@@ -1,9 +1,9 @@
-//! The connectors' diagnostics writer.
+//! The edge's diagnostics writer.
 //!
 //! Diagnostics are off unless the marker file `home/diagnostics.on` exists. While it does, each
 //! call to [`record`] appends one JSON line to `home/diagnostics/<component>.jsonl`. The writer
 //! checks the marker on every call, so there is no watcher and no state to keep in step. It
-//! never reports a failure to its caller: a diagnostics fault must not disturb a connector.
+//! never reports a failure to its caller: a diagnostics fault must not disturb an edge.
 //!
 //! Lines are content-free: an event name from the closed [`Event`] vocabulary and a short
 //! detail. A file stops growing at [`MAX_FILE_BYTES`] and the service prunes it.
@@ -26,10 +26,10 @@ pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// Which relay peer is writing. The name is the log file's stem.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Component {
-    /// The MCP stdio connector.
-    McpConnector,
-    /// The browser native-messaging connector.
-    BrowserConnector,
+    /// The edge running as the MCP relay.
+    EdgeMcp,
+    /// The edge running as the browser relay.
+    EdgeBrowser,
 }
 
 impl Component {
@@ -37,24 +37,24 @@ impl Component {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::McpConnector => "mcp-connector",
-            Self::BrowserConnector => "browser-connector",
+            Self::EdgeMcp => "edge-mcp",
+            Self::EdgeBrowser => "edge-browser",
         }
     }
 }
 
-/// The closed vocabulary of connector diagnostics events.
+/// The closed vocabulary of edge diagnostics events.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
-    /// The connector process began.
+    /// The edge process began.
     ProcessStarted,
-    /// The connector process is about to exit.
+    /// The edge process is about to exit.
     ProcessExited,
     /// The parent process went away.
     ParentGone,
-    /// The session is ending, so the connector is leaving.
+    /// The session is ending, so the edge is leaving.
     SessionEnded,
-    /// The connector tried to start the service.
+    /// The edge tried to start the service.
     ServiceStartAttempted,
     /// Starting the service failed.
     ServiceStartFailed,

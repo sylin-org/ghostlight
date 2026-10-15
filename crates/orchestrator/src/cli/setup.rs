@@ -496,7 +496,7 @@ mod tests {
 
     fn browser_report(browsers: Vec<BrowserRegistration>) -> NativeHostReport {
         NativeHostReport {
-            connector: PathBuf::from("/ghostlight-browser-connector"),
+            connector: PathBuf::from("/ghostlight"),
             browsers,
             private_view: None,
         }

@@ -6,7 +6,7 @@
 use std::env;
 
 use crate::intake::session::SessionMarker;
-use ghostlight_relay::home::SERVICE_EXECUTABLE_NAME;
+use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME};
 use sysinfo::{get_current_pid, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// The environment variable a caller sets to pin its own session.
@@ -40,9 +40,9 @@ fn declared() -> Option<String> {
 
 /// How many ancestors the caller walk reads before it stops.
 ///
-/// The bound covers the whole climb: the Ghostlight hops (a carrier hands over to the installed
-/// command, which may hand over to a development build) and the run of same-named ancestors above
-/// them. It keeps a malformed process tree from looping the walk.
+/// The bound covers the whole climb: the Ghostlight hops (the edge hands over to a service image,
+/// a carrier hands over to the installed one, which may hand over to a development build) and the
+/// run of same-named ancestors above them. It keeps a malformed process tree from looping the walk.
 const MAX_ANCESTORS_READ: usize = 8;
 
 /// One process as the caller walk sees it.
@@ -54,9 +54,24 @@ struct Ancestor {
     parent: Option<u32>,
 }
 
-/// Whether a process file name is the Ghostlight service executable.
+/// The most bytes of a process name the Linux kernel keeps.
+const LINUX_PROCESS_NAME_BYTES: usize = 15;
+
+/// The name the operating system reports for a process running the image `file_name`: Linux keeps
+/// the first 15 bytes.
+fn reported_name(file_name: &str) -> &str {
+    if cfg!(target_os = "linux") {
+        &file_name[..file_name.len().min(LINUX_PROCESS_NAME_BYTES)]
+    } else {
+        file_name
+    }
+}
+
+/// Whether a process name is the edge or the service image.
 fn is_ghostlight(name: &str) -> bool {
-    name.eq_ignore_ascii_case(SERVICE_EXECUTABLE_NAME)
+    [EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME]
+        .into_iter()
+        .any(|file_name| name.eq_ignore_ascii_case(reported_name(file_name)))
 }
 
 /// Climb from `start` past every Ghostlight executable, then to the outermost of the run of
@@ -152,8 +167,8 @@ fn caller() -> Option<SessionMarker> {
 #[cfg(test)]
 mod tests {
     use super::{
-        caller, marker, nearest_foreign_ancestor, Ancestor, MAX_ANCESTORS_READ,
-        SERVICE_EXECUTABLE_NAME, SESSION_VARIABLE,
+        caller, marker, nearest_foreign_ancestor, reported_name, Ancestor, EDGE_EXECUTABLE_NAME,
+        MAX_ANCESTORS_READ, SERVICE_EXECUTABLE_NAME, SESSION_VARIABLE,
     };
     use crate::intake::session::SessionMarker;
 
@@ -196,6 +211,18 @@ mod tests {
             process(10, "pwsh.exe", Some(1)),
         ];
         assert_eq!(walk(&two, 30), Some(10));
+    }
+
+    #[test]
+    fn the_edge_and_the_image_it_runs_are_both_climbed_as_the_names_the_system_reports() {
+        let edge = reported_name(EDGE_EXECUTABLE_NAME);
+        let service = reported_name(SERVICE_EXECUTABLE_NAME);
+        let chain = [
+            process(30, service, Some(20)),
+            process(20, edge, Some(10)),
+            process(10, "pwsh.exe", Some(1)),
+        ];
+        assert_eq!(walk(&chain, 30), Some(10));
     }
 
     #[test]

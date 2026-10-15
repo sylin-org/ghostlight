@@ -1,7 +1,8 @@
 //! The 2.0 install root: where every installed file lives under the Ghostlight home.
 //!
-//! Every route installs into `home/bin`. A development build lives in `home/dev` and is selected
-//! by the marker file `home/development`. The installer's record, its lock, and the state,
+//! Every route installs into `home/bin`: the edge `ghostlight` and the service image
+//! `ghostlight-service` (ADR-0199 Decision 1). A development build lives in `home/dev`, beside its
+//! own edge, and is selected by the marker file `home/development`. The installer's record, its lock, and the state,
 //! policy and manifest directories sit beside them (ADR-0197 Decisions 10, 13 and 14). The
 //! layout holds names only and touches no file: callers pass the home that
 //! `ghostlight_relay::home::home()` resolves, and tests pass a temporary directory.
@@ -10,7 +11,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use ghostlight_relay::home::{
-    self, BIN_DIRECTORY_NAME, RUN_DIRECTORY_NAME, SERVICE_EXECUTABLE_NAME, SERVICE_LOCK_NAME,
+    self, BIN_DIRECTORY_NAME, EDGE_EXECUTABLE_NAME, RUN_DIRECTORY_NAME, SERVICE_EXECUTABLE_NAME,
+    SERVICE_LOCK_NAME,
 };
 
 /// Directory holding a development build of the service.
@@ -38,21 +40,15 @@ pub const POLICY_DIRECTORY_NAME: &str = "policy";
 /// Directory of native-host manifests the installer writes.
 pub const MANIFESTS_DIRECTORY_NAME: &str = "manifests";
 
-/// File name of the MCP connector executable on this platform.
-#[cfg(windows)]
-pub const MCP_CONNECTOR_EXECUTABLE_NAME: &str = "ghostlight-mcp-connector.exe";
+/// The edge's command name without a platform suffix, which is how a client entry names it.
+pub const EDGE_COMMAND_NAME: &str = "ghostlight";
 
-/// File name of the MCP connector executable on this platform.
-#[cfg(not(windows))]
-pub const MCP_CONNECTOR_EXECUTABLE_NAME: &str = "ghostlight-mcp-connector";
+/// The retired MCP connector's name without a platform suffix. Earlier builds installed it beside
+/// the service, and client entries written for them still name it.
+pub const RETIRED_MCP_CONNECTOR_NAME: &str = "ghostlight-mcp-connector";
 
-/// File name of the browser connector executable on this platform.
-#[cfg(windows)]
-pub const BROWSER_CONNECTOR_EXECUTABLE_NAME: &str = "ghostlight-browser-connector.exe";
-
-/// File name of the browser connector executable on this platform.
-#[cfg(not(windows))]
-pub const BROWSER_CONNECTOR_EXECUTABLE_NAME: &str = "ghostlight-browser-connector";
+/// The retired browser connector's name without a platform suffix.
+pub const RETIRED_BROWSER_CONNECTOR_NAME: &str = "ghostlight-browser-connector";
 
 /// Every path the installer and the entry rule use, derived from one home directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,28 +87,28 @@ impl Layout {
         self.home.join(DEV_DIRECTORY_NAME)
     }
 
-    /// The installed service executable: `home/bin/ghostlight`.
+    /// The installed service executable: `home/bin/ghostlight-service`.
     #[must_use]
     pub fn service_executable(&self) -> PathBuf {
         self.bin().join(SERVICE_EXECUTABLE_NAME)
     }
 
-    /// The development build's service executable: `home/dev/ghostlight`.
+    /// The installed edge: `home/bin/ghostlight`. Clients, browsers and shells start it.
+    #[must_use]
+    pub fn edge(&self) -> PathBuf {
+        self.bin().join(EDGE_EXECUTABLE_NAME)
+    }
+
+    /// The development build's service executable: `home/dev/ghostlight-service`.
     #[must_use]
     pub fn development_executable(&self) -> PathBuf {
         self.dev().join(SERVICE_EXECUTABLE_NAME)
     }
 
-    /// The installed MCP connector: `home/bin/ghostlight-mcp-connector`.
+    /// The development build's edge: `home/dev/ghostlight`.
     #[must_use]
-    pub fn mcp_connector(&self) -> PathBuf {
-        self.bin().join(MCP_CONNECTOR_EXECUTABLE_NAME)
-    }
-
-    /// The installed browser connector: `home/bin/ghostlight-browser-connector`.
-    #[must_use]
-    pub fn browser_connector(&self) -> PathBuf {
-        self.bin().join(BROWSER_CONNECTOR_EXECUTABLE_NAME)
+    pub fn development_edge(&self) -> PathBuf {
+        self.dev().join(EDGE_EXECUTABLE_NAME)
     }
 
     /// The development marker: `home/development`.
@@ -209,21 +205,28 @@ mod tests {
     fn executables_carry_the_platform_suffix() {
         let layout = Layout::new(HOME);
         let bin = Path::new(HOME).join("bin");
+        let dev = Path::new(HOME).join("dev");
         assert_eq!(
             layout.service_executable(),
-            bin.join(format!("ghostlight{EXE}"))
+            bin.join(format!("ghostlight-service{EXE}"))
         );
-        assert_eq!(
-            layout.mcp_connector(),
-            bin.join(format!("ghostlight-mcp-connector{EXE}"))
-        );
-        assert_eq!(
-            layout.browser_connector(),
-            bin.join(format!("ghostlight-browser-connector{EXE}"))
-        );
+        assert_eq!(layout.edge(), bin.join(format!("ghostlight{EXE}")));
         assert_eq!(
             layout.development_executable(),
-            Path::new(HOME).join("dev").join(format!("ghostlight{EXE}"))
+            dev.join(format!("ghostlight-service{EXE}"))
+        );
+        assert_eq!(
+            layout.development_edge(),
+            dev.join(format!("ghostlight{EXE}"))
+        );
+    }
+
+    #[test]
+    fn the_command_name_is_the_edge_file_name_without_its_suffix() {
+        assert_eq!(
+            format!("{EDGE_COMMAND_NAME}{EXE}"),
+            EDGE_EXECUTABLE_NAME,
+            "a client entry names the edge by this stem"
         );
     }
 }

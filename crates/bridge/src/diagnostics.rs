@@ -77,16 +77,16 @@ pub mod event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Component {
     Orchestrator,
-    McpConnector,
-    BrowserConnector,
+    EdgeMcp,
+    EdgeBrowser,
 }
 
 impl Component {
     pub fn as_str(self) -> &'static str {
         match self {
             Component::Orchestrator => "orchestrator",
-            Component::McpConnector => "mcp-connector",
-            Component::BrowserConnector => "browser-connector",
+            Component::EdgeMcp => "edge-mcp",
+            Component::EdgeBrowser => "edge-browser",
         }
     }
 }
@@ -847,7 +847,7 @@ mod tests {
         let home = root.clone();
         set_marker(&home, true).expect("marker");
         let sink = Sink::birth_with(
-            Component::McpConnector,
+            Component::EdgeMcp,
             "9.9.9-test",
             &home,
             None,
@@ -871,7 +871,7 @@ mod tests {
         let root = temp_root("toggle");
         let home = root.clone();
         let sink = Sink::birth_with(
-            Component::McpConnector,
+            Component::EdgeMcp,
             "9.9.9-test",
             &home,
             None,
@@ -916,7 +916,7 @@ mod tests {
         let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_for_callback = Arc::clone(&seen);
         let sink = Sink::birth_with(
-            Component::BrowserConnector,
+            Component::EdgeBrowser,
             "9.9.9-test",
             &home,
             None,
@@ -1005,7 +1005,7 @@ mod tests {
             fs::write(directory.join(&name), vec![b'a'; 10]).expect("seed file");
         }
         for index in 0..3 {
-            let name = format!("2026080{}T00000{}Z-mcp-connector-2.jsonl", index + 1, index);
+            let name = format!("2026080{}T00000{}Z-edge-mcp-2.jsonl", index + 1, index);
             fs::write(directory.join(&name), vec![b'b'; 10]).expect("seed file");
         }
         fs::write(directory.join(MARKER_FILE_NAME), b"").expect("marker");
@@ -1034,8 +1034,8 @@ mod tests {
         assert!(parse_log_name("foreign.txt").is_none());
         assert!(parse_log_name("service.lock").is_none());
         let (component, stamp) =
-            parse_log_name("20260829T123456Z-mcp-connector-42-7.jsonl").expect("parses");
-        assert_eq!(component, "mcp-connector");
+            parse_log_name("20260829T123456Z-edge-mcp-42-7.jsonl").expect("parses");
+        assert_eq!(component, "edge-mcp");
         assert_eq!(stamp, "20260829T123456Z");
         assert!(parse_log_name("2026-not-a-stamp-orchestrator-1.jsonl").is_none());
     }

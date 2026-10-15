@@ -1,11 +1,11 @@
 //! Forwarding one MCP stdio session to the service over relay protocol 4 (ADR-0197 Decisions 2,
 //! 11 and 12).
 //!
-//! The connector reads client lines from stdin and service lines from an `mcp` relay stream, and
+//! The edge reads client lines from stdin and service lines from an `mcp` relay stream, and
 //! passes each one on unchanged. It looks inside a line only to track outstanding request ids per
 //! direction, to answer `ping` itself, and to know which requests to answer when the service is
 //! cut off or does not come back in time. Those answers are the failure templates the service
-//! handed over in its last accepted reply; the connector authors no words, and before any reply
+//! handed over in its last accepted reply; the edge authors no words, and before any reply
 //! it answers the bare internal error.
 //!
 //! A client response reaches the service only when it answers a request the live connection made.
@@ -13,12 +13,12 @@
 //! and is sent without them, or not at all when nothing is left. So a late answer to a service
 //! that went away never reaches the next one, which may have reused the id.
 //!
-//! The service says goodbye before it closes the stream on purpose, and the connector acts on the
+//! The service says goodbye before it closes the stream on purpose, and the edge acts on the
 //! reason (ADR-0199 Decision 10). After `quit` every outstanding request is answered as cut off
 //! and nothing is held: the next request starts the service again, as an `agent` start. After
-//! `replace` lines are held and the connector reconnects without starting the service for up to
+//! `replace` lines are held and the edge reconnects without starting the service for up to
 //! [`HOLD_LIMIT`], and then behaves as after a lost connection. After `uninstall` outstanding
-//! requests are answered and the connector exits. After `session_end` the connector exits too, and
+//! requests are answered and the edge exits. After `session_end` the edge exits too, and
 //! it exits the same way when its own session listener hears that the session is ending
 //! ([`Event::SessionEnded`]): nothing is started then (ADR-0199 Decision 13). A stream that ends
 //! with no goodbye is a crash and behaves as a lost connection.
@@ -47,10 +47,10 @@ use serde_json::{json, Value};
 
 use crate::hold::{HeldLine, Hold, Request};
 
-/// The channel this connector names in its opening.
+/// The channel this edge names in its opening.
 pub const CHANNEL: &str = "mcp";
 
-/// The JSON-RPC member names and values the connector reads or writes.
+/// The JSON-RPC member names and values the edge reads or writes.
 mod rpc {
     /// The protocol version member.
     pub const JSONRPC: &str = "jsonrpc";
@@ -62,14 +62,14 @@ mod rpc {
     pub const METHOD: &str = "method";
     /// The success member of a response.
     pub const RESULT: &str = "result";
-    /// The method the connector answers itself.
+    /// The method the edge answers itself.
     pub const PING: &str = "ping";
 }
 
-/// Why this connector starts the service: an agent needs it.
+/// Why this edge starts the service: an agent needs it.
 const START_REASON: StartReason = StartReason::Agent;
 
-/// The service the connector talks to: how to open a stream and how to start it.
+/// The service the edge talks to: how to open a stream and how to start it.
 pub trait Service: Send + Sync + 'static {
     /// Connect to the running service and present `opening`.
     fn connect(&self, opening: &Opening) -> Result<(Connection, Reply), ConnectError>;
@@ -78,7 +78,7 @@ pub trait Service: Send + Sync + 'static {
     fn start(&self, reason: StartReason) -> io::Result<()>;
 }
 
-/// The source of the current time for every bound the connector keeps.
+/// The source of the current time for every bound the edge keeps.
 pub trait Clock: Send + Sync + 'static {
     /// The current instant.
     fn now(&self) -> Instant;
@@ -127,7 +127,7 @@ pub enum Event {
     Frame(u64, McpFrame),
     /// The connection of the given generation ended.
     Gone(u64),
-    /// The process that started the connector went away.
+    /// The process that started the edge went away.
     ParentGone,
     /// The session is ending.
     SessionEnded,
@@ -487,8 +487,8 @@ impl<W: Write> Forwarder<W> {
     /// The service is closing this stream on purpose.
     ///
     /// Every outstanding request is answered as cut off in each case. `quit` and an unknown
-    /// reason then leave the connector idle until a request needs the service. `replace` expects
-    /// the next service for [`HOLD_LIMIT`]. `uninstall` and `session_end` end the connector.
+    /// reason then leave the edge idle until a request needs the service. `replace` expects
+    /// the next service for [`HOLD_LIMIT`]. `uninstall` and `session_end` end the edge.
     fn goodbye(&mut self, reason: GoodbyeReason) -> io::Result<Flow> {
         (self.environment.log)(LogEvent::ServiceDisconnected, reason.as_str());
         self.disconnect()?;
@@ -565,7 +565,7 @@ struct Inspection {
     requests: Vec<Request>,
     /// Id keys the line answers: elements with an id and no method.
     responses: Vec<String>,
-    /// The id of a lone `ping` request. The connector answers a client's ping itself; a service's
+    /// The id of a lone `ping` request. The edge answers a client's ping itself; a service's
     /// ping is an ordinary request and is also in `requests`.
     ping: Option<Value>,
 }

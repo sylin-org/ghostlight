@@ -50,11 +50,7 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     let layout = Layout::current()?;
     let mut sibling_set_ready = true;
     let mut binaries = Vec::new();
-    for path in [
-        layout.service_executable(),
-        layout.mcp_connector(),
-        layout.browser_connector(),
-    ] {
+    for path in [layout.service_executable(), layout.edge()] {
         let ready = path.is_file();
         sibling_set_ready &= ready;
         binaries.push((path, ready));
@@ -157,6 +153,9 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
             harness.state.label(),
             harness.detail
         );
+        if let Some(evidence) = &harness.evidence {
+            println!("  {evidence}");
+        }
     }
     render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
     let report = &observation.diagnostics;

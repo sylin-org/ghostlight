@@ -42,13 +42,13 @@
 //! holds content this migration did not copy is never overwritten, and an original is deleted
 //! only when its content is at the destination.
 
-use std::env;
+use std::env::{self, consts::EXE_SUFFIX};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use ghostlight_relay::home::SERVICE_EXECUTABLE_NAME;
+use ghostlight_relay::home::EDGE_EXECUTABLE_NAME;
 use ghostlight_relay::private;
 use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
@@ -56,7 +56,7 @@ use thiserror::Error;
 
 use super::entry;
 use super::layout::{
-    Layout, BROWSER_CONNECTOR_EXECUTABLE_NAME, INSTALL_RECORD_NAME, MCP_CONNECTOR_EXECUTABLE_NAME,
+    Layout, INSTALL_RECORD_NAME, RETIRED_BROWSER_CONNECTOR_NAME, RETIRED_MCP_CONNECTOR_NAME,
 };
 use super::native_host::{self, NativeHostRegistry};
 use super::record::{self, InstallRecord, Version};
@@ -742,6 +742,7 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
             .map(|directory| directory.join(LEGACY_DEPLOY_LOCK_NAME)),
     );
     deletions.push(home.join(LEGACY_INSTALLATION_LOCK_NAME));
+    deletions.extend(retired_connectors(&layout));
     // The record decides the next run's plan, so it goes last.
     deletions.push(home.join(LEGACY_RECORD_NAME));
     plan.deletions = deletions
@@ -754,21 +755,65 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
         .iter()
         .flat_map(LegacyInstallation::directories)
     {
-        for name in [
-            SERVICE_EXECUTABLE_NAME,
-            MCP_CONNECTOR_EXECUTABLE_NAME,
-            BROWSER_CONNECTOR_EXECUTABLE_NAME,
-        ] {
+        // 1.x named its service image after the product, which is now the edge's name.
+        let service = EDGE_EXECUTABLE_NAME.to_owned();
+        for name in std::iter::once(service).chain(retired_connector_names()) {
             let image = directory.join(name);
             if image.is_file() {
                 push_unique(&mut plan.images_to_stop, image);
             }
         }
     }
+    for image in pre_edge_service_images(&layout)
+        .into_iter()
+        .chain(retired_connectors(&layout))
+    {
+        push_unique(&mut plan.images_to_stop, image);
+    }
     plan.registrations_to_reclaim = legacy.registrations.clone();
     plan.flatpak =
         Some(FlatpakLeftovers::below(&legacy.roots.user_home)).filter(FlatpakLeftovers::present);
     Ok(plan)
+}
+
+/// File names of the connector images 1.x and earlier 2.0 development builds installed.
+pub(super) fn retired_connector_names() -> [String; 2] {
+    [RETIRED_MCP_CONNECTOR_NAME, RETIRED_BROWSER_CONNECTOR_NAME]
+        .map(|name| format!("{name}{EXE_SUFFIX}"))
+}
+
+/// The retired connector images that exist in `layout`'s `bin`.
+fn retired_connectors(layout: &Layout) -> Vec<PathBuf> {
+    retired_connector_names()
+        .into_iter()
+        .map(|name| layout.bin().join(name))
+        .filter(|path| path.is_file())
+        .collect()
+}
+
+/// Whether `bin` still holds the layout of an earlier 2.0 development build, where the service
+/// image had the edge's name: connector images beside it, or an install record that names no
+/// edge.
+pub fn pre_edge_layout(layout: &Layout) -> bool {
+    !retired_connectors(layout).is_empty()
+        || matches!(
+            InstallRecord::read(&layout.install_record()),
+            Ok(Some(record)) if record.edge_sha256.is_none()
+        )
+}
+
+/// The service images of the earlier layout that sit under the edge's name, as files that exist:
+/// the one in `bin` while `bin` holds that layout, and the development build's.
+fn pre_edge_service_images(layout: &Layout) -> Vec<PathBuf> {
+    let mut images = Vec::new();
+    if pre_edge_layout(layout) {
+        images.push(layout.edge());
+    }
+    if !layout.development_executable().is_file() {
+        images.push(layout.development_edge());
+    }
+    images.retain(|image| image.is_file());
+    images
 }
 
 /// Make every destination directory and refuse a destination that holds something else.
@@ -1463,6 +1508,14 @@ mod tests {
     /// Bytes of the audit log the fake 1.x installation holds.
     const AUDIT: &str = "{\"event\":\"old\"}\n";
 
+    /// The image names a 1.x installation held: the service under the product's name, which is
+    /// now the edge's, and both connectors.
+    fn legacy_image_names() -> Vec<String> {
+        std::iter::once(EDGE_EXECUTABLE_NAME.to_owned())
+            .chain(retired_connector_names())
+            .collect()
+    }
+
     /// Carry out every step of `plan` with nothing to stop.
     fn execute(plan: &MigrationPlan) -> Result<(), MigrationError> {
         prepare(plan)?;
@@ -1513,18 +1566,14 @@ mod tests {
 
         /// The three executables of a 1.x installation in `directory`.
         fn executables(&self, directory: &Path) -> Vec<PathBuf> {
-            [
-                SERVICE_EXECUTABLE_NAME,
-                MCP_CONNECTOR_EXECUTABLE_NAME,
-                BROWSER_CONNECTOR_EXECUTABLE_NAME,
-            ]
-            .into_iter()
-            .map(|name| {
-                let path = directory.join(name);
-                self.write(&path, name);
-                path
-            })
-            .collect()
+            legacy_image_names()
+                .into_iter()
+                .map(|name| {
+                    let path = directory.join(&name);
+                    self.write(&path, &name);
+                    path
+                })
+                .collect()
         }
 
         fn record(&self, record: &serde_json::Value) {
@@ -1626,6 +1675,8 @@ mod tests {
                     .path("repo/target/release")
                     .join(LEGACY_DEPLOY_LOCK_NAME),
                 fixture.home.join(LEGACY_INSTALLATION_LOCK_NAME),
+                fixture.home.join("bin").join(&retired_connector_names()[0]),
+                fixture.home.join("bin").join(&retired_connector_names()[1]),
                 fixture.home.join(LEGACY_RECORD_NAME),
             ]
         );
@@ -1634,12 +1685,10 @@ mod tests {
         let expected: Vec<PathBuf> = [repo_release, bin]
             .iter()
             .flat_map(|directory| {
-                [
-                    SERVICE_EXECUTABLE_NAME,
-                    MCP_CONNECTOR_EXECUTABLE_NAME,
-                    BROWSER_CONNECTOR_EXECUTABLE_NAME,
-                ]
-                .map(|name| directory.join(name))
+                legacy_image_names()
+                    .into_iter()
+                    .map(|name| directory.join(name))
+                    .collect::<Vec<_>>()
             })
             .collect();
         assert_eq!(plan.images_to_stop, expected);
@@ -2310,6 +2359,7 @@ mod tests {
             service_version: "1.3.4".into(),
             relay_revision: "2".into(),
             service_sha256: "00".into(),
+            edge_sha256: None,
         }
         .write(&serving.join(INSTALL_RECORD_NAME))
         .unwrap();

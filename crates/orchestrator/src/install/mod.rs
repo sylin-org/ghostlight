@@ -28,6 +28,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use ghostlight_relay::route::MCP_ARGUMENT;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
 use serde::{Deserialize, Serialize};
@@ -37,8 +38,11 @@ use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
 
 use container::{AppContainer, Residence};
+use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
 
 const SERVER_NAME: &str = "ghostlight";
+/// The arguments that make the edge the MCP relay, in every client's entry.
+const MCP_ARGUMENTS: [&str; 1] = [MCP_ARGUMENT];
 /// The package name of the Claude desktop app, which reads the Claude Desktop configuration.
 const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
 /// File in the state directory recording where each MCP client's configuration was found.
@@ -85,11 +89,11 @@ impl HarnessRegistry {
         registry
     }
 
-    /// A registry over client configurations below `directory` that names `connector` and keeps
+    /// A registry over client configurations below `directory` that start `edge` and keeps
     /// its located paths in `state`, for tests that must not touch this user's clients.
     #[cfg(test)]
-    pub(crate) fn isolated(directory: &Path, connector: &Path, state: &Path) -> Self {
-        Self::with_context(isolated_context(directory, connector, state))
+    pub(crate) fn isolated(directory: &Path, edge: &Path, state: &Path) -> Self {
+        Self::with_context(isolated_context(directory, edge, state))
     }
 
     /// Like [`Self::isolated`], run from inside `container`: the configurations below
@@ -97,11 +101,11 @@ impl HarnessRegistry {
     #[cfg(test)]
     pub(crate) fn isolated_inside(
         directory: &Path,
-        connector: &Path,
+        edge: &Path,
         state: &Path,
         container: AppContainer,
     ) -> Self {
-        let mut context = isolated_context(directory, connector, state);
+        let mut context = isolated_context(directory, edge, state);
         context.private_view = Some(PrivateView {
             container,
             roots: vec![directory.join("config")],
@@ -220,7 +224,7 @@ impl HarnessRegistry {
     pub fn copy_text(&self, id: &str, kind: HarnessCopyKind) -> Result<String, HarnessError> {
         let definition = definition(&self.inner.context, id)?;
         Ok(match kind {
-            HarnessCopyKind::Command => self.inner.context.connector.to_string_lossy().into_owned(),
+            HarnessCopyKind::Command => mcp_command_line(&self.inner.context.edge),
             HarnessCopyKind::Setup => manual_setup(&self.inner.context, &definition)?,
         })
     }
@@ -276,13 +280,13 @@ impl HarnessRegistry {
 /// A context over client configurations below `directory`, for tests that must not touch this
 /// user's clients.
 #[cfg(test)]
-fn isolated_context(directory: &Path, connector: &Path, state: &Path) -> HarnessContext {
+fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessContext {
     HarnessContext {
         home: directory.join("home"),
         config: directory.join("config"),
         roaming: directory.join("config"),
         codex_config: directory.join("codex").join("config.toml"),
-        connector: connector.to_path_buf(),
+        edge: edge.to_path_buf(),
         path_entries: Vec::new(),
         locations: state.join(HARNESS_LOCATIONS_FILE),
         windows: false,
@@ -315,7 +319,8 @@ pub enum HarnessAction {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessCopyKind {
-    /// The absolute installed MCP connector path.
+    /// The installed edge's command line for a local stdio MCP server: its absolute path and
+    /// the `mcp` argument.
     Command,
     /// The smallest complete target-specific configuration document.
     Setup,
@@ -331,7 +336,7 @@ pub enum HarnessState {
     Available,
     /// The exact current Ghostlight registration is present.
     Installed,
-    /// A Ghostlight-owned registration points at an older connector location.
+    /// A Ghostlight-owned registration starts something other than the installed edge.
     Updatable,
     /// A malformed or foreign entry requires deliberate manual attention.
     NeedsAttention,
@@ -375,7 +380,7 @@ pub struct HarnessSummary {
     /// (ADR-0135).
     ///
     /// Present only when the target needs attention: either the bounded command line found
-    /// where Ghostlight's connector belongs, or the bounded reason the configuration could
+    /// where Ghostlight's entry belongs, or the bounded reason the configuration could
     /// not be parsed. The surface renders it verbatim and authors no words of its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
@@ -394,7 +399,7 @@ pub struct HarnessSummary {
     pub private_view: bool,
     /// Exact configuration destination currently resolved for this target.
     pub config_path: String,
-    /// Exact installed connector command available for manual setup.
+    /// Exact installed command line available for manual setup.
     pub connector_command: String,
     /// Smallest complete manual configuration document for this target.
     pub manual_setup: String,
@@ -416,7 +421,7 @@ pub struct HarnessActionResult {
 pub struct HarnessSetupResult {
     /// Missing registrations added for detected targets.
     pub set_up: usize,
-    /// Stale Ghostlight-owned registrations updated to the current connector.
+    /// Stale Ghostlight-owned registrations updated to start the installed edge.
     pub updated: usize,
     /// Refused malformed or foreign targets still requiring a person's attention.
     pub needs_attention: usize,
@@ -472,7 +477,7 @@ struct HarnessContext {
     config: PathBuf,
     roaming: PathBuf,
     codex_config: PathBuf,
-    connector: PathBuf,
+    edge: PathBuf,
     path_entries: Vec<PathBuf>,
     locations: PathBuf,
     windows: bool,
@@ -525,11 +530,11 @@ impl HarnessContext {
             windows,
         );
         let layout = layout::Layout::current();
-        let connector = layout
+        let edge = layout
             .as_ref()
             .map(layout::Layout::bin)
             .unwrap_or_default()
-            .join(executable_name("ghostlight-mcp-connector", windows));
+            .join(executable_name(EDGE_COMMAND_NAME, windows));
         let path_entries = env::var_os("PATH")
             .map(|path| env::split_paths(&path).collect())
             .unwrap_or_default();
@@ -556,7 +561,7 @@ impl HarnessContext {
             config: roots.config,
             roaming: roots.roaming,
             codex_config: roots.codex_config,
-            connector,
+            edge,
             path_entries,
             locations,
             windows,
@@ -667,7 +672,7 @@ enum ManualDialect {
     Continue,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum JsonDialect {
     McpServers,
     Copilot,
@@ -1048,14 +1053,15 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             .executables
             .iter()
             .any(|name| executable_on_path(context, name));
-    let connector_ready = context.connector.is_file();
+    let edge_ready = context.edge.is_file();
     let manual = matches!(definition.dialect, ConfigDialect::Manual(_));
     let registration = registration_state(context, definition);
+    let retired = matches!(registration, Ok(RegistrationState::Retired));
     let state = match &registration {
         Ok(RegistrationState::Missing) if detected => HarnessState::Available,
         Ok(RegistrationState::Missing) => HarnessState::NotDetected,
         Ok(RegistrationState::Current) => HarnessState::Installed,
-        Ok(RegistrationState::Updatable) => HarnessState::Updatable,
+        Ok(RegistrationState::Updatable | RegistrationState::Retired) => HarnessState::Updatable,
         Ok(RegistrationState::Foreign(_)) | Err(_) => HarnessState::NeedsAttention,
     };
     // The blocked causes are named from what the inspection actually saw, never conflated
@@ -1072,31 +1078,33 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         _ if manual => manual_setup_sentence(definition),
         _ => match state {
             HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
+            HarnessState::Updatable if retired => format!(
+                "This entry starts {RETIRED_MCP_CONNECTOR_NAME}, which Ghostlight no longer \
+                 installs. Set up points it at {EDGE_COMMAND_NAME} {MCP_ARGUMENT}."
+            ),
             HarnessState::Updatable => "Ghostlight's saved registration needs an update.".into(),
-            HarnessState::Available if connector_ready => {
+            HarnessState::Available if edge_ready => {
                 "Detected and ready for an explicit Ghostlight registration.".into()
             }
-            HarnessState::Available => "Detected, but the sibling MCP connector is missing.".into(),
-            HarnessState::NotDetected if connector_ready => {
+            HarnessState::Available => "Detected, but the Ghostlight edge is missing.".into(),
+            HarnessState::NotDetected if edge_ready => {
                 "Not detected. You can prepare its user configuration before installing it.".into()
             }
-            HarnessState::NotDetected => {
-                "Not detected, and the sibling MCP connector is missing.".into()
-            }
+            HarnessState::NotDetected => "Not detected, and the Ghostlight edge is missing.".into(),
             HarnessState::NeedsAttention => String::new(),
         },
     };
     let evidence: Option<String> = match &registration {
         Ok(RegistrationState::Foreign(found_command)) => Some(match found_command {
             Some(found) => format!(
-                "Found `{found}` where Ghostlight's connector belongs; \
+                "Found `{found}` where Ghostlight's entry belongs; \
                  Ghostlight maintains `{}` there and changed nothing.",
-                context.connector.display()
+                context.edge.display()
             ),
             None => format!(
-                "Found an entry without a usable command where Ghostlight's connector belongs; \
+                "Found an entry without a usable command where Ghostlight's entry belongs; \
                  Ghostlight maintains `{}` there and changed nothing.",
-                context.connector.display()
+                context.edge.display()
             ),
         }),
         Err(HarnessError::Malformed(reason)) => {
@@ -1107,7 +1115,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     if definition.located_stale {
         detail.push_str(" A previously located path is missing; the normal location is shown.");
     }
-    let can_fix = connector_ready && matches!(registration, Ok(RegistrationState::Foreign(_)));
+    let can_fix = edge_ready && matches!(registration, Ok(RegistrationState::Foreign(_)));
     HarnessSummary {
         id: definition.id.into(),
         product_id: definition.product_id.into(),
@@ -1118,7 +1126,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         state,
         detail,
         evidence,
-        can_install: connector_ready
+        can_install: edge_ready
             && !manual
             && matches!(
                 state,
@@ -1130,11 +1138,11 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         can_locate: true,
         private_view: context.private_to(definition).is_some(),
         config_path: definition.path.to_string_lossy().into_owned(),
-        connector_command: context.connector.to_string_lossy().into_owned(),
+        connector_command: mcp_command_line(&context.edge),
         manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
             format!(
                 "Use this command as a local stdio MCP server:\n{}",
-                context.connector.display()
+                mcp_command_line(&context.edge)
             )
         }),
     }
@@ -1157,6 +1165,8 @@ enum RegistrationState {
     Missing,
     Current,
     Updatable,
+    /// An owned entry starts the retired `ghostlight-mcp-connector`, which no longer exists.
+    Retired,
     /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload is the
     /// bounded command line found there, when one could be read (ADR-0135).
     Foreign(Option<String>),
@@ -1171,15 +1181,15 @@ fn registration_state(
     }
     let source = fs::read_to_string(&definition.path).map_err(HarnessError::Read)?;
     match definition.dialect {
-        ConfigDialect::CodexToml => inspect_toml(&source, &context.connector, context.windows),
+        ConfigDialect::CodexToml => inspect_toml(&source, &context.edge, context.windows),
         ConfigDialect::Manual(_) => Ok(RegistrationState::Missing),
         ConfigDialect::Json(dialect) => {
-            inspect_json(&source, dialect, &context.connector, context.windows)
+            inspect_json(&source, dialect, &context.edge, context.windows)
         }
         ConfigDialect::OpenCode => inspect_json(
             &source,
             opencode_dialect(context, &source)?,
-            &context.connector,
+            &context.edge,
             context.windows,
         ),
     }
@@ -1188,7 +1198,7 @@ fn registration_state(
 fn inspect_json(
     source: &str,
     dialect: JsonDialect,
-    connector: &Path,
+    edge: &Path,
     windows: bool,
 ) -> Result<RegistrationState, HarnessError> {
     let parsed = parse_jsonc(source)?;
@@ -1198,14 +1208,14 @@ fn inspect_json(
     Ok(
         json_entry_command(entry, dialect).map_or(RegistrationState::Foreign(None), |command| {
             let args = json_entry_args(entry, dialect);
-            command_registration_state(command, args.as_deref(), connector, windows)
+            command_registration_state(command, args.as_deref(), edge, windows)
         }),
     )
 }
 
 fn inspect_toml(
     source: &str,
-    connector: &Path,
+    edge: &Path,
     windows: bool,
 ) -> Result<RegistrationState, HarnessError> {
     let document = source
@@ -1223,7 +1233,7 @@ fn inspect_toml(
         .and_then(Item::as_str)
         .unwrap_or_default();
     let args = toml_entry_args(entry);
-    let state = command_registration_state(command, args.as_deref(), connector, windows);
+    let state = command_registration_state(command, args.as_deref(), edge, windows);
     if matches!(
         state,
         RegistrationState::Current | RegistrationState::Updatable
@@ -1314,19 +1324,17 @@ fn apply_install(
     definition: &HarnessDefinition,
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
-    if !context.connector.is_file() {
-        return Err(HarnessError::ConnectorMissing);
+    if !context.edge.is_file() {
+        return Err(HarnessError::EdgeMissing);
     }
     let changed = match definition.dialect {
-        ConfigDialect::CodexToml => edit_toml(&definition.path, &context.connector, true)?,
+        ConfigDialect::CodexToml => edit_toml(&definition.path, &context.edge, true)?,
         ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => {
-            edit_json(&definition.path, &context.connector, dialect, true)?
-        }
+        ConfigDialect::Json(dialect) => edit_json(&definition.path, &context.edge, dialect, true)?,
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
             let dialect = opencode_dialect(context, &source)?;
-            edit_json(&definition.path, &context.connector, dialect, true)?
+            edit_json(&definition.path, &context.edge, dialect, true)?
         }
     };
     let summary = inspect(context, definition);
@@ -1353,15 +1361,13 @@ fn apply_uninstall(
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
     let changed = match definition.dialect {
-        ConfigDialect::CodexToml => edit_toml(&definition.path, &context.connector, false)?,
+        ConfigDialect::CodexToml => edit_toml(&definition.path, &context.edge, false)?,
         ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => {
-            edit_json(&definition.path, &context.connector, dialect, false)?
-        }
+        ConfigDialect::Json(dialect) => edit_json(&definition.path, &context.edge, dialect, false)?,
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
             let dialect = opencode_dialect(context, &source)?;
-            edit_json(&definition.path, &context.connector, dialect, false)?
+            edit_json(&definition.path, &context.edge, dialect, false)?
         }
     };
     let summary = inspect(context, definition);
@@ -1387,17 +1393,17 @@ fn apply_fix(
     definition: &HarnessDefinition,
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
-    if !context.connector.is_file() {
-        return Err(HarnessError::ConnectorMissing);
+    if !context.edge.is_file() {
+        return Err(HarnessError::EdgeMissing);
     }
     let changed = match definition.dialect {
-        ConfigDialect::CodexToml => fix_toml(&definition.path, &context.connector)?,
+        ConfigDialect::CodexToml => fix_toml(&definition.path, &context.edge)?,
         ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => fix_json(&definition.path, &context.connector, dialect)?,
+        ConfigDialect::Json(dialect) => fix_json(&definition.path, &context.edge, dialect)?,
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
             let dialect = opencode_dialect(context, &source)?;
-            fix_json(&definition.path, &context.connector, dialect)?
+            fix_json(&definition.path, &context.edge, dialect)?
         }
     };
     let summary = inspect(context, definition);
@@ -1442,13 +1448,13 @@ impl RegistrationEdit {
 
 fn edit_json(
     path: &Path,
-    connector: &Path,
+    edge: &Path,
     dialect: JsonDialect,
     install: bool,
 ) -> Result<bool, HarnessError> {
     edit_json_with(
         path,
-        connector,
+        edge,
         dialect,
         if install {
             RegistrationEdit::Install
@@ -1458,13 +1464,13 @@ fn edit_json(
     )
 }
 
-fn fix_json(path: &Path, connector: &Path, dialect: JsonDialect) -> Result<bool, HarnessError> {
-    edit_json_with(path, connector, dialect, RegistrationEdit::Fix)
+fn fix_json(path: &Path, edge: &Path, dialect: JsonDialect) -> Result<bool, HarnessError> {
+    edit_json_with(path, edge, dialect, RegistrationEdit::Fix)
 }
 
 fn edit_json_with(
     path: &Path,
-    connector: &Path,
+    edge: &Path,
     dialect: JsonDialect,
     intent: RegistrationEdit,
 ) -> Result<bool, HarnessError> {
@@ -1472,15 +1478,14 @@ fn edit_json_with(
     let parsed = parse_jsonc(&source)?;
     let current = json_entry(&parsed, dialect);
     if let Some(entry) = current {
-        let foreign = !json_entry_owned(entry, dialect, connector, cfg!(target_os = "windows"));
+        let foreign = !json_entry_owned(entry, dialect, edge, cfg!(target_os = "windows"));
         if foreign && !intent.replaces_foreign() {
             return Err(HarnessError::ForeignEntry);
         }
         if !foreign && intent.replaces_foreign() {
             return Err(HarnessError::NotFixable);
         }
-        if intent == RegistrationEdit::Install && entry == &expected_json_entry(connector, dialect)
-        {
+        if intent == RegistrationEdit::Install && entry == &expected_json_entry(edge, dialect) {
             return Ok(false);
         }
     } else if intent.replaces_foreign() {
@@ -1498,7 +1503,7 @@ fn edit_json_with(
         let collection = collection.ok_or_else(|| {
             HarnessError::Malformed("could not create the harness server collection".into())
         })?;
-        let entry = cst_input(expected_json_entry(connector, dialect));
+        let entry = cst_input(expected_json_entry(edge, dialect));
         if let Some(existing) = collection.get(SERVER_NAME) {
             existing.set_value(entry);
         } else {
@@ -1512,10 +1517,10 @@ fn edit_json_with(
     Ok(true)
 }
 
-fn edit_toml(path: &Path, connector: &Path, install: bool) -> Result<bool, HarnessError> {
+fn edit_toml(path: &Path, edge: &Path, install: bool) -> Result<bool, HarnessError> {
     edit_toml_with(
         path,
-        connector,
+        edge,
         if install {
             RegistrationEdit::Install
         } else {
@@ -1524,13 +1529,13 @@ fn edit_toml(path: &Path, connector: &Path, install: bool) -> Result<bool, Harne
     )
 }
 
-fn fix_toml(path: &Path, connector: &Path) -> Result<bool, HarnessError> {
-    edit_toml_with(path, connector, RegistrationEdit::Fix)
+fn fix_toml(path: &Path, edge: &Path) -> Result<bool, HarnessError> {
+    edit_toml_with(path, edge, RegistrationEdit::Fix)
 }
 
 fn edit_toml_with(
     path: &Path,
-    connector: &Path,
+    edge: &Path,
     intent: RegistrationEdit,
 ) -> Result<bool, HarnessError> {
     let source = read_or_empty(path)?;
@@ -1547,12 +1552,7 @@ fn edit_toml_with(
             .and_then(Item::as_str)
             .unwrap_or_default();
         let args = toml_entry_args(entry);
-        let foreign = !command_owned(
-            command,
-            args.as_deref(),
-            connector,
-            cfg!(target_os = "windows"),
-        );
+        let foreign = !command_owned(command, args.as_deref(), edge, cfg!(target_os = "windows"));
         if foreign && !intent.replaces_foreign() {
             return Err(HarnessError::ForeignEntry);
         }
@@ -1560,11 +1560,8 @@ fn edit_toml_with(
             return Err(HarnessError::NotFixable);
         }
         if intent == RegistrationEdit::Install
-            && command == connector.to_string_lossy()
-            && entry
-                .get("args")
-                .and_then(Item::as_array)
-                .is_some_and(Array::is_empty)
+            && command == edge.to_string_lossy()
+            && args.as_deref() == Some(&MCP_ARGUMENTS[..])
             && missing_codex_desktop_environment(entry, cfg!(windows))?.is_empty()
         {
             return Ok(false);
@@ -1582,8 +1579,8 @@ fn edit_toml_with(
             .unwrap_or_else(|| Item::Table(Table::new()))
     };
     if intent.installs() {
-        updated["command"] = value(connector.to_string_lossy().into_owned());
-        updated["args"] = value(Array::new());
+        updated["command"] = value(edge.to_string_lossy().into_owned());
+        updated["args"] = value(mcp_arguments_array());
         forward_codex_desktop_environment(&mut updated, cfg!(windows))?;
         if !document.contains_key("mcp_servers") {
             document["mcp_servers"] = Item::Table(Table::new());
@@ -1615,21 +1612,22 @@ fn json_entry(root: &Value, dialect: JsonDialect) -> Option<&Value> {
     }
 }
 
-fn expected_json_entry(connector: &Path, dialect: JsonDialect) -> Value {
-    let command = connector.to_string_lossy().into_owned();
+fn expected_json_entry(edge: &Path, dialect: JsonDialect) -> Value {
+    let command = edge.to_string_lossy().into_owned();
+    let args = MCP_ARGUMENTS;
     match dialect {
         JsonDialect::Copilot => {
-            json!({"type":"local","command":command,"args":[],"env":{},"tools":["*"]})
+            json!({"type":"local","command":command,"args":args,"env":{},"tools":["*"]})
         }
-        JsonDialect::Servers => json!({"type":"stdio","command":command,"args":[]}),
-        JsonDialect::Crush => json!({"type":"stdio","command":command,"args":[]}),
+        JsonDialect::Servers => json!({"type":"stdio","command":command,"args":args}),
+        JsonDialect::Crush => json!({"type":"stdio","command":command,"args":args}),
         JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => {
-            json!({"command":command,"args":[],"env":{}})
+            json!({"command":command,"args":args,"env":{}})
         }
         JsonDialect::OpenCodeV1 => {
-            json!({"type":"local","command":[command],"enabled":true})
+            json!({"type":"local","command":[command, MCP_ARGUMENT],"enabled":true})
         }
-        JsonDialect::OpenCodeV2 => json!({"type":"local","command":[command]}),
+        JsonDialect::OpenCodeV2 => json!({"type":"local","command":[command, MCP_ARGUMENT]}),
     }
 }
 
@@ -1718,10 +1716,10 @@ fn escape_cst_string(value: &str) -> String {
     escaped
 }
 
-fn json_entry_owned(entry: &Value, dialect: JsonDialect, connector: &Path, windows: bool) -> bool {
+fn json_entry_owned(entry: &Value, dialect: JsonDialect, edge: &Path, windows: bool) -> bool {
     json_entry_command(entry, dialect).is_some_and(|command| {
         let args = json_entry_args(entry, dialect);
-        command_owned(command, args.as_deref(), connector, windows)
+        command_owned(command, args.as_deref(), edge, windows)
     })
 }
 
@@ -1777,25 +1775,25 @@ fn manual_setup(
     match definition.dialect {
         ConfigDialect::CodexToml => {
             let mut entry = Item::Table(Table::new());
-            entry["command"] = value(context.connector.to_string_lossy().into_owned());
-            entry["args"] = value(Array::new());
+            entry["command"] = value(context.edge.to_string_lossy().into_owned());
+            entry["args"] = value(mcp_arguments_array());
             forward_codex_desktop_environment(&mut entry, context.windows)?;
             let mut document = DocumentMut::new();
             document["mcp_servers"] = Item::Table(Table::new());
             document["mcp_servers"][SERVER_NAME] = entry;
             Ok(document.to_string())
         }
-        ConfigDialect::Json(dialect) => manual_json_setup(&context.connector, dialect),
-        ConfigDialect::Manual(dialect) => Ok(manual_yaml_setup(&context.connector, dialect)),
+        ConfigDialect::Json(dialect) => manual_json_setup(&context.edge, dialect),
+        ConfigDialect::Manual(dialect) => Ok(manual_yaml_setup(&context.edge, dialect)),
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
-            manual_json_setup(&context.connector, opencode_dialect(context, &source)?)
+            manual_json_setup(&context.edge, opencode_dialect(context, &source)?)
         }
     }
 }
 
-fn manual_json_setup(connector: &Path, dialect: JsonDialect) -> Result<String, HarnessError> {
-    let entry = expected_json_entry(connector, dialect);
+fn manual_json_setup(edge: &Path, dialect: JsonDialect) -> Result<String, HarnessError> {
+    let entry = expected_json_entry(edge, dialect);
     let document = match dialect {
         JsonDialect::McpServers | JsonDialect::Copilot => {
             json!({"mcpServers": {SERVER_NAME: entry}})
@@ -1811,15 +1809,17 @@ fn manual_json_setup(connector: &Path, dialect: JsonDialect) -> Result<String, H
         .map_err(|error| HarnessError::Malformed(error.to_string()))
 }
 
-fn manual_yaml_setup(connector: &Path, dialect: ManualDialect) -> String {
-    let command = serde_json::to_string(&connector.to_string_lossy())
+fn manual_yaml_setup(edge: &Path, dialect: ManualDialect) -> String {
+    let command = serde_json::to_string(&edge.to_string_lossy())
         .expect("a filesystem path is always representable as a JSON/YAML string");
+    let arguments = serde_json::to_string(&MCP_ARGUMENTS)
+        .expect("fixed arguments are always representable as a JSON/YAML string");
     match dialect {
         ManualDialect::Goose => format!(
-            "extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: {command}\n    args: []\n    envs: {{}}\n    timeout: 300\n"
+            "extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: {command}\n    args: {arguments}\n    envs: {{}}\n    timeout: 300\n"
         ),
         ManualDialect::Continue => format!(
-            "name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: {command}\n    args: []\n"
+            "name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: {command}\n    args: {arguments}\n"
         ),
     }
 }
@@ -1840,24 +1840,20 @@ fn command_name(command: &str, expected: &str) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case(expected))
 }
 
-fn command_owned(command: &str, args: Option<&[&str]>, connector: &Path, windows: bool) -> bool {
-    command_name(command, "ghostlight-mcp-connector")
-        || legacy_relay_owned(command, args, connector, windows)
+fn command_owned(command: &str, args: Option<&[&str]>, edge: &Path, windows: bool) -> bool {
+    command_name(command, EDGE_COMMAND_NAME)
+        || command_name(command, RETIRED_MCP_CONNECTOR_NAME)
+        || legacy_relay_owned(command, args, edge, windows)
 }
 
-fn legacy_relay_owned(
-    command: &str,
-    args: Option<&[&str]>,
-    connector: &Path,
-    windows: bool,
-) -> bool {
+fn legacy_relay_owned(command: &str, args: Option<&[&str]>, edge: &Path, windows: bool) -> bool {
     if !command_name(command, "ghostlight-relay") || args != Some(&["--role", "agent"]) {
         return false;
     }
     let Some(actual_root) = Path::new(command).parent().and_then(Path::parent) else {
         return false;
     };
-    let Some(expected_root) = connector.parent().and_then(Path::parent) else {
+    let Some(expected_root) = edge.parent().and_then(Path::parent) else {
         return false;
     };
     paths_equal(actual_root, expected_root, windows)
@@ -1866,19 +1862,21 @@ fn legacy_relay_owned(
 fn command_registration_state(
     command: &str,
     args: Option<&[&str]>,
-    connector: &Path,
+    edge: &Path,
     windows: bool,
 ) -> RegistrationState {
-    if !command_owned(command, args, connector, windows) {
+    if !command_owned(command, args, edge, windows) {
         return RegistrationState::Foreign(bounded_command_line(command, args));
     }
     let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
-    let expected = fs::canonicalize(connector).unwrap_or_else(|_| connector.to_path_buf());
-    let current = command_name(command, "ghostlight-mcp-connector")
+    let expected = fs::canonicalize(edge).unwrap_or_else(|_| edge.to_path_buf());
+    let current = command_name(command, EDGE_COMMAND_NAME)
         && paths_equal(&actual, &expected, windows)
-        && args.is_some_and(|args| args.is_empty());
+        && args == Some(&MCP_ARGUMENTS[..]);
     if current {
         RegistrationState::Current
+    } else if command_name(command, RETIRED_MCP_CONNECTOR_NAME) {
+        RegistrationState::Retired
     } else {
         RegistrationState::Updatable
     }
@@ -1925,7 +1923,7 @@ fn bounded_disclosure(value: &str) -> Option<String> {
     Some(bounded)
 }
 
-/// The bounded command line found where Ghostlight's connector belongs.
+/// The bounded command line found where Ghostlight's entry belongs.
 fn bounded_command_line(command: &str, args: Option<&[&str]>) -> Option<String> {
     let mut line = String::from(command);
     if let Some(args) = args {
@@ -2106,6 +2104,23 @@ fn executable_on_path(context: &HarnessContext, name: &str) -> bool {
         .any(|directory| directory.join(&executable).is_file())
 }
 
+/// The command line that starts the MCP relay of the edge at `edge`: its path, quoted when the
+/// path holds a space, then the `mcp` argument.
+fn mcp_command_line(edge: &Path) -> String {
+    let path = edge.to_string_lossy();
+    let path = if path.contains(char::is_whitespace) {
+        format!("\"{path}\"")
+    } else {
+        path.into_owned()
+    };
+    format!("{path} {}", MCP_ARGUMENTS.join(" "))
+}
+
+/// The arguments of an edge entry as a TOML array.
+fn mcp_arguments_array() -> Array {
+    MCP_ARGUMENTS.iter().copied().collect()
+}
+
 fn executable_name(name: &str, windows: bool) -> String {
     if windows {
         format!("{name}.exe")
@@ -2129,9 +2144,9 @@ pub enum HarnessError {
     /// The selected product does not have an official download on this platform.
     #[error("supported harness `{0}` has no official download for this platform")]
     NoDownload(String),
-    /// The packaged sibling connector is unavailable.
-    #[error("the sibling Ghostlight MCP connector is missing")]
-    ConnectorMissing,
+    /// The installed edge is unavailable.
+    #[error("the Ghostlight edge is missing")]
+    EdgeMissing,
     /// The harness config could not be read.
     #[error("could not read harness configuration: {0}")]
     Read(io::Error),
@@ -2180,10 +2195,12 @@ mod tests {
 
     use super::{
         bounded_command_line, command_registration_state, definitions, edit_json, edit_toml,
-        fix_toml, harness_roots, inspect, inspect_json, inspect_toml, jsonc_options,
-        manual_json_setup, replace_with_backup, resolve_through_symlink, AppContainer,
-        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
-        HarnessSummary, JsonDialect, PrivateView, RegistrationState, EVIDENCE_MAX_CHARS,
+        executable_name, expected_json_entry, fix_toml, harness_roots, inspect, inspect_json,
+        inspect_toml, json_entry_args, json_entry_command, jsonc_options, manual_json_setup,
+        mcp_command_line, replace_with_backup, resolve_through_symlink, AppContainer,
+        HarnessAction, HarnessContext, HarnessCopyKind, HarnessError, HarnessRegistry,
+        HarnessRoots, HarnessState, HarnessSummary, JsonDialect, PrivateView, RegistrationState,
+        EDGE_COMMAND_NAME, EVIDENCE_MAX_CHARS, RETIRED_MCP_CONNECTOR_NAME,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -2196,14 +2213,10 @@ mod tests {
         directory
     }
 
-    fn connector(directory: &Path) -> PathBuf {
-        let connector = directory.join(if cfg!(windows) {
-            "ghostlight-mcp-connector.exe"
-        } else {
-            "ghostlight-mcp-connector"
-        });
-        fs::write(&connector, b"test").unwrap();
-        connector
+    fn edge(directory: &Path) -> PathBuf {
+        let edge = directory.join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
+        fs::write(&edge, b"test").unwrap();
+        edge
     }
 
     fn context(directory: &Path) -> HarnessContext {
@@ -2212,7 +2225,7 @@ mod tests {
             config: directory.join("config"),
             roaming: directory.join("config"),
             codex_config: directory.join("codex/config.toml"),
-            connector: connector(directory),
+            edge: edge(directory),
             path_entries: Vec::new(),
             locations: directory.join("config/ghostlight/harness-locations.json"),
             windows: false,
@@ -2318,13 +2331,13 @@ mod tests {
         let binary_directory = directory.join("bin");
         fs::create_dir_all(&binary_directory).unwrap();
         fs::write(binary_directory.join("zeditor"), b"test").unwrap();
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         let registry = HarnessRegistry::with_context(HarnessContext {
             home: directory.join("home"),
             config: directory.join("config"),
             roaming: directory.join("config"),
             codex_config: directory.join("codex/config.toml"),
-            connector,
+            edge,
             path_entries: vec![binary_directory],
             locations: directory.join("locations.json"),
             windows: false,
@@ -2376,9 +2389,9 @@ mod tests {
     fn every_registry_row_has_offline_artwork_and_the_exact_manual_command() {
         let directory = temporary("roster-artwork-manual");
         let context = context(&directory);
-        let connector = context.connector.to_string_lossy().into_owned();
-        let serialized_connector = serde_json::to_string(&connector).unwrap();
-        let escaped_connector = serialized_connector
+        let edge = context.edge.to_string_lossy().into_owned();
+        let serialized_edge = serde_json::to_string(&edge).unwrap();
+        let escaped_edge = serialized_edge
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
             .unwrap();
@@ -2390,11 +2403,15 @@ mod tests {
                 "missing packaged artwork for {}",
                 summary.id
             );
-            assert_eq!(summary.connector_command, connector);
+            assert_eq!(summary.connector_command, format!("{edge} mcp"));
             assert!(
-                summary.manual_setup.contains(&connector)
-                    || summary.manual_setup.contains(escaped_connector),
-                "manual setup for {} omitted the connector",
+                summary.manual_setup.contains(&edge) || summary.manual_setup.contains(escaped_edge),
+                "manual setup for {} omitted the edge",
+                summary.id
+            );
+            assert!(
+                summary.manual_setup.contains("\"mcp\""),
+                "manual setup for {} omitted the mcp argument",
                 summary.id
             );
         }
@@ -2470,18 +2487,18 @@ mod tests {
 
         let directory = temporary("json-mode");
         let path = directory.join("config.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         fs::write(&path, "{\"theme\":\"dark\"}\n").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(edit_json(&path, &connector, JsonDialect::Copilot, true).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::Copilot, true).unwrap());
         let installed = fs::read(&path).unwrap();
-        assert!(!edit_json(&path, &connector, JsonDialect::Copilot, true).unwrap());
+        assert!(!edit_json(&path, &edge, JsonDialect::Copilot, true).unwrap());
         assert_eq!(fs::read(&path).unwrap(), installed);
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o640
         );
-        assert!(edit_json(&path, &connector, JsonDialect::Copilot, false).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::Copilot, false).unwrap());
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o640
@@ -2492,14 +2509,14 @@ mod tests {
     #[test]
     fn manual_json_setup_uses_the_real_ghostlight_key() {
         let directory = temporary("manual-json");
-        let connector = connector(&directory);
-        let document = manual_json_setup(&connector, JsonDialect::Copilot).unwrap();
+        let edge = edge(&directory);
+        let document = manual_json_setup(&edge, JsonDialect::Copilot).unwrap();
         let value: Value = serde_json::from_str(&document).unwrap();
         assert!(value["mcpServers"].get("ghostlight").is_some());
         assert!(value["mcpServers"].get("SERVER_NAME").is_none());
         assert_eq!(
             value["mcpServers"]["ghostlight"]["command"].as_str(),
-            Some(connector.to_string_lossy().as_ref())
+            Some(edge.to_string_lossy().as_ref())
         );
         fs::remove_dir_all(directory).unwrap();
     }
@@ -2657,7 +2674,7 @@ mod tests {
         let configured: Value = serde_json::from_str(&fs::read_to_string(&devin).unwrap()).unwrap();
         assert_eq!(
             configured["mcpServers"]["ghostlight"]["command"].as_str(),
-            Some(context.connector.to_string_lossy().as_ref())
+            Some(context.edge.to_string_lossy().as_ref())
         );
         assert_eq!(
             fs::read_to_string(&windsurf).unwrap(),
@@ -2796,7 +2813,7 @@ mod tests {
             assert!(summary.detail.contains("Copy setup"), "{}", summary.detail);
             assert!(summary
                 .manual_setup
-                .contains(&*context.connector.to_string_lossy().replace('\\', "\\\\")));
+                .contains(&*context.edge.to_string_lossy().replace('\\', "\\\\")));
 
             let result = registry.setup_detected().unwrap();
             assert_eq!(result.set_up, 0);
@@ -2836,11 +2853,9 @@ mod tests {
     fn legacy_relay_requires_the_exact_agent_signature_and_install_root() {
         let directory = temporary("legacy-relay");
         let install_root = directory.join("bin");
-        let current = install_root.join("v1").join(if cfg!(windows) {
-            "ghostlight-mcp-connector.exe"
-        } else {
-            "ghostlight-mcp-connector"
-        });
+        let current = install_root
+            .join("v1")
+            .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
         let legacy = install_root.join("v0").join(if cfg!(windows) {
             "ghostlight-relay.exe"
         } else {
@@ -2884,14 +2899,14 @@ mod tests {
     fn json_install_is_idempotent_and_preserves_siblings() {
         let directory = temporary("json");
         let path = directory.join("mcp.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         fs::write(
             &path,
             r#"{"other":7,"mcpServers":{"sibling":{"command":"sibling"}}}"#,
         )
         .unwrap();
-        assert!(edit_json(&path, &connector, JsonDialect::McpServers, true).unwrap());
-        assert!(!edit_json(&path, &connector, JsonDialect::McpServers, true).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::McpServers, true).unwrap());
+        assert!(!edit_json(&path, &edge, JsonDialect::McpServers, true).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(value["other"], 7);
         assert_eq!(value["mcpServers"]["sibling"]["command"], "sibling");
@@ -2899,13 +2914,13 @@ mod tests {
             inspect_json(
                 &fs::read_to_string(&path).unwrap(),
                 JsonDialect::McpServers,
-                &connector,
+                &edge,
                 cfg!(windows)
             )
             .unwrap(),
             RegistrationState::Current
         );
-        assert!(edit_json(&path, &connector, JsonDialect::McpServers, false).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::McpServers, false).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(value["mcpServers"].get("ghostlight").is_none());
         fs::remove_dir_all(directory).unwrap();
@@ -2915,10 +2930,10 @@ mod tests {
     fn jsonc_install_and_uninstall_preserve_comments_and_trailing_commas() {
         let directory = temporary("jsonc");
         let path = directory.join("settings.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         let source = "{\n  // keep this thought\n  \"context_servers\": {},\n}\n";
         fs::write(&path, source).unwrap();
-        assert!(edit_json(&path, &connector, JsonDialect::ContextServers, true).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::ContextServers, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         assert!(installed.contains("// keep this thought"));
         assert!(installed.contains("\"ghostlight\""));
@@ -2926,7 +2941,7 @@ mod tests {
             inspect_json(
                 &installed,
                 JsonDialect::ContextServers,
-                &connector,
+                &edge,
                 cfg!(windows)
             )
             .unwrap(),
@@ -2944,7 +2959,7 @@ mod tests {
         assert!(entry["command"].is_string());
         assert!(entry["args"].is_array());
         assert!(entry["env"].is_object());
-        assert!(edit_json(&path, &connector, JsonDialect::ContextServers, false).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::ContextServers, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("// keep this thought"));
         assert!(!removed.contains("\"ghostlight\""));
@@ -2956,15 +2971,15 @@ mod tests {
     fn zcode_nested_install_and_uninstall_preserve_sibling_servers() {
         let directory = temporary("zcode");
         let path = directory.join("config.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         let source = "{\n  \"mcp\": {\n    \"servers\": {\n      \"other\": {\"command\": \"keep\"}\n    }\n  }\n}\n";
         fs::write(&path, source).unwrap();
-        assert!(edit_json(&path, &connector, JsonDialect::ZCode, true).unwrap());
-        assert!(!edit_json(&path, &connector, JsonDialect::ZCode, true).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::ZCode, true).unwrap());
+        assert!(!edit_json(&path, &edge, JsonDialect::ZCode, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         assert!(installed.contains("\"other\""));
         assert_eq!(
-            inspect_json(&installed, JsonDialect::ZCode, &connector, cfg!(windows)).unwrap(),
+            inspect_json(&installed, JsonDialect::ZCode, &edge, cfg!(windows)).unwrap(),
             RegistrationState::Current
         );
         // Pinned against ZCode's own written shape, observed live in ~/.zcode/cli/config.json
@@ -2977,7 +2992,7 @@ mod tests {
         assert!(entry["command"].is_string());
         assert!(entry["args"].is_array());
         assert!(entry["env"].is_object());
-        assert!(edit_json(&path, &connector, JsonDialect::ZCode, false).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::ZCode, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("\"other\""));
         assert!(!removed.contains("\"ghostlight\""));
@@ -3017,9 +3032,9 @@ mod tests {
         // the separately confirmed Fix action may do that.
         let directory = temporary("zcode-foreign-orchestrator");
         let path = directory.join("config.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         let orchestrator = directory
-            .join("ghostlight")
+            .join(executable_name("ghostlight-service", cfg!(windows)))
             .to_string_lossy()
             .replace('\\', "\\\\");
         let source = format!(
@@ -3028,12 +3043,12 @@ mod tests {
         fs::write(&path, &source).unwrap();
         for install in [true, false] {
             assert!(matches!(
-                edit_json(&path, &connector, JsonDialect::ZCode, install),
+                edit_json(&path, &edge, JsonDialect::ZCode, install),
                 Err(HarnessError::ForeignEntry)
             ));
         }
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
-        let state = inspect_json(&source, JsonDialect::ZCode, &connector, cfg!(windows)).unwrap();
+        let state = inspect_json(&source, JsonDialect::ZCode, &edge, cfg!(windows)).unwrap();
         assert!(
             matches!(state, RegistrationState::Foreign(Some(_))),
             "{state:?}"
@@ -3045,12 +3060,12 @@ mod tests {
     fn foreign_entries_are_never_overwritten_or_removed() {
         let directory = temporary("foreign");
         let path = directory.join("mcp.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         let source = r#"{"mcpServers":{"ghostlight":{"command":"some-other-tool"}}}"#;
         fs::write(&path, source).unwrap();
         for install in [true, false] {
             assert!(matches!(
-                edit_json(&path, &connector, JsonDialect::McpServers, install),
+                edit_json(&path, &edge, JsonDialect::McpServers, install),
                 Err(HarnessError::ForeignEntry)
             ));
         }
@@ -3101,7 +3116,7 @@ mod tests {
             inspect_json(
                 &fixed,
                 JsonDialect::McpServers,
-                &context.connector,
+                &context.edge,
                 context.windows
             )
             .unwrap(),
@@ -3124,17 +3139,17 @@ mod tests {
     #[test]
     fn explicit_fix_is_lossless_for_the_toml_dialect() {
         let directory = temporary("fix-foreign-toml");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
 
         let toml = directory.join("config.toml");
         let toml_source = "title = \"keep\"\n\n[mcp_servers.sibling]\ncommand = \"keep-me\"\n\n[mcp_servers.ghostlight]\ncommand = \"alien\"\nargs = [\"serve\"]\n";
         fs::write(&toml, toml_source).unwrap();
-        assert!(fix_toml(&toml, &connector).unwrap());
+        assert!(fix_toml(&toml, &edge).unwrap());
         let fixed_toml = fs::read_to_string(&toml).unwrap();
         assert!(fixed_toml.contains("title = \"keep\""));
         assert!(fixed_toml.contains("[mcp_servers.sibling]"));
         assert_eq!(
-            inspect_toml(&fixed_toml, &connector, cfg!(windows)).unwrap(),
+            inspect_toml(&fixed_toml, &edge, cfg!(windows)).unwrap(),
             RegistrationState::Current
         );
         assert_eq!(
@@ -3202,7 +3217,7 @@ mod tests {
     fn foreign_entries_disclose_what_was_found() {
         let directory = temporary("foreign-evidence");
         let path = claude_desktop_config(&directory);
-        let expected_connector = connector(&directory);
+        let expected_edge = edge(&directory);
         let long_argument = "x".repeat(EVIDENCE_MAX_CHARS + 40);
         let entry = serde_json::json!({
             "mcpServers": {
@@ -3226,7 +3241,7 @@ mod tests {
         // The bidi override is stripped and whitespace collapses; the words themselves stay.
         assert!(evidence.contains("someother tool"), "{evidence}");
         assert!(
-            evidence.contains(&expected_connector.display().to_string()),
+            evidence.contains(&expected_edge.display().to_string()),
             "{evidence}"
         );
         assert!(evidence.contains("changed nothing"), "{evidence}");
@@ -3249,7 +3264,7 @@ mod tests {
     fn malformed_configurations_disclose_the_parser_reason() {
         let directory = temporary("malformed-evidence");
         let path = claude_desktop_config(&directory);
-        connector(&directory);
+        edge(&directory);
         fs::write(&path, "{\"mcpServers\": {").unwrap();
 
         let summary = inspected_summary(&directory);
@@ -3272,12 +3287,12 @@ mod tests {
     fn unblocked_targets_and_commandless_foreign_entries_stay_bounded() {
         let directory = temporary("unblocked-evidence");
         let path = claude_desktop_config(&directory);
-        let expected_connector = connector(&directory);
+        let expected_edge = edge(&directory);
         let installed = serde_json::json!({
             "mcpServers": {
                 "ghostlight": {
-                    "command": expected_connector,
-                    "args": [],
+                    "command": expected_edge,
+                    "args": ["mcp"],
                     "env": {},
                 }
             }
@@ -3305,7 +3320,7 @@ mod tests {
     #[test]
     fn every_blocked_dialect_discloses_its_found_command() {
         let directory = temporary("dialect-evidence");
-        let expected_connector = connector(&directory);
+        let expected_edge = edge(&directory);
 
         let toml = directory.join("codex.toml");
         std::fs::write(
@@ -3315,7 +3330,7 @@ mod tests {
         .unwrap();
         let toml_source = fs::read_to_string(&toml).unwrap();
         assert!(matches!(
-            inspect_toml(&toml_source, &expected_connector, false),
+            inspect_toml(&toml_source, &expected_edge, false),
             Ok(RegistrationState::Foreign(Some(found)))
                 if found.contains("alien-tool serve")
         ));
@@ -3331,14 +3346,12 @@ mod tests {
     }
 
     #[test]
-    fn an_owned_old_connector_path_is_updatable_not_installed() {
-        let directory = temporary("updatable");
-        let current = connector(&directory);
-        let old = directory.join("old").join(if cfg!(windows) {
-            "ghostlight-mcp-connector.exe"
-        } else {
-            "ghostlight-mcp-connector"
-        });
+    fn an_owned_entry_naming_the_retired_connector_is_retired_not_installed() {
+        let directory = temporary("retired");
+        let current = edge(&directory);
+        let old = directory
+            .join("old")
+            .join(executable_name(RETIRED_MCP_CONNECTOR_NAME, cfg!(windows)));
         let source = serde_json::json!({
             "mcpServers": {
                 "ghostlight": {
@@ -3351,8 +3364,106 @@ mod tests {
         .to_string();
         assert_eq!(
             inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
-            RegistrationState::Updatable
+            RegistrationState::Retired
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_edge_with_other_arguments_or_another_path_is_updatable() {
+        let directory = temporary("updatable");
+        let current = edge(&directory);
+        let elsewhere = directory
+            .join("elsewhere")
+            .join(executable_name(EDGE_COMMAND_NAME, cfg!(windows)));
+        for (command, args) in [
+            (current.clone(), serde_json::json!([])),
+            (current.clone(), serde_json::json!(["serve"])),
+            (elsewhere, serde_json::json!(["mcp"])),
+        ] {
+            let source = serde_json::json!({
+                "mcpServers": {"ghostlight": {"command": command, "args": args, "env": {}}}
+            })
+            .to_string();
+            assert_eq!(
+                inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
+                RegistrationState::Updatable
+            );
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn every_dialect_starts_the_edge_with_the_mcp_argument() {
+        let directory = temporary("arguments");
+        let current = edge(&directory);
+        for dialect in [
+            JsonDialect::McpServers,
+            JsonDialect::Copilot,
+            JsonDialect::Servers,
+            JsonDialect::ContextServers,
+            JsonDialect::Crush,
+            JsonDialect::OpenCodeV1,
+            JsonDialect::OpenCodeV2,
+            JsonDialect::ZCode,
+        ] {
+            let entry = expected_json_entry(&current, dialect);
+            assert_eq!(
+                json_entry_command(&entry, dialect),
+                Some(current.to_string_lossy().as_ref()),
+                "{dialect:?}"
+            );
+            assert_eq!(
+                json_entry_args(&entry, dialect).as_deref(),
+                Some(&["mcp"][..]),
+                "{dialect:?}"
+            );
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_copied_command_is_the_edge_and_its_argument() {
+        let directory = temporary("copy-command");
+        let registry = HarnessRegistry::with_context(context(&directory));
+        let path = edge(&directory);
+        let id = registry.summaries()[0].id.clone();
+        assert_eq!(
+            registry.copy_text(&id, HarnessCopyKind::Command).unwrap(),
+            format!("{} mcp", path.display())
+        );
+        assert_eq!(
+            mcp_command_line(Path::new("/with space/ghostlight")),
+            "\"/with space/ghostlight\" mcp"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_hand_written_entry_naming_the_retired_connector_is_named_in_the_summary() {
+        let directory = temporary("hand-written");
+        let mut context = context(&directory);
+        let codex = context.codex_config.clone();
+        fs::create_dir_all(codex.parent().unwrap()).unwrap();
+        fs::write(
+            &codex,
+            "[mcp_servers.ghostlight]\ncommand = \"ghostlight-mcp-connector\"\nargs = []\n",
+        )
+        .unwrap();
+        context.path_entries = Vec::new();
+        let registry = HarnessRegistry::with_context(context);
+        let summary = registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "codex")
+            .unwrap();
+        assert_eq!(summary.state, HarnessState::Updatable);
+        assert!(summary.detail.contains("ghostlight-mcp-connector"));
+        assert!(summary.detail.contains("ghostlight mcp"));
+        registry.apply("codex", HarnessAction::Install).unwrap();
+        let rewritten = fs::read_to_string(&codex).unwrap();
+        assert!(!rewritten.contains("ghostlight-mcp-connector"));
+        assert!(rewritten.contains("args = [\"mcp\"]"));
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3360,17 +3471,17 @@ mod tests {
     fn codex_toml_edit_preserves_unrelated_comments() {
         let directory = temporary("toml");
         let path = directory.join("config.toml");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         fs::write(&path, "# keep me\nmodel = \"gpt-test\"\n").unwrap();
-        assert!(edit_toml(&path, &connector, true).unwrap());
-        assert!(!edit_toml(&path, &connector, true).unwrap());
+        assert!(edit_toml(&path, &edge, true).unwrap());
+        assert!(!edit_toml(&path, &edge, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         assert!(installed.contains("# keep me"));
         assert_eq!(
-            inspect_toml(&installed, &connector, cfg!(windows)).unwrap(),
+            inspect_toml(&installed, &edge, cfg!(windows)).unwrap(),
             RegistrationState::Current
         );
-        assert!(edit_toml(&path, &connector, false).unwrap());
+        assert!(edit_toml(&path, &edge, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("# keep me"));
         assert!(!removed.contains("mcp_servers"));
@@ -3382,17 +3493,17 @@ mod tests {
     fn codex_owned_registration_gains_desktop_forwarding_without_losing_custom_fields() {
         let directory = temporary("codex-desktop");
         let path = directory.join("config.toml");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         let source = format!(
             "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
-            connector.to_string_lossy()
+            edge.to_string_lossy()
         );
         fs::write(&path, &source).unwrap();
         assert_eq!(
-            inspect_toml(&source, &connector, false).unwrap(),
+            inspect_toml(&source, &edge, false).unwrap(),
             RegistrationState::Updatable
         );
-        assert!(edit_toml(&path, &connector, true).unwrap());
+        assert!(edit_toml(&path, &edge, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
         let entry = &document["mcp_servers"]["ghostlight"];
@@ -3419,7 +3530,7 @@ mod tests {
         assert!(super::missing_codex_desktop_environment(entry, false)
             .unwrap()
             .is_empty());
-        assert!(!edit_toml(&path, &connector, true).unwrap());
+        assert!(!edit_toml(&path, &edge, true).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), installed);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -3429,17 +3540,17 @@ mod tests {
     fn codex_malformed_environment_is_preserved_and_windows_needs_no_desktop_forwarding() {
         let directory = temporary("codex-malformed-env");
         let path = directory.join("config.toml");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         let source = format!(
             "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nenv_vars = \"not-an-array\"\n",
-            connector.to_string_lossy()
+            edge.to_string_lossy()
         );
         fs::write(&path, &source).unwrap();
-        assert!(inspect_toml(&source, &connector, false).is_err());
-        assert!(edit_toml(&path, &connector, true).is_err());
+        assert!(inspect_toml(&source, &edge, false).is_err());
+        assert!(edit_toml(&path, &edge, true).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
         assert_eq!(
-            inspect_toml(&source, &connector, true).unwrap(),
+            inspect_toml(&source, &edge, true).unwrap(),
             RegistrationState::Current
         );
         fs::remove_dir_all(directory).unwrap();
@@ -3450,7 +3561,7 @@ mod tests {
     fn codex_malformed_environment_members_are_preserved_before_migration() {
         let directory = temporary("codex-malformed-env-members");
         let path = directory.join("config.toml");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         for members in [
             "123",
             "true",
@@ -3463,7 +3574,7 @@ mod tests {
             "{ name = \"DISPLAY\", extra = true }",
             "\"DISPLAY\", \"WAYLAND_DISPLAY\", \"XDG_RUNTIME_DIR\", \"DBUS_SESSION_BUS_ADDRESS\", \"XDG_CURRENT_DESKTOP\", \"XAUTHORITY\", 123",
         ] {
-            for command in [&connector, &directory.join("old/ghostlight-mcp-connector")] {
+            for command in [&edge, &directory.join("old/ghostlight-mcp-connector")] {
                 for source in [
                     format!(
                         "# preserve exactly\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nenv_vars = [{members}]\n",
@@ -3476,10 +3587,10 @@ mod tests {
                 ] {
                     fs::write(&path, &source).unwrap();
                     assert!(
-                        inspect_toml(&source, &connector, false).is_err(),
+                        inspect_toml(&source, &edge, false).is_err(),
                         "inspection accepted {source}"
                     );
-                    assert!(edit_toml(&path, &connector, true).is_err());
+                    assert!(edit_toml(&path, &edge, true).is_err());
                     assert_eq!(fs::read_to_string(&path).unwrap(), source);
                 }
             }
@@ -3492,12 +3603,12 @@ mod tests {
     fn codex_inline_owned_registration_keeps_custom_fields() {
         let directory = temporary("codex-inline-env");
         let path = directory.join("config.toml");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         fs::write(&path, format!(
             "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
-            connector.to_string_lossy()
+            edge.to_string_lossy()
         )).unwrap();
-        assert!(edit_toml(&path, &connector, true).unwrap());
+        assert!(edit_toml(&path, &edge, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
         assert_eq!(
@@ -3505,7 +3616,7 @@ mod tests {
             Some(45)
         );
         assert_eq!(
-            inspect_toml(&installed, &connector, false).unwrap(),
+            inspect_toml(&installed, &edge, false).unwrap(),
             RegistrationState::Current
         );
         fs::remove_dir_all(directory).unwrap();
@@ -3520,7 +3631,7 @@ mod tests {
             .find(|row| row.id == "codex")
             .unwrap();
         let manual = super::manual_setup(&context, &definition).unwrap();
-        assert!(edit_toml(&definition.path, &context.connector, true).unwrap());
+        assert!(edit_toml(&definition.path, &context.edge, true).unwrap());
         assert_eq!(manual, fs::read_to_string(&definition.path).unwrap());
         fs::remove_dir_all(directory).unwrap();
     }
@@ -3529,23 +3640,23 @@ mod tests {
     fn opencode_v1_uses_the_local_command_array_contract() {
         let directory = temporary("opencode-v1");
         let path = directory.join("opencode.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         fs::write(&path, r#"{"theme":"ghost","mcp":{}}"#).unwrap();
 
-        assert!(edit_json(&path, &connector, JsonDialect::OpenCodeV1, true).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::OpenCodeV1, true).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(value["theme"], "ghost");
         assert_eq!(value["mcp"]["ghostlight"]["type"], "local");
         assert_eq!(
             value["mcp"]["ghostlight"]["command"][0].as_str(),
-            Some(connector.to_string_lossy().as_ref())
+            Some(edge.to_string_lossy().as_ref())
         );
         assert_eq!(value["mcp"]["ghostlight"]["enabled"], true);
         assert_eq!(
             inspect_json(
                 &fs::read_to_string(&path).unwrap(),
                 JsonDialect::OpenCodeV1,
-                &connector,
+                &edge,
                 cfg!(windows)
             )
             .unwrap(),
@@ -3559,22 +3670,22 @@ mod tests {
     fn opencode_v2_preserves_the_nested_servers_contract() {
         let directory = temporary("opencode-v2");
         let path = directory.join("opencode.json");
-        let connector = connector(&directory);
+        let edge = edge(&directory);
         fs::write(
             &path,
             r#"{"mcp":{"servers":{"sibling":{"type":"remote"}}}}"#,
         )
         .unwrap();
 
-        assert!(edit_json(&path, &connector, JsonDialect::OpenCodeV2, true).unwrap());
-        assert!(!edit_json(&path, &connector, JsonDialect::OpenCodeV2, true).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::OpenCodeV2, true).unwrap());
+        assert!(!edit_json(&path, &edge, JsonDialect::OpenCodeV2, true).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");
         assert_eq!(value["mcp"]["servers"]["ghostlight"]["type"], "local");
         assert!(value["mcp"]["servers"]["ghostlight"]
             .get("enabled")
             .is_none());
-        assert!(edit_json(&path, &connector, JsonDialect::OpenCodeV2, false).unwrap());
+        assert!(edit_json(&path, &edge, JsonDialect::OpenCodeV2, false).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(value["mcp"]["servers"].get("ghostlight").is_none());
         assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");

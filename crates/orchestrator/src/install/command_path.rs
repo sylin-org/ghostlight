@@ -122,7 +122,7 @@ impl CommandPathContext {
         Self {
             unix: cfg!(unix),
             executable: super::layout::Layout::current()
-                .map(|layout| layout.service_executable())
+                .map(|layout| layout.edge())
                 .unwrap_or_default(),
             bin_home: home.join(".local/bin"),
         }

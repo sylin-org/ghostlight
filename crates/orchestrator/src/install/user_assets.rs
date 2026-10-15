@@ -32,14 +32,6 @@ const ASSETS: &[(&str, &str)] = &[
         include_str!("../../../../packaging/linux/man/ghostlight.1"),
     ),
     (
-        "man/man1/ghostlight-mcp-connector.1",
-        include_str!("../../../../packaging/linux/man/ghostlight-mcp-connector.1"),
-    ),
-    (
-        "man/man1/ghostlight-browser-connector.1",
-        include_str!("../../../../packaging/linux/man/ghostlight-browser-connector.1"),
-    ),
-    (
         "bash-completion/completions/ghostlight",
         include_str!("../../../../packaging/linux/completions/ghostlight.bash"),
     ),
@@ -339,8 +331,8 @@ mod tests {
                 assert!(contents.contains(".SH NAME"), "{name} has no NAME section");
             }
         }
-        // Three manual pages, one per installed executable, plus one completion per shell.
-        assert_eq!(ASSETS.len(), 6);
+        // One manual page plus one completion per shell.
+        assert_eq!(ASSETS.len(), 4);
     }
 
     #[test]

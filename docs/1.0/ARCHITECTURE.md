@@ -2,15 +2,16 @@
 
 ## Shape and dependencies
 
-Ghostlight has four process or trust-boundary components and one shared wire crate:
+Ghostlight has three process or trust-boundary components and one shared wire crate. The edge is
+one executable that runs as two relays:
 
 ```text
 MCP client
-  -> ghostlight-mcp-connector
-  -> typed local service bridge
-  -> ghostlight orchestrator service
-  -> typed local browser bridge
-  -> ghostlight-browser-connector
+  -> ghostlight mcp (the edge as the MCP relay)
+  -> relay protocol 4
+  -> ghostlight-service
+  -> relay protocol 4
+  -> ghostlight chrome-extension://... (the edge as the browser relay)
   -> browser native messaging
   -> policy-free Chromium adapter
   -> advertised privileged browser mechanisms
@@ -21,14 +22,24 @@ local human
   -> the same orchestrator contexts
 ```
 
-- `crates/bridge` defines the small versioned service wire vocabulary, framing, and the one
-  shared local service-lifecycle seam. The browser adapter component lives in
-  `crates/orchestrator/src/browser/adapter`, because only the service reads it: one module per
-  browser family, holding the typed wire vocabulary of each level the extension can speak and
-  every page asset that runs in a page.
-- `crates/orchestrator` is the domain-driven modular monolith and service process.
-- `crates/mcp-connector` is the hand-rolled JSON-RPC MCP stdio edge.
-- `crates/browser-connector` is a frame relay between native messaging and the service.
+- `crates/relay` is the frozen relay protocol 4: the endpoint, the peer checks, framing, the
+  opening, start reasons, the session listener and the route an edge invocation takes. The browser
+  adapter component lives in `crates/orchestrator/src/browser/adapter`, because only the service
+  reads it: one module per browser family, holding the typed wire vocabulary of each level the
+  extension can speak and every page asset that runs in a page.
+- `crates/bridge` holds the service's typed diagnostics contracts.
+- `crates/orchestrator` is the domain-driven modular monolith and service process, built as
+  `ghostlight-service`.
+- `crates/edge` is the `ghostlight` executable. It depends on no workspace crate but `relay`, and
+  knows no verb. Run from `<home>/bin` with the first argument `mcp`, it is the hand-rolled
+  JSON-RPC MCP stdio relay. With a first argument that is a Chrome extension origin, it is the
+  frame relay between native messaging and the service. Anything else, or nothing, it hands to
+  `<home>/bin/ghostlight-service` with the same arguments. A copy that does not run from
+  `<home>/bin` is a carrier and hands to the service image beside it. On Unix a hand-over is an
+  exec. On Windows the edge is a console-subsystem process that runs the image as a child on its
+  console, keeps running through Ctrl-C and Ctrl-Break and returns the child's exit code; its
+  application manifest sets `consoleAllocationPolicy` to `detached`, so a double-click shows no
+  console on Windows 11 24H2 and later.
 - `extension` implements the full Chromium physical mechanism set, page-runtime installation,
   browser topology, content-free feedback, and the local toolbar/options experience.
 
@@ -36,14 +47,14 @@ Only process, lifecycle, and trust boundaries justify these crates. Product cont
 modules inside the orchestrator. The dependency direction points inward to `bridge` types and
 orchestrator ports. The orchestrator does not depend on MCP or Chromium APIs.
 
-The `ghostlight` executable also hosts the Tauri 2 desktop event loop. Tauri is a presentation
+The `ghostlight-service` executable also hosts the Tauri 2 desktop event loop. Tauri is a presentation
 adapter inside the modular monolith, not another service or state authority. Every supported
 orchestrator start initializes this desktop authority; there is no service-only launch mode.
 
 ## Local lifecycle
 
 There is one Ghostlight home per OS user, `~/.ghostlight`, and every path derives from it
-(ADR-0197 Decision 10): the installed executables in `bin`, `run` (the service lock and, on Linux,
+(ADR-0197 Decision 10): the installed executables `ghostlight` and `ghostlight-service` in `bin`, `run` (the service lock and, on Linux,
 the relay socket), the state
 directory `state` (audit log, MCP client locations, the extension handoff marker), the policy
 directory `policy`, the Windows native-host manifest in `manifests`, and diagnostics in
@@ -54,10 +65,12 @@ installs into `bin` (ADR-0197 Decision 13); registrations name the executables t
 Before any command runs, `main` applies the entry rule (`install/entry.rs`, carried out by
 `cli/start.rs`). While the `development` marker names an existing build, every other copy
 forwards to it with the same arguments; a forwarded `serve` starts detached and the parent exits.
-Without a marker, only `bin/ghostlight` serves. Any other copy is a carrier: a command that uses
-the service installs from the carrier's own directory when the installed service is absent,
-older or damaged, then runs the installed one. `doctor`, `status`, `help` and `--version` never
-install.
+Without a marker, only `bin/ghostlight-service` serves. Any other copy is a carrier: a command
+that uses the service installs from the carrier's own directory when the installed service is
+absent, older or damaged, then runs the installed one. `doctor`, `status`, `help` and `--version`
+never install. The edge's own verbs, `mcp` and a Chrome extension origin, are the exception to the
+marker: a service image that receives one hands it to `bin/ghostlight`, installing first when it
+is a carrier, because the development install keeps the edge in `bin` at its relay revision.
 
 `deployment install` (`install/deployment.rs`) is the only writer of `bin` and `dev`
 (ADR-0197 Decisions 14 and 15). Under the install lock it checks the break migration's destinations
@@ -66,9 +79,11 @@ client-location files into the home and leaves the originals in place (the 1.x s
 still running keeps reading its policy from them, and a service or client started by the next
 steps must find the copies), then compares `bin/install.json` with the
 payload: an older payload is refused, the same intact version is left alone, the service image is
-rename-swapped (`install/swap.rs`), and the connectors are replaced only when the relay revision
-changes. `--development` swaps the service into `dev` and writes the marker; `--restore` removes
-it. As soon as `bin` holds the executables, and before anything old is stopped,
+rename-swapped (`install/swap.rs`), and the edge is replaced only when the relay revision
+changes or `bin` still holds the layout of an earlier development build, where the service image
+had the edge's name and two connector images sat beside it; the installer stops those exact
+images and deletes the connector files. `--development` swaps the service and the edge into `dev`
+and writes the marker; `--restore` removes it. As soon as `bin` holds the executables, and before anything old is stopped,
 `install/reconcile.rs` points every registration at `bin`: native-host manifests (reclaiming
 one that names another path), owned MCP client entries, the Linux desktop entry, command link and
 manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install/windows_entry.rs`).
@@ -79,8 +94,8 @@ browser's `HKCU` value names it; a value is written only when it differs from wh
 `%LOCALAPPDATA%` lands in that app's private copy, is inside that app's container, where registry
 and `AppData` writes reach only that app (a packaged terminal that is not redirected is not). There
 the install (`install/container.rs`) writes the manifest, leaves those redirected registrations
-unwritten, except the configuration of the container's own app, and reports them with the one command that finishes them from a regular terminal,
-`<home>/bin/ghostlight.exe install`; `doctor` says it cannot see what other apps see. An install
+unwritten, except the configuration of the container's own app, and reports them with the one
+command that finishes them from a regular terminal, `<home>/bin/ghostlight.exe install`; `doctor` says it cannot see what other apps see. An install
 outside a container moves the older manifest out of `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts`
 and removes that directory when it is empty.
 Only then does the installer stop the 1.x images (and look again for a few rounds for any that
@@ -91,22 +106,23 @@ first; an original and a copy that both changed are kept, the original set aside
 beside each copy records what was copied, so an install that fails before this step is finished
 by the next one by the same rule),
 archive the 1.x audit log, delete the 1.x lifecycle files with the installation record last,
-start `bin/ghostlight serve --reason update`, and write `install.json` only once a service answers
+start `bin/ghostlight-service serve --reason update`, and write `install.json` only once a service answers
 a control status with an instance other than the one it replaced. The quit is a control `quit` for
 replacement, and the installer waits up to 10 s for `run/service.lock` to be free; an earlier
 development build that cannot be asked, or an installed image that still runs, is stopped by its
 exact image.
-Registering first matters: a browser relaunches its connector from the registration the moment
-the old connector stops, and an old registration would start the 1.x connector again.
+Registering first matters: a browser relaunches its host from the registration the moment the old
+one stops, and an old registration would start the 1.x connector again.
 When the service starts from `bin` or the marked build, it registers any browser that has no
 registration yet.
 
 Every start of the service is `serve --reason <word>`, and the reason is one of six: `agent` (the
-MCP connector, at its own start and for each held request), `browser` (the browser connector,
-once, at its own start), `command` (`call`, when no service answers), `person` (`open` and a bare
+MCP relay, at its own start and for each held request), `browser` (the browser relay, once, at
+its own start), `command` (`call`, when no service answers), `person` (`open` and a bare
 launch), `recover` (the shell, after a loss without goodbye) and `update` (the installer). `serve`
 requires the reason. `status`, `doctor`, `help` and `--version` never start the service. In
-order, `serve` refuses an image other than `bin/ghostlight` (or the marked development build),
+order, `serve` refuses an image other than `bin/ghostlight-service` (or the marked development
+build),
 refuses an elevated Windows token, applies the quit latch, takes the operating-system lock on
 `run/service.lock`, and only then opens state. The lock is held until exit and admits the single
 local authority; the endpoint's first-instance flag is a second refusal. A start that finds the
@@ -123,16 +139,16 @@ A person's Quit (the tray, the workbench, or control `quit` with reason `quit`) 
 deletes it after taking the lock and serves. So after Quit a browser restart does not bring
 Ghostlight back; the next agent request, a command that needs it, or a person does. Before it
 closes its streams the service sends a goodbye on each: `quit`, `replace` (the installer's quit)
-or `uninstall`. The MCP connector answers its outstanding requests as cut off on every goodbye.
+or `uninstall`. The MCP relay answers its outstanding requests as cut off on every goodbye.
 After `quit` it holds nothing and starts the service again only for the next request. After
 `replace` it holds lines and reconnects without starting the service for up to the hold limit,
-and then behaves as after a lost connection. After `uninstall` it exits. The browser connector
+and then behaves as after a lost connection. After `uninstall` it exits. The browser relay
 tells the extension the service is away after `quit` or `replace`, waits, never starts the
 service, and exits when a service accepts again; after `uninstall` it exits at once. A stream that
 ends with no goodbye is a crash and is handled as before.
 
 A no-argument launch and the explicit local-human `ghostlight open` intent send control `show` to
-a running service. When no service answers, they start `bin/ghostlight serve --reason person`
+a running service. When no service answers, they start `bin/ghostlight-service serve --reason person`
 detached, wait for it to accept an opening, and send `show`, retrying until the window is shown
 or 15 s have passed. Nothing serves in the foreground. The service creates its tray and
 backgrounds the workbench: minimized on Windows and hidden on Linux. The request admits no
@@ -147,22 +163,22 @@ destroyed event, and rebuilds from the canonical configuration. On Linux, abnorm
 termination discards that exact window after the signal callback; the next explicit Open creates a
 fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority, and
 it holds (see above).
-Every Ghostlight process honors the end of the session: the service, both connectors, and every
-one-shot command. The listener is one module, `ghostlight_relay::os::session`. On Windows it is a
+Every Ghostlight process honors the end of the session: the service, the edge in every role, and
+every one-shot command. The listener is one module, `ghostlight_relay::os::session`. On Windows it is a
 hidden top-level window on its own thread, never a message-only window, plus the console handler;
 it answers `WM_QUERYENDSESSION` with TRUE at once, and the console handler returns FALSE so the
 default exit is never suppressed. On Linux it is SIGTERM and SIGHUP through a handler that writes
 one byte to a self-pipe and a thread that reads it. One process-wide state says the session is
 ending. It is set at the first signal, the query included, and lifted only when the system
 cancels the end. On Windows the state also asks the system (`GetSystemMetrics` with
-`SM_SHUTTINGDOWN`), so a process born after the broadcast, such as a browser connector the
+`SM_SHUTTINGDOWN`), so a process born after the broadcast, such as a browser relay the
 extension relaunches during a sign-out, refuses too. Linux has no equally cheap question: only a
 process that received the signal refuses. While it holds, `start_service` and `spawn_detached`
 refuse and nothing is spawned; browser recovery launches no browser and the install handoff opens no page.
 
 On the final signal a process arms a 2 s fallback exit first. The service then says
 `goodbye{session_end}` on every stream and leaves through the desktop's exit, without waiting for
-work in flight and without setting the quit latch. A connector, which may find the service already
+work in flight and without setting the quit latch. An edge, which may find the service already
 gone, exits 0 on its own signal and on a `session_end` goodbye, and a stream that drops while the
 session is ending never leads to a start. A one-shot command leaves at once. Desktop retention is
 disarmed while the state holds, so the native event loop never keeps the process alive.
@@ -170,15 +186,15 @@ disarmed while the state holds, so the native event loop never keeps the process
 ## Fringe stability
 
 Ghostlight's fringes are independently versioned compatibility products. Their size is not
-constrained; their reasons to change are. The MCP connector changes only for MCP negotiation and
-protocol compatibility and local service connection lifetime. The browser connector changes only
-for native messaging, the local relay endpoint and its peer checks, framing, and connection
+constrained; their reasons to change are. The edge as the MCP relay changes only for MCP
+negotiation and protocol compatibility and local service connection lifetime. As the browser relay
+it changes only for native messaging, the local relay endpoint and its peer checks, framing, and connection
 lifetime.
 Each browser adapter changes only for privileged browser mechanisms, browser-execution integrity
 and recovery, or the preserved Ghostlight user experience. Any product feature expressible through
 existing physical browser capabilities changes only the orchestrator.
 
-The browser connector treats adapter frames as opaque bounded bytes. A small relay protocol owns
+The browser relay treats adapter frames as opaque bounded bytes. A small relay protocol owns
 the peer checks and backend availability separately from the adapter protocol. The relay keeps
 Chromium's native port alive while the service is unavailable, reconnects to the endpoint of the
 home, repeats only the relay and cached adapter handshakes, and never interprets or replays a
@@ -306,7 +322,7 @@ deadline for a launch.
 
 An adapter that advertises end-to-end liveness acknowledges content-free service heartbeats at the
 extension shore, independently of browser operations. Relay attachment and adapter availability are
-separate facts: a missed liveness window stops new dispatch while leaving the opaque connector and
+separate facts: a missed liveness window stops new dispatch while leaving the opaque relay and
 socket available for a later acknowledgement. Every physical dispatch is followed by its own
 probe. At a call's deadline, a probe that has gone unanswered for at least five seconds marks the
 adapter not answering, while a shorter deadline proves nothing: the acknowledgement may be queued
@@ -316,7 +332,7 @@ and only the 45-second heartbeat timeout or a real end-of-stream fails a connect
 calls. A best-effort cancel that finds the writer busy is skipped rather than closing the
 connection. Work waiting for a silent adapter sends it one probe at once instead of waiting up to
 20 seconds for the timer. Each lost and resumed acknowledgement is logged to process diagnostics
-as `heartbeat_lost` and `heartbeat_resumed`. The browser connector remains unaware of both
+as `heartbeat_lost` and `heartbeat_resumed`. The browser relay remains unaware of both
 frames.
 
 ## Orchestrator contexts
@@ -846,7 +862,7 @@ Governance owns the monotonic `audit.availability` setting and attributes its st
 the immutable policy layer. The executor reads current storage health before browser preparation
 and at the final dispatch callback after writer queuing. Already-admitted effects remain truthful.
 Human controls, diagnostics, and policy explanation remain reachable. Storage health does not
-mutate human runtime control. The extension and both connectors remain free
+mutate human runtime control. The extension and the edge remain free
 of audit policy and health semantics.
 
 Startup tolerates unreadable history or a failed destination, with explicit human health.

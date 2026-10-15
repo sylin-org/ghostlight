@@ -42,7 +42,7 @@ fn report(outcome: &Outcome, layout: &Layout) {
         );
         return;
     }
-    for placed in plan.swaps.iter().chain(&plan.connector_replacements) {
+    for placed in &plan.swaps {
         println!(
             "Installed {} in {}.",
             placed.name,
@@ -107,7 +107,7 @@ fn report_registrations(report: &ReconcileReport, layout: &Layout) {
         );
     }
     for client in &report.clients_rewritten {
-        println!("{client} now starts the installed MCP connector.");
+        println!("{client} now starts the installed Ghostlight edge.");
     }
     for entry in &report.clients_unchanged {
         match &entry.found {

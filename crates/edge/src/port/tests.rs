@@ -38,9 +38,9 @@ struct FakeState {
     starts: AtomicU32,
     /// The reason of every start, in order.
     reasons: Mutex<Vec<StartReason>>,
-    /// Browser openings the connector tried, whether or not the service was up.
+    /// Browser openings the edge tried, whether or not the service was up.
     attempts: AtomicU32,
-    /// Control openings the connector tried, whether or not the service was up.
+    /// Control openings the edge tried, whether or not the service was up.
     probes: AtomicU32,
     openings: Mutex<Vec<Opening>>,
     browsers: Mutex<Vec<Browser>>,
@@ -135,7 +135,7 @@ impl FakeState {
     }
 }
 
-/// The connector's view of the fake: connect while it is up; starting may bring it up.
+/// The edge's view of the fake: connect while it is up; starting may bring it up.
 struct FakeService(Arc<FakeState>);
 
 impl Service for FakeService {
@@ -199,7 +199,7 @@ impl Write for SharedOutput {
 
 fn no_log(_: LogEvent, _: &str) {}
 
-/// A running connector wired to a fake service and in-memory Chrome pipes.
+/// A running edge wired to a fake service and in-memory Chrome pipes.
 struct Harness {
     fake: Arc<FakeState>,
     input: Option<mpsc::Sender<Vec<u8>>>,
@@ -213,12 +213,12 @@ impl Harness {
         Self::start_from(up, start_brings_up, Some(ORIGIN.to_owned()))
     }
 
-    /// A connector started by Chrome with `origin` as its first argument, if it had one.
+    /// An edge started by Chrome with `origin` as its first argument, if it had one.
     fn start_from(up: bool, start_brings_up: bool, origin: Option<String>) -> Self {
         Self::start_with(up, start_brings_up, origin, NEVER_ABSENT)
     }
 
-    /// A connector that tells Chrome no service is there once `absent_after` passes.
+    /// An edge that tells Chrome no service is there once `absent_after` passes.
     fn start_absent_after(up: bool, absent_after: Duration) -> Self {
         Self::start_with(up, false, Some(ORIGIN.to_owned()), absent_after)
     }
@@ -257,7 +257,7 @@ impl Harness {
         }
     }
 
-    /// A connector whose first hello has been delivered to a service that is already up.
+    /// An edge whose first hello has been delivered to a service that is already up.
     fn connected(hello: &[u8]) -> Self {
         let harness = Self::start(true, false);
         harness.chrome_sends(hello);
@@ -348,7 +348,7 @@ fn a_service_that_stays_down_is_started_once_and_connected_to_when_it_appears() 
     assert_eq!(
         harness.fake.starts.load(Ordering::SeqCst),
         1,
-        "a browser start is made once, at the connector's own start"
+        "a browser start is made once, at the edge's own start"
     );
     harness.fake.bring_up();
     harness.wait(|| harness.fake.received(0).len() == 1);
@@ -413,7 +413,7 @@ fn losing_the_service_tells_chrome_once_and_never_starts_it() {
     harness.fake.go_down();
     harness.wait(|| harness.chrome_receives().len() == 2);
     harness.chrome_sends(b"while away");
-    // Two probe intervals pass: the connector keeps looking and keeps its hands off the service.
+    // Two probe intervals pass: the edge keeps looking and keeps its hands off the service.
     harness.wait(|| harness.fake.probes.load(Ordering::SeqCst) >= 2);
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
     assert_eq!(harness.fake.browser_streams(), 1);
@@ -514,23 +514,6 @@ fn an_opening_without_an_origin_when_chrome_named_none() {
     assert_eq!(harness.fake.openings()[0].origin, None);
     harness.chrome_closes();
     harness.finish().unwrap();
-}
-
-#[test]
-fn only_a_first_argument_that_names_an_extension_is_an_origin() {
-    assert_eq!(
-        extension_origin(Some(ORIGIN.to_owned())).as_deref(),
-        Some(ORIGIN)
-    );
-    assert_eq!(
-        extension_origin(Some("--parent-window=4242".to_owned())),
-        None
-    );
-    assert_eq!(
-        extension_origin(Some("https://example.com/".to_owned())),
-        None
-    );
-    assert_eq!(extension_origin(None), None);
 }
 
 #[test]

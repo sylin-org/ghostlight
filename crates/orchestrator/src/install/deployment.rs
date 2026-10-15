@@ -1,7 +1,8 @@
 //! `ghostlight deployment install`: the one way executables reach the Ghostlight home.
 //!
-//! A package, the npm launcher, the get scripts and the development loop all run a `ghostlight`
-//! with this command (ADR-0197 Decisions 13 to 15). Under the install lock it:
+//! A package, the npm launcher, the get scripts and the development loop all run a
+//! `ghostlight-service` with this command (ADR-0197 Decisions 13 to 15, ADR-0199 Decision 19).
+//! Under the install lock it:
 //!
 //! 1. checks the 2.0 break migration's destinations when a 1.x layout is found, so a conflict
 //!    changes nothing, then moves the 1.x policy, managed-policy and client-location files into
@@ -9,18 +10,19 @@
 //!    steps let start must find them in place;
 //! 2. reads `bin/install.json` and decides what to replace: a release refuses an older payload,
 //!    does nothing for the same intact version, rename-swaps the service image into `bin`, and
-//!    replaces the connectors only when the relay revision changes; `--development` swaps the
-//!    service into `dev` and writes the development marker (installing into `bin` as well when
-//!    `bin` speaks another relay revision); `--restore` removes the marker;
+//!    replaces the edge only when the relay revision changes or `bin` still holds the pre-edge
+//!    layout; `--development` swaps the service and the edge into `dev` and writes the
+//!    development marker (installing into `bin` as well when `bin` needs another edge);
+//!    `--restore` removes the marker;
 //! 3. reconciles every registration to name `bin`, as soon as `bin` holds the executables and
-//!    before anything old is stopped, so a browser or client that relaunches a connector the
-//!    moment the old one stops starts the new one;
+//!    before anything old is stopped, so a browser or client that relaunches its host the moment
+//!    the old one stops starts the new one;
 //! 4. stops the 1.x images and looks again for a few rounds for any that respawned;
 //! 5. asks the running service to quit (a control `quit` for replacement) and waits for its
 //!    service lock to be free, and stops that exact image if it has not exited or is an earlier
 //!    development build that cannot be asked; archives the 1.x audit log, then removes the 1.x
 //!    lifecycle files, the installation record last;
-//! 6. starts `bin/ghostlight serve` and writes `install.json` only once a service answers a
+//! 6. starts `bin/ghostlight-service serve` and writes `install.json` only once a service answers a
 //!    control status with an instance other than the one that was replaced.
 //!
 //! There is no rollback: a service that does not start is reported, `install.json` stays as it
@@ -35,14 +37,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use ghostlight_relay::home::{SERVICE_EXECUTABLE_NAME, TEST_HOME_VARIABLE};
+use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME, TEST_HOME_VARIABLE};
 use ghostlight_relay::private;
 use ghostlight_relay::protocol::{Control, QuitReason, StartReason};
 use serde::Serialize;
 use thiserror::Error;
 
 use super::entry::{canonical_path, same_path};
-use super::layout::{Layout, BROWSER_CONNECTOR_EXECUTABLE_NAME, MCP_CONNECTOR_EXECUTABLE_NAME};
+use super::layout::Layout;
 use super::marker::DevelopmentMarker;
 use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
@@ -50,12 +52,6 @@ use super::record::{self, InstallRecord, PayloadRefused, Standing};
 use super::swap;
 use crate::cli::client;
 use crate::service::lock::ServiceLock;
-
-/// The connectors one package carries beside the service.
-const CONNECTORS: [&str; 2] = [
-    MCP_CONNECTOR_EXECUTABLE_NAME,
-    BROWSER_CONNECTOR_EXECUTABLE_NAME,
-];
 
 /// How long an install waits for another install to finish. An install can itself spend the
 /// quit wait and the ready wait.
@@ -98,7 +94,7 @@ pub enum Mode {
 /// One `deployment install` command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Request {
-    /// The directory holding the payload's three executables; `None` is this executable's own
+    /// The directory holding the payload's two executables; `None` is this executable's own
     /// directory.
     pub payload: Option<PathBuf>,
     /// What to install.
@@ -112,7 +108,7 @@ pub struct Request {
 pub struct Build {
     /// Product version.
     pub version: String,
-    /// Relay revision its connectors speak.
+    /// Relay revision its edge speaks.
     pub relay_revision: String,
     /// SHA-256 of its service image.
     pub image_sha256: String,
@@ -128,12 +124,14 @@ impl Build {
         })
     }
 
-    /// The record `install.json` holds once this build serves from `bin`.
-    fn record(&self) -> InstallRecord {
+    /// The record `install.json` holds once this build serves from `bin`, with the edge it
+    /// leaves there.
+    fn record(&self, edge_sha256: Option<String>) -> InstallRecord {
         InstallRecord {
             service_version: self.version.clone(),
             relay_revision: self.relay_revision.clone(),
             service_sha256: self.image_sha256.clone(),
+            edge_sha256,
         }
     }
 }
@@ -151,7 +149,7 @@ pub trait ProcessControl {
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()>;
     /// Whether any process runs one of `images`.
     fn is_running(&self, images: &[PathBuf]) -> bool;
-    /// Start `bin/ghostlight serve --reason update` in `layout`'s home, detached, without waiting
+    /// Start `bin/ghostlight-service serve --reason update` in `layout`'s home, detached, without waiting
     /// for it.
     fn start_serve(&self, layout: &Layout) -> io::Result<()>;
     /// Wait up to 30 s for the service of `layout`'s home to answer an accepted control status
@@ -279,10 +277,8 @@ pub struct InstallPlan {
     pub migration: MigrationPlan,
     /// The same version is installed and intact: nothing else happens.
     pub unchanged: bool,
-    /// Service images placed by rename-swap.
+    /// Executables placed by rename-swap: the service image, and the edge where it changes.
     pub swaps: Vec<Swap>,
-    /// Connectors replaced because the relay revision changes.
-    pub connector_replacements: Vec<Swap>,
     /// The development marker change.
     pub marker: Option<MarkerChange>,
     /// Whether the running service is replaced by a new `serve`.
@@ -317,16 +313,16 @@ pub enum RestoreRefused {
     /// The restore was not run by the release service in `bin`.
     #[error("Run the restore with the installed service: {0} deployment install --restore")]
     NotInstalledService(PathBuf),
-    /// The connectors in `bin` speak another relay revision than the service there.
+    /// The edge in `bin` speaks another relay revision than the service there.
     #[error(
-        "The connectors in {bin} speak relay revision {connectors} and the service there speaks \
-         {service}, so the installed service could not serve them. Install a release first"
+        "The edge in {bin} speaks relay revision {edge} and the service there speaks \
+         {service}, so the installed service could not serve it. Install a release first"
     )]
     RelayMismatch {
         /// The `bin` directory.
         bin: PathBuf,
-        /// Relay revision recorded for the connectors.
-        connectors: String,
+        /// Relay revision recorded for the edge.
+        edge: String,
         /// Relay revision of the service.
         service: String,
     },
@@ -450,14 +446,13 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
     let layout = &context.layout;
     let migration = migration::plan(layout.home(), &context.legacy)?;
     let installed = InstallRecord::read(&layout.install_record())?;
-    let payload_record = context.build.record();
+    let pre_edge = migration::pre_edge_layout(layout);
     let mut plan = InstallPlan {
         mode,
         version: context.build.version.clone(),
         migration,
         unchanged: false,
         swaps: Vec::new(),
-        connector_replacements: Vec::new(),
         marker: None,
         restart: true,
         record: None,
@@ -466,10 +461,12 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
     };
     let relay_changes = installed.as_ref().map(|record| &record.relay_revision)
         != Some(&context.build.relay_revision);
+    let edge_changes = relay_changes || pre_edge;
     match mode {
         Mode::Release => {
             validate_payload(&context.payload, &layout.bin())?;
             let image = installed_image(layout)?;
+            let payload_record = context.build.record(None);
             match record::decide(installed.as_ref(), &payload_record, image.as_deref()) {
                 Standing::Newer => {
                     let installed = installed.as_ref().expect("a newer standing has a record");
@@ -483,23 +480,26 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                 Standing::Same => {}
                 Standing::Absent | Standing::Older | Standing::Damaged => {
                     plan.swaps.push(service_swap(context, layout.bin()));
-                    if relay_changes {
-                        plan.connector_replacements = connector_swaps(context, &layout.bin());
-                    }
-                    plan.record = Some(payload_record);
+                    plan.record = Some(placed_in_bin(
+                        context,
+                        &mut plan,
+                        installed.as_ref(),
+                        edge_changes,
+                    )?);
                 }
             }
         }
         Mode::Development => {
             validate_payload(&context.payload, &layout.dev())?;
             plan.swaps.push(service_swap(context, layout.dev()));
+            plan.swaps.push(edge_swap(context, layout.dev()));
             plan.marker = Some(MarkerChange::Write(layout.development_executable()));
-            if relay_changes {
-                // Connectors start bin/ghostlight serve, which forwards to the development
-                // build, so bin must speak the payload's relay revision.
+            if edge_changes {
+                // The edge starts bin/ghostlight-service serve, which forwards to the
+                // development build, so bin must hold an edge and a service at the payload's
+                // relay revision.
                 plan.swaps.push(service_swap(context, layout.bin()));
-                plan.connector_replacements = connector_swaps(context, &layout.bin());
-                plan.record = Some(payload_record);
+                plan.record = Some(placed_in_bin(context, &mut plan, installed.as_ref(), true)?);
             }
         }
         Mode::Restore => {
@@ -553,7 +553,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         migration::prepare(&plan.migration)?;
         copied = migration::copy_state(&plan.migration)?;
     }
-    for placed in plan.swaps.iter().chain(&plan.connector_replacements) {
+    for placed in &plan.swaps {
         swap::rename_swap(&placed.directory, &placed.name, &placed.source)?;
     }
     match &plan.marker {
@@ -605,11 +605,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
 /// the programs still running them are found under their `.old-<n>` names; the executables at
 /// the `bin` paths are now this install's and must not be stopped.
 fn legacy_images(plan: &InstallPlan) -> Vec<PathBuf> {
-    let placed: Vec<&Swap> = plan
-        .swaps
-        .iter()
-        .chain(&plan.connector_replacements)
-        .collect();
+    let placed = &plan.swaps;
     let mut images = Vec::new();
     for image in &plan.migration.images_to_stop {
         let displaced = placed
@@ -657,16 +653,32 @@ fn service_swap(context: &Context<'_>, directory: PathBuf) -> Swap {
     }
 }
 
-/// The swaps placing the payload's connectors in `bin`.
-fn connector_swaps(context: &Context<'_>, bin: &Path) -> Vec<Swap> {
-    CONNECTORS
-        .iter()
-        .map(|name| Swap {
-            directory: bin.to_owned(),
-            name: (*name).to_owned(),
-            source: context.payload.join(name),
-        })
-        .collect()
+/// The swap placing the payload's edge in `directory`.
+fn edge_swap(context: &Context<'_>, directory: PathBuf) -> Swap {
+    Swap {
+        directory,
+        name: EDGE_EXECUTABLE_NAME.to_owned(),
+        source: context.payload.join(EDGE_EXECUTABLE_NAME),
+    }
+}
+
+/// Add the edge swap to `plan` when `edge_changes`, and return the record `bin` holds once the
+/// payload is installed there: the edge it leaves is the payload's, or the installed one.
+fn placed_in_bin(
+    context: &Context<'_>,
+    plan: &mut InstallPlan,
+    installed: Option<&InstallRecord>,
+    edge_changes: bool,
+) -> anyhow::Result<InstallRecord> {
+    let edge_sha256 = if edge_changes {
+        plan.swaps.push(edge_swap(context, context.layout.bin()));
+        Some(record::sha256_file(
+            &context.payload.join(EDGE_EXECUTABLE_NAME),
+        )?)
+    } else {
+        installed.and_then(|record| record.edge_sha256.clone())
+    };
+    Ok(context.build.record(edge_sha256))
 }
 
 /// Every image a running service of this home may have been started from.
@@ -685,7 +697,7 @@ fn installed_image(layout: &Layout) -> io::Result<Option<String>> {
     }
 }
 
-/// Refuse a restore unless the installed service runs it and its connectors match it.
+/// Refuse a restore unless the installed service runs it and its edge matches it.
 fn check_restore(
     context: &Context<'_>,
     installed: Option<&InstallRecord>,
@@ -701,16 +713,16 @@ fn check_restore(
     if installed.relay_revision != context.build.relay_revision {
         return Err(RestoreRefused::RelayMismatch {
             bin: layout.bin(),
-            connectors: installed.relay_revision.clone(),
+            edge: installed.relay_revision.clone(),
             service: context.build.relay_revision.clone(),
         });
     }
     Ok(())
 }
 
-/// Require the three executables in `payload`, which must not be `destination` itself.
+/// Require the service and the edge in `payload`, which must not be `destination` itself.
 fn validate_payload(payload: &Path, destination: &Path) -> Result<(), PayloadError> {
-    for name in std::iter::once(SERVICE_EXECUTABLE_NAME).chain(CONNECTORS) {
+    for name in [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME] {
         let path = payload.join(name);
         if !path.is_file() {
             return Err(PayloadError::Missing(path));
@@ -756,9 +768,9 @@ mod tests {
     use std::fs;
 
     use super::super::migration::{
-        FlatpakLeftovers, FlatpakPart, FlatpakResult, LegacyInstallation, MigrationError,
-        AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME, LEGACY_DEPLOY_LOCK_NAME, LEGACY_RECORD_NAME,
-        LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
+        retired_connector_names, FlatpakLeftovers, FlatpakPart, FlatpakResult, LegacyInstallation,
+        MigrationError, AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME, LEGACY_DEPLOY_LOCK_NAME,
+        LEGACY_RECORD_NAME, LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
     };
     use super::super::native_host::NativeHostRegistry;
     use super::super::scratch::Scratch;
@@ -775,6 +787,19 @@ mod tests {
     /// Relay revision of the payload under test.
     const RELAY: &str = "4";
 
+    /// What the payload's edge holds.
+    fn edge_text(relay: &str) -> String {
+        format!("edge {relay}")
+    }
+
+    /// The image names a 1.x installation held: the service under the product's name, which is
+    /// now the edge's, and both connectors.
+    fn legacy_image_names() -> Vec<String> {
+        std::iter::once(EDGE_EXECUTABLE_NAME.to_owned())
+            .chain(retired_connector_names())
+            .collect()
+    }
+
     /// What the fake process control was asked to do.
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum Call {
@@ -788,7 +813,7 @@ mod tests {
     /// What the disk showed at the moment of one request.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     struct Sighting {
-        /// A native-host manifest already names the installed browser connector.
+        /// A native-host manifest already names the installed edge.
         registered: bool,
         /// The 1.x installation record still exists.
         record_present: bool,
@@ -808,8 +833,7 @@ mod tests {
         waited_for: RefCell<Vec<Option<String>>>,
         /// How many looks for a respawned 1.x program find one.
         respawns: Cell<u32>,
-        /// The manifest, the connector it must name and the 1.x record to look at on every
-        /// request.
+        /// The manifest, the edge it must name and the 1.x record to look at on every request.
         witness: Option<(PathBuf, PathBuf, PathBuf)>,
         /// The 1.x user policy and its 2.0 place, to look at on every request.
         policy_witness: Option<(PathBuf, PathBuf)>,
@@ -938,12 +962,8 @@ mod tests {
             Self::write_payload(&payload, "service");
             let hosts = root.join("hosts");
             let registrations = Registrations::isolated(
-                NativeHostRegistry::isolated(&hosts, &layout.browser_connector()),
-                HarnessRegistry::isolated(
-                    &root.join("clients"),
-                    &layout.mcp_connector(),
-                    &layout.state(),
-                ),
+                NativeHostRegistry::isolated(&hosts, &layout.edge()),
+                HarnessRegistry::isolated(&root.join("clients"), &layout.edge(), &layout.state()),
             );
             Self {
                 scratch,
@@ -958,9 +978,7 @@ mod tests {
 
         fn write_payload(payload: &Path, service: &str) {
             fs::write(payload.join(SERVICE_EXECUTABLE_NAME), service).unwrap();
-            for name in CONNECTORS {
-                fs::write(payload.join(name), format!("{name} {RELAY}")).unwrap();
-            }
+            fs::write(payload.join(EDGE_EXECUTABLE_NAME), edge_text(RELAY)).unwrap();
         }
 
         fn build(&self, version: &str) -> Build {
@@ -975,8 +993,8 @@ mod tests {
         /// Put a 1.x installation record in the home and its executables in `serving`.
         fn plant_legacy_installation(&mut self, serving: &Path) {
             fs::create_dir_all(serving).unwrap();
-            for name in std::iter::once(SERVICE_EXECUTABLE_NAME).chain(CONNECTORS) {
-                fs::write(serving.join(name), format!("1.x {name}")).unwrap();
+            for name in legacy_image_names() {
+                fs::write(serving.join(&name), format!("1.x {name}")).unwrap();
             }
             fs::create_dir_all(self.layout.home()).unwrap();
             fs::write(self.legacy_record(), "{}").unwrap();
@@ -989,15 +1007,10 @@ mod tests {
 
         /// A control that looks at the manifest and the 1.x record on every request.
         fn watching_control(&self) -> FakeControl {
-            let manifest =
-                NativeHostRegistry::isolated(&self.hosts, &self.layout.browser_connector())
-                    .isolated_manifest("chrome");
+            let manifest = NativeHostRegistry::isolated(&self.hosts, &self.layout.edge())
+                .isolated_manifest("chrome");
             let mut control = FakeControl::new();
-            control.witness = Some((
-                manifest,
-                self.layout.browser_connector(),
-                self.legacy_record(),
-            ));
+            control.witness = Some((manifest, self.layout.edge(), self.legacy_record()));
             control
         }
 
@@ -1037,15 +1050,14 @@ mod tests {
             )
         }
 
-        /// Whether the manifest the registrations wrote names the installed browser connector.
-        fn manifest_names_bin_connector(&self) -> bool {
-            let manifest =
-                NativeHostRegistry::isolated(&self.hosts, &self.layout.browser_connector())
-                    .isolated_manifest("chrome");
+        /// Whether the manifest the registrations wrote names the installed edge.
+        fn manifest_names_bin_edge(&self) -> bool {
+            let manifest = NativeHostRegistry::isolated(&self.hosts, &self.layout.edge())
+                .isolated_manifest("chrome");
             let value: serde_json::Value =
                 serde_json::from_str(&fs::read_to_string(manifest).unwrap()).unwrap();
             fs::canonicalize(value["path"].as_str().unwrap()).unwrap()
-                == fs::canonicalize(self.layout.browser_connector()).unwrap()
+                == fs::canonicalize(self.layout.edge()).unwrap()
         }
 
         fn read(&self, path: PathBuf) -> String {
@@ -1085,18 +1097,14 @@ mod tests {
         let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
         assert_eq!(outcome.service_started, Some(true));
         assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-        for name in CONNECTORS {
-            assert_eq!(
-                fixture.read(fixture.layout.bin().join(name)),
-                format!("{name} {RELAY}")
-            );
-        }
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
         assert_eq!(
             fixture.record(),
             Some(InstallRecord {
                 service_version: VERSION.to_owned(),
                 relay_revision: RELAY.to_owned(),
                 service_sha256: fixture.build(VERSION).image_sha256,
+                edge_sha256: Some(record::sha256_file(&fixture.layout.edge()).unwrap()),
             })
         );
         assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
@@ -1146,30 +1154,132 @@ mod tests {
     }
 
     #[test]
-    fn connectors_stay_when_the_relay_revision_matches() {
+    fn the_edge_stays_when_the_relay_revision_matches() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        let recorded = fixture.record().unwrap().edge_sha256;
+        Fixture::write_payload(&fixture.payload, "next service");
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+        let outcome = fixture
+            .run(Mode::Release, "2.2.0", &FakeControl::new())
+            .unwrap();
+        assert_eq!(
+            outcome
+                .plan
+                .swaps
+                .iter()
+                .map(|placed| placed.name.as_str())
+                .collect::<Vec<_>>(),
+            [SERVICE_EXECUTABLE_NAME]
+        );
+        assert_eq!(
+            fixture.read(fixture.layout.service_executable()),
+            "next service"
+        );
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+        let record = fixture.record().unwrap();
+        assert_eq!(record.service_version, "2.2.0");
+        assert_eq!(record.edge_sha256, recorded);
+    }
+
+    #[test]
+    fn the_edge_is_replaced_when_the_relay_revision_changes() {
         let fixture = Fixture::new();
         fixture
             .run(Mode::Release, VERSION, &FakeControl::new())
             .unwrap();
         Fixture::write_payload(&fixture.payload, "next service");
-        for name in CONNECTORS {
-            fs::write(fixture.payload.join(name), "rebuilt connector").unwrap();
-        }
-        let outcome = fixture
-            .run(Mode::Release, "2.2.0", &FakeControl::new())
-            .unwrap();
-        assert!(outcome.plan.connector_replacements.is_empty());
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "next edge").unwrap();
+        let control = FakeControl::new();
+        let build = Build {
+            relay_revision: "5".to_owned(),
+            ..fixture.build("2.2.0")
+        };
+        install(
+            &fixture.context(build, &control),
+            &Request {
+                payload: None,
+                mode: Mode::Release,
+                plan_only: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(fixture.read(fixture.layout.edge()), "next edge");
+        let record = fixture.record().unwrap();
+        assert_eq!(record.relay_revision, "5");
         assert_eq!(
-            fixture.read(fixture.layout.service_executable()),
-            "next service"
+            record.edge_sha256,
+            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
         );
-        for name in CONNECTORS {
-            assert_eq!(
-                fixture.read(fixture.layout.bin().join(name)),
-                format!("{name} {RELAY}")
-            );
+    }
+
+    #[test]
+    fn a_pre_edge_layout_is_replaced_and_its_connectors_go_after_an_exact_image_stop() {
+        let fixture = Fixture::new();
+        let bin = fixture.layout.bin();
+        fs::create_dir_all(&bin).unwrap();
+        // An earlier development build: the service under the edge's name, both connectors, and
+        // a record that names no edge.
+        fs::write(fixture.layout.edge(), "pre-edge service").unwrap();
+        for name in retired_connector_names() {
+            fs::write(bin.join(name), "retired connector").unwrap();
         }
-        assert_eq!(fixture.record().unwrap().service_version, "2.2.0");
+        InstallRecord {
+            service_version: VERSION.to_owned(),
+            relay_revision: RELAY.to_owned(),
+            service_sha256: "0".repeat(64),
+            edge_sha256: None,
+        }
+        .write(&fixture.layout.install_record())
+        .unwrap();
+        let control = FakeControl::new();
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        let calls = control.calls();
+        let Call::Stop(images) = &calls[0] else {
+            panic!("{calls:?}");
+        };
+        let mut expected = vec![bin.join(format!("{EDGE_EXECUTABLE_NAME}.old-1"))];
+        expected.extend(retired_connector_names().map(|name| bin.join(name)));
+        assert_eq!(images, &expected);
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+        for name in retired_connector_names() {
+            assert!(!bin.join(&name).exists(), "{name}");
+        }
+        assert_eq!(
+            fixture.record().unwrap().edge_sha256,
+            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+        );
+    }
+
+    #[test]
+    fn a_development_service_that_sits_under_the_edges_name_is_stopped_and_replaced() {
+        let fixture = Fixture::new();
+        let dev = fixture.layout.dev();
+        fs::create_dir_all(&dev).unwrap();
+        fs::write(
+            fixture.layout.development_edge(),
+            "pre-edge development service",
+        )
+        .unwrap();
+        let control = FakeControl::new();
+        fixture.run(Mode::Development, VERSION, &control).unwrap();
+        let calls = control.calls();
+        let Call::Stop(images) = &calls[0] else {
+            panic!("{calls:?}");
+        };
+        assert_eq!(images, &[dev.join(format!("{EDGE_EXECUTABLE_NAME}.old-1"))]);
+        assert_eq!(
+            fixture.read(fixture.layout.development_edge()),
+            edge_text(RELAY)
+        );
+        assert_eq!(
+            fixture.read(fixture.layout.development_executable()),
+            "service"
+        );
     }
 
     #[test]
@@ -1213,9 +1323,11 @@ mod tests {
             })
         );
         assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
-        for name in CONNECTORS {
-            assert!(fixture.layout.bin().join(name).is_file());
-        }
+        assert_eq!(
+            fixture.read(fixture.layout.development_edge()),
+            edge_text(RELAY)
+        );
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
         assert_eq!(fixture.record().unwrap().relay_revision, RELAY);
 
         // With bin on the same relay revision, the next development build leaves bin alone.
@@ -1223,7 +1335,12 @@ mod tests {
         let outcome = fixture
             .run(Mode::Development, VERSION, &FakeControl::new())
             .unwrap();
-        assert_eq!(outcome.plan.swaps.len(), 1);
+        assert_eq!(outcome.plan.swaps.len(), 2);
+        assert!(outcome
+            .plan
+            .swaps
+            .iter()
+            .all(|placed| placed.directory == fixture.layout.dev()));
         assert_eq!(
             fixture.read(fixture.layout.development_executable()),
             "dev service"
@@ -1305,7 +1422,7 @@ mod tests {
             serde_json::json!({
                 "name": super::super::native_host::HOST_NAME,
                 "description": "Ghostlight browser connector",
-                "path": "/home/user/.ghostlight/bin/ghostlight-browser-connector",
+                "path": "/home/user/.ghostlight/bin/ghostlight",
                 "type": "stdio",
             })
             .to_string(),
@@ -1342,7 +1459,7 @@ mod tests {
         for index in stops {
             assert!(sightings[index].registered, "{calls:?} at {index}");
         }
-        assert!(fixture.manifest_names_bin_connector());
+        assert!(fixture.manifest_names_bin_edge());
     }
 
     #[test]
@@ -1358,7 +1475,7 @@ mod tests {
             .scratch
             .path()
             .join("old-1x")
-            .join(MCP_CONNECTOR_EXECUTABLE_NAME);
+            .join(&retired_connector_names()[0]);
         fs::create_dir_all(located.parent().unwrap()).unwrap();
         fs::write(
             &located,
@@ -1388,7 +1505,11 @@ mod tests {
         );
         assert_eq!(
             fs::canonicalize(command).unwrap(),
-            fs::canonicalize(fixture.layout.mcp_connector()).unwrap()
+            fs::canonicalize(fixture.layout.edge()).unwrap()
+        );
+        assert_eq!(
+            written["mcpServers"]["ghostlight"]["args"],
+            serde_json::json!(["mcp"])
         );
         assert!(!locations.exists());
         let kept: serde_json::Value = serde_json::from_str(
@@ -1622,11 +1743,10 @@ mod tests {
         let control = FakeControl::new();
         control.respawns.set(1);
         fixture.run(Mode::Release, VERSION, &control).unwrap();
-        let images = vec![
-            serving.join(SERVICE_EXECUTABLE_NAME),
-            serving.join(MCP_CONNECTOR_EXECUTABLE_NAME),
-            serving.join(BROWSER_CONNECTOR_EXECUTABLE_NAME),
-        ];
+        let images: Vec<PathBuf> = legacy_image_names()
+            .iter()
+            .map(|name| serving.join(name))
+            .collect();
         let mut expected = vec![Call::Stop(images.clone())];
         expected.extend([
             Call::Running,
@@ -1665,19 +1785,19 @@ mod tests {
         let Call::Stop(images) = &calls[0] else {
             panic!("{calls:?}");
         };
-        let moved = |name: &str| fixture.layout.bin().join(format!("{name}.old-1"));
-        assert!(
-            images.contains(&moved(SERVICE_EXECUTABLE_NAME)),
-            "{images:?}"
-        );
-        for name in CONNECTORS {
-            assert!(images.contains(&moved(name)), "{images:?}");
+        // The 1.x service sat under the name the edge now has, so the install moved it aside.
+        let moved = fixture
+            .layout
+            .bin()
+            .join(format!("{EDGE_EXECUTABLE_NAME}.old-1"));
+        assert!(images.contains(&moved), "{images:?}");
+        // The connectors were never replaced, so they are stopped where they are, and removed.
+        for name in retired_connector_names() {
+            let connector = fixture.layout.bin().join(name);
+            assert!(images.contains(&connector), "{images:?}");
+            assert!(!connector.exists());
         }
-        for installed in [
-            fixture.layout.service_executable(),
-            fixture.layout.mcp_connector(),
-            fixture.layout.browser_connector(),
-        ] {
+        for installed in [fixture.layout.service_executable(), fixture.layout.edge()] {
             assert!(!images.contains(&installed), "{images:?}");
         }
     }
@@ -1731,8 +1851,7 @@ mod tests {
         )
         .unwrap();
         assert!(!outcome.plan.migration.is_empty());
-        assert_eq!(outcome.plan.swaps.len(), 2);
-        assert_eq!(outcome.plan.connector_replacements.len(), CONNECTORS.len());
+        assert_eq!(outcome.plan.swaps.len(), 4);
         assert!(serde_json::to_value(&outcome.plan).is_ok());
         assert!(control.calls().is_empty());
         assert_eq!(fixture.snapshot(), before);
@@ -1741,7 +1860,7 @@ mod tests {
     #[test]
     fn a_payload_missing_an_executable_is_refused() {
         let fixture = Fixture::new();
-        fs::remove_file(fixture.payload.join(BROWSER_CONNECTOR_EXECUTABLE_NAME)).unwrap();
+        fs::remove_file(fixture.payload.join(EDGE_EXECUTABLE_NAME)).unwrap();
         let error = fixture
             .run(Mode::Release, VERSION, &FakeControl::new())
             .unwrap_err();
@@ -1863,6 +1982,7 @@ mod tests {
             service_version: VERSION.to_owned(),
             relay_revision: relay.to_owned(),
             service_sha256: "0".repeat(64),
+            edge_sha256: None,
         };
         record(EARLIER_DEVELOPMENT_RELAY)
             .write(&fixture.layout.install_record())

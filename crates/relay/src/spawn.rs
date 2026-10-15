@@ -1,15 +1,15 @@
 //! Starting the service: the backoff schedule and the detached `serve` launch.
 //!
-//! An edge that finds no service runs `bin/ghostlight serve --reason <word>` and does not wait
-//! for it. The reason says who is starting the service, so a Quit that should hold is honored
-//! (ADR-0199 Decision 10). The service binds its endpoint when it is ready, and the edge keeps
+//! An edge that finds no service runs `bin/ghostlight-service serve --reason <word>` and does not
+//! wait for it. The reason says who is starting the service, so a Quit that should hold is
+//! honored (ADR-0199 Decision 10). The service binds its endpoint when it is ready, and the edge keeps
 //! trying to connect on the [`Backoff`] schedule. The child is detached so it outlives the edge
 //! that started it.
 //!
 //! [`spawn_serve`] is the one place the service is started; the edges, the installer and the
 //! command line all use it, through [`os::spawn_detached`](crate::os::spawn_detached). A
 //! detached service must hold nothing of its starter: a pipe it inherited would keep a caller
-//! that captures output (an installer piped through a filter, a connector's MCP or
+//! that captures output (an installer piped through a filter, an edge's MCP or
 //! native-messaging pipes) waiting for as long as the service runs. The child therefore starts
 //! with no inherited handle or descriptor at all, and null standard streams.
 
@@ -78,7 +78,7 @@ pub fn serve_arguments(reason: StartReason) -> [&'static OsStr; 3] {
 /// Start `executable serve --reason <reason>` detached, with `directory` as its working
 /// directory, and return the new process id without waiting for it.
 ///
-/// The `directory` must be one the service owns, never the connector's own (usually the user's
+/// The `directory` must be one the service owns, never the edge's own (usually the user's
 /// project folder): the service outlives its starter, and a running process holds its working
 /// directory open on Windows. Success means the process was created, not that the service is
 /// ready. The service is ready when its endpoint accepts an opening.
@@ -86,7 +86,7 @@ pub fn spawn_serve(executable: &Path, directory: &Path, reason: StartReason) -> 
     os::spawn_detached(executable, &serve_arguments(reason), directory)
 }
 
-/// Start the installed service (`home/bin/ghostlight serve --reason <reason>`, working directory
+/// Start the installed service (`home/bin/ghostlight-service serve --reason <reason>`, working directory
 /// `home`) and return without waiting for it.
 ///
 /// Success means the process was created, not that the service is ready. See [`spawn_serve`].

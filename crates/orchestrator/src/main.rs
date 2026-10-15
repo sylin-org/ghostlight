@@ -1,8 +1,9 @@
-//! The `ghostlight` executable: the service, its desktop workbench and the command line.
+//! The `ghostlight-service` executable: the service, its desktop workbench and every typed
+//! command (ADR-0199 Decision 1).
 //!
 //! Before any command runs, the entry rule decides whether this copy does the job, hands it to
-//! the development build or the installed service, or installs from its own package first
-//! (ADR-0197 Decisions 10, 13 and 15).
+//! the development build or the installed service, hands the edge's relay verbs to the installed
+//! edge, or installs from its own package first (ADR-0197 Decisions 10, 13 and 15).
 
 // The mandatory npm launcher retains CLI stdio and waits for this child. Release desktop launches
 // therefore use the native Windows application subsystem without flashing a console window.
@@ -11,9 +12,9 @@
     windows_subsystem = "windows"
 )]
 
-use ghostlight::cli::session_end::listen_unless_serving;
-use ghostlight::cli::start::{start, ProcessLauncher, Start};
-use ghostlight::install::layout::Layout;
+use ghostlight_service::cli::session_end::listen_unless_serving;
+use ghostlight_service::cli::start::{start, ProcessLauncher, Start};
+use ghostlight_service::install::layout::Layout;
 
 fn main() -> anyhow::Result<()> {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
@@ -25,7 +26,7 @@ fn main() -> anyhow::Result<()> {
         &Layout::current()?,
         &ProcessLauncher,
     )? {
-        Start::Dispatch(mode) => ghostlight::cli::dispatch(mode),
+        Start::Dispatch(mode) => ghostlight_service::cli::dispatch(mode),
         Start::Exit(code) => std::process::exit(code),
     }
 }

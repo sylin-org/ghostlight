@@ -1,5 +1,5 @@
 [package]
-name = "ghostlight"
+name = "ghostlight-service"
 publish = false
 version.workspace = true
 edition.workspace = true

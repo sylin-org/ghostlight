@@ -1,10 +1,10 @@
 //! Registrations the installer reconciles after every install.
 //!
-//! Every registration names an executable in `home/bin` (ADR-0197 Decisions 13 and 14): the
-//! browsers' native-host manifests name `bin/ghostlight-browser-connector`, owned MCP client
-//! entries name `bin/ghostlight-mcp-connector`, and the platform entries (the Linux desktop entry,
-//! command link and manual pages; the Windows Start-menu shortcut and Uninstall key) name
-//! `bin/ghostlight`. Reconciling is idempotent: what is current is left alone. A native-host
+//! Every registration names an executable in `home/bin` (ADR-0197 Decisions 13 and 14, ADR-0199
+//! Decision 1): the browsers' native-host manifests name the edge `bin/ghostlight`, owned MCP
+//! client entries start it with `mcp`, the command link names it, and the other platform entries
+//! (the Linux desktop entry; the Windows Start-menu shortcut and Uninstall key) name the service
+//! image `bin/ghostlight-service`. Reconciling is idempotent: what is current is left alone. A native-host
 //! manifest that names another path is reclaimed; a client entry Ghostlight does not own, such
 //! as an `npx` launcher, is reported and left as it is.
 //!
@@ -53,7 +53,7 @@ pub struct UnchangedEntry {
 pub struct ReconcileReport {
     /// Browsers whose native-host registration was written.
     pub browsers: Vec<String>,
-    /// Clients whose Ghostlight entry was rewritten to the installed connector.
+    /// Clients whose Ghostlight entry was rewritten to start the installed edge.
     pub clients_rewritten: Vec<String>,
     /// Client entries under Ghostlight's name that Ghostlight does not own.
     pub clients_unchanged: Vec<UnchangedEntry>,
@@ -186,7 +186,7 @@ pub fn native_hosts_allowed() -> bool {
     env::var_os(TEST_HOME_VARIABLE).is_none() || env::var_os(NATIVE_HOST_DIR_VARIABLE).is_some()
 }
 
-/// Write every supported browser's manifest, reclaiming one that names another connector.
+/// Write every supported browser's manifest, reclaiming one that names another host.
 /// Manifests Ghostlight does not own are left for a person.
 fn reconcile_native_hosts(hosts: &NativeHostRegistry, report: &mut ReconcileReport) {
     let before = match hosts.check() {
@@ -229,7 +229,7 @@ fn reconcile_native_hosts(hosts: &NativeHostRegistry, report: &mut ReconcileRepo
     }
 }
 
-/// Rewrite the owned client entries that name another connector, and report the entries under
+/// Rewrite the owned client entries that start something else, and report the entries under
 /// Ghostlight's name that Ghostlight does not own.
 fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
     let summaries = match clients.refresh() {
@@ -365,12 +365,22 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    use ghostlight_relay::home::EDGE_EXECUTABLE_NAME;
     use serde_json::{json, Value};
 
-    use super::super::layout::{BROWSER_CONNECTOR_EXECUTABLE_NAME, MCP_CONNECTOR_EXECUTABLE_NAME};
+    use super::super::layout::RETIRED_MCP_CONNECTOR_NAME;
     use super::super::native_host::HOST_NAME;
     use super::super::scratch::Scratch;
     use super::*;
+
+    /// File name of the retired MCP connector, which client entries written for earlier builds
+    /// still name.
+    fn retired_mcp_connector() -> String {
+        format!(
+            "{RETIRED_MCP_CONNECTOR_NAME}{}",
+            std::env::consts::EXE_SUFFIX
+        )
+    }
 
     /// Browser whose manifest the tests plant.
     const BROWSER: &str = "chrome";
@@ -387,8 +397,7 @@ mod tests {
             let root = fs::canonicalize(scratch.path()).unwrap();
             let layout = Layout::new(root.join("home"));
             fs::create_dir_all(layout.bin()).unwrap();
-            fs::write(layout.browser_connector(), b"browser").unwrap();
-            fs::write(layout.mcp_connector(), b"mcp").unwrap();
+            fs::write(layout.edge(), b"edge").unwrap();
             Self {
                 _scratch: scratch,
                 layout,
@@ -398,13 +407,10 @@ mod tests {
 
         fn private_registrations(&self, app: &str) -> Registrations {
             Registrations::isolated(
-                NativeHostRegistry::isolated(
-                    &self.root.join("hosts"),
-                    &self.layout.browser_connector(),
-                ),
+                NativeHostRegistry::isolated(&self.root.join("hosts"), &self.layout.edge()),
                 HarnessRegistry::isolated_inside(
                     &self.root.join("clients"),
-                    &self.layout.mcp_connector(),
+                    &self.layout.edge(),
                     &self.layout.state(),
                     AppContainer { app: app.into() },
                 ),
@@ -414,20 +420,17 @@ mod tests {
 
         fn registrations(&self) -> Registrations {
             Registrations::isolated(
-                NativeHostRegistry::isolated(
-                    &self.root.join("hosts"),
-                    &self.layout.browser_connector(),
-                ),
+                NativeHostRegistry::isolated(&self.root.join("hosts"), &self.layout.edge()),
                 HarnessRegistry::isolated(
                     &self.root.join("clients"),
-                    &self.layout.mcp_connector(),
+                    &self.layout.edge(),
                     &self.layout.state(),
                 ),
             )
         }
 
         fn manifest(&self) -> PathBuf {
-            NativeHostRegistry::isolated(&self.root.join("hosts"), &self.layout.browser_connector())
+            NativeHostRegistry::isolated(&self.root.join("hosts"), &self.layout.edge())
                 .isolated_manifest(BROWSER)
         }
 
@@ -444,12 +447,9 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_naming_another_connector_is_reclaimed() {
+    fn a_manifest_naming_another_host_is_reclaimed() {
         let fixture = Fixture::new();
-        let old = fixture
-            .root
-            .join("old")
-            .join(BROWSER_CONNECTOR_EXECUTABLE_NAME);
+        let old = fixture.root.join("old").join(EDGE_EXECUTABLE_NAME);
         Fixture::write_json(
             &fixture.manifest(),
             &json!({
@@ -472,7 +472,7 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(fixture.manifest()).unwrap()).unwrap();
         assert_eq!(
             fs::canonicalize(manifest["path"].as_str().unwrap()).unwrap(),
-            fs::canonicalize(fixture.layout.browser_connector()).unwrap()
+            fs::canonicalize(fixture.layout.edge()).unwrap()
         );
         let again = fixture.registrations().reconcile(&fixture.layout, "2.0.0");
         assert!(again.browsers.is_empty(), "{again:?}");
@@ -482,7 +482,7 @@ mod tests {
     fn an_owned_client_entry_is_rewritten_and_an_npx_entry_is_left_alone() {
         let fixture = Fixture::new();
         let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
-        let old_connector = fixture.root.join("old").join(MCP_CONNECTOR_EXECUTABLE_NAME);
+        let old_connector = fixture.root.join("old").join(retired_mcp_connector());
         Fixture::write_json(
             &owned,
             &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
@@ -509,7 +509,7 @@ mod tests {
                     .as_str()
                     .unwrap()
             ),
-            fixture.layout.mcp_connector()
+            fixture.layout.edge()
         );
     }
 
@@ -517,7 +517,7 @@ mod tests {
     fn inside_another_apps_container_a_client_under_appdata_is_reported_private_and_left_alone() {
         let fixture = Fixture::new();
         let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
-        let old_connector = fixture.root.join("old").join(MCP_CONNECTOR_EXECUTABLE_NAME);
+        let old_connector = fixture.root.join("old").join(retired_mcp_connector());
         Fixture::write_json(
             &owned,
             &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),
@@ -544,7 +544,7 @@ mod tests {
     fn inside_its_own_container_a_packaged_client_is_rewritten() {
         let fixture = Fixture::new();
         let owned = fixture.client_config("config/Claude/claude_desktop_config.json");
-        let old_connector = fixture.root.join("old").join(MCP_CONNECTOR_EXECUTABLE_NAME);
+        let old_connector = fixture.root.join("old").join(retired_mcp_connector());
         Fixture::write_json(
             &owned,
             &json!({"mcpServers": {"ghostlight": {"command": old_connector}}}),

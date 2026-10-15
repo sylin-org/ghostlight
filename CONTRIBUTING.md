@@ -25,9 +25,9 @@ project's recorded vision, not taste of the day:
   language are owned by the orchestrator and recorded in
   [docs/1.0/LANGUAGE.md](docs/1.0/LANGUAGE.md). Requests are evaluated as user jobs, not as
   client-specific aliases or low-level browser commands.
-- **Stable fringes.** Product and journey evolution belongs in the orchestrator. The MCP
-  connector, browser connector, shared bridge, and extension change only when their actual edge
-  mechanisms or versioned contracts must change.
+- **Stable fringes.** Product and journey evolution belongs in the orchestrator. The
+  edge, the relay, and the extension change only when their actual edge mechanisms or versioned
+  contracts must change.
 - **Never phone home.** Telemetry, activation servers, and update pings are permanently
   out ([ADR-0028](docs/adr/0028-tripwire-licensing-and-continuity-promise.md)).
 - **Lean engine.** Fewer, more meaningful moving parts win over feature count. No generic event
@@ -48,8 +48,8 @@ Practical expectations for PRs: CI (.github/workflows/ci.yml) green -- it runs t
 
 ### The dev loop: seeing your changes live
 
-Ghostlight 1.0 runs one orchestrator with independently reconnecting MCP and browser shores. An
-orchestrator, workbench, or bundled-UI change rebuilds and restarts `ghostlight`; it does not
+Ghostlight runs one service with independently reconnecting MCP and browser shores. A service,
+workbench, or bundled-UI change rebuilds and restarts `ghostlight-service`; it does not
 require a relay or adapter edit. A privileged browser-mechanism change requires an explicit reload
 of the affected browser adapter. [docs/DEV-LOOP.md](docs/DEV-LOOP.md) has the exact refresh matrix
 and isolated process journey.

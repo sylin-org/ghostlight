@@ -46,7 +46,7 @@ this journey. Provenance verification, clean-machine install, upgrade, and unins
 gates, not claims made by this source tree.
 
 The npm process is a download and launch edge, not the product authority. Supported-client
-registrations point directly at the cached native MCP connector. A bare `npx -y ghostlight@1.3.14`
+registrations point directly at the cached native `ghostlight` edge with the argument `mcp`. A bare `npx -y ghostlight@1.3.14`
 remains the stdio command for another compatible MCP client.
 
 ## Workbench installation behavior
@@ -65,14 +65,16 @@ MCP integrations supports these explicit user-level configurations:
 
 **Check** is read-only. **Install** and **Uninstall** are explicit, serialized operations. They:
 
-- point directly to the sibling `ghostlight-mcp-connector`;
+- start the installed `ghostlight` edge with the argument `mcp`;
 - create the parent directory when preparing a not-yet-detected harness;
 - preserve unrelated properties, JSONC comments, trailing commas, TOML comments, and formatting;
 - create a `.ghostlight-backup` beside an existing file before replacement;
 - are idempotent; and
 - refuse malformed, unreadable, or foreign-owned `ghostlight` entries.
 
-Uninstall removes only an entry whose command identifies Ghostlight's connector. It does not
+Uninstall removes only an entry whose command identifies Ghostlight's edge. An entry written
+for an earlier build that names `ghostlight-mcp-connector` is still Ghostlight's: Install
+rewrites it, and `ghostlight doctor` names it. It does not
 uninstall the harness, delete unrelated empty sections, remove the browser extension, or stop the
 orchestrator.
 
@@ -103,10 +105,10 @@ this same no-argument desktop authority.
 
 For browser development, load `extension/` unpacked in Chromium 125 or newer. Its pinned key
 preserves the established development identity. The platform native-messaging host must point at
-the sibling source-built `ghostlight-browser-connector`; use the isolated procedure in
+the sibling source-built `ghostlight`; use the isolated procedure in
 [`../DEV-LOOP.md`](../DEV-LOOP.md) and never replace an installed stack you do not own.
 
-The repository process journey exercises the real three-executable topology without modifying a
+The repository process journey exercises the real two-executable topology without modifying a
 user installation:
 
 ```sh
@@ -138,7 +140,7 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 ## Recovery
 
 - **Service is not running:** reconnect the MCP integration or enable the matching extension.
-  Either connector demand-starts its exact sibling service and keeps retrying.
+  The edge, as either relay, demand-starts the installed service and keeps retrying.
 - **Workbench window is gone:** launch Ghostlight directly or open it from the tray. Closing the
   window destroys only that disposable surface; browser service and the tray remain available.
 - **Workbench cannot initialize:** the orchestrator exits instead of leaving an invisible
@@ -166,7 +168,7 @@ package. It does not silently edit harness registrations or extension settings.
 
 On Linux, replacing a Debian package does not replace an already-running authority. After the
 package update, use Ghostlight's Quit action, then open Ghostlight from Applications or run
-`ghostlight open`. Reconnect MCP clients to load the updated connector executables. Check
+`ghostlight open`. Reconnect MCP clients to load the updated edge. Check
 `ghostlight doctor` for the running service version; `ghostlight --version` reports the executable
 on disk and can differ until the old process has exited.
 

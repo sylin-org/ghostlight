@@ -1,5 +1,5 @@
 anyhow
-ghostlight-browser-connector
+ghostlight
 ghostlight-relay
 itoa
 memchr

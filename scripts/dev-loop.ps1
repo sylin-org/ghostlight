@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 # Builds the workspace in an isolated target directory and hands the result to
-# `ghostlight deployment install --development`. The installer owns locking,
+# `ghostlight-service deployment install --development`. The installer owns locking,
 # stopping running images, and copying. -Restore runs the installed binary's
 # `deployment install --restore` instead and builds nothing.
 [CmdletBinding()]
@@ -18,9 +18,9 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repo = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$exe = if ($IsWindows) { "ghostlight.exe" } else { "ghostlight" }
+$exe = if ($IsWindows) { "ghostlight-service.exe" } else { "ghostlight-service" }
 
-# The binary is GUI-subsystem on Windows, so its output is captured through a
+# The service image is GUI-subsystem on Windows, so its output is captured through a
 # redirected process rather than the console.
 function Invoke-Ghostlight {
     param([string]$Binary, [string[]]$Arguments)

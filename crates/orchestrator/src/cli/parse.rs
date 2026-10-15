@@ -6,6 +6,7 @@
 use std::ffi::OsString;
 
 use ghostlight_relay::protocol::StartReason;
+use ghostlight_relay::route::{BROWSER_ORIGIN_PREFIX, MCP_ARGUMENT};
 use ghostlight_relay::spawn::REASON_OPTION;
 
 /// Every subcommand a person is offered, in help order.
@@ -38,6 +39,9 @@ pub enum LaunchMode {
     Serve(StartReason),
     /// Explicit local-human intent to make the workbench visible.
     Open,
+    /// The edge's relay verbs, `mcp` or a Chrome extension origin. The edge runs them itself; a
+    /// service image that receives one hands it to the installed edge.
+    Relay,
     /// The command-line intake. A script asked for work, not for a window (ADR-0105).
     Call,
     /// Process diagnostics: read the shared log and actuate the marker (ADR-0145).
@@ -143,6 +147,14 @@ fn deployment_request(arguments: &[OsString]) -> Option<crate::install::deployme
     (request.mode != Mode::Restore || request.payload.is_none()).then_some(request)
 }
 
+/// Whether `argument` selects one of the edge's relays: `mcp` or a Chrome extension origin.
+fn is_relay_verb(argument: &OsString) -> bool {
+    argument == MCP_ARGUMENT
+        || argument
+            .to_str()
+            .is_some_and(|argument| argument.starts_with(BROWSER_ORIGIN_PREFIX))
+}
+
 /// Parse command-line arguments into a typed `LaunchMode`.
 pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Result<LaunchMode> {
     let arguments = arguments.into_iter().collect::<Vec<_>>();
@@ -162,6 +174,9 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
     }
     if arguments.is_empty() {
         return Ok(LaunchMode::Desktop);
+    }
+    if arguments.first().is_some_and(is_relay_verb) {
+        return Ok(LaunchMode::Relay);
     }
     if arguments.len() == 1
         && arguments
@@ -348,7 +363,7 @@ pub fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOption
 /// Render the CLI help text.
 pub fn help_text() -> String {
     format!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve --reason <word>   Start the service without a window (Ghostlight programs run this)\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve --reason <word>   Start the service without a window (Ghostlight programs run this)\n  ghostlight mcp                     Run as a local stdio MCP server for an MCP client\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the browser-extension walkthrough\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION")
     )
 }

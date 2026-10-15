@@ -79,7 +79,7 @@ impl Hold {
         self.lines.front().map(|line| line.held_at + HOLD_LIMIT)
     }
 
-    /// Whether any held line carries a request, which is what makes the connector start the
+    /// Whether any held line carries a request, which is what makes the edge start the
     /// service.
     #[must_use]
     pub fn has_request(&self) -> bool {

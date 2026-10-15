@@ -70,7 +70,7 @@ if (lane === "all") {
   await node("policy-grammar", "tests/policy-grammar.mjs");
 }
 const artifacts = new Map();
-const executables = ["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"];
+const executables = ["ghostlight", "ghostlight-service"];
 let built = await run("build", "cargo", ["build", "--workspace", "--locked", "--message-format=json-render-diagnostics"], root, line => {
   const message = JSON.parse(line);
   if (message.reason === "compiler-artifact" && message.executable && executables.includes(message.target.name)
@@ -79,7 +79,7 @@ let built = await run("build", "cargo", ["build", "--workspace", "--locked", "--
 if (built) {
   const directories = new Set([...artifacts.values()].map(dirname));
   if (executables.some(name => !artifacts.has(name)) || directories.size !== 1) {
-    blocked("build-artifacts", "Cargo must identify all three executable artifacts in one directory.");
+    blocked("build-artifacts", "Cargo must identify both executable artifacts in one directory.");
     built = false;
   } else {
     environment.GHOSTLIGHT_BIN_DIR = [...directories][0];

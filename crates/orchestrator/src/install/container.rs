@@ -208,10 +208,7 @@ impl Drop for Probe {
 /// The command that finishes the private registrations from a regular terminal.
 #[must_use]
 pub fn finishing_command(layout: &Layout) -> String {
-    format!(
-        "{} {FINISHING_SUBCOMMAND}",
-        layout.service_executable().display()
-    )
+    format!("{} {FINISHING_SUBCOMMAND}", layout.edge().display())
 }
 
 /// The lines an install prints when it left `registrations` unwritten because `container` keeps
@@ -243,7 +240,7 @@ pub fn cannot_see_line(container: &AppContainer, layout: &Layout) -> String {
          and AppData, so Ghostlight cannot see what other apps see there. To check the real \
          registrations, run this from a regular terminal: {} doctor",
         container.app,
-        layout.service_executable().display()
+        layout.edge().display()
     )
 }
 
@@ -264,7 +261,7 @@ pub fn uninstall_refusal(container: &AppContainer, layout: &Layout) -> String {
          and AppData, so removing registrations here would not remove them for other apps. Run \
          this from a regular terminal: {} uninstall",
         container.app,
-        layout.service_executable().display()
+        layout.edge().display()
     )
 }
 
@@ -419,10 +416,7 @@ mod tests {
              Google Chrome, Codex."
         );
         assert!(lines[1].starts_with("To finish them, run this from a regular terminal: "));
-        assert!(lines[1].ends_with(&format!(
-            "{} install",
-            layout.service_executable().display()
-        )));
+        assert!(lines[1].ends_with(&format!("{} install", layout.edge().display())));
         assert!(lines[1].contains("ghostlight"));
         assert!(cannot_see_line(&container, &layout).contains("cannot see what other apps see"));
         assert!(uninstall_refusal(&container, &layout).ends_with("uninstall"));

@@ -45,6 +45,16 @@ fn a_missing_user_home_is_not_found() {
     );
 }
 
+#[test]
+fn the_service_image_and_the_edge_are_two_files_with_the_platform_suffix() {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    assert_eq!(EDGE_EXECUTABLE_NAME, format!("ghostlight{suffix}"));
+    assert_eq!(
+        SERVICE_EXECUTABLE_NAME,
+        format!("ghostlight-service{suffix}")
+    );
+}
+
 mod verbatim {
     use std::path::{Path, PathBuf};
 

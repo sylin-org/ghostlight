@@ -1,4 +1,4 @@
-//! Tests for the connectors' diagnostics writer.
+//! Tests for the edge's diagnostics writer.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -31,7 +31,7 @@ impl Scratch {
     }
 
     fn log(&self) -> PathBuf {
-        self.directory().join("mcp-connector.jsonl")
+        self.directory().join("edge-mcp.jsonl")
     }
 
     fn write(&self, detail: &str) -> io::Result<()> {
@@ -39,7 +39,7 @@ impl Scratch {
             &self.marker(),
             &self.directory(),
             1234,
-            Component::McpConnector,
+            Component::EdgeMcp,
             Event::ServiceConnected,
             detail,
         )
@@ -75,7 +75,7 @@ fn a_line_is_appended_while_the_marker_exists() {
         lines[0],
         json!({
             "ts_ms": 1234,
-            "component": "mcp-connector",
+            "component": "edge-mcp",
             "relay": crate::RELAY,
             "pid": std::process::id(),
             "event": "service_connected",

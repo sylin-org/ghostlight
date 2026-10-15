@@ -1,10 +1,10 @@
-// Connector guards (ADR-0197 D25, connector half).
+// Edge guards (ADR-0197 D25, ADR-0199 D21).
 //
-// Two facts per connector crate and for the relay crate they share:
-//   1. the crate names in the normal dependency tree of each connector on each supported
+// Two facts about the edge crate and the relay crate it shares with the service:
+//   1. the crate names in the normal dependency tree of the edge on each supported
 //      target (tests/golden/cargo-tree/<crate>.<target>.txt), with no network crate among
 //      them (ADR-0028, never phone home);
-//   2. the connector and relay source equals the last published tag at the same
+//   2. the edge and relay source equals the last published tag at the same
 //      relay revision, so a published revision never changes underneath users.
 //
 // Run `GHOSTLIGHT_GUARD_UPDATE=1 node --test tests/guards/connectors.test.mjs`
@@ -24,13 +24,13 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TREE_DIR = join(ROOT, "tests", "golden", "cargo-tree");
 const UPDATE = process.env.GHOSTLIGHT_GUARD_UPDATE === "1";
 
-const CONNECTORS = ["ghostlight-mcp-connector", "ghostlight-browser-connector"];
+const EDGES = ["ghostlight"];
 const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
 
 /** Source paths locked to the published relay revision; tests directories are excluded. */
-const LOCKED = ["crates/relay", "crates/mcp-connector", "crates/browser-connector", ":(exclude)crates/*/tests/**"];
+const LOCKED = ["crates/relay", "crates/edge", ":(exclude)crates/*/tests/**"];
 
-/** Crates a connector must never link: any network stack would break the never-phone-home promise (ADR-0028). */
+/** Crates the edge must never link: any network stack would break the never-phone-home promise (ADR-0028). */
 const NETWORK_CRATES = /^(hyper|reqwest|ureq|h2|http|rustls|native-tls|openssl|curl|isahc|tokio|socket2|mio)$/;
 
 /** Cargo stderr that means the registry was unreachable, so the tree cannot be resolved. */
@@ -101,7 +101,7 @@ function revisionAt(tag) {
   return match ? Number(match[1]) : null;
 }
 
-for (const crate of CONNECTORS) {
+for (const crate of EDGES) {
   for (const target of TARGETS) {
     test(`dependency tree of ${crate} on ${target} is frozen`, (t) => {
       const file = join(TREE_DIR, `${crate}.${target}.txt`);
@@ -114,7 +114,7 @@ for (const crate of CONNECTORS) {
       assert.deepEqual(
         network,
         [],
-        `${crate} on ${target} links a network crate (${network.join(", ")}): connectors never phone home (ADR-0028)`,
+        `${crate} on ${target} links a network crate (${network.join(", ")}): the edge never phones home (ADR-0028)`,
       );
       if (UPDATE) {
         mkdirSync(TREE_DIR, { recursive: true });
@@ -137,7 +137,7 @@ test("the offline skip message is built from the field cargoTree returns", () =>
   assert.equal(message, "cargo cannot resolve crate-a for target-b: failed to download x");
 });
 
-test("connector source is unchanged since the last published tag at this relay revision", () => {
+test("edge source is unchanged since the last published tag at this relay revision", () => {
   const tags = git("tag", "--list", "v[0-9]*", "--sort=-v:refname").split(/\r?\n/).filter((tag) => tag && !tag.startsWith("archive/"));
   assert.ok(tags.length > 0, "no release tags: fetch with tags (fetch-depth: 0)");
   const revision = relayRevision();
@@ -148,6 +148,6 @@ test("connector source is unchanged since the last published tag at this relay r
   }
   assert.ok(
     gitOk("diff", "--quiet", tag, "--", ...LOCKED),
-    `connector source changed since ${tag} at relay revision ${revision}: bump RELAY`,
+    `edge source changed since ${tag} at relay revision ${revision}: bump RELAY`,
   );
 });
