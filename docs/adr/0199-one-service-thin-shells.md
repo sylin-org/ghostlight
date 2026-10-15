@@ -145,10 +145,12 @@ Nothing that speaks relay protocol 3 has shipped, so this is the cheapest moment
      start. The runtime file, port, token, templates file and lease are deleted.
 6. **Typed commands move inside the running service in 2.x, with no edge change.** The `command`
    opening then carries the arguments, the working directory, which standard streams are
-   terminals, and the terminal width. No environment variable crosses. The edge pumps stdin,
-   stdout and stderr as bytes and returns the exit code the service sends. Ctrl-C, Ctrl-Break and
-   a closed terminal become `interrupt`. If the stream drops first, the edge prints `relay`'s one
-   fallback sentence and returns a fixed code.
+   terminals, and the terminal width. No environment variable crosses. The process that does this
+   is the one-shot service-image process the edge hands over to (Decision 2), connecting with the
+   `command` role. It pumps stdin, stdout and stderr as bytes, turns Ctrl-C, Ctrl-Break and a
+   closed terminal into `interrupt`, prints `relay`'s one fallback sentence and returns a fixed
+   code if the stream drops first, and otherwise returns the exit code the service sends. The edge
+   still only hands over, so no edge change follows.
 
    In 2.0 every typed command runs as a one-shot process of the service image (owner ruling
    2026-10-15). `status`, `doctor`, `help` and `--version` never start the service; `call` starts
