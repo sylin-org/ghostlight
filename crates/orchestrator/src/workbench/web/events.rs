@@ -4,7 +4,9 @@
 //! once for each audience that has a subscriber, so a watcher never receives what only the window
 //! may see, and is queued for every stream in a bounded channel that publishing never waits on.
 //! A stream that falls behind by more than the channel holds is ended with a `reset` event, and
-//! its screen reads a fresh snapshot (ADR-0199, amendment of 2026-10-15).
+//! its screen reads a fresh snapshot. Turning watching off ends every watching stream with a
+//! `closed` event that says why, and leaves the window's streams open (ADR-0199, amendment of
+//! 2026-10-15).
 
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,9 +17,10 @@ use std::time::Duration;
 use serde_json::json;
 
 use super::http::{EventWriter, Incoming, Response};
+use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Audience, Projection};
-use crate::workbench::{WorkbenchEvent, WorkbenchEventSink};
+use crate::workbench::{WorkbenchChange, WorkbenchEvent, WorkbenchEventSink};
 
 /// The type of the stream.
 pub const EVENT_STREAM_TYPE: &str = "text/event-stream";
@@ -43,6 +46,9 @@ const EVENT_HELLO: &str = "hello";
 /// The name of the event that ends a stream whose screen must read a snapshot again.
 const EVENT_RESET: &str = "reset";
 
+/// The name of the event that ends a watching stream because watching was turned off.
+const EVENT_CLOSED: &str = "closed";
+
 /// The comment a quiet stream sends.
 const COMMENT_KEEP: &str = ": keep";
 
@@ -61,6 +67,7 @@ struct Subscriber {
     after: u64,
     queue: SyncSender<Arc<str>>,
     behind: Arc<AtomicBool>,
+    closed: Arc<AtomicBool>,
 }
 
 /// Fans every published change out to every open stream.
@@ -118,12 +125,14 @@ impl EventHub {
         let id = self.next_id.fetch_add(1, Ordering::AcqRel);
         let (queue, receiver) = mpsc::sync_channel(QUEUE_DEPTH);
         let behind = Arc::new(AtomicBool::new(false));
+        let closed = Arc::new(AtomicBool::new(false));
         subscribers.push(Subscriber {
             id,
             context,
             after,
             queue,
             behind: Arc::clone(&behind),
+            closed: Arc::clone(&closed),
         });
         Ok(Subscription {
             hub: Arc::clone(self),
@@ -132,6 +141,7 @@ impl EventHub {
             hello_seq: after,
             receiver,
             behind,
+            closed,
         })
     }
 
@@ -169,9 +179,19 @@ impl WorkbenchEventSink for EventHub {
         let mut subscribers = lock(&self.subscribers);
         let mut control: Option<Arc<str>> = None;
         let mut watch: Option<Arc<str>> = None;
+        // A part that says watching is off ends every watching stream, and none of them is sent
+        // the part: a screen that may no longer watch is shown no data.
+        let watching_off = matches!(
+            &event.change,
+            WorkbenchChange::ControlsChanged { controls } if !controls.viewing.watch
+        );
         subscribers.retain(|subscriber| {
             if subscriber.after >= event.seq {
                 return true;
+            }
+            if watching_off && subscriber.context == WebContext::Watch {
+                subscriber.closed.store(true, Ordering::Release);
+                return false;
             }
             let frame = match subscriber.context {
                 WebContext::Control => {
@@ -202,6 +222,7 @@ pub struct Subscription {
     hello_seq: u64,
     receiver: Receiver<Arc<str>>,
     behind: Arc<AtomicBool>,
+    closed: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for Subscription {
@@ -229,6 +250,8 @@ pub enum Frame {
     Keep,
     /// The screen fell behind and must read a snapshot again.
     Reset,
+    /// Watching was turned off, so this watching stream is over.
+    Closed,
     /// The stream is over.
     End,
 }
@@ -252,7 +275,9 @@ impl Subscription {
             Ok(frame) => Frame::Change(frame),
             Err(RecvTimeoutError::Timeout) => Frame::Keep,
             Err(RecvTimeoutError::Disconnected) => {
-                if self.behind.load(Ordering::Acquire) {
+                if self.closed.load(Ordering::Acquire) {
+                    Frame::Closed
+                } else if self.behind.load(Ordering::Acquire) {
                     Frame::Reset
                 } else {
                     Frame::End
@@ -273,6 +298,13 @@ pub fn keep_frame() -> String {
 pub fn reset_frame() -> String {
     let data = json!({ "reason": RESET_BEHIND });
     format!("event: {EVENT_RESET}\ndata: {data}\n\n")
+}
+
+/// The text of the event that tells a watching screen watching was turned off.
+#[must_use]
+pub fn closed_frame() -> String {
+    let data = json!({ "sentence": words::WATCHING_OFF });
+    format!("event: {EVENT_CLOSED}\ndata: {data}\n\n")
 }
 
 /// Write `head` and then the stream until it ends, a write fails or a write takes too long.
@@ -296,6 +328,7 @@ fn write_stream(
             Frame::Change(frame) => writer.write(&frame)?,
             Frame::Keep => writer.write(&keep_frame())?,
             Frame::Reset => return writer.write(&reset_frame()),
+            Frame::Closed => return writer.write(&closed_frame()),
             Frame::End => return Ok(()),
         }
     }

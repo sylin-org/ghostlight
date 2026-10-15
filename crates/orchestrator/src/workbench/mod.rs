@@ -5,12 +5,14 @@ mod history;
 mod input;
 mod live;
 pub mod parts;
+mod watching;
 pub mod web;
 
 pub use history::{HistoryStep, StepHistoryState};
 pub use input::{
     validate_policy_document, validate_search_query, POLICY_DOCUMENT_LIMIT, SEARCH_QUERY_LIMIT,
 };
+pub use watching::Watching;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
@@ -36,7 +38,7 @@ use crate::install::{
 };
 use crate::language::outcome::Observed;
 use crate::language::readiness;
-use crate::language::workbench as words;
+use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::workspace::WorkspaceStore;
 
 const HISTORY_LIMIT: usize = 500;
@@ -416,7 +418,7 @@ pub struct WebFacts {
     /// The value that changes on every start of this service.
     pub instance: String,
     /// Whether other screens may watch.
-    pub watching: Arc<web::Watching>,
+    pub watching: Arc<Watching>,
 }
 
 /// Why a precondition-guarded policy write did not happen.
@@ -428,6 +430,17 @@ pub enum PolicyWriteError {
     /// The authority refused the write.
     #[error(transparent)]
     Authoring(#[from] AuthoringError),
+}
+
+/// Why "Others can watch" was not changed.
+#[derive(Debug, Error)]
+pub enum WatchingError {
+    /// No watch view is being served, so there is nothing to turn on or off.
+    #[error("{}", words::WATCHING_NOT_SERVED)]
+    NotServed,
+    /// The setting could not be written to this computer.
+    #[error("{}", words::WATCHING_NOT_SAVED)]
+    NotSaved(#[source] io::Error),
 }
 
 /// Why a state-guarded client act did not happen.
@@ -451,11 +464,14 @@ impl WorkbenchFacade {
         browser: Arc<dyn BrowserPort>,
         diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
+        let web: Arc<OnceLock<WebFacts>> = Arc::default();
         let live = live::Live::new(
             &projection,
             workspaces,
             governance.clone(),
             browser,
+            Arc::clone(&diagnostics),
+            Arc::clone(&web),
             unix_ms(),
         );
         Self {
@@ -464,7 +480,7 @@ impl WorkbenchFacade {
             diagnostics,
             harnesses: HarnessRegistry::discover(),
             live,
-            web: Arc::default(),
+            web,
             native_acts: Arc::default(),
             policy_writes: Arc::default(),
             diagnostics_writes: Arc::default(),
@@ -526,7 +542,25 @@ impl WorkbenchFacade {
             part: parts::HintedPart::Diagnostics,
             etag: parts::json_etag(&report),
         });
+        self.live.refresh();
         report
+    }
+
+    /// Turn "Others can watch" on or off, and answer the Controls part as the window sees it.
+    ///
+    /// This is the only way watching changes. A request that arrives afterwards is in the context
+    /// the new state gives it, and turning it off ends every open watching stream.
+    pub fn set_watching(&self, on: bool) -> Result<parts::ControlsPart, WatchingError> {
+        let facts = self.web.get().ok_or(WatchingError::NotServed)?;
+        facts.watching.set(on).map_err(WatchingError::NotSaved)?;
+        self.live.refresh();
+        Ok(self.live.controls(&self.live.gather()))
+    }
+
+    /// What is connected to the service right now, counted the light way.
+    #[must_use]
+    pub fn connection_counts(&self) -> ConnectionCounts {
+        self.live.connection_counts()
     }
 
     /// Attach the best-effort operating-system presentation adapter.
@@ -637,6 +671,7 @@ impl WorkbenchFacade {
         let seq = self.projection.current_seq();
         let gathered = self.live.gather();
         let status = self.live.status(&gathered);
+        let controls = self.live.controls(&gathered);
         let live::Gathered {
             operations,
             sessions,
@@ -730,6 +765,7 @@ impl WorkbenchFacade {
                 policy: status.configuration.policy,
             },
             service: status.service,
+            controls,
         }
     }
 
@@ -1307,6 +1343,13 @@ pub enum WorkbenchChange {
         /// The whole part, which replaces the one a surface holds.
         connections: parts::ConnectionsPart,
     },
+    /// The controls part differs from the one last published.
+    ControlsChanged {
+        /// The whole part as the window sees it, which replaces the one a surface holds. Each
+        /// context is shown its own form when the change is projected. Boxed because the part is
+        /// far larger than most changes, and the published JSON is unchanged.
+        controls: Box<parts::ControlsPart>,
+    },
     /// A part that is read on demand changed: read it again if you show it.
     ///
     /// The tag lets a surface skip a change it has already read.
@@ -1441,6 +1484,8 @@ pub struct WorkbenchSnapshot {
     pub harnesses: Vec<HarnessSummary>,
     /// Content-free authority and runtime configuration facts.
     pub configuration: ConfigurationSummary,
+    /// The shared Controls sheet, as the window sees it.
+    pub controls: parts::ControlsPart,
 }
 
 /// Current service facts.

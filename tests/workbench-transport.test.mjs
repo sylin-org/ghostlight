@@ -16,7 +16,7 @@ const ui = join(resolve(import.meta.dirname, ".."), "crates", "orchestrator", "u
 const Transport = require(join(ui, "transport.js"));
 const Words = require(join(ui, "words.js"));
 
-const PARTS = "status,connections,activity,integrations,diagnostics";
+const PARTS = "status,connections,activity,integrations,diagnostics,controls";
 
 /** A response the fake service gives. */
 function answer(status, body, headers = {}) {
@@ -55,10 +55,11 @@ const parts = {
     document_coverage: [{ invocation: "b" }]
   },
   integrations: { harnesses: [{ id: "codex" }] },
-  diagnostics: { diagnostics: [{ label: "Orchestrator" }], process_diagnostics: { layer: "off" } }
+  diagnostics: { diagnostics: [{ label: "Orchestrator" }], process_diagnostics: { layer: "off" } },
+  controls: { viewing: { watch: true }, you: { context: "control" } }
 };
 
-test("a snapshot is one GET naming the five parts, put back into today's flat shape", async () => {
+test("a snapshot is one GET naming the six parts, put back into today's flat shape", async () => {
   const send = fakeFetch(() => answer(200, { seq: 9, instance: "i1", parts }));
   const transport = Transport.overHttp({ fetch: send });
   const snapshot = await transport.snapshot();
@@ -67,10 +68,11 @@ test("a snapshot is one GET naming the five parts, put back into today's flat sh
   assert.equal(send.calls[0].path, `/api/snapshot?parts=${PARTS}`);
   assert.equal(send.calls[0].body, undefined);
   assert.deepEqual(Object.keys(snapshot).sort(), [
-    "audit_health", "audit_notice", "browsers", "configuration", "diagnostics", "document_coverage",
-    "harnesses", "history", "instance", "operations", "overview", "process_diagnostics", "readiness",
-    "runtime_note", "seq", "service", "sessions"
+    "audit_health", "audit_notice", "browsers", "configuration", "controls", "diagnostics",
+    "document_coverage", "harnesses", "history", "instance", "operations", "overview",
+    "process_diagnostics", "readiness", "runtime_note", "seq", "service", "sessions"
   ]);
+  assert.deepEqual(snapshot.controls, parts.controls);
   assert.equal(snapshot.seq, 9);
   assert.equal(snapshot.service.runtime_state, "active");
   assert.equal(snapshot.runtime_note, "Paused from the tray.");
@@ -153,6 +155,7 @@ test("the other acts go where the table sends them", async () => {
   const transport = Transport.overHttp({ fetch: send, bearer: "k" });
   await transport.previewPolicy("{}");
   await transport.setDiagnostics(true);
+  await transport.setWatching(false);
   await transport.refreshHarnesses();
   await transport.setupDetectedHarnesses();
   await transport.locateHarness("codex");
@@ -164,6 +167,7 @@ test("the other acts go where the table sends them", async () => {
   assert.deepEqual(seen, [
     'POST /api/policy/preview {"document":"{}"}',
     'PUT /api/controls/diagnostics {"on":true}',
+    'PUT /api/controls/viewing {"watch":false}',
     "POST /api/integrations/rescan {}",
     "POST /api/integrations/setup-all {}",
     'POST /api/integrations/locate {"id":"codex"}',
@@ -433,6 +437,7 @@ test("the native shell path still invokes today's commands with today's argument
   await transport.search("q");
   await transport.applyIntent("hold");
   await transport.setDiagnostics(true);
+  await transport.setWatching(false);
   await transport.revealDiagnostics();
   await transport.policy();
   await transport.previewPolicy("p");
@@ -453,6 +458,7 @@ test("the native shell path still invokes today's commands with today's argument
     ["workbench_search", { query: "q" }],
     ["apply_runtime_intent", { intent: "hold" }],
     ["set_diagnostics", { on: true }],
+    ["set_watching", { watch: false }],
     ["reveal_diagnostics"],
     ["workbench_policy"],
     ["preview_user_policy", { document: "p" }],
@@ -509,8 +515,8 @@ test("every act the page names is a key of the context a window is given", () =>
     opener: Transport.OPENER_SERVICE,
     acts: Object.fromEntries([
       "search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
-      "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all", "harness_act",
-      "test_notification", "open", "reveal_diagnostics", "locate"
+      "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching", "setup_all",
+      "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"
     ].map((act) => [act, { available: true, why_not: null }]))
   };
   const named = Object.values(Transport.ACT);

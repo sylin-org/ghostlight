@@ -84,6 +84,7 @@ enum Api {
     PutPolicy,
     DeletePolicy,
     SetDiagnostics,
+    SetViewing,
     SetupAll,
     HarnessAct,
     TestNotification,
@@ -126,7 +127,7 @@ const fn route(
 }
 
 /// The closed table. Anything not here is not served.
-static ROUTES: [Route; 18] = [
+static ROUTES: [Route; 19] = [
     route(
         Api::Context,
         Method::Get,
@@ -208,6 +209,13 @@ static ROUTES: [Route; 18] = [
         Api::SetDiagnostics,
         Method::Put,
         "/api/controls/diagnostics",
+        WatchAccess::NeedsWindow,
+        SMALL_BODY,
+    ),
+    route(
+        Api::SetViewing,
+        Method::Put,
+        "/api/controls/viewing",
         WatchAccess::NeedsWindow,
         SMALL_BODY,
     ),
@@ -632,6 +640,7 @@ fn api(
         Api::PutPolicy => acted(shared, put_policy(shared, head, &body)),
         Api::DeletePolicy => acted(shared, delete_policy(shared, head)),
         Api::SetDiagnostics => acted(shared, set_diagnostics(shared, &projection, &body)),
+        Api::SetViewing => acted(shared, set_viewing(shared, &projection, &body)),
         Api::SetupAll => acted(shared, setup_all(shared, &body)),
         Api::HarnessAct => acted(shared, harness_act(shared, &projection, &body)),
         Api::TestNotification => test_notification(shared, &body),
@@ -708,6 +717,12 @@ struct RuntimeArguments {
 #[serde(deny_unknown_fields)]
 struct DiagnosticsArguments {
     on: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ViewingArguments {
+    watch: bool,
 }
 
 /// The client acts a page can ask for. A check is not one: it changes nothing.
@@ -1014,6 +1029,17 @@ fn set_diagnostics(shared: &Shared, projection: &Projection, body: &[u8]) -> Res
     };
     let report = shared.facade.set_diagnostics(arguments.on);
     json_response(Status::Ok, &projection.diagnostics_report(&report))
+}
+
+fn set_viewing(shared: &Shared, projection: &Projection, body: &[u8]) -> Response {
+    let arguments: ViewingArguments = match decode(body) {
+        Ok(arguments) => arguments,
+        Err(response) => return response,
+    };
+    match shared.facade.set_watching(arguments.watch) {
+        Ok(controls) => json_response(Status::Ok, &projection.controls(&controls)),
+        Err(error) => refused(&error.to_string()),
+    }
 }
 
 fn setup_all(shared: &Shared, body: &[u8]) -> Response {

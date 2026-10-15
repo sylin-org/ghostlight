@@ -100,6 +100,29 @@ if (JSON.stringify(actualHarnessIds) !== JSON.stringify(expectedHarnessIds)
   throw new Error(`preview harness roster drifted: ${harnesses.length} rows / ${previewProductCount} products`);
 }
 
+// The Controls sheet as the window sees it: every act available, watching on.
+const controlsFixture = {
+  runtime: {
+    label: "Browser work", state: "active", word: "Running", note: null,
+    acts: Object.fromEntries(["hold", "resume", "start_session", "end_session"].map((act) => [act, { available: true, why_not: null }]))
+  },
+  viewing: {
+    label: "Others can watch", watch: true, url: "http://127.0.0.1:41234/",
+    word: "On -- anyone on this computer can open this view",
+    acts: { set_watching: { available: true, why_not: null } }
+  },
+  diagnostics: {
+    label: "Process diagnostics", on: false, layer: "off", used_bytes: 0, folder: "~/.ghostlight/logs", word: "Off",
+    acts: { set_diagnostics: { available: true, why_not: null }, reveal_diagnostics: { available: true, why_not: null } }
+  },
+  notifications: {
+    label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
+    acts: { test_notification: { available: true, why_not: null } }
+  },
+  service: { word: "Ghostlight service is up; 3 MCP clients and 2 browsers connected." },
+  you: { context: "control", word: "Full control", sentence: "Others on this computer can watch this view in a browser." }
+};
+
 const snapshot = {
   seq: 0,
   generated_at_ms: Date.now(),
@@ -128,6 +151,7 @@ const snapshot = {
     { id: "authority", label: "Authority", severity: "passing", detail: "Configured authority sources are valid." }
   ],
   harnesses,
+  controls: controlsFixture,
   configuration: {
     runtime_state: "active",
     local_policy_configured: true,
@@ -255,6 +279,21 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     for (const handler of listeners) handler({ payload: event });
   };
 
+  // The sheet follows the service: a change to the runtime, watching or diagnostics is pushed whole.
+  const publishControls = () => {
+    const controls = preview.controls;
+    controls.runtime.state = preview.service.runtime_state;
+    controls.runtime.word = { active: "Running", held: "Paused", ended: "Session ended" }[controls.runtime.state];
+    controls.viewing.word = controls.viewing.watch
+      ? "On -- anyone on this computer can open this view"
+      : "Off -- only this window shows Ghostlight";
+    controls.you.sentence = controls.viewing.watch
+      ? "Others on this computer can watch this view in a browser."
+      : "Watching is off: only this window shows Ghostlight.";
+    controls.diagnostics.word = controls.diagnostics.on ? "On (" + controls.diagnostics.layer + ")" : "Off";
+    publish({ kind: "controls_changed", controls: JSON.parse(JSON.stringify(controls)) });
+  };
+
   const runOne = () => {
     if (preview.service.runtime_state !== "active") return;
     counter += 1;
@@ -305,8 +344,8 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
         if (command === "workbench_context") {
           // The window's own context: every act is available, so the page draws all of it.
           const acts = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
-            "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all",
-            "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"];
+            "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
+            "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"];
           return {
             context: "control", word: "Full control",
             sentence: "Others on this computer can watch this view in a browser.",
@@ -315,7 +354,17 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
             product: { version: "1.0.0", license: "Apache-2.0 OR MIT" }, links: {}
           };
         }
-        if (command === "set_diagnostics") return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
+        if (command === "set_diagnostics") {
+          preview.controls.diagnostics.on = args.on;
+          preview.controls.diagnostics.layer = args.on ? "marker" : "off";
+          publishControls();
+          return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
+        }
+        if (command === "set_watching") {
+          preview.controls.viewing.watch = args.watch;
+          publishControls();
+          return preview.controls;
+        }
         if (command === "continue_in_window") return null;
         if (command === "workbench_snapshot") return preview;
         if (command === "workbench_search") return [];
@@ -338,6 +387,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
           preview.service.runtime_state = state;
           preview.configuration.runtime_state = state;
           publish({ kind: "runtime_changed", runtime_state: state });
+          publishControls();
           if (state === "active") runOne();
           // Mirrors crates/orchestrator/src/language/control.rs: the confirmation states the
           // authority's state only, never browser delivery.
@@ -377,7 +427,7 @@ const server = createServer(async (request, response) => {
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
     const served = new Set(["index.html", "styles.css", "app.js", "ghostlight.png"]);
-    if (!served.has(name) && !/^lib\/[a-z]+\.js$/.test(name)
+    if (!served.has(name) && !/^lib\/[a-z]+\.js$/.test(name) && !/^kit\/[a-z]+\.(js|css)$/.test(name)
       && !/^integrations\/[a-z0-9-]+\.svg$/.test(name)) {
       response.writeHead(404).end();
       return;

@@ -465,6 +465,7 @@ fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
             .body(&json!({ "document": READ_POLICY }).to_string()),
         Call::new("DELETE", "/api/policy/user").header("If-Match", tag),
         Call::new("PUT", "/api/controls/diagnostics").body(r#"{"on":true}"#),
+        Call::new("PUT", "/api/controls/viewing").body(r#"{"watch":false}"#),
         post("/api/integrations/setup-all", "{}"),
         post(
             "/api/integrations/act",
@@ -484,6 +485,8 @@ fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
         assert_eq!(reply.code(), "needs_window", "{label}");
     }
     assert_eq!(acts.asked(), 0);
+    assert!(fixture.facade.watching());
+    assert!(!fixture.root.join("state").join("watch.off").exists());
     assert_eq!(fixture.facade.policy().layers.len(), 0);
     assert!(fixture.facade.diagnostics_report().directory.is_some());
     assert_eq!(fixture.facade.diagnostics.directory(), None);
@@ -1643,8 +1646,14 @@ fn the_acts_that_change_a_part_hint_at_it_with_its_tag() {
     assert_eq!(diagnostics.status, 200);
     let hinted = hint(&mut window, "diagnostics");
     assert_eq!(hinted.json()["change"]["etag"].as_str().unwrap().len(), 64);
+    // The last change the act caused is the sheet's new state, which follows the hint.
+    let sheet = window.until(|block| block.is("controls_changed"));
     assert_eq!(
-        hinted.id,
+        sheet.json()["change"]["controls"]["diagnostics"]["on"],
+        true
+    );
+    assert_eq!(
+        sheet.id,
         Some(format!(
             "instance_test-{}",
             diagnostics.header("Ghostlight-Seq").unwrap()
@@ -1941,4 +1950,213 @@ fn a_watcher_is_given_the_download_address_of_each_client_that_has_one() {
         .unwrap()
         .iter()
         .any(|harness| harness.get("download_url").is_some()));
+}
+
+/// The marker a home holds only while watching is off.
+fn watch_off_marker(fixture: &Fixture) -> PathBuf {
+    fixture.root.join("state").join("watch.off")
+}
+
+fn set_viewing(fixture: &Fixture, watch: bool) -> Reply {
+    fixture.control(
+        Call::new("PUT", "/api/controls/viewing").body(&json!({ "watch": watch }).to_string()),
+    )
+}
+
+#[test]
+fn a_fresh_home_is_watched_and_the_controls_part_says_so_to_each_context() {
+    let fixture = Fixture::start();
+    assert!(fixture.facade.watching());
+    assert!(!watch_off_marker(&fixture).exists());
+
+    let window = fixture.control(get("/api/snapshot?parts=controls")).json();
+    let controls = &window["parts"]["controls"];
+    assert_eq!(controls["viewing"]["watch"], true);
+    assert_eq!(controls["viewing"]["url"], fixture.server.address().url());
+    assert_eq!(controls["viewing"]["word"], words::CONTROLS_VIEWING_ON);
+    assert_eq!(
+        controls["viewing"]["acts"]["set_watching"]["available"],
+        true
+    );
+    assert_eq!(controls["you"]["context"], "control");
+
+    let everything = fixture.control(get("/api/snapshot")).json();
+    assert!(everything["parts"].get("controls").is_some());
+
+    let tab = fixture.watch(get("/api/snapshot?parts=controls")).json();
+    let seen = &tab["parts"]["controls"];
+    assert_eq!(seen["you"]["context"], "watch");
+    assert_eq!(seen["you"]["sentence"], words::SENTENCE_WATCH);
+    assert_eq!(seen["viewing"]["acts"]["set_watching"]["available"], false);
+    assert_eq!(seen["runtime"]["acts"]["hold"]["available"], true);
+}
+
+#[test]
+fn turning_watching_off_closes_a_tab_at_once_and_the_window_keeps_its_stream() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    let mut tab = Stream::open(fixture.port(), None);
+    window.hello();
+    tab.hello();
+
+    let off = set_viewing(&fixture, false);
+    assert_eq!(off.status, 200);
+    assert!(off.header("Ghostlight-Seq").is_some());
+    let answer = off.json();
+    assert_eq!(answer["viewing"]["watch"], false);
+    assert_eq!(answer["viewing"]["word"], words::CONTROLS_VIEWING_OFF);
+    assert_eq!(answer["you"]["sentence"], words::SENTENCE_CONTROL_PRIVATE);
+    assert!(watch_off_marker(&fixture).exists());
+    assert!(!fixture.facade.watching());
+
+    // A request with no key is closed from this moment.
+    assert_eq!(
+        fixture.watch(get("/api/context")).json()["context"],
+        "closed"
+    );
+    assert_eq!(fixture.watch(get("/api/snapshot")).status, 403);
+
+    // The watching stream is told why it ended, and is over.
+    let closed = tab.until(|block| block.event.as_deref() == Some("closed"));
+    assert_eq!(closed.json()["sentence"], words::WATCHING_OFF);
+    assert!(tab.next().is_none());
+
+    // The window hears the new state, and keeps receiving.
+    let sheet = window.until(|block| {
+        block.is("controls_changed")
+            && block.json()["change"]["controls"]["viewing"]["watch"] == false
+    });
+    assert_eq!(
+        sheet.json()["change"]["controls"]["you"]["sentence"],
+        words::SENTENCE_CONTROL_PRIVATE
+    );
+    assert_eq!(
+        fixture
+            .control(post("/api/runtime", r#"{"intent":"hold"}"#))
+            .status,
+        200
+    );
+    window.until(|block| {
+        block.is("status_changed")
+            && block.json()["change"]["status"]["service"]["runtime_state"] == "held"
+    });
+}
+
+#[test]
+fn turning_watching_on_removes_the_marker_and_a_tab_watches_again() {
+    let fixture = Fixture::closed();
+    assert!(watch_off_marker(&fixture).exists());
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    window.hello();
+    assert_eq!(
+        fixture.watch(get("/api/context")).json()["context"],
+        "closed"
+    );
+
+    let on = set_viewing(&fixture, true);
+    assert_eq!(on.status, 200);
+    assert_eq!(on.json()["viewing"]["watch"], true);
+    assert!(!watch_off_marker(&fixture).exists());
+    assert_eq!(
+        fixture.watch(get("/api/context")).json()["context"],
+        "watch"
+    );
+    window.until(|block| {
+        block.is("controls_changed")
+            && block.json()["change"]["controls"]["viewing"]["watch"] == true
+    });
+}
+
+#[test]
+fn setting_watching_to_what_it_already_is_changes_nothing_and_publishes_nothing() {
+    let fixture = Fixture::start();
+    assert_eq!(set_viewing(&fixture, true).status, 200);
+    let seq = fixture.facade.current_seq();
+    assert_eq!(set_viewing(&fixture, true).status, 200);
+    assert_eq!(fixture.facade.current_seq(), seq);
+}
+
+#[test]
+fn the_watching_route_takes_exactly_one_boolean() {
+    let fixture = Fixture::start();
+    for body in [
+        r#"{"watch":"yes"}"#,
+        r#"{}"#,
+        r#"{"watch":false,"extra":1}"#,
+    ] {
+        let reply = fixture.control(Call::new("PUT", "/api/controls/viewing").body(body));
+        assert_eq!(reply.status, 400, "{body}");
+        assert_eq!(reply.code(), "bad_request", "{body}");
+    }
+    assert!(fixture.facade.watching());
+}
+
+#[test]
+fn a_facade_that_is_not_served_cannot_change_watching() {
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None, None),
+        Arc::new(crate::browser::RelayBrowserPort::new(
+            "epoch".into(),
+            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
+        )),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let error = facade.set_watching(false).unwrap_err();
+    assert_eq!(error.to_string(), words::WATCHING_NOT_SERVED);
+    assert!(facade.watching());
+}
+
+#[test]
+fn diagnostics_turned_on_from_a_terminal_reach_the_sheet_within_one_refresher_tick() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    window.hello();
+    fixture.facade.authority_refreshed();
+    window.until(|block| block.is("controls_changed"));
+
+    // The command line flips the same marker the window does, behind the facade's back.
+    fixture.facade.diagnostics.toggle();
+    fixture.facade.authority_refreshed();
+    let sheet = window.until(|block| {
+        block.is("controls_changed")
+            && block.json()["change"]["controls"]["diagnostics"]["on"] == true
+    });
+    assert!(sheet.json()["change"]["controls"]["diagnostics"]["word"]
+        .as_str()
+        .unwrap()
+        .starts_with("On ("));
+}
+
+#[test]
+fn a_pause_changes_the_runtime_row_of_every_screens_controls() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    let mut tab = Stream::open(fixture.port(), None);
+    window.hello();
+    tab.hello();
+    assert_eq!(
+        fixture
+            .watch(post("/api/runtime", r#"{"intent":"hold"}"#))
+            .status,
+        200
+    );
+    let held = |block: &Block| {
+        block.is("controls_changed")
+            && block.json()["change"]["controls"]["runtime"]["state"] == "held"
+    };
+    let seen_by_window = window.until(held);
+    let seen_by_tab = tab.until(held);
+    let runtime = |block: &Block| block.json()["change"]["controls"]["runtime"].clone();
+    assert_eq!(runtime(&seen_by_window)["note"], words::PAUSED_FROM_WATCHER);
+    assert_eq!(
+        runtime(&seen_by_window)["acts"]["resume"]["available"],
+        true
+    );
+    assert_eq!(runtime(&seen_by_tab)["acts"]["resume"]["available"], false);
+    assert_eq!(
+        seen_by_tab.json()["change"]["controls"]["you"]["context"],
+        "watch"
+    );
 }

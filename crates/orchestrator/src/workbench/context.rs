@@ -91,6 +91,8 @@ pub enum WebAct {
     RemovePolicy,
     /// Turn process diagnostics on or off.
     SetDiagnostics,
+    /// Turn "Others can watch" on or off.
+    SetWatching,
     /// Connect every client Ghostlight can.
     SetupAll,
     /// Install, fix or remove one client's setup.
@@ -107,7 +109,7 @@ pub enum WebAct {
 
 impl WebAct {
     /// Every act, in the order the context document lists them.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Search,
         Self::CheckPolicy,
         Self::Rescan,
@@ -119,6 +121,7 @@ impl WebAct {
         Self::ApplyPolicy,
         Self::RemovePolicy,
         Self::SetDiagnostics,
+        Self::SetWatching,
         Self::SetupAll,
         Self::HarnessAct,
         Self::TestNotification,
@@ -142,6 +145,7 @@ impl WebAct {
             Self::ApplyPolicy => "apply_policy",
             Self::RemovePolicy => "remove_policy",
             Self::SetDiagnostics => "set_diagnostics",
+            Self::SetWatching => "set_watching",
             Self::SetupAll => "setup_all",
             Self::HarnessAct => "harness_act",
             Self::TestNotification => "test_notification",

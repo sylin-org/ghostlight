@@ -31,6 +31,58 @@
   /** The band's word while the live stream is lost and being opened again. */
   const RECONNECTING = "Reconnecting";
 
+  /** Said after the Controls sheet turns "Others can watch" on. */
+  const WATCHING_TURNED_ON = "Others can watch again.";
+
+  /** Said after the Controls sheet turns "Others can watch" off. */
+  const WATCHING_TURNED_OFF = "Only this window shows Ghostlight now.";
+
+  /** Said after the Controls sheet sends the notification test. */
+  const TEST_NOTIFICATION_SENT = "Test notification sent.";
+
+  /** Said after the Controls sheet copies the address of the watch view. */
+  const ADDRESS_COPIED = "Address copied.";
+
+  /**
+   * The labels of the Controls sheet that belong to this page: its headings, its personal
+   * settings and the verb on each button. The service says everything else, in its own part.
+   */
+  const CONTROLS = Object.freeze({
+    open: "Controls",
+    title: "Controls",
+    screen: "On this screen",
+    computer: "For Ghostlight on this computer",
+    density: "Density",
+    comfortable: "Comfortable",
+    compact: "Compact",
+    motion: "Motion",
+    followSystem: "Follow the system",
+    reduced: "Reduced",
+    pause: "Pause",
+    resume: "Resume",
+    startSession: "Start session",
+    endSession: "End session",
+    turnOn: "Turn on",
+    turnOff: "Turn off",
+    copyAddress: "Copy address",
+    openLogFolder: "Open log folder",
+    sendTest: "Send test",
+    continueInWindow: CONTINUE_LABEL
+  });
+
+  /** How a count of bytes reads on the Controls sheet. */
+  function byteSize(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 1024) return `${Math.max(0, Math.floor(bytes || 0))} bytes`;
+    const units = ["KB", "MB", "GB"];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+  }
+
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
   const VIEWS = { monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
 
@@ -462,6 +514,7 @@
 
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
+    WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONTROLS, byteSize,
     neverTouchedCount, leftOutCount,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,

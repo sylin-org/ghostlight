@@ -94,7 +94,7 @@ h1, h2, h3 { margin: 0; font-weight: 400; }
 
 /* ---------------------------- the lamp band ---------------------------- */
 .lampband {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
   align-items: center; gap: 18px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line);

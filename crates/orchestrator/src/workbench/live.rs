@@ -1,27 +1,33 @@
 //! The live parts of the workbench: what a screen shows the moment something connects, pauses or
 //! starts working.
 //!
-//! The status and connections parts change without any act of a screen. A pause from the tray or
-//! the browser toolbar, a session that opens, a browser that goes away: none of them is a domain
-//! event of the work projection. This module builds those two parts the light way (no history),
-//! remembers the last ones it published, and publishes a part only when it differs from that.
-//! Every caller that knows something may have changed asks for a refresh and nothing more
-//! (ADR-0199, amendment of 2026-10-15).
+//! The status, connections and controls parts change without any act of a screen. A pause from the
+//! tray or the browser toolbar, a session that opens, a browser that goes away, process diagnostics
+//! turned on from a terminal: none of them is a domain event of the work projection. This module
+//! builds those parts the light way (no history), remembers the last ones it published, and
+//! publishes a part only when it differs from that. Every caller that knows something may have
+//! changed asks for a refresh and nothing more (ADR-0199, amendment of 2026-10-15).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
-use super::parts::{self, ConnectionsPart, HintedPart, StatusConfiguration, StatusPart};
+use super::parts::{
+    self, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, StatusConfiguration, StatusPart,
+};
 use super::{
     BrowserInstanceSummary, OperationSummary, ReadinessSummary, RuntimeSource, ServiceSummary,
-    SessionSummary, WorkbenchChange, WorkbenchProjection,
+    SessionSummary, WebFacts, WorkbenchChange, WorkbenchProjection,
 };
 use crate::browser::adapter::RuntimeControlState;
 use crate::browser::BrowserPort;
+use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
 use crate::governance::{GovernanceDiagnostics, GovernanceFacade};
+use crate::intake::session::IntakeChannel;
 use crate::language::audit_health::AuditHealth;
 use crate::language::readiness;
+use crate::language::workbench::ConnectionCounts;
+use crate::provenance::ConnectionDetails;
 use crate::workspace::WorkspaceStore;
 
 /// What one look at the service says, gathered once so every part built from it agrees.
@@ -63,6 +69,7 @@ impl Gathered {
 struct Published {
     status: Option<StatusPart>,
     connections: Option<ConnectionsPart>,
+    controls: Option<ControlsPart>,
 }
 
 /// What the facade remembers between looks.
@@ -74,12 +81,32 @@ struct Remembered {
     authority: String,
 }
 
+/// Count `connections` by the intake that admitted each, beside `browsers`.
+fn count_connections<'a>(
+    connections: impl Iterator<Item = &'a ConnectionDetails>,
+    browsers: usize,
+) -> ConnectionCounts {
+    let mut counts = ConnectionCounts {
+        browsers,
+        ..ConnectionCounts::default()
+    };
+    for connection in connections {
+        match connection.channel {
+            IntakeChannel::Mcp => counts.mcp_clients += 1,
+            IntakeChannel::Cli => counts.command_line += 1,
+        }
+    }
+    counts
+}
+
 /// The live parts of one workbench.
 pub(super) struct Live {
     projection: WorkbenchProjection,
     workspaces: WorkspaceStore,
     governance: GovernanceFacade,
     browser: Arc<dyn BrowserPort>,
+    diagnostics: Arc<DiagnosticsHub>,
+    web: Arc<OnceLock<WebFacts>>,
     started_at_ms: u64,
     published: Mutex<Published>,
     wanted: AtomicBool,
@@ -102,6 +129,8 @@ impl Live {
         workspaces: WorkspaceStore,
         governance: GovernanceFacade,
         browser: Arc<dyn BrowserPort>,
+        diagnostics: Arc<DiagnosticsHub>,
+        web: Arc<OnceLock<WebFacts>>,
         started_at_ms: u64,
     ) -> Arc<Self> {
         let live = Arc::new(Self {
@@ -113,6 +142,8 @@ impl Live {
             }),
             governance,
             browser,
+            diagnostics,
+            web,
             started_at_ms,
             published: Mutex::default(),
             wanted: AtomicBool::new(false),
@@ -216,6 +247,39 @@ impl Live {
         }
     }
 
+    /// The Controls sheet of one look, as the window sees it.
+    pub fn controls(&self, gathered: &Gathered) -> ControlsPart {
+        let facts = self.web.get();
+        let report = self.diagnostics.report();
+        let user_home = parts::user_home();
+        ControlsPart::of(&ControlsFacts {
+            runtime_state: gathered.runtime_state,
+            runtime_note: gathered.runtime_note.as_deref(),
+            watching: facts.is_none_or(|facts| facts.watching.is_on()),
+            url: facts.map(|facts| facts.address.url()),
+            diagnostics: &report,
+            counts: count_connections(
+                gathered
+                    .sessions
+                    .iter()
+                    .flat_map(|session| session.connections.iter()),
+                gathered.browsers.len(),
+            ),
+            user_home: user_home.as_deref(),
+        })
+    }
+
+    /// What is connected right now, without gathering operations, history or authority.
+    pub fn connection_counts(&self) -> ConnectionCounts {
+        let summaries = self.workspaces.summaries();
+        count_connections(
+            summaries
+                .iter()
+                .flat_map(|workspace| workspace.connections.iter()),
+            self.browser.browsers().len(),
+        )
+    }
+
     /// Remember who brought the runtime to `state`. A request that leaves the state as it was
     /// keeps the first source: the pause came from there.
     pub fn record_runtime(&self, state: RuntimeControlState, source: RuntimeSource) {
@@ -264,6 +328,13 @@ impl Live {
                     published.connections = Some(connections.clone());
                     self.projection
                         .publish(WorkbenchChange::ConnectionsChanged { connections });
+                }
+                let controls = self.controls(&gathered);
+                if published.controls.as_ref() != Some(&controls) {
+                    published.controls = Some(controls.clone());
+                    self.projection.publish(WorkbenchChange::ControlsChanged {
+                        controls: Box::new(controls),
+                    });
                 }
             }
             drop(published);

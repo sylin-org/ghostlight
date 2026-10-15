@@ -1088,3 +1088,86 @@ fn an_address_that_is_not_secure_never_reaches_the_computer() {
     assert_eq!(acts.asked(), 0);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn connections_are_counted_by_the_intake_that_admitted_each_and_browsers_by_adapter() {
+    use crate::intake::session::IntakeChannel;
+    use crate::language::workbench::{service_line, ConnectionCounts};
+
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
+    workspaces.admit("Cursor".into(), IntakeChannel::Mcp);
+    workspaces.admit("a script".into(), IntakeChannel::Cli);
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        workspaces,
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let counts = ConnectionCounts {
+        mcp_clients: 2,
+        command_line: 1,
+        browsers: 1,
+    };
+    assert_eq!(facade.connection_counts(), counts);
+    assert_eq!(
+        facade.snapshot().controls.service.word,
+        service_line(Some(counts))
+    );
+    assert_eq!(
+        service_line(Some(counts)),
+        "Ghostlight service is up; 2 MCP clients, 1 command-line session and 1 browser connected."
+    );
+}
+
+#[test]
+fn a_service_with_nothing_connected_counts_nothing() {
+    let facade = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(false, false),
+    );
+    assert_eq!(
+        facade.connection_counts(),
+        crate::language::workbench::ConnectionCounts::default()
+    );
+}
+
+#[test]
+fn the_controls_are_published_when_they_differ_and_not_otherwise() {
+    use crate::browser::adapter::RuntimeControlState;
+
+    let facade = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+    );
+    let events = Arc::new(Events::default());
+    facade.attach_events(events.clone());
+    let published = || {
+        events
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match &event.change {
+                WorkbenchChange::ControlsChanged { controls } => Some(controls.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    facade.refresh_live_parts();
+    assert_eq!(published().len(), 1, "the first look is always published");
+    facade.refresh_live_parts();
+    assert_eq!(published().len(), 1, "a look that found nothing new is not");
+
+    facade.apply_runtime_intent(super::WorkbenchRuntimeIntent::Hold);
+    let controls = published();
+    assert_eq!(controls.len(), 2);
+    assert_eq!(controls[1].runtime.state, RuntimeControlState::Held);
+    assert_eq!(
+        controls[1].runtime.note.as_deref(),
+        Some(crate::language::workbench::PAUSED_IN_WINDOW)
+    );
+    assert_eq!(*controls[1], facade.snapshot().controls);
+}

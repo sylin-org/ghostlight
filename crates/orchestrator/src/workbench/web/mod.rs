@@ -16,7 +16,6 @@ mod limits;
 mod routes;
 #[cfg(test)]
 mod tests;
-mod watching;
 
 use std::fmt;
 use std::io;
@@ -31,9 +30,7 @@ use base64::Engine as _;
 use ghostlight_relay::endpoint::fnv1a32;
 use zeroize::Zeroizing;
 
-use super::{WebFacts, WorkbenchEventSink, WorkbenchFacade};
-
-pub use watching::Watching;
+use super::{Watching, WebFacts, WorkbenchEventSink, WorkbenchFacade};
 
 /// The lowest port a home's default can be.
 const PORT_BASE: u16 = 41_000;

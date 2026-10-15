@@ -41,6 +41,7 @@
     applyPolicy: "apply_policy",
     removePolicy: "remove_policy",
     setDiagnostics: "set_diagnostics",
+    setWatching: "set_watching",
     setupAll: "setup_all",
     harnessAct: "harness_act",
     testNotification: "test_notification",
@@ -57,7 +58,7 @@
   /** The status that says watching is off. */
   const STATUS_WATCHING_OFF = 403;
   /** The parts a snapshot is asked for, in the order the service lists them. */
-  const SNAPSHOT_PARTS = Object.freeze(["status", "connections", "activity", "integrations", "diagnostics"]);
+  const SNAPSHOT_PARTS = Object.freeze(["status", "connections", "activity", "integrations", "diagnostics", "controls"]);
   /** How long a stream waits before it opens again, after each failure in a row. */
   const RECONNECT_STEPS_MS = Object.freeze([1000, 2000, 5000, 10000]);
   /** How long a stream may stay silent before it counts as dead. */
@@ -88,6 +89,7 @@
     remove_user_policy: { method: DELETE, path: "/api/policy/user", tagged: true },
     apply_runtime_intent: { method: POST, path: "/api/runtime", body: ({ intent }) => ({ intent }) },
     set_diagnostics: { method: PUT, path: "/api/controls/diagnostics", body: ({ on }) => ({ on }) },
+    set_watching: { method: PUT, path: "/api/controls/viewing", body: ({ watch }) => ({ watch }) },
     refresh_harnesses: { method: POST, path: "/api/integrations/rescan", body: () => ({}) },
     setup_detected_harnesses: { method: POST, path: "/api/integrations/setup-all", body: () => ({}) },
     manage_harness: {
@@ -116,6 +118,7 @@
     const activity = parts.activity ?? {};
     const integrations = parts.integrations ?? {};
     const diagnostics = parts.diagnostics ?? {};
+    const controls = parts.controls;
     const sessions = connections.sessions ?? [];
     const browsers = connections.browsers ?? [];
     const operations = activity.operations ?? [];
@@ -144,6 +147,7 @@
       process_diagnostics: diagnostics.process_diagnostics
     };
     if (status.runtime_note !== undefined) flat.runtime_note = status.runtime_note;
+    if (controls !== undefined) flat.controls = controls;
     return flat;
   }
 
@@ -416,6 +420,9 @@
 
       /** Turn process diagnostics on or off; returns the resulting state. */
       setDiagnostics: (on) => call("set_diagnostics", { on }),
+
+      /** Turn "Others can watch" on or off; returns the controls part the window now shows. */
+      setWatching: (watch) => call("set_watching", { watch }),
 
       /** Open the diagnostics folder through the native shell. */
       revealDiagnostics: () => call("reveal_diagnostics"),

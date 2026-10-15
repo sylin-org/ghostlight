@@ -61,8 +61,8 @@ use crate::language::outcome::DialogKind;
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
-use crate::workbench::web::{PendingWorkbench, Watching, WorkbenchAddress, WorkbenchServer};
-use crate::workbench::{RuntimeSource, WorkbenchFacade, WorkbenchProjection};
+use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
+use crate::workbench::{RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;

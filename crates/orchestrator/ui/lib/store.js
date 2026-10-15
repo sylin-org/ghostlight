@@ -161,6 +161,14 @@
       emit(CHANGE.Collections, { snapshot });
     }
 
+    /** Take the controls part the orchestrator published as this window's own. */
+    function applyControls(controls) {
+      const snapshot = state.snapshot;
+      if (!snapshot) return;
+      snapshot.controls = controls;
+      emit(CHANGE.Collections, { snapshot });
+    }
+
     /** Take the connections part the orchestrator published as this window's own. */
     function applyConnections(connections) {
       const snapshot = state.snapshot;
@@ -271,6 +279,7 @@
           case "runtime_changed": state.runtime = change.runtime_state; break;
           case "status_changed": applyStatus(change.status); break;
           case "connections_changed": applyConnections(change.connections); break;
+          case "controls_changed": applyControls(change.controls); break;
           // The part is read on demand; the caller decides whether this window shows it.
           case "part_changed": return "hinted";
           default: return "ignored";

@@ -17,6 +17,7 @@ use crate::language::composition::{
 };
 use crate::language::coverage::Coverage;
 use crate::language::outcome::Observed;
+use crate::language::workbench::ConnectionCounts;
 use crate::provenance::ConnectionDetails;
 use crate::workbench::{
     ConfigurationSummary, DiagnosticSeverity, HistoryStep, OperationPhase, OverviewSummary,
@@ -238,6 +239,23 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             },
             policy: governance.policy_chip(),
         },
+        controls: ControlsPart::of(&ControlsFacts {
+            runtime_state: RuntimeControlState::Held,
+            runtime_note: Some("Paused from the tray."),
+            watching: true,
+            url: Some("http://127.0.0.1:41234/"),
+            diagnostics: &DiagnosticsReport {
+                layer: "marker",
+                directory: Some("/home/ann/.ghostlight/logs".into()),
+                used_bytes: 4,
+            },
+            counts: ConnectionCounts {
+                mcp_clients: 1,
+                command_line: 0,
+                browsers: 1,
+            },
+            user_home: Some(Path::new(HOME)),
+        }),
     };
     (snapshot, governance.effective_authority(), path)
 }
@@ -543,6 +561,58 @@ const POLICY_CONTROL_ONLY: &[&str] = &["etag"];
 /// What only a watcher's policy has.
 const POLICY_WATCH_ONLY: &[&str] = &["layers[].settings[].count"];
 
+/// The keys every act of the Controls part has.
+const AVAILABILITY_KEYS: &[&str] = &["available", "why_not"];
+
+/// The Controls part has the same keys for every audience: only the values of its acts differ.
+fn controls_keys() -> BTreeSet<String> {
+    let mut keys = expected(&[&[
+        "diagnostics",
+        "diagnostics.acts",
+        "diagnostics.folder",
+        "diagnostics.label",
+        "diagnostics.layer",
+        "diagnostics.on",
+        "diagnostics.used_bytes",
+        "diagnostics.word",
+        "notifications",
+        "notifications.acts",
+        "notifications.label",
+        "notifications.word",
+        "runtime",
+        "runtime.acts",
+        "runtime.label",
+        "runtime.note",
+        "runtime.state",
+        "runtime.word",
+        "service",
+        "service.word",
+        "viewing",
+        "viewing.acts",
+        "viewing.label",
+        "viewing.url",
+        "viewing.watch",
+        "viewing.word",
+        "you",
+        "you.context",
+        "you.sentence",
+        "you.word",
+    ]]);
+    for act in [
+        "diagnostics.acts.reveal_diagnostics",
+        "diagnostics.acts.set_diagnostics",
+        "notifications.acts.test_notification",
+        "runtime.acts.end_session",
+        "runtime.acts.hold",
+        "runtime.acts.resume",
+        "runtime.acts.start_session",
+        "viewing.acts.set_watching",
+    ] {
+        keys.extend(under(act, AVAILABILITY_KEYS));
+    }
+    keys
+}
+
 fn expected(groups: &[&[&str]]) -> BTreeSet<String> {
     groups
         .iter()
@@ -624,6 +694,7 @@ fn each_part_holds_exactly_the_keys_classified_for_its_audience() {
             expected(&[DIAGNOSTIC_KEYS]),
             "{audience:?}"
         );
+        assert_eq!(shown(Part::Controls), controls_keys(), "{audience:?}");
     }
     let _ = std::fs::remove_file(path);
 }
@@ -822,5 +893,115 @@ fn the_rules_tag_ignores_formatting_key_order_and_version() {
     assert_ne!(policy_etag(&authority), tag);
     authority.layers.clear();
     assert_eq!(policy_etag(&authority), NO_POLICY_ETAG);
+    let _ = std::fs::remove_file(path);
+}
+
+/// The acts of a controls part, by name, with whether each is available.
+fn available(controls: &Value) -> Vec<(String, bool)> {
+    let mut found = Vec::new();
+    for (row, acts) in [
+        ("runtime", &controls["runtime"]["acts"]),
+        ("viewing", &controls["viewing"]["acts"]),
+        ("diagnostics", &controls["diagnostics"]["acts"]),
+        ("notifications", &controls["notifications"]["acts"]),
+    ] {
+        for (name, act) in acts.as_object().unwrap() {
+            found.push((format!("{row}.{name}"), act["available"].as_bool().unwrap()));
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() {
+    let (snapshot, _, path) = populated();
+    let window = projection(Audience::Control).part(Part::Controls, &snapshot);
+    assert!(available(&window).iter().all(|(_, may)| *may), "{window}");
+    assert_eq!(window["you"]["context"], "control");
+    assert_eq!(window["you"]["word"], words::WORD_CONTROL);
+    assert_eq!(window["you"]["sentence"], words::SENTENCE_CONTROL_WATCHED);
+
+    let watcher = projection(Audience::Watch).part(Part::Controls, &snapshot);
+    let allowed: Vec<_> = available(&watcher)
+        .into_iter()
+        .filter(|(_, may)| *may)
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(allowed, ["runtime.hold"]);
+    assert_eq!(
+        watcher["viewing"]["acts"]["set_watching"]["why_not"],
+        words::CHANGE_IN_WINDOW
+    );
+    assert_eq!(watcher["you"]["context"], "watch");
+    assert_eq!(watcher["you"]["sentence"], words::SENTENCE_WATCH);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn the_sheet_says_what_it_is_told_in_the_service_words() {
+    let (snapshot, _, path) = populated();
+    let controls = projection(Audience::Control).part(Part::Controls, &snapshot);
+    assert_eq!(controls["runtime"]["state"], "held");
+    assert_eq!(controls["runtime"]["word"], words::CONTROLS_RUNTIME_HELD);
+    assert_eq!(controls["runtime"]["note"], "Paused from the tray.");
+    assert_eq!(controls["viewing"]["watch"], true);
+    assert_eq!(controls["viewing"]["word"], words::CONTROLS_VIEWING_ON);
+    assert_eq!(controls["viewing"]["url"], "http://127.0.0.1:41234/");
+    assert_eq!(controls["diagnostics"]["on"], true);
+    assert_eq!(controls["diagnostics"]["word"], "On (marker)");
+    assert_eq!(
+        controls["service"]["word"],
+        "Ghostlight service is up; 1 MCP client and 1 browser connected."
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn watching_off_changes_the_word_and_the_sentence_the_window_is_told() {
+    let (mut snapshot, _, path) = populated();
+    snapshot.controls.viewing.watch = false;
+    snapshot.controls.viewing.word = words::CONTROLS_VIEWING_OFF;
+    let window = projection(Audience::Control).part(Part::Controls, &snapshot);
+    assert_eq!(window["viewing"]["word"], words::CONTROLS_VIEWING_OFF);
+    assert_eq!(window["you"]["sentence"], words::SENTENCE_CONTROL_PRIVATE);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn the_log_folder_is_shown_relative_to_the_users_home() {
+    let (snapshot, _, path) = populated();
+    let sep = std::path::MAIN_SEPARATOR;
+    let controls = projection(Audience::Watch).part(Part::Controls, &snapshot);
+    assert_eq!(
+        controls["diagnostics"]["folder"],
+        format!("~{sep}.ghostlight{sep}logs")
+    );
+    assert!(!controls.to_string().contains("/home/ann"));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn an_event_that_carries_the_controls_is_projected_for_each_audience() {
+    let (snapshot, _, path) = populated();
+    let event = WorkbenchEvent {
+        seq: 4,
+        change: WorkbenchChange::ControlsChanged {
+            controls: Box::new(snapshot.controls.clone()),
+        },
+    };
+    let window = projection(Audience::Control).event(&event);
+    assert_eq!(window["change"]["kind"], "controls_changed");
+    assert_eq!(window["change"]["controls"]["you"]["context"], "control");
+    assert_eq!(
+        window["change"]["controls"]["runtime"]["acts"]["end_session"]["available"],
+        true
+    );
+    let watcher = projection(Audience::Watch).event(&event);
+    assert_eq!(watcher["change"]["controls"]["you"]["context"], "watch");
+    assert_eq!(
+        watcher["change"]["controls"]["runtime"]["acts"]["end_session"]["available"],
+        false
+    );
     let _ = std::fs::remove_file(path);
 }

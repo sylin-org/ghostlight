@@ -1,7 +1,7 @@
 //! The parts of the workbench state a screen may ask for, and what each audience sees of them.
 //!
-//! A snapshot is cut into closed parts: status, connections, activity, integrations and
-//! diagnostics. Policy has its own route. Each part is projected for an [`Audience`] when the
+//! A snapshot is cut into closed parts: status, connections, activity, integrations, diagnostics
+//! and controls. Policy has its own route. Each part is projected for an [`Audience`] when the
 //! response is written, so a page never redacts and never holds data its context may not see
 //! (ADR-0199, amendment of 2026-10-15). The projection drops what nobody reads, shows home-relative
 //! paths to everyone, and turns the person's own lists of sensitive sites into counts for a watcher.
@@ -13,16 +13,19 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use super::context::{availability, Availability, WebAct, WebContext};
 use super::{
     BrowserInstanceSummary, DiagnosticItem, HistoryItem, OperationSummary, ReadinessSummary,
     ServiceSummary, SessionSummary, WorkbenchChange, WorkbenchEvent, WorkbenchSnapshot,
 };
+use crate::browser::adapter::RuntimeControlState;
+use crate::diagnostics::DiagnosticsReport;
 use crate::governance::effective::{EffectiveAuthority, LayerKind, PolicyChip};
 use crate::governance::ManagedPolicyPassport;
 use crate::install::{HarnessActionResult, HarnessSummary};
 use crate::language::audit_health::AuditHealth;
 use crate::language::coverage::HumanCoverage;
-use crate::language::workbench as words;
+use crate::language::workbench::{self as words, ConnectionCounts};
 
 /// The environment variable that names the user's home directory.
 #[cfg(windows)]
@@ -47,6 +50,17 @@ pub enum Audience {
     Watch,
 }
 
+impl Audience {
+    /// The context a request is in when a projection is made for this audience.
+    #[must_use]
+    pub const fn context(self) -> WebContext {
+        match self {
+            Self::Control => WebContext::Control,
+            Self::Watch => WebContext::Watch,
+        }
+    }
+}
+
 /// One closed slice of the snapshot a screen can ask for.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Part {
@@ -60,6 +74,9 @@ pub enum Part {
     Integrations,
     /// Checkup cards and process diagnostics.
     Diagnostics,
+    /// The shared Controls sheet: pause and the session, who can watch, process diagnostics and
+    /// the notification test, with what each context may do.
+    Controls,
 }
 
 /// A part token the service does not know.
@@ -69,12 +86,13 @@ pub struct UnknownPart;
 
 impl Part {
     /// Every part, in the order a snapshot lists them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Status,
         Self::Connections,
         Self::Activity,
         Self::Integrations,
         Self::Diagnostics,
+        Self::Controls,
     ];
 
     /// The snake_case token that names this part on the wire.
@@ -86,6 +104,7 @@ impl Part {
             Self::Activity => "activity",
             Self::Integrations => "integrations",
             Self::Diagnostics => "diagnostics",
+            Self::Controls => "controls",
         }
     }
 
@@ -175,6 +194,282 @@ impl ConnectionsPart {
             sessions: snapshot.sessions.clone(),
             browsers: snapshot.browsers.clone(),
         }
+    }
+}
+
+/// The layer name of process diagnostics that are not being written.
+const DIAGNOSTICS_OFF_LAYER: &str = "off";
+
+/// The facts the Controls sheet is made from, before any context has seen them.
+#[derive(Clone, Copy, Debug)]
+pub struct ControlsFacts<'a> {
+    /// Whether agents may ask for browser work.
+    pub runtime_state: RuntimeControlState,
+    /// Where a pause came from, while agents are paused.
+    pub runtime_note: Option<&'a str>,
+    /// Whether other screens on this computer may watch.
+    pub watching: bool,
+    /// Where the watch view is served, when a server is up.
+    pub url: Option<&'a str>,
+    /// The process-diagnostics state.
+    pub diagnostics: &'a DiagnosticsReport,
+    /// What is connected to the service.
+    pub counts: ConnectionCounts,
+    /// The user's home directory, which the diagnostics folder is shown relative to.
+    pub user_home: Option<&'a Path>,
+}
+
+/// The shared Controls sheet.
+///
+/// Every Ghostlight web app draws the same sheet from this part. Each act carries whether the
+/// context it was made for may do it, and `you` names that context, so a screen draws what it is
+/// told and never guesses. The part the service holds is the Control form; [`Self::seen_by`]
+/// makes the form another context sees.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ControlsPart {
+    /// Agents' browser work: whether it runs, and how to pause, resume, start and end it.
+    pub runtime: RuntimeControls,
+    /// "Others can watch".
+    pub viewing: ViewingControls,
+    /// Process diagnostics.
+    pub diagnostics: DiagnosticsControls,
+    /// The notification test.
+    pub notifications: NotificationControls,
+    /// The one sentence about the service.
+    pub service: ServiceControls,
+    /// The context the part was made for.
+    pub you: YouControls,
+}
+
+/// The runtime row of the Controls sheet.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RuntimeControls {
+    /// The row's label.
+    pub label: &'static str,
+    /// The authoritative runtime state.
+    pub state: RuntimeControlState,
+    /// The word for the state.
+    pub word: &'static str,
+    /// Where a pause came from, while agents are paused.
+    pub note: Option<String>,
+    /// What the context may do.
+    pub acts: RuntimeActs,
+}
+
+/// The acts of the runtime row.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RuntimeActs {
+    /// Pause agents.
+    pub hold: Availability,
+    /// Let agents work again.
+    pub resume: Availability,
+    /// Start a fresh session.
+    pub start_session: Availability,
+    /// End the session.
+    pub end_session: Availability,
+}
+
+/// The "Others can watch" row of the Controls sheet.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ViewingControls {
+    /// The row's label.
+    pub label: &'static str,
+    /// Whether other screens on this computer may watch.
+    pub watch: bool,
+    /// Where the watch view is served, when a server is up.
+    pub url: Option<String>,
+    /// The word for the state.
+    pub word: &'static str,
+    /// What the context may do.
+    pub acts: ViewingActs,
+}
+
+/// The acts of the "Others can watch" row.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ViewingActs {
+    /// Turn watching on or off.
+    pub set_watching: Availability,
+}
+
+/// The process-diagnostics row of the Controls sheet.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DiagnosticsControls {
+    /// The row's label.
+    pub label: &'static str,
+    /// Whether process diagnostics are being written.
+    pub on: bool,
+    /// What turned them on, or `off`.
+    pub layer: &'static str,
+    /// Bytes of diagnostics logs on disk.
+    pub used_bytes: u64,
+    /// The folder the logs live in, relative to the user's home.
+    pub folder: Option<String>,
+    /// The word for the state.
+    pub word: String,
+    /// What the context may do.
+    pub acts: DiagnosticsActs,
+}
+
+/// The acts of the process-diagnostics row.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DiagnosticsActs {
+    /// Turn process diagnostics on or off.
+    pub set_diagnostics: Availability,
+    /// Show the log folder in the file manager.
+    pub reveal_diagnostics: Availability,
+}
+
+/// The notifications row of the Controls sheet.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct NotificationControls {
+    /// The row's label.
+    pub label: &'static str,
+    /// What the test does.
+    pub word: &'static str,
+    /// What the context may do.
+    pub acts: NotificationActs,
+}
+
+/// The acts of the notifications row.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct NotificationActs {
+    /// Show a test notification.
+    pub test_notification: Availability,
+}
+
+/// The service line of the Controls sheet.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ServiceControls {
+    /// The sentence about the service and what is connected to it.
+    pub word: String,
+}
+
+/// Who the Controls part was made for, as the band's context chip says it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct YouControls {
+    /// The context's token.
+    pub context: &'static str,
+    /// The short word for the context.
+    pub word: &'static str,
+    /// The sentence that says who can see this view.
+    pub sentence: &'static str,
+}
+
+impl ControlsPart {
+    /// The Controls part for the window, made from `facts`.
+    #[must_use]
+    pub fn of(facts: &ControlsFacts<'_>) -> Self {
+        let report = facts.diagnostics;
+        let on = report.layer != DIAGNOSTICS_OFF_LAYER;
+        // Every act starts as unavailable; `address` then fills each one for the context.
+        let unavailable = Availability {
+            available: false,
+            why_not: None,
+        };
+        let mut part = Self {
+            runtime: RuntimeControls {
+                label: words::CONTROLS_RUNTIME_LABEL,
+                state: facts.runtime_state,
+                word: match facts.runtime_state {
+                    RuntimeControlState::Active => words::CONTROLS_RUNTIME_ACTIVE,
+                    RuntimeControlState::Held => words::CONTROLS_RUNTIME_HELD,
+                    RuntimeControlState::Ended => words::CONTROLS_RUNTIME_ENDED,
+                },
+                note: facts.runtime_note.map(str::to_owned),
+                acts: RuntimeActs {
+                    hold: unavailable.clone(),
+                    resume: unavailable.clone(),
+                    start_session: unavailable.clone(),
+                    end_session: unavailable.clone(),
+                },
+            },
+            viewing: ViewingControls {
+                label: words::CONTROLS_VIEWING_LABEL,
+                watch: facts.watching,
+                url: facts.url.map(str::to_owned),
+                word: if facts.watching {
+                    words::CONTROLS_VIEWING_ON
+                } else {
+                    words::CONTROLS_VIEWING_OFF
+                },
+                acts: ViewingActs {
+                    set_watching: unavailable.clone(),
+                },
+            },
+            diagnostics: DiagnosticsControls {
+                label: words::CONTROLS_DIAGNOSTICS_LABEL,
+                on,
+                layer: report.layer,
+                used_bytes: report.used_bytes,
+                folder: report
+                    .directory
+                    .as_deref()
+                    .map(|folder| match facts.user_home {
+                        Some(home) => display_path(home, folder),
+                        None => folder.to_owned(),
+                    }),
+                word: if on {
+                    words::controls_diagnostics_on(report.layer)
+                } else {
+                    words::CONTROLS_DIAGNOSTICS_OFF.to_owned()
+                },
+                acts: DiagnosticsActs {
+                    set_diagnostics: unavailable.clone(),
+                    reveal_diagnostics: unavailable.clone(),
+                },
+            },
+            notifications: NotificationControls {
+                label: words::CONTROLS_NOTIFICATIONS_LABEL,
+                word: words::CONTROLS_NOTIFICATIONS_WORD,
+                acts: NotificationActs {
+                    test_notification: unavailable,
+                },
+            },
+            service: ServiceControls {
+                word: words::service_line(Some(facts.counts)),
+            },
+            you: YouControls {
+                context: WebContext::Control.token(),
+                word: WebContext::Control.word(),
+                sentence: "",
+            },
+        };
+        part.address(WebContext::Control);
+        part
+    }
+
+    /// The same part as `context` sees it: the acts it may do, and who it is.
+    #[must_use]
+    pub fn seen_by(&self, context: WebContext) -> Self {
+        let mut seen = self.clone();
+        seen.address(context);
+        seen
+    }
+
+    /// Fill every act and `you` for `context`.
+    fn address(&mut self, context: WebContext) {
+        let may = |act| availability(act, context);
+        self.runtime.acts = RuntimeActs {
+            hold: may(WebAct::Hold),
+            resume: may(WebAct::Resume),
+            start_session: may(WebAct::StartSession),
+            end_session: may(WebAct::EndSession),
+        };
+        self.viewing.acts = ViewingActs {
+            set_watching: may(WebAct::SetWatching),
+        };
+        self.diagnostics.acts = DiagnosticsActs {
+            set_diagnostics: may(WebAct::SetDiagnostics),
+            reveal_diagnostics: may(WebAct::RevealDiagnostics),
+        };
+        self.notifications.acts = NotificationActs {
+            test_notification: may(WebAct::TestNotification),
+        };
+        self.you = YouControls {
+            context: context.token(),
+            word: context.word(),
+            sentence: context.sentence(self.viewing.watch),
+        };
     }
 }
 
@@ -283,6 +578,7 @@ impl Projection {
                 });
                 value
             }
+            Part::Controls => self.controls(&snapshot.controls),
             Part::Diagnostics => {
                 let mut value = to_value(&DiagnosticsPart {
                     diagnostics: &snapshot.diagnostics,
@@ -313,6 +609,12 @@ impl Projection {
         value
     }
 
+    /// The Controls part, as this audience sees it: the acts it may do, and who it is.
+    #[must_use]
+    pub fn controls(&self, controls: &ControlsPart) -> Value {
+        to_value(&controls.seen_by(self.audience.context()))
+    }
+
     /// One published event, as this audience sees it.
     ///
     /// The stream projects an event once for each audience that has a subscriber, with the same
@@ -335,6 +637,9 @@ impl Projection {
             }
             WorkbenchChange::ConnectionsChanged { connections } => {
                 change["connections"] = self.connections(connections);
+            }
+            WorkbenchChange::ControlsChanged { controls } => {
+                change["controls"] = self.controls(controls);
             }
             WorkbenchChange::PartChanged {
                 part: HintedPart::Policy,

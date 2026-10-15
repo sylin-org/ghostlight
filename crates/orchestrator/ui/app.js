@@ -26,7 +26,8 @@
  */
 
 const {
-  CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND
+  CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
+  WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONTROLS, byteSize
 } = globalThis.GhostlightWords;
 
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
@@ -83,6 +84,49 @@ const view = globalThis.GhostlightView.create({
   onFailure: reportFailure
 });
 
+/*
+ * The shared Controls sheet.
+ *
+ * It is drawn from the controls part of the snapshot and acts through the functions below, so it
+ * holds no transport of its own. Its personal settings are kept in this browser when it lets us.
+ */
+function personalStorage() {
+  try {
+    return window.localStorage ?? null;
+  } catch (error) {
+    return null;
+  }
+}
+
+const controls = globalThis.GhostlightControls.create({
+  document,
+  words: { ...CONTROLS, byteSize },
+  storage: personalStorage(),
+  applyIntent,
+  setWatching,
+  setDiagnostics,
+  revealDiagnostics,
+  testNotification,
+  continueInWindow,
+  copyText: typeof transport.copyText === "function" ? copyAddress : undefined,
+  onFailure: reportFailure
+});
+
+/* The controls part last painted, so a collection that did not change it repaints nothing. */
+let paintedControls = null;
+
+/** Draw the controls part, and the band's chip from the context it names. */
+function paintControls(part) {
+  if (!part) return;
+  const signature = JSON.stringify(part);
+  if (signature === paintedControls) return;
+  const painted = attempt("painting the controls", () => {
+    controls.render(part);
+    if (part.you) view.chip(part.you);
+  });
+  if (painted) paintedControls = signature;
+}
+
 /* What the service said this page may do. Nothing is offered until it has said. */
 let context = null;
 const allowed = (act) => context?.acts?.[act]?.available ?? true;
@@ -118,6 +162,7 @@ function draw(kind, detail) {
       break;
     case CHANGE.Collections:
       view.collections(detail.snapshot, store.pending());
+      paintControls(detail.snapshot.controls);
       break;
     default:
       reportFailure("drawing a change", new Error(`unknown change ${kind}`));
@@ -374,26 +419,60 @@ async function continueInWindow() {
   }
 }
 
-// The person's diagnostics controls: set the shared marker, or open its folder through the
-// native shell. Both live behind closed commands, like every other act in this window.
-async function handleDiagnosticsAction(button) {
-  if (!transport.available || button.disabled) return;
-  const operation = button.dataset.diagnosticsOperation;
-  button.disabled = true;
+/** Turn "Others can watch" on or off. The Controls sheet draws the part the service answers with. */
+async function setWatching(watch) {
+  if (!transport.available) return;
   try {
-    if (operation === "toggle") {
-      const turningOn = store.snapshot()?.process_diagnostics?.layer === "off";
-      const report = await transport.setDiagnostics(turningOn);
-      view.toast(`Process diagnostics are ${report.layer === "off" ? "off" : `on (${report.layer})`}.`);
-      await settled(report);
-    } else if (operation === "reveal") {
-      await transport.revealDiagnostics();
-    }
+    const part = await transport.setWatching(watch);
+    view.toast(watch ? WATCHING_TURNED_ON : WATCHING_TURNED_OFF);
+    await settled(part);
   } catch (error) {
     view.toast(String(error), true);
     await resync();
-  } finally {
-    button.disabled = false;
+  }
+}
+
+// The person's diagnostics controls: set the shared marker, or open its folder through the
+// service. Both live behind closed commands, like every other act in this window.
+async function setDiagnostics(turningOn) {
+  if (!transport.available) return;
+  try {
+    const report = await transport.setDiagnostics(turningOn);
+    view.toast(`Process diagnostics are ${report.layer === "off" ? "off" : `on (${report.layer})`}.`);
+    await settled(report);
+  } catch (error) {
+    view.toast(String(error), true);
+    await resync();
+  }
+}
+
+async function revealDiagnostics() {
+  if (!transport.available) return;
+  try {
+    await transport.revealDiagnostics();
+  } catch (error) {
+    view.toast(String(error), true);
+  }
+}
+
+/** Prove the notification path end to end. */
+async function testNotification() {
+  if (!transport.available) return;
+  try {
+    await transport.testNotification();
+    view.toast(TEST_NOTIFICATION_SENT);
+  } catch (error) {
+    view.toast(String(error), true);
+  }
+}
+
+/** Put the address of the watch view on the clipboard of this screen. */
+async function copyAddress(address) {
+  try {
+    await transport.copyText(address);
+    view.toast(ADDRESS_COPIED);
+  } catch (error) {
+    view.toast(String(error), true);
   }
 }
 
@@ -536,12 +615,11 @@ function wire() {
     // they may. An action inside an open rule is handled above and must not close it again.
     const toggle = event.target.closest("[data-rule-toggle]");
     if (toggle) view.toggleRule(toggle.dataset.ruleToggle);
-    const intent = event.target.closest("[data-intent]");
-    if (intent && !intent.disabled) applyIntent(intent.dataset.intent);
+    // The wheel is the band's own control; the Controls sheet wires the buttons it holds.
+    const wheel = event.target.closest("#wheel");
+    if (wheel && !wheel.disabled) applyIntent(wheel.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");
     if (harness) handleHarnessAction(harness);
-    const diagnostics = event.target.closest("[data-diagnostics-operation]");
-    if (diagnostics) handleDiagnosticsAction(diagnostics);
     const carryOn = event.target.closest("[data-continue]");
     if (carryOn) continueInWindow();
     const destination = event.target.closest("[data-destination]");
@@ -631,9 +709,6 @@ function wire() {
     }
   });
 
-  el["test-notification"].addEventListener("click", (event) =>
-    withButton(event, () => transport.testNotification(), "Test notification sent."));
-
   // Only the native shell has no live stream that tells it when it was away, so only the native
   // shell asks again when it comes back into view.
   if (native) {
@@ -656,6 +731,7 @@ function wire() {
 async function becomeClosed(sentence) {
   stopStream?.();
   stopStream = null;
+  attempt("closing the controls", () => controls.hide());
   let told = null;
   try {
     told = await transport.context();
@@ -707,6 +783,7 @@ async function start() {
   }
   if (context.context === CONTEXT_CLOSED) {
     view.closed(context);
+    attempt("closing the controls", () => controls.hide());
     return;
   }
   attempt("telling the page what it may do", () => view.context(context));
@@ -726,6 +803,7 @@ function boot() {
     }, HEARTBEAT_MS);
   }
   attempt("wiring the surface", wire);
+  attempt("wiring the controls", () => controls.wire());
   attempt("starting", () => {
     start();
   });

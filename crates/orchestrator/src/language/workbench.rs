@@ -98,6 +98,96 @@ pub const LINK_NOT_SECURE: &str = "Ghostlight opens only secure links.";
 /// The title of the dialog where a person points at a client's application or settings file.
 pub const LOCATE_DIALOG_TITLE: &str = "Locate the harness application or settings file";
 
+/// The label of the Controls row for agents' browser work.
+pub const CONTROLS_RUNTIME_LABEL: &str = "Browser work";
+
+/// The state word of browser work that agents may ask for.
+pub const CONTROLS_RUNTIME_ACTIVE: &str = "Running";
+
+/// The state word of browser work that is paused.
+pub const CONTROLS_RUNTIME_HELD: &str = "Paused";
+
+/// The state word of browser work whose session has ended.
+pub const CONTROLS_RUNTIME_ENDED: &str = "Session ended";
+
+/// The label of the Controls row for "Others can watch".
+pub const CONTROLS_VIEWING_LABEL: &str = "Others can watch";
+
+/// The state word of "Others can watch" while it is on.
+pub const CONTROLS_VIEWING_ON: &str = "On -- anyone on this computer can open this view";
+
+/// The state word of "Others can watch" while it is off.
+pub const CONTROLS_VIEWING_OFF: &str = "Off -- only this window shows Ghostlight";
+
+/// The label of the Controls row for process diagnostics.
+pub const CONTROLS_DIAGNOSTICS_LABEL: &str = "Process diagnostics";
+
+/// The state word of process diagnostics while they are off.
+pub const CONTROLS_DIAGNOSTICS_OFF: &str = "Off";
+
+/// The state word of process diagnostics while they are on, naming what turned them on.
+#[must_use]
+pub fn controls_diagnostics_on(layer: &str) -> String {
+    format!("On ({layer})")
+}
+
+/// The label of the Controls row for the notification test.
+pub const CONTROLS_NOTIFICATIONS_LABEL: &str = "Notifications";
+
+/// What the notification test does.
+pub const CONTROLS_NOTIFICATIONS_WORD: &str =
+    "Send one local checkup notification. Nothing leaves this device.";
+
+/// Why watching cannot be changed: no watch view is being served.
+pub const WATCHING_NOT_SERVED: &str = "Ghostlight is not serving a watch view on this computer.";
+
+/// Why watching was not changed: the setting could not be saved.
+pub const WATCHING_NOT_SAVED: &str = "Ghostlight could not save that setting. Try again.";
+
+/// How many of each kind of connection the service has right now.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ConnectionCounts {
+    /// Connections whose channel is MCP, across every session.
+    pub mcp_clients: usize,
+    /// Connections whose channel is the command line, across every session.
+    pub command_line: usize,
+    /// Connected browser instances.
+    pub browsers: usize,
+}
+
+/// The one sentence the window, `status` and `doctor` say about the service.
+///
+/// The service is zero or one, so this counts connections and never services. `None` means the
+/// service is not running.
+#[must_use]
+pub fn service_line(counts: Option<ConnectionCounts>) -> String {
+    let Some(counts) = counts else {
+        return "Ghostlight service is not running.".to_owned();
+    };
+    let mut parts = Vec::new();
+    for (count, one, many) in [
+        (counts.mcp_clients, "MCP client", "MCP clients"),
+        (
+            counts.command_line,
+            "command-line session",
+            "command-line sessions",
+        ),
+        (counts.browsers, "browser", "browsers"),
+    ] {
+        match count {
+            0 => {}
+            1 => parts.push(format!("1 {one}")),
+            _ => parts.push(format!("{count} {many}")),
+        }
+    }
+    let connected = match parts.split_last() {
+        None => return "Ghostlight service is up; nothing is connected yet.".to_owned(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    };
+    format!("Ghostlight service is up; {connected} connected.")
+}
+
 /// A search that is longer than the search box allows.
 #[must_use]
 pub fn search_too_long(limit: usize) -> String {
@@ -160,6 +250,9 @@ mod tests {
             POLICY_EMPTY,
             DIAGNOSTICS_OFF,
             LINK_NOT_SECURE,
+            CONTROLS_NOTIFICATIONS_WORD,
+            WATCHING_NOT_SERVED,
+            WATCHING_NOT_SAVED,
         ] {
             assert!(sentence.is_ascii(), "{sentence}");
             assert!(sentence.ends_with('.'), "{sentence}");
@@ -175,6 +268,66 @@ mod tests {
         assert_eq!(
             never_touch_count(3),
             "3 sites are marked never-touch by policy."
+        );
+    }
+    fn counts(
+        mcp_clients: usize,
+        command_line: usize,
+        browsers: usize,
+    ) -> Option<ConnectionCounts> {
+        Some(ConnectionCounts {
+            mcp_clients,
+            command_line,
+            browsers,
+        })
+    }
+
+    #[test]
+    fn a_service_that_is_not_running_says_so() {
+        assert_eq!(service_line(None), "Ghostlight service is not running.");
+    }
+
+    #[test]
+    fn a_service_with_nothing_connected_says_so() {
+        assert_eq!(
+            service_line(counts(0, 0, 0)),
+            "Ghostlight service is up; nothing is connected yet."
+        );
+    }
+
+    #[test]
+    fn one_connection_reads_in_the_singular() {
+        assert_eq!(
+            service_line(counts(1, 0, 0)),
+            "Ghostlight service is up; 1 MCP client connected."
+        );
+    }
+
+    #[test]
+    fn two_kinds_are_joined_with_and() {
+        assert_eq!(
+            service_line(counts(2, 0, 2)),
+            "Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+        );
+    }
+
+    #[test]
+    fn three_kinds_are_listed_and_the_last_is_joined_with_and() {
+        assert_eq!(
+            service_line(counts(1, 1, 1)),
+            "Ghostlight service is up; 1 MCP client, 1 command-line session and 1 browser connected."
+        );
+    }
+
+    #[test]
+    fn a_kind_with_none_connected_is_left_out() {
+        assert_eq!(
+            service_line(counts(0, 0, 3)),
+            "Ghostlight service is up; 3 browsers connected."
+        );
+        assert_eq!(
+            service_line(counts(0, 2, 0)),
+            "Ghostlight service is up; 2 command-line sessions connected."
         );
     }
 }

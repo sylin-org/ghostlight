@@ -58,6 +58,46 @@ nodes.get("confirm-dialog").querySelector = (selector) =>
 
 const reported = [];
 let heartbeat = false;
+
+// The controls part exactly as the service shapes it: every act says whether this context may do
+// it, and `you` names the context. The window may do all of it; a watcher may only pause.
+const SHEET_WHY = "Change this in the Ghostlight window.";
+const SHEET_PRIVATE = "Watching is off: only this window shows Ghostlight.";
+const SHEET_WATCHED = "Others on this computer can watch this view in a browser.";
+const SHEET_WATCHER = "Anyone on this computer can open this view. Changes are made in the Ghostlight window.";
+const controlsPart = ({
+  context = "control", watch = true, runtime = "active", note = null, layer = "marker"
+} = {}) => {
+  const control = context === "control";
+  const act = (may = false) => (control || may ? { available: true, why_not: null } : { available: false, why_not: SHEET_WHY });
+  const on = layer !== "off";
+  return {
+    runtime: {
+      label: "Browser work", state: runtime,
+      word: { active: "Running", held: "Paused", ended: "Session ended" }[runtime], note,
+      acts: { hold: act(true), resume: act(), start_session: act(), end_session: act() }
+    },
+    viewing: {
+      label: "Others can watch", watch, url: "http://127.0.0.1:41234/",
+      word: watch ? "On -- anyone on this computer can open this view" : "Off -- only this window shows Ghostlight",
+      acts: { set_watching: act() }
+    },
+    diagnostics: {
+      label: "Process diagnostics", on, layer, used_bytes: 4242, folder: "~/.cache/ghostlight",
+      word: on ? `On (${layer})` : "Off",
+      acts: { set_diagnostics: act(), reveal_diagnostics: act() }
+    },
+    notifications: {
+      label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
+      acts: { test_notification: act() }
+    },
+    service: { word: "Ghostlight service is up; 1 MCP client and 1 browser connected." },
+    you: {
+      context, word: control ? "Full control" : "Watching",
+      sentence: control ? (watch ? SHEET_WATCHED : SHEET_PRIVATE) : SHEET_WATCHER
+    }
+  };
+};
 let snapshots = 0;
 let bulkSetups = 0;
 let feedFixture = false;
@@ -68,8 +108,8 @@ const controlContext = {
   sentence: "Others on this computer can watch this view in a browser.",
   instance: "instance_1", opener: "service",
   acts: Object.fromEntries(["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
-    "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all",
-    "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"]
+    "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
+    "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"]
     .map((act) => [act, { available: true, why_not: null }])),
   product: { version: "1.0.0", license: "Apache-2.0 OR MIT" },
   links: {}
@@ -126,6 +166,7 @@ const snapshot = () => ({
       tone: "applied"
     }
   },
+  controls: controlsPart(),
   overview: {}
 });
 
@@ -222,6 +263,33 @@ await new Promise((r) => setTimeout(r, 0));
 sandbox.globalThis.__second = true;
 const before = sandbox.__aboutAttempts ?? 0;
 await new Promise((r) => setTimeout(r, 60));
+
+// The Controls sheet as the first snapshot drew it, read before anything below repaints it.
+const sheetNode = (id) => nodes.get(id);
+const sheetAfterBoot = {
+  open: sheetNode("controls-open").hidden,
+  service: sheetNode("controls-service").textContent,
+  runtimeLabel: sheetNode("controls-runtime-label").textContent,
+  runtimeWord: sheetNode("controls-runtime-word").textContent,
+  hold: sheetNode("controls-hold").hidden,
+  resume: sheetNode("controls-resume").hidden,
+  start: sheetNode("controls-start").hidden,
+  end: sheetNode("controls-end").hidden,
+  viewingWord: sheetNode("controls-viewing-word").textContent,
+  viewingUrl: sheetNode("controls-viewing-url").textContent,
+  viewingToggle: sheetNode("controls-viewing-toggle").textContent,
+  viewingToggleHidden: sheetNode("controls-viewing-toggle").hidden,
+  diagnosticsWord: sheetNode("controls-diagnostics-word").textContent,
+  diagnosticsPlace: sheetNode("controls-diagnostics-place").textContent,
+  diagnosticsToggle: sheetNode("controls-diagnostics-toggle").textContent,
+  diagnosticsToggleHidden: sheetNode("controls-diagnostics-toggle").hidden,
+  diagnosticsReveal: sheetNode("controls-diagnostics-reveal").hidden,
+  notificationsWord: sheetNode("controls-notifications-word").textContent,
+  test: sheetNode("test-notification").hidden,
+  continueLine: sheetNode("controls-continue").hidden,
+  chip: sheetNode("context-chip").textContent,
+  chipTitle: sheetNode("context-chip").title
+};
 
 // The orchestrator pushes a changed status. The band, the wheel and the sentence behind the word
 // change with no snapshot asked for, and a hint about a part nobody is looking at asks for nothing.
@@ -454,6 +522,22 @@ dispatchDocument("click", {
 });
 await new Promise((r) => setTimeout(r, 0));
 const readsOnOpening = policyReads();
+// The service turns watching off and diagnostics off. The sheet and the chip follow the pushed
+// part with no snapshot asked for, and the chip is redrawn from the context the part names.
+const snapshotsBeforeControls = snapshotRequests();
+pushChange({
+  seq: ++hintSeq,
+  change: { kind: "controls_changed", controls: controlsPart({ watch: false, layer: "off" }) }
+});
+const sheetAfterPush = {
+  viewingWord: sheetNode("controls-viewing-word").textContent,
+  viewingToggle: sheetNode("controls-viewing-toggle").textContent,
+  diagnosticsWord: sheetNode("controls-diagnostics-word").textContent,
+  diagnosticsToggle: sheetNode("controls-diagnostics-toggle").textContent,
+  chip: sheetNode("context-chip").textContent,
+  chipTitle: sheetNode("context-chip").title,
+  snapshots: snapshotRequests() - snapshotsBeforeControls
+};
 pushChange({ seq: ++hintSeq, change: { kind: "part_changed", part: "policy", etag: "tag-clean" } });
 await new Promise((r) => setTimeout(r, 0));
 const readsAfterCleanHint = policyReads();
@@ -698,7 +782,7 @@ const STALE_SENTENCE = "Your rules changed in another window; your draft is kept
 const CLOSED_SENTENCE = "Watching is off on this computer. Turn it on in the Ghostlight window.";
 const LINKS = { home: "https://example.test/home", source: "https://example.test/source" };
 const ACT_KEYS = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
-  "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all", "harness_act",
+  "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching", "setup_all", "harness_act",
   "test_notification", "open", "reveal_diagnostics", "locate"];
 const WATCHER_ACTS = new Set(["search", "check_policy", "rescan", "continue_in_window", "hold"]);
 
@@ -768,8 +852,9 @@ function openStream() {
 function fakeService(kind) {
   const state = {
     seq: 5, runtime: "active", note: null, requests: [], stream: null, bearer: "key-1",
-    policyTag: "tag-1", stale: false
+    policyTag: "tag-1", stale: false, watching: true
   };
+  const controls = () => controlsPart({ context: kind, watch: state.watching, runtime: state.runtime, note: state.note });
   const status = () => ({
     service: { version: "2.0.0", started_at_ms: 0, runtime_state: state.runtime },
     readiness: state.runtime === "held"
@@ -790,7 +875,8 @@ function fakeService(kind) {
     diagnostics: {
       diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Accepting connections." }],
       process_diagnostics: { layer: "marker", directory: "~/.cache/ghostlight", used_bytes: 4242 }
-    }
+    },
+    controls: controls()
   });
   const emit = (change) => {
     state.seq += 1;
@@ -823,8 +909,17 @@ function fakeService(kind) {
       state.runtime = intent === "hold" ? "held" : "active";
       state.note = intent === "hold" ? "Paused from a screen that is watching." : null;
       const answer = reply(200, { accepted: true, runtime_state: state.runtime, message: "Paused." },
-        { "ghostlight-seq": String(state.seq + 1) });
-      Promise.resolve().then(() => emit({ kind: "status_changed", status: status() }));
+        { "ghostlight-seq": String(state.seq + 2) });
+      Promise.resolve().then(() => {
+        emit({ kind: "status_changed", status: status() });
+        emit({ kind: "controls_changed", controls: controls() });
+      });
+      return answer;
+    }
+    if (url.pathname === "/api/controls/viewing") {
+      state.watching = JSON.parse(init.body).watch;
+      const answer = reply(200, controls(), { "ghostlight-seq": String(state.seq + 1) });
+      Promise.resolve().then(() => emit({ kind: "controls_changed", controls: controls() }));
       return answer;
     }
     if (url.pathname === "/api/integrations/rescan") return reply(200, roster(), { "ghostlight-seq": String(state.seq) });
@@ -920,8 +1015,16 @@ const watchOpening = {
   chip: watching.text("context-chip").textContent,
   chipTitle: watching.text("context-chip").title,
   setup: watching.text("setup-integrations").hidden,
-  endSession: watching.text("runtime-strip").hidden,
-  sendTest: watching.text("notifications-strip").hidden,
+  endSession: watching.text("controls-end").hidden,
+  sendTest: watching.text("test-notification").hidden,
+  sheetOpen: watching.text("controls-open").hidden,
+  sheetPause: watching.text("controls-hold").hidden,
+  sheetViewingToggle: watching.text("controls-viewing-toggle").hidden,
+  sheetDiagnosticsToggle: watching.text("controls-diagnostics-toggle").hidden,
+  sheetReveal: watching.text("controls-diagnostics-reveal").hidden,
+  sheetContinue: watching.text("controls-continue").hidden,
+  sheetContinueWhy: watching.text("controls-continue-why").textContent,
+  sheetViewingWord: watching.text("controls-viewing-word").textContent,
   recheck: watching.text("refresh-integrations").hidden,
   wheelHidden: watching.text("wheel").hidden,
   bandContinue: watching.text("band-continue").hidden,
@@ -936,7 +1039,7 @@ watching.windowHandlers.get("focus")?.();
 await watching.settle();
 const watchFocusSent = watchRequests().length - watchBeforeFocus;
 const watchBeforeHold = { snapshots: watchSnapshots(), requests: watchRequests().length };
-watching.clickOn("[data-intent]", { dataset: { intent: "hold" }, disabled: false });
+watching.clickOn("#wheel", { dataset: { intent: "hold" }, disabled: false });
 await watching.settle();
 await watching.settle();
 await watching.settle();
@@ -948,7 +1051,11 @@ const watchHeld = {
   note: watching.text("wheel-state-note").textContent,
   continueHidden: watching.text("band-continue").hidden,
   continueMarkup: watching.text("band-continue").innerHTML,
-  snapshotsAfter: watchSnapshots()
+  snapshotsAfter: watchSnapshots(),
+  sheetRuntime: watching.text("controls-runtime-word").textContent,
+  sheetNote: watching.text("controls-runtime-note").textContent,
+  sheetResume: watching.text("controls-resume").hidden,
+  sheetContinue: watching.text("controls-continue").hidden
 };
 const watchBeforeAbout = watchRequests().length;
 watching.clickOn("[data-destination]", { dataset: { destination: "home" } });
@@ -970,8 +1077,14 @@ const controlSnapshots = () => controlRequests.filter((request) => request.path 
 const controlOpening = {
   chip: controlling.text("context-chip").textContent,
   setup: controlling.text("setup-integrations").hidden,
-  endSession: controlling.text("runtime-strip").hidden,
-  sendTest: controlling.text("notifications-strip").hidden,
+  endSession: controlling.text("controls-end").hidden,
+  sendTest: controlling.text("test-notification").hidden,
+  sheetOpen: controlling.text("controls-open").hidden,
+  sheetPause: controlling.text("controls-hold").hidden,
+  sheetViewingToggle: controlling.text("controls-viewing-toggle").hidden,
+  sheetDiagnosticsToggle: controlling.text("controls-diagnostics-toggle").hidden,
+  sheetReveal: controlling.text("controls-diagnostics-reveal").hidden,
+  sheetContinue: controlling.text("controls-continue").hidden,
   wheelHidden: controlling.text("wheel").hidden,
   bandContinue: controlling.text("band-continue").hidden,
   rosterLineHidden: controlling.text("integrations-continue").hidden,
@@ -989,7 +1102,7 @@ controlling.clickOn("[data-harness-operation]", {
 await controlling.settle();
 const toastAfterCopy = controlling.text("toast").textContent;
 const controlSnapshotsBeforeHold = controlSnapshots();
-controlling.clickOn("[data-intent]", { dataset: { intent: "hold" }, disabled: false });
+controlling.clickOn("#wheel", { dataset: { intent: "hold" }, disabled: false });
 await controlling.settle();
 await controlling.settle();
 await controlling.settle();
@@ -1000,6 +1113,38 @@ controlling.clickOn("[data-destination]", { dataset: { destination: "home" } });
 await controlling.settle();
 const controlOpenedLinks = controlling.opened.length;
 const openRequest = controlRequests.find((request) => request.path === "/api/open");
+
+// The Controls sheet of the window: the button opens it, a press inside it acts through the
+// transport, and its state follows the change the act caused without a snapshot.
+const clickInSheet = (page, selector, element) => page.click({
+  closest: (asked) => (asked === selector ? element : asked === "#controls-sheet" ? page.text("controls-sheet") : null)
+});
+const keyOn = (page, key) => {
+  for (const handler of page.documentHandlers.get("keydown") ?? []) handler({ key, preventDefault() {} });
+};
+controlling.clickOn("#controls-open", controlling.text("controls-open"));
+const sheetOpened = controlling.text("controls-sheet").hidden === false;
+const controlSnapshotsBeforeSheet = controlSnapshots();
+clickInSheet(controlling, "[data-viewing]", { dataset: { viewing: "toggle" }, disabled: false });
+await controlling.settle();
+await controlling.settle();
+await controlling.settle();
+const viewingRequest = controlRequests.find((request) => request.path === "/api/controls/viewing");
+const sheetAfterOff = {
+  word: controlling.text("controls-viewing-word").textContent,
+  toggle: controlling.text("controls-viewing-toggle").textContent,
+  chipTitle: controlling.text("context-chip").title,
+  snapshots: controlSnapshots() - controlSnapshotsBeforeSheet
+};
+clickInSheet(controlling, "[data-intent]", { dataset: { intent: "end_session" }, disabled: false });
+await controlling.settle();
+await controlling.settle();
+const intentRequests = controlRequests.filter((request) => request.path === "/api/runtime");
+keyOn(controlling, "Escape");
+const sheetClosedByEscape = controlling.text("controls-sheet").hidden === true;
+controlling.clickOn("#controls-open", controlling.text("controls-open"));
+controlling.click({ closest: () => null });
+const sheetClosedByOutsideClick = controlling.text("controls-sheet").hidden === true;
 
 // The rules: the tag the page read is the tag a write quotes, and a stale refusal keeps the draft.
 controlling.clickOn("[data-view]", { dataset: { view: "policy" } });
@@ -1054,6 +1199,8 @@ const httpChecks = [
     JSON.stringify(watchOpening.chip)],
   ["a watching page draws no control for a change it cannot make",
     watchOpening.setup === true && watchOpening.endSession === true && watchOpening.sendTest === true
+      && watchOpening.sheetViewingToggle === true && watchOpening.sheetDiagnosticsToggle === true
+      && watchOpening.sheetReveal === true
       && !/>Set up<|>Update<|>Remove<|>Fix<|>Locate<|Turn on|Turn off|Open log folder/.test(watchOpening.roster + watchOpening.status)
       && watchOpening.recheck === false,
     JSON.stringify({ ...watchOpening, roster: undefined, status: undefined })],
@@ -1063,12 +1210,16 @@ const httpChecks = [
       && watchOpening.roster.includes('<a class="ghost-button" href="https://example.test/qwen"')
       && !watchOpening.roster.includes('data-harness-operation="download"'),
     watchOpening.roster],
-  ["a watching page shows one Continue line for the roster and one inside the diagnostics card",
+  ["a watching page shows one Continue line for the roster and one for the Controls sheet, none on Status",
     watchOpening.rosterLineHidden === false && watchOpening.rosterLine.includes(CONTINUE_SENTENCE)
       && watchOpening.rosterLine.includes("data-continue") && watchOpening.rosterLine.includes("Continue in the Ghostlight window")
-      && (watchOpening.status.match(/data-continue/g) ?? []).length === 1
-      && watchOpening.status.includes("Operational log is on"),
+      && !watchOpening.status.includes("data-continue")
+      && watchOpening.sheetContinue === false && watchOpening.sheetContinueWhy === CONTINUE_SENTENCE,
     watchOpening.rosterLine + watchOpening.status],
+  ["a watching page has the Controls button and the sheet shows Pause while agents run, the rest as state",
+    watchOpening.sheetOpen === false && watchOpening.sheetPause === false
+      && watchOpening.sheetViewingWord === "On -- anyone on this computer can open this view",
+    JSON.stringify(watchOpening)],
   ["a watching page draws the wheel while agents are running, and Apply as a way to the window",
     watchOpening.wheelHidden === false && watchOpening.bandContinue === true
       && watchOpening.apply === "Apply in the Ghostlight window",
@@ -1082,6 +1233,10 @@ const httpChecks = [
     watchHeld.wheelHidden === true && watchHeld.state === false && watchHeld.word === "Paused"
       && watchHeld.note === "Paused from a screen that is watching." && watchHeld.continueHidden === false
       && watchHeld.continueMarkup.includes("data-continue"),
+    JSON.stringify(watchHeld)],
+  ["while held, the sheet of a watching page says Paused and where it came from, and offers no Resume",
+    watchHeld.sheetRuntime === "Paused" && watchHeld.sheetNote === "Paused from a screen that is watching."
+      && watchHeld.sheetResume === true && watchHeld.sheetContinue === false,
     JSON.stringify(watchHeld)],
   ["the About card of a watching page sends nothing and opens the Home link in a new tab",
     watchAbout.requests === 0 && watchAbout.opened.length === 1
@@ -1103,9 +1258,22 @@ const httpChecks = [
       && controlOpening.roster.includes(">Fix</button>") && controlOpening.roster.includes(">Locate</button>")
       && controlOpening.roster.includes('data-harness-operation="download"')
       && controlOpening.roster.includes('data-harness-state="updatable"')
-      && controlOpening.status.includes('data-diagnostics-operation="toggle"')
-      && controlOpening.status.includes('data-diagnostics-operation="reveal"'),
+      && controlOpening.sheetOpen === false && controlOpening.sheetPause === false
+      && controlOpening.sheetViewingToggle === false && controlOpening.sheetDiagnosticsToggle === false
+      && controlOpening.sheetReveal === false && controlOpening.sheetContinue === true,
     JSON.stringify({ ...controlOpening, roster: undefined, status: undefined })],
+  ["the window's Controls button opens the sheet, and Escape or a click outside closes it",
+    sheetOpened && sheetClosedByEscape && sheetClosedByOutsideClick,
+    JSON.stringify({ sheetOpened, sheetClosedByEscape, sheetClosedByOutsideClick })],
+  ["Turn off in the sheet is one keyed PUT, waited for as a change, and the chip says only this window shows Ghostlight",
+    viewingRequest?.method === "PUT" && viewingRequest.body === '{"watch":false}'
+      && viewingRequest.headers.Authorization === "Bearer key-1" && viewingRequest.credentials === "omit"
+      && sheetAfterOff.word === "Off -- only this window shows Ghostlight" && sheetAfterOff.toggle === "Turn on"
+      && sheetAfterOff.chipTitle === SHEET_PRIVATE && sheetAfterOff.snapshots === 0,
+    JSON.stringify({ viewingRequest, sheetAfterOff })],
+  ["End session in the sheet asks for the end_session intent",
+    intentRequests.some((request) => request.body === '{"intent":"end_session"}'),
+    JSON.stringify(intentRequests.map((request) => request.body))],
   ["every request the window makes carries the key and none carries credentials",
     controlRequests.length > 0
       && controlRequests.every((request) => request.headers.Authorization === "Bearer key-1" && request.credentials === "omit"),
@@ -1151,11 +1319,40 @@ const httpChecks = [
 const checks = [
   ...httpChecks,
   ["the native shell's page is told it has full control and draws every control",
-    nodes.get("context-chip").textContent === "Full control"
-      && nodes.get("setup-integrations").hidden === false && nodes.get("runtime-strip").hidden === false
-      && nodes.get("notifications-strip").hidden === false && nodes.get("integrations-continue").hidden === true
-      && nodes.get("band-continue").hidden === true,
-    `chip=${nodes.get("context-chip").textContent}`],
+    sheetAfterBoot.chip === "Full control"
+      && nodes.get("setup-integrations").hidden === false && sheetAfterBoot.end === false
+      && sheetAfterBoot.test === false && nodes.get("integrations-continue").hidden === true
+      && nodes.get("band-continue").hidden === true && sheetAfterBoot.continueLine === true,
+    `chip=${sheetAfterBoot.chip}`],
+  ["the Controls sheet is drawn from the snapshot's controls part in the service's words",
+    sheetAfterBoot.open === false && sheetAfterBoot.runtimeLabel === "Browser work"
+      && sheetAfterBoot.runtimeWord === "Running" && sheetAfterBoot.hold === false
+      && sheetAfterBoot.resume === true && sheetAfterBoot.start === true
+      && sheetAfterBoot.service === "Ghostlight service is up; 1 MCP client and 1 browser connected."
+      && sheetAfterBoot.viewingWord === "On -- anyone on this computer can open this view"
+      && sheetAfterBoot.viewingUrl === "http://127.0.0.1:41234/"
+      && sheetAfterBoot.viewingToggle === "Turn off" && sheetAfterBoot.viewingToggleHidden === false
+      && sheetAfterBoot.notificationsWord.startsWith("Send one local checkup notification"),
+    JSON.stringify(sheetAfterBoot)],
+  ["the sheet's diagnostics row renders the state and both person acts",
+    sheetAfterBoot.diagnosticsWord === "On (marker)" && sheetAfterBoot.diagnosticsPlace === "~/.cache/ghostlight (4.1 KB)"
+      && sheetAfterBoot.diagnosticsToggle === "Turn off" && sheetAfterBoot.diagnosticsToggleHidden === false
+      && sheetAfterBoot.diagnosticsReveal === false,
+    JSON.stringify(sheetAfterBoot)],
+  ["a pushed controls part updates the sheet and redraws the chip from the context it names, with no snapshot",
+    sheetAfterPush.viewingWord === "Off -- only this window shows Ghostlight"
+      && sheetAfterPush.viewingToggle === "Turn on" && sheetAfterPush.diagnosticsWord === "Off"
+      && sheetAfterPush.diagnosticsToggle === "Turn on" && sheetAfterPush.chip === "Full control"
+      && sheetAfterPush.chipTitle === SHEET_PRIVATE && sheetAfterPush.snapshots === 0,
+    JSON.stringify(sheetAfterPush)],
+  ["the Status page holds neither End session nor Send test",
+    (() => {
+      const status = markup.slice(markup.indexOf('id="view-status"'), markup.indexOf('id="view-policy"'));
+      return !status.includes("end_session") && !status.includes("test-notification")
+        && !status.includes("runtime-strip") && !status.includes("notifications-strip")
+        && !nodes.get("diagnostic-grid").innerHTML.includes("Process diagnostics");
+    })(),
+    "the Status page still carries a control that moved to the sheet"],
   ["a pushed status changes the word, the sentence behind it and the wheel with no snapshot",
     wordBeforePush === "Ready" && wordAfterPush === "Paused"
       && wordTitleAfterPush === "Paused from the tray."
@@ -1196,28 +1393,6 @@ const checks = [
     setupEverythingWasActionable && bulkSetups === 1
       && listeners.includes("setup-integrations:click"),
     `actionable=${setupEverythingWasActionable} calls=${bulkSetups}`],
-  ["the status card renders the diagnostics state and both person acts",
-    (() => {
-      const grid = nodes.get("diagnostic-grid");
-      return Boolean(grid) && grid.innerHTML.includes("Process diagnostics")
-        && grid.innerHTML.includes("on (marker)")
-        && grid.innerHTML.includes('data-diagnostics-operation="toggle"')
-        && grid.innerHTML.includes('data-diagnostics-operation="reveal"');
-    })()],
-  ["the status card flips to Turn on when the layer changes under it",
-    (() => {
-      view.collections({
-        sessions: [], browsers: [],
-        diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Ghostlight is accepting local connections." }],
-        history: [], service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
-        process_diagnostics: { layer: "off", directory: "/home/test/.cache/ghostlight", used_bytes: 4242 },
-        configuration: { managed_policy: { configured: false } },
-        harnesses: []
-      }, []);
-      const grid = nodes.get("diagnostic-grid");
-      return grid.innerHTML.includes("Turn on") && !grid.innerHTML.includes("Turn off")
-        && grid.innerHTML.includes("Operational log is off");
-    })()],
   ["integrations stay one flat roster with category order before alphabetic name order",
     !rosterHtml.includes("integration-group")
       && JSON.stringify(rosterCards.map((card) => card.name)) === JSON.stringify([

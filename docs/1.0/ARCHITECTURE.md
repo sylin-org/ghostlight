@@ -478,7 +478,7 @@ window, a watching screen and the browser toolbar change the runtime through one
 publishes it. File work runs outside the UI event loop. The native notification port is
 best effort and content-free. WebView, tray, notification, and recoverable Tauri failures cannot
 change domain truth; startup or event-loop failure ends the desktop authority instead of leaving
-an invisible process.
+an invisible process. Every Ghostlight web app shares one band and Controls sheet from `ui/kit`, drawn from the service's controls part.
 
 The page reads its context from the service before it draws and renders what it is told: an act
 its context cannot make is shown as state, with one line that leads to the Ghostlight window.

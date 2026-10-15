@@ -70,6 +70,18 @@
         + `<button class="link-button" type="button" data-continue>${escapeHtml(CONTINUE_LABEL)}</button>`;
     }
 
+    /**
+     * Name the body for the runtime state it shows, and keep every other class it wears.
+     *
+     * The page's personal settings are classes on the body too, so the runtime name replaces only
+     * the runtime classes.
+     */
+    function runtimeClass(name) {
+      const kept = String(document.body.className).split(/\s+/)
+        .filter((className) => className && !className.startsWith("runtime-"));
+      document.body.className = [name, ...kept].join(" ");
+    }
+
     /** Run one fallible paint. Report what went wrong, and say it did not happen. */
     function attempt(what, step) {
       try {
@@ -480,7 +492,7 @@
       }
       const readiness = facts.snapshot?.readiness;
       const name = lost || !readiness ? "runtime-offline" : `runtime-${readiness.tone}`;
-      document.body.className = name;
+      runtimeClass(name);
       // While the live stream is being opened again the page cannot vouch for what it shows.
       el["state-word"].textContent = lost ? RECONNECTING : readiness ? readiness.word : "";
       // Where a pause came from is the better thing to read on the word while there is one.
@@ -531,7 +543,7 @@
 
     /** The band of a screen with nothing to show: no lamp state, no wheel, only its chip. */
     function closedBand() {
-      document.body.className = "runtime-offline";
+      runtimeClass("runtime-offline");
       el["state-word"].textContent = "";
       el["state-word"].title = "";
       el["state-facts"].textContent = "";
@@ -558,8 +570,6 @@
       chip(told);
       el["refresh-integrations"].hidden = !can(ACT.rescan);
       el["setup-integrations"].hidden = !can(ACT.setupAll);
-      el["runtime-strip"].hidden = !can(ACT.endSession);
-      el["notifications-strip"].hidden = !can(ACT.testNotification);
       el["apply-policy"].textContent = can(ACT.applyPolicy) ? "Apply" : APPLY_IN_WINDOW_LABEL;
       el["sacred-hosts"].disabled = !can(ACT.applyPolicy);
     }
@@ -775,38 +785,13 @@
       el["diagnostic-grid"].innerHTML = snapshot.diagnostics.map((item) =>
         `<article class="card"><span class="severity ${escapeHtml(item.severity)}"><span class="dot"></span>`
         + `${escapeHtml(item.severity)}</span><h2>${escapeHtml(item.label)}</h2>`
-        + `<p>${escapeHtml(item.detail)}</p></article>`).join("")
-        + processDiagnosticsCard(snapshot.process_diagnostics);
+        + `<p>${escapeHtml(item.detail)}</p></article>`).join("");
 
       const started = snapshot.service.started_at_ms
         ? new Date(snapshot.service.started_at_ms).toLocaleString()
         : "unknown";
       el.colophon.textContent =
         `Ghostlight ${snapshot.service.version} - running since ${started} - everything on this page stays on this device.`;
-    }
-
-    /* The ADR-0145 card: whether the shared process log is on, and the two person acts. */
-    function processDiagnosticsCard(report) {
-      if (!report) return "";
-      const layer = report.layer === "off"
-        ? "off"
-        : `on (${escapeHtml(report.layer)})`;
-      const place = report.directory
-        ? ` Logs live in ${escapeHtml(report.directory)} (${report.used_bytes} bytes).`
-        : "";
-      const toggle = can(ACT.setDiagnostics)
-        ? `<button class="ghost-button" type="button" data-diagnostics-operation="toggle">`
-          + `${report.layer === "off" ? "Turn on" : "Turn off"}</button>` : "";
-      // The folder is named and openable even while off: retained logs live there, and it is
-      // where the next activation writes.
-      const reveal = can(ACT.revealDiagnostics)
-        ? `<button class="link-button" type="button" data-diagnostics-operation="reveal">Open log folder</button>` : "";
-      const withheld = [ACT.setDiagnostics, ACT.revealDiagnostics].find((act) => !can(act));
-      return `<article class="card"><span class="severity passing"><span class="dot"></span>passing</span>`
-        + `<h2>Process diagnostics</h2><p>Operational log is ${layer}.${place}</p>`
-        + (toggle || reveal ? `<p>${toggle} ${reveal}</p>` : "")
-        + (withheld ? `<p class="continue-line">${continueMarkup(whyNot(withheld))}</p>` : "")
-        + `</article>`;
     }
 
     /* -------------------------------- policy -------------------------------- */
@@ -1499,11 +1484,7 @@
       };
       ifChanged("about", product, () => about(product));
       ifChanged("integrations", [snapshot.harnesses, [...pending], access?.acts], () => integrations(snapshot, pending));
-      ifChanged(
-        "status",
-        [snapshot.diagnostics, snapshot.process_diagnostics, snapshot.configuration, snapshot.service, access?.acts],
-        () => status(snapshot),
-      );
+      ifChanged("status", [snapshot.diagnostics, snapshot.configuration, snapshot.service], () => status(snapshot));
     }
 
     /* -------------------------------- chrome ------------------------------ */
@@ -1648,7 +1629,7 @@
     return Object.freeze({
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
-      context, closed, reconnecting,
+      context, closed, chip, reconnecting,
       band, collections, navigate, showing: () => current, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,

@@ -177,6 +177,7 @@ pub fn run(reason: StartReason) -> Result<()> {
             remove_user_policy,
             apply_runtime_intent,
             set_diagnostics,
+            set_watching,
             reveal_diagnostics,
             refresh_harnesses,
             setup_detected_harnesses,
@@ -742,6 +743,16 @@ fn set_diagnostics(on: bool, state: State<'_, DesktopState>) -> Result<serde_jso
     serde_json::to_value(state.workbench.set_diagnostics(on)).map_err(|error| error.to_string())
 }
 
+/// Turn "Others can watch" on or off and report the Controls part the window now shows.
+#[tauri::command]
+fn set_watching(watch: bool, state: State<'_, DesktopState>) -> Result<serde_json::Value, String> {
+    let controls = state
+        .workbench
+        .set_watching(watch)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(controls).map_err(|error| error.to_string())
+}
+
 /// Open the diagnostics folder in the operating system's file manager. The folder is the one
 /// the diagnostics state names; this actuation lives in the native process, and the WebView
 /// gains no opener permission.
@@ -883,7 +894,12 @@ mod tests {
         let app = surface_source();
         // Each command the shared transport names for the shell is registered, and each one the
         // shell registers is named by the transport, so neither side can drift alone.
-        for command in ["workbench_context", "set_diagnostics", "continue_in_window"] {
+        for command in [
+            "workbench_context",
+            "set_diagnostics",
+            "set_watching",
+            "continue_in_window",
+        ] {
             assert!(commands.contains(command), "{command} is not registered");
             assert!(
                 app.contains(&format!("\"{command}\"")),
@@ -974,6 +990,9 @@ mod tests {
             },
             WorkbenchChange::ConnectionsChanged {
                 connections: ConnectionsPart::of(&snapshot),
+            },
+            WorkbenchChange::ControlsChanged {
+                controls: Box::new(snapshot.controls.clone()),
             },
             WorkbenchChange::PartChanged {
                 part: HintedPart::Integrations,
@@ -1089,6 +1108,7 @@ mod tests {
             include_str!("../../ui/lib/transport.js"),
             include_str!("../../ui/lib/store.js"),
             include_str!("../../ui/lib/view.js"),
+            include_str!("../../ui/kit/controls.js"),
             include_str!("../../ui/app.js"),
         ]
         .join(

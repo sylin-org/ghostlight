@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ghostlight</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="kit/kit.css">
 </head>
 <body class="runtime-quiet">
   <div class="app-shell">
@@ -30,6 +31,9 @@
         <small id="wheel-state-note"></small>
       </span>
       <span class="continue-line band-continue" id="band-continue" hidden></span>
+
+      <button class="controls-open" type="button" id="controls-open" data-word="open"
+              aria-haspopup="dialog" aria-expanded="false" aria-controls="controls-sheet" hidden></button>
 
       <nav class="tabs" aria-label="Ghostlight">
         <button class="tab active" type="button" data-view="monitor" aria-current="page">At a glance</button>
@@ -94,21 +98,6 @@
           <button class="ghost-button" type="button" id="refresh-status">Refresh</button>
         </div>
         <div class="card-grid" id="diagnostic-grid"></div>
-        <section class="strip" id="runtime-strip">
-          <div>
-            <h2>Runtime session</h2>
-            <p>Ending the session stops new governed effects. Start a fresh one from the Pause control when you want work to continue.</p>
-          </div>
-          <button class="danger-button" type="button" data-intent="end_session">End session</button>
-        </section>
-
-        <section class="strip" id="notifications-strip">
-          <div>
-            <h2>Notifications</h2>
-            <p>Send one local Ghostlight checkup notification. Nothing leaves this device.</p>
-          </div>
-          <button class="ghost-button" type="button" id="test-notification">Send test</button>
-        </section>
         <p class="colophon" id="colophon"></p>
       </section>
       <section class="view" id="view-policy" data-page="policy" aria-labelledby="policy-heading">
@@ -222,6 +211,87 @@
     </main>
   </div>
 
+  <section class="controls-sheet" id="controls-sheet" role="dialog" aria-modal="true"
+           aria-labelledby="controls-title" tabindex="-1" hidden>
+    <h2 class="sr-only" id="controls-title" data-word="title"></h2>
+
+    <div class="controls-group" id="controls-screen">
+      <h3 data-word="screen"></h3>
+      <div class="controls-row">
+        <span class="controls-label" data-word="density"></span>
+        <span class="controls-choices" role="group">
+          <button class="choice" type="button" data-personal="density" data-value="comfortable" data-word="comfortable"></button>
+          <button class="choice" type="button" data-personal="density" data-value="compact" data-word="compact"></button>
+        </span>
+      </div>
+      <div class="controls-row">
+        <span class="controls-label" data-word="motion"></span>
+        <span class="controls-choices" role="group">
+          <button class="choice" type="button" data-personal="motion" data-value="system" data-word="followSystem"></button>
+          <button class="choice" type="button" data-personal="motion" data-value="reduced" data-word="reduced"></button>
+        </span>
+      </div>
+    </div>
+
+    <div class="controls-group" id="controls-computer">
+      <h3 data-word="computer"></h3>
+      <p class="controls-service" id="controls-service"></p>
+
+      <div class="controls-row" id="controls-runtime">
+        <span class="controls-label" id="controls-runtime-label"></span>
+        <span class="controls-state">
+          <b id="controls-runtime-word"></b>
+          <small id="controls-runtime-note"></small>
+        </span>
+        <span class="controls-acts">
+          <button class="ghost-button" type="button" id="controls-hold" data-intent="hold" data-word="pause" hidden></button>
+          <button class="ghost-button" type="button" id="controls-resume" data-intent="resume" data-word="resume" hidden></button>
+          <button class="ghost-button" type="button" id="controls-start" data-intent="start_session" data-word="startSession" hidden></button>
+          <button class="danger-button" type="button" id="controls-end" data-intent="end_session" data-word="endSession" hidden></button>
+        </span>
+      </div>
+
+      <div class="controls-row" id="controls-viewing">
+        <span class="controls-label" id="controls-viewing-label"></span>
+        <span class="controls-state">
+          <b id="controls-viewing-word"></b>
+          <small class="controls-detail" id="controls-viewing-url" hidden></small>
+        </span>
+        <span class="controls-acts">
+          <button class="link-button" type="button" id="controls-viewing-copy" data-viewing="copy" data-word="copyAddress" hidden></button>
+          <button class="ghost-button" type="button" id="controls-viewing-toggle" data-viewing="toggle" hidden></button>
+        </span>
+      </div>
+
+      <div class="controls-row" id="controls-diagnostics">
+        <span class="controls-label" id="controls-diagnostics-label"></span>
+        <span class="controls-state">
+          <b id="controls-diagnostics-word"></b>
+          <small class="controls-detail" id="controls-diagnostics-place" hidden></small>
+        </span>
+        <span class="controls-acts">
+          <button class="link-button" type="button" id="controls-diagnostics-reveal" data-diagnostics-operation="reveal" data-word="openLogFolder" hidden></button>
+          <button class="ghost-button" type="button" id="controls-diagnostics-toggle" data-diagnostics-operation="toggle" hidden></button>
+        </span>
+      </div>
+
+      <div class="controls-row" id="controls-notifications">
+        <span class="controls-label" id="controls-notifications-label"></span>
+        <span class="controls-state">
+          <small id="controls-notifications-word"></small>
+        </span>
+        <span class="controls-acts">
+          <button class="ghost-button" type="button" id="test-notification" data-word="sendTest" hidden></button>
+        </span>
+      </div>
+
+      <p class="continue-line" id="controls-continue" hidden>
+        <span id="controls-continue-why"></span>
+        <button class="link-button" type="button" id="controls-continue-button" data-controls-continue data-word="continueInWindow"></button>
+      </p>
+    </div>
+  </section>
+
   <div class="palette-backdrop" id="palette" hidden>
     <div class="palette-box" role="dialog" aria-modal="true" aria-label="Search Ghostlight">
       <div class="palette-input">
@@ -253,6 +323,7 @@
   <script src="lib/transport.js"></script>
   <script src="lib/store.js"></script>
   <script src="lib/view.js"></script>
+  <script src="kit/controls.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

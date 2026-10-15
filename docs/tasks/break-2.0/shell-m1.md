@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-08-controls-sheet.
+Next: m1-09-desktop-role.
 
 ## Landed
 
@@ -53,6 +53,7 @@ Next: m1-08-controls-sheet.
 | m1-05-live-stream | One live stream, pushed to every screen. `GET /api/events` is served from an `EventHub` every screen subscribes to; the sequence advances whether or not anyone listens; a snapshot reads it first; `status_changed`, `connections_changed` and `part_changed` events keep the band, the sessions and the hinted parts current; the tray, the window, a watching screen and the browser toolbar change the runtime through `apply_runtime_control(intent, source)`, and the status says where a pause came from. Acts answer with `Ghostlight-Seq`. | see `git log` |
 | m1-06-native-acts | The acts that need the operating system are service actions the window asks for over loopback: `WorkbenchNativeActs` (open a link, open a folder, pick a file) attached beside the presentation port, four facade methods on top of it, three Control-only routes, and a table of links in `/api/context` for every context. The Tauri window behaves as before; its four commands call the facade. | see `git log` |
 | m1-07-page-transport | The page speaks loopback HTTP and renders its context. `transport.js` gains `overHttp` (one table maps each Tauri command name to a route) and the live stream with reconnect; `app.js` reads `GET /api/context` first and renders what it is told: Control as before, Watch as state with one Continue line per panel, Closed as one sentence per data view with the About page in full. The page drops the pull on every focus and the rescan on every focus; opening Integrations rescans once. The Tauri window keeps its path and gains `workbench_context`, `set_diagnostics` and `continue_in_window`. | see `git log` |
+| m1-08-controls-sheet | One shared Controls sheet on the band of every Ghostlight web app (`ui/kit/controls.js`, `ui/kit/kit.css`): "On this screen" (Density, Motion, kept in the browser) and "For Ghostlight on this computer" (Pause and the session, "Others can watch", process diagnostics, the notification test). The service gains the `controls` part, `WorkbenchChange::ControlsChanged`, `WorkbenchFacade::set_watching` (the only way watching changes; off ends every watching stream with `closed`), `connection_counts` and `service_line`; the Status page loses its session, notification and process-diagnostics strips. | see `git log` |
 
 ## Route table
 
@@ -76,6 +77,7 @@ every route but the pages and `/api/context`.
 | `/api/policy/user` | PUT | with `If-Match` | window | 403 | none | `apply_user_policy` |
 | `/api/policy/user` | DELETE | with `If-Match` | window | 403 | none | `remove_user_policy` |
 | `/api/controls/diagnostics` | PUT | set | window | 403 | none | `toggle_diagnostics` |
+| `/api/controls/viewing` | PUT | `{ watch }`, answers the controls part | window | 403 | none | (new; Tauri command `set_watching`) |
 | `/api/integrations/setup-all` | POST | yes | window | 403 | none | `setup_detected_harnesses` |
 | `/api/integrations/act` | POST | with `expected_state` | window | 403 | none | `manage_harness` |
 | `/api/notifications/test` | POST | yes | window | 403 | none | `test_notification` |
@@ -136,6 +138,20 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
 - m1-07, Chrome, with watching turned off (a later slice adds the switch; until then the Closed run is
   covered by `tests/workbench-surface.mjs` only): every data view shows the one sentence and About
   shows the Version and License facts and every link.
+
+- m1-08, in the Ghostlight window (Tauri), Windows and Linux: the Controls button sits on the band after the wheel; the
+  sheet replaces the Status page's Runtime session and Notifications strips and its process-diagnostics card (Status
+  keeps its four health cards, Refresh and the colophon). Pause, Resume, Start session, End session, Turn on and off
+  for diagnostics, Open log folder and Send test all work from the sheet; Escape, the button and a click outside close
+  it. Density Compact tightens the hero and the queue, Motion Reduced stops the lamp and the view animations, and both
+  are remembered after the window is reopened.
+- m1-08, Windows: with a Chrome tab on the logged watch address, press Turn off under "Others can watch" in the window.
+  The tab shows the closed sentence at once, its About page still shows in full, and the window's chip tooltip reads
+  "Watching is off: only this window shows Ghostlight." with no reload. Reload the tab: it still shows the closed
+  sentence. Turn it on again in the window and reload the tab: it watches again. `state/watch.off` exists in the home
+  only while it is off, and a service restart keeps the choice.
+- m1-08, Windows: run `ghostlight diagnostics on` from a terminal while the sheet is open; its diagnostics row follows
+  within about a second with no refresh.
 
 ## Blockers
 
@@ -281,3 +297,35 @@ None.
 - m1-07: `tests/workbench-surface.mjs` moved its injected About failure to the new
   `about({ version, license, counts })` signature. The preview server's fixture and the Tauri
   fixture in the surface test answer `workbench_context` with a Control context.
+
+- m1-08: the controls part carries a `label` on each row (`runtime`, `viewing`, `diagnostics`, `notifications`), which
+  the spec's key list does not name. The kit holds no sentence, so every row label comes from
+  `S/language/workbench.rs` with the state words; the page's own labels (headings, Density, Motion, each button's verb)
+  are `CONTROLS` in `words.js` and are handed to the kit. `runtime.note` is always present (null while not paused).
+- m1-08: `ControlsPart` is the Control form. `ControlsPart::seen_by(context)` fills every act's availability and `you`
+  for a context, so the snapshot, the event and the route all project from one value, and the service compares the
+  Control form to decide whether anything changed. The log folder is made home-relative when the part is built.
+- m1-08: the controls part is published by the live refresh, with status and connections, so a connection that comes or
+  goes, a pause from the tray and `ghostlight diagnostics on` all reach the sheet. Process diagnostics report their
+  log size, so while they are on the sheet is republished whenever the size changes.
+- m1-08: an act that changes the controls answers with `Ghostlight-Seq` of the `controls_changed` it caused, which
+  follows its part hint. `the_acts_that_change_a_part_hint_at_it_with_its_tag` now reads the controls event for the
+  diagnostics act.
+- m1-08: a watching stream that watching-off ends gets no copy of the part: the hub ends it with `closed` instead.
+  A closed tab does not poll; it shows the closed sentence until it is reloaded.
+- m1-08: the Copy address button shows only on a screen that may change who watches, and only where the page has a
+  clipboard (the loopback path). The Tauri path has no clipboard command, so the address is selectable text there.
+- m1-08: `app.js` wires only the band's wheel for `data-intent`; the buttons in the sheet carry their own attributes
+  and are wired by the kit, so one press is one act. The sheet's Continue button is `data-controls-continue`, not
+  `data-continue`, for the same reason.
+- m1-08: `view.js` names the body for the runtime state without discarding the other classes it wears, because the
+  personal settings are body classes too.
+- m1-08: the diagnostics part still carries `process_diagnostics` (the pinned key set is unchanged); the page now reads
+  the sheet's diagnostics row instead.
+- m1-08: `connection_counts` is tested over an in-memory workspace store with admitted MCP and command-line
+  connections and a fake browser; it needs no home, so no `TestHome` is used.
+- m1-08: `docs/1.0/ARCHITECTURE.md` still says process diagnostics can be toggled "from the workbench Status card"
+  (the process-diagnostics paragraph). That paragraph is not one this slice may edit; whoever next edits it should say
+  "Controls sheet".
+- Owner question: Theme and "Hold this screen" are not part of this milestone's "On this screen" group. Should
+  either be added once the demo has been seen?
