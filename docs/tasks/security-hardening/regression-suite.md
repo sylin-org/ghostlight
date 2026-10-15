@@ -27,8 +27,8 @@ It never labels an unavailable lane as passed.
 emitted executable artifact paths, and passes their directory as `GHOSTLIGHT_BIN_DIR`; an inherited
 stale binary selection or cross-build output directory cannot silently win.
 It writes logs and `results.json` beneath `.tmp/hardening-suite/<run>/`, including source revision,
-source-content fingerprint, executable hashes, platform, named gate results, and timings. A source
-change during the run invalidates the result. Documentation-only edits do not change the source
+source-content fingerprint, executable hashes, platform, named gate results, and timings. A run cited as release or revision evidence must show
+`source_unchanged: true`. Documentation-only edits do not change the source
 fingerprint. The report is evidence for the named platform and lane, not an installation claim.
 
 `--lane=process` and `--lane=browser` select explicit subsets for separate CI jobs. Both still build

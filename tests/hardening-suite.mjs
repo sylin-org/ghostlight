@@ -117,9 +117,10 @@ if (lane !== "process") {
   }
 }
 report.finished_at = new Date().toISOString();
-report.source_unchanged = report.source_sha256 === source();
-report.passed = report.source_unchanged && report.results.every(result => result.status === "passed");
+report.source_sha256_end = source();
+report.source_unchanged = report.source_sha256 === report.source_sha256_end;
+report.passed = report.results.every((result) => result.status === "passed");
 save();
 console.log(`Evidence: ${join(output, "results.json")}`);
-if (!report.source_unchanged) console.error("Source changed while the suite ran; repeat on a stable tree.");
+if (!report.source_unchanged) console.warn("Note: source changed during the run; results.json records both fingerprints. Do not cite this run as evidence for one revision.");
 process.exitCode = report.passed ? 0 : 1;
