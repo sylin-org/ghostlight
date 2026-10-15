@@ -166,13 +166,14 @@ fn post(proxy: &EventLoopProxy<SpikeEvent>, event: SpikeEvent) {
     let _ = proxy.send_event(event);
 }
 
-/// Ends the process on the final signal of the session, arming the fallback exit first.
-fn end_session(state: &SessionState, signal: SessionSignal) {
+/// Handles a signal about the end of the session: on the final one, arms the fallback exit
+/// first and then calls `exit`.
+fn end_session(state: &SessionState, signal: SessionSignal, exit: impl FnOnce()) {
     session::handle(
         state,
         signal,
         || session::arm_fallback_exit(FALLBACK_EXIT),
-        || std::process::exit(0),
+        exit,
     );
 }
 
@@ -196,7 +197,9 @@ impl Spike {
         #[cfg(target_os = "linux")]
         {
             let state = self.session.clone();
-            session::install_unix_signals(move |signal| end_session(&state, signal));
+            session::install_unix_signals(move |signal| {
+                end_session(&state, signal, || std::process::exit(0))
+            });
         }
         self.apply(LifecycleEvent::OpenRequested, target);
     }
@@ -281,7 +284,16 @@ impl Spike {
             Event::UserEvent(SpikeEvent::RendererLost) => {
                 self.apply(LifecycleEvent::RendererLost, target);
             }
-            Event::LoopDestroyed => end_session(&self.session, SessionSignal::Final),
+            Event::LoopDestroyed => {
+                // The loop's own teardown would drop the tray and the window, but the exit
+                // comes first. Drop them here so Windows removes the notification icon.
+                let state = self.session.clone();
+                end_session(&state, SessionSignal::Final, || {
+                    self.window = None;
+                    self._tray = None;
+                    std::process::exit(0)
+                });
+            }
             _ => {}
         }
     }
