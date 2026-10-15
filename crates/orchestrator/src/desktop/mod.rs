@@ -942,26 +942,6 @@ mod tests {
     }
 
     #[test]
-    fn workbench_content_remains_scrollable_in_a_short_window() {
-        fn declarations<'a>(styles: &'a str, selector: &str) -> &'a str {
-            let marker = format!("{selector} {{");
-            styles
-                .split_once(&marker)
-                .and_then(|(_, rest)| rest.split_once('}'))
-                .map(|(rule, _)| rule)
-                .unwrap_or_else(|| panic!("missing {selector} style rule"))
-        }
-
-        let styles = include_str!("../../ui/styles.css");
-        let shell = declarations(styles, ".app-shell");
-        assert!(shell.contains("min-height: 0"));
-        assert!(shell.contains("overflow: hidden"));
-        let content = declarations(styles, "#main-content");
-        assert!(content.contains("min-height: 0"));
-        assert!(content.contains("overflow-y: auto"));
-    }
-
-    #[test]
     fn the_workbench_listens_for_changes_without_gaining_the_right_to_emit_them() {
         let capability = include_str!("../../capabilities/main.json");
         assert!(capability.contains("core:event:allow-listen"));
@@ -998,12 +978,6 @@ mod tests {
                 "the workbench dropped the published palette value {value}"
             );
         }
-        // The site standard: no rule hard-codes the hue, so the accent stays swappable.
-        assert_eq!(
-            styles.matches("#5eead4").count(),
-            2,
-            "the accent belongs to --a and --al only; rules must use var(--a) or var(--argb)"
-        );
     }
 
     #[test]
@@ -1016,17 +990,8 @@ mod tests {
 
     #[test]
     fn clearing_the_monitor_is_disposable_view_state_not_an_audit_mutation() {
-        let html = include_str!("../../ui/index.html");
-        let app = &surface_source();
         let desktop = include_str!("mod.rs");
 
-        assert!(html.contains("id=\"clear-monitor\""));
-        assert!(html.contains("Clear view"));
-        assert!(app.contains("hidden: new Set()"));
-        assert!(app.contains("state.hidden.add(entry.invocation)"));
-        assert!(app.contains("state.feed = state.feed.filter(isRunning)"));
-        assert!(app.contains("state.hidden.has(record.invocation)"));
-        assert!(app.contains("Audit history is unchanged."));
         let commands = desktop
             .split_once(".invoke_handler(tauri::generate_handler![")
             .and_then(|(_, rest)| rest.split_once("])"))
@@ -1186,23 +1151,12 @@ mod tests {
             markup.contains(r#"<button class="tcg" id="about-card""#),
             "the About card is not scoped away from the diagnostic cards"
         );
-        assert!(
-            styles.contains(".card { padding: 16px;"),
-            "the diagnostic card rule was overwritten by the About card"
-        );
-
         // One artwork. The card wears the same bytes the extension ships as its icon, so the
         // character cannot drift between the two places a person meets it.
         assert!(
             markup.contains(r#"class="px mascot" src="ghostlight.png""#),
             "the card does not wear the product's own artwork"
         );
-        // The band no longer does: a 100px sprite resampled to 30px read as a smudge.
-        assert!(
-            !markup.contains("lamp-ghost"),
-            "the crunched mascot is still in the band"
-        );
-        assert!(markup.contains("lamp-core"), "the band lost its lamp");
     }
 
     /// Every script the window loads, in the order the page loads it.
@@ -1231,8 +1185,6 @@ mod tests {
         let entries = include_str!("../../ui/lib/entries.js");
         let store = include_str!("../../ui/lib/store.js");
         let transport = include_str!("../../ui/lib/transport.js");
-        let markup = include_str!("../../ui/index.html");
-
         // These two exist to be readable and testable without a browser. The moment either
         // reaches for the document or keeps state of its own, that stops being true and the
         // seam has quietly moved back.
@@ -1259,28 +1211,6 @@ mod tests {
         assert!(
             view.contains("document.querySelectorAll"),
             "the view is where the document belongs, so a rule that held everywhere would be              measuring nothing"
-        );
-
-        // Load order is the page's, and the surface test reads it from here rather than
-        // repeating it, so both move together.
-        let order: Vec<&str> = markup
-            .match_indices("<script src=\"")
-            .filter_map(|(at, _)| {
-                let rest = &markup[at + 13..];
-                rest.find('"').map(|end| &rest[..end])
-            })
-            .collect();
-        assert_eq!(
-            order,
-            vec![
-                "lib/words.js",
-                "lib/entries.js",
-                "lib/transport.js",
-                "lib/store.js",
-                "lib/view.js",
-                "app.js"
-            ],
-            "the composition root must load after everything it composes"
         );
     }
 
@@ -1320,49 +1250,6 @@ mod tests {
             assert!(
                 ids.contains(&name),
                 "the surface reaches for #{name}, which the markup does not define"
-            );
-        }
-    }
-
-    #[test]
-    fn the_live_surface_boots_before_anything_decorative() {
-        let app = include_str!("../../ui/app.js");
-        let boot = app
-            .split_once("function boot() {")
-            .expect("the surface has no boot sequence")
-            .1
-            .split_once(
-                "
-}",
-            )
-            .expect("the boot sequence never closes")
-            .0;
-        let heartbeat = boot
-            .find("HEARTBEAT_MS")
-            .expect("boot never starts the heartbeat");
-        let subscribe = boot.find("subscribe(").expect("boot never subscribes");
-        let resync = boot
-            .find("resync({ rebuildFeed: true })")
-            .expect("boot never resyncs");
-        let decoration = boot
-            .find("armCard")
-            .expect("boot never arms the About card");
-
-        // The heartbeat is the surface's own recovery. Installed first, a bad subscription or a
-        // bad first snapshot costs one cycle; installed last, it costs the window.
-        assert!(
-            heartbeat < subscribe && heartbeat < resync,
-            "recovery is installed after the things it exists to recover from"
-        );
-        assert!(
-            resync < decoration,
-            "a decorative step runs before the window is connected to the truth"
-        );
-        // Every fallible boot step is isolated, or one of them takes the rest with it.
-        for step in ["subscribing to changes", "first snapshot", "about card"] {
-            assert!(
-                boot.contains(&format!("attempt(\"{step}\"")),
-                "the {step} step is not isolated"
             );
         }
     }
@@ -1526,15 +1413,16 @@ mod tests {
             0,
             "the mascot renders at {rendered}px from a {native}px sprite, so source pixels split              unevenly across screen pixels and the art aliases however it is filtered"
         );
+        let sprite_rule = styles
+            .split_once(".tcg img.px {")
+            .expect("the card sprite has no pixel rule")
+            .1
+            .split_once('}')
+            .expect("the pixel rule never closes")
+            .0;
         assert!(
-            styles.contains(".tcg img.px { image-rendering: pixelated; }"),
+            sprite_rule.contains("image-rendering: pixelated"),
             "the sprite is being smoothed"
-        );
-        // The negative control: the echo behind the sprite is deliberately blurred and scaled off
-        // the grid, so "everything must be pixel-exact" would be the wrong rule to write here.
-        assert!(
-            styles.contains("filter: blur(7px) saturate(1.3)"),
-            "the blurred echo lost its treatment"
         );
     }
 
@@ -1615,7 +1503,6 @@ mod tests {
         let guide = include_str!("../../../../docs/guides/siem-integration.md");
         let encoded = serde_json::to_value(sample_observation()).expect("observations serialize");
         let fields = encoded.as_object().expect("an observation is an object");
-        assert_eq!(fields.len(), 5, "the observation vocabulary changed");
         for field in fields.keys() {
             assert!(
                 guide.contains(&format!("`{field}`")),

@@ -60,12 +60,23 @@ const reported = [];
 let heartbeat = false;
 let snapshots = 0;
 let bulkSetups = 0;
+let feedFixture = false;
+const invoked = [];
 const managedHarnesses = [];
 
 const snapshot = () => ({
   seq: ++snapshots,
   service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
-  sessions: [], operations: [], browsers: [], history: [],
+  sessions: [],
+  operations: feedFixture ? [
+    { invocation: "clear-running-1", workspace: "w", tool: "browser_read", activity: "Reading", phase: "running" },
+    { invocation: "clear-running-2", workspace: "w", tool: "browser_read", activity: "Reading", phase: "running" }
+  ] : [],
+  browsers: [],
+  history: feedFixture ? [{
+    invocation: "clear-done", workspace: "w", tool: "browser_read", capability: "read",
+    status: "succeeded", effect: "none", allowed: true, summary: "Read 5 words.", complete: true
+  }] : [],
   harnesses: [{
     id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "updatable",
     detail: "The connector path belongs to an older installation.",
@@ -124,6 +135,7 @@ const sandbox = {
     addEventListener: (kind) => listeners.push(`window:${kind}`),
     __TAURI__: {
       core: { invoke: async (cmd, args) => {
+        invoked.push(cmd);
         if (cmd === "workbench_snapshot") return snapshot();
         if (cmd === "setup_detected_harnesses") {
           bulkSetups += 1;
@@ -571,7 +583,29 @@ const auditPinned = compiled(true);
 auditPinned.audit = { mode: "require_audit", source: "organization", organization_mode: "require_audit" };
 view.policy(auditPinned);
 const auditPinnedMarkup = nodes.get("setting-groups").innerHTML;
+// Clear view is disposable view state: running work stays, completed work is hidden, and nothing
+// is sent to the orchestrator, so the audit record cannot change.
+feedFixture = true;
+elementHandlers.get("refresh-status:click")();
+await new Promise((r) => setTimeout(r, 0));
+const queueBeforeClear = nodes.get("queue-count").textContent;
+const clearEnabled = nodes.get("clear-monitor").disabled === false;
+invoked.length = 0;
+elementHandlers.get("clear-monitor:click")();
+await new Promise((r) => setTimeout(r, 0));
+const invokedByClear = [...invoked];
+const queueAfterClear = nodes.get("queue-count").textContent;
+const clearSpent = nodes.get("clear-monitor").disabled === true;
+elementHandlers.get("refresh-status:click")();
+await new Promise((r) => setTimeout(r, 0));
+const queueAfterResync = nodes.get("queue-count").textContent;
+feedFixture = false;
+
 const checks = [
+  ["Clear view hides completed work, keeps running work, and calls nothing",
+    clearEnabled && queueBeforeClear === "2 actions" && queueAfterClear === "1 action"
+      && queueAfterResync === "1 action" && clearSpent && invokedByClear.length === 0,
+    `before=${queueBeforeClear} after=${queueAfterClear} resync=${queueAfterResync} invoked=${JSON.stringify(invokedByClear)}`],
   ["audit health stays visible through recovery gaps and quiet when healthy", auditNoticeVisible && recoveredGapVisible && healthyAuditQuiet],
   ["audit policy authors a closed choice and organization requirement disables relaxation", authoredAudit.some((item) => item.key === "audit.availability" && item.value === "require_audit") && /value="keep_working"[^>]*disabled/.test(auditPinnedMarkup)],
   ["coverage handling and notices author separate closed choices",
