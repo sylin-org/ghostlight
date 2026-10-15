@@ -2,7 +2,10 @@
 //!
 //! When the target is Windows and the build host can compile resources, it embeds the product icon
 //! and the version information (the description Task Manager and Explorer show) into
-//! `ghostlight-desktop.exe`. On every other host or target it does nothing.
+//! `ghostlight-desktop.exe`. On MSVC targets it also embeds the application manifest, which asks
+//! for Common Controls 6: the window's libraries import `TaskDialogIndirect`, which only that
+//! version has, so without the manifest Windows refuses to load the image. On every other host or
+//! target it does nothing.
 
 #[cfg(windows)]
 use std::fs;
@@ -25,6 +28,14 @@ const RESOURCE_FILE: &str = "desktop.rc";
 #[cfg(windows)]
 const TARGET_WINDOWS: &str = "windows";
 
+/// The application manifest beside the crate's `Cargo.toml`.
+#[cfg(windows)]
+const MANIFEST: &str = "manifest.xml";
+
+/// The Cargo target environment whose linker embeds the manifest.
+#[cfg(windows)]
+const TARGET_ENV_MSVC: &str = "msvc";
+
 /// The size of an ICO header with one directory entry; the PNG follows it.
 #[cfg(windows)]
 const ICO_HEADER_BYTES: u32 = 22;
@@ -32,9 +43,20 @@ const ICO_HEADER_BYTES: u32 = 22;
 #[cfg(windows)]
 fn main() {
     println!("cargo:rerun-if-changed={ICON_PNG}");
+    println!("cargo:rerun-if-changed={MANIFEST}");
     println!("cargo:rerun-if-changed=build.rs");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok(TARGET_WINDOWS) {
         return;
+    }
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok(TARGET_ENV_MSVC) {
+        let directory = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo supplies CARGO_MANIFEST_DIR"),
+        );
+        println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
+            directory.join(MANIFEST).display()
+        );
     }
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo supplies OUT_DIR"));
     let icon = write_icon(&out_dir).expect("prepare the Ghostlight Windows icon");
