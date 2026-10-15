@@ -7,7 +7,8 @@
 //! is reported to the service, and a goodbye or a lost stream ends the shell.
 //!
 //! With a tray, closing the window keeps the process and the tray opens it again. Without one,
-//! closing the window ends the shell, so no invisible process stays behind.
+//! losing the window ends the shell, whether the person closed it or the renderer failed, so no
+//! invisible process stays behind.
 //!
 //! The pure parts (the tray action, the exit codes) are unit tested. [`run`] is native glue that
 //! opens a window, so it is checked live and never in `cargo test`.
@@ -26,6 +27,7 @@ use crate::tray::{Tray, TrayEvent};
 use crate::webview::{prepare_profile, profile_directory};
 use crate::window::{
     self, LifecycleEvent, ShellView, ShellWindow, WindowAct, WindowError, WindowLifecycle,
+    WindowState,
 };
 
 /// The exit code of a session with no display.
@@ -52,6 +54,13 @@ pub fn tray_action(event: &TrayEvent) -> Option<TrayAction> {
             item => Some(TrayAction::Report(item)),
         },
     }
+}
+
+/// Whether the shell has a reason to keep running. A tray can always open the window again.
+/// Without one, a shell whose window is gone has nothing left for a person to use, and it would
+/// hold the service's only shell slot while invisible, so it ends.
+fn goes_on(has_tray: bool, window: WindowState) -> bool {
+    has_tray || window != WindowState::Absent
 }
 
 /// What reaches the event loop from outside it.
@@ -114,7 +123,12 @@ impl Shell {
             });
         }
         self.apply(LifecycleEvent::OpenRequested, target);
-        self.tray.is_some() || self.lifecycle.is_open()
+        self.goes_on()
+    }
+
+    /// Whether the shell still has a tray or a window.
+    fn goes_on(&self) -> bool {
+        goes_on(self.tray.is_some(), self.lifecycle.state())
     }
 
     fn apply(&mut self, event: LifecycleEvent, target: &EventLoopWindowTarget<ShellEvent>) {
@@ -211,6 +225,9 @@ impl Shell {
                 });
             }
             _ => {}
+        }
+        if !self.goes_on() {
+            *flow = ControlFlow::Exit;
         }
     }
 }
@@ -331,6 +348,19 @@ mod tests {
     fn an_entry_this_build_does_not_have_does_nothing() {
         assert_eq!(tray_action(&item("settings")), None);
         assert_eq!(tray_action(&item("")), None);
+    }
+
+    #[test]
+    fn a_shell_with_a_tray_goes_on_without_a_window() {
+        assert!(goes_on(true, WindowState::Absent));
+        assert!(goes_on(true, WindowState::Open));
+    }
+
+    #[test]
+    fn a_shell_without_a_tray_ends_when_its_window_is_gone() {
+        assert!(!goes_on(false, WindowState::Absent));
+        assert!(goes_on(false, WindowState::Open));
+        assert!(goes_on(false, WindowState::Replacing));
     }
 
     #[test]
