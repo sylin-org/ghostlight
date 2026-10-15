@@ -51,6 +51,8 @@ pub const OPENING_DEADLINE: Duration = Duration::from_millis(5_000);
 
 #[cfg(test)]
 mod version_tests {
+    //! Checks that the crate version major is the relay revision.
+
     use super::RELAY;
 
     /// The crate version major is the relay revision, so a published connector names its revision.
