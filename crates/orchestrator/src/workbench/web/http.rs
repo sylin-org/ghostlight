@@ -10,6 +10,8 @@ use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::time::{Duration, Instant};
 
+use super::events::Subscription;
+
 /// The longest request line plus headers the server reads.
 pub const HEAD_LIMIT: usize = 16 * 1024;
 
@@ -69,6 +71,8 @@ pub mod header {
     pub const FRAME_OPTIONS: &str = "X-Frame-Options";
     /// What a page may load and do.
     pub const CONTENT_SECURITY_POLICY: &str = "Content-Security-Policy";
+    /// The sequence number of the last change an act caused.
+    pub const SEQ: &str = "Ghostlight-Seq";
 }
 
 /// The methods the server tells apart.
@@ -252,6 +256,23 @@ impl Incoming {
         self.drain();
     }
 
+    /// Write the head of `response` and keep the connection open for a body that has no length.
+    ///
+    /// The body ends when the connection closes. Each write to the returned writer gives up after
+    /// `deadline`.
+    pub fn begin_stream(
+        mut self,
+        response: &Response,
+        deadline: Duration,
+    ) -> io::Result<EventWriter> {
+        self.stream.set_write_timeout(Some(deadline))?;
+        response.write_stream_head(&mut self.stream)?;
+        self.stream.flush()?;
+        Ok(EventWriter {
+            stream: self.stream,
+        })
+    }
+
     /// Read and discard what the peer still sends, so closing does not reset the response.
     fn drain(&mut self) {
         let deadline = Instant::now() + DRAIN_DEADLINE;
@@ -263,6 +284,25 @@ impl Incoming {
                 Err(_) => break,
             }
         }
+    }
+}
+
+/// The body of a stream, written as it happens. Dropping it closes the connection.
+pub struct EventWriter {
+    stream: TcpStream,
+}
+
+impl EventWriter {
+    /// Write `text` and send it now.
+    pub fn write(&mut self, text: &str) -> io::Result<()> {
+        self.stream.write_all(text.as_bytes())?;
+        self.stream.flush()
+    }
+}
+
+impl Drop for EventWriter {
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
     }
 }
 
@@ -384,6 +424,8 @@ pub enum Status {
     PreconditionRequired,
     /// 429.
     TooManyRequests,
+    /// 503.
+    ServiceUnavailable,
 }
 
 impl Status {
@@ -407,6 +449,7 @@ impl Status {
             Self::Unprocessable => 422,
             Self::PreconditionRequired => 428,
             Self::TooManyRequests => 429,
+            Self::ServiceUnavailable => 503,
         }
     }
 
@@ -428,11 +471,13 @@ impl Status {
             Self::Unprocessable => "Unprocessable Content",
             Self::PreconditionRequired => "Precondition Required",
             Self::TooManyRequests => "Too Many Requests",
+            Self::ServiceUnavailable => "Service Unavailable",
         }
     }
 }
 
-/// One response. Every response says `Connection: close` and carries its `Content-Length`.
+/// One response. Every response says `Connection: close`. It carries its `Content-Length`, unless
+/// its body is a stream of events, which ends when the connection does.
 #[derive(Debug)]
 pub struct Response {
     /// The status.
@@ -440,6 +485,7 @@ pub struct Response {
     headers: Vec<(&'static str, String)>,
     body: Vec<u8>,
     head_only: bool,
+    events: Option<Subscription>,
 }
 
 impl Response {
@@ -451,7 +497,20 @@ impl Response {
             headers: Vec::new(),
             body: Vec::new(),
             head_only: false,
+            events: None,
         }
+    }
+
+    /// Make the body a stream of events, which the caller writes after the head.
+    #[must_use]
+    pub fn with_events(mut self, subscription: Subscription) -> Self {
+        self.events = Some(subscription);
+        self
+    }
+
+    /// Take the stream this response's body is, if it is one.
+    pub fn take_events(&mut self) -> Option<Subscription> {
+        self.events.take()
     }
 
     /// Add a header.
@@ -486,15 +545,16 @@ impl Response {
             .map(|(_, value)| value.as_str())
     }
 
-    fn write_to(&self, out: &mut impl Write) -> io::Result<()> {
+    fn head(&self, length: Option<usize>) -> String {
         let mut head = format!(
-            "HTTP/1.1 {} {}\r\n{}: close\r\n{}: {}\r\n",
+            "HTTP/1.1 {} {}\r\n{}: close\r\n",
             self.status.code(),
             self.status.reason(),
             header::CONNECTION,
-            header::CONTENT_LENGTH,
-            self.body.len()
         );
+        if let Some(length) = length {
+            head.push_str(&format!("{}: {length}\r\n", header::CONTENT_LENGTH));
+        }
         for (name, value) in &self.headers {
             head.push_str(name);
             head.push_str(": ");
@@ -502,11 +562,20 @@ impl Response {
             head.push_str("\r\n");
         }
         head.push_str("\r\n");
-        out.write_all(head.as_bytes())?;
+        head
+    }
+
+    fn write_to(&self, out: &mut impl Write) -> io::Result<()> {
+        out.write_all(self.head(Some(self.body.len())).as_bytes())?;
         if !self.head_only {
             out.write_all(&self.body)?;
         }
         Ok(())
+    }
+
+    /// Write the head of a body that has no length: it ends when the connection closes.
+    fn write_stream_head(&self, out: &mut impl Write) -> io::Result<()> {
+        out.write_all(self.head(None).as_bytes())
     }
 }
 

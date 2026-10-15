@@ -473,7 +473,9 @@ a sandboxed or absent browser look usable.
 Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. The loopback server in
 `workbench/web` is a second inbound adapter over the same facade. It decides access per route in
 three contexts (Control with the per-start bearer, Watch, Closed) and projects each part for its
-audience in the service. File work runs outside the UI event loop. The native notification port is
+audience in the service. One numbered event stream fans out to every screen, and the tray, the
+window, a watching screen and the browser toolbar change the runtime through one facade call that
+publishes it. File work runs outside the UI event loop. The native notification port is
 best effort and content-free. WebView, tray, notification, and recoverable Tauri failures cannot
 change domain truth; startup or event-loop failure ends the desktop authority instead of leaving
 an invisible process.

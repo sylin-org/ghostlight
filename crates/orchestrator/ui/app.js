@@ -129,6 +129,41 @@ function receiveChange(event) {
   const change = store.applyChange(event);
   if (change === "gap") resync({ rebuildFeed: true });
   else if (change === "refresh") resync();
+  else if (change === "hinted") hinted(event.change);
+}
+
+/*
+ * A part that is read on demand has changed.
+ *
+ * The orchestrator says which part and gives its tag. A part this window shows is read again; one
+ * it does not show is remembered as out of date and read when the person opens it. A tag already
+ * acted on is not acted on twice.
+ */
+const HINT_VIEWS = Object.freeze({ integrations: "integrations", policy: "policy", diagnostics: "status" });
+const hintTags = new Map();
+const outdated = new Set();
+
+function reread(part) {
+  // The snapshot carries integrations and diagnostics; the policy is its own read.
+  if (part === "policy") loadPolicy();
+  else resync();
+}
+
+function hinted({ part, etag }) {
+  if (!HINT_VIEWS[part]) return;
+  if (etag !== undefined && hintTags.get(part) === etag) return;
+  hintTags.set(part, etag);
+  if (view.showing() === HINT_VIEWS[part]) reread(part);
+  else outdated.add(part);
+}
+
+/** Read again whatever the person is about to see that changed while it was out of sight. */
+function openedView(name) {
+  for (const part of [...outdated]) {
+    if (HINT_VIEWS[part] !== name) continue;
+    outdated.delete(part);
+    reread(part);
+  }
 }
 
 /* --------------------------------- policy ------------------------------- */
@@ -315,7 +350,11 @@ function wire() {
     const tab = event.target.closest("[data-view]");
     if (tab) {
       view.navigate(tab.dataset.view);
-      if (tab.dataset.view === "policy") loadPolicy();
+      if (tab.dataset.view === "policy") {
+        outdated.delete("policy");
+        loadPolicy();
+      }
+      openedView(tab.dataset.view);
     }
     const ruleAction = event.target.closest("[data-rule-action]");
     if (ruleAction && !ruleAction.disabled) {

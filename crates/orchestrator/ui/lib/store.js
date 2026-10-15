@@ -137,6 +137,44 @@
       else emit(CHANGE.Row, { entry: state.feed[index] });
     }
 
+    /**
+     * Take the status part the orchestrator published as this window's own.
+     *
+     * The part replaces what the snapshot held under the same names, so the word, the lamp and
+     * the chip change without a pull.
+     */
+    function applyStatus(status) {
+      state.runtime = status.service.runtime_state;
+      const snapshot = state.snapshot;
+      if (!snapshot) return;
+      snapshot.service = status.service;
+      snapshot.readiness = status.readiness;
+      snapshot.audit_health = status.audit_health;
+      snapshot.audit_notice = status.audit_notice;
+      if (status.runtime_note) snapshot.runtime_note = status.runtime_note;
+      else delete snapshot.runtime_note;
+      snapshot.configuration = {
+        ...snapshot.configuration,
+        ...status.configuration,
+        runtime_state: status.service.runtime_state
+      };
+      emit(CHANGE.Collections, { snapshot });
+    }
+
+    /** Take the connections part the orchestrator published as this window's own. */
+    function applyConnections(connections) {
+      const snapshot = state.snapshot;
+      if (!snapshot) return;
+      snapshot.sessions = connections.sessions;
+      snapshot.browsers = connections.browsers;
+      snapshot.overview = {
+        ...snapshot.overview,
+        active_sessions: connections.sessions.length,
+        connected_browsers: connections.browsers.length
+      };
+      emit(CHANGE.Collections, { snapshot });
+    }
+
     function settled(record) {
       if (state.snapshot) {
         const previous = state.snapshot.history.findIndex((item) => item.invocation === record.invocation);
@@ -206,10 +244,12 @@
        * Fold one sequenced change in.
        *
        * A gap means this cache can no longer be trusted, so it says so rather than guessing, and
-       * the caller rebuilds from a fresh snapshot.
+       * the caller rebuilds from a fresh snapshot. A change numbered at or below the snapshot's is
+       * already in it.
        */
       applyChange(event) {
         if (!event || typeof event.seq !== "number") return "ignored";
+        if (event.seq <= state.seq) return "ignored";
         if (event.seq !== state.seq + 1) return "gap";
         state.seq = event.seq;
         const change = event.change;
@@ -228,6 +268,10 @@
           case "operation_settled": touch(); settled(change.record); break;
           case "composition_changed": touch(); settled(change.record); break;
           case "runtime_changed": state.runtime = change.runtime_state; break;
+          case "status_changed": applyStatus(change.status); break;
+          case "connections_changed": applyConnections(change.connections); break;
+          // The part is read on demand; the caller decides whether this window shows it.
+          case "part_changed": return "hinted";
           default: return "ignored";
         }
         emit(CHANGE.Band);

@@ -28,7 +28,7 @@ use crate::language::workbench::{COPIED_COMMAND, COPIED_SETUP};
 use crate::service::lifetime::QUIT_GRACE;
 use crate::service::{Quit, ServiceHost};
 use crate::workbench::{
-    validate_policy_document, validate_search_query, PolicyPreview, SearchHit,
+    validate_policy_document, validate_search_query, PolicyPreview, RuntimeSource, SearchHit,
     WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade,
     WorkbenchIntentResult, WorkbenchNotification, WorkbenchPresentationError,
     WorkbenchPresentationPort, WorkbenchRuntimeIntent, WorkbenchSnapshot,
@@ -302,7 +302,9 @@ fn reveal_from_tray(app: &AppHandle) {
 
 fn apply_tray_intent(app: &AppHandle, intent: WorkbenchRuntimeIntent) {
     let state = app.state::<DesktopState>();
-    let _ = state.workbench.apply_runtime_intent(intent);
+    let _ = state
+        .workbench
+        .apply_runtime_control(intent.into(), RuntimeSource::Tray);
 }
 
 fn show_workbench(app: &AppHandle) -> Result<(), WorkbenchPresentationError> {
@@ -846,9 +848,24 @@ mod tests {
         use crate::browser::adapter::RuntimeControlState;
 
         use crate::governance::{Capability, CapabilitySet};
-        use crate::workbench::{HistoryItem, OperationPhase, OperationSummary, WorkbenchChange};
+        use crate::workbench::parts::{ConnectionsPart, HintedPart, StatusPart};
+        use crate::workbench::{
+            HistoryItem, OperationPhase, OperationSummary, WorkbenchChange, WorkbenchFacade,
+            WorkbenchProjection,
+        };
 
         let app = &surface_source();
+        let facade = WorkbenchFacade::new(
+            WorkbenchProjection::default(),
+            crate::workspace::WorkspaceStore::default(),
+            crate::governance::GovernanceFacade::new(None, None),
+            std::sync::Arc::new(crate::browser::RelayBrowserPort::new(
+                "guard".into(),
+                crate::browser::adapter::chromium::protocol4::assets::page_assets(),
+            )),
+            crate::diagnostics::DiagnosticsHub::for_tests(),
+        );
+        let snapshot = facade.snapshot();
         let operation = OperationSummary {
             provenance: None,
             invocation: "invocation_1".into(),
@@ -898,6 +915,16 @@ mod tests {
             },
             WorkbenchChange::RuntimeChanged {
                 runtime_state: RuntimeControlState::Active,
+            },
+            WorkbenchChange::StatusChanged {
+                status: StatusPart::of(&snapshot),
+            },
+            WorkbenchChange::ConnectionsChanged {
+                connections: ConnectionsPart::of(&snapshot),
+            },
+            WorkbenchChange::PartChanged {
+                part: HintedPart::Integrations,
+                etag: String::new(),
             },
         ] {
             let encoded = serde_json::to_value(&change).expect("changes serialize");

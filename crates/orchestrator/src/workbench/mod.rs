@@ -3,6 +3,7 @@
 pub mod context;
 mod history;
 mod input;
+mod live;
 pub mod parts;
 pub mod web;
 
@@ -35,6 +36,7 @@ use crate::install::{
 };
 use crate::language::outcome::Observed;
 use crate::language::readiness;
+use crate::language::workbench as words;
 use crate::workspace::WorkspaceStore;
 
 const HISTORY_LIMIT: usize = 500;
@@ -65,12 +67,19 @@ pub struct PreviewRefusal {
     pub count: usize,
 }
 
+/// What the projection calls after a change that can alter the live parts of the workbench.
+type StatusHook = Arc<dyn Fn() + Send + Sync>;
+
 /// Disposable workbench projection fed directly from the closed domain-event vocabulary.
 #[derive(Clone, Default)]
 pub struct WorkbenchProjection {
     inner: Arc<Mutex<ProjectionState>>,
     presentation: Arc<Mutex<Option<Arc<dyn WorkbenchPresentationPort>>>>,
-    events: Arc<Mutex<Option<Arc<dyn WorkbenchEventSink>>>>,
+    events: Arc<Mutex<Vec<Arc<dyn WorkbenchEventSink>>>>,
+    status_hook: Arc<Mutex<Option<StatusHook>>>,
+    /// Held while a change takes its sequence number and reaches every sink, so every sink sees
+    /// the changes in sequence order.
+    delivery: Arc<Mutex<()>>,
     seq: Arc<AtomicU64>,
 }
 
@@ -195,9 +204,15 @@ impl WorkbenchProjection {
         *lock(&self.presentation) = Some(port);
     }
 
-    /// Attach or replace the best-effort sequenced change-event sink.
+    /// Add a best-effort sequenced change-event sink. Every attached sink receives every event,
+    /// in sequence order.
     pub fn attach_events(&self, sink: Arc<dyn WorkbenchEventSink>) {
-        *lock(&self.events) = Some(sink);
+        lock(&self.events).push(sink);
+    }
+
+    /// Register what runs after a change that can alter the status or connections parts.
+    fn set_status_hook(&self, hook: StatusHook) {
+        *lock(&self.status_hook) = Some(hook);
     }
 
     /// Sequence number of the most recently published change.
@@ -206,16 +221,29 @@ impl WorkbenchProjection {
         self.seq.load(Ordering::Acquire)
     }
 
-    /// Publish one sequenced change to the disposable presentation surface, if any is attached.
+    /// Number one change and deliver it to every attached sink.
     ///
-    /// Never call this while holding the projection state lock: presentation adapters are
-    /// outbound boundaries and must not be reached across a domain lock.
+    /// The sequence advances whether or not anyone listens, so a surface that attaches later can
+    /// tell what it missed. A sink must not publish from inside its own delivery. Never call this
+    /// while holding the projection state lock: presentation adapters are outbound boundaries and
+    /// must not be reached across a domain lock.
     fn publish(&self, change: WorkbenchChange) {
-        let Some(sink) = lock(&self.events).clone() else {
-            return;
-        };
-        let seq = self.seq.fetch_add(1, Ordering::AcqRel) + 1;
-        sink.publish(WorkbenchEvent { seq, change });
+        let refreshes = change.refreshes_live_parts();
+        {
+            let _ordered = lock(&self.delivery);
+            let seq = self.seq.fetch_add(1, Ordering::AcqRel) + 1;
+            let sinks = lock(&self.events).clone();
+            let event = WorkbenchEvent { seq, change };
+            for sink in &sinks {
+                sink.publish(event.clone());
+            }
+        }
+        if refreshes {
+            let hook = lock(&self.status_hook).clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
     }
 
     /// React to one completed domain transition without affecting its authority or truth.
@@ -367,12 +395,10 @@ impl WorkbenchProjection {
 #[derive(Clone)]
 pub struct WorkbenchFacade {
     projection: WorkbenchProjection,
-    workspaces: WorkspaceStore,
     governance: GovernanceFacade,
-    browser: Arc<dyn BrowserPort>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     harnesses: HarnessRegistry,
-    started_at_ms: u64,
+    live: Arc<live::Live>,
     web: Arc<OnceLock<WebFacts>>,
     policy_writes: Arc<Mutex<()>>,
     diagnostics_writes: Arc<Mutex<()>>,
@@ -424,14 +450,19 @@ impl WorkbenchFacade {
         browser: Arc<dyn BrowserPort>,
         diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
+        let live = live::Live::new(
+            &projection,
+            workspaces,
+            governance.clone(),
+            browser,
+            unix_ms(),
+        );
         Self {
             projection,
-            workspaces,
             governance,
-            browser,
             diagnostics,
             harnesses: HarnessRegistry::discover(),
-            started_at_ms: unix_ms(),
+            live,
             web: Arc::default(),
             policy_writes: Arc::default(),
             diagnostics_writes: Arc::default(),
@@ -479,7 +510,7 @@ impl WorkbenchFacade {
     pub fn apply_diagnostics_toggle(&self) -> crate::diagnostics::DiagnosticsReport {
         let _writing = lock(&self.diagnostics_writes);
         self.diagnostics.toggle();
-        self.diagnostics.report()
+        self.diagnostics_changed()
     }
 
     /// Set process diagnostics on or off, then report the state.
@@ -490,7 +521,17 @@ impl WorkbenchFacade {
         if self.diagnostics.directory().is_some() != on {
             self.diagnostics.toggle();
         }
-        self.diagnostics.report()
+        self.diagnostics_changed()
+    }
+
+    /// Tell every screen that process diagnostics may have changed, and report the state.
+    fn diagnostics_changed(&self) -> crate::diagnostics::DiagnosticsReport {
+        let report = self.diagnostics.report();
+        self.projection.publish(WorkbenchChange::PartChanged {
+            part: parts::HintedPart::Diagnostics,
+            etag: parts::json_etag(&report),
+        });
+        report
     }
 
     /// Attach the best-effort operating-system presentation adapter.
@@ -498,46 +539,52 @@ impl WorkbenchFacade {
         self.projection.attach_presentation(port);
     }
 
-    /// Attach the best-effort sequenced change-event sink used by a live presentation surface.
+    /// Add a best-effort sequenced change-event sink used by a live presentation surface. Every
+    /// attached sink receives every event, in order.
     pub fn attach_events(&self, sink: Arc<dyn WorkbenchEventSink>) {
         self.projection.attach_events(sink);
+    }
+
+    /// Sequence number of the most recently published change.
+    #[must_use]
+    pub fn current_seq(&self) -> u64 {
+        self.projection.current_seq()
+    }
+
+    /// Publish the status and connections parts if they differ from the ones last published.
+    ///
+    /// Call it after anything that may have changed who is connected or what is working. It never
+    /// waits and is safe from any thread.
+    pub fn refresh_live_parts(&self) {
+        self.live.refresh();
+    }
+
+    /// Call it after the authority has been checked again: publish the live parts, and a policy
+    /// hint when the published authority is not the one last announced.
+    pub fn authority_refreshed(&self) {
+        self.live.refresh();
+        self.live.authority_refreshed();
     }
 
     /// Build an immutable, content-minimized snapshot for a disposable UI.
     #[must_use]
     pub fn snapshot(&self) -> WorkbenchSnapshot {
-        let operations = self.projection.operations();
-        let browsers_list = self.browser.browsers();
-        let sessions = self
-            .workspaces
-            .summaries()
-            .into_iter()
-            .map(|workspace| {
-                let browser = self.workspaces.browser_of(&workspace.id).and_then(|id| {
-                    browsers_list
-                        .iter()
-                        .find(|b| b.id == id)
-                        .map(|b| b.name.clone().unwrap_or_else(|| "Chromium".into()))
-                        .or_else(|| Some("Chromium".into()))
-                });
-                SessionSummary {
-                    active_operations: operations
-                        .iter()
-                        .filter(|operation| operation.workspace == workspace.id)
-                        .count(),
-                    id: workspace.id,
-                    client_label: workspace.client_label,
-                    connections: workspace.connections,
-                    channel: workspace.channel,
-                    leased: workspace.leased,
-                    tab_count: workspace.tab_count,
-                    held_tab_count: workspace.held_tab_count,
-                    browser,
-                }
-            })
-            .collect::<Vec<_>>();
-        let browsers = self.browser_summary();
-        let governance = self.governance.diagnostics();
+        // Read the sequence before anything is gathered. A change publishes after it has been
+        // made, so one numbered at or below this is already in what follows, and one above it is
+        // newer: the surface applies it by key, and applying it twice does no harm. Reading the
+        // sequence last would count a change that landed mid-assembly as included when it is not.
+        let seq = self.projection.current_seq();
+        let gathered = self.live.gather();
+        let status = self.live.status(&gathered);
+        let live::Gathered {
+            operations,
+            sessions,
+            browsers,
+            authority,
+            audit_health,
+            audit_required,
+            ..
+        } = gathered;
         let mut diagnostics = vec![DiagnosticItem::passing(
             "service",
             "Orchestrator",
@@ -558,13 +605,13 @@ impl WorkbenchFacade {
         });
         // The same validity governance enforces, so this card, the header, and the Policy tab
         // agree. A failed reload that keeps the last valid policy in force is not failing closed.
-        diagnostics.push(if !governance.authority_valid {
+        diagnostics.push(if !authority.authority_valid {
             DiagnosticItem::failing(
                 "authority",
                 "Authority",
                 "A configured authority source is invalid; work fails closed. A policy file still in schema 3 needs ghostlight policy migrate <file>.",
             )
-        } else if !governance.local_policy_valid {
+        } else if !authority.local_policy_valid {
             DiagnosticItem::warning(
                 "authority",
                 "Authority",
@@ -577,33 +624,15 @@ impl WorkbenchFacade {
                 "Configured authority sources are valid.",
             )
         });
-        let history = self.projection.history();
-        // Read the sequence after gathering, so a snapshot never claims to be newer than it is.
-        // A change published mid-assembly is re-delivered and applied idempotently by key.
-        let seq = self.projection.current_seq();
-        let runtime_state = self.governance.runtime_state();
-        let audit_health = self.projection.audit_health();
-        let required = self.governance.snapshot().requires_audit();
-        let readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
-            audit_required_unavailable: required && audit_health.unavailable(),
-            browser_connected: !browsers.is_empty(),
-            session_ended: runtime_state == RuntimeControlState::Ended,
-            paused: runtime_state == RuntimeControlState::Held,
-            authority_invalid: !governance.authority_valid,
-            working: !operations.is_empty(),
-        });
         diagnostics.push(if audit_health.quiet() {
-            DiagnosticItem::passing("audit", "History", &audit_health.detail(required))
+            DiagnosticItem::passing("audit", "History", &audit_health.detail(audit_required))
         } else {
-            DiagnosticItem::warning("audit", "History", &audit_health.detail(required))
+            DiagnosticItem::warning("audit", "History", &audit_health.detail(audit_required))
         });
+        let history = self.projection.history();
         WorkbenchSnapshot {
-            audit_notice: if audit_health.quiet() {
-                String::new()
-            } else {
-                audit_health.detail(required)
-            },
-            audit_health,
+            audit_notice: status.audit_notice,
+            audit_health: status.audit_health,
             document_coverage: self
                 .projection
                 .lock()
@@ -613,12 +642,8 @@ impl WorkbenchFacade {
                 .collect(),
             seq,
             generated_at_ms: unix_ms(),
-            service: ServiceSummary {
-                version: env!("CARGO_PKG_VERSION").into(),
-                started_at_ms: self.started_at_ms,
-                runtime_state,
-            },
-            readiness,
+            runtime_note: status.runtime_note,
+            readiness: status.readiness,
             overview: OverviewSummary {
                 active_sessions: sessions.len(),
                 active_operations: operations.len(),
@@ -633,16 +658,17 @@ impl WorkbenchFacade {
             process_diagnostics: self.diagnostics.report(),
             harnesses: self.harnesses.summaries(),
             configuration: ConfigurationSummary {
-                runtime_state: self.governance.runtime_state(),
-                local_policy_configured: governance.local_policy_configured,
-                local_policy_active: governance.local_policy_active,
-                local_policy_valid: governance.local_policy_valid,
-                managed_authority_configured: governance.managed_authority_configured,
-                managed_authority_active: governance.managed_authority_active,
-                managed_authority_valid: governance.managed_authority_valid,
-                managed_policy: governance.managed_policy,
-                policy: self.governance.policy_chip(),
+                runtime_state: status.service.runtime_state,
+                local_policy_configured: authority.local_policy_configured,
+                local_policy_active: authority.local_policy_active,
+                local_policy_valid: authority.local_policy_valid,
+                managed_authority_configured: authority.managed_authority_configured,
+                managed_authority_active: authority.managed_authority_active,
+                managed_authority_valid: authority.managed_authority_valid,
+                managed_policy: status.configuration.managed_policy,
+                policy: status.configuration.policy,
             },
+            service: status.service,
         }
     }
 
@@ -800,10 +826,25 @@ impl WorkbenchFacade {
     /// or without a connected browser. Telling adapters is a best-effort notice the authority sends
     /// itself when the state changes, so it never changes what the person is told.
     pub fn apply_runtime_intent(&self, intent: WorkbenchRuntimeIntent) -> WorkbenchIntentResult {
-        let state = self.governance.apply_runtime_intent(intent.into());
+        self.apply_runtime_control(intent.into(), RuntimeSource::Window)
+    }
+
+    /// Apply one runtime control from `source`, the one path every screen takes.
+    ///
+    /// The window, a watching screen, the tray and the browser toolbar all end here. The state is
+    /// applied through the authority, remembered with where it came from, announced, and then the
+    /// live parts are refreshed so every screen can say which of them paused the agents.
+    pub fn apply_runtime_control(
+        &self,
+        intent: RuntimeControlIntent,
+        source: RuntimeSource,
+    ) -> WorkbenchIntentResult {
+        let state = self.governance.apply_runtime_intent(intent);
+        self.live.record_runtime(state, source);
         self.projection.publish(WorkbenchChange::RuntimeChanged {
             runtime_state: state,
         });
+        self.live.refresh();
         WorkbenchIntentResult {
             accepted: true,
             runtime_state: state,
@@ -918,6 +959,7 @@ impl WorkbenchFacade {
         document: &str,
     ) -> Result<WorkbenchIntentResult, AuthoringError> {
         let policy = self.governance.apply_user_policy(document)?;
+        self.live.policy_changed();
         Ok(self.policy_result(format!(
             "Your rules are applied: {} {}.",
             policy.name, policy.version
@@ -942,6 +984,7 @@ impl WorkbenchFacade {
 
     fn remove_policy_unguarded(&self) -> Result<WorkbenchIntentResult, AuthoringError> {
         self.governance.remove_user_policy()?;
+        self.live.policy_changed();
         Ok(self.policy_result("Your rules are removed.".to_owned()))
     }
 
@@ -965,7 +1008,22 @@ impl WorkbenchFacade {
 
     /// Re-check supported development harnesses without changing their configuration.
     pub fn refresh_harnesses(&self) -> Result<Vec<HarnessSummary>, HarnessError> {
-        self.harnesses.refresh()
+        let summaries = self.harnesses.refresh()?;
+        self.integrations_changed(&summaries);
+        Ok(summaries)
+    }
+
+    /// Tell every screen that the roster of clients was looked at again, with its tag.
+    fn integrations_changed(&self, summaries: &[HarnessSummary]) {
+        self.projection.publish(WorkbenchChange::PartChanged {
+            part: parts::HintedPart::Integrations,
+            etag: parts::json_etag(&summaries),
+        });
+    }
+
+    /// Tell every screen that an act changed the roster of clients.
+    fn roster_changed(&self) {
+        self.integrations_changed(&self.harnesses.summaries());
     }
 
     /// The last complete check of the supported clients, without scanning again.
@@ -992,7 +1050,9 @@ impl WorkbenchFacade {
         if !matches!(current, Some(Ok(state)) if state == expected_state) {
             return Err(HarnessActError::Stale);
         }
-        Ok(self.harnesses.apply(id, action)?)
+        let result = self.harnesses.apply(id, action)?;
+        self.roster_changed();
+        Ok(result)
     }
 
     /// Apply one explicit, ownership-checked development-harness registration intent.
@@ -1001,12 +1061,16 @@ impl WorkbenchFacade {
         id: &str,
         action: HarnessAction,
     ) -> Result<HarnessActionResult, HarnessError> {
-        self.harnesses.apply(id, action)
+        let result = self.harnesses.apply(id, action)?;
+        self.roster_changed();
+        Ok(result)
     }
 
     /// Set up and update every detected harness target Ghostlight can change safely.
     pub fn setup_detected_harnesses(&self) -> Result<HarnessSetupResult, HarnessError> {
-        self.harnesses.setup_detected()
+        let result = self.harnesses.setup_detected()?;
+        self.roster_changed();
+        Ok(result)
     }
 
     /// Resolve product-owned manual setup text for one supported harness target.
@@ -1029,7 +1093,9 @@ impl WorkbenchFacade {
         id: &str,
         path: &Path,
     ) -> Result<HarnessActionResult, HarnessError> {
-        self.harnesses.locate(id, path)
+        let result = self.harnesses.locate(id, path)?;
+        self.roster_changed();
+        Ok(result)
     }
 
     /// Exercise the same best-effort notification port used for important domain facts.
@@ -1052,22 +1118,6 @@ impl WorkbenchFacade {
             .ok_or(WorkbenchError::PresentationUnavailable)?;
         port.reveal()?;
         Ok(())
-    }
-
-    fn browser_summary(&self) -> Vec<BrowserInstanceSummary> {
-        self.browser
-            .browsers()
-            .into_iter()
-            .map(|browser| {
-                let family = browser.name.unwrap_or_else(|| "Chromium".into());
-                BrowserInstanceSummary {
-                    id: browser.id,
-                    family,
-                    adapter_version: Some(browser.adapter_version),
-                    connected: true,
-                }
-            })
-            .collect()
     }
 }
 
@@ -1143,6 +1193,65 @@ pub enum WorkbenchChange {
         /// The new runtime control state.
         runtime_state: RuntimeControlState,
     },
+    /// The status part differs from the one last published.
+    StatusChanged {
+        /// The whole part, which replaces the one a surface holds.
+        status: parts::StatusPart,
+    },
+    /// The connections part differs from the one last published.
+    ConnectionsChanged {
+        /// The whole part, which replaces the one a surface holds.
+        connections: parts::ConnectionsPart,
+    },
+    /// A part that is read on demand changed: read it again if you show it.
+    ///
+    /// The tag lets a surface skip a change it has already read.
+    PartChanged {
+        /// Which part changed.
+        part: parts::HintedPart,
+        /// The tag of the part now.
+        etag: String,
+    },
+}
+
+impl WorkbenchChange {
+    /// Whether this change can alter what the status and connections parts say.
+    ///
+    /// The two changes that carry those parts are not among them: a refresh never causes one.
+    const fn refreshes_live_parts(&self) -> bool {
+        matches!(
+            self,
+            Self::AuditHealthChanged { .. }
+                | Self::OperationStarted { .. }
+                | Self::OperationChanged { .. }
+                | Self::OperationSettled { .. }
+        )
+    }
+}
+
+/// Where a runtime control came from, so every screen can say who paused the agents.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeSource {
+    /// The Ghostlight window.
+    Window,
+    /// A browser tab that only watches.
+    Watcher,
+    /// The tray menu.
+    Tray,
+    /// The browser toolbar.
+    Browser,
+}
+
+impl RuntimeSource {
+    /// The sentence that says a pause came from here.
+    const fn paused_note(self) -> &'static str {
+        match self {
+            Self::Window => words::PAUSED_IN_WINDOW,
+            Self::Watcher => words::PAUSED_FROM_WATCHER,
+            Self::Tray => words::PAUSED_FROM_TRAY,
+            Self::Browser => words::PAUSED_FROM_BROWSER,
+        }
+    }
 }
 
 /// One content-free notification decision made by the orchestrator.
@@ -1204,6 +1313,9 @@ pub struct WorkbenchSnapshot {
     pub service: ServiceSummary,
     /// The one aggregate answer the front door leads with.
     pub readiness: ReadinessSummary,
+    /// Where the pause came from, present only while agents are paused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_note: Option<String>,
     /// At-a-glance counts.
     pub overview: OverviewSummary,
     /// Admitted MCP sessions.

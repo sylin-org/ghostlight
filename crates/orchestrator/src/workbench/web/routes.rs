@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::assets::{self, Asset};
+use super::events::{TooManyScreens, EVENT_STREAM_TYPE};
 use super::http::{header, Head, Incoming, Method, Response, Status};
 use super::limits::retry_after_seconds;
 use super::{same_secret, Shared};
@@ -22,7 +23,7 @@ use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Audience, Part, Projection};
 use crate::workbench::{
     validate_policy_document, validate_search_query, HarnessActError, PolicyWriteError,
-    WorkbenchRuntimeIntent,
+    RuntimeSource, WorkbenchRuntimeIntent,
 };
 
 /// The prefix of every route that carries data or takes a change.
@@ -73,6 +74,7 @@ form-action 'none'; frame-ancestors 'none'";
 enum Api {
     Context,
     Snapshot,
+    Events,
     Policy,
     Search,
     PolicyPreview,
@@ -121,7 +123,7 @@ const fn route(
 }
 
 /// The closed table. Anything not here is not served.
-static ROUTES: [Route; 14] = [
+static ROUTES: [Route; 15] = [
     route(
         Api::Context,
         Method::Get,
@@ -133,6 +135,13 @@ static ROUTES: [Route; 14] = [
         Api::Snapshot,
         Method::Get,
         "/api/snapshot",
+        WatchAccess::Open,
+        0,
+    ),
+    route(
+        Api::Events,
+        Method::Get,
+        "/api/events",
         WatchAccess::Open,
         0,
     ),
@@ -229,6 +238,7 @@ enum ErrorCode {
     NeedsWindow,
     WatchingOff,
     TooMany,
+    TooManyScreens,
     TooLarge,
     BadRequest,
     UnsupportedType,
@@ -247,6 +257,7 @@ impl ErrorCode {
             Self::NeedsWindow => "needs_window",
             Self::WatchingOff => "watching_off",
             Self::TooMany => "too_many",
+            Self::TooManyScreens => "too_many_screens",
             Self::TooLarge => "too_large",
             Self::BadRequest => "bad_request",
             Self::UnsupportedType => "unsupported_type",
@@ -587,17 +598,18 @@ fn api(
     let response = match route.api {
         Api::Context => json_response(Status::Ok, &shared.facade.context_document(context)),
         Api::Snapshot => snapshot(shared, head, &projection),
+        Api::Events => events(shared, context),
         Api::Policy => json_response(Status::Ok, &projection.policy(&shared.facade.policy())),
         Api::Search => search(shared, &body),
         Api::PolicyPreview => preview(shared, &body),
-        Api::Rescan => rescan(shared, &projection, watching, &body),
+        Api::Rescan => acted(shared, rescan(shared, &projection, watching, &body)),
         Api::Window => window(shared, &body),
-        Api::Runtime => runtime(shared, &body, watching),
-        Api::PutPolicy => put_policy(shared, head, &body),
-        Api::DeletePolicy => delete_policy(shared, head),
-        Api::SetDiagnostics => set_diagnostics(shared, &projection, &body),
-        Api::SetupAll => setup_all(shared, &body),
-        Api::HarnessAct => harness_act(shared, &projection, &body),
+        Api::Runtime => acted(shared, runtime(shared, &body, watching)),
+        Api::PutPolicy => acted(shared, put_policy(shared, head, &body)),
+        Api::DeletePolicy => acted(shared, delete_policy(shared, head)),
+        Api::SetDiagnostics => acted(shared, set_diagnostics(shared, &projection, &body)),
+        Api::SetupAll => acted(shared, setup_all(shared, &body)),
+        Api::HarnessAct => acted(shared, harness_act(shared, &projection, &body)),
         Api::TestNotification => test_notification(shared, &body),
     };
     drop(preview_permit);
@@ -739,6 +751,30 @@ fn snapshot(shared: &Shared, head: &Head, projection: &Projection) -> Response {
     )
 }
 
+/// Open the live stream. It carries the changes numbered above the sequence its hello names.
+fn events(shared: &Shared, context: WebContext) -> Response {
+    match shared.events.open(context, || shared.facade.current_seq()) {
+        Ok(subscription) => Response::new(Status::Ok)
+            .with_header(header::CONTENT_TYPE, EVENT_STREAM_TYPE)
+            .with_events(subscription),
+        Err(TooManyScreens) => failure(
+            Status::ServiceUnavailable,
+            ErrorCode::TooManyScreens,
+            words::TOO_MANY_SCREENS,
+        ),
+    }
+}
+
+/// Name the last change an act caused, so a page can wait for that change instead of asking
+/// again. Only an act that happened says so.
+fn acted(shared: &Shared, response: Response) -> Response {
+    if response.status == Status::Ok {
+        response.with_header(header::SEQ, shared.facade.current_seq().to_string())
+    } else {
+        response
+    }
+}
+
 fn search(shared: &Shared, body: &[u8]) -> Response {
     let arguments: SearchArguments = match decode(body) {
         Ok(arguments) => arguments,
@@ -821,7 +857,14 @@ fn runtime(shared: &Shared, body: &[u8], watching: bool) -> Response {
             return too_many(wait);
         }
     }
-    let result = shared.facade.apply_runtime_intent(arguments.intent);
+    let source = if watching {
+        RuntimeSource::Watcher
+    } else {
+        RuntimeSource::Window
+    };
+    let result = shared
+        .facade
+        .apply_runtime_control(arguments.intent.into(), source);
     json_response(
         Status::Ok,
         &serde_json::to_value(result).expect("an intent result is plain data"),

@@ -63,6 +63,7 @@ let bulkSetups = 0;
 let feedFixture = false;
 const invoked = [];
 const managedHarnesses = [];
+let pushChange = null;
 
 const snapshot = () => ({
   seq: ++snapshots,
@@ -147,7 +148,7 @@ const sandbox = {
         }
         return [];
       } },
-      event: { listen: async () => () => {} }
+      event: { listen: async (_name, handler) => { pushChange = (change) => handler({ payload: change }); return () => {}; } }
     }
   },
   setTimeout: (fn, ms) => { if (typeof fn === "function" && !ms) fn(); return 0; },
@@ -204,6 +205,52 @@ await new Promise((r) => setTimeout(r, 0));
 sandbox.globalThis.__second = true;
 const before = sandbox.__aboutAttempts ?? 0;
 await new Promise((r) => setTimeout(r, 60));
+
+// The orchestrator pushes a changed status. The band, the wheel and the sentence behind the word
+// change with no snapshot asked for, and a hint about a part nobody is looking at asks for nothing.
+const snapshotRequests = () => invoked.filter((cmd) => cmd === "workbench_snapshot").length;
+const statusPush = (seq, runtime, note) => ({
+  seq,
+  change: {
+    kind: "status_changed",
+    status: {
+      service: { version: "1.0.0", started_at_ms: 0, runtime_state: runtime },
+      readiness: runtime === "held"
+        ? { state: "paused", word: "Paused", detail: "Agents are paused.", tone: "warning", invites_control: true }
+        : { state: "ready", word: "Ready", detail: "Connected and idle. Agents can work when they ask.", tone: "quiet", invites_control: true },
+      audit_health: {},
+      audit_notice: "",
+      configuration: {
+        policy: { situation: "layered", detail: "Example Org sets the rules, and you have narrowed them further.", tone: "applied" },
+        managed_policy: { configured: false }
+      },
+      ...(note ? { runtime_note: note } : {})
+    }
+  }
+});
+const requestsBeforePush = snapshotRequests();
+const seqBeforePush = snapshots;
+const wordBeforePush = nodes.get("state-word").textContent;
+pushChange(statusPush(seqBeforePush + 1, "held", "Paused from the tray."));
+const wordAfterPush = nodes.get("state-word").textContent;
+const wordTitleAfterPush = nodes.get("state-word").title;
+const wheelAfterPush = nodes.get("wheel").dataset.intent;
+const requestsAfterPush = snapshotRequests();
+pushChange(statusPush(seqBeforePush + 2, "active", null));
+const titleAfterResume = nodes.get("state-word").title;
+pushChange({ seq: seqBeforePush + 3, change: { kind: "part_changed", part: "integrations", etag: "tag-1" } });
+pushChange({ seq: seqBeforePush + 4, change: { kind: "part_changed", part: "policy", etag: "tag-2" } });
+await new Promise((r) => setTimeout(r, 0));
+const requestsAfterHints = snapshotRequests();
+const policyReadsAfterHints = invoked.filter((cmd) => cmd === "workbench_policy").length;
+dispatchDocument("click", {
+  target: { closest: (selector) => selector === "[data-view]" ? { dataset: { view: "integrations" } } : null }
+});
+await new Promise((r) => setTimeout(r, 0));
+const requestsAfterOpening = snapshotRequests();
+dispatchDocument("click", {
+  target: { closest: (selector) => selector === "[data-view]" ? { dataset: { view: "monitor" } } : null }
+});
 
 const connections = nodes.get("connections");
 // Read what the booted surface drew before anything below repaints the same nodes: the second
@@ -591,6 +638,16 @@ const queueAfterResync = nodes.get("queue-count").textContent;
 feedFixture = false;
 
 const checks = [
+  ["a pushed status changes the word, the sentence behind it and the wheel with no snapshot",
+    wordBeforePush === "Ready" && wordAfterPush === "Paused"
+      && wordTitleAfterPush === "Paused from the tray."
+      && wheelAfterPush === "resume" && requestsAfterPush === requestsBeforePush
+      && titleAfterResume === "Connected and idle. Agents can work when they ask.",
+    `before=${wordBeforePush} after=${wordAfterPush} title=${wordTitleAfterPush} wheel=${wheelAfterPush} requests=${requestsBeforePush}->${requestsAfterPush}`],
+  ["a hint about a part nobody is looking at asks for nothing until it is opened",
+    requestsAfterHints === requestsAfterPush && policyReadsAfterHints === 0
+      && requestsAfterOpening === requestsAfterHints + 1,
+    `requests=${requestsAfterPush}->${requestsAfterHints}->${requestsAfterOpening} policy=${policyReadsAfterHints}`],
   ["Clear view hides completed work, keeps running work, and calls nothing",
     clearEnabled && queueBeforeClear === "2 actions" && queueAfterClear === "1 action"
       && queueAfterResync === "1 action" && clearSpent && invokedByClear.length === 0,

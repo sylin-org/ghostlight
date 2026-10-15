@@ -133,6 +133,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
         }],
         seq: 9,
         generated_at_ms: 10,
+        runtime_note: Some("Paused from the tray.".into()),
         service: ServiceSummary {
             version: "2.0.0".into(),
             started_at_ms: 11,
@@ -305,6 +306,7 @@ const STATUS_KEYS: &[&str] = &[
     "readiness.state",
     "readiness.tone",
     "readiness.word",
+    "runtime_note",
     "service",
     "service.runtime_state",
     "service.started_at_ms",

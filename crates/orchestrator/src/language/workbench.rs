@@ -74,6 +74,21 @@ pub const COPIED_COMMAND: &str = "MCP command copied.";
 /// Confirmation after copying a harness's manual setup.
 pub const COPIED_SETUP: &str = "Manual setup copied.";
 
+/// Why the runtime is held, when the pause came from the Ghostlight window.
+pub const PAUSED_IN_WINDOW: &str = "Paused in the Ghostlight window.";
+
+/// Why the runtime is held, when the pause came from a screen that is watching.
+pub const PAUSED_FROM_WATCHER: &str = "Paused from a screen that is watching.";
+
+/// Why the runtime is held, when the pause came from the tray.
+pub const PAUSED_FROM_TRAY: &str = "Paused from the tray.";
+
+/// Why the runtime is held, when the pause came from the browser toolbar.
+pub const PAUSED_FROM_BROWSER: &str = "Paused from the browser toolbar.";
+
+/// What a screen is told when every place for a live view of its kind is taken.
+pub const TOO_MANY_SCREENS: &str = "Too many screens are watching. Close one and try again.";
+
 /// A search that is longer than the search box allows.
 #[must_use]
 pub fn search_too_long(limit: usize) -> String {
@@ -125,6 +140,11 @@ mod tests {
             NOT_FOUND,
             METHOD_NOT_ALLOWED,
             MISDIRECTED,
+            PAUSED_IN_WINDOW,
+            PAUSED_FROM_WATCHER,
+            PAUSED_FROM_TRAY,
+            PAUSED_FROM_BROWSER,
+            TOO_MANY_SCREENS,
             COPIED_COMMAND,
             COPIED_SETUP,
             SEARCH_CONTROL_CHARACTER,

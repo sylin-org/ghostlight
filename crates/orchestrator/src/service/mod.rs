@@ -62,7 +62,7 @@ use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::web::{PendingWorkbench, Watching, WorkbenchAddress, WorkbenchServer};
-use crate::workbench::{WorkbenchFacade, WorkbenchProjection};
+use crate::workbench::{RuntimeSource, WorkbenchFacade, WorkbenchProjection};
 use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
@@ -286,7 +286,7 @@ impl ServiceHost {
             Arc::clone(&diagnostics),
         ));
         browser.set_event_sink(Arc::new(ServiceBrowserEvents {
-            governance: governance.clone(),
+            workbench: workbench.clone(),
             workspaces: workspaces.clone(),
         }));
 
@@ -296,7 +296,7 @@ impl ServiceHost {
             layout.quit_latch(),
             Arc::clone(&browser),
         );
-        let refresher = spawn_refresher(governance.clone(), Arc::clone(&stop))?;
+        let refresher = spawn_refresher(governance.clone(), workbench.clone(), Arc::clone(&stop))?;
         let refresher_thread = refresher.thread().clone();
         let audit_stop = stop.clone();
         let audit_for_thread = Arc::clone(&audit);
@@ -748,6 +748,7 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
                 if listener::accept(&connection, &intake.accepted(Role::Browser)).is_ok() {
                     // The first frame on the stream is the extension's own hello.
                     let _ = intake.browser.attach(connection);
+                    intake.workbench.refresh_live_parts();
                 }
             }
             Role::Control => serve_control(connection, opening.control, intake),
@@ -1010,13 +1011,19 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 /// Start the one thread that keeps published authority current until `stop` is set.
 ///
 /// It is the only thread that reads policy files on a schedule or fetches the organization's
-/// policy, so no tool call ever waits on either.
-fn spawn_refresher(governance: GovernanceFacade, stop: Arc<AtomicBool>) -> Result<JoinHandle<()>> {
+/// policy, so no tool call ever waits on either. After each check it tells the workbench, so
+/// every screen hears of a changed policy or a changed saving state within a second.
+fn spawn_refresher(
+    governance: GovernanceFacade,
+    workbench: WorkbenchFacade,
+    stop: Arc<AtomicBool>,
+) -> Result<JoinHandle<()>> {
     thread::Builder::new()
         .name("ghostlight-policy-refresher".into())
         .spawn(move || {
             while !stop.load(Ordering::SeqCst) {
                 governance.refresh_tick();
+                workbench.authority_refreshed();
                 thread::park_timeout(REFRESH_INTERVAL);
             }
         })
@@ -1129,6 +1136,7 @@ impl LiveSession {
                 }
             }
         }
+        intake.workbench.refresh_live_parts();
         Ok(live)
     }
 
@@ -1289,6 +1297,7 @@ impl LiveSession {
             None,
             self.workspace.as_str(),
         );
+        intake.workbench.refresh_live_parts();
     }
 }
 
@@ -1533,8 +1542,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Applies what a connected browser reports: its tabs, its dialogs and its toolbar's pause, and
+/// tells the workbench when who is connected may have changed.
 struct ServiceBrowserEvents {
-    governance: GovernanceFacade,
+    workbench: WorkbenchFacade,
     workspaces: WorkspaceStore,
 }
 
@@ -1551,14 +1562,19 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 .workspaces
                 .apply_browser_readiness(browser, tab_id, readiness),
             BrowserEvent::RuntimeControlRequested { intent } => {
-                self.governance.apply_runtime_intent(intent);
+                self.workbench
+                    .apply_runtime_control(intent, RuntimeSource::Browser);
             }
             BrowserEvent::TabClosed { tab_id } => {
-                self.workspaces.apply_browser_close(browser, tab_id)
+                self.workspaces.apply_browser_close(browser, tab_id);
+                self.workbench.refresh_live_parts();
             }
             // A browser that comes back may have restarted and reused its tab ids, so nothing it
             // left behind stays reusable.
-            BrowserEvent::Disconnected => self.workspaces.apply_browser_disconnect(browser),
+            BrowserEvent::Disconnected => {
+                self.workspaces.apply_browser_disconnect(browser);
+                self.workbench.refresh_live_parts();
+            }
             // Attention never reaches this sink: it is browser routing state, and the port that
             // knows which connection reported it is the only thing that needs it.
             BrowserEvent::Attended => {}
@@ -1674,10 +1690,6 @@ mod tests {
             )),
             diagnostics.clone(),
         );
-        let sink = super::ServiceBrowserEvents {
-            governance: governance.clone(),
-            workspaces: workspaces.clone(),
-        };
         let view = WorkbenchFacade::new(
             projection,
             workspaces.clone(),
@@ -1688,6 +1700,10 @@ mod tests {
             )),
             diagnostics,
         );
+        let sink = super::ServiceBrowserEvents {
+            workbench: view.clone(),
+            workspaces: workspaces.clone(),
+        };
 
         let initial_audit = std::fs::read_to_string(&audit_path).unwrap_or_default();
 
@@ -1873,7 +1889,6 @@ mod tests {
     fn the_browser_reporting_a_dialog_is_recorded_for_the_tab_that_holds_it() {
         use crate::browser::adapter::{BrowserEvent, BrowserReadiness, PhysicalTab};
         use crate::browser::BrowserEventSink;
-        use crate::governance::GovernanceFacade;
         use crate::language::outcome::DialogKind;
         use crate::workspace::WorkspaceStore;
 
@@ -1894,7 +1909,7 @@ mod tests {
             .unwrap();
         drop(lease);
         let sink = super::ServiceBrowserEvents {
-            governance: GovernanceFacade::new(None, None),
+            workbench: test_workbench(&workspaces),
             workspaces: workspaces.clone(),
         };
         let dialog = |tab_id, present, dialog_type: &str| BrowserEvent::DialogChanged {
@@ -1925,12 +1940,11 @@ mod tests {
     fn browser_events_take_released_tabs_out_of_reuse() {
         use crate::browser::adapter::BrowserEvent;
         use crate::browser::BrowserEventSink;
-        use crate::governance::GovernanceFacade;
         use crate::workspace::WorkspaceStore;
 
         let workspaces = WorkspaceStore::default();
         let sink = super::ServiceBrowserEvents {
-            governance: GovernanceFacade::new(None, None),
+            workbench: test_workbench(&workspaces),
             workspaces: workspaces.clone(),
         };
         let closed = |tab_id| BrowserEvent::TabClosed { tab_id };
@@ -1961,6 +1975,129 @@ mod tests {
         clean_up_kept_open(&workspaces, &released);
         sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected);
         assert_eq!(reusable_example_tab(&workspaces), None);
+    }
+
+    /// A workbench over `workspaces` and a fresh authority, with no browser connected.
+    fn test_workbench(
+        workspaces: &crate::workspace::WorkspaceStore,
+    ) -> crate::workbench::WorkbenchFacade {
+        crate::workbench::WorkbenchFacade::new(
+            crate::workbench::WorkbenchProjection::default(),
+            workspaces.clone(),
+            crate::governance::GovernanceFacade::new(None, None),
+            Arc::new(crate::browser::RelayBrowserPort::new(
+                "events-test".into(),
+                super::page_assets(),
+            )),
+            crate::diagnostics::DiagnosticsHub::for_tests(),
+        )
+    }
+
+    /// Keeps the changes the workbench publishes, in order.
+    #[derive(Default)]
+    struct HeardChanges(std::sync::Mutex<Vec<crate::workbench::WorkbenchEvent>>);
+
+    impl crate::workbench::WorkbenchEventSink for HeardChanges {
+        fn publish(&self, event: crate::workbench::WorkbenchEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    impl HeardChanges {
+        fn all(&self) -> Vec<crate::workbench::WorkbenchEvent> {
+            self.0.lock().unwrap().clone()
+        }
+
+        /// The sessions the latest connections change named, if there has been one.
+        fn sessions(&self) -> Option<usize> {
+            self.all()
+                .iter()
+                .rev()
+                .find_map(|event| match &event.change {
+                    crate::workbench::WorkbenchChange::ConnectionsChanged { connections } => {
+                        Some(connections.sessions.len())
+                    }
+                    _ => None,
+                })
+        }
+
+        fn notes(&self) -> Vec<Option<String>> {
+            self.all()
+                .iter()
+                .filter_map(|event| match &event.change {
+                    crate::workbench::WorkbenchChange::StatusChanged { status } => {
+                        Some(status.runtime_note.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    #[test]
+    fn the_browser_toolbar_pauses_through_the_workbench_and_says_so() {
+        use crate::browser::adapter::{BrowserEvent, RuntimeControlIntent};
+        use crate::browser::BrowserEventSink;
+        use crate::language::workbench::PAUSED_FROM_BROWSER;
+
+        let workspaces = crate::workspace::WorkspaceStore::default();
+        let workbench = test_workbench(&workspaces);
+        let heard = Arc::new(HeardChanges::default());
+        workbench.attach_events(heard.clone());
+        let sink = super::ServiceBrowserEvents {
+            workbench: workbench.clone(),
+            workspaces,
+        };
+        let request = |intent| BrowserEvent::RuntimeControlRequested { intent };
+
+        sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::ToggleHold));
+        assert_eq!(heard.notes().pop(), Some(Some(PAUSED_FROM_BROWSER.into())));
+        let statuses = heard.notes().len();
+        let runtime_changes = |heard: &HeardChanges| {
+            heard
+                .all()
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        event.change,
+                        crate::workbench::WorkbenchChange::RuntimeChanged { .. }
+                    )
+                })
+                .count()
+        };
+        assert_eq!(runtime_changes(&heard), 1);
+
+        // The same pause again is a change of nothing a screen shows.
+        sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::Hold));
+        assert_eq!(runtime_changes(&heard), 2);
+        assert_eq!(heard.notes().len(), statuses);
+
+        sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::ToggleHold));
+        assert_eq!(heard.notes().pop(), Some(None));
+    }
+
+    #[test]
+    fn opening_and_closing_a_session_tells_every_screen() {
+        let home = TestHome::new("connections-live");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let heard = Arc::new(HeardChanges::default());
+        host.workbench.attach_events(heard.clone());
+
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
+        let deadline = Instant::now() + PATIENCE;
+        while heard.sessions() != Some(1) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(heard.sessions(), Some(1), "the session opened unannounced");
+
+        drop(socket);
+        let deadline = Instant::now() + PATIENCE;
+        while heard.sessions() != Some(0) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(heard.sessions(), Some(0), "the session closed unannounced");
     }
 
     /// The instance every test service reports.

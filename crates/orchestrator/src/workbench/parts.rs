@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use super::{
     BrowserInstanceSummary, DiagnosticItem, HistoryItem, OperationSummary, ReadinessSummary,
-    ServiceSummary, SessionSummary, WorkbenchSnapshot,
+    ServiceSummary, SessionSummary, WorkbenchChange, WorkbenchEvent, WorkbenchSnapshot,
 };
 use crate::governance::effective::{EffectiveAuthority, LayerKind, PolicyChip};
 use crate::governance::ManagedPolicyPassport;
@@ -98,25 +98,84 @@ impl Part {
     }
 }
 
-#[derive(Serialize)]
-struct StatusPart<'a> {
-    service: &'a ServiceSummary,
-    readiness: &'a ReadinessSummary,
-    audit_health: &'a AuditHealth,
-    audit_notice: &'a str,
-    configuration: StatusConfiguration<'a>,
+/// A part whose change is announced as a hint: the page reads it again if it shows it.
+///
+/// Policy has its own route, and integrations and diagnostics are parts of a snapshot. None of
+/// them travels in an event, because each can be large or private to the window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HintedPart {
+    /// The supported clients and their registrations.
+    Integrations,
+    /// The compiled policy.
+    Policy,
+    /// Checkup cards and process diagnostics.
+    Diagnostics,
 }
 
-#[derive(Serialize)]
-struct StatusConfiguration<'a> {
-    policy: &'a PolicyChip,
-    managed_policy: &'a ManagedPolicyPassport,
+/// The status part: readiness, service facts, saving health and the policy chip.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StatusPart {
+    /// Service identity and control state.
+    pub service: ServiceSummary,
+    /// The one aggregate answer and its words.
+    pub readiness: ReadinessSummary,
+    /// Current storage health and explicit historical gaps.
+    pub audit_health: AuditHealth,
+    /// Persistent human notice, empty during ordinary healthy operation.
+    pub audit_notice: String,
+    /// The band chip and the passport of a signed organization policy.
+    pub configuration: StatusConfiguration,
+    /// Where the pause came from, present only while agents are paused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_note: Option<String>,
 }
 
-#[derive(Serialize)]
-struct ConnectionsPart<'a> {
-    sessions: &'a [SessionSummary],
-    browsers: &'a [BrowserInstanceSummary],
+/// The configuration facts the status part carries.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StatusConfiguration {
+    /// The band chip, authored by the orchestrator.
+    pub policy: PolicyChip,
+    /// Signed managed-policy provenance.
+    pub managed_policy: ManagedPolicyPassport,
+}
+
+impl StatusPart {
+    /// The status part of `snapshot`.
+    #[must_use]
+    pub fn of(snapshot: &WorkbenchSnapshot) -> Self {
+        Self {
+            service: snapshot.service.clone(),
+            readiness: snapshot.readiness.clone(),
+            audit_health: snapshot.audit_health.clone(),
+            audit_notice: snapshot.audit_notice.clone(),
+            configuration: StatusConfiguration {
+                policy: snapshot.configuration.policy.clone(),
+                managed_policy: snapshot.configuration.managed_policy.clone(),
+            },
+            runtime_note: snapshot.runtime_note.clone(),
+        }
+    }
+}
+
+/// The connections part: admitted sessions and connected browsers.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ConnectionsPart {
+    /// Admitted MCP sessions.
+    pub sessions: Vec<SessionSummary>,
+    /// Currently connected browser instances.
+    pub browsers: Vec<BrowserInstanceSummary>,
+}
+
+impl ConnectionsPart {
+    /// The connections part of `snapshot`.
+    #[must_use]
+    pub fn of(snapshot: &WorkbenchSnapshot) -> Self {
+        Self {
+            sessions: snapshot.sessions.clone(),
+            browsers: snapshot.browsers.clone(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -181,50 +240,87 @@ impl Projection {
     /// One part of `snapshot`, as this audience sees it.
     #[must_use]
     pub fn part(&self, part: Part, snapshot: &WorkbenchSnapshot) -> Value {
-        let mut value = match part {
-            Part::Status => to_value(&StatusPart {
-                service: &snapshot.service,
-                readiness: &snapshot.readiness,
-                audit_health: &snapshot.audit_health,
-                audit_notice: &snapshot.audit_notice,
-                configuration: StatusConfiguration {
-                    policy: &snapshot.configuration.policy,
-                    managed_policy: &snapshot.configuration.managed_policy,
-                },
-            }),
-            Part::Connections => to_value(&ConnectionsPart {
-                sessions: &snapshot.sessions,
-                browsers: &snapshot.browsers,
-            }),
-            Part::Activity => to_value(&ActivityPart {
-                operations: &snapshot.operations,
-                history: &snapshot.history,
-                document_coverage: &snapshot.document_coverage,
-            }),
-            Part::Integrations => to_value(&IntegrationsPart {
-                harnesses: &snapshot.harnesses,
-            }),
-            Part::Diagnostics => to_value(&DiagnosticsPart {
-                diagnostics: &snapshot.diagnostics,
-                process_diagnostics: &snapshot.process_diagnostics,
-            }),
-        };
         match part {
-            Part::Status => {}
-            Part::Connections => each(&mut value, "sessions", |session| {
-                remove(session, &["leased", "held_tab_count"]);
-            }),
-            Part::Activity => each(&mut value, "document_coverage", |coverage| {
-                self.count_excluded_hosts(coverage);
-            }),
-            Part::Integrations => each(&mut value, "harnesses", |harness| {
-                self.project_harness(harness);
-            }),
+            Part::Status => self.status(&StatusPart::of(snapshot)),
+            Part::Connections => self.connections(&ConnectionsPart::of(snapshot)),
+            Part::Activity => {
+                let mut value = to_value(&ActivityPart {
+                    operations: &snapshot.operations,
+                    history: &snapshot.history,
+                    document_coverage: &snapshot.document_coverage,
+                });
+                each(&mut value, "document_coverage", |coverage| {
+                    self.count_excluded_hosts(coverage);
+                });
+                value
+            }
+            Part::Integrations => {
+                let mut value = to_value(&IntegrationsPart {
+                    harnesses: &snapshot.harnesses,
+                });
+                each(&mut value, "harnesses", |harness| {
+                    self.project_harness(harness);
+                });
+                value
+            }
             Part::Diagnostics => {
+                let mut value = to_value(&DiagnosticsPart {
+                    diagnostics: &snapshot.diagnostics,
+                    process_diagnostics: &snapshot.process_diagnostics,
+                });
                 if let Some(directory) = value.pointer_mut("/process_diagnostics/directory") {
                     self.rewrite_path(directory);
                 }
+                value
             }
+        }
+    }
+
+    /// The status part, as this audience sees it. Every audience sees all of it.
+    #[must_use]
+    pub fn status(&self, status: &StatusPart) -> Value {
+        to_value(status)
+    }
+
+    /// The connections part, as this audience sees it. Which tabs are leased or held is a detail
+    /// of the window's own controls, so nobody is shown it here.
+    #[must_use]
+    pub fn connections(&self, connections: &ConnectionsPart) -> Value {
+        let mut value = to_value(connections);
+        each(&mut value, "sessions", |session| {
+            remove(session, &["leased", "held_tab_count"]);
+        });
+        value
+    }
+
+    /// One published event, as this audience sees it.
+    ///
+    /// The stream projects an event once for each audience that has a subscriber, with the same
+    /// rules as the routes: a watcher is told how many sites a document excluded and never which,
+    /// and is given no policy tag to test guesses against.
+    #[must_use]
+    pub fn event(&self, event: &WorkbenchEvent) -> Value {
+        let mut value = to_value(event);
+        let Some(change) = value.get_mut("change") else {
+            return value;
+        };
+        match &event.change {
+            WorkbenchChange::DocumentCoverageChanged { .. } => {
+                if let Some(details) = change.get_mut("details") {
+                    self.count_excluded_hosts(details);
+                }
+            }
+            WorkbenchChange::StatusChanged { status } => {
+                change["status"] = self.status(status);
+            }
+            WorkbenchChange::ConnectionsChanged { connections } => {
+                change["connections"] = self.connections(connections);
+            }
+            WorkbenchChange::PartChanged {
+                part: HintedPart::Policy,
+                ..
+            } if self.watching() => remove(change, &["etag"]),
+            _ => {}
         }
         value
     }
@@ -440,7 +536,17 @@ pub fn policy_etag(authority: &EffectiveAuthority) -> String {
         }
         Err(_) => document.to_owned(),
     };
-    Sha256::digest(text.as_bytes())
+    hex_digest(text.as_bytes())
+}
+
+/// The tag of a value that is read on demand: a hash of its JSON.
+#[must_use]
+pub fn json_etag<T: Serialize + ?Sized>(value: &T) -> String {
+    hex_digest(to_value(value).to_string().as_bytes())
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()

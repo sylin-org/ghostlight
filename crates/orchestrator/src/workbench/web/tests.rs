@@ -17,6 +17,7 @@ use crate::governance::GovernanceFacade;
 use crate::install::HarnessRegistry;
 use crate::language::coverage::{Coverage, HumanCoverage};
 use crate::language::workbench as words;
+use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Part, USER_HOME_VARIABLE};
 use crate::workbench::WorkbenchPresentationPort;
 use crate::workbench::{WorkbenchNotification, WorkbenchPresentationError, WorkbenchProjection};
@@ -1354,4 +1355,420 @@ fn a_thirty_third_connection_is_closed_without_an_answer() {
     drop(idle);
     std::thread::sleep(std::time::Duration::from_millis(300));
     assert_eq!(get("/api/context").send(port).status, 200);
+}
+
+/// One block of a stream: the parts of an event, or a comment.
+#[derive(Debug, Default)]
+struct Block {
+    event: Option<String>,
+    id: Option<String>,
+    data: Option<String>,
+    comment: Option<String>,
+}
+
+impl Block {
+    fn json(&self) -> Value {
+        serde_json::from_str(self.data.as_deref().expect("the block carries data"))
+            .expect("the data is JSON")
+    }
+
+    /// The kind of change a block carries, when it carries one.
+    fn kind(&self) -> Option<String> {
+        self.json()["change"]["kind"].as_str().map(str::to_owned)
+    }
+
+    fn is(&self, kind: &str) -> bool {
+        self.data.is_some() && self.event.is_none() && self.kind().as_deref() == Some(kind)
+    }
+}
+
+/// An open `GET /api/events`, read the way a page reads it.
+struct Stream {
+    reader: std::io::BufReader<TcpStream>,
+}
+
+impl Stream {
+    /// Open a stream that must be accepted, and read its head.
+    fn open(port: u16, bearer: Option<&str>) -> Self {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut request = format!("GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
+        if let Some(bearer) = bearer {
+            request.push_str(&format!("Authorization: Bearer {bearer}\r\n"));
+        }
+        request.push_str("\r\n");
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut reader = std::io::BufReader::new(stream);
+        let mut status = String::new();
+        std::io::BufRead::read_line(&mut reader, &mut status).unwrap();
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        let mut headers = Vec::new();
+        loop {
+            let mut line = String::new();
+            std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
+            if line.trim_end().is_empty() {
+                break;
+            }
+            headers.push(line.trim_end().to_ascii_lowercase());
+        }
+        assert!(headers.contains(&"content-type: text/event-stream".to_owned()));
+        assert!(headers.contains(&"cache-control: no-store".to_owned()));
+        assert!(
+            !headers
+                .iter()
+                .any(|line| line.starts_with("content-length")),
+            "a stream has no length: {headers:?}"
+        );
+        Self { reader }
+    }
+
+    /// The next block, or none when the stream ended or stayed quiet for the read timeout.
+    fn next(&mut self) -> Option<Block> {
+        let mut block = Block::default();
+        let mut any = false;
+        loop {
+            let mut line = String::new();
+            match std::io::BufRead::read_line(&mut self.reader, &mut line) {
+                Ok(0) | Err(_) => return None,
+                Ok(_) => {}
+            }
+            let line = line.trim_end_matches(['\r', '\n']);
+            if line.is_empty() {
+                if any {
+                    return Some(block);
+                }
+                continue;
+            }
+            any = true;
+            if let Some(comment) = line.strip_prefix(": ") {
+                block.comment = Some(comment.to_owned());
+            } else if let Some(value) = line.strip_prefix("event: ") {
+                block.event = Some(value.to_owned());
+            } else if let Some(value) = line.strip_prefix("id: ") {
+                block.id = Some(value.to_owned());
+            } else if let Some(value) = line.strip_prefix("data: ") {
+                block.data = Some(value.to_owned());
+            } else {
+                panic!("not a stream line: {line}");
+            }
+        }
+    }
+
+    /// The next block when one comes within `wait`.
+    fn next_within(&mut self, wait: std::time::Duration) -> Option<Block> {
+        self.reader.get_ref().set_read_timeout(Some(wait)).unwrap();
+        let block = self.next();
+        self.reader
+            .get_ref()
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        block
+    }
+
+    /// Read until a block satisfies `wanted`, and return it.
+    fn until(&mut self, wanted: impl Fn(&Block) -> bool) -> Block {
+        loop {
+            let block = self.next().expect("the stream ended before the block came");
+            if wanted(&block) {
+                return block;
+            }
+        }
+    }
+
+    fn hello(&mut self) -> Value {
+        let block = self.next().expect("a stream opens with a hello");
+        assert_eq!(block.event.as_deref(), Some("hello"));
+        block.json()
+    }
+}
+
+#[test]
+fn a_window_and_a_watcher_hear_the_same_change_each_as_it_may_see_it() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    let mut tab = Stream::open(fixture.port(), None);
+    let window_hello = window.hello();
+    let tab_hello = tab.hello();
+    assert_eq!(window_hello["context"], "control");
+    assert_eq!(tab_hello["context"], "watch");
+    for hello in [&window_hello, &tab_hello] {
+        assert_eq!(hello["instance"], "instance_test");
+        assert_eq!(hello["seq"], fixture.facade.current_seq());
+    }
+
+    fixture.facade.projection.document_coverage(HumanCoverage {
+        summary: "One frame was excluded.".into(),
+        explanation: "Excluded by policy.".into(),
+        invocation: "invocation_1".into(),
+        coverage: Coverage::default(),
+        excluded_hosts: vec![EXCLUDED_HOST.into()],
+        proactive: false,
+    });
+    let at_window = window.until(|block| block.is("document_coverage_changed"));
+    let at_tab = tab.until(|block| block.is("document_coverage_changed"));
+    let seq = window_hello["seq"].as_u64().unwrap() + 1;
+    assert_eq!(at_window.id, Some(format!("instance_test-{seq}")));
+    assert_eq!(at_tab.id, at_window.id);
+    assert_eq!(at_window.json()["seq"], seq);
+
+    let details = &at_window.json()["change"]["details"];
+    assert_eq!(details["excluded_hosts"], json!([EXCLUDED_HOST]));
+    assert_eq!(details["excluded_host_count"], 1);
+    let watched = at_tab.json();
+    assert_eq!(watched["change"]["details"]["excluded_host_count"], 1);
+    assert!(watched["change"]["details"].get("excluded_hosts").is_none());
+    assert!(!at_tab.data.unwrap().contains(EXCLUDED_HOST));
+}
+
+#[test]
+fn an_act_answers_with_the_sequence_of_the_last_change_it_caused() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    window.hello();
+
+    let reply = fixture.control(post("/api/runtime", r#"{"intent":"hold"}"#));
+    assert_eq!(reply.status, 200);
+    let seq: u64 = reply.header("Ghostlight-Seq").unwrap().parse().unwrap();
+    assert_eq!(seq, fixture.facade.current_seq());
+
+    let mut kinds = Vec::new();
+    let mut note = None;
+    loop {
+        let block = window.next().expect("the changes the act caused arrive");
+        let kind = block.kind().unwrap();
+        if kind == "status_changed" {
+            note = block.json()["change"]["status"]["runtime_note"]
+                .as_str()
+                .map(str::to_owned);
+        }
+        kinds.push(kind);
+        if block.id == Some(format!("instance_test-{seq}")) {
+            break;
+        }
+    }
+    assert!(kinds.contains(&"runtime_changed".to_owned()), "{kinds:?}");
+    assert_eq!(note.as_deref(), Some(words::PAUSED_IN_WINDOW));
+    assert!(window
+        .next_within(std::time::Duration::from_millis(300))
+        .is_none());
+
+    // A read answers without a sequence: it caused nothing.
+    assert!(fixture
+        .control(get("/api/snapshot"))
+        .header("Ghostlight-Seq")
+        .is_none());
+    // A refused act caused nothing either.
+    let refused = fixture.control(post("/api/runtime", r#"{"intent":"nonsense"}"#));
+    assert_eq!(refused.status, 400);
+    assert!(refused.header("Ghostlight-Seq").is_none());
+}
+
+#[test]
+fn a_pause_from_a_watching_screen_says_so_on_every_screen() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    window.hello();
+    let reply = fixture.watch(post("/api/runtime", r#"{"intent":"hold"}"#));
+    assert_eq!(reply.status, 200);
+    let status = window.until(|block| block.is("status_changed"));
+    assert_eq!(
+        status.json()["change"]["status"]["runtime_note"],
+        words::PAUSED_FROM_WATCHER
+    );
+    assert_eq!(
+        status.json()["change"]["status"]["service"]["runtime_state"],
+        serde_json::to_value(RuntimeControlState::Held).unwrap()
+    );
+}
+
+#[test]
+fn the_acts_that_change_a_part_hint_at_it_with_its_tag() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    let mut tab = Stream::open(fixture.port(), None);
+    window.hello();
+    tab.hello();
+    let hint = |stream: &mut Stream, part: &str| {
+        stream.until(|block| block.is("part_changed") && block.json()["change"]["part"] == part)
+    };
+
+    let tag = fixture.control(get("/api/policy")).json()["etag"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let put = fixture.control(
+        Call::new("PUT", "/api/policy/user")
+            .header("If-Match", &tag)
+            .body(&json!({ "document": READ_POLICY }).to_string()),
+    );
+    assert_eq!(put.status, 200);
+    let hinted = hint(&mut window, "policy");
+    let new_tag = fixture.control(get("/api/policy")).json()["etag"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(new_tag, tag);
+    assert_eq!(hinted.json()["change"]["etag"], new_tag);
+    assert_eq!(
+        hinted.id,
+        Some(format!(
+            "instance_test-{}",
+            put.header("Ghostlight-Seq").unwrap()
+        ))
+    );
+    // A watcher is told the part changed and is given no tag to test guesses against.
+    let watched = hint(&mut tab, "policy");
+    assert_eq!(watched.id, hinted.id);
+    assert!(watched.json()["change"].get("etag").is_none());
+
+    let diagnostics = fixture.control(
+        Call::new("PUT", "/api/controls/diagnostics").body(&json!({ "on": true }).to_string()),
+    );
+    assert_eq!(diagnostics.status, 200);
+    let hinted = hint(&mut window, "diagnostics");
+    assert_eq!(hinted.json()["change"]["etag"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        hinted.id,
+        Some(format!(
+            "instance_test-{}",
+            diagnostics.header("Ghostlight-Seq").unwrap()
+        ))
+    );
+
+    let rescan = fixture.control(post("/api/integrations/rescan", "{}"));
+    assert_eq!(rescan.status, 200);
+    let hinted = hint(&mut window, "integrations");
+    assert_eq!(hinted.json()["change"]["etag"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        hinted.id,
+        Some(format!(
+            "instance_test-{}",
+            rescan.header("Ghostlight-Seq").unwrap()
+        ))
+    );
+    assert_eq!(
+        hint(&mut tab, "integrations").json()["change"]["etag"],
+        hinted.json()["change"]["etag"]
+    );
+}
+
+#[test]
+fn only_so_many_screens_can_watch_and_the_next_is_told_why() {
+    let fixture = Fixture::start();
+    let bearer = fixture.bearer();
+    let windows: Vec<Stream> = (0..4)
+        .map(|_| Stream::open(fixture.port(), Some(&bearer)))
+        .collect();
+    let refused = fixture.control(get("/api/events"));
+    assert_eq!(refused.status, 503);
+    assert_eq!(refused.code(), "too_many_screens");
+    assert_eq!(refused.json()["error"]["message"], words::TOO_MANY_SCREENS);
+    // The window's places are its own: a watcher still gets in.
+    let tabs: Vec<Stream> = (0..8).map(|_| Stream::open(fixture.port(), None)).collect();
+    let refused = fixture.watch(get("/api/events"));
+    assert_eq!(refused.status, 503);
+    assert_eq!(refused.code(), "too_many_screens");
+    drop((windows, tabs));
+}
+
+#[test]
+fn a_closed_view_has_no_stream_and_the_window_still_does() {
+    let fixture = Fixture::closed();
+    let refused = fixture.watch(get("/api/events"));
+    assert_eq!(refused.status, 403);
+    assert_eq!(refused.code(), "watching_off");
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    assert_eq!(window.hello()["context"], "control");
+    let wrong = get("/api/events")
+        .bearer("not-the-key")
+        .send(fixture.port());
+    assert_eq!(wrong.status, 401);
+}
+
+#[test]
+fn a_stopped_server_ends_its_streams() {
+    let fixture = Fixture::start();
+    let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
+    window.hello();
+    fixture.server.stop();
+    assert!(window.next().is_none());
+}
+
+#[test]
+fn a_screen_that_stops_reading_is_reset_and_another_keeps_receiving() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const PATIENCE: std::time::Duration = std::time::Duration::from_secs(20);
+
+    let fixture = Fixture::start();
+    let bearer = fixture.bearer();
+    let mut slow = Stream::open(fixture.port(), Some(&bearer));
+    let quick = Stream::open(fixture.port(), Some(&bearer));
+    let received = Arc::new(AtomicUsize::new(0));
+    let counting = {
+        let received = Arc::clone(&received);
+        std::thread::spawn(move || {
+            let mut quick = quick;
+            while let Some(block) = quick.next() {
+                if block.is("document_coverage_changed") {
+                    received.fetch_add(1, Ordering::AcqRel);
+                }
+            }
+        })
+    };
+
+    // Each change names enough sites that the sockets between the two cannot hold the backlog.
+    let hosts: Vec<String> = (0..500)
+        .map(|index| format!("{index:03}-{}.invalid", "x".repeat(120)))
+        .collect();
+    let mut published = 0_usize;
+    let started = std::time::Instant::now();
+    let events = &fixture.server.shared.events;
+    while events.open_streams(WebContext::Control) == 2 {
+        assert!(
+            started.elapsed() < PATIENCE,
+            "the screen that never reads was never ended"
+        );
+        fixture.facade.projection.document_coverage(HumanCoverage {
+            summary: "Frames were excluded.".into(),
+            explanation: "Excluded by policy.".into(),
+            invocation: format!("invocation_{published}"),
+            coverage: Coverage::default(),
+            excluded_hosts: hosts.clone(),
+            proactive: false,
+        });
+        published += 1;
+        // The screen that reads is never allowed to fall far behind the one that does not.
+        while published > received.load(Ordering::Acquire) + 100 {
+            assert!(started.elapsed() < PATIENCE, "the quick screen stopped");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    let reset = slow.until(|block| block.event.as_deref() == Some("reset"));
+    assert_eq!(reset.json(), json!({ "reason": "behind" }));
+    assert!(slow.next().is_none(), "a reset ends the stream");
+    assert_eq!(events.open_streams(WebContext::Control), 1);
+
+    // The other screen lost nothing, and hears the next change too.
+    fixture.facade.projection.document_coverage(HumanCoverage {
+        summary: "Frames were excluded.".into(),
+        explanation: "Excluded by policy.".into(),
+        invocation: "invocation_last".into(),
+        coverage: Coverage::default(),
+        excluded_hosts: vec![EXCLUDED_HOST.into()],
+        proactive: false,
+    });
+    published += 1;
+    while received.load(Ordering::Acquire) < published {
+        assert!(
+            started.elapsed() < PATIENCE,
+            "the quick screen lost a change"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    fixture.server.stop();
+    counting.join().unwrap();
 }

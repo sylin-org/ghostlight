@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-05-live-stream.
+Next: m1-06-native-acts.
 
 ## Landed
 
@@ -50,6 +50,7 @@ Next: m1-05-live-stream.
 | m1-02-harness-evidence | Harness evidence names a foreign program and its argument count, never its arguments; a configuration that cannot be parsed carries no evidence (owner answers Q3 and Q8). | see `git log` |
 | m1-03-own-origin | Agents can never open or read the workbench's own loopback origin: `GovernanceFacade::protect_workbench_port` shares the port with every snapshot, and the landing decision refuses a loopback address on that port with `ProtectedHost` whatever the policy says. The authority id does not depend on the port. | see `git log` |
 | m1-04-loopback-server | The service serves the workbench on 127.0.0.1 with access decided per route in three contexts (Control, Watch, Closed), each part projected for its audience, guards on Host, Origin and framing, and the bearer made at each start. `protect_workbench_port` runs between binding and answering. The Tauri window is unchanged. | see `git log` |
+| m1-05-live-stream | One live stream, pushed to every screen. `GET /api/events` is served from an `EventHub` every screen subscribes to; the sequence advances whether or not anyone listens; a snapshot reads it first; `status_changed`, `connections_changed` and `part_changed` events keep the band, the sessions and the hinted parts current; the tray, the window, a watching screen and the browser toolbar change the runtime through `apply_runtime_control(intent, source)`, and the status says where a pause came from. Acts answer with `Ghostlight-Seq`. | see `git log` |
 
 ## Route table
 
@@ -63,6 +64,7 @@ every route but the pages and `/api/context`.
 | `/` and each file under `ui/` | GET, HEAD | page | page | page | none | (the private scheme) |
 | `/api/context` | GET | full | projected | product only | none | (new; Tauri command in m1-07) |
 | `/api/snapshot?parts=` | GET | all parts | projected | 403 | none | `workbench_snapshot` |
+| `/api/events` | GET | stream | stream, projected | 403 | 4 window and 8 watching streams | (new; Tauri event `ghostlight://change`) |
 | `/api/policy` | GET | full, with etag | projected, no etag | 403 | none | `workbench_policy` |
 | `/api/search` | POST | yes | yes | 403 | 5 per second | `workbench_search` |
 | `/api/policy/preview` | POST | yes | yes | 403 | 1 in flight, 10 per minute | `preview_user_policy` |
@@ -77,8 +79,15 @@ every route but the pages and `/api/context`.
 | `/api/notifications/test` | POST | yes | window | 403 | none | `test_notification` |
 
 Not routed, by design: `quit_ghostlight`, `copy_harness_text` (m1-07 copies in the page),
-`reveal_diagnostics`, `locate_harness`, `open_harness_download`, `open_destination` (m1-06) and the
-event stream (m1-05).
+`reveal_diagnostics`, `locate_harness`, `open_harness_download` and `open_destination` (m1-06).
+
+`/api/events` answers `200 text/event-stream` with no length, ended by closing the connection. It
+writes `event: hello` with `{ context, instance, seq }`, then `id: <instance>-<seq>` and
+`data: <the projected event as one line of JSON>` for each change numbered above the hello's `seq`,
+`: keep` after 15 s of quiet, and `event: reset` with `{ "reason": "behind" }` before it ends a
+stream whose queue (256 changes) overflowed. Past the places it answers `503 too_many_screens`.
+Every act that succeeds answers with `Ghostlight-Seq: <seq after the act>` (rescan, runtime, both
+policy writes, diagnostics, setup-all, client act).
 
 Bodies are JSON objects with exactly the named fields. Answers keep today's Tauri values: search
 answers the array of hits, a preview answers the preview, an intent answers the intent result, a
@@ -95,6 +104,15 @@ Errors are `{ "error": { "code", "message" } }`; what a facade call refuses with
   window.
 - m1-04, Windows: a service stopped and started again at once takes the same port (the unit test
   covers TIME_WAIT on loopback; confirm with a real restart).
+
+- m1-05, Windows and Linux: with the Tauri window open, pause from the tray and from the browser
+  toolbar; the band's word, lamp and wheel change within a second and the word's tooltip names the
+  source ("Paused from the tray.", "Paused from the browser toolbar."). Pause from a tab on the
+  watch address and the window's tooltip says "Paused from a screen that is watching.".
+- m1-05, Windows and Linux: connect and disconnect an MCP client and a browser; the sessions and
+  browsers counts in the band change in the window with no refresh.
+- m1-05, Windows: leave the window open for a minute with a tab on the watch address; both stay
+  current, and closing the tab frees its place within about 15 s (the next keep-alive write fails).
 
 ## Blockers
 
@@ -150,3 +168,46 @@ None.
   test passes there, so TIME_WAIT on the server's port does not block binding.
 - m1-04: docs/trust/data-flows.md says `ghostlight status` shows the port, as the spec's sentence
   does; `status` shows it from m1-11.
+
+- m1-05: `WorkbenchProjection::attach_events` appends, so every attached sink hears every event in
+  order. A `delivery` lock makes the sequence number and the hand-off to the sinks one step, so no
+  sink sees events out of order; a sink must not publish from inside its own delivery.
+- m1-05: `S/workbench/live.rs` (new, in the lane's `S/workbench/**`) holds the live parts: it
+  gathers operations, sessions, browsers, authority and runtime once, builds the status and
+  connections parts from that look, and publishes a part only when it differs from the last one
+  published. The projection holds the refresh hook through a `Weak`, so the facade is not kept
+  alive by it. A refresh that arrives while another runs marks the parts wanted again and returns;
+  the running refresh looks once more before it lets go, so the last look is always published, in
+  order, and nothing waits.
+- m1-05: the hook runs after an operation starts, changes or settles and after a saving-health
+  change. A composition receipt and a coverage change cannot alter either part, so they do not run
+  it. The first refresh always publishes both parts, because nothing was published before it.
+- m1-05: `StatusPart` and `ConnectionsPart` are owned types in `S/workbench/parts.rs`, built from a
+  snapshot with `of`, and a snapshot carries `runtime_note` (skipped when absent), so the Tauri
+  snapshot and the web part say the same thing. `Projection::event` projects a published event for
+  an audience: a watcher's coverage event carries `excluded_host_count` and no host, and a
+  watcher's policy hint carries no etag.
+- m1-05: the policy hint's etag is the new user-layer tag after the person's own write, which
+  is what `GET /api/policy` reports for the window. When the refresher finds a different published
+  authority it announces the authority id instead, so a change that leaves the user layer alone (a
+  managed policy, a file edited by hand) still differs from every tag the page holds. The facade
+  remembers the id it last announced, so the refresher does not repeat an act's hint.
+- m1-05: `locate_harness` also publishes the integrations hint, because it changes the roster; the
+  spec named only refresh, setup-all and manage. `apply_diagnostics_toggle` (the Tauri act) publishes
+  the diagnostics hint like `set_diagnostics`.
+- m1-05: the Tauri tray's Pause and Resume pass `RuntimeSource::Tray`; the Tauri `apply_runtime_intent`
+  command and `WorkbenchFacade::apply_runtime_intent` pass `Window`. `ServiceBrowserEvents` holds the
+  facade instead of the governance facade and applies the toolbar's intent through
+  `apply_runtime_control(intent, Browser)`, toggle included.
+- m1-05: refresh points: after `intake.browser.attach(connection)` returns, after a browser
+  `Disconnected` or `TabClosed`, at the end of `LiveSession::open` and `LiveSession::close`, and
+  after each refresher tick (`WorkbenchFacade::authority_refreshed`). A browser connecting changes
+  the parts at attach; `attach` returns once the connection is registered, so the refresh sees it.
+- m1-05: the page: `lib/store.js` folds `status_changed` and `connections_changed` into its snapshot
+  and ignores an event numbered at or below the snapshot's (a snapshot now reads the sequence
+  first, so those are already in it). `part_changed` returns `hinted`; `app.js` re-reads the part
+  when its destination is showing (policy through the policy read, integrations and diagnostics
+  through the full snapshot, which is all the Tauri transport has until m1-07) and otherwise reads
+  it when the person opens that destination. A tag already acted on is not acted on twice. The
+  Status page's checkup cards are derived from the snapshot and are not pushed; they follow the
+  ten-second heartbeat or the next hint.

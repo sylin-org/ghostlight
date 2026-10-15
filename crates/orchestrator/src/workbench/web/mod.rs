@@ -10,6 +10,7 @@
 //! and to nobody else, and never logged, put in a URL or sent in a response.
 
 mod assets;
+mod events;
 mod http;
 mod limits;
 mod routes;
@@ -30,7 +31,7 @@ use base64::Engine as _;
 use ghostlight_relay::endpoint::fnv1a32;
 use zeroize::Zeroizing;
 
-use super::{WebFacts, WorkbenchFacade};
+use super::{WebFacts, WorkbenchEventSink, WorkbenchFacade};
 
 pub use watching::Watching;
 
@@ -165,12 +166,15 @@ impl PendingWorkbench {
             instance: instance.clone(),
             watching: Arc::clone(&watching),
         });
+        let events = Arc::new(events::EventHub::new(instance.clone()));
+        facade.attach_events(Arc::clone(&events) as Arc<dyn WorkbenchEventSink>);
         let mut random = Zeroizing::new([0_u8; BEARER_BYTES]);
         getrandom::getrandom(&mut *random).expect("the operating system supplies random bytes");
         let bearer =
             Zeroizing::new(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&random[..]));
         let shared = Arc::new(Shared {
             facade: facade.clone(),
+            events,
             instance,
             bearer,
             watching,
@@ -192,6 +196,7 @@ impl PendingWorkbench {
 /// What every connection of one server shares.
 struct Shared {
     facade: WorkbenchFacade,
+    events: Arc<events::EventHub>,
     instance: String,
     bearer: Zeroizing<String>,
     watching: Arc<Watching>,
@@ -266,6 +271,7 @@ impl WorkbenchServer {
     /// Stop answering and free the port. A second call does nothing.
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
+        self.shared.events.close();
         let thread = self
             .thread
             .lock()
@@ -349,10 +355,13 @@ fn from_loopback(stream: &TcpStream) -> bool {
 fn serve_connection(shared: &Shared, stream: TcpStream) {
     let _ = stream.set_nodelay(true);
     let (mut incoming, head) = http::Incoming::read_head(stream);
-    let response = match head {
+    let mut response = match head {
         Ok(head) => routes::answer(shared, &head, &mut incoming),
         Err(http::ReadError::Closed) => return,
         Err(http::ReadError::Malformed) => routes::unreadable(),
     };
-    incoming.finish(&response);
+    match response.take_events() {
+        Some(subscription) => events::serve(incoming, &response, &subscription),
+        None => incoming.finish(&response),
+    }
 }

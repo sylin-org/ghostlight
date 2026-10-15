@@ -443,7 +443,8 @@
       const name = readiness ? `runtime-${readiness.tone}` : "runtime-offline";
       document.body.className = name;
       el["state-word"].textContent = readiness ? readiness.word : "";
-      el["state-word"].title = readiness ? readiness.detail : "";
+      // Where a pause came from is the better thing to read on the word while there is one.
+      el["state-word"].title = facts.snapshot?.runtime_note ?? (readiness ? readiness.detail : "");
 
       if (!facts.snapshot) {
         el["state-facts"].textContent = "";
@@ -1333,8 +1334,11 @@
 
     /* -------------------------------- chrome ------------------------------ */
 
+    let current = "monitor";
+
     function navigate(view) {
       if (!VIEWS[view]) return;
+      current = view;
       for (const node of document.querySelectorAll(".view")) {
         node.classList.toggle("active", node.dataset.page === view);
       }
@@ -1470,7 +1474,7 @@
     return Object.freeze({
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
-      band, collections, navigate, toast, openHarnessManual,
+      band, collections, navigate, showing: () => current, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
       discardDraft, renderRules, previewResult, previewCleared, editorStatus,

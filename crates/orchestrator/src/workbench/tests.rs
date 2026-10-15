@@ -248,7 +248,7 @@ fn published_changes_stay_content_minimized() {
 }
 
 #[test]
-fn a_projection_without_a_sink_publishes_nothing_and_stays_at_zero() {
+fn a_projection_without_a_sink_still_numbers_what_it_publishes() {
     let projection = WorkbenchProjection::default();
     projection.react(&DomainEvent::WorkStarted {
         provenance: None,
@@ -258,7 +258,7 @@ fn a_projection_without_a_sink_publishes_nothing_and_stays_at_zero() {
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
     });
-    assert_eq!(projection.current_seq(), 0);
+    assert_eq!(projection.current_seq(), 1);
     assert_eq!(projection.operations().len(), 1);
 }
 
@@ -619,5 +619,286 @@ fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
         authority_card(&retained).severity,
         super::DiagnosticSeverity::Warning
     );
+    let _ = std::fs::remove_file(path);
+}
+
+/// The changes a sink has been handed, in the order it got them.
+fn heard(events: &Events) -> Vec<WorkbenchEvent> {
+    events.0.lock().unwrap().clone()
+}
+
+fn failing_health(unreadable: u64) -> crate::language::audit_health::AuditHealth {
+    crate::language::audit_health::AuditHealth {
+        failure: Some(crate::language::audit_health::StorageFailure::Write),
+        unconfirmed_receipts: 0,
+        unreadable_entries: unreadable,
+        history_unavailable: false,
+    }
+}
+
+#[test]
+fn the_sequence_advances_with_no_listener_and_every_sink_hears_every_event() {
+    let projection = WorkbenchProjection::default();
+    projection.audit_health_changed(failing_health(1));
+    assert_eq!(
+        projection.current_seq(),
+        1,
+        "a change nobody listened to still has a number"
+    );
+
+    let first = Arc::new(Events::default());
+    let second = Arc::new(Events::default());
+    projection.attach_events(first.clone());
+    projection.attach_events(second.clone());
+    projection.audit_health_changed(failing_health(2));
+    projection.react(&DomainEvent::WorkStarted {
+        provenance: None,
+        invocation: "invocation_1".into(),
+        workspace: "workspace_1".into(),
+        tool: "browser_read".into(),
+        activity: PresentationActivity::Read,
+        capabilities: Capability::Read.into(),
+    });
+
+    let one = heard(&first);
+    assert_eq!(
+        one.iter().map(|event| event.seq).collect::<Vec<_>>(),
+        [2, 3],
+        "a sink attached later hears only what follows, numbered where the sequence stood"
+    );
+    assert_eq!(one, heard(&second));
+}
+
+/// A browser port that publishes a change while the workbench is listing the browsers.
+struct BusyBrowser {
+    projection: WorkbenchProjection,
+    fired: std::sync::atomic::AtomicBool,
+}
+
+impl crate::browser::BrowserPort for BusyBrowser {
+    fn call(
+        &self,
+        _: &str,
+        _: &str,
+        _: crate::browser::adapter::BrowserCommand,
+        _: std::time::Instant,
+        _: &std::sync::atomic::AtomicBool,
+    ) -> Result<crate::browser::adapter::BrowserOutcome, crate::browser::BrowserError> {
+        panic!("a snapshot must not dispatch browser work");
+    }
+
+    fn browsers(&self) -> Vec<crate::browser::BrowserSummary> {
+        if !self.fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            self.projection.audit_health_changed(failing_health(7));
+        }
+        Vec::new()
+    }
+
+    fn publish_control_state(
+        &self,
+        _: crate::browser::adapter::RuntimeControlState,
+    ) -> Result<(), crate::browser::BrowserError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_snapshot_is_never_newer_than_the_changes_it_claims() {
+    let projection = WorkbenchProjection::default();
+    let facade = WorkbenchFacade::new(
+        projection.clone(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None, None),
+        Arc::new(BusyBrowser {
+            projection,
+            fired: std::sync::atomic::AtomicBool::new(false),
+        }),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let events = Arc::new(Events::default());
+    facade.attach_events(events.clone());
+
+    let snapshot = facade.snapshot();
+
+    let landed = heard(&events)
+        .into_iter()
+        .find(|event| matches!(event.change, WorkbenchChange::AuditHealthChanged { .. }))
+        .expect("the change landed while the snapshot was assembled");
+    assert!(
+        snapshot.seq < landed.seq,
+        "a snapshot numbered {} claims a change numbered {}, which a page would then skip",
+        snapshot.seq,
+        landed.seq
+    );
+}
+
+fn statuses(events: &[WorkbenchEvent]) -> Vec<super::parts::StatusPart> {
+    events
+        .iter()
+        .filter_map(|event| match &event.change {
+            WorkbenchChange::StatusChanged { status } => Some(status.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn count_of(events: &[WorkbenchEvent], kind: &str) -> usize {
+    events
+        .iter()
+        .filter(|event| serde_json::to_value(&event.change).unwrap()["kind"] == kind)
+        .count()
+}
+
+#[test]
+fn a_pause_says_where_it_came_from_and_a_repeat_says_nothing_new() {
+    use super::RuntimeSource;
+    use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
+    use crate::language::workbench as words;
+
+    let facade = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+    );
+    let events = Arc::new(Events::default());
+    facade.attach_events(events.clone());
+
+    facade.apply_runtime_control(RuntimeControlIntent::Hold, RuntimeSource::Browser);
+    let after_hold = heard(&events);
+    assert_eq!(count_of(&after_hold, "runtime_changed"), 1);
+    let note = statuses(&after_hold)
+        .last()
+        .and_then(|status| status.runtime_note.clone());
+    assert_eq!(note.as_deref(), Some(words::PAUSED_FROM_BROWSER));
+    assert_eq!(
+        facade.snapshot().runtime_note.as_deref(),
+        Some(words::PAUSED_FROM_BROWSER)
+    );
+
+    // The same pause again changes nothing a screen shows, and the first source stays.
+    facade.apply_runtime_control(RuntimeControlIntent::Hold, RuntimeSource::Tray);
+    let after_repeat = heard(&events);
+    assert_eq!(count_of(&after_repeat, "runtime_changed"), 2);
+    assert_eq!(
+        statuses(&after_repeat).len(),
+        statuses(&after_hold).len(),
+        "an identical pause published a second status"
+    );
+
+    // Resuming drops the sentence, and the next pause names its own source.
+    facade.apply_runtime_control(RuntimeControlIntent::Resume, RuntimeSource::Window);
+    let resumed = statuses(&heard(&events));
+    assert_eq!(resumed.last().unwrap().runtime_note, None);
+    assert_eq!(
+        resumed.last().unwrap().service.runtime_state,
+        RuntimeControlState::Active
+    );
+    for (source, sentence) in [
+        (RuntimeSource::Tray, words::PAUSED_FROM_TRAY),
+        (RuntimeSource::Window, words::PAUSED_IN_WINDOW),
+        (RuntimeSource::Watcher, words::PAUSED_FROM_WATCHER),
+    ] {
+        facade.apply_runtime_control(RuntimeControlIntent::ToggleHold, source);
+        let last = statuses(&heard(&events)).pop().unwrap();
+        assert_eq!(last.runtime_note.as_deref(), Some(sentence));
+        facade.apply_runtime_control(RuntimeControlIntent::ToggleHold, source);
+    }
+
+    // The window's own intent is the window's pause.
+    facade.apply_runtime_intent(super::WorkbenchRuntimeIntent::Hold);
+    assert_eq!(
+        facade.snapshot().runtime_note.as_deref(),
+        Some(words::PAUSED_IN_WINDOW)
+    );
+}
+
+#[test]
+fn work_and_saving_health_refresh_the_status_and_connections_without_a_pull() {
+    let projection = WorkbenchProjection::default();
+    let facade = WorkbenchFacade::new(
+        projection.clone(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let events = Arc::new(Events::default());
+    facade.attach_events(events.clone());
+
+    projection.react(&DomainEvent::WorkStarted {
+        provenance: None,
+        invocation: "invocation_1".into(),
+        workspace: "workspace_1".into(),
+        tool: "browser_read".into(),
+        activity: PresentationActivity::Read,
+        capabilities: Capability::Read.into(),
+    });
+    let working = statuses(&heard(&events)).pop().unwrap();
+    assert_eq!(
+        working.readiness.state,
+        crate::language::readiness::Readiness::Working
+    );
+
+    projection.audit_health_changed(failing_health(3));
+    let heard_now = heard(&events);
+    let health = statuses(&heard_now).pop().unwrap();
+    assert_eq!(health.audit_health, failing_health(3));
+    assert!(!health.audit_notice.is_empty());
+
+    // Nothing changed, so asking again says nothing.
+    let before = heard(&events).len();
+    facade.refresh_live_parts();
+    facade.refresh_live_parts();
+    assert_eq!(heard(&events).len(), before);
+}
+
+#[test]
+fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_not_repeat_it() {
+    let path = temporary_policy("hint");
+    let governance = GovernanceFacade::owning_user_policy(path.clone(), None);
+    let facade = facade_over(governance.clone(), ControlledBrowser::new(true, false));
+    let events = Arc::new(Events::default());
+    facade.attach_events(events.clone());
+
+    facade.apply_user_policy(READ_ONLY_POLICY).unwrap();
+    let hints = |events: &[WorkbenchEvent]| -> Vec<(super::parts::HintedPart, String)> {
+        events
+            .iter()
+            .filter_map(|event| match &event.change {
+                WorkbenchChange::PartChanged { part, etag } => Some((*part, etag.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    let applied = hints(&heard(&events));
+    assert_eq!(
+        applied,
+        [(
+            super::parts::HintedPart::Policy,
+            super::parts::policy_etag(&facade.policy())
+        )]
+    );
+    assert_ne!(applied[0].1, super::parts::NO_POLICY_ETAG);
+
+    // The refresher has nothing new to say about an authority the person just applied.
+    facade.authority_refreshed();
+    assert_eq!(hints(&heard(&events)).len(), 1);
+
+    // A rules file edited by hand is news, and the hint names the authority that is now in force.
+    std::fs::write(
+        &path,
+        READ_ONLY_POLICY.replace("\"name\":\"read\"", "\"name\":\"look-around\""),
+    )
+    .unwrap();
+    governance.refresh_tick();
+    facade.authority_refreshed();
+    let after_edit = hints(&heard(&events));
+    assert_eq!(after_edit.len(), 2);
+    assert_eq!(after_edit[1].0, super::parts::HintedPart::Policy);
+    assert_eq!(after_edit[1].1, governance.snapshot().id());
+    facade.authority_refreshed();
+    assert_eq!(hints(&heard(&events)).len(), 2);
+
+    facade.remove_user_policy().unwrap();
+    assert_eq!(hints(&heard(&events)).len(), 3);
     let _ = std::fs::remove_file(path);
 }
