@@ -16,6 +16,21 @@
   /** Said under the rule editor when the applied rules changed elsewhere while edits were unsaved. */
   const POLICY_CHANGED_ELSEWHERE = "The applied rules changed elsewhere. Discard your edits to see them.";
 
+  /** The button that brings the Ghostlight application forward, where a change can be made. */
+  const CONTINUE_LABEL = "Continue in the Ghostlight window";
+
+  /** The button that takes a draft of the rules to the Ghostlight application to be applied. */
+  const APPLY_IN_WINDOW_LABEL = "Apply in the Ghostlight window";
+
+  /** Said after Copy setup puts a client's manual setup on the clipboard. */
+  const COPIED_SETUP = "Manual setup copied.";
+
+  /** Said after Copy MCP command puts a client's command on the clipboard. */
+  const COPIED_COMMAND = "MCP command copied.";
+
+  /** The band's word while the live stream is lost and being opened again. */
+  const RECONNECTING = "Reconnecting";
+
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
   const VIEWS = { monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
 
@@ -239,6 +254,16 @@
   /** Every setting item, in one flat list, for lookups that do not care about grouping. */
   const SETTING_ITEMS = SETTING_GROUPS.flatMap((group) => group.items);
 
+  /** How a view that may not name the never-touch sites says how many there are. */
+  function neverTouchedCount(count) {
+    return count === 1 ? "1 site is never touched." : `${count} sites are never touched.`;
+  }
+
+  /** How a view that may not name the sites a document left out says how many there were. */
+  function leftOutCount(count) {
+    return count === 1 ? "1 site was left out." : `${count} sites were left out.`;
+  }
+
   /** How one authored setting reads once it is in force, for the read-only summary. */
   function settingWords(key, value) {
     if (key === SACRED_KEY) {
@@ -436,7 +461,8 @@
   ];
 
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
-    POLICY_CHANGED_ELSEWHERE,
+    POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
+    neverTouchedCount, leftOutCount,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
     READINESS_ATTENTION, readinessNeedsAttention,

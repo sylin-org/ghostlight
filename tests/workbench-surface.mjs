@@ -62,6 +62,18 @@ let snapshots = 0;
 let bulkSetups = 0;
 let feedFixture = false;
 const invoked = [];
+// The window's own context: every act is available, so a page in it draws everything.
+const controlContext = {
+  context: "control", word: "Full control",
+  sentence: "Others on this computer can watch this view in a browser.",
+  instance: "instance_1", opener: "service",
+  acts: Object.fromEntries(["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
+    "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all",
+    "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"]
+    .map((act) => [act, { available: true, why_not: null }])),
+  product: { version: "1.0.0", license: "Apache-2.0 OR MIT" },
+  links: {}
+};
 const managedHarnesses = [];
 let pushChange = null;
 let policyReply = null;
@@ -137,6 +149,9 @@ const sandbox = {
     __TAURI__: {
       core: { invoke: async (cmd, args) => {
         invoked.push(cmd);
+        if (cmd === "workbench_context") return controlContext;
+        if (cmd === "set_diagnostics") return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
+        if (cmd === "continue_in_window") return null;
         if (cmd === "workbench_snapshot") return snapshot();
         if (cmd === "workbench_policy" && policyReply) return policyReply();
         if (cmd === "setup_detected_harnesses") {
@@ -169,8 +184,8 @@ const sources = ORDER.map((name) => {
   let text = readFileSync(join(ui, name), "utf8");
   if (name.endsWith("view.js")) {
     text = text.replace(
-      "    function about(snapshot) {",
-      "    function about(snapshot) { globalThis.__aboutAttempts = (globalThis.__aboutAttempts || 0) + 1;"
+      "    function about({ version, license, counts }) {",
+      "    function about({ version, license, counts }) { globalThis.__aboutAttempts = (globalThis.__aboutAttempts || 0) + 1;"
         + " throw new Error('deliberate About failure');"
     );
   }
@@ -671,7 +686,476 @@ await new Promise((r) => setTimeout(r, 0));
 const queueAfterResync = nodes.get("queue-count").textContent;
 feedFixture = false;
 
+// ---------------------------------------------------------------------------------------------
+// The same page with no native shell: over loopback HTTP, in the three contexts.
+//
+// Each run boots the real modules against a fresh stub document and a fake service that records
+// every request it is sent, so the assertions are about what a person would see and what the
+// page asked for, not about how the page is written.
+// ---------------------------------------------------------------------------------------------
+const CONTINUE_SENTENCE = "Change this in the Ghostlight window.";
+const STALE_SENTENCE = "Your rules changed in another window; your draft is kept.";
+const CLOSED_SENTENCE = "Watching is off on this computer. Turn it on in the Ghostlight window.";
+const LINKS = { home: "https://example.test/home", source: "https://example.test/source" };
+const ACT_KEYS = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
+  "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all", "harness_act",
+  "test_notification", "open", "reveal_diagnostics", "locate"];
+const WATCHER_ACTS = new Set(["search", "check_policy", "rescan", "continue_in_window", "hold"]);
+
+const contextFor = (kind) => {
+  if (kind === "closed") {
+    return {
+      context: "closed", word: "Watching is off", sentence: CLOSED_SENTENCE,
+      product: { version: "2.0.0", license: "Apache-2.0 OR MIT" }, links: LINKS
+    };
+  }
+  const control = kind === "control";
+  return {
+    context: kind, word: control ? "Full control" : "Watching",
+    sentence: control ? "Others on this computer can watch this view in a browser."
+      : "Anyone on this computer can open this view. Changes are made in the Ghostlight window.",
+    instance: "instance_1", opener: control ? "service" : "anchor",
+    acts: Object.fromEntries(ACT_KEYS.map((act) => [act, control || WATCHER_ACTS.has(act)
+      ? { available: true, why_not: null } : { available: false, why_not: CONTINUE_SENTENCE }])),
+    product: { version: "2.0.0", license: "Apache-2.0 OR MIT" }, links: LINKS
+  };
+};
+
+const roster = () => [
+  { id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "updatable",
+    detail: "Old owned connector.", can_install: true, can_fix: false, can_uninstall: false, can_download: true,
+    can_locate: true, config_path: "~/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight mcp",
+    manual_setup: "codex setup", download_url: "https://example.test/codex" },
+  { id: "zed", product_id: "zed", name: "Zed", target: "User", icon: "zed.svg", state: "installed",
+    detail: "Current.", can_install: false, can_fix: false, can_uninstall: true, can_download: true,
+    can_locate: true, config_path: "~/.config/zed/settings.json", connector_command: "/opt/ghostlight/ghostlight mcp",
+    manual_setup: "zed setup", download_url: "https://example.test/zed" },
+  { id: "junie", product_id: "junie", name: "Junie", target: "CLI", icon: "junie.svg", state: "needs_attention",
+    detail: "Foreign entry preserved.", can_install: false, can_fix: true, can_uninstall: false, can_download: true,
+    can_locate: true, config_path: "~/.junie/mcp.json", connector_command: "/opt/ghostlight/ghostlight mcp",
+    manual_setup: "junie setup", download_url: "https://example.test/junie" },
+  { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", target: "CLI", icon: "qwen-code.svg",
+    state: "not_detected", detail: "Not detected.", can_install: true, can_fix: false, can_uninstall: false,
+    can_download: true, can_locate: true, config_path: "~/.qwen/settings.json",
+    connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup",
+    download_url: "https://example.test/qwen" }
+];
+
+/** A stream the fake service holds open, which the test writes events into. */
+function openStream() {
+  const queued = [];
+  const encoder = new TextEncoder();
+  let waiting = null;
+  return {
+    write(text) {
+      const value = encoder.encode(text);
+      if (waiting) {
+        const resolve = waiting;
+        waiting = null;
+        resolve({ done: false, value });
+      } else {
+        queued.push(value);
+      }
+    },
+    reader: {
+      read: () => (queued.length ? Promise.resolve({ done: false, value: queued.shift() })
+        : new Promise((resolve) => { waiting = resolve; }))
+    }
+  };
+}
+
+/** The service the page talks to, in one context. */
+function fakeService(kind) {
+  const state = {
+    seq: 5, runtime: "active", note: null, requests: [], stream: null, bearer: "key-1",
+    policyTag: "tag-1", stale: false
+  };
+  const status = () => ({
+    service: { version: "2.0.0", started_at_ms: 0, runtime_state: state.runtime },
+    readiness: state.runtime === "held"
+      ? { state: "paused", word: "Paused", detail: "Agents are paused.", tone: "held", invites_control: true }
+      : { state: "ready", word: "Ready", detail: "Connected and idle.", tone: "quiet", invites_control: true },
+    audit_health: {}, audit_notice: "",
+    configuration: {
+      policy: { situation: "layered", detail: "Your rules apply.", tone: "applied" },
+      managed_policy: { configured: false }
+    },
+    ...(state.note ? { runtime_note: state.note } : {})
+  });
+  const parts = () => ({
+    status: status(),
+    connections: { sessions: [], browsers: [] },
+    activity: { operations: [], history: [], document_coverage: [] },
+    integrations: { harnesses: roster() },
+    diagnostics: {
+      diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Accepting connections." }],
+      process_diagnostics: { layer: "marker", directory: "~/.cache/ghostlight", used_bytes: 4242 }
+    }
+  });
+  const emit = (change) => {
+    state.seq += 1;
+    state.stream?.write(`id: instance_1-${state.seq}\ndata: ${JSON.stringify({ seq: state.seq, change })}\n\n`);
+  };
+  const reply = (status_, body, headers = {}) => ({
+    ok: status_ >= 200 && status_ < 300, status: status_,
+    headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+    text: async () => (body === undefined ? "" : JSON.stringify(body))
+  });
+
+  async function fetch(path, init = {}) {
+    const url = new URL(path, "http://127.0.0.1:41000");
+    state.requests.push({
+      method: init.method ?? "GET", path: url.pathname, query: url.search, headers: init.headers ?? {},
+      body: init.body ?? null, credentials: init.credentials, cache: init.cache
+    });
+    if (url.pathname === "/api/context") return reply(200, contextFor(kind));
+    if (url.pathname === "/api/snapshot") return reply(200, { seq: state.seq, instance: "instance_1", parts: parts() });
+    if (url.pathname === "/api/events") {
+      state.stream = openStream();
+      state.stream.write(`event: hello\ndata: ${JSON.stringify({ context: kind, instance: "instance_1", seq: state.seq })}\n\n`);
+      return {
+        ok: true, status: 200, headers: { get: () => null },
+        body: { getReader: () => state.stream.reader }
+      };
+    }
+    if (url.pathname === "/api/runtime") {
+      const { intent } = JSON.parse(init.body);
+      state.runtime = intent === "hold" ? "held" : "active";
+      state.note = intent === "hold" ? "Paused from a screen that is watching." : null;
+      const answer = reply(200, { accepted: true, runtime_state: state.runtime, message: "Paused." },
+        { "ghostlight-seq": String(state.seq + 1) });
+      Promise.resolve().then(() => emit({ kind: "status_changed", status: status() }));
+      return answer;
+    }
+    if (url.pathname === "/api/integrations/rescan") return reply(200, roster(), { "ghostlight-seq": String(state.seq) });
+    if (url.pathname === "/api/window" || url.pathname === "/api/open") return reply(200, {});
+    if (url.pathname === "/api/policy") {
+      return reply(200, { ...compiled(true), etag: state.policyTag });
+    }
+    if (url.pathname === "/api/policy/user") {
+      if (state.stale) {
+        state.policyTag = "tag-2";
+        return reply(412, { error: { code: "stale", message: STALE_SENTENCE } });
+      }
+      return reply(200, { accepted: true, runtime_state: "active", message: "Your rules are applied." },
+        { "ghostlight-seq": String(state.seq) });
+    }
+    return reply(404, { error: { code: "not_found", message: "There is nothing at this address." } });
+  }
+  return { state, fetch, emit, status };
+}
+
+/** One page: the real modules over a stub document, with no native shell. */
+function bootHttpPage(kind) {
+  const service = fakeService(kind);
+  const pageNodes = new Map(ids.map((id) => [id, node(id)]));
+  // The markup says which elements start out hidden; the stub starts from the same truth.
+  const startsHidden = new Set([...markup.matchAll(/<[^>]*\bid="([^"]+)"[^>]*>/g)]
+    .filter(([tag]) => /\shidden[\s>=]/.test(tag)).map(([, id]) => id));
+  for (const [id, element] of pageNodes) element.hidden = startsHidden.has(id);
+  const pageDocumentHandlers = new Map();
+  const pageWindowHandlers = new Map();
+  const pageElementHandlers = new Map();
+  const opened = [];
+  const pageReported = [];
+  const copied = [];
+  for (const [id, element] of pageNodes) {
+    element.addEventListener = (type, handler) => pageElementHandlers.set(`${id}:${type}`, handler);
+  }
+  const page = {
+    console: { error: (detail) => pageReported.push(String(detail)), log() {}, warn() {} },
+    document: {
+      getElementById: (id) => pageNodes.get(id) ?? null,
+      querySelectorAll: (sel) => (sel === "[id]" ? [...pageNodes.values()] : []),
+      querySelector: () => null,
+      addEventListener: (type, handler) => {
+        if (!pageDocumentHandlers.has(type)) pageDocumentHandlers.set(type, []);
+        pageDocumentHandlers.get(type).push(handler);
+      },
+      removeEventListener() {},
+      hidden: false, body: node("body"),
+      createElement: () => node("x"), createDocumentFragment: () => node("f")
+    },
+    window: {
+      addEventListener: (type, handler) => pageWindowHandlers.set(type, handler),
+      fetch: service.fetch,
+      open: (...args) => opened.push(args)
+    },
+    navigator: { clipboard: { writeText: async (text) => copied.push(text) } },
+    GhostlightAccess: kind === "control" ? Object.freeze({ bearer: service.state.bearer }) : undefined,
+    setTimeout: (fn, ms) => { if (typeof fn === "function" && !ms) fn(); return 0; },
+    clearTimeout() {}, clearInterval() {}, setInterval: () => 0,
+    AbortController, TextDecoder, TextEncoder,
+    Date, JSON, Math, String, Number, Boolean, Array, Object, Set, Map, Promise, Error,
+    isNaN, parseInt, parseFloat, performance: { now: () => 0 }, crypto: { randomUUID: () => "x" }
+  };
+  page.globalThis = page;
+  page.window.document = page.document;
+  vm.createContext(page);
+  let threw = null;
+  try {
+    vm.runInContext(ORDER.map((name) => readFileSync(join(ui, name), "utf8")).join("\n"), page);
+  } catch (error) {
+    threw = error.message;
+  }
+  const click = (target) => {
+    for (const handler of pageDocumentHandlers.get("click") ?? []) handler({ target });
+  };
+  const clickOn = (selector, element) =>
+    click({ closest: (asked) => (asked === selector ? element : null) });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const text = (id) => pageNodes.get(id);
+  return { service, page, nodes: pageNodes, opened, reported: pageReported, copied, click, clickOn, settle,
+    text, threw, windowHandlers: pageWindowHandlers, documentHandlers: pageDocumentHandlers,
+    handlers: pageElementHandlers };
+}
+
+// ---- Watch ----------------------------------------------------------------------------------
+const watching = bootHttpPage("watch");
+await watching.settle();
+await watching.settle();
+const watchRequests = () => watching.service.state.requests;
+const watchSnapshots = () => watchRequests().filter((request) => request.path === "/api/snapshot").length;
+const watchOpening = {
+  chip: watching.text("context-chip").textContent,
+  chipTitle: watching.text("context-chip").title,
+  setup: watching.text("setup-integrations").hidden,
+  endSession: watching.text("runtime-strip").hidden,
+  sendTest: watching.text("notifications-strip").hidden,
+  recheck: watching.text("refresh-integrations").hidden,
+  wheelHidden: watching.text("wheel").hidden,
+  bandContinue: watching.text("band-continue").hidden,
+  roster: watching.text("integration-grid").innerHTML,
+  rosterLine: watching.text("integrations-continue").innerHTML,
+  rosterLineHidden: watching.text("integrations-continue").hidden,
+  status: watching.text("diagnostic-grid").innerHTML,
+  apply: watching.text("apply-policy").textContent
+};
+const watchBeforeFocus = watchRequests().length;
+watching.windowHandlers.get("focus")?.();
+await watching.settle();
+const watchFocusSent = watchRequests().length - watchBeforeFocus;
+const watchBeforeHold = { snapshots: watchSnapshots(), requests: watchRequests().length };
+watching.clickOn("[data-intent]", { dataset: { intent: "hold" }, disabled: false });
+await watching.settle();
+await watching.settle();
+await watching.settle();
+const holdRequest = watchRequests().find((request) => request.path === "/api/runtime");
+const watchHeld = {
+  wheelHidden: watching.text("wheel").hidden,
+  state: watching.text("wheel-state").hidden,
+  word: watching.text("wheel-state-word").textContent,
+  note: watching.text("wheel-state-note").textContent,
+  continueHidden: watching.text("band-continue").hidden,
+  continueMarkup: watching.text("band-continue").innerHTML,
+  snapshotsAfter: watchSnapshots()
+};
+const watchBeforeAbout = watchRequests().length;
+watching.clickOn("[data-destination]", { dataset: { destination: "home" } });
+await watching.settle();
+const watchAbout = { requests: watchRequests().length - watchBeforeAbout, opened: watching.opened.map((call) => [...call]) };
+watching.clickOn("[data-continue]", { dataset: {} });
+await watching.settle();
+const continueRequest = watchRequests().find((request) => request.path === "/api/window");
+watching.clickOn("[data-view]", { dataset: { view: "integrations" } });
+await watching.settle();
+const rescanRequests = watchRequests().filter((request) => request.path === "/api/integrations/rescan").length;
+
+// ---- Control, over HTTP ---------------------------------------------------------------------
+const controlling = bootHttpPage("control");
+await controlling.settle();
+await controlling.settle();
+const controlRequests = controlling.service.state.requests;
+const controlSnapshots = () => controlRequests.filter((request) => request.path === "/api/snapshot").length;
+const controlOpening = {
+  chip: controlling.text("context-chip").textContent,
+  setup: controlling.text("setup-integrations").hidden,
+  endSession: controlling.text("runtime-strip").hidden,
+  sendTest: controlling.text("notifications-strip").hidden,
+  wheelHidden: controlling.text("wheel").hidden,
+  bandContinue: controlling.text("band-continue").hidden,
+  rosterLineHidden: controlling.text("integrations-continue").hidden,
+  roster: controlling.text("integration-grid").innerHTML,
+  status: controlling.text("diagnostic-grid").innerHTML,
+  apply: controlling.text("apply-policy").textContent
+};
+controlling.clickOn("[data-harness-operation]", {
+  dataset: { harness: "zed", harnessOperation: "copy", copyKind: "command", harnessName: "Zed" }
+});
+await controlling.settle();
+controlling.clickOn("[data-harness-operation]", {
+  dataset: { harness: "zed", harnessOperation: "copy", copyKind: "setup", harnessName: "Zed" }
+});
+await controlling.settle();
+const toastAfterCopy = controlling.text("toast").textContent;
+const controlSnapshotsBeforeHold = controlSnapshots();
+controlling.clickOn("[data-intent]", { dataset: { intent: "hold" }, disabled: false });
+await controlling.settle();
+await controlling.settle();
+await controlling.settle();
+const controlHold = controlRequests.find((request) => request.path === "/api/runtime");
+const controlSnapshotsAfterHold = controlSnapshots();
+const controlWordAfterHold = controlling.text("wheel").dataset.intent;
+controlling.clickOn("[data-destination]", { dataset: { destination: "home" } });
+await controlling.settle();
+const controlOpenedLinks = controlling.opened.length;
+const openRequest = controlRequests.find((request) => request.path === "/api/open");
+
+// The rules: the tag the page read is the tag a write quotes, and a stale refusal keeps the draft.
+controlling.clickOn("[data-view]", { dataset: { view: "policy" } });
+await controlling.settle();
+await controlling.settle();
+vm.runInContext("view.addRule()", controlling.page);
+const draftBeforeStale = vm.runInContext("view.draftDocument()", controlling.page);
+const controlPolicyReads = () => controlRequests.filter((request) => request.path === "/api/policy").length;
+const readsBeforeStale = controlPolicyReads();
+controlling.service.state.stale = true;
+controlling.handlers.get("apply-policy:click")();
+await controlling.settle();
+await controlling.settle();
+await controlling.settle();
+const staleWrite = controlRequests.find((request) => request.path === "/api/policy/user");
+const staleOutcome = {
+  toast: controlling.text("toast").textContent,
+  dirty: vm.runInContext("view.draftIsDirty()", controlling.page),
+  draft: vm.runInContext("view.draftDocument()", controlling.page),
+  reads: controlPolicyReads() - readsBeforeStale
+};
+controlling.service.state.stale = false;
+controlling.handlers.get("apply-policy:click")();
+await controlling.settle();
+await controlling.settle();
+await controlling.settle();
+const writes = controlRequests.filter((request) => request.path === "/api/policy/user");
+
+// ---- Closed ---------------------------------------------------------------------------------
+const closedPage = bootHttpPage("closed");
+await closedPage.settle();
+await closedPage.settle();
+const closedRequests = closedPage.service.state.requests;
+const closedViews = ["closed-monitor", "closed-integrations", "closed-status", "closed-policy"]
+  .map((id) => [closedPage.text(id).textContent, closedPage.text(id).hidden]);
+const closedAbout = closedPage.text("about-facts").innerHTML;
+closedPage.clickOn("[data-view]", { dataset: { view: "policy" } });
+await closedPage.settle();
+closedPage.clickOn("[data-destination]", { dataset: { destination: "source" } });
+await closedPage.settle();
+const closedState = {
+  requests: closedRequests.map((request) => `${request.method} ${request.path}`),
+  chip: closedPage.text("context-chip").textContent,
+  wheelHidden: closedPage.text("wheel").hidden,
+  wordText: closedPage.text("state-word").textContent,
+  opened: closedPage.opened.map((call) => [...call])
+};
+
+const httpChecks = [
+  ["over HTTP a watching page says so in its chip and keeps the service's sentence beside it",
+    watchOpening.chip === "Watching" && watchOpening.chipTitle.includes("Changes are made in the Ghostlight window"),
+    JSON.stringify(watchOpening.chip)],
+  ["a watching page draws no control for a change it cannot make",
+    watchOpening.setup === true && watchOpening.endSession === true && watchOpening.sendTest === true
+      && !/>Set up<|>Update<|>Remove<|>Fix<|>Locate<|Turn on|Turn off|Open log folder/.test(watchOpening.roster + watchOpening.status)
+      && watchOpening.recheck === false,
+    JSON.stringify({ ...watchOpening, roster: undefined, status: undefined })],
+  ["a watching page keeps the state of every client as text and offers Copy and Install as plain controls",
+    watchOpening.roster.includes("Old owned connector.") && watchOpening.roster.includes(">Copy setup<")
+      && watchOpening.roster.includes(">Copy MCP command<")
+      && watchOpening.roster.includes('<a class="ghost-button" href="https://example.test/qwen"')
+      && !watchOpening.roster.includes('data-harness-operation="download"'),
+    watchOpening.roster],
+  ["a watching page shows one Continue line for the roster and one inside the diagnostics card",
+    watchOpening.rosterLineHidden === false && watchOpening.rosterLine.includes(CONTINUE_SENTENCE)
+      && watchOpening.rosterLine.includes("data-continue") && watchOpening.rosterLine.includes("Continue in the Ghostlight window")
+      && (watchOpening.status.match(/data-continue/g) ?? []).length === 1
+      && watchOpening.status.includes("Operational log is on"),
+    watchOpening.rosterLine + watchOpening.status],
+  ["a watching page draws the wheel while agents are running, and Apply as a way to the window",
+    watchOpening.wheelHidden === false && watchOpening.bandContinue === true
+      && watchOpening.apply === "Apply in the Ghostlight window",
+    JSON.stringify({ wheel: watchOpening.wheelHidden, continue: watchOpening.bandContinue, apply: watchOpening.apply })],
+  ["a pause from a watching page is one keyless POST and is shown by waiting for its change, not by asking again",
+    holdRequest?.method === "POST" && holdRequest.body === '{"intent":"hold"}' && holdRequest.headers.Authorization === undefined
+      && holdRequest.credentials === "omit" && holdRequest.cache === "no-store"
+      && watchHeld.snapshotsAfter === watchBeforeHold.snapshots,
+    JSON.stringify({ holdRequest, snapshots: [watchBeforeHold.snapshots, watchHeld.snapshotsAfter] })],
+  ["while held, a watching page shows the state and its note where the wheel was, with the Continue line in the band",
+    watchHeld.wheelHidden === true && watchHeld.state === false && watchHeld.word === "Paused"
+      && watchHeld.note === "Paused from a screen that is watching." && watchHeld.continueHidden === false
+      && watchHeld.continueMarkup.includes("data-continue"),
+    JSON.stringify(watchHeld)],
+  ["the About card of a watching page sends nothing and opens the Home link in a new tab",
+    watchAbout.requests === 0 && watchAbout.opened.length === 1
+      && watchAbout.opened[0][0] === LINKS.home && watchAbout.opened[0][1] === "_blank"
+      && watchAbout.opened[0][2] === "noopener,noreferrer",
+    JSON.stringify(watchAbout)],
+  ["a window focus sends nothing", watchFocusSent === 0, `sent=${watchFocusSent}`],
+  ["Continue in the Ghostlight window is one POST asking for the workbench",
+    continueRequest?.method === "POST" && continueRequest.body === '{"view":"workbench"}',
+    JSON.stringify(continueRequest)],
+  ["opening Integrations looks for the clients once", rescanRequests === 1, `rescans=${rescanRequests}`],
+  ["a page with the key draws every control the native shell draws and no Continue line",
+    controlOpening.chip === "Full control" && controlOpening.setup === false && controlOpening.endSession === false
+      && controlOpening.sendTest === false && controlOpening.wheelHidden === false
+      && controlOpening.bandContinue === true && controlOpening.rosterLineHidden === true
+      && controlOpening.apply === "Apply"
+      && !(controlOpening.roster + controlOpening.status).includes("data-continue")
+      && controlOpening.roster.includes(">Update</button>") && controlOpening.roster.includes(">Remove</button>")
+      && controlOpening.roster.includes(">Fix</button>") && controlOpening.roster.includes(">Locate</button>")
+      && controlOpening.roster.includes('data-harness-operation="download"')
+      && controlOpening.roster.includes('data-harness-state="updatable"')
+      && controlOpening.status.includes('data-diagnostics-operation="toggle"')
+      && controlOpening.status.includes('data-diagnostics-operation="reveal"'),
+    JSON.stringify({ ...controlOpening, roster: undefined, status: undefined })],
+  ["every request the window makes carries the key and none carries credentials",
+    controlRequests.length > 0
+      && controlRequests.every((request) => request.headers.Authorization === "Bearer key-1" && request.credentials === "omit"),
+    JSON.stringify(controlRequests.map((request) => [request.path, request.headers.Authorization]))],
+  ["Copy puts the client's own command and setup on the clipboard and says so",
+    JSON.stringify(controlling.copied) === JSON.stringify(["/opt/ghostlight/ghostlight mcp", "zed setup"])
+      && toastAfterCopy === "Manual setup copied.",
+    JSON.stringify(controlling.copied)],
+  ["the window's pause is waited for as well", controlHold?.headers.Authorization === "Bearer key-1"
+    && controlSnapshotsAfterHold === controlSnapshotsBeforeHold && controlWordAfterHold === "resume",
+    `snapshots=${controlSnapshotsBeforeHold}->${controlSnapshotsAfterHold} intent=${controlWordAfterHold}`],
+  ["the window asks its service to open a link, and a tab opens it itself",
+    controlOpenedLinks === 0 && openRequest?.body === '{"destination":"home"}'
+      && openRequest.headers.Authorization === "Bearer key-1" && watchAbout.opened.length === 1,
+    JSON.stringify(openRequest)],
+  ["a write quotes the tag the page read, and a stale refusal says so, keeps the draft and reads the rules again",
+    staleWrite?.method === "PUT" && staleWrite.headers["If-Match"] === '"tag-1"'
+      && staleOutcome.toast === STALE_SENTENCE && staleOutcome.dirty && staleOutcome.draft === draftBeforeStale
+      && staleOutcome.reads === 1,
+    JSON.stringify({ staleWrite, staleOutcome })],
+  ["the next write quotes the new tag and goes through",
+    writes.length === 2 && writes[1].headers["If-Match"] === '"tag-2"'
+      && controlling.text("toast").textContent === "Your rules are applied.",
+    JSON.stringify(writes.map((request) => request.headers))],
+  ["a closed page asks for its context and nothing else",
+    JSON.stringify(closedState.requests) === JSON.stringify(["GET /api/context"]),
+    JSON.stringify(closedState.requests)],
+  ["a closed page says why in every data view and draws no wheel and no lamp state",
+    closedViews.every(([line, hidden]) => line === CLOSED_SENTENCE && hidden === false)
+      && closedState.chip === "Watching is off" && closedState.wheelHidden === true && closedState.wordText === ""
+      && closedPage.service.state.requests.length === 1,
+    JSON.stringify({ closedViews, closedState })],
+  ["a closed page still shows the About page in full, without the counts that come from data",
+    closedAbout.includes("<dt>Version</dt><dd>2.0.0</dd>") && closedAbout.includes("<dt>License</dt><dd>Apache-2.0 OR MIT</dd>")
+      && !closedAbout.includes("Sessions") && !closedAbout.includes("Recorded"),
+    closedAbout],
+  ["a closed page opens an About link in a new tab", closedState.opened.length === 1
+    && closedState.opened[0][0] === LINKS.source, JSON.stringify(closedState.opened)],
+  ["no page threw while booting", [watching, controlling, closedPage].every((p) => p.threw === null && p.reported.length === 0),
+    JSON.stringify([watching, controlling, closedPage].map((p) => [p.threw, p.reported]))]
+];
+
 const checks = [
+  ...httpChecks,
+  ["the native shell's page is told it has full control and draws every control",
+    nodes.get("context-chip").textContent === "Full control"
+      && nodes.get("setup-integrations").hidden === false && nodes.get("runtime-strip").hidden === false
+      && nodes.get("notifications-strip").hidden === false && nodes.get("integrations-continue").hidden === true
+      && nodes.get("band-continue").hidden === true,
+    `chip=${nodes.get("context-chip").textContent}`],
   ["a pushed status changes the word, the sentence behind it and the wheel with no snapshot",
     wordBeforePush === "Ready" && wordAfterPush === "Paused"
       && wordTitleAfterPush === "Paused from the tray."

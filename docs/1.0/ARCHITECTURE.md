@@ -480,6 +480,11 @@ best effort and content-free. WebView, tray, notification, and recoverable Tauri
 change domain truth; startup or event-loop failure ends the desktop authority instead of leaving
 an invisible process.
 
+The page reads its context from the service before it draws and renders what it is told: an act
+its context cannot make is shown as state, with one line that leads to the Ghostlight window.
+Inside the Tauri window it speaks Tauri commands; anywhere else it speaks JSON and one live stream
+over loopback. Both paths use the same command names, through one transport.
+
 ## Chokepoints and unit of work
 
 Every direct call and flow enters `ApplicationExecutor::execute`. One invocation owns one

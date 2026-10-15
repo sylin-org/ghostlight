@@ -508,13 +508,6 @@ impl WorkbenchFacade {
         self.diagnostics.report()
     }
 
-    /// The person-facing toggle act, then the resulting state.
-    pub fn apply_diagnostics_toggle(&self) -> crate::diagnostics::DiagnosticsReport {
-        let _writing = lock(&self.diagnostics_writes);
-        self.diagnostics.toggle();
-        self.diagnostics_changed()
-    }
-
     /// Set process diagnostics on or off, then report the state.
     ///
     /// It flips only when the state differs, so two screens or a retry converge on the request.

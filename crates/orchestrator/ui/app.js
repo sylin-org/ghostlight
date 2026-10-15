@@ -19,15 +19,37 @@
  * changed from a closed list of kinds, and the view draws what it is handed. A view that cannot
  * fetch can never fail on a missing snapshot, and a store that never sees the document cannot be
  * corrupted by a rendering fault.
+ *
+ * The page asks the service first what it may do, and renders what it is told. Inside the native
+ * shell it speaks to the shell; anywhere else it speaks to the service over loopback, with the
+ * key the shell hands to its own page and a browser tab never has.
  */
 
-const { CHANGE_EVENT, HEARTBEAT_MS, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE } = globalThis.GhostlightWords;
+const {
+  CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND
+} = globalThis.GhostlightWords;
 
-const transport = globalThis.GhostlightTransport.create({
-  invoke: window.__TAURI__?.core?.invoke,
-  listen: window.__TAURI__?.event?.listen,
-  changeEvent: CHANGE_EVENT
-});
+/** How long an act waits for the change it caused to reach this page, before it asks again. */
+const SEQ_WAIT_MS = 2000;
+
+/** The context in which a service shows nothing. */
+const CLOSED_CONTEXT = "closed";
+
+/** The tokens of what a harness can copy. */
+const COPY_COMMAND = "command";
+
+const native = window.__TAURI__?.core?.invoke;
+const transport = native
+  ? globalThis.GhostlightTransport.create({
+    invoke: window.__TAURI__?.core?.invoke,
+    listen: window.__TAURI__?.event?.listen,
+    changeEvent: CHANGE_EVENT
+  })
+  : globalThis.GhostlightTransport.overHttp({
+    fetch: window.fetch.bind(window),
+    clipboard: navigator.clipboard,
+    bearer: globalThis.GhostlightAccess?.bearer
+  });
 
 /*
  * Nothing in this window is allowed to fail quietly.
@@ -64,6 +86,11 @@ const view = globalThis.GhostlightView.create({
   coverageFor: (invocation) => store.snapshot()?.document_coverage?.find((item) => item.invocation === invocation),
   onFailure: reportFailure
 });
+
+/* What the service said this page may do. Nothing is offered until it has said. */
+let context = null;
+const allowed = (act) => context?.acts?.[act]?.available ?? true;
+const showsData = () => context !== null && context.context !== CLOSED_CONTEXT;
 
 /**
  * The one place a change becomes a picture.
@@ -103,6 +130,16 @@ function draw(kind, detail) {
 
 /* ------------------------------ synchronizing --------------------------- */
 
+/* Changes that arrived before the first snapshot, in the order they arrived. */
+const early = [];
+
+/* The sequence the first hello of the live stream named, until a snapshot has caught up with it. */
+let helloSeq = null;
+let helloSeen = false;
+
+/* Acts waiting for the change they caused to reach this page. */
+const waiters = new Set();
+
 async function resync({ rebuildFeed = false, quiet = true } = {}) {
   if (!transport.available) {
     store.setConnected(false);
@@ -122,14 +159,66 @@ async function resync({ rebuildFeed = false, quiet = true } = {}) {
   // both said "Not connected" for either, which sends the reader looking at the wrong thing.
   attempt("rendering the snapshot", () =>
     store.applySnapshot(snapshot, rebuildFeed || snapshot.seq !== store.snapshot()?.seq || !store.snapshot()));
+  caughtUp();
+}
+
+/** A snapshot is in: replay what arrived while it was on its way, and wake the acts that waited. */
+function caughtUp() {
+  for (const event of early.splice(0)) receiveChange(event);
+  if (helloSeq !== null && helloSeq > store.seq()) {
+    helloSeq = null;
+    resync({ rebuildFeed: true });
+  }
+  reached();
 }
 
 function receiveChange(event) {
+  if (!store.snapshot()) {
+    if (early.length < FEED_LIMIT) early.push(event);
+    return;
+  }
   // A gap means this cache can no longer be trusted. Rebuild rather than guess.
   const change = store.applyChange(event);
   if (change === "gap") resync({ rebuildFeed: true });
   else if (change === "refresh") resync();
   else if (change === "hinted") hinted(event.change);
+  reached();
+}
+
+/** Resolve every act whose change has reached the cache. */
+function reached() {
+  for (const waiter of [...waiters]) {
+    if (store.seq() < waiter.seq) continue;
+    clearTimeout(waiter.timer);
+    waiters.delete(waiter);
+    waiter.resolve(true);
+  }
+}
+
+/** Wait, for a short while, until the cache has the change numbered `seq`. */
+function reaches(seq) {
+  if (store.seq() >= seq) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const waiter = { seq, resolve, timer: null };
+    waiter.timer = setTimeout(() => {
+      waiters.delete(waiter);
+      resolve(false);
+    }, SEQ_WAIT_MS);
+    waiters.add(waiter);
+  });
+}
+
+/**
+ * Bring the cache up to date after an act.
+ *
+ * An act that names the change it caused is waited for, because the live stream delivers that
+ * change and asking again would be a second copy of it. An act that names none, or whose change
+ * does not arrive, is followed by a snapshot.
+ */
+async function settled(result) {
+  const seq = globalThis.GhostlightTransport.seqOf(result);
+  if (seq !== undefined && await reaches(seq)) return;
+  await resync();
 }
 
 /*
@@ -151,6 +240,8 @@ function reread(part) {
 }
 
 function rereadPolicy() {
+  // The person's own write reads the policy when it is done, so a hint about it says nothing new.
+  if (policyWriting) return;
   if (view.draftIsDirty()) {
     outdated.add("policy");
     view.editorStatus(POLICY_CHANGED_ELSEWHERE);
@@ -172,8 +263,19 @@ function hinted({ part, etag }) {
   else outdated.add(part);
 }
 
-/** Read again whatever the person is about to see that changed while it was out of sight. */
+/**
+ * Bring up to date whatever the person is about to see.
+ *
+ * Opening the clients looks for them again, once. Anything else that changed while it was out of
+ * sight is read again.
+ */
 function openedView(name) {
+  if (!showsData()) return;
+  if (name === "integrations" && allowed("rescan")) {
+    outdated.delete("integrations");
+    rescan().catch((error) => view.toast(String(error), true));
+    return;
+  }
   for (const part of [...outdated]) {
     if (HINT_VIEWS[part] !== name) continue;
     outdated.delete(part);
@@ -181,18 +283,29 @@ function openedView(name) {
   }
 }
 
+/** Look for the supported clients again, and bring the cache up to date. */
+async function rescan() {
+  await settled(await transport.refreshHarnesses());
+}
+
 /* --------------------------------- policy ------------------------------- */
+
+/* The tag of the rules the Policy destination was drawn from, which a write must quote. */
+let policyEtag;
+let policyWriting = false;
 
 /*
  * The Policy destination is fetched rather than carried in every snapshot.
  *
  * It changes when somebody changes a policy, which is rare, and it carries the exact documents.
- * Pulling it on arrival and on demand keeps the ten-second safety pull small.
+ * Pulling it on arrival and on demand keeps the safety pull small.
  */
-async function loadPolicy() {
+async function loadPolicy({ keepDraft = false } = {}) {
   if (!transport.available) return;
   try {
-    view.policy(await transport.policy());
+    const compiled = await transport.policy();
+    policyEtag = compiled.etag;
+    view.policy(compiled, { keepDraft });
     outdated.delete("policy");
   } catch (error) {
     reportFailure("reading the policy", error);
@@ -200,39 +313,47 @@ async function loadPolicy() {
 }
 
 async function checkPolicy() {
-  const document = view.draftDocument();
-  if (!document) return;
+  const draft = view.draftDocument();
+  if (!draft) return;
   try {
-    view.previewResult(await transport.previewPolicy(document));
+    view.previewResult(await transport.previewPolicy(draft));
   } catch (error) {
     view.previewCleared();
     view.editorStatus(String(error));
+  }
+}
+
+/** Write the person's rules, or take them to where the write is made. */
+async function writePolicy(write, refused) {
+  policyWriting = true;
+  try {
+    const result = await write();
+    view.toast(result.message);
+    view.previewCleared();
+    await loadPolicy();
+    await settled(result);
+  } catch (error) {
+    if (error?.code === globalThis.GhostlightTransport.STALE) {
+      // Rules that moved on are read again, and the person's draft stays exactly as it is.
+      view.toast(String(error), true);
+      await loadPolicy({ keepDraft: true });
+    } else {
+      refused(error);
+    }
+  } finally {
+    policyWriting = false;
   }
 }
 
 async function applyPolicy() {
-  const document = view.draftDocument();
-  if (!document) return;
-  try {
-    view.toast((await transport.applyPolicy(document)).message);
-    view.previewCleared();
-    await loadPolicy();
-    await resync();
-  } catch (error) {
-    // A refused document changed nothing, so the draft stays exactly as the person left it.
-    view.editorStatus(String(error));
-  }
+  const draft = view.draftDocument();
+  if (!draft) return;
+  // A refused document changed nothing, so the draft stays exactly as the person left it.
+  await writePolicy(() => transport.applyPolicy(draft, policyEtag), (error) => view.editorStatus(String(error)));
 }
 
 async function removePolicy() {
-  try {
-    view.toast((await transport.removePolicy()).message);
-    view.previewCleared();
-    await loadPolicy();
-    await resync();
-  } catch (error) {
-    view.toast(String(error), true);
-  }
+  await writePolicy(() => transport.removePolicy(policyEtag), (error) => view.toast(String(error), true));
 }
 
 /* -------------------------------- intents ------------------------------- */
@@ -240,14 +361,24 @@ async function removePolicy() {
 async function applyIntent(intent) {
   if (!transport.available) return;
   try {
-    view.toast((await transport.applyIntent(intent)).message);
-    await resync();
+    const result = await transport.applyIntent(intent);
+    view.toast(result.message);
+    await settled(result);
   } catch (error) {
     view.toast(String(error), true);
   }
 }
 
-// The person's diagnostics controls: flip the shared marker, or open its folder through the
+/** Bring the Ghostlight application forward, where the change this page cannot make is made. */
+async function continueInWindow() {
+  try {
+    await transport.continueInWindow();
+  } catch (error) {
+    view.toast(String(error), true);
+  }
+}
+
+// The person's diagnostics controls: set the shared marker, or open its folder through the
 // native shell. Both live behind closed commands, like every other act in this window.
 async function handleDiagnosticsAction(button) {
   if (!transport.available || button.disabled) return;
@@ -255,22 +386,31 @@ async function handleDiagnosticsAction(button) {
   button.disabled = true;
   try {
     if (operation === "toggle") {
-      const report = await transport.toggleDiagnostics();
+      const turningOn = store.snapshot()?.process_diagnostics?.layer === "off";
+      const report = await transport.setDiagnostics(turningOn);
       view.toast(`Process diagnostics are ${report.layer === "off" ? "off" : `on (${report.layer})`}.`);
+      await settled(report);
     } else if (operation === "reveal") {
       await transport.revealDiagnostics();
     }
   } catch (error) {
     view.toast(String(error), true);
+    await resync();
   } finally {
     button.disabled = false;
-    await resync();
   }
+}
+
+/** The text a client's Copy button puts on the clipboard, from what this page already holds. */
+function harnessText(id, kind) {
+  const harness = store.snapshot()?.harnesses.find((item) => item.id === id);
+  if (!harness) throw new Error(`no client ${id}`);
+  return kind === COPY_COMMAND ? harness.connector_command : harness.manual_setup;
 }
 
 async function handleHarnessAction(button) {
   if (!transport.available || button.disabled) return;
-  const { harness: id, harnessOperation: operation, harnessAction: action,
+  const { harness: id, harnessOperation: operation, harnessAction: action, harnessState: state,
     harnessName: name, harnessTarget: target, product: productId, copyKind: copyKind } = button.dataset;
   if (operation === "manage" && action === "uninstall" && !(await view.confirmRemoval(name))) return;
   if (operation === "manage" && action === "fix" && !(await view.confirmFix(name, target))) return;
@@ -285,7 +425,12 @@ async function handleHarnessAction(button) {
   }
   if (operation === "copy") {
     try {
-      view.toast(await transport.copyHarnessText(id, copyKind));
+      if (typeof transport.copyText === "function") {
+        await transport.copyText(harnessText(id, copyKind));
+        view.toast(copyKind === COPY_COMMAND ? COPIED_COMMAND : COPIED_SETUP);
+      } else {
+        view.toast(await transport.copyHarnessText(id, copyKind));
+      }
     } catch (error) {
       view.toast(String(error), true);
     }
@@ -296,15 +441,19 @@ async function handleHarnessAction(button) {
     if (operation === "locate") {
       const result = await transport.locateHarness(id);
       if (result) view.toast(result.message);
+      await settled(result);
     } else {
-      view.toast((await transport.manageHarness(id, action)).message);
+      const result = await transport.manageHarness(id, action, state);
+      view.toast(result.message);
+      await settled(result);
     }
   } catch (error) {
-    if (operation === "manage") view.openHarnessManual(id);
+    // A client that changed since it was drawn is not a client that could not be set up.
+    if (operation === "manage" && error?.code !== globalThis.GhostlightTransport.STALE) view.openHarnessManual(id);
     view.toast(String(error), true);
+    await resync();
   } finally {
     store.endHarness(id);
-    await resync();
   }
 }
 
@@ -321,8 +470,18 @@ async function search(query) {
   }
 }
 
-/** Every destination opens in the browser you already use, which is the one Ghostlight drives. */
+/**
+ * Every destination opens in the browser you already use, which is the one Ghostlight drives.
+ *
+ * The shell asks the service to open it. A browser tab opens the address the service listed, as
+ * an ordinary link, and sends nothing: the page holds no address of its own.
+ */
 async function openDestination(destination) {
+  if (context !== null && context.opener !== "service") {
+    const address = context.links?.[destination];
+    if (address) window.open(address, "_blank", "noopener,noreferrer");
+    return;
+  }
   try {
     await transport.openDestination(destination);
   } catch (error) {
@@ -366,7 +525,7 @@ function wire() {
     const tab = event.target.closest("[data-view]");
     if (tab) {
       view.navigate(tab.dataset.view);
-      if (tab.dataset.view === "policy" && !view.draftIsDirty()) {
+      if (tab.dataset.view === "policy" && showsData() && !view.draftIsDirty()) {
         outdated.delete("policy");
         loadPolicy();
       }
@@ -387,6 +546,8 @@ function wire() {
     if (harness) handleHarnessAction(harness);
     const diagnostics = event.target.closest("[data-diagnostics-operation]");
     if (diagnostics) handleDiagnosticsAction(diagnostics);
+    const carryOn = event.target.closest("[data-continue]");
+    if (carryOn) continueInWindow();
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
     const hit = event.target.closest("[data-search-view]");
@@ -395,16 +556,6 @@ function wire() {
       view.closePalette();
     }
     if (event.target === el.palette) view.closePalette();
-  });
-
-  window.addEventListener("focus", async () => {
-    if (!transport.available) return;
-    try {
-      await transport.refreshHarnesses();
-      await resync();
-    } catch (error) {
-      view.toast(String(error), true);
-    }
   });
 
   el["palette-query"].addEventListener("input", () => {
@@ -416,7 +567,7 @@ function wire() {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       if (view.paletteOpen()) view.closePalette();
-      else view.openPalette();
+      else if (showsData()) view.openPalette();
       return;
     }
     if (event.key === "Escape" && view.paletteOpen()) view.closePalette();
@@ -449,7 +600,8 @@ function wire() {
   el["sacred-hosts"].addEventListener("input", (event) => view.setSacred(event.target.value));
   el["add-rule"].addEventListener("click", () => view.addRule());
   el["check-policy"].addEventListener("click", () => checkPolicy());
-  el["apply-policy"].addEventListener("click", () => applyPolicy());
+  // A screen that cannot write the rules takes the draft to where they are written, and keeps it.
+  el["apply-policy"].addEventListener("click", () => (allowed("apply_policy") ? applyPolicy() : continueInWindow()));
   el["discard-policy"].addEventListener("click", () => discardPolicyDraft());
   el["remove-policy"].addEventListener("click", () => removePolicy());
   el["refresh-policy"].addEventListener("click", () => {
@@ -467,17 +619,14 @@ function wire() {
   });
 
   el["refresh-integrations"].addEventListener("click", (event) =>
-    withButton(event, async () => {
-      await transport.refreshHarnesses();
-      await resync();
-    }, "MCP clients re-checked."));
+    withButton(event, rescan, "MCP clients re-checked."));
 
   el["setup-integrations"].addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
     try {
       const result = await transport.setupDetectedHarnesses();
-      await resync();
+      await settled(result);
       view.toast(result.message, result.failures.length > 0);
     } catch (error) {
       view.toast(String(error), true);
@@ -489,9 +638,13 @@ function wire() {
   el["test-notification"].addEventListener("click", (event) =>
     withButton(event, () => transport.testNotification(), "Test notification sent."));
 
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) resync();
-  });
+  // Only the native shell has no live stream that tells it when it was away, so only the native
+  // shell asks again when it comes back into view.
+  if (native) {
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) resync();
+    });
+  }
 
   setInterval(() => {
     if (!document.hidden) view.tickElapsed(store.feed());
@@ -500,6 +653,43 @@ function wire() {
     if (!document.hidden) view.tickAges(store.feed());
   }, 15000);
 }
+
+/* ------------------------------- the stream ----------------------------- */
+
+/** Watching turned off under a page that was watching: it shows what a closed page shows. */
+async function becomeClosed(sentence) {
+  stopStream?.();
+  stopStream = null;
+  let told = null;
+  try {
+    told = await transport.context();
+  } catch (error) {
+    told = null;
+  }
+  const base = told?.context === CLOSED_CONTEXT ? told : { ...context, context: CLOSED_CONTEXT };
+  context = { ...base, sentence: sentence ?? base.sentence };
+  view.closed(context);
+}
+
+const streamHandlers = {
+  change: (message) => receiveChange(message.payload),
+  hello(data) {
+    const reconnected = helloSeen;
+    helloSeen = true;
+    // After a stream was lost the cache cannot be trusted. On the first hello it can be, unless
+    // the snapshot was taken before the stream opened and changes lie between the two.
+    if (reconnected || (store.snapshot() && data.seq > store.seq())) {
+      resync({ rebuildFeed: true });
+      return;
+    }
+    helloSeq = data.seq;
+  },
+  reset: () => resync({ rebuildFeed: true }),
+  closed: (data) => becomeClosed(data?.sentence),
+  reconnecting: (on) => view.reconnecting(on)
+};
+
+let stopStream = null;
 
 /*
  * Start the window, in the order that matters.
@@ -511,15 +701,38 @@ function wire() {
  * The rule now: the live surface is brought up first, and anything decorative goes last, where
  * failing cannot cost the window its connection to the truth.
  */
-function boot() {
-  // The heartbeat is this surface's own recovery, so it is installed before anything that can
-  // fail. A bad subscription or a bad first snapshot then costs one cycle rather than the window.
-  setInterval(() => {
-    if (!document.hidden) resync();
-  }, HEARTBEAT_MS);
-  attempt("wiring the surface", wire);
-  attempt("subscribing to changes", () => transport.subscribe(receiveChange));
+async function start() {
+  try {
+    context = await transport.context();
+  } catch (error) {
+    store.setConnected(false);
+    reportFailure("reading what this page may do", error);
+    return;
+  }
+  if (context.context === CLOSED_CONTEXT) {
+    view.closed(context);
+    return;
+  }
+  attempt("telling the page what it may do", () => view.context(context));
+  attempt("subscribing to changes", () => {
+    stopStream = transport.subscribe(streamHandlers);
+  });
   attempt("first snapshot", () => resync({ rebuildFeed: true }));
+}
+
+function boot() {
+  // The native shell's heartbeat is its own recovery, so it is installed before anything that can
+  // fail. A bad subscription or a bad first snapshot then costs one cycle rather than the window.
+  // A page on the live stream has no heartbeat: the stream tells it when it was away.
+  if (native) {
+    setInterval(() => {
+      if (!document.hidden) resync();
+    }, HEARTBEAT_MS);
+  }
+  attempt("wiring the surface", wire);
+  attempt("starting", () => {
+    start();
+  });
   attempt("about card", () => view.armCard());
 }
 

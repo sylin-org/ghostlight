@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-07-page-transport.
+Next: m1-08-controls-sheet.
 
 ## Landed
 
@@ -52,6 +52,7 @@ Next: m1-07-page-transport.
 | m1-04-loopback-server | The service serves the workbench on 127.0.0.1 with access decided per route in three contexts (Control, Watch, Closed), each part projected for its audience, guards on Host, Origin and framing, and the bearer made at each start. `protect_workbench_port` runs between binding and answering. The Tauri window is unchanged. | see `git log` |
 | m1-05-live-stream | One live stream, pushed to every screen. `GET /api/events` is served from an `EventHub` every screen subscribes to; the sequence advances whether or not anyone listens; a snapshot reads it first; `status_changed`, `connections_changed` and `part_changed` events keep the band, the sessions and the hinted parts current; the tray, the window, a watching screen and the browser toolbar change the runtime through `apply_runtime_control(intent, source)`, and the status says where a pause came from. Acts answer with `Ghostlight-Seq`. | see `git log` |
 | m1-06-native-acts | The acts that need the operating system are service actions the window asks for over loopback: `WorkbenchNativeActs` (open a link, open a folder, pick a file) attached beside the presentation port, four facade methods on top of it, three Control-only routes, and a table of links in `/api/context` for every context. The Tauri window behaves as before; its four commands call the facade. | see `git log` |
+| m1-07-page-transport | The page speaks loopback HTTP and renders its context. `transport.js` gains `overHttp` (one table maps each Tauri command name to a route) and the live stream with reconnect; `app.js` reads `GET /api/context` first and renders what it is told: Control as before, Watch as state with one Continue line per panel, Closed as one sentence per data view with the About page in full. The page drops the pull on every focus and the rescan on every focus; opening Integrations rescans once. The Tauri window keeps its path and gains `workbench_context`, `set_diagnostics` and `continue_in_window`. | see `git log` |
 
 ## Route table
 
@@ -121,6 +122,20 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
 - m1-06, Windows and Linux, in the Ghostlight window: the About and Status pages' links open in the
   default browser; "Open log folder" shows the diagnostics folder (on and off); a client's Download opens
   its page; Locate opens the file dialog, a cancel changes nothing, a chosen file is remembered.
+
+- m1-07, Chrome, on the logged watch address (`RUNTIME_PUBLISHED` carries `workbench=<url>`): the page
+  shows live data with the Watching chip and no greyed control; Set up everything, End session and
+  Send test are absent; Integrations and the diagnostics card each show one "Change this in the
+  Ghostlight window." line with a Continue button that brings the window forward; Pause works and the
+  band then shows the state, its note and the Continue line; the About card and links open in a new
+  tab; stopping the service shows "Reconnecting" in the band and the page recovers on its own when
+  the service is back.
+- m1-07, Ghostlight window (Tauri), Windows and Linux: nothing changed but the chip ("Full control");
+  opening Integrations looks for the clients once; the window's focus no longer pulls; "Turn on" and
+  "Turn off" for process diagnostics still work (the command is now `set_diagnostics`).
+- m1-07, Chrome, with watching turned off (a later slice adds the switch; until then the Closed run is
+  covered by `tests/workbench-surface.mjs` only): every data view shows the one sentence and About
+  shows the Version and License facts and every link.
 
 ## Blockers
 
@@ -236,3 +251,33 @@ None.
   Watch both get it.
 - m1-06: `WebAct` gained `open`, `reveal_diagnostics` and `locate`, Control only (answer Q20). `WebAct::ALL` has 17.
 
+- m1-07: the words.js additions are the four the spec names (`CONTINUE_LABEL`, `COPIED_SETUP`,
+  `COPIED_COMMAND`, `RECONNECTING`) plus `APPLY_IN_WINDOW_LABEL` (the Watch spec names the Apply
+  button's label) and two count helpers, `neverTouchedCount` and `leftOutCount`. A watcher's policy
+  and coverage carry only counts, so the page needs a sentence for a count; the service's own
+  never-touch sentence lives in the ceilings and is shown as it arrives.
+- m1-07: a refused HTTP request rejects with a frozen object whose text is the service's sentence
+  (`String(error)` and `error.message`) and that also carries `status` and `code`. A bare string has
+  no place for the `stale` code the page needs to keep a draft and read the rules again.
+- m1-07: the sequence an act answers with is attached to its result as a non-enumerable `seq`
+  (`GhostlightTransport.seqOf(result)`). `app.js` waits up to 2 s for the store to reach it and pulls
+  a snapshot only when it does not. `store.seq()` and a repaint in `store.endHarness` were added for
+  this; nothing else in the store changed.
+- m1-07: the Tauri command `toggle_diagnostics` and `WorkbenchFacade::apply_diagnostics_toggle` are
+  retired; the page now says `set_diagnostics(on)` on both paths. A source guard in
+  `desktop/mod.rs` pins the three new commands and the absence of the toggle.
+- m1-07: the `closed` event's data is read as `{ sentence }`; the server does not send the event yet.
+  A stream that opens with 403 (`watching_off`) is treated the same way, using the envelope's
+  message. The page also reads `GET /api/context` again and shows its Closed word.
+- m1-07: a watcher's policy draft keeps the rules and settings it was drawn from but not the
+  never-touch hosts (the service sends a count), so Check against my history for a watcher
+  approximates the person's real list; the field is read-only and shows the count. Apply there
+  is "Apply in the Ghostlight window" and keeps the draft.
+- m1-07: `view.policy(view, { keepDraft })` keeps the draft when the applied rules moved on under a
+  refused write. A hint about the rules while the page's own write is in flight is ignored; the
+  write reads the rules itself when it is done.
+- m1-07: the Closed About page leaves out the Sessions, Browsers and Recorded facts, which come from
+  data routes, as the spec says.
+- m1-07: `tests/workbench-surface.mjs` moved its injected About failure to the new
+  `about({ version, license, counts })` signature. The preview server's fixture and the Tauri
+  fixture in the surface test answer `workbench_context` with a Control context.

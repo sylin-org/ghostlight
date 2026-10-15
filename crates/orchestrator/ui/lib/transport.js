@@ -1,8 +1,12 @@
 // Ghostlight workbench -- the only thing here that talks to the orchestrator.
 //
-// Every call out of this window goes through one object, so what the surface can ask for is a
-// list you can read in one sitting. It holds no state and touches no document: give it a way to
-// invoke and a way to listen, and it will tell you what came back or throw trying.
+// Every call out of this page goes through one object, so what the surface can ask for is a list
+// you can read in one sitting. It holds no state and touches no page: give it a way to invoke and
+// a way to listen (inside the native shell), or a way to fetch and a clipboard (anywhere else),
+// and it will tell you what came back or throw trying.
+//
+// Both paths speak today's command names. Inside the native shell a name is an invoke command;
+// over loopback the same name is looked up in one table that gives its method, path and body.
 (function installGhostlightTransport(root, factory) {
   const api = factory();
   root.GhostlightTransport = api;
@@ -10,6 +14,139 @@
 })(globalThis, function createGhostlightTransportApi() {
   "use strict";
 
+  /** The header an act answers with: the last change the act caused. */
+  const SEQ_HEADER = "Ghostlight-Seq";
+  /** The header a policy write names the rules it was drawn from by. */
+  const IF_MATCH_HEADER = "If-Match";
+  /** The path of the live stream. */
+  const EVENTS_PATH = "/api/events";
+  /** The code of a refusal that says the rules or the client changed since the page drew them. */
+  const STALE = "stale";
+  /** The status that says watching is off. */
+  const STATUS_WATCHING_OFF = 403;
+  /** The parts a snapshot is asked for, in the order the service lists them. */
+  const SNAPSHOT_PARTS = Object.freeze(["status", "connections", "activity", "integrations", "diagnostics"]);
+  /** How long a stream waits before it opens again, after each failure in a row. */
+  const RECONNECT_STEPS_MS = Object.freeze([1000, 2000, 5000, 10000]);
+  /** How long a stream may stay silent before it counts as dead. */
+  const DEAD_AFTER_MS = 40000;
+
+  const GET = "GET";
+  const POST = "POST";
+  const PUT = "PUT";
+  const DELETE = "DELETE";
+
+  /** The window view a page can ask to have brought forward. */
+  const WORKBENCH_VIEW = "workbench";
+
+  /**
+   * Where each command goes over loopback.
+   *
+   * `body` turns a command's arguments, and the extra it quotes, into the JSON the route reads.
+   * The extra is the state of the client a command was drawn with. A `tagged` command quotes the
+   * tag of the rules it was drawn from in an `If-Match` header.
+   */
+  const ROUTES = Object.freeze({
+    workbench_context: { method: GET, path: "/api/context" },
+    workbench_snapshot: { method: GET, path: `/api/snapshot?parts=${SNAPSHOT_PARTS.join(",")}`, read: flatten },
+    workbench_search: { method: POST, path: "/api/search", body: ({ query }) => ({ query }) },
+    workbench_policy: { method: GET, path: "/api/policy" },
+    preview_user_policy: { method: POST, path: "/api/policy/preview", body: ({ document }) => ({ document }) },
+    apply_user_policy: { method: PUT, path: "/api/policy/user", body: ({ document }) => ({ document }), tagged: true },
+    remove_user_policy: { method: DELETE, path: "/api/policy/user", tagged: true },
+    apply_runtime_intent: { method: POST, path: "/api/runtime", body: ({ intent }) => ({ intent }) },
+    set_diagnostics: { method: PUT, path: "/api/controls/diagnostics", body: ({ on }) => ({ on }) },
+    refresh_harnesses: { method: POST, path: "/api/integrations/rescan", body: () => ({}) },
+    setup_detected_harnesses: { method: POST, path: "/api/integrations/setup-all", body: () => ({}) },
+    manage_harness: {
+      method: POST,
+      path: "/api/integrations/act",
+      body: ({ id, action }, { expectedState }) => ({ id, action, expected_state: expectedState })
+    },
+    locate_harness: { method: POST, path: "/api/integrations/locate", body: ({ id }) => ({ id }) },
+    test_notification: { method: POST, path: "/api/notifications/test", body: () => ({}) },
+    reveal_diagnostics: { method: POST, path: "/api/diagnostics/reveal", body: () => ({}) },
+    open_destination: { method: POST, path: "/api/open", body: ({ destination }) => ({ destination }) },
+    open_harness_download: { method: POST, path: "/api/open", body: ({ productId }) => ({ product: productId }) },
+    continue_in_window: { method: POST, path: "/api/window", body: () => ({ view: WORKBENCH_VIEW }) }
+  });
+
+  /**
+   * Put the parts of a snapshot answer back into the one flat shape the store and the view read.
+   *
+   * Pure: the answer in, the snapshot out. The counts the overview carries are derived from the
+   * parts, so they cannot disagree with them.
+   */
+  function flatten(answer) {
+    const parts = answer.parts ?? {};
+    const status = parts.status ?? {};
+    const connections = parts.connections ?? {};
+    const activity = parts.activity ?? {};
+    const integrations = parts.integrations ?? {};
+    const diagnostics = parts.diagnostics ?? {};
+    const sessions = connections.sessions ?? [];
+    const browsers = connections.browsers ?? [];
+    const operations = activity.operations ?? [];
+    const history = activity.history ?? [];
+    const flat = {
+      seq: answer.seq,
+      instance: answer.instance,
+      service: status.service,
+      readiness: status.readiness,
+      audit_health: status.audit_health,
+      audit_notice: status.audit_notice,
+      configuration: status.configuration,
+      overview: {
+        active_sessions: sessions.length,
+        active_operations: operations.length,
+        connected_browsers: browsers.length,
+        blocked_in_history: history.filter((item) => item.allowed === false).length
+      },
+      sessions,
+      browsers,
+      operations,
+      history,
+      document_coverage: activity.document_coverage ?? [],
+      harnesses: integrations.harnesses ?? [],
+      diagnostics: diagnostics.diagnostics ?? [],
+      process_diagnostics: diagnostics.process_diagnostics
+    };
+    if (status.runtime_note !== undefined) flat.runtime_note = status.runtime_note;
+    return flat;
+  }
+
+  /**
+   * The change an act caused, when the service said so.
+   *
+   * The sequence rides on the result of an act, out of sight of anything that copies the result.
+   */
+  function seqOf(result) {
+    return typeof result?.seq === "number" ? result.seq : undefined;
+  }
+
+  /**
+   * A refusal, as the page reads it.
+   *
+   * It reads as the service's sentence wherever it is turned into text, the way a rejection from
+   * the native shell does, and it also carries the status and the code for a caller that cares.
+   */
+  function refusal(message, status, code) {
+    return Object.freeze({ message, status, code, toString: () => message });
+  }
+
+  /** The refusal an unsuccessful response holds. */
+  async function refusalOf(response) {
+    let envelope = null;
+    try {
+      envelope = JSON.parse(await response.text());
+    } catch (error) {
+      envelope = null;
+    }
+    const detail = envelope?.error;
+    return refusal(detail?.message ?? `HTTP ${response.status}`, response.status, detail?.code);
+  }
+
+  /** Native shell path: today's commands, invoked. */
   function create({ invoke, listen, changeEvent } = {}) {
     /** Whether there is an orchestrator to talk to at all. */
     const available = typeof invoke === "function";
@@ -21,6 +158,220 @@
 
     return Object.freeze({
       available,
+      ...commands(call),
+
+      /** Copy product-owned command or setup text without granting arbitrary clipboard access. */
+      copyHarnessText: (id, kind) => call("copy_harness_text", { id, kind }),
+
+      /** Sequenced changes, pushed. Returns a way to stop, or null when there is nothing to subscribe to. */
+      subscribe(handlers) {
+        if (typeof listen !== "function") return null;
+        const listening = listen(changeEvent, handlers.change);
+        return () => Promise.resolve(listening).then((stop) => {
+          if (typeof stop === "function") stop();
+        });
+      }
+    });
+  }
+
+  /** Loopback path: the same commands, sent as JSON to the service that served the page. */
+  function overHttp({ fetch: send, clipboard, bearer, schedule, cancel } = {}) {
+    const available = typeof send === "function";
+    const later = schedule ?? ((work, ms) => setTimeout(work, ms));
+    const earlier = cancel ?? ((handle) => clearTimeout(handle));
+
+    function headers(withBody) {
+      const sent = {};
+      if (withBody) sent["Content-Type"] = "application/json";
+      if (bearer) sent.Authorization = `Bearer ${bearer}`;
+      return sent;
+    }
+
+    async function call(command, args = {}, extra = {}) {
+      if (!available) throw new Error("no orchestrator is attached");
+      const route = ROUTES[command];
+      const body = route.body ? route.body(args, extra) : undefined;
+      const sent = headers(body !== undefined);
+      if (route.tagged && extra.etag !== undefined) sent[IF_MATCH_HEADER] = `"${extra.etag}"`;
+      const response = await send(route.path, {
+        method: route.method,
+        headers: sent,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        credentials: "omit",
+        cache: "no-store"
+      });
+      if (!response.ok) throw await refusalOf(response);
+      const text = await response.text();
+      let result = text ? JSON.parse(text) : null;
+      if (route.read) result = route.read(result);
+      const seq = response.headers?.get?.(SEQ_HEADER);
+      if (seq !== null && seq !== undefined && result !== null && typeof result === "object") {
+        Object.defineProperty(result, "seq", { value: Number(seq), enumerable: false, configurable: true });
+      }
+      return result;
+    }
+
+    /**
+     * Read the live stream until it ends, and open it again after each failure.
+     *
+     * An event the service names is passed to the handler of that name. Any other event is a
+     * change, handed over as `{ payload }` the way the native shell hands it over. A stream that
+     * ends, fails or says nothing for too long counts as lost until its next hello.
+     */
+    function subscribe(handlers) {
+      let stopped = false;
+      let lost = false;
+      let step = 0;
+      let controller = null;
+      let deadTimer = null;
+      let wake = null;
+
+      /** A handler that throws is the page's fault to report, never a reason to drop the stream. */
+      function safely(work) {
+        try {
+          work();
+        } catch (error) {
+          Promise.reject(error);
+        }
+      }
+
+      function lose() {
+        if (lost) return;
+        lost = true;
+        safely(() => handlers.reconnecting?.(true));
+      }
+
+      function arm() {
+        earlier(deadTimer);
+        deadTimer = later(() => controller?.abort(), DEAD_AFTER_MS);
+      }
+
+      function dispatch(block) {
+        let name = "message";
+        const lines = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith(":")) continue;
+          if (line.startsWith("event:")) name = line.slice("event:".length).trim();
+          else if (line.startsWith("data:")) lines.push(line.slice("data:".length).replace(/^ /, ""));
+        }
+        if (!lines.length) return;
+        let data;
+        try {
+          data = JSON.parse(lines.join("\n"));
+        } catch (error) {
+          return;
+        }
+        if (name === "hello") {
+          if (lost) {
+            lost = false;
+            safely(() => handlers.reconnecting?.(false));
+          }
+          safely(() => handlers.hello?.(data));
+        } else if (name === "closed") {
+          safely(() => handlers.closed?.(data));
+        } else if (name === "reset") {
+          safely(() => handlers.reset?.(data));
+        } else {
+          safely(() => handlers.change?.({ payload: data }));
+        }
+      }
+
+      async function read(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffered = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          arm();
+          step = 0;
+          buffered = (buffered + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+          let end = buffered.indexOf("\n\n");
+          while (end >= 0) {
+            const block = buffered.slice(0, end);
+            buffered = buffered.slice(end + 2);
+            dispatch(block);
+            end = buffered.indexOf("\n\n");
+          }
+        }
+      }
+
+      function pause(ms) {
+        return new Promise((resolve) => {
+          const handle = later(resolve, ms);
+          wake = () => {
+            earlier(handle);
+            resolve();
+          };
+        });
+      }
+
+      async function run() {
+        while (!stopped) {
+          controller = new AbortController();
+          try {
+            arm();
+            const response = await send(EVENTS_PATH, {
+              method: GET,
+              headers: headers(false),
+              credentials: "omit",
+              cache: "no-store",
+              signal: controller.signal
+            });
+            if (response.status === STATUS_WATCHING_OFF) {
+              const refused = await refusalOf(response);
+              stop();
+              safely(() => handlers.closed?.({ sentence: refused.message }));
+              return;
+            }
+            if (!response.ok) throw await refusalOf(response);
+            await read(response);
+          } catch (error) {
+            if (stopped) return;
+          }
+          earlier(deadTimer);
+          if (stopped) return;
+          lose();
+          await pause(RECONNECT_STEPS_MS[Math.min(step, RECONNECT_STEPS_MS.length - 1)]);
+          step += 1;
+        }
+      }
+
+      function stop() {
+        stopped = true;
+        earlier(deadTimer);
+        controller?.abort();
+        wake?.();
+      }
+
+      run();
+      return stop;
+    }
+
+    return Object.freeze({
+      available,
+      ...commands(call),
+
+      /** Put text on the clipboard of the screen that asked. */
+      copyText(text) {
+        if (typeof clipboard?.writeText !== "function") return Promise.reject(new Error("no clipboard is attached"));
+        return clipboard.writeText(text);
+      },
+
+      subscribe
+    });
+  }
+
+  /**
+   * The commands both paths share, written once against a way to call.
+   *
+   * `call(command, args, extra)` carries `extra` for the path that can use it: the native shell
+   * ignores the tag of the rules and the state of the client, because it has one screen.
+   */
+  function commands(call) {
+    return {
+      /** The three-way answer to what this screen may do, and the words for it. */
+      context: () => call("workbench_context"),
 
       /** The whole current truth, which the store then decides what to do with. */
       snapshot: () => call("workbench_snapshot"),
@@ -31,10 +382,8 @@
       /** Hold, resume, end or start the runtime session. */
       applyIntent: (intent) => call("apply_runtime_intent", { intent }),
 
-      /** Resume the exact session incident a person reviewed, without replay. */
-
-      /** Flip the shared process-diagnostics marker; returns the resulting state. */
-      toggleDiagnostics: () => call("toggle_diagnostics"),
+      /** Turn process diagnostics on or off; returns the resulting state. */
+      setDiagnostics: (on) => call("set_diagnostics", { on }),
 
       /** Open the diagnostics folder through the native shell. */
       revealDiagnostics: () => call("reveal_diagnostics"),
@@ -53,11 +402,11 @@
        */
       previewPolicy: (policy) => call("preview_user_policy", { document: policy }),
 
-      /** Replace this machine's own rules with one complete policy text. */
-      applyPolicy: (policy) => call("apply_user_policy", { document: policy }),
+      /** Replace this machine's own rules with one complete policy text, drawn from the rules `etag` names. */
+      applyPolicy: (policy, etag) => call("apply_user_policy", { document: policy }, { etag }),
 
-      /** Remove this machine's own rules. */
-      removePolicy: () => call("remove_user_policy"),
+      /** Remove this machine's own rules, drawn from the rules `etag` names. */
+      removePolicy: (etag) => call("remove_user_policy", undefined, { etag }),
 
       /** Re-detect the MCP clients installed for this user. */
       refreshHarnesses: () => call("refresh_harnesses"),
@@ -65,14 +414,11 @@
       /** Set up or update every detected MCP target the orchestrator can change safely. */
       setupDetectedHarnesses: () => call("setup_detected_harnesses"),
 
-      /** Set up, update, fix, or remove Ghostlight from one concrete MCP target. */
-      manageHarness: (id, action) => call("manage_harness", { id, action }),
+      /** Set up, update, fix, or remove Ghostlight from one concrete MCP target, drawn in `expectedState`. */
+      manageHarness: (id, action, expectedState) => call("manage_harness", { id, action }, { expectedState }),
 
       /** Ask the native shell to locate one supported harness executable or settings file. */
       locateHarness: (id) => call("locate_harness", { id }),
-
-      /** Copy product-owned command or setup text without granting arbitrary clipboard access. */
-      copyHarnessText: (id, kind) => call("copy_harness_text", { id, kind }),
 
       /** Open one product-owned official download destination. */
       openHarnessDownload: (productId) => call("open_harness_download", { productId }),
@@ -83,19 +429,15 @@
       /**
        * Open one of the places the product is willing to point at.
        *
-       * A name, never an address: the orchestrator owns the URL, so this window cannot be talked
+       * A name, never an address: the orchestrator owns the URL, so this page cannot be talked
        * into opening something the product did not choose.
        */
       openDestination: (destination) => call("open_destination", { destination }),
 
-      /** Sequenced changes, pushed. Returns false when there is nothing to subscribe to. */
-      subscribe(handler) {
-        if (typeof listen !== "function") return false;
-        listen(changeEvent, (message) => handler(message.payload));
-        return true;
-      }
-    });
+      /** Bring the Ghostlight application forward, where changes are made. */
+      continueInWindow: () => call("continue_in_window")
+    };
   }
 
-  return Object.freeze({ create });
+  return Object.freeze({ create, overHttp, flatten, seqOf, STALE, SNAPSHOT_PARTS });
 });

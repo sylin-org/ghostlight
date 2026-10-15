@@ -17,12 +17,19 @@
       <div class="state">
         <span class="state-word" id="state-word">Starting</span>
         <span class="state-facts" id="state-facts"></span>
+        <span class="chip context-chip" id="context-chip" hidden></span>
       </div>
 
       <button class="wheel" type="button" id="wheel" data-intent="hold" disabled>
         <svg viewBox="0 0 24 24" id="wheel-icon" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
         <span id="wheel-label">Pause</span>
       </button>
+
+      <span class="wheel-state" id="wheel-state" hidden>
+        <b id="wheel-state-word"></b>
+        <small id="wheel-state-note"></small>
+      </span>
+      <span class="continue-line band-continue" id="band-continue" hidden></span>
 
       <nav class="tabs" aria-label="Ghostlight">
         <button class="tab active" type="button" data-view="monitor" aria-current="page">At a glance</button>
@@ -39,6 +46,7 @@
 
     <main id="main-content" tabindex="-1">
       <section class="view active" id="view-monitor" data-page="monitor" aria-label="At a glance">
+        <p class="closed-line" id="closed-monitor" hidden></p>
         <div class="connections" id="connections"></div>
         <p id="audit-health" class="coverage-note" role="status" hidden></p>
 
@@ -59,6 +67,7 @@
       </section>
 
       <section class="view" id="view-integrations" data-page="integrations" aria-labelledby="integrations-heading">
+        <p class="closed-line" id="closed-integrations" hidden></p>
         <div class="page-heading">
           <div>
             <span class="kicker">Local coding harnesses</span>
@@ -70,10 +79,12 @@
             <button class="primary-button" type="button" id="setup-integrations">Set up everything</button>
           </div>
         </div>
+        <div class="continue-line" id="integrations-continue" hidden></div>
         <div class="integration-roster" id="integration-grid"></div>
       </section>
 
       <section class="view" id="view-status" data-page="status" aria-labelledby="status-heading">
+        <p class="closed-line" id="closed-status" hidden></p>
         <div class="page-heading">
           <div>
             <span class="kicker">Local diagnostics and authority</span>
@@ -83,7 +94,7 @@
           <button class="ghost-button" type="button" id="refresh-status">Refresh</button>
         </div>
         <div class="card-grid" id="diagnostic-grid"></div>
-        <section class="strip">
+        <section class="strip" id="runtime-strip">
           <div>
             <h2>Runtime session</h2>
             <p>Ending the session stops new governed effects. Start a fresh one from the Pause control when you want work to continue.</p>
@@ -91,7 +102,7 @@
           <button class="danger-button" type="button" data-intent="end_session">End session</button>
         </section>
 
-        <section class="strip">
+        <section class="strip" id="notifications-strip">
           <div>
             <h2>Notifications</h2>
             <p>Send one local Ghostlight checkup notification. Nothing leaves this device.</p>
@@ -101,6 +112,7 @@
         <p class="colophon" id="colophon"></p>
       </section>
       <section class="view" id="view-policy" data-page="policy" aria-labelledby="policy-heading">
+        <p class="closed-line" id="closed-policy" hidden></p>
         <div class="page-heading">
           <div>
             <span class="kicker">What agents may do here, and who decided</span>

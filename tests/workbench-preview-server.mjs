@@ -302,6 +302,21 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
   window.__TAURI__ = {
     core: {
       invoke: async (command, args = {}) => {
+        if (command === "workbench_context") {
+          // The window's own context: every act is available, so the page draws all of it.
+          const acts = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
+            "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "setup_all",
+            "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"];
+          return {
+            context: "control", word: "Full control",
+            sentence: "Others on this computer can watch this view in a browser.",
+            instance: "preview", opener: "service",
+            acts: Object.fromEntries(acts.map((act) => [act, { available: true, why_not: null }])),
+            product: { version: "1.0.0", license: "Apache-2.0 OR MIT" }, links: {}
+          };
+        }
+        if (command === "set_diagnostics") return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
+        if (command === "continue_in_window") return null;
         if (command === "workbench_snapshot") return preview;
         if (command === "workbench_search") return [];
         if (command === "workbench_policy") return policyView;

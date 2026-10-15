@@ -200,6 +200,7 @@
       feed: () => state.feed,
       hero: () => state.feed[0],
       snapshot: () => state.snapshot,
+      seq: () => state.seq,
       runtime: () => state.runtime,
       connected: () => state.connected,
       pending: () => state.pending,
@@ -301,6 +302,7 @@
 
       endHarness(id) {
         state.pending.delete(id);
+        if (state.snapshot) emit(CHANGE.Collections, { snapshot: state.snapshot });
       }
     });
   }

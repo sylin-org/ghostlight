@@ -17,11 +17,20 @@
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     hostReadback, patternCovers,
-    escapeHtml, words, duration, stopwatch, ago, shortId
+    escapeHtml, words, duration, stopwatch, ago, shortId,
+    CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
 
   const TOAST_MS = 4200;
+
+  /** The panels that hold data, each with the line that says why it holds none and its section. */
+  const DATA_PANELS = Object.freeze([
+    Object.freeze({ line: "closed-monitor", section: "view-monitor" }),
+    Object.freeze({ line: "closed-integrations", section: "view-integrations" }),
+    Object.freeze({ line: "closed-status", section: "view-status" }),
+    Object.freeze({ line: "closed-policy", section: "view-policy" })
+  ]);
 
   function create({ sessionFor = () => null, coverageFor = () => null, onFailure = () => {} } = {}) {
     /*
@@ -38,6 +47,27 @@
     const painted = Object.create(null);
     let toastTimer = null;
     let confirmation = null;
+
+    /*
+     * What this screen was told it may do.
+     *
+     * Until it is told, it may do everything, which is the native shell's own situation and what
+     * a view built directly assumes. An act it may not do is drawn as the state it would have
+     * changed, with one line saying where the change is made.
+     */
+    let access = null;
+    let closedMode = false;
+    let lost = false;
+    let lastFacts = null;
+    const can = (act) => !closedMode && (access?.acts?.[act]?.available ?? true);
+    const whyNot = (act) => access?.acts?.[act]?.why_not ?? "";
+    const opensLinks = () => access !== null && access.opener !== "service";
+
+    /** The one line a panel shows for the acts it cannot offer: the reason, and the way on. */
+    function continueMarkup(why) {
+      return `<span>${escapeHtml(why)}</span>`
+        + `<button class="link-button" type="button" data-continue>${escapeHtml(CONTINUE_LABEL)}</button>`;
+    }
 
     /** Run one fallible paint. Report what went wrong, and say it did not happen. */
     function attempt(what, step) {
@@ -241,10 +271,13 @@
     function coverageMarkup(entry) {
       const details = coverageFor(entry.invocation);
       if (!details || (!details.coverage.page_excluded_documents && !details.coverage.unavailable_documents && !details.coverage.limited_by_size)) return "";
-      const hosts = details.excluded_hosts.map((host) => `<li>${escapeHtml(host)}</li>`).join("");
+      const hosts = (details.excluded_hosts ?? []).map((host) => `<li>${escapeHtml(host)}</li>`).join("");
+      // A screen that may not name the sites is told only how many there were.
+      const unnamed = !hosts && details.excluded_host_count > 0
+        ? `<p>${escapeHtml(leftOutCount(details.excluded_host_count))}</p>` : "";
       const indication = details.proactive ? `<p class="coverage-note">${escapeHtml(details.summary)}</p>` : "";
       return indication + historyDetails(`${entry.invocation}:coverage`, "Coverage details",
-        `<p>${escapeHtml(details.summary)}</p>` + (hosts ? `<p>${escapeHtml(details.explanation)}</p><ul>${hosts}</ul>` : ""));
+        `<p>${escapeHtml(details.summary)}</p>` + (hosts ? `<p>${escapeHtml(details.explanation)}</p><ul>${hosts}</ul>` : unnamed));
     }
 
     function heroMarkup(entry) {
@@ -439,10 +472,16 @@
     // its own readiness is a second source of truth about the one thing that must have exactly one,
     // which is the same rule the Policy chip below already follows.
     function band(facts) {
+      lastFacts = facts;
+      if (closedMode) {
+        closedBand();
+        return;
+      }
       const readiness = facts.snapshot?.readiness;
-      const name = readiness ? `runtime-${readiness.tone}` : "runtime-offline";
+      const name = lost || !readiness ? "runtime-offline" : `runtime-${readiness.tone}`;
       document.body.className = name;
-      el["state-word"].textContent = readiness ? readiness.word : "";
+      // While the live stream is being opened again the page cannot vouch for what it shows.
+      el["state-word"].textContent = lost ? RECONNECTING : readiness ? readiness.word : "";
       // Where a pause came from is the better thing to read on the word while there is one.
       el["state-word"].title = facts.snapshot?.runtime_note ?? (readiness ? readiness.detail : "");
 
@@ -469,12 +508,80 @@
       // cannot say is that this window lost it: the last snapshot outlives the connection, so a lost
       // authority disables the wheel here rather than letting a stale answer keep it enabled.
       const paused = facts.runtime !== "active";
-      el.wheel.disabled = facts.connected === false || !(facts.snapshot?.readiness?.invites_control ?? false);
-      el.wheel.dataset.intent = facts.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
+      const intent = facts.runtime === "ended" ? "start_session" : paused ? "resume" : "hold";
+      el.wheel.disabled = lost || facts.connected === false || !(facts.snapshot?.readiness?.invites_control ?? false);
+      el.wheel.dataset.intent = intent;
       el["wheel-label"].textContent = facts.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
       el["wheel-icon"].innerHTML = paused
         ? '<path d="M7 4.5 19 12 7 19.5z"/>'
         : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+
+      // A screen that cannot press the wheel shows the state in its place, and where to change it.
+      const offered = can(intent);
+      el.wheel.hidden = !offered;
+      el["wheel-state"].hidden = offered;
+      el["band-continue"].hidden = offered;
+      if (!offered) {
+        el["wheel-state-word"].textContent = readiness ? readiness.word : "";
+        el["wheel-state-note"].textContent = facts.snapshot?.runtime_note ?? "";
+        el["band-continue"].innerHTML = continueMarkup(whyNot(intent));
+      }
+    }
+
+    /** The band of a screen with nothing to show: no lamp state, no wheel, only its chip. */
+    function closedBand() {
+      document.body.className = "runtime-offline";
+      el["state-word"].textContent = "";
+      el["state-word"].title = "";
+      el["state-facts"].textContent = "";
+      el.wheel.hidden = true;
+      el["wheel-state"].hidden = true;
+      el["band-continue"].hidden = true;
+    }
+
+    /** The chip beside the state word: who can see this view, in the service's own words. */
+    function chip(told) {
+      el["context-chip"].textContent = told.word ?? "";
+      el["context-chip"].title = told.sentence ?? "";
+      el["context-chip"].hidden = !told.word;
+    }
+
+    /** Take what the service says this screen may do, and draw the controls to match. */
+    function context(told) {
+      access = told;
+      closedMode = false;
+      for (const panel of DATA_PANELS) {
+        el[panel.line].hidden = true;
+        el[panel.section].classList.remove("closed");
+      }
+      chip(told);
+      el["refresh-integrations"].hidden = !can("rescan");
+      el["setup-integrations"].hidden = !can("setup_all");
+      el["runtime-strip"].hidden = !can("end_session");
+      el["notifications-strip"].hidden = !can("test_notification");
+      el["apply-policy"].textContent = can("apply_policy") ? "Apply" : APPLY_IN_WINDOW_LABEL;
+      el["sacred-hosts"].disabled = !can("apply_policy");
+    }
+
+    /** Take the answer of a service that shows nothing: every data view says why, About shows in full. */
+    function closed(told) {
+      access = told;
+      closedMode = true;
+      chip(told);
+      for (const panel of DATA_PANELS) {
+        el[panel.line].textContent = told.sentence;
+        el[panel.line].hidden = false;
+        el[panel.section].classList.add("closed");
+      }
+      el["policy-state"].setAttribute("aria-label", "Open Policy.");
+      closedBand();
+      about({ version: told.product?.version, license: told.product?.license, counts: null });
+    }
+
+    /** Say that the live stream is being opened again, or that it is back. */
+    function reconnecting(on) {
+      lost = on;
+      if (!closedMode) band(lastFacts ?? { connected: false, snapshot: null, runtime: "active", running: 0 });
     }
 
     /* ----------------------------- collections ---------------------------- */
@@ -530,18 +637,23 @@
       }).join("");
     }
 
-    function about(snapshot) {
-      const service = snapshot.service ?? {};
-      const version = String(service.version ?? "");
+    /**
+     * The About page. The product's version and license come from the service; the three counts
+     * come from data, so a screen that is shown no data passes none.
+     */
+    function about({ version, license, counts }) {
+      const exact = String(version ?? "");
       // The disc wears the short form the portfolio card wears; the exact build is in the facts.
-      el["about-version"].textContent = version.split(".").slice(0, 2).join(".") || "1.0";
-      const facts = [
-        ["Version", version || "unknown"],
-        ["Sessions", `${snapshot.sessions.length} connected`],
-        ["Browsers", `${snapshot.browsers.length} attached`],
-        ["Recorded", `${snapshot.history.length} actions on this device`],
-        ["License", "Apache-2.0 OR MIT"]
-      ];
+      el["about-version"].textContent = exact.split(".").slice(0, 2).join(".") || "1.0";
+      const facts = [["Version", exact || "unknown"]];
+      if (counts) {
+        facts.push(
+          ["Sessions", `${counts.sessions} connected`],
+          ["Browsers", `${counts.browsers} attached`],
+          ["Recorded", `${counts.recorded} actions on this device`]
+        );
+      }
+      if (license) facts.push(["License", license]);
       el["about-facts"].innerHTML = facts
         .map(([term, value]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`)
         .join("");
@@ -553,6 +665,10 @@
         && (harness.state === "available" || harness.state === "updatable"));
       setup.disabled = !actionable;
       setup.dataset.actionable = String(actionable);
+      // One line for the whole roster, naming the first change this screen cannot make.
+      const withheld = ["harness_act", "locate", "setup_all"].find((act) => !can(act));
+      el["integrations-continue"].hidden = !withheld;
+      el["integrations-continue"].innerHTML = withheld ? continueMarkup(whyNot(withheld)) : "";
       if (!snapshot.harnesses.length) {
         el["integration-grid"].innerHTML =
           '<div class="empty">No supported MCP client was found for this user.</div>';
@@ -571,6 +687,7 @@
         const waiting = pending.has(harness.id);
         return `<button class="${kind}" type="button" data-harness-operation="manage"`
           + ` data-harness-action="${action}" data-harness="${escapeHtml(harness.id)}"`
+          + ` data-harness-state="${escapeHtml(harness.state)}"`
           + ` data-harness-name="${escapeHtml(harness.name)}"`
           + ` data-harness-target="${escapeHtml(harness.target)}"${waiting ? " disabled" : ""}>`
           + `${waiting ? "Working..." : label}</button>`;
@@ -597,14 +714,16 @@
           const updatable = harness.state === "updatable";
           const needsAttention = harness.state === "needs_attention";
           let primary = "";
-          if (installed && harness.can_uninstall) {
+          if (!can("harness_act")) {
+            primary = "";
+          } else if (installed && harness.can_uninstall) {
             primary = actionButton(harness, "uninstall", "Remove", "danger-button");
           } else if ((available || updatable) && harness.can_install) {
             primary = actionButton(harness, "install", updatable ? "Update" : "Set up");
           } else if (needsAttention && harness.can_fix) {
             primary = actionButton(harness, "fix", "Fix");
           }
-          const locate = harness.can_locate && harness.state !== "not_detected"
+          const locate = can("locate") && harness.can_locate && harness.state !== "not_detected"
             ? utilityButton(harness, "locate", "Locate") : "";
           const setup = utilityButton(harness, "copy", "Copy setup", ' data-copy-kind="setup"');
           return `<div class="integration-target">`
@@ -621,11 +740,17 @@
         }).join("");
         const missing = visible.length === 1 && visible[0].state === "not_detected";
         const first = visible[0];
-        const install = missing && targets.some((target) => target.can_download)
-          ? `<button class="ghost-button" type="button" data-harness-operation="download"`
-            + ` data-product="${escapeHtml(productId)}" data-harness="${escapeHtml(first.id)}"`
-            + ` data-harness-name="${escapeHtml(first.name)}">Install</button>` : "";
-        const locate = missing ? utilityButton(first, "locate", "Locate") : "";
+        const downloadable = targets.find((target) => target.can_download);
+        // A tab follows the product's own link; the window asks the service to open it.
+        const install = !(missing && downloadable) ? ""
+          : !opensLinks()
+            ? `<button class="ghost-button" type="button" data-harness-operation="download"`
+              + ` data-product="${escapeHtml(productId)}" data-harness="${escapeHtml(first.id)}"`
+              + ` data-harness-name="${escapeHtml(first.name)}">Install</button>`
+            : downloadable.download_url
+              ? `<a class="ghost-button" href="${escapeHtml(downloadable.download_url)}"`
+                + ` target="_blank" rel="noopener noreferrer">Install</a>` : "";
+        const locate = missing && can("locate") ? utilityButton(first, "locate", "Locate") : "";
         const command = utilityButton(first, "copy", "Copy MCP command", ' data-copy-kind="command"');
         const html = `<article class="tile integration-card integration-${category.id}">`
           + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
@@ -668,14 +793,19 @@
       const place = report.directory
         ? ` Logs live in ${escapeHtml(report.directory)} (${report.used_bytes} bytes).`
         : "";
-      const toggle = `<button class="ghost-button" type="button" data-diagnostics-operation="toggle">`
-        + `${report.layer === "off" ? "Turn on" : "Turn off"}</button>`;
+      const toggle = can("set_diagnostics")
+        ? `<button class="ghost-button" type="button" data-diagnostics-operation="toggle">`
+          + `${report.layer === "off" ? "Turn on" : "Turn off"}</button>` : "";
       // The folder is named and openable even while off: retained logs live there, and it is
       // where the next activation writes.
-      const reveal = `<button class="link-button" type="button" data-diagnostics-operation="reveal">Open log folder</button>`;
+      const reveal = can("reveal_diagnostics")
+        ? `<button class="link-button" type="button" data-diagnostics-operation="reveal">Open log folder</button>` : "";
+      const withheld = ["set_diagnostics", "reveal_diagnostics"].find((act) => !can(act));
       return `<article class="card"><span class="severity passing"><span class="dot"></span>passing</span>`
         + `<h2>Process diagnostics</h2><p>Operational log is ${layer}.${place}</p>`
-        + `<p>${toggle} ${reveal}</p></article>`;
+        + (toggle || reveal ? `<p>${toggle} ${reveal}</p>` : "")
+        + (withheld ? `<p class="continue-line">${continueMarkup(whyNot(withheld))}</p>` : "")
+        + `</article>`;
     }
 
     /* -------------------------------- policy -------------------------------- */
@@ -691,7 +821,13 @@
     let draft = null;
     let applied = null;
 
-    function policy(view) {
+    /**
+     * Draw the compiled policy.
+     *
+     * The draft is replaced by the applied rules unless the caller says to keep it, which a screen
+     * does when it learns that the applied rules moved on while the person's edits were unsent.
+     */
+    function policy(view, { keepDraft = false } = {}) {
       applied = view;
       el["policy-headline"].textContent = view.headline;
 
@@ -719,10 +855,16 @@
       el["add-rule"].hidden = !user.editable;
       el["policy-blocked"].hidden = user.editable || !user.blocked_reason;
       if (user.blocked_reason) el["policy-blocked-reason"].textContent = user.blocked_reason;
-      el["policy-remove"].hidden = !(user.editable && user.source === "workbench" && hasUserLayer(view));
+      el["policy-remove"].hidden = !(user.editable && user.source === "workbench" && hasUserLayer(view)
+        && can("remove_policy"));
 
-      draft = user.editable ? draftFrom(view) : null;
-      opened.clear();
+      if (!user.editable) {
+        draft = null;
+        opened.clear();
+      } else if (!(keepDraft && draft)) {
+        draft = draftFrom(view);
+        opened.clear();
+      }
       renderRules();
     }
 
@@ -780,7 +922,9 @@
             } catch (error) {
               // A value the orchestrator could not render as JSON is shown as it arrived.
             }
-            return `<li>${escapeHtml(settingWords(setting.key, value))}`
+            // A screen that may not name the never-touch sites is told how many there are.
+            const counted = setting.key === SACRED_KEY && typeof setting.count === "number";
+            return `<li>${escapeHtml(counted ? neverTouchedCount(setting.count) : settingWords(setting.key, value))}`
               + ` <span class="owner">${escapeHtml(setting.owner)}</span></li>`;
           }).join("")
           + `</ul>`
@@ -815,7 +959,7 @@
 
     /** No opinion on anything, which is what an absent setting means. */
     function emptySettings() {
-      return { restricted: new Set(), sacred: "", startup: null, choices: {} };
+      return { restricted: new Set(), sacred: "", sacredCount: null, startup: null, choices: {} };
     }
 
     /**
@@ -830,6 +974,7 @@
       for (const setting of authored) {
         if (setting.key === SACRED_KEY) {
           settings.sacred = parseHostList(setting.value).join(", ");
+          if (typeof setting.count === "number") settings.sacredCount = setting.count;
         } else if (setting.key === "browser.startup") {
           try {
             const value = JSON.parse(setting.value);
@@ -942,6 +1087,13 @@
     function refreshSacred() {
       const patterns = splitHosts(draft?.settings.sacred ?? "");
       const readback = patterns.map((pattern) => hostReadback(pattern)).join("; ");
+      // A screen that may not name the sites shows how many there are, and leaves them as they are.
+      const counted = draft?.settings.sacredCount;
+      if (typeof counted === "number" && !can("apply_policy")) {
+        el["sacred-readback"].textContent = neverTouchedCount(counted);
+        el["sacred-readback"].classList.toggle("readback-empty", false);
+        return;
+      }
       el["sacred-readback"].textContent = readback
         ? `Never touched: ${readback}.`
         : "No sites beyond the ones Ghostlight always refuses.";
@@ -1163,14 +1315,10 @@
       return String(value || "").split(",").map((pattern) => pattern.trim()).filter(Boolean);
     }
 
-    /** Compose the document the orchestrator will validate. The surface authors no semantics. */
-    function draftDocument() {
-      if (!draft) return null;
-      return JSON.stringify({
-        schema: 4,
-        name: "Your rules",
-        version: new Date().toISOString().slice(0, 10),
-        grants: draft.rules.map((rule, index) => {
+    /** What a draft says: its rules and its settings, and nothing about when it was written. */
+    function documentBody(source) {
+      return {
+        grants: source.rules.map((rule, index) => {
           const grant = {
             id: rule.id && /^[A-Za-z0-9._-]+$/.test(rule.id) ? rule.id : `rule-${index + 1}`,
             hosts: { allow: splitHosts(rule.hosts) },
@@ -1179,7 +1327,27 @@
           if (rule.description.trim()) grant.description = rule.description.trim();
           return grant;
         }),
-        config: settingEntries()
+        config: settingEntries(source.settings)
+      };
+    }
+
+    /**
+     * Compose the document the orchestrator will validate. The surface authors no semantics.
+     *
+     * The version is today's date only when the rules or settings differ from the applied ones;
+     * a draft that says what is already applied keeps the applied version.
+     */
+    function draftDocument() {
+      if (!draft) return null;
+      const body = documentBody(draft);
+      const user = applied?.layers?.find((layer) => layer.kind === "user");
+      const unchanged = Boolean(user) && JSON.stringify(body) === JSON.stringify(documentBody(draftFrom(applied)));
+      return JSON.stringify({
+        schema: 4,
+        name: "Your rules",
+        version: unchanged ? user.version : new Date().toISOString().slice(0, 10),
+        grants: body.grants,
+        config: body.config
       }, null, 2);
     }
 
@@ -1190,14 +1358,14 @@
      * this layer for a recommendation to be relaxed by, so asking would be a word without a
      * consequence.
      */
-    function settingEntries() {
-      const entries = [...draft.settings.restricted]
+    function settingEntries(settings) {
+      const entries = [...settings.restricted]
         .map((key) => ({ key, value: false, level: "mandatory" }));
-      if (draft.settings.startup) {
-        entries.push({ key: "browser.startup", value: draft.settings.startup, level: "mandatory" });
+      if (settings.startup) {
+        entries.push({ key: "browser.startup", value: settings.startup, level: "mandatory" });
       }
-      for (const [key, value] of Object.entries(draft.settings.choices)) entries.push({ key, value, level: "mandatory" });
-      const sacred = splitHosts(draft.settings.sacred);
+      for (const [key, value] of Object.entries(settings.choices)) entries.push({ key, value, level: "mandatory" });
+      const sacred = splitHosts(settings.sacred);
       if (sacred.length) entries.push({ key: SACRED_KEY, value: sacred, level: "mandatory" });
       return entries;
     }
@@ -1323,11 +1491,16 @@
       });
       passport = snapshot.configuration?.managed_policy ?? null;
       ifChanged("connections", [snapshot.sessions, snapshot.browsers], () => connections(snapshot));
-      ifChanged("about", [snapshot.service, snapshot.sessions.length, snapshot.browsers.length, snapshot.history.length], () => about(snapshot));
-      ifChanged("integrations", [snapshot.harnesses, [...pending]], () => integrations(snapshot, pending));
+      const product = {
+        version: access?.product?.version ?? snapshot.service?.version,
+        license: access?.product?.license,
+        counts: { sessions: snapshot.sessions.length, browsers: snapshot.browsers.length, recorded: snapshot.history.length }
+      };
+      ifChanged("about", product, () => about(product));
+      ifChanged("integrations", [snapshot.harnesses, [...pending], access?.acts], () => integrations(snapshot, pending));
       ifChanged(
         "status",
-        [snapshot.diagnostics, snapshot.process_diagnostics, snapshot.configuration, snapshot.service],
+        [snapshot.diagnostics, snapshot.process_diagnostics, snapshot.configuration, snapshot.service, access?.acts],
         () => status(snapshot),
       );
     }
@@ -1474,6 +1647,7 @@
     return Object.freeze({
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
+      context, closed, reconnecting,
       band, collections, navigate, showing: () => current, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,

@@ -26,6 +26,7 @@ use crate::language::environment::SESSION_LISTENER_FAILED;
 use crate::language::workbench::{COPIED_COMMAND, COPIED_SETUP};
 use crate::service::lifetime::QUIT_GRACE;
 use crate::service::{Quit, ServiceHost};
+use crate::workbench::context::WebContext;
 use crate::workbench::{
     validate_policy_document, validate_search_query, PolicyPreview, RuntimeSource, SearchHit,
     WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade,
@@ -167,6 +168,7 @@ pub fn run(reason: StartReason) -> Result<()> {
             window_lifecycle: Mutex::new(WindowLifecycle::default()),
         })
         .invoke_handler(tauri::generate_handler![
+            workbench_context,
             workbench_snapshot,
             workbench_search,
             workbench_policy,
@@ -174,7 +176,7 @@ pub fn run(reason: StartReason) -> Result<()> {
             apply_user_policy,
             remove_user_policy,
             apply_runtime_intent,
-            toggle_diagnostics,
+            set_diagnostics,
             reveal_diagnostics,
             refresh_harnesses,
             setup_detected_harnesses,
@@ -184,6 +186,7 @@ pub fn run(reason: StartReason) -> Result<()> {
             open_harness_download,
             test_notification,
             open_destination,
+            continue_in_window,
             quit_ghostlight
         ])
         .on_window_event(|_window, event| {
@@ -569,6 +572,12 @@ fn show_window(window: &WebviewWindow) -> Result<(), WorkbenchPresentationError>
         .map_err(|error| WorkbenchPresentationError::Native(error.to_string()))
 }
 
+/// What this window may do: the Control context, with every act available.
+#[tauri::command]
+fn workbench_context(state: State<'_, DesktopState>) -> serde_json::Value {
+    state.workbench.context_document(WebContext::Control)
+}
+
 #[tauri::command]
 fn workbench_snapshot(state: State<'_, DesktopState>) -> WorkbenchSnapshot {
     state.workbench.snapshot()
@@ -727,11 +736,10 @@ fn test_notification(state: State<'_, DesktopState>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Flip the shared process-diagnostics marker and report the resulting state.
+/// Turn the shared process-diagnostics marker on or off and report the resulting state.
 #[tauri::command]
-fn toggle_diagnostics(state: State<'_, DesktopState>) -> Result<serde_json::Value, String> {
-    serde_json::to_value(state.workbench.apply_diagnostics_toggle())
-        .map_err(|error| error.to_string())
+fn set_diagnostics(on: bool, state: State<'_, DesktopState>) -> Result<serde_json::Value, String> {
+    serde_json::to_value(state.workbench.set_diagnostics(on)).map_err(|error| error.to_string())
 }
 
 /// Open the diagnostics folder in the operating system's file manager. The folder is the one
@@ -755,6 +763,12 @@ fn open_destination(destination: WorkbenchDestination, app: AppHandle) -> Result
         .workbench
         .open_destination(destination)
         .map_err(|error| error.to_string())
+}
+
+/// Bring the Ghostlight window forward. This window already is the one, so it only shows it.
+#[tauri::command]
+fn continue_in_window(state: State<'_, DesktopState>) -> Result<(), String> {
+    state.workbench.reveal().map_err(|error| error.to_string())
 }
 
 /// A person's Quit: the service sets the latch, finishes what is in flight, says goodbye on every
@@ -855,6 +869,30 @@ mod tests {
         assert!(
             !commands.contains("clear"),
             "clearing visible rows must not become a Tauri command"
+        );
+    }
+
+    #[test]
+    fn the_page_can_ask_what_it_may_do_and_carry_on_in_the_window() {
+        let desktop = include_str!("mod.rs");
+        let commands = desktop
+            .split_once(".invoke_handler(tauri::generate_handler![")
+            .and_then(|(_, rest)| rest.split_once("])"))
+            .map(|(commands, _)| commands)
+            .expect("the desktop keeps an explicit Tauri command allowlist");
+        let app = surface_source();
+        // Each command the shared transport names for the shell is registered, and each one the
+        // shell registers is named by the transport, so neither side can drift alone.
+        for command in ["workbench_context", "set_diagnostics", "continue_in_window"] {
+            assert!(commands.contains(command), "{command} is not registered");
+            assert!(
+                app.contains(&format!("\"{command}\"")),
+                "the transport never calls {command}"
+            );
+        }
+        assert!(
+            !commands.contains("toggle_diagnostics"),
+            "the page sets diagnostics now; a toggle would leave two ways to say it"
         );
     }
 
