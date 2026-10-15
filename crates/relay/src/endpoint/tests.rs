@@ -289,6 +289,25 @@ fn a_client_that_connects_before_accept_is_still_served() {
 }
 
 #[test]
+fn a_client_that_connects_and_closes_does_not_stop_the_listener_serving_the_next() {
+    let home = TempHome::new();
+    let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
+    let accepting = Arc::clone(&listener);
+    let server = thread::spawn(move || loop {
+        let mut server_end = accepting.accept().unwrap();
+        if let Some(frame) = read_frame::<Value>(&mut server_end).unwrap() {
+            break frame;
+        }
+    });
+
+    drop(home.connect().unwrap());
+    let mut client = home.connect().unwrap();
+    write_frame(&mut client, &json!({"after": "a probe"})).unwrap();
+    let frame = within_patience(move || server.join().unwrap());
+    assert_eq!(frame, json!({"after": "a probe"}));
+}
+
+#[test]
 fn several_clients_each_get_their_own_server_end() {
     let home = TempHome::new();
     let listener = Arc::new(Listener::bind_first(home.path()).unwrap());

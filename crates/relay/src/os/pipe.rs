@@ -227,10 +227,21 @@ fn create_instance(
     Ok(Owned(handle))
 }
 
+/// What a wait on a pipe instance ended with.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Arrival {
+    /// A client is connected to the instance.
+    Client,
+    /// A client connected and closed its end before the wait saw it. The instance still needs
+    /// [`DisconnectNamedPipe`] before it can serve again.
+    ClientGone,
+}
+
 /// Wait until a client connects to `pipe`, or until `stop` is signalled.
 ///
-/// A stop cancels the wait and returns [`io::ErrorKind::ConnectionAborted`].
-fn wait_for_client(pipe: &Owned, stop: Option<&Event>) -> io::Result<()> {
+/// A client that has already come and gone is reported as [`Arrival::ClientGone`], not as a
+/// failure. A stop cancels the wait and returns [`io::ErrorKind::ConnectionAborted`].
+fn wait_for_client(pipe: &Owned, stop: Option<&Event>) -> io::Result<Arrival> {
     if stop.is_some_and(is_signalled) {
         return Err(io::ErrorKind::ConnectionAborted.into());
     }
@@ -240,11 +251,12 @@ fn wait_for_client(pipe: &Owned, stop: Option<&Event>) -> io::Result<()> {
     // operation is finished: every path below waits for it to complete or cancels it and waits.
     let connected = unsafe { ConnectNamedPipe(pipe.0, &mut overlapped) } != 0;
     if connected {
-        return Ok(());
+        return Ok(Arrival::Client);
     }
     let failure = io::Error::last_os_error();
     match failure.raw_os_error() {
-        Some(ERROR_PIPE_CONNECTED) => return Ok(()),
+        Some(ERROR_PIPE_CONNECTED) => return Ok(Arrival::Client),
+        Some(ERROR_NO_DATA) => return Ok(Arrival::ClientGone),
         Some(ERROR_IO_PENDING) => {}
         _ => return Err(failure),
     }
@@ -263,7 +275,18 @@ fn wait_for_client(pipe: &Owned, stop: Option<&Event>) -> io::Result<()> {
             io::Error::last_os_error()
         });
     }
-    finish(pipe.0, &mut overlapped).map(|_| ())
+    match finish(pipe.0, &mut overlapped) {
+        Ok(_) => Ok(Arrival::Client),
+        Err(failure) if failure.raw_os_error() == Some(ERROR_NO_DATA) => Ok(Arrival::ClientGone),
+        Err(failure) => Err(failure),
+    }
+}
+
+/// Drop the client of the connected server instance `pipe`, so the instance can serve again.
+fn disconnect(pipe: &Owned) {
+    // SAFETY: pipe is a valid server handle. The call fails harmlessly when no client is
+    // connected.
+    unsafe { DisconnectNamedPipe(pipe.0) };
 }
 
 /// Whether `event` is signalled right now.
@@ -548,7 +571,9 @@ impl PipeListener {
 
     /// Wait for the next client that passes the check, and return its end.
     ///
-    /// A client is admitted when its user is this process's user and its integrity level is at
+    /// The pipe name is never left without an instance: when this returns an error, an instance
+    /// is still waiting. A client that connects and closes before it is accepted is skipped. A
+    /// client is admitted when its user is this process's user and its integrity level is at
     /// least medium. Any other client is disconnected before a byte is exchanged and the wait
     /// goes on. After [`PipeListener::shutdown`] this returns
     /// [`io::ErrorKind::ConnectionAborted`].
@@ -559,19 +584,30 @@ impl PipeListener {
                 Some(pipe) => pipe,
                 None => create_instance(&self.name, Some(&self.descriptor), false)?,
             };
-            if let Err(failure) = wait_for_client(&pipe, Some(&self.stop)) {
-                if failure.kind() == io::ErrorKind::ConnectionAborted {
+            match wait_for_client(&pipe, Some(&self.stop)) {
+                Ok(Arrival::Client) => {}
+                Ok(Arrival::ClientGone) => {
+                    disconnect(&pipe);
                     *waiting = Some(pipe);
+                    continue;
                 }
-                return Err(failure);
+                Err(failure) => {
+                    *waiting = Some(pipe);
+                    return Err(failure);
+                }
             }
-            *waiting = Some(create_instance(&self.name, Some(&self.descriptor), false)?);
+            match create_instance(&self.name, Some(&self.descriptor), false) {
+                Ok(next) => *waiting = Some(next),
+                Err(failure) => {
+                    disconnect(&pipe);
+                    *waiting = Some(pipe);
+                    return Err(failure);
+                }
+            }
             if self.client_is_admitted(&pipe) {
                 return Ok(PipeStream::new(pipe));
             }
-            // SAFETY: pipe is a valid connected server handle; dropping the client before any
-            // byte moves.
-            unsafe { DisconnectNamedPipe(pipe.0) };
+            disconnect(&pipe);
         }
     }
 
@@ -714,6 +750,8 @@ pub fn pipe_pair() -> io::Result<(PipeStream, PipeStream)> {
         Err(PipeConnectError::Io(failure)) => return Err(failure),
         Err(_) => return Err(io::ErrorKind::NotFound.into()),
     };
-    wait_for_client(&server, None)?;
+    if wait_for_client(&server, None)? == Arrival::ClientGone {
+        return Err(io::ErrorKind::BrokenPipe.into());
+    }
     Ok((PipeStream::new(server), PipeStream::new(client)))
 }
