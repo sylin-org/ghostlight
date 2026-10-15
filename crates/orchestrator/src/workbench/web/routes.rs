@@ -590,7 +590,7 @@ fn api(
         Api::Policy => json_response(Status::Ok, &projection.policy(&shared.facade.policy())),
         Api::Search => search(shared, &body),
         Api::PolicyPreview => preview(shared, &body),
-        Api::Rescan => rescan(shared, &projection, watching),
+        Api::Rescan => rescan(shared, &projection, watching, &body),
         Api::Window => window(shared, &body),
         Api::Runtime => runtime(shared, &body, watching),
         Api::PutPolicy => put_policy(shared, head, &body),
@@ -772,7 +772,10 @@ fn preview(shared: &Shared, body: &[u8]) -> Response {
     }
 }
 
-fn rescan(shared: &Shared, projection: &Projection, watching: bool) -> Response {
+fn rescan(shared: &Shared, projection: &Projection, watching: bool, body: &[u8]) -> Response {
+    if let Err(response) = decode::<NoArguments>(body) {
+        return response;
+    }
     let scan = || {
         shared
             .facade

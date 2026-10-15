@@ -282,7 +282,9 @@ impl Projection {
         value
     }
 
-    /// The compiled policy, as this audience sees it, with the etag of its user layer.
+    /// The compiled policy, as this audience sees it. Control also gets the etag of the user
+    /// layer, which the policy write routes check; a watcher never writes and is not given a
+    /// value it could test guesses about the withheld never-touch list against.
     #[must_use]
     pub fn policy(&self, authority: &EffectiveAuthority) -> Value {
         let mut value = to_value(authority);
@@ -315,7 +317,9 @@ impl Projection {
         if self.watching() {
             Self::count_never_touch_ceilings(&mut value, &never_touch);
         }
-        value["etag"] = Value::String(policy_etag(authority));
+        if !self.watching() {
+            value["etag"] = Value::String(policy_etag(authority));
+        }
         value
     }
 

@@ -128,7 +128,6 @@ pub enum ReadError {
 }
 
 /// One request's line and headers.
-#[derive(Debug)]
 pub struct Head {
     /// The method.
     pub method: Method,
@@ -139,6 +138,21 @@ pub struct Head {
     headers: Vec<(String, String)>,
     /// The body's declared size.
     pub content_length: usize,
+}
+
+/// Prints the request without any header value: one of them is the bearer.
+impl std::fmt::Debug for Head {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: Vec<&str> = self.headers.iter().map(|(name, _)| name.as_str()).collect();
+        f.debug_struct("Head")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field("query", &self.query)
+            .field("header_names", &names)
+            .field("header_values", &"[redacted]")
+            .field("content_length", &self.content_length)
+            .finish()
+    }
 }
 
 impl Head {
@@ -512,6 +526,18 @@ mod tests {
         assert_eq!(head.content_length, 7);
         assert_eq!(head.header("host"), Some("127.0.0.1:1"));
         assert_eq!(head.header("x-a"), Some("b"));
+    }
+
+    #[test]
+    fn a_request_prints_without_its_bearer() {
+        let head = parse_head(
+            "GET /api/context HTTP/1.1\r\nHost: 127.0.0.1:1\r\nAuthorization: Bearer s3cr3t-bearer",
+        )
+        .unwrap();
+        let printed = format!("{head:?}");
+        assert!(!printed.contains("s3cr3t-bearer"), "{printed}");
+        assert!(printed.contains("Authorization"), "{printed}");
+        assert!(printed.contains("[redacted]"), "{printed}");
     }
 
     #[test]

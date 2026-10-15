@@ -489,7 +489,6 @@ const POLICY_KEYS: &[&str] = &[
     "capabilities[].label",
     "capabilities[].state",
     "ceilings",
-    "etag",
     "headline",
     "layers",
     "layers[].document",
@@ -535,6 +534,9 @@ const POLICY_KEYS: &[&str] = &[
     "user_layer.path",
     "user_layer.source",
 ];
+
+/// What only the Control policy has.
+const POLICY_CONTROL_ONLY: &[&str] = &["etag"];
 
 /// What only a watcher's policy has.
 const POLICY_WATCH_ONLY: &[&str] = &["layers[].settings[].count"];
@@ -630,7 +632,7 @@ fn the_policy_holds_exactly_the_keys_classified_for_its_audience() {
     let authority = authority(&path);
     assert_eq!(
         key_paths(&projection(Audience::Control).policy(&authority)),
-        expected(&[POLICY_KEYS])
+        expected(&[POLICY_KEYS, POLICY_CONTROL_ONLY])
     );
     assert_eq!(
         key_paths(&projection(Audience::Watch).policy(&authority)),

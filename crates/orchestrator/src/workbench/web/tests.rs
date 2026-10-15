@@ -1137,6 +1137,24 @@ fn a_body_that_is_not_the_routes_arguments_is_a_bad_request() {
         assert_eq!(reply.status, 400, "{body}");
         assert_eq!(reply.code(), "bad_request");
     }
+    for body in ["", "not json", "[]", "\"x\"", r#"{"x":1}"#] {
+        for route in ["/api/integrations/rescan", "/api/integrations/setup-all"] {
+            let reply = fixture.control(post(route, body));
+            assert_eq!(reply.status, 400, "{route} {body}");
+            assert_eq!(reply.code(), "bad_request", "{route} {body}");
+        }
+    }
+}
+
+#[test]
+fn a_watcher_is_given_no_policy_etag_and_the_window_is() {
+    let fixture = Fixture::start();
+    assert!(fixture.control(get("/api/policy")).json()["etag"].is_string());
+    assert!(fixture
+        .watch(get("/api/policy"))
+        .json()
+        .get("etag")
+        .is_none());
 }
 
 #[test]
