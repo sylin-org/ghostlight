@@ -9,7 +9,9 @@ Gate, with `CARGO_TARGET_DIR=.target-assessment`: `cargo fmt --all --check`, `ca
 --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked`, `npm test
 --prefix extension`, the protocol-4 and level-3 page asset tests, `npm test --prefix
 packaging/npm`, `node --test packaging/mcpb/test/launcher.test.js`, `node --check` on changed
-scripts, and `scripts/check-repository-integrity.ps1`. No journeys and no binaries are started.
+scripts, and `scripts/check-repository-integrity.ps1`. Journeys
+run once switch-18 rewrites them. Until then, binaries run under `GHOSTLIGHT_TEST_HOME`, or on a
+preserved real home after `-Plan`.
 
 ## RESUME HERE
 

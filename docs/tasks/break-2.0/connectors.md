@@ -120,6 +120,11 @@ Next slice: the remaining deferrable connectors slices, per the lane plan. No bl
   Windows and 16 on Linux for each connector; the Windows extra is `ghostlight-win-peer`. The
   extension entry arrives with switch-17.
 
+## Owed
+
+- `crates/relay/src/log.rs` gets a test that pins its line's key set (and that only Event-vocabulary
+  names appear) before the bridge diagnostics sink and its schema pin are retired (ADR-0145 D4).
+
 ## Blockers
 
 None.

@@ -11,6 +11,11 @@ directory.
 
 ## Ownership
 
+Status: the service and extension lanes are closed. The switch owns every file (switch.md),
+including bridge, win-peer, the manifests and Cargo.lock. Any remaining connectors slice runs as a
+switch slice, one at a time, not as a parallel lane. The table records how the lanes split the
+work.
+
 No file is edited by two lanes.
 
 | Lane | Owns |
@@ -48,29 +53,30 @@ Ownership also covers compilation:
 - Stage your own paths only: `git add -- <paths>`. Commit only those paths with
   `git commit -s -m "<type>(<scope>): <subject>" -m "<body>" -m "Co-Authored-By: ..." -- <paths>`.
 - Never run `git add -A`, `git add .`, `git commit -a`, stash, reset, `checkout --`, clean, rebase
-  or push. While `.git/index.lock` exists, retry after a few seconds.
+  or push. While `.git/index.lock` exists, retry after a few seconds. (The AGENTS.md note about
+  pending edits in stashes records how the 2026-10-05 branch cleanup preserved existing work. It
+  does not permit creating stashes here.)
+- An error inside a file another agent is changing is that agent's work in progress: wait and
+  retry, never fix it.
+- Build into your own `CARGO_TARGET_DIR`.
 - Conventional commits, one logical change each. Every commit passes its lane gate.
 - Update the lane ledger in the same commit as the slice.
-- If a slice cannot go green in about 60 minutes, commit nothing partial, record the blocker, and
-  continue with the next slice that does not depend on it.
+- Never commit a partial slice. Record a blocker in the lane ledger and move to work that does not
+  depend on it.
 
 ## Rules
 
-- ASCII only. A doc comment on every module and every public function. No history-narrating
-  comments. Lint suppressions only as `#[expect(lint, reason = "...")]`. Repeated literals become
-  named constants.
+- AGENTS.md code style and writing conventions apply. No history-narrating comments (ADR-0197
+  Decision 24). Lint suppressions are `#[expect(lint, reason = "...")]`.
 - New service items stay `pub` along a pub path from `lib.rs` until they are wired, so
   `-D warnings` sees no dead code. The switch narrows visibility.
 - The 2.0 tree reads pristine (ADR-0197 Decision 24): no shims, dead code or transition paths.
-- Nothing runs or leaves the machine. No Ghostlight binary, journey, service, dev loop,
-  installation or browser. Never read `local/`, `private/` or `saps/`.
+- Nothing leaves the machine. Never read `local/`, `private/` or `saps/`. Binaries and journeys
+  may run under `GHOSTLIGHT_TEST_HOME` with your own `CARGO_TARGET_DIR`. A 2.0 install on a real
+  1.x home is a one-way break migration (83aa61f0: the 1.x service fell to all-open mid-move), so
+  first preserve a copy of that home, then run `pwsh scripts/dev-loop.ps1 -Plan` before the real
+  run. The install replaces the live service every session on this machine uses.
 
 ## Gates
 
-- Connectors: with `CARGO_TARGET_DIR=.target-connectors`, `cargo fmt -p <crates> --check`,
-  `cargo clippy -p <crates> --all-targets -- -D warnings` and `cargo test -p <crates>`, where
-  `<crates>` is only what is already built on `ghostlight-relay`. Script slices add a parse check,
-  `sh -n`, `npm test --prefix packaging/npm` or `node --test packaging/mcpb/test/launcher.test.js`
-  as they apply.
-- Docs slices: `pwsh -NoProfile -File scripts/check-repository-integrity.ps1`.
-- Service and extension lanes: their own gates, named in their ledgers.
+Gate: the switch gate in switch.md.
