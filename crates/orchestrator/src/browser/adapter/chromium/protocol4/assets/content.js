@@ -1062,7 +1062,7 @@ ${line}` : line;
   }
 
   // How each filled field stands against what was given: held as given, held in another format
-  // (text only), or changed by the page.
+  // (text only, never a credential-class control), or changed by the page.
   function fillStanding(fields, allowCredentials = false) {
     return fields.map((field, index) => {
       const element = resolve(field.locator);
@@ -1072,7 +1072,7 @@ ${line}` : line;
       const held = fillControlValue(element);
       const expected = expectedFillValue(element, field.value);
       if (held === expected) return { index, element, state: "held" };
-      const reformatted = !echoedControl(element) && typeof held === "string" && foldedFormat(held) === foldedFormat(expected);
+      const reformatted = !credentialClass(element) && !echoedControl(element) && typeof held === "string" && foldedFormat(held) === foldedFormat(expected);
       return { index, element, state: reformatted ? "reformatted" : "changed" };
     });
   }

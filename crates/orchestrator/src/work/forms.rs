@@ -1237,7 +1237,6 @@ fn credential_control(
     )
 }
 
-/// Whether answering this control can change the options another control offers.
 /// Pair each problem the page reported with the field it names: that field's handle, given
 /// value, and last observed role and name. A position the call does not have is a page that
 /// disagrees with the contract, and gives none.
@@ -1296,6 +1295,7 @@ fn held_fields(
     Some(fields)
 }
 
+/// Whether answering this control can change the options another control offers.
 const fn is_choice(role: TargetRole) -> bool {
     matches!(
         role,

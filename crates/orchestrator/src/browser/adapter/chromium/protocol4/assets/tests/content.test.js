@@ -2985,6 +2985,20 @@ test("a credential-class field is never echoed, and a reverted one carries no va
   assert.deepEqual(reply.error.detail, { problems: [{ field: 0, problem: "reverted" }] });
 });
 
+test("a credential-class field the page reformatted is a failure, not a tolerated format", async () => {
+  const harness = contentHarness();
+  const secret = textInput(harness, { label: "Key", value: "abc-123" });
+  secret.type = "password";
+  const locator = await harness.locatorOf("Key");
+  const fields = [{ locator, value: "abc-123" }];
+
+  secret.value = "ABC123";
+  const reply = await harness.send(verifyFill(fields, { allow_credentials: true }));
+
+  assert.equal(reply.error.code, "not_retained");
+  assert.deepEqual(reply.error.detail, { problems: [{ field: 0, problem: "reverted" }] });
+});
+
 test("a field that is stable only part of the window still fails without naming a change", async () => {
   const harness = contentHarness();
   textInput(harness, { label: "Name", value: "Ada" });
