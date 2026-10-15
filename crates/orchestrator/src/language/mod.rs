@@ -8,6 +8,7 @@ pub mod capability_map;
 pub mod composition;
 pub mod control;
 pub mod coverage;
+pub mod deployment;
 pub mod environment;
 pub mod field_echo;
 pub mod field_problem;

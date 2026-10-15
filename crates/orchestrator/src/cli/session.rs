@@ -41,7 +41,8 @@ fn declared() -> Option<String> {
 /// How many ancestors the caller walk reads before it stops.
 ///
 /// The bound covers the whole climb: the Ghostlight hops (the edge hands over to a service image,
-/// a carrier hands over to the installed one) and the run of same-named ancestors above them. It keeps a malformed process tree from looping the walk.
+/// a carrier hands over to the installed one) and the run of same-named ancestors above them. It
+/// keeps a malformed process tree from looping the walk.
 const MAX_ANCESTORS_READ: usize = 8;
 
 /// One process as the caller walk sees it.

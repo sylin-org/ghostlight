@@ -117,13 +117,25 @@ fn serve_reason(arguments: &[OsString]) -> anyhow::Result<StartReason> {
     }
 }
 
+/// The option that installs a payload as the development channel.
+pub const DEVELOPMENT_OPTION: &str = "--development";
+
+/// The option that returns a development installation to a release.
+pub const RESTORE_OPTION: &str = "--restore";
+
+/// The option that prints the install plan and changes nothing.
+pub const PLAN_OPTION: &str = "--plan";
+
 /// How `deployment install` is used.
-const DEPLOYMENT_USAGE: &str =
-    "usage: ghostlight deployment install [<payload directory>] [--development | --restore] [--plan]";
+fn deployment_usage() -> String {
+    format!(
+        "usage: ghostlight deployment install [<payload directory>]          [{DEVELOPMENT_OPTION} | {RESTORE_OPTION}] [{PLAN_OPTION}]"
+    )
+}
 
 /// Read the options of `deployment install`: at most one payload directory, at most one of
-/// `--development` and `--restore`, and `--plan`. A restore installs a payload like any other
-/// install, so it takes the same optional payload directory.
+/// [`DEVELOPMENT_OPTION`] and [`RESTORE_OPTION`], and [`PLAN_OPTION`]. A restore installs a
+/// payload like any other install, so it takes the same optional payload directory.
 fn deployment_request(arguments: &[OsString]) -> Option<crate::install::deployment::Request> {
     use crate::install::deployment::{Mode, Request};
 
@@ -134,11 +146,11 @@ fn deployment_request(arguments: &[OsString]) -> Option<crate::install::deployme
     };
     for argument in arguments {
         match argument.to_str() {
-            Some("--development") if request.mode == Mode::Release => {
+            Some(DEVELOPMENT_OPTION) if request.mode == Mode::Release => {
                 request.mode = Mode::Development;
             }
-            Some("--restore") if request.mode == Mode::Release => request.mode = Mode::Restore,
-            Some("--plan") if !request.plan_only => request.plan_only = true,
+            Some(RESTORE_OPTION) if request.mode == Mode::Release => request.mode = Mode::Restore,
+            Some(PLAN_OPTION) if !request.plan_only => request.plan_only = true,
             Some(option) if option.starts_with("--") => return None,
             _ if request.payload.is_none() => request.payload = Some(argument.into()),
             _ => return None,
@@ -170,7 +182,7 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
                 return Ok(LaunchMode::DeploymentInstall(request));
             }
         }
-        anyhow::bail!("{DEPLOYMENT_USAGE}");
+        anyhow::bail!("{}", deployment_usage());
     }
     if arguments.is_empty() {
         return Ok(LaunchMode::Desktop);

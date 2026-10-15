@@ -3,7 +3,7 @@
 //! [`start`] gathers the facts [`crate::install::entry::decide`] needs from the Ghostlight home,
 //! asks it, and carries the answer out through a [`Launcher`]: run here, forward to the installed
 //! service, hand the edge's own verbs to the installed edge, install from a carrier package
-//! first, or refuse to serve (ADR-0197 Decisions 10 and 13, ADR-0199 Decision 2 and the
+//! first, name the way back when a development build's executable is gone, or refuse to serve (ADR-0197 Decisions 10 and 13, ADR-0199 Decision 2 and the
 //! development channel amendment). The launcher is the only part that starts processes, so tests
 //! drive the real rule with a fake one.
 
@@ -16,6 +16,7 @@ use anyhow::Result;
 use ghostlight_relay::os::session;
 
 use crate::cli::parse::{self, LaunchMode};
+use crate::install::deployment::DevelopmentExecutableMissing;
 use crate::install::entry::{self, canonical_path, Entry, Facts, Role};
 use crate::install::layout::Layout;
 use crate::install::record::{self, Channel, InstallRecord, Standing};
@@ -98,6 +99,9 @@ pub fn start(
     };
     match entry::decide(&current_exe, role, &facts) {
         Entry::Run => Ok(Start::Dispatch(parsed?)),
+        Entry::Forward(target) if development_channel && !target.is_file() => {
+            Err(DevelopmentExecutableMissing(target).into())
+        }
         Entry::Forward(target) => Ok(Start::Exit(launcher.run(&target, &arguments)?)),
         Entry::CarrierInstall => {
             launcher.install(layout)?;
@@ -275,6 +279,27 @@ mod tests {
                 "{version}"
             );
         }
+    }
+
+    #[test]
+    fn a_carrier_names_the_way_back_when_the_development_build_it_would_run_is_gone() {
+        let home = Home::new();
+        let carrier = home.carrier();
+        home.installed();
+        home.record_in(env!("CARGO_PKG_VERSION"), Channel::Development);
+        fs::remove_file(home.layout.service_executable()).unwrap();
+        for arguments in [&["call", "--catalog"][..], &["open"]] {
+            let (result, calls) = home.start(&carrier, arguments);
+            let error = result.unwrap_err();
+            let missing = error
+                .downcast_ref::<DevelopmentExecutableMissing>()
+                .unwrap_or_else(|| panic!("{error}"));
+            assert_eq!(missing.0, home.layout.service_executable());
+            assert!(error.to_string().contains("deployment install --restore"));
+            assert!(calls.is_empty(), "{arguments:?}");
+        }
+        let edge_missing = home.start(&carrier, &["mcp"]).0.unwrap_err();
+        assert!(edge_missing.is::<DevelopmentExecutableMissing>());
     }
 
     #[test]

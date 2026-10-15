@@ -83,17 +83,22 @@ the break migration's destinations
 client-location files into the home and leaves the originals in place (the 1.x service that is
 still running keeps reading its policy from them, and a service or client started by the next
 steps must find the copies), then compares `bin/install.json` with the
-payload: an older payload is refused, the same intact version is left alone, the service image is
+payload: an older payload is refused, the same intact version with an intact edge is left alone, the service image is
 rename-swapped (`install/swap.rs`), and the edge is replaced only when the relay revision
 changes, the edge in `bin` is missing or is not the one the record names, or `bin` still holds
 the layout of an earlier development build, where the service image had the edge's name and two
 connector images sat beside it; the installer stops those exact images and deletes the connector
 files. A release also refuses to install over the development channel and names the restore
-command. `--development` places the same files in `bin` the same way, but swaps the service
+commands of the release carriers (npm and the get scripts), after it has checked that the payload
+is not `bin` itself. `--development` places the same files in `bin` the same way, but swaps the service
 every time, whatever version is installed, and records `"channel": "development"` in
 `install.json`. `--restore` installs this executable's own package the same way whatever is
 installed, records the release channel, and is the one allowed move down. It is not offline: the
-package it installs is a release carrier's, from npm or the get scripts. Earlier development
+package it installs is a release carrier's, from npm or the get scripts. Until 2.0 is published,
+the published npm package and the main-branch get scripts have no 2.0 `--restore`, so the way back
+is a 2.0 build's own `deployment install --restore`, run from that build's directory. A carrier
+that finds a development record with the executable it would run gone, and `doctor`, name the same
+route. Earlier development
 builds ran from `~/.ghostlight/dev`, selected by the marker `~/.ghostlight/development`. An
 install that finds either stops what runs from there and removes both once `bin` holds the new
 executables; an entry a running program keeps is reported and removed by the next install.

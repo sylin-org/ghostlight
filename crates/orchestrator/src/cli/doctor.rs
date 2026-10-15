@@ -18,6 +18,7 @@ use crate::install::container;
 use crate::install::deployment::{stop_strays, stray_processes, StrayProcess};
 use crate::install::layout::Layout;
 use crate::install::record::{Channel, InstallRecord};
+use crate::language::deployment as deployment_words;
 use crate::language::workbench as words;
 
 /// Everything `doctor` observed, gathered once.
@@ -39,6 +40,22 @@ pub struct DoctorObservation {
     strays: Vec<StrayProcess>,
     readiness: Option<crate::workbench::ReadinessSummary>,
     diagnostics: crate::diagnostics::DiagnosticsReport,
+}
+
+impl DoctorObservation {
+    /// The sentence that names the way back to a release, when the record says a development
+    /// build is installed and one of its executables is gone. No command works from such an
+    /// installation, so this is the line a person needs.
+    fn missing_development_executable(&self) -> Option<String> {
+        let development = self
+            .installed
+            .as_ref()
+            .is_some_and(|record| record.channel == Channel::Development);
+        let (missing, _) = self.binaries.iter().find(|(_, ready)| !ready)?;
+        development.then(|| {
+            deployment_words::development_executable_missing(&missing.display().to_string())
+        })
+    }
 }
 
 /// Observe complete local system state for diagnostic reporting.
@@ -107,6 +124,9 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         .is_some_and(|record| record.channel == Channel::Development)
     {
         println!("{}", words::DEVELOPMENT_CHANNEL_LINE);
+    }
+    if let Some(line) = observation.missing_development_executable() {
+        println!("{line}");
     }
     println!(
         "Environment: {} -- {}",
@@ -308,6 +328,34 @@ mod tests {
                 used_bytes: 0,
             },
         }
+    }
+
+    #[test]
+    fn a_development_build_with_a_missing_executable_gets_the_way_back() {
+        use crate::install::record::{Channel, InstallRecord};
+
+        let mut observed = observation(Vec::new());
+        observed.binaries = vec![
+            (PathBuf::from("bin/ghostlight-service"), false),
+            (PathBuf::from("bin/ghostlight"), true),
+        ];
+        assert_eq!(observed.missing_development_executable(), None);
+        observed.installed = Some(InstallRecord {
+            service_version: "2.0.0".into(),
+            relay_revision: "4".into(),
+            service_sha256: "a".into(),
+            edge_sha256: None,
+            channel: Channel::Release,
+        });
+        assert_eq!(observed.missing_development_executable(), None);
+        if let Some(record) = observed.installed.as_mut() {
+            record.channel = Channel::Development;
+        }
+        let line = observed.missing_development_executable().unwrap();
+        assert!(line.contains("bin/ghostlight-service is missing"), "{line}");
+        assert!(line.ends_with(&crate::language::deployment::restore_route()));
+        observed.binaries[0].1 = true;
+        assert_eq!(observed.missing_development_executable(), None);
     }
 
     #[test]

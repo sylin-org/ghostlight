@@ -14,7 +14,8 @@ decision:
 
 - ADR-0197 Decisions 1 and 3 are superseded now (Decisions 1 to 5 here).
 - ADR-0197 Decision 15, and the development directory and marker of Decision 13, are superseded
-  when Decision 18 lands (2.x).
+  when Decision 18 lands (2.x). [The amendment of 2026-10-15, the development channel lands in
+  2.0, brought Decision 18 into 2.0, so these supersessions take effect in 2.0.]
 - ADR-0127 Decisions 1 and 3 and ADR-0166's desktop-ready discovery (its section "Discovery means
   the desktop interaction route is ready", which ADR-0197 Decision 10 kept) are superseded when
   the shell lands. ADR-0102 Decisions 1 and 6 and ADR-0119 Decisions 2 and 3 change when the shell

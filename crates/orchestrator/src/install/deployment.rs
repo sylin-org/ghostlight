@@ -9,9 +9,11 @@
 //!    the home: no 1.x program holds them open, and the 2.0 service or client that the next
 //!    steps let start must find them in place;
 //! 2. reads `bin/install.json` and decides what to replace. A release refuses an older payload
-//!    and a development installation, does nothing for the same intact version, rename-swaps the
-//!    service image into `bin`, and replaces the edge only when the relay revision changes, `bin`
-//!    still holds the pre-edge layout, or the edge in `bin` is not the one recorded.
+//!    and a development installation, does nothing for the same intact version with an intact
+//!    edge, rename-swaps the service image into `bin`, and replaces the edge only when the relay
+//!    revision changes, `bin` still holds the pre-edge layout, or the edge in `bin` is missing or
+//!    is not the one recorded. The payload is checked first, so a release install run from `bin`
+//!    itself reports that, not a restore command that would fail the same way.
 //!    `--development` places the same files the same way, but always swaps the service, whatever
 //!    version is installed, and records the development channel. `--restore` does the same for
 //!    this executable's own package and records the release channel: the one way back from a
@@ -56,6 +58,7 @@ use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
 use super::record::{self, Channel, InstallRecord, PayloadRefused, Standing};
 use super::swap;
 use crate::cli::client;
+use crate::language::deployment as words;
 use crate::service::lock::ServiceLock;
 
 /// How long an install waits for another install to finish. An install can itself spend the
@@ -509,51 +512,36 @@ pub struct Outcome {
     pub registrations: Option<ReconcileReport>,
     /// What became of the files the 1.x Flatpak route left in the home.
     pub flatpak: Vec<FlatpakStep>,
-    /// Entries of the plan's deletions that could not be removed, because a program still runs
-    /// from them. The next install tries again; this one is not failed by them.
+    /// Entries of the plan's deletions that could not be removed, usually because a program still
+    /// runs from them. The next install tries again; this one is not failed by them.
     pub left_behind: Vec<PathBuf>,
 }
 
-/// A release package found an installation that a development build made.
+/// A release package found an installation that a development build made. The refusal names the
+/// release carriers that restore: a package's own directory is a temporary stage that is gone
+/// once its carrier exits.
 #[derive(Debug, Error)]
-#[error(
-    "The installed Ghostlight is a development build, so this package did not replace it. To \
-     return to a release, run: {restore}"
-)]
-pub struct DevelopmentInstalled {
-    /// The command that installs this package as a release over the development build.
-    pub restore: String,
-}
+#[error("{}", words::development_installed())]
+pub struct DevelopmentInstalled;
 
-impl DevelopmentInstalled {
-    /// The refusal that names `executable`, the service image of the refused package.
-    fn new(executable: &Path) -> Self {
-        let name = executable.display().to_string();
-        let name = if name.contains(char::is_whitespace) {
-            format!("\"{name}\"")
-        } else {
-            name
-        };
-        Self {
-            restore: format!("{name} deployment install {RESTORE_OPTION}"),
-        }
-    }
-}
-
-/// The option that returns a development installation to a release.
-const RESTORE_OPTION: &str = "--restore";
+/// The installation record says a development build is installed and the executable a command
+/// goes to is gone, so there is nothing to hand the command to. The restore route is the only
+/// way forward.
+#[derive(Debug, Error)]
+#[error("{}", words::development_executable_missing(&.0.display().to_string()))]
+pub struct DevelopmentExecutableMissing(pub PathBuf);
 
 /// Why a payload directory cannot be installed.
 #[derive(Debug, Error)]
 pub enum PayloadError {
     /// An executable is missing from the payload.
-    #[error("The Ghostlight package is missing {0}")]
+    #[error("{}", words::payload_missing(&.0.display().to_string()))]
     Missing(PathBuf),
     /// The payload already is the directory it would be installed into.
-    #[error("Run the installation from the package's own directory, not from {0}")]
+    #[error("{}", words::payload_in_place(&.0.display().to_string()))]
     InPlace(PathBuf),
     /// The payload's service is another build than the running installer.
-    #[error("{0} holds another build of Ghostlight; run that build's own deployment install")]
+    #[error("{}", words::payload_other_build(&.0.display().to_string()))]
     OtherBuild(PathBuf),
 }
 
@@ -633,10 +621,7 @@ pub fn install_carrier(layout: &Layout) -> anyhow::Result<()> {
 
 /// The new service did not answer in time.
 #[derive(Debug, Error)]
-#[error(
-    "The Ghostlight service in {0} did not start within 30 s. The installation record was not \
-     written, so the next launch installs again"
-)]
+#[error("{}", words::service_did_not_start(&.0.display().to_string(), READY_WAIT.as_secs()))]
 pub struct ServiceDidNotStart(pub PathBuf);
 
 /// Plan `request` and, unless it only asks for the plan, carry it out under the install lock.
@@ -676,14 +661,13 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
     let edge_changes = edge_changes(context, installed.as_ref())?;
     match mode {
         Mode::Release => {
+            validate_payload(&context.payload, &layout.bin())?;
             if installed
                 .as_ref()
                 .is_some_and(|record| record.channel == Channel::Development)
             {
-                let service = context.payload.join(SERVICE_EXECUTABLE_NAME);
-                return Err(DevelopmentInstalled::new(&service).into());
+                return Err(DevelopmentInstalled.into());
             }
-            validate_payload(&context.payload, &layout.bin())?;
             let image = installed_image(layout)?;
             let payload_record = context.build.record(None, Channel::Release);
             match record::decide(installed.as_ref(), &payload_record, image.as_deref()) {
@@ -691,13 +675,15 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                     let installed = installed.as_ref().expect("a newer standing has a record");
                     return Err(PayloadRefused::new(installed, &payload_record).into());
                 }
-                Standing::Same if plan.migration.is_empty() && retired.is_empty() => {
+                Standing::Same
+                    if !edge_changes && plan.migration.is_empty() && retired.is_empty() =>
+                {
                     plan.unchanged = true;
                     plan.restart = false;
                     return Ok(plan);
                 }
-                Standing::Same => {}
-                Standing::Absent | Standing::Older | Standing::Damaged => {
+                Standing::Same if !edge_changes => {}
+                Standing::Absent | Standing::Older | Standing::Damaged | Standing::Same => {
                     place_in_bin(
                         context,
                         &mut plan,
@@ -859,7 +845,7 @@ fn stop_legacy(control: &dyn ProcessControl, images: &[PathBuf]) -> anyhow::Resu
     let stop = || {
         control
             .stop_image(images)
-            .context("Could not stop the old Ghostlight programs")
+            .context(words::OLD_PROGRAMS_WOULD_NOT_STOP)
     };
     stop()?;
     for _ in 0..LEGACY_RESPAWN_ROUNDS {
@@ -991,8 +977,8 @@ impl RetiredDevelopment {
 }
 
 /// Stop what runs from the retired development directory and remove what `plan` lists as
-/// deletions. Returns the entries that could not be removed, which are the ones a program still
-/// runs from. A stop that fails is not an error here: the removal that follows names what stayed.
+/// deletions. Returns the entries that could not be removed, which are usually the ones a program
+/// still runs from. A stop that fails is not an error here: the removal that follows names what stayed.
 fn remove_retired_development(
     control: &dyn ProcessControl,
     layout: &Layout,
@@ -1073,7 +1059,7 @@ fn hold_install_lock(path: &Path) -> io::Result<File> {
             Err(TryLockError::WouldBlock) => {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    "Ghostlight installation is still changing; retry shortly",
+                    words::INSTALL_LOCK_BUSY,
                 ))
             }
             Err(TryLockError::Error(error)) => return Err(error),
@@ -1506,6 +1492,39 @@ mod tests {
     }
 
     #[test]
+    fn the_same_version_with_a_missing_or_changed_edge_is_not_left_alone() {
+        for damage in [None, Some("another edge")] {
+            let fixture = Fixture::new();
+            fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            match damage {
+                None => fs::remove_file(fixture.layout.edge()).unwrap(),
+                Some(text) => fs::write(fixture.layout.edge(), text).unwrap(),
+            }
+            let control = FakeControl::new();
+            let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+            assert!(!outcome.plan.unchanged, "{damage:?}");
+            assert!(
+                placed_names(&outcome.plan).contains(&EDGE_EXECUTABLE_NAME),
+                "{damage:?}"
+            );
+            assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+            assert_eq!(outcome.service_started, Some(true));
+            let recorded = fixture.record().unwrap().edge_sha256;
+            assert_eq!(
+                recorded,
+                Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+            );
+            // Repaired, so the next identical install is a no-op again.
+            let outcome = fixture
+                .run(Mode::Release, VERSION, &FakeControl::new())
+                .unwrap();
+            assert!(outcome.plan.unchanged, "{damage:?}");
+        }
+    }
+
+    #[test]
     fn an_older_payload_is_refused_and_changes_nothing() {
         let fixture = Fixture::new();
         fixture
@@ -1815,22 +1834,48 @@ mod tests {
         for version in ["2.0.0", VERSION, "9.9.9"] {
             let control = FakeControl::new();
             let error = fixture.run(Mode::Release, version, &control).unwrap_err();
-            let refusal = error
-                .downcast_ref::<DevelopmentInstalled>()
-                .unwrap_or_else(|| panic!("{error}"));
-            let service = fixture.payload.join(SERVICE_EXECUTABLE_NAME);
+            assert!(error.is::<DevelopmentInstalled>(), "{error}");
+            let message = error.to_string();
             assert!(
-                refusal.restore.ends_with(&format!(
-                    "{} deployment install --restore",
-                    service.display()
-                )),
-                "{}",
-                refusal.restore
+                message.contains("npx ghostlight deployment install --restore"),
+                "{message}"
+            );
+            assert!(message.contains("get.ps1"), "{message}");
+            assert!(message.contains("get.sh"), "{message}");
+            assert!(
+                !message.contains(&fixture.payload.display().to_string()),
+                "a staged payload is gone once its carrier exits: {message}"
             );
             assert!(error.to_string().contains("development build"), "{error}");
             assert!(control.calls().is_empty());
             assert_eq!(fixture.snapshot(), before, "{version}");
         }
+    }
+
+    #[test]
+    fn a_release_install_run_in_place_reports_the_in_place_payload_not_a_restore() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        let before = fixture.snapshot();
+        // The installed edge hands `ghostlight deployment install` to bin/ghostlight-service,
+        // so the payload is bin itself.
+        let control = FakeControl::new();
+        let in_place = Context {
+            payload: fixture.layout.bin(),
+            ..fixture.context(fixture.build(VERSION), &control)
+        };
+        let error = plan(&in_place, Mode::Release).unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<PayloadError>(),
+                Some(PayloadError::InPlace(_))
+            ),
+            "{error}"
+        );
+        assert!(!error.to_string().contains("--restore"), "{error}");
+        assert_eq!(fixture.snapshot(), before);
     }
 
     #[test]

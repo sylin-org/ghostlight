@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::language::deployment as words;
+
 /// Which kind of build the installation in `bin` is.
 ///
 /// The development loop installs its build into `bin` as the development channel. A release
@@ -126,10 +128,7 @@ pub fn decide(
 
 /// Why a payload was not installed.
 #[derive(Debug, Error)]
-#[error(
-    "Ghostlight {installed} is already installed and this package carries the older \
-     {payload}, so nothing was changed"
-)]
+#[error("{}", words::payload_refused(.installed, .payload))]
 pub struct PayloadRefused {
     /// Version now installed.
     pub installed: String,
