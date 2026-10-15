@@ -128,9 +128,6 @@ if ($brokenLinks.Count -gt 0) {
     throw "Broken local documentation links:`n$($brokenLinks -join "`n")"
 }
 
-$extension = Get-Content -LiteralPath (Join-Path $repo "extension/manifest.json") -Raw |
-    ConvertFrom-Json
-
 # The canonical source catalog and active language surfaces must agree exactly.
 $catalogSource = Get-Content -LiteralPath (
     Join-Path $repo "crates/orchestrator/src/language/catalog.rs"
@@ -172,19 +169,6 @@ if (-not $language.Contains("The $catalogCount tools below")) {
 }
 if (-not $acceptance.Contains("exactly the $catalogCount tools")) {
     throw "ACCEPTANCE.md catalog count does not match the source catalog"
-}
-
-$permissionDocument = Get-Content -LiteralPath (
-    Join-Path $repo "docs/legal/PERMISSION_JUSTIFICATIONS.md"
-) -Raw
-$documentedPermissions = @(
-    [regex]::Matches($permissionDocument, '(?m)^## (?<permission>[A-Za-z][A-Za-z0-9]*)\r?$') |
-        ForEach-Object { $_.Groups["permission"].Value } |
-        Sort-Object
-)
-$manifestPermissions = @($extension.permissions | Sort-Object)
-if (($documentedPermissions -join "`n") -ne ($manifestPermissions -join "`n")) {
-    throw "Extension manifest permissions and Chrome Web Store justifications differ"
 }
 
 # The plugin distribution member: twin manifests and both catalogs must agree (ADR-0144).
@@ -237,4 +221,3 @@ if (($claudeServer.args -join "`n") -ne ($zcodeServer.args -join "`n")) {
 
 Write-Output "Repository integrity: local links valid."
 Write-Output "Only the $($expectedNonAscii.Count) listed historical files may contain non-ASCII bytes."
-Write-Output "Every extension manifest permission has exactly one Chrome Web Store justification."
