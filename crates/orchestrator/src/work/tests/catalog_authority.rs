@@ -728,7 +728,7 @@ fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child(
             fs::write(
                 &policy,
                 serde_json::to_vec(&json!({
-                    "schema":3,"name":"Exact ordinary permission","version":"1",
+                    "schema":4,"name":"Exact ordinary permission","version":"1",
                     "grants":grants
                 }))
                 .unwrap(),
@@ -822,7 +822,7 @@ fn observation_variants_reject_missing_configured_capabilities_before_browser_ef
                 fs::write(
                     &policy,
                     serde_json::to_vec(&json!({
-                        "schema":3,"name":"Incomplete named work","version":"1",
+                        "schema":4,"name":"Incomplete named work","version":"1",
                         "grants":[{"id":"partial","hosts":{"allow":["*"]},"allowed":permitted}]
                     }))
                     .unwrap(),
@@ -892,7 +892,7 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
             let (tab_handle, target, button) = established(&executor, &browser, &workspace);
             let policy = temporary_policy("recording-distinct-source-and-target");
             fs::write(&policy, serde_json::to_vec(&json!({
-                "schema":3,"name":"Separate source and destination","version":"1","grants":[
+                "schema":4,"name":"Separate source and destination","version":"1","grants":[
                     {"id":"source","hosts":{"allow":["source.example"]},"allowed":[if source_read { "read" } else { "write" }]},
                     {"id":"destination","hosts":{"allow":["example.com"]},"allowed":[if destination_write { "write" } else { "read" }]},
                     {"id":"elsewhere","hosts":{"allow":["unrelated.example"]},"allowed":["read","write"]}

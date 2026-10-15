@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f03b-policy-schema4.
+Next: f04-audit-v2.
 
 ## Landed
 
@@ -111,6 +111,7 @@ Next: f03b-policy-schema4.
 | f01c-yaml-copy-setup | goose and Continue get Copy setup instead of a YAML editor (ADR-0197 D22). `ConfigDialect::Manual(ManualDialect::{Goose, Continue})` replaces the YAML dialect: the file is never read, parsed or written; the state is NotDetected or Available from the existing presence evidence; `can_install`, `can_fix` and `can_uninstall` are false; the detail is one sentence naming the file; `setup_detected` skips it; an explicit install, fix or uninstall returns `HarnessError::ManualSetup` with that sentence and changes nothing. All YAML parse and edit functions, their tests and `serde_yaml` (with `unsafe-libyaml` and `ryu`) are gone. README and the installation guide say goose and Continue use Copy setup. | see `git log` |
 | f02-catalog-golden | The model surface is pinned (ADR-0197 D8 and D17, ADR-0198 D26). `ToolDefinition.output_schema`, `outcome_schema()`, the strip in `render_catalog`, `listed_tools()` and the tests that only read the output schema are gone; `tools_list_carries_no_output_schema` stays. `docs/1.0/catalog.json` is the exact `tools` array of `tools/list`, pretty-printed; `the_catalog_matches_docs_1_0_catalog_json` and `the_catalog_golden_is_ascii` guard it. `tests/golden/model/success.json` and `refusal.json` pin the complete `tools/call` result (content, structuredContent, isError) at the latest MCP revision through the real session and `lean::project`, with volatile ids normalized; `a_listed_tab_matches_the_success_golden` and `a_call_that_does_not_decode_matches_the_refusal_golden` (in `work/tests/golden.rs`) guard them, and `GHOSTLIGHT_CATALOG_UPDATE=1` rewrites all three. These two files are the envelope pin. ACCEPTANCE, ARCHITECTURE and LANGUAGE stop promising an output schema; AGENTS.md names the regeneration command. | see `git log` |
 | f03a-attention-state | The attention runtime state and its control file are gone (ADR-0197 D19). `RuntimeControls` holds active, held and ended in memory only; `GHOSTLIGHT_RUNTIME_CONTROL_FILE`, `with_runtime_control_file`, `require_attention` and `runtime_control_file_configured` are removed, so `runtime_decision` reads only the in-memory controls. `ReasonCode::RuntimeAttention`, `Status::AttentionRequired`, `Refusal::AttentionRequired`, `CheckFailure::AttentionRequired`, `AuditRefusal::AttentionRequired`, `DomainEvent::AttentionRequired` with its presentation and workbench reactions, `PresentationKind::Attention` (service and wire mirror), `RuntimeControlState::Attention`, `StepCounts.attention_required` and `EXIT_ATTENTION` are removed; the other exit codes keep their numbers. `StepCause::AttentionRequired` stays for the local interlock. `StepCounts` no longer denies unknown fields and an unknown refusal reason already reads as no refusal facts, so earlier audit lines still read. The page assets lose the attention branch and `tests/golden/protocol4/assets.sha256` is refreshed. LANGUAGE, ARCHITECTURE, ACCEPTANCE, INTENT, the scripting and SIEM guides, the adapter-protocol-4 note and the man page stop naming the state. | see `git log` |
+| f03b-policy-schema4 | Policy schema 4 (ADR-0197 D19, blueprint F3). Schema 4 is schema 3 without `mode` (on the policy and on each grant), `channels.mcp.enabled`, `channels.cli.enabled`, `policy.user.enabled`, `content.frames.handling` and `content.frames.notice`; identity and the canonical hash are unchanged. `parse` accepts only schema 4 and refuses schema 3 with `unsupported policy schema 3; run ghostlight policy migrate <file>` (`ManifestError::RetiredSchema`). `governance/migrate.rs` and `language/migration.rs` carry `ghostlight policy migrate <file>`: it drops `mode` enforce, a channel set to true, the user switch and a frame option at its default, refuses everything else with one sentence per part and leaves the file untouched, and on success copies the original to `<file>.schema3.bak` and replaces the file in one step. Ghostlight's own `policy/user-policy.json` moves at load by the same rule; administrator files (the managed file and bundles, `GHOSTLIGHT_POLICY_FILE`) are never rewritten and fail closed. `PolicyMode`, `Decision.observed`, `PermissionCheck.observed`, the layer mode, `AuditRecord.policy_observed` and `policy_mode`, `admits_channel` with `ReasonCode::ChannelDenied`, `PolicyRule::Channel`, `BlockedReason::Channel` and `OpeningRefusal::ChannelNotAdmitted`, `user_authoring_allowed`, and the `DocumentPolicy` resolution (frame handling is fixed at permitted content, the notice at when affected) are gone. `PermissionCheck` and `LayerEvidence` no longer deny unknown fields, so earlier audit lines still read. The workbench editor writes schema 4 and has no watch-only, channel or frame controls. Every example moved to schema 4; `developer-observe.json` and `scripting-disabled.json` are deleted. | see `git log` |
 
 ## Owed live checks
 
@@ -136,6 +137,21 @@ them.
   instead of the removed `attention` branch; `node tests/live-journey.mjs` records statuses
   without `attention_required`. `node tests/workbench-surface.mjs`, the page-asset tests, the
   extension tests and the guards were run and pass.
+- f03b: the coordinator runs, against a built tree, `node tests/process-journey.mjs`,
+  `tests/cli-journey.mjs` (its channel-refusal block is gone), `tests/frame-browser-journey.mjs`
+  (Chrome/MV3; the mode and notice loops are gone), `tests/provenance-journey.mjs`,
+  `tests/script-browser-journey.mjs`, `tests/local-resilience-journey.mjs`,
+  `tests/fixed-installation-journey.mjs`, `tests/windows-desktop-journey.ps1`,
+  `tests/workbench-history-browser.mjs` (the preview fixtures lost `mode`, `observed` and
+  `authoring_allowed`), and the Linux acceptance `governance.mjs` (the strict-coverage phase became
+  `excluded-frame-content-is-left-out-and-reported`) and `managed/run.mjs`; every policy document
+  they write is schema 4. `node tests/history-compatibility.mjs` with
+  `GHOSTLIGHT_PREVIOUS_EXECUTABLE` set gives the published predecessor a schema-3 file and the build
+  under test a schema-4 one. On a real home holding a schema-3 `policy/user-policy.json`, starting
+  the service moves it and leaves `user-policy.json.schema3.bak`; `ghostlight policy migrate` on a
+  schema-3 file with `mode: "observe"` prints the refusal and changes nothing. `node
+  tests/workbench-surface.mjs` and `node tests/policy-grammar.mjs` were run and pass (neither starts
+  a Ghostlight program).
 
 ## Notes
 
@@ -191,3 +207,21 @@ them.
   read-only serde alias and never writes it, and
   `audit_reads_lines_that_carry_the_removed_attention_state` runs such a line through
   `audit::read_line`.
+- f03b: the tree differed from the spec in seven places. (1) `mode` also lived on each grant, so
+  `grants[].mode` leaves with it and migrate applies the same rule to it. (2) Removing the user switch
+  took `user_authoring_allowed`, `AuthoringError::{NotAllowed, OrganizationOnlySetting}`,
+  `UserLayer.authoring_allowed` and `Inputs.authoring_allowed` with it, and the policy_explain facts lose
+  `documents`, `layers[].mode` and `rules[].mode`. (3) Channel admission left a whole vocabulary behind
+  (`ReasonCode::ChannelDenied`, `PolicyRule::Channel`, `BlockedReason::Channel`,
+  `OpeningRefusal::ChannelNotAdmitted`); none was ever written to audit, so no read alias was kept.
+  (4) `Manifest` and its blocks skip absent optional fields when serialized, so a migrated file has no
+  `null`s; migrate writes the document through `Manifest`, which orders keys by the struct, not by the
+  original file. (5) A `.schema3.bak` that already exists with different bytes stops the move
+  (the file is left alone) instead of being overwritten. (6) Doctor and the workbench show the migrate
+  sentence through the shared `Readiness::PolicyInvalid` detail and the Status Authority card, not through
+  a new diagnostics field, which would have carried a path. (7) `examples/scripting-disabled.json` is
+  deleted as well as `developer-observe.json`: the channel switch was its whole purpose. The locked
+  fleet example keeps its name and loses the user switch. The journeys that exercised the removed
+  options changed rather than gained replacements: `tests/cli-journey.mjs` drops the channel refusal,
+  `tests/frame-browser-journey.mjs` runs the one remaining coverage behavior, and the Linux
+  `governance.mjs` phase for `complete_page` now asserts the permitted-content result.

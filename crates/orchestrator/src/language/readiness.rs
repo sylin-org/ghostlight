@@ -72,7 +72,7 @@ impl Readiness {
                 "This session was ended. Start a new session to let agents work again."
             }
             Readiness::Paused => "Browser work is paused. Resume when you are ready.",
-            Readiness::PolicyInvalid => "A configured policy is not valid, so Ghostlight refuses all browser work. Open Policy to see what applies.",
+            Readiness::PolicyInvalid => "A configured policy is not valid, so Ghostlight refuses all browser work. Open Policy to see what applies. A policy file still in schema 3 needs ghostlight policy migrate <file>.",
             Readiness::HistoryUnavailable => "Policy requires saved history. Ghostlight checks storage automatically before new browser work can proceed.",
             Readiness::Working => "An agent is working in your browser right now.",
             Readiness::Ready => "Connected and idle. Agents can work when they ask.",

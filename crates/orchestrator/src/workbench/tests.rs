@@ -364,7 +364,7 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
 
     let preview = facade
             .preview_user_policy(
-                r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
             )
             .unwrap();
     assert_eq!(preview.considered, 4);
@@ -380,7 +380,7 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
 
     let unchanged = facade
             .preview_user_policy(
-                r#"{"schema":3,"name":"open","version":"1","grants":[{"id":"everything","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
+                r#"{"schema":4,"name":"open","version":"1","grants":[{"id":"everything","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
             )
             .unwrap();
     assert_eq!(unchanged.refused_total, 0);
@@ -392,7 +392,7 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
     // right and useless, so the sentence explains the draft instead of reporting a number
     // that reads as a claim about work this machine already completed.
     let empty = facade
-        .preview_user_policy(r#"{"schema":3,"name":"mine","version":"1","grants":[]}"#)
+        .preview_user_policy(r#"{"schema":4,"name":"mine","version":"1","grants":[]}"#)
         .unwrap();
     assert_eq!(empty.refused_total, 4);
     assert!(empty.refused.is_empty());
@@ -485,7 +485,7 @@ fn temporary_policy(name: &str) -> std::path::PathBuf {
     ))
 }
 
-const READ_ONLY_POLICY: &str = r#"{"schema":3,"name":"read","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[]}"#;
+const READ_ONLY_POLICY: &str = r#"{"schema":4,"name":"read","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[]}"#;
 
 #[test]
 fn pause_and_resume_apply_while_no_browser_is_connected() {

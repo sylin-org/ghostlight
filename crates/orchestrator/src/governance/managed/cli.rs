@@ -32,7 +32,7 @@ pub enum Command {
         /// Optional ML-DSA-65 private seed file.
         mldsa_seed: Option<PathBuf>,
     },
-    /// Sign a schema-3 manifest at an explicit sequence.
+    /// Sign a schema-4 manifest at an explicit sequence.
     Sign(SignOptions),
     /// Sign at the next sequence and print a ready bootstrap.
     Publish(PublishOptions),
@@ -41,7 +41,7 @@ pub enum Command {
 /// Shared signing inputs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SignOptions {
-    /// Schema-3 manifest path.
+    /// Schema-4 manifest path.
     pub manifest: PathBuf,
     /// Ed25519 private seed path.
     pub ed25519_seed: PathBuf,
@@ -462,7 +462,7 @@ mod tests {
         let output = root.join("policy.bundle");
         fs::write(
             &manifest,
-            r#"{"schema":3,"name":"org","version":"1","grants":[]}"#,
+            r#"{"schema":4,"name":"org","version":"1","grants":[]}"#,
         )
         .unwrap();
         run(

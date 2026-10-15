@@ -32,7 +32,7 @@ instead of changing your active personal window.
 
 No policy is required for HTTP(S) browsing, including a development server on localhost. Local
 and remote destinations use the same policy rules. If you want narrower personal boundaries,
-create the small schema-3 file documented in
+create the small schema-4 file documented in
 [`governance-configuration.md`](governance-configuration.md) and set `GHOSTLIGHT_POLICY_FILE`
 before launching Ghostlight.
 

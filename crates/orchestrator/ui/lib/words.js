@@ -184,45 +184,8 @@
       ]
     }] },
     {
-      title: "Where agents may connect",
-      items: [
-        {
-          key: "channels.mcp.enabled",
-          name: "MCP clients",
-          on: "Claude Code, Codex, Cursor, and other MCP-compatible tools may open a session here.",
-          off: "No MCP client may open a session here.",
-          link: { view: "integrations", label: "See connected clients" }
-        },
-        {
-          key: "channels.cli.enabled",
-          name: "Command line",
-          on: "ghostlight call may open a session, for scripts and automation.",
-          off: "The command line may not open a session here.",
-          link: { destination: "scripting_guide", label: "Scripting examples" }
-        }
-      ]
-    },
-    {
       title: "In the browser",
       items: [
-        {
-          key: "content.frames.handling", kind: "choice", field: "handling",
-          name: "When embedded content is excluded", default: "permitted_content",
-          choices: [
-            { value: "permitted_content", label: "Use permitted content", detail: "Keep useful permitted work and explain what was excluded." },
-            { value: "complete_operation", label: "Require complete access for the operation", detail: "Every document needed by this operation must be accessible." },
-            { value: "complete_page", label: "Require complete access for the page", detail: "Every document on the page must permit the requested capability." }
-          ]
-        },
-        {
-          key: "content.frames.notice", kind: "choice", field: "notice",
-          name: "Embedded content notices", default: "when_affected",
-          choices: [
-            { value: "on_demand", label: "Details on demand", detail: "Coverage remains available in history details." },
-            { value: "when_affected", label: "When work is affected", detail: "Show an indication when an exclusion limits the requested work." },
-            { value: "when_excluded", label: "Whenever content is excluded", detail: "Show an indication when the page contains excluded content." }
-          ]
-        },
         {
           key: "browser.tabs.allow_close",
           name: "Closing tabs",
@@ -267,11 +230,6 @@
     }
   ];
 
-  /** The one setting only an organization may author, named so its display is not a raw key. */
-  const ORGANIZATION_SETTINGS = {
-    "policy.user.enabled": "You may not set your own rules on this machine"
-  };
-
   /** Registered key for the never-touch destination list, which is a list rather than a switch. */
   const SACRED_KEY = "content.security.sacred_domains";
 
@@ -290,9 +248,6 @@
       return choice ? `${known.name}: ${choice.label}` : `${known.name}: ${JSON.stringify(value)}`;
     }
     if (known) return value === false ? known.off : `${known.on} (not restricted)`;
-    if (ORGANIZATION_SETTINGS[key]) {
-      return value === false ? ORGANIZATION_SETTINGS[key] : `${ORGANIZATION_SETTINGS[key]} (allowed)`;
-    }
     return `${key} = ${JSON.stringify(value)}`;
   }
 

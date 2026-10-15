@@ -13,7 +13,7 @@ assert.equal(dirname(scratch), join(root, ".tmp"));
 assert.equal(dirname(runtime), binaries);
 mkdirSync(scratch, { recursive: true });
 const policy = join(scratch, "policy.json");
-writeFileSync(policy, JSON.stringify({ schema: 3, name: "H8 fixture", version: "1", grants: [{ id: "all", hosts: { allow: ["*"] }, allowed: ["read", "action", "write", "execute"] }],
+writeFileSync(policy, JSON.stringify({ schema: 4, name: "H8 fixture", version: "1", grants: [{ id: "all", hosts: { allow: ["*"] }, allowed: ["read", "action", "write", "execute"] }],
   config: [{ key: "browser.startup", value: "manual", level: "mandatory" }] }));
 const sockets = [];
 const delay = ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms));

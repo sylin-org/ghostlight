@@ -13,10 +13,13 @@ const previous = process.env.GHOSTLIGHT_PREVIOUS_EXECUTABLE && resolve(process.e
 mkdirSync(join(root, ".tmp/history-compatibility"), { recursive: true });
 const area = mkdtempSync(join(root, ".tmp/history-compatibility/run-"));
 const audit = join(area, "audit.jsonl");
-const policy = join(area, "policy.json");
-writeFileSync(policy, JSON.stringify({ schema: 3, name: "History compatibility", version: "1",
+// The published predecessor reads schema 3; the build under test reads schema 4.
+const policyBody = { name: "History compatibility", version: "1",
   grants: [{ id: "ordinary-work", hosts: { allow: ["*"] }, allowed: ["read", "action", "write", "execute"] }],
-  config: [{ key: "browser.startup", value: "manual", level: "mandatory" }] }));
+  config: [{ key: "browser.startup", value: "manual", level: "mandatory" }] };
+const policyFor = { predecessor: join(area, "policy-schema3.json"), current: join(area, "policy.json") };
+writeFileSync(policyFor.predecessor, JSON.stringify({ schema: 3, ...policyBody }));
+writeFileSync(policyFor.current, JSON.stringify({ schema: 4, ...policyBody }));
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const report = { passed: false, release_ready: false, binaries: [], phases: [],
   scope: "Real authority/CLI persistence; no browser or installed-package acceptance",
@@ -53,7 +56,7 @@ async function exercise(executable, name, expectedUnreadable) {
   assert.equal(existsSync(runtime), false, "Refusing existing runtime file");
   assert.equal(existsSync(runtime.replace(/\.json$/, ".lock")), false, "Refusing existing lease");
   const environment = { ...process.env, GHOSTLIGHT_RUNTIME_FILE: runtime, GHOSTLIGHT_AUDIT_FILE: audit,
-    GHOSTLIGHT_NATIVE_HOST_DIR: join(area, "native"), GHOSTLIGHT_POLICY_FILE: policy };
+    GHOSTLIGHT_NATIVE_HOST_DIR: join(area, "native"), GHOSTLIGHT_POLICY_FILE: executable === previous ? policyFor.predecessor : policyFor.current };
   const log = [];
   const child = spawn(executable, [], { env: environment, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   active = { child, runtime };

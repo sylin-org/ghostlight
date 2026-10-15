@@ -6,12 +6,13 @@ distribution source.
 
 ## Roll out safely
 
-1. Write the smallest schema-3 grants that admit the required hosts and independent RAWX sets.
-2. Start in `mode: "observe"` and collect content-minimized JSONL from a pilot group.
-3. Run `ghostlight policy validate`, `policy explain`, and `policy simulate` against real audit.
+1. Write the smallest schema-4 grants that admit the required hosts and independent RAWX sets.
+2. Collect content-minimized JSONL from a pilot group working without a policy.
+3. Run `ghostlight policy validate`, `policy explain`, and `policy simulate` against that audit,
+   which lists the recorded work the policy would have refused.
 4. Generate organization-owned signing keys offline and publish a monotonically sequenced bundle.
 5. Provision `managed.json` through your endpoint-management tooling.
-6. Confirm the workbench Policy Passport, then move the policy to `mode: "enforce"`.
+6. Confirm the workbench Policy Passport.
 
 The complete schema, signing commands, bootstrap paths, and failure behavior are in
 [`governance-configuration.md`](governance-configuration.md).

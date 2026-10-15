@@ -126,9 +126,7 @@ fn reply(connection: &mut TcpStream, value: &impl serde::Serialize) -> Result<()
 const fn refusal_code(refusal: OpeningRefusal) -> RefusalCode {
     match refusal {
         OpeningRefusal::Authentication => RefusalCode::AuthenticationFailed,
-        OpeningRefusal::Unsupported | OpeningRefusal::ChannelNotAdmitted(_) => {
-            RefusalCode::Unsupported
-        }
+        OpeningRefusal::Unsupported => RefusalCode::Unsupported,
         OpeningRefusal::Malformed => RefusalCode::Malformed,
         OpeningRefusal::Capacity => RefusalCode::Capacity,
         OpeningRefusal::ShuttingDown => RefusalCode::ShuttingDown,

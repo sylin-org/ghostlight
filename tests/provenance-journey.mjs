@@ -141,7 +141,7 @@ async function journey() {
       : entry.isFile() ? readFileSync(join(path, entry.name), "utf8") : "").join("\n");
   }
   try {
-    writeFileSync(policy, JSON.stringify({ schema: 3, name: "C1 fixture", version: "1", grants: [
+    writeFileSync(policy, JSON.stringify({ schema: 4, name: "C1 fixture", version: "1", grants: [
       { id: "sylin", hosts: { allow: ["sylin.org"] }, allowed: ["read", "action", "write", "execute"] }
     ], config: [{ key: "browser.startup", value: "manual", level: "mandatory" }] }));
     start(join(binaries, `ghostlight${suffix}`), [], { env: environment });

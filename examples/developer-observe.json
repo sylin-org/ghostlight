@@ -1,7 +1,0 @@
-{
-  "schema": 3,
-  "name": "Observe policy impact",
-  "version": "1",
-  "mode": "observe",
-  "grants": []
-}

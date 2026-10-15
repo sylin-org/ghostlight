@@ -1671,7 +1671,7 @@ fn child_receipts_share_authority_without_holding_the_session() {
     let path = temporary_policy("h4-denials");
     fs::write(
         &path,
-        r#"{"schema":3,"name":"deny","version":"1","grants":[]}"#,
+        r#"{"schema":4,"name":"deny","version":"1","grants":[]}"#,
     )
     .unwrap();
     let governance = GovernanceFacade::new(Some(path.clone()), None);
@@ -2395,7 +2395,7 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
     let policy = temporary_policy("unknown-landing");
     fs::write(
             &policy,
-            r#"{"schema":3,"name":"work test","version":"1","grants":[{"id":"approved","hosts":{"allow":["approved.example"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"work test","version":"1","grants":[{"id":"approved","hosts":{"allow":["approved.example"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
     let (executor, browser, workspaces, workspace, _) =

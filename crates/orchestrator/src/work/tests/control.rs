@@ -44,7 +44,7 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
     let policy = temporary_policy("explain-no-browser-authority");
     fs::write(
         &policy,
-        r#"{"schema":3,"name":"no browser grants","version":"1","grants":[]}"#,
+        r#"{"schema":4,"name":"no browser grants","version":"1","grants":[]}"#,
     )
     .unwrap();
     for intent in [
@@ -130,7 +130,7 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
     fs::write(
         &policy.0,
         serde_json::to_vec(&json!({
-            "schema":3,"name":"test authority","version":"1",
+            "schema":4,"name":"test authority","version":"1",
             "grants":[{"id":"permitted-site","hosts":{"allow":["example.com"]},"allowed":["read"]}]
         }))
         .unwrap(),
@@ -208,11 +208,11 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
 }
 
 #[test]
-fn obsolete_arguments_are_rejected_even_in_observe_mode() {
-    let path = temporary_policy("h5-observe");
+fn obsolete_arguments_are_rejected_before_any_policy_check() {
+    let path = temporary_policy("h5-read");
     fs::write(
         &path,
-        r#"{"schema":3,"name":"observe","version":"1","mode":"observe","grants":[]}"#,
+        r#"{"schema":4,"name":"read","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
     )
     .unwrap();
     for (tool, mut arguments) in [

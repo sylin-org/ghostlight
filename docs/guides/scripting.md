@@ -141,26 +141,6 @@ line grants nothing they did not already have. Anyone who can run `ghostlight ca
 the MCP connector by hand. The channel is recorded so that you can *see* what happened; it is not a
 security boundary, and Ghostlight does not pretend it is.
 
-## Turning it off
-
-An organization that wants agent work but not scripted work closes the channel in policy:
-
-```json
-{
-  "schema": 3,
-  "name": "MCP only",
-  "version": "1",
-  "grants": [],
-  "config": [
-    {"key": "channels.cli.enabled", "value": false, "level": "mandatory"}
-  ]
-}
-```
-
-`ghostlight call` then exits non-zero with `channel_denied` before any session opens, and nothing is
-invoked or audited. The full rules, including how layers compose, are in
-[governance-configuration.md](governance-configuration.md#turning-an-intake-channel-off).
-
 ## Worked examples
 
 [`scripts/browser-journey.ps1`](../../scripts/browser-journey.ps1) and

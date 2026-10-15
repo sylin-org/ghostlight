@@ -1164,17 +1164,13 @@ impl ApplicationExecutor {
         commits: &[String],
     ) -> Decision {
         let requirements = requirements.into();
-        let mut observed = None;
         for url in commits.iter().chain(std::iter::once(&tab.url)) {
             let decision = self.authorize_landing(context, requirements, url);
             if !decision.allowed {
                 return decision;
             }
-            if decision.observed && observed.is_none() {
-                observed = Some(decision);
-            }
         }
-        observed.unwrap_or_else(Decision::permitted)
+        Decision::permitted()
     }
 
     /// Govern a completed observation's destination. Runtime controls guard the next dispatch;
@@ -1198,18 +1194,16 @@ impl ApplicationExecutor {
             return action;
         }
         let close = context.snapshot.authorize_tab_close();
-        if !close.allowed || close.observed {
+        if close.allowed {
+            action
+        } else {
             self.retain_permission(
                 context,
                 context
                     .snapshot
                     .decision_evidence(CapabilitySet::ACTION, None, close),
             );
-        }
-        if !close.allowed || close.observed {
             close
-        } else {
-            action
         }
     }
 
@@ -2242,7 +2236,6 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
         ReasonCode::InvalidAuthority => BlockedReason::InvalidAuthority,
         ReasonCode::RuntimeHold => BlockedReason::Hold,
         ReasonCode::SessionEnded => BlockedReason::SessionEnded,
-        ReasonCode::ChannelDenied => BlockedReason::Channel,
         ReasonCode::AuditUnavailable => BlockedReason::AuditUnavailable,
         ReasonCode::Permitted | ReasonCode::InvalidRequest => BlockedReason::Unspecified,
     }
@@ -2256,9 +2249,6 @@ fn with_denial_facts(decision: Decision, mut facts: Value) -> Value {
         }
         if let Some(rule) = decision.policy_rule() {
             object.insert("policy_rule".into(), Value::String(rule.into()));
-        }
-        if let Some(mode) = decision.policy_mode() {
-            object.insert("policy_mode".into(), Value::String(mode.into()));
         }
     }
     facts
@@ -2778,7 +2768,7 @@ mod tests {
             fs::write(
                 &self.0,
                 serde_json::to_vec(&json!({
-                    "schema":3,"name":"test authority","version":"1",
+                    "schema":4,"name":"test authority","version":"1",
                     "grants":[{"id":"test","hosts":{"allow":["*"]},"allowed":capabilities}]
                 }))
                 .unwrap(),
@@ -2795,7 +2785,7 @@ mod tests {
 
     fn all_open_policy_with(config: &str) -> String {
         format!(
-            r#"{{"schema":3,"name":"work test","version":"1","grants":[{{"id":"all","hosts":{{"allow":["*"]}},"allowed":["read","action","write","execute"]}}],"config":{config}}}"#
+            r#"{{"schema":4,"name":"work test","version":"1","grants":[{{"id":"all","hosts":{{"allow":["*"]}},"allowed":["read","action","write","execute"]}}],"config":{config}}}"#
         )
     }
 }

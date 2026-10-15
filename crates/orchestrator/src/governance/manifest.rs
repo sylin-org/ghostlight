@@ -1,4 +1,4 @@
-//! Strict schema-3 policy documents and their canonical identity.
+//! Strict schema-4 policy documents and their canonical identity.
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -51,53 +51,21 @@ impl BrowserStartup {
     }
 }
 
-/// Whether an ordinary policy denial blocks work or is reported while work continues.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PolicyMode {
-    /// Denials are authoritative.
-    #[default]
-    Enforce,
-    /// Ordinary denials are observed; permanent protected-resource denials still enforce.
-    Observe,
-}
-
-impl PolicyMode {
-    /// Compose two tiers without allowing a lower tier to weaken enforcement.
-    #[must_use]
-    pub const fn strictest(self, other: Self) -> Self {
-        if matches!(self, Self::Enforce) || matches!(other, Self::Enforce) {
-            Self::Enforce
-        } else {
-            Self::Observe
-        }
-    }
-
-    /// Stable policy and audit vocabulary.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Enforce => "enforce",
-            Self::Observe => "observe",
-        }
-    }
-}
-
 /// Informational identity resolved before a manifest was authored.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdentityBlock {
     /// How the principal was resolved.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_by: Option<String>,
     /// Human-plain principal label.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub principal: Option<String>,
     /// Optional group labels used to explain the resolved policy.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<String>>,
     /// Informational resolution time.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_at: Option<String>,
 }
 
@@ -112,16 +80,16 @@ pub struct OrganizationBlock {
     /// Display name of the authoring organization.
     pub name: String,
     /// The organization's own explanation of why this policy exists.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub statement: Option<String>,
     /// An HTTPS page the organization publishes about this policy.
     ///
     /// Presented as text. The workbench opens destinations from a closed vocabulary and never an
     /// authored address, so carrying one here can never turn into a reachable link.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// Channels a governed person may use to ask about this policy.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contacts: Vec<OrganizationContact>,
 }
 
@@ -134,7 +102,7 @@ pub struct OrganizationContact {
     /// Channel address.
     pub value: String,
     /// Optional organization-authored display label.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
 
@@ -161,11 +129,8 @@ pub struct Grant {
     /// Independent capability facts this grant permits.
     pub allowed: Vec<Capability>,
     /// Optional human-plain purpose.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Optional override of the manifest mode.
-    #[serde(default)]
-    pub mode: Option<PolicyMode>,
 }
 
 impl Grant {
@@ -197,7 +162,7 @@ impl SettingLevel {
     }
 }
 
-/// One narrowly registered schema-3 setting.
+/// One narrowly registered setting.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigEntry {
@@ -209,29 +174,26 @@ pub struct ConfigEntry {
     pub level: SettingLevel,
 }
 
-/// One strict schema-3 policy manifest.
+/// One strict schema-4 policy manifest.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
-    /// Must be exactly 3.
+    /// Must be exactly [`SCHEMA`].
     pub schema: u32,
     /// Stable human-plain policy name.
     pub name: String,
     /// Authored policy version label.
     pub version: String,
-    /// Manifest default mode.
-    #[serde(default)]
-    pub mode: Option<PolicyMode>,
     /// Informational resolved identity.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<IdentityBlock>,
     /// Informational authoring organization.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<OrganizationBlock>,
     /// Ordered grants. May be empty.
     pub grants: Vec<Grant>,
     /// Narrow monotonic product settings.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<ConfigEntry>,
     /// Canonical SHA-256 identity, never authored.
     #[serde(skip)]
@@ -281,7 +243,7 @@ impl Manifest {
     }
 }
 
-/// Why a schema-3 manifest could not become authority.
+/// Why a manifest could not become authority.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum ManifestError {
     /// The text is not JSON.
@@ -296,8 +258,14 @@ pub enum ManifestError {
         /// Parser detail.
         message: String,
     },
+    /// The document is schema 3, which `ghostlight policy migrate` can carry forward.
+    #[error("{origin}: unsupported policy schema 3; run ghostlight policy migrate <file>")]
+    RetiredSchema {
+        /// Human-plain source label.
+        origin: String,
+    },
     /// The schema marker is absent or unsupported.
-    #[error("{origin}: unsupported policy schema {found}; expected 3")]
+    #[error("{origin}: unsupported policy schema {found}; expected 4")]
     UnsupportedSchema {
         /// Human-plain source label.
         origin: String,
@@ -324,7 +292,13 @@ pub enum ManifestError {
     },
 }
 
-/// Upper bound on structural nesting any real schema-3 document needs. The deepest legitimate
+/// The one policy schema this build reads.
+pub const SCHEMA: u64 = 4;
+
+/// The policy schema `ghostlight policy migrate` reads and no other path accepts.
+pub const RETIRED_SCHEMA: u64 = 3;
+
+/// Upper bound on structural nesting any real document needs. The deepest legitimate
 /// shape is manifest -> grants -> grant -> hosts -> allow, five levels; this leaves generous room
 /// for growth while still rejecting a document nested deep enough to threaten the parser below.
 const MAX_NESTING_DEPTH: usize = 64;
@@ -371,27 +345,40 @@ fn reject_excessive_nesting(text: &str, source: &str) -> Result<(), ManifestErro
     Ok(())
 }
 
-/// Parse, validate, and canonically identify one policy manifest.
-pub fn parse(text: &str, source: &str) -> Result<Manifest, ManifestError> {
+/// Read one document as JSON, without yet asking what schema it speaks.
+pub(super) fn read_value(text: &str, source: &str) -> Result<Value, ManifestError> {
     let stripped = text.strip_prefix('\u{feff}').unwrap_or(text);
     reject_excessive_nesting(stripped, source)?;
-    let value: Value = serde_json::from_str(stripped).map_err(|error| ManifestError::Syntax {
+    serde_json::from_str(stripped).map_err(|error| ManifestError::Syntax {
         origin: source.into(),
         line: error.line(),
         column: error.column(),
         message: error.to_string(),
-    })?;
-    if value.get("schema").and_then(Value::as_u64) != Some(3) {
-        return Err(ManifestError::UnsupportedSchema {
-            origin: source.into(),
-            found: value
-                .get("schema")
-                .map(Value::to_string)
-                .unwrap_or_else(|| "<missing>".into()),
-        });
+    })
+}
+
+/// Parse, validate, and canonically identify one policy manifest.
+pub fn parse(text: &str, source: &str) -> Result<Manifest, ManifestError> {
+    let value = read_value(text, source)?;
+    match value.get("schema").and_then(Value::as_u64) {
+        Some(SCHEMA) => {}
+        Some(RETIRED_SCHEMA) => {
+            return Err(ManifestError::RetiredSchema {
+                origin: source.into(),
+            })
+        }
+        _ => {
+            return Err(ManifestError::UnsupportedSchema {
+                origin: source.into(),
+                found: value
+                    .get("schema")
+                    .map(Value::to_string)
+                    .unwrap_or_else(|| "<missing>".into()),
+            })
+        }
     }
     let mut manifest: Manifest =
-        serde_json::from_str(stripped).map_err(|error| ManifestError::Shape {
+        serde_json::from_value(value.clone()).map_err(|error| ManifestError::Shape {
             origin: source.into(),
             message: error.to_string(),
         })?;
@@ -552,40 +539,9 @@ fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<()
                 return field(source, &path, "must be keep_working or require_audit");
             }
         }
-        super::documents::HANDLING_KEY => {
-            if entry
-                .value
-                .as_str()
-                .and_then(super::documents::Handling::parse)
-                .is_none()
-            {
-                return field(
-                    source,
-                    &path,
-                    "must be permitted_content, complete_operation, or complete_page",
-                );
-            }
-        }
-        super::documents::NOTICE_KEY => {
-            if entry
-                .value
-                .as_str()
-                .and_then(super::documents::Notice::parse)
-                .is_none()
-            {
-                return field(
-                    source,
-                    &path,
-                    "must be on_demand, when_affected, or when_excluded",
-                );
-            }
-        }
         "browser.tabs.allow_close"
         | super::SCREENSHOTS_ENABLED_KEY
-        | "privacy.preserve_target_names"
-        | "channels.mcp.enabled"
-        | "channels.cli.enabled"
-        | "policy.user.enabled" => {
+        | "privacy.preserve_target_names" => {
             if !entry.value.is_boolean() {
                 return field(source, &path, "must be a boolean");
             }
@@ -618,7 +574,7 @@ fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<()
             return field(
                 source,
                 &format!("config[{index}].key"),
-                "is not a registered 1.0 policy setting",
+                "is not a registered policy setting",
             )
         }
     }
@@ -718,7 +674,7 @@ fn write_canonical(value: &Value, output: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, valid_host_pattern, BrowserStartup, PolicyMode};
+    use super::{parse, valid_host_pattern, BrowserStartup, ManifestError};
 
     #[test]
     fn a_deeply_nested_document_is_rejected_before_it_reaches_the_recursive_parser() {
@@ -726,7 +682,7 @@ mod tests {
         // test stack could survive parsing recursively if the guard were absent -- the guard must
         // reject it on a linear scan, never by calling into serde_json's Value parser at all.
         let bomb = format!(
-            r#"{{"schema":3,"name":"x","version":"1","grants":[],"config":[{{"key":"content.security.sacred_domains","value":{}[]{},"level":"mandatory"}}]}}"#,
+            r#"{{"schema":4,"name":"x","version":"1","grants":[],"config":[{{"key":"content.security.sacred_domains","value":{}[]{},"level":"mandatory"}}]}}"#,
             "[".repeat(5_000),
             "]".repeat(5_000)
         );
@@ -737,27 +693,27 @@ mod tests {
         // brackets exceeds MAX_NESTING_DEPTH if the scanner mistakenly counted them, while
         // staying under the unrelated 100-character bound `name` already enforces.
         let deceptive = format!(
-            r#"{{"schema":3,"name":"{}","version":"1","grants":[]}}"#,
+            r#"{{"schema":4,"name":"{}","version":"1","grants":[]}}"#,
             "[".repeat(80)
         );
         assert!(parse(&deceptive, "deceptive").is_ok());
     }
 
     #[test]
-    fn schema_three_is_strict_and_has_a_format_independent_hash() {
+    fn schema_four_is_strict_and_has_a_format_independent_hash() {
         let first = parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
             "first",
         )
         .unwrap();
         let second = parse(
-            "{\n  \"grants\": [], \"version\": \"1\", \"name\": \"test\", \"schema\": 3\n}",
+            "{\n  \"grants\": [], \"version\": \"1\", \"name\": \"test\", \"schema\": 4\n}",
             "second",
         )
         .unwrap();
         assert_eq!(first.hash, second.hash);
         assert!(parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"surprise":true}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"surprise":true}"#,
             "strict"
         )
         .is_err());
@@ -767,9 +723,9 @@ mod tests {
     #[test]
     fn grants_reject_duplicate_identity_capabilities_and_patterns() {
         for text in [
-            r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"same","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"same","hosts":{"allow":["other.com"]},"allowed":["read"]}]}"#,
-            r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"g","hosts":{"allow":["example.com"]},"allowed":["read","read"]}]}"#,
-            r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"g","hosts":{"allow":["example.com","EXAMPLE.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"same","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"same","hosts":{"allow":["other.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"g","hosts":{"allow":["example.com"]},"allowed":["read","read"]}]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"g","hosts":{"allow":["example.com","EXAMPLE.com"]},"allowed":["read"]}]}"#,
         ] {
             assert!(parse(text, "duplicate").is_err());
         }
@@ -795,14 +751,14 @@ mod tests {
     #[test]
     fn organization_identity_is_optional_bounded_and_additive() {
         let anonymous = parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
             "plain",
         )
         .unwrap();
         assert!(anonymous.organization.is_none());
 
         let named = parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":"Example Organization","statement":"Keeps browser work inside approved sites.","url":"https://example.com/policy","contacts":[{"kind":"email","value":"security@example.com","label":"Security team"}]}}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":"Example Organization","statement":"Keeps browser work inside approved sites.","url":"https://example.com/policy","contacts":[{"kind":"email","value":"security@example.com","label":"Security team"}]}}"#,
             "named",
         )
         .unwrap();
@@ -812,34 +768,78 @@ mod tests {
         assert_eq!(organization.contacts[0].value, "security@example.com");
 
         for rejected in [
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":""}}"#,
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":"Example","url":"http://example.com"}}"#,
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{"name":"Example","surprise":true}}"#,
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"organization":{}}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":""}}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":"Example","url":"http://example.com"}}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{"name":"Example","surprise":true}}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"organization":{}}"#,
         ] {
             assert!(parse(rejected, "rejected").is_err(), "{rejected}");
         }
     }
 
     #[test]
-    fn the_user_layer_switch_is_a_registered_boolean_setting() {
-        assert!(parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"policy.user.enabled","value":false,"level":"mandatory"}]}"#,
-            "registered"
+    fn schema_three_is_refused_with_the_migrate_sentence() {
+        let error = parse(
+            r#"{"schema":3,"name":"test","version":"1","grants":[]}"#,
+            "old.json",
         )
-        .is_ok());
-        assert!(parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"policy.user.enabled","value":"no","level":"mandatory"}]}"#,
-            "typed"
-        )
-        .is_err());
+        .unwrap_err();
+        assert!(matches!(error, ManifestError::RetiredSchema { .. }));
+        assert_eq!(
+            error.to_string(),
+            "old.json: unsupported policy schema 3; run ghostlight policy migrate <file>"
+        );
+        for other in [r#""schema":2"#, r#""schema":5"#, r#""schema":"4""#] {
+            let text = format!(r#"{{{other},"name":"test","version":"1","grants":[]}}"#);
+            assert!(matches!(
+                parse(&text, "other").unwrap_err(),
+                ManifestError::UnsupportedSchema { .. }
+            ));
+        }
+        assert!(matches!(
+            parse(r#"{"name":"test","version":"1","grants":[]}"#, "missing").unwrap_err(),
+            ManifestError::UnsupportedSchema { .. }
+        ));
+    }
+
+    #[test]
+    fn the_settings_and_modes_schema_three_had_are_not_part_of_schema_four() {
+        let config = |key: &str, value: &str| {
+            format!(
+                r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{key}","value":{value},"level":"mandatory"}}]}}"#
+            )
+        };
+        for (key, value) in [
+            ("channels.mcp.enabled", "true"),
+            ("channels.cli.enabled", "false"),
+            ("policy.user.enabled", "false"),
+            ("content.frames.handling", r#""permitted_content""#),
+            ("content.frames.notice", r#""when_affected""#),
+        ] {
+            let error = parse(&config(key, value), "retired").unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("is not a registered policy setting"),
+                "{key}: {error}"
+            );
+        }
+        for text in [
+            r#"{"schema":4,"name":"test","version":"1","mode":"enforce","grants":[]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"g","mode":"observe","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+        ] {
+            assert!(matches!(
+                parse(text, "retired").unwrap_err(),
+                ManifestError::Shape { .. }
+            ));
+        }
     }
 
     #[test]
     fn browser_startup_accepts_only_the_two_closed_values() {
         for value in ["on_demand", "manual"] {
             let document = format!(
-                r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
+                r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
             );
             let policy = parse(&document, "registered").expect("closed value parses");
             assert_eq!(policy.string_setting("browser.startup"), Some(value));
@@ -850,7 +850,7 @@ mod tests {
     #[test]
     fn browser_startup_refuses_an_unknown_value() {
         assert!(parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":"automatic","level":"mandatory"}]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":"automatic","level":"mandatory"}]}"#,
             "unknown"
         )
         .is_err());
@@ -859,7 +859,7 @@ mod tests {
     #[test]
     fn browser_startup_refuses_a_non_string_value() {
         assert!(parse(
-            r#"{"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":true,"level":"mandatory"}]}"#,
+            r#"{"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":"browser.startup","value":true,"level":"mandatory"}]}"#,
             "typed"
         )
         .is_err());
@@ -874,18 +874,6 @@ mod tests {
         assert_eq!(
             BrowserStartup::default_for_platform(false),
             BrowserStartup::Manual
-        );
-    }
-
-    #[test]
-    fn enforce_is_the_strict_mode() {
-        assert_eq!(
-            PolicyMode::Observe.strictest(PolicyMode::Enforce),
-            PolicyMode::Enforce
-        );
-        assert_eq!(
-            PolicyMode::Observe.strictest(PolicyMode::Observe),
-            PolicyMode::Observe
         );
     }
 }

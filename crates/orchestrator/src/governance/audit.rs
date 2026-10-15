@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// Registered choice for continuing work during a known history-storage failure.
 pub const MODE_KEY: &str = "audit.availability";
 
-/// A storage requirement is independent of ordinary grant observe mode.
+/// Whether browser work continues while history cannot be saved.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditMode {
@@ -94,9 +94,7 @@ impl AuthoritySnapshot {
                 grant: None,
                 rule,
                 denial: super::denial_bytes(&self.layers[index].manifest.hash, "", rule),
-                mode: super::manifest::PolicyMode::Enforce,
             },
-            super::manifest::PolicyMode::Enforce,
         )
     }
 }
@@ -105,7 +103,7 @@ impl AuthoritySnapshot {
 mod tests {
     use super::*;
     fn manifest(mode: &str) -> Manifest {
-        super::super::manifest::parse(&format!(r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"{MODE_KEY}","value":"{mode}","level":"mandatory"}}]}}"#), "test").unwrap()
+        super::super::manifest::parse(&format!(r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{MODE_KEY}","value":"{mode}","level":"mandatory"}}]}}"#), "test").unwrap()
     }
     #[test]
     fn either_layer_can_require_audit_and_user_cannot_relax_the_organization() {
@@ -131,6 +129,6 @@ mod tests {
             serde_json::from_str::<AuditMode>("\"require_audit\"").unwrap(),
             AuditMode::RequireAudit
         );
-        assert!(super::super::manifest::parse(&serde_json::to_string(&serde_json::json!({"schema":3,"name":"test","version":"1","grants":[],"config":[{"key":MODE_KEY,"value":"silent","level":"mandatory"}]})).unwrap(), "test").is_err());
+        assert!(super::super::manifest::parse(&serde_json::to_string(&serde_json::json!({"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":MODE_KEY,"value":"silent","level":"mandatory"}]})).unwrap(), "test").is_err());
     }
 }

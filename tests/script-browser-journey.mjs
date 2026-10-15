@@ -108,7 +108,7 @@ try {
     return result.result.value;
   };
   writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({
-    schema: 3, name: "Isolated script journey", version: "1",
+    schema: 4, name: "Isolated script journey", version: "1",
     grants: [{ id: "fixture", hosts: { allow: ["127.0.0.1"] }, allowed: ["read", "action", "write", "execute"] }],
     config: [{ key: "browser.startup", value: "manual", level: "mandatory" }]
   }));

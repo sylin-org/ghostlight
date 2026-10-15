@@ -843,7 +843,7 @@ mod tests {
             std::fs::write(
                 &path,
                 format!(
-                    r#"{{"schema":3,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
+                    r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
                 ),
             )
             .unwrap();

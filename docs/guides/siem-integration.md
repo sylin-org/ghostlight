@@ -24,8 +24,6 @@ its bounded History view from the same file.
   "policy_seq": 12,
   "allowed": false,
   "reason": "capability_denied",
-  "policy_observed": false,
-  "policy_mode": "enforce",
   "policy_rule": "capability",
   "denial_id": "D-opaque",
   "policy_tier": "managed",
@@ -54,8 +52,6 @@ its bounded History view from the same file.
 | `authority` | Opaque immutable authority snapshot id. |
 | `policy_seq` | Signed managed publish sequence, when active. |
 | `allowed`, `reason` | Final-boundary decision and stable reason. |
-| `policy_observed` | True when observe mode shadowed a denial without blocking. |
-| `policy_mode` | Effective `observe` or `enforce`, when policy decided. |
 | `policy_rule`, `policy_tier`, `grant_id` | Content-free deciding attribution. |
 | `denial_id` | Deterministic `D-` correlation id for an authored denial. |
 | `status`, `effect` | Terminal result and physical-effect class. |
@@ -70,7 +66,8 @@ its bounded History view from the same file.
 | `channel` | `mcp` or `cli`; attribution, not authority. |
 
 The optional singular `capability` field exists only so 1.0 can read historical pre-ADR-0121
-records. New records write `capabilities`.
+records. New records write `capabilities`. Lines written before 2.0 can carry `policy_observed` and
+`policy_mode`; 2.0 writes neither.
 
 The H1 source correction replaces arbitrary failure-facts retention with typed metadata. For
 example, a primitive browser error records `{"reason":"browser_primitive_failed"}` while its
@@ -123,7 +120,7 @@ access controls appropriate to operational metadata.
 Useful signals include:
 
 - `allowed = false` grouped by `reason`, `tool`, `policy_tier`, and `grant_id`;
-- `policy_observed = true` when preparing an enforce rollout;
+- `ghostlight policy simulate` over collected audit when preparing a policy change;
 - `effect in (partial, unknown)`, because those outcomes are never replay-safe;
 - `denial_id` for the user-to-administrator feedback loop;
 - `policy_seq` changes and rollback or invalid-authority events;

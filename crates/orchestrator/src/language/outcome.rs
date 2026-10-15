@@ -229,8 +229,6 @@ pub enum BlockedReason {
     Hold,
     /// A runtime control ended the session.
     SessionEnded,
-    /// An authority layer does not admit this intake channel.
-    Channel,
     /// Authority refused for a reason with no more specific wording.
     Unspecified,
 }
@@ -1436,7 +1434,6 @@ impl Refusal {
                 | BlockedReason::Capability
                 | BlockedReason::TabClose
                 | BlockedReason::Screenshot
-                | BlockedReason::Channel
                 | BlockedReason::Unspecified => {
                     vec!["Call policy_explain to see what this session may do.".into()]
                 }
@@ -1822,9 +1819,6 @@ fn blocked(reason: BlockedReason, host: &Option<String>) -> String {
         // and 5. Pause is reversible and says so by not being terminal; stop ends the session.
         (BlockedReason::Hold, _) => HUMAN_PAUSE_DIRECTIVE.into(),
         (BlockedReason::SessionEnded, _) => HUMAN_STOP_DIRECTIVE.into(),
-        (BlockedReason::Channel, _) => {
-            "Blocked: policy does not accept calls from this kind of client.".into()
-        }
         (BlockedReason::Unspecified, Some(host)) => format!("Blocked by policy on {host}."),
         (BlockedReason::Unspecified, None) => "Blocked by Ghostlight policy.".into(),
     }
@@ -2874,13 +2868,6 @@ Changes are \"unsaved\".".into()),
                 "Cancelled before anything reached the browser.",
             ),
             (
-                Refusal::AuthorityBlocked {
-                    reason: BlockedReason::Channel,
-                    host: None,
-                },
-                "Blocked: policy does not accept calls from this kind of client.",
-            ),
-            (
                 Refusal::EffectUnknown,
                 "Sent, but the browser never confirmed what happened.",
             ),
@@ -3095,7 +3082,6 @@ Changes are \"unsaved\".".into()),
             BlockedReason::Capability,
             BlockedReason::TabClose,
             BlockedReason::Screenshot,
-            BlockedReason::Channel,
             BlockedReason::Unspecified,
         ] {
             let refusal = Refusal::AuthorityBlocked {
@@ -3127,7 +3113,7 @@ Changes are \"unsaved\".".into()),
             .summary(),
             Outcome::RecordingBoundary { duration_ms: 3_000 }.summary(),
             Refusal::AuthorityBlocked {
-                reason: BlockedReason::Channel,
+                reason: BlockedReason::Screenshot,
                 host: None,
             }
             .summary(),

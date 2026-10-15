@@ -67,13 +67,7 @@ pub struct StepReceipt {
 /// Explain actual permission evidence, without reading today's policy or guessing grants.
 #[must_use]
 pub fn permission(check: &PermissionCheck) -> String {
-    let verdict = if check.observed {
-        "Allowed in observe mode; policy would refuse this work"
-    } else if check.allowed {
-        "Allowed"
-    } else {
-        "Refused"
-    };
+    let verdict = if check.allowed { "Allowed" } else { "Refused" };
     if check.reason != ReasonCode::Permitted && check.layers.is_empty() && !check.request_evaluated
     {
         return format!("{verdict}: {}.", check.reason.as_str().replace('_', " "));

@@ -17,7 +17,7 @@ fn temporary(name: &str) -> PathBuf {
 }
 
 fn policy(name: &str, grants: &str, config: &str) -> String {
-    format!(r#"{{"schema":3,"name":"{name}","version":"1","grants":{grants},"config":{config}}}"#)
+    format!(r#"{{"schema":4,"name":"{name}","version":"1","grants":{grants},"config":{config}}}"#)
 }
 
 fn all_open_grant() -> &'static str {
@@ -488,7 +488,6 @@ fn first_applicable_denial_is_stably_attributed() {
     assert_eq!(record.policy_tier.as_deref(), Some("user"));
     assert_eq!(record.grant_id.as_deref(), Some("first"));
     assert_eq!(record.policy_rule.as_deref(), Some("capability"));
-    assert_eq!(record.policy_mode.as_deref(), Some("enforce"));
     assert_eq!(record.denial_id, first.denial_id());
 
     let changed = snapshot_for(
@@ -504,10 +503,10 @@ fn first_applicable_denial_is_stably_attributed() {
 }
 
 #[test]
-fn observe_shadows_ordinary_denials_but_never_protected_resources() {
+fn an_empty_policy_refuses_ordinary_hosts_and_protected_resources_stay_protected() {
     let snapshot = snapshot_for(
-        "observe",
-        r#"{"schema":3,"name":"observe","version":"1","mode":"observe","grants":[]}"#,
+        "empty",
+        r#"{"schema":4,"name":"empty","version":"1","grants":[]}"#,
     );
     for url in [
         "https://example.com",
@@ -516,20 +515,18 @@ fn observe_shadows_ordinary_denials_but_never_protected_resources() {
         "http://169.254.169.254",
     ] {
         let ordinary = snapshot.authorize_landing(Capability::Read, url);
-        assert!(ordinary.allowed);
-        assert!(ordinary.observed);
+        assert!(!ordinary.allowed);
         assert_eq!(ordinary.reason, ReasonCode::HostDenied);
         assert!(ordinary.denial_id().is_some());
     }
 
     let protected = snapshot.authorize_landing(Capability::Read, "chrome://extensions");
     assert!(!protected.allowed);
-    assert!(!protected.observed);
     assert_eq!(protected.reason, ReasonCode::ProtectedHost);
 
     let sacred = snapshot_for(
-        "observe-sacred",
-        r#"{"schema":3,"name":"observe sacred","version":"1","mode":"observe","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["localhost"],"level":"mandatory"}]}"#,
+        "sacred",
+        r#"{"schema":4,"name":"sacred","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["localhost"],"level":"mandatory"}]}"#,
     );
     assert!(
         !sacred
@@ -539,17 +536,17 @@ fn observe_shadows_ordinary_denials_but_never_protected_resources() {
 }
 
 #[test]
-fn strictest_layer_mode_wins_and_snapshots_have_deterministic_identity() {
-    let managed = temporary("mode-managed");
-    let local = temporary("mode-local");
+fn layers_compose_by_intersection_and_snapshots_have_deterministic_identity() {
+    let managed = temporary("compose-managed");
+    let local = temporary("compose-local");
     fs::write(
         &managed,
-        r#"{"schema":3,"name":"managed","version":"1","mode":"observe","grants":[]}"#,
+        r#"{"schema":4,"name":"managed","version":"1","grants":[]}"#,
     )
     .unwrap();
     fs::write(
             &local,
-            r#"{"schema":3,"name":"local","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"local","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
     let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
@@ -558,13 +555,13 @@ fn strictest_layer_mode_wins_and_snapshots_have_deterministic_identity() {
     let denied = first.authorize_landing(Capability::Read, "https://example.com");
     assert!(
         !denied.allowed,
-        "the enforcing local tier prevents shadow admission"
+        "the local tier cannot readmit what the managed tier refuses"
     );
     assert_eq!(first.id(), same.id());
 
     fs::write(
             &local,
-            r#"{"schema":3,"name":"local","version":"2","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"local","version":"2","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
     let changed = facade.snapshot();
@@ -574,7 +571,7 @@ fn strictest_layer_mode_wins_and_snapshots_have_deterministic_identity() {
 }
 
 #[test]
-fn maintained_policy_examples_match_the_schema_three_decoder() {
+fn maintained_policy_examples_match_the_schema_four_decoder() {
     for (name, source) in [
         (
             "research-read-only",
@@ -593,20 +590,12 @@ fn maintained_policy_examples_match_the_schema_three_decoder() {
             include_str!("../../../../examples/developer-unrestricted.json"),
         ),
         (
-            "developer-observe",
-            include_str!("../../../../examples/developer-observe.json"),
-        ),
-        (
             "dev-live-test",
             include_str!("../../../../examples/dev-live-test.json"),
         ),
         (
             "demo-policy",
             include_str!("../../../../examples/demo-policy.json"),
-        ),
-        (
-            "scripting-disabled",
-            include_str!("../../../../examples/scripting-disabled.json"),
         ),
         (
             "personal-starter",
@@ -632,8 +621,8 @@ fn maintained_policy_examples_match_the_schema_three_decoder() {
         let path = temporary(name);
         fs::write(&path, source).unwrap();
         assert!(
-            super::read_policy(&path).is_ok(),
-            "{name} must remain a valid 1.0 policy"
+            super::read_policy(&path, false).is_ok(),
+            "{name} must remain a valid policy"
         );
         let _ = fs::remove_file(path);
     }
@@ -651,7 +640,7 @@ fn authoring_validates_before_it_replaces_and_never_leaves_the_product_failing_c
             .allowed
     );
 
-    let good = r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#;
+    let good = r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#;
     facade.apply_user_policy(good).unwrap();
     let applied = facade.snapshot();
     assert!(
@@ -666,7 +655,7 @@ fn authoring_validates_before_it_replaces_and_never_leaves_the_product_failing_c
     );
 
     // A rejected document leaves both the file and the authority exactly as they were.
-    let error = facade.apply_user_policy("{\"schema\":3,").unwrap_err();
+    let error = facade.apply_user_policy("{\"schema\":4,").unwrap_err();
     assert!(matches!(error, AuthoringError::Invalid(_)));
     assert_eq!(fs::read_to_string(&path).unwrap(), good);
     assert!(
@@ -676,12 +665,13 @@ fn authoring_validates_before_it_replaces_and_never_leaves_the_product_failing_c
             .allowed
     );
 
-    // The organization switch is not something a user layer may author for itself.
-    let overreach = r#"{"schema":3,"name":"mine","version":"2","grants":[],"config":[{"key":"policy.user.enabled","value":true,"level":"mandatory"}]}"#;
+    // A switch schema 4 no longer has is an unregistered setting, not something to ignore.
+    let retired = r#"{"schema":4,"name":"mine","version":"2","grants":[],"config":[{"key":"policy.user.enabled","value":true,"level":"mandatory"}]}"#;
     assert!(matches!(
-        facade.apply_user_policy(overreach).unwrap_err(),
-        AuthoringError::OrganizationOnlySetting(_)
+        facade.apply_user_policy(retired).unwrap_err(),
+        AuthoringError::Invalid(_)
     ));
+    assert_eq!(fs::read_to_string(&path).unwrap(), good);
 
     facade.remove_user_policy().unwrap();
     assert!(!path.exists());
@@ -700,13 +690,13 @@ fn a_policy_file_ghostlight_does_not_own_is_never_written_back() {
     let path = temporary("foreign-policy");
     fs::write(
         &path,
-        br#"{"schema":3,"name":"theirs","version":"1","grants":[]}"#,
+        br#"{"schema":4,"name":"theirs","version":"1","grants":[]}"#,
     )
     .unwrap();
     let facade = GovernanceFacade::new(Some(path.clone()), None);
     assert!(matches!(
         facade
-            .apply_user_policy(r#"{"schema":3,"name":"mine","version":"1","grants":[]}"#)
+            .apply_user_policy(r#"{"schema":4,"name":"mine","version":"1","grants":[]}"#)
             .unwrap_err(),
         AuthoringError::NotOwned
     ));
@@ -724,14 +714,14 @@ fn a_candidate_policy_is_decided_under_the_organization_ceiling_without_being_ap
     let owned = temporary("preview-user");
     fs::write(
             &managed,
-            br#"{"schema":3,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
+            br#"{"schema":4,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
         )
         .unwrap();
     let facade = GovernanceFacade::owning_user_policy(owned.clone(), Some(managed.clone()));
 
     let decided = facade
             .candidate_snapshot(
-                r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"wide","hosts":{"allow":["*"]},"allowed":["read","action","write"]}]}"#,
+                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"wide","hosts":{"allow":["*"]},"allowed":["read","action","write"]}]}"#,
             )
             .unwrap();
     assert_eq!(decided.rules, 1);
@@ -760,25 +750,13 @@ fn a_candidate_policy_is_decided_under_the_organization_ceiling_without_being_ap
 }
 
 #[test]
-fn an_organization_may_switch_off_user_authoring_without_widening_authority() {
-    let managed = temporary("authoring-managed");
-    let local = temporary("authoring-local");
-    fs::write(
-            &managed,
-            br#"{"schema":3,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}],"config":[{"key":"policy.user.enabled","value":false,"level":"mandatory"}]}"#,
-        )
-        .unwrap();
-    fs::write(
-            &local,
-            br#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"narrow","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
-        )
-        .unwrap();
-
-    let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
-    assert!(!facade.user_authoring_allowed());
-    // The switch gates authoring only. An existing user layer keeps subtracting, because
-    // ignoring it would restore authority the organization never granted back.
+fn an_owned_schema_three_user_policy_moves_at_load_and_keeps_a_backup() {
+    let path = temporary("owned-schema-three");
+    let original = r#"{"schema":3,"name":"mine","version":"1","mode":"enforce","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}],"config":[{"key":"channels.cli.enabled","value":true,"level":"mandatory"},{"key":"policy.user.enabled","value":false,"level":"mandatory"},{"key":"content.frames.handling","value":"permitted_content","level":"mandatory"}]}"#;
+    fs::write(&path, original).unwrap();
+    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
     let snapshot = facade.snapshot();
+    assert!(facade.diagnostics().authority_valid);
     assert!(
         snapshot
             .authorize_landing(CapabilitySet::READ, "https://example.com")
@@ -789,10 +767,56 @@ fn an_organization_may_switch_off_user_authoring_without_widening_authority() {
             .authorize_landing(CapabilitySet::ACTION, "https://example.com")
             .allowed
     );
+    let moved = fs::read_to_string(&path).unwrap();
+    assert!(manifest::parse(&moved, "moved").is_ok());
+    let backup = migrate::backup_path(&path);
+    assert_eq!(fs::read_to_string(&backup).unwrap(), original);
+    let _ = fs::remove_file(path);
+    let _ = fs::remove_file(backup);
+}
 
-    assert!(GovernanceFacade::new(Some(local.clone()), None).user_authoring_allowed());
+#[test]
+fn an_owned_schema_three_user_policy_that_would_change_meaning_fails_closed_untouched() {
+    let path = temporary("owned-observe");
+    let original = r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[]}"#;
+    fs::write(&path, original).unwrap();
+    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    assert_eq!(
+        facade
+            .snapshot()
+            .authorize_capability(Capability::Read)
+            .reason,
+        ReasonCode::InvalidAuthority
+    );
+    assert!(!facade.diagnostics().authority_valid);
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    assert!(!migrate::backup_path(&path).exists());
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn administrator_schema_three_files_fail_closed_and_are_never_rewritten() {
+    let managed = temporary("admin-managed");
+    let named = temporary("admin-named");
+    let document = r#"{"schema":3,"name":"theirs","version":"1","grants":[]}"#;
+    for (user, organization) in [(Some(named.clone()), None), (None, Some(managed.clone()))] {
+        fs::write(&managed, document).unwrap();
+        fs::write(&named, document).unwrap();
+        let facade = GovernanceFacade::new(user, organization);
+        assert_eq!(
+            facade
+                .snapshot()
+                .authorize_capability(Capability::Read)
+                .reason,
+            ReasonCode::InvalidAuthority
+        );
+        for path in [&managed, &named] {
+            assert_eq!(fs::read_to_string(path).unwrap(), document);
+            assert!(!migrate::backup_path(path).exists());
+        }
+    }
     let _ = fs::remove_file(managed);
-    let _ = fs::remove_file(local);
+    let _ = fs::remove_file(named);
 }
 
 #[test]
@@ -1179,113 +1203,6 @@ fn an_observation_has_one_place_for_a_host_and_none_for_the_rest_of_a_url() {
         ["host", "readiness"],
         "an observation grew another field a URL could travel in"
     );
-}
-
-#[test]
-fn naming_a_channel_is_how_a_layer_takes_control_of_it() {
-    use crate::intake::session::IntakeChannel;
-
-    let unconfigured = GovernanceFacade::new(None, None);
-    for channel in [IntakeChannel::Mcp, IntakeChannel::Cli] {
-        assert!(
-            unconfigured.admits_channel(channel).allowed,
-            "an unconfigured Ghostlight must admit every intake"
-        );
-    }
-
-    let path = temporary("channel-empty");
-    fs::write(
-        &path,
-        policy(
-            "channel-off",
-            "[]",
-            r#"[{"key":"channels.cli.enabled","value":false,"level":"mandatory"}]"#,
-        ),
-    )
-    .unwrap();
-    let empty = GovernanceFacade::new(Some(path.clone()), None);
-    assert_eq!(
-        empty.admits_channel(IntakeChannel::Cli).reason,
-        ReasonCode::ChannelDenied
-    );
-    assert!(
-        empty.admits_channel(IntakeChannel::Mcp).allowed,
-        "a layer restricts only the channels it names"
-    );
-    let _ = fs::remove_file(path);
-
-    let path = temporary("channel-false");
-    fs::write(
-            &path,
-            policy(
-                "channels",
-                "[]",
-                r#"[{"key":"channels.cli.enabled","value":false,"level":"mandatory"},{"key":"channels.mcp.enabled","value":true,"level":"recommended"}]"#,
-            ),
-        )
-        .unwrap();
-    let explicit = GovernanceFacade::new(Some(path.clone()), None);
-    assert!(!explicit.admits_channel(IntakeChannel::Cli).allowed);
-    assert!(explicit.admits_channel(IntakeChannel::Mcp).allowed);
-    let _ = fs::remove_file(path);
-}
-
-#[test]
-fn a_local_layer_cannot_readmit_a_channel_managed_authority_refused() {
-    use crate::intake::session::IntakeChannel;
-
-    let managed = temporary("channel-managed");
-    fs::write(
-        &managed,
-        policy(
-            "managed",
-            "[]",
-            r#"[{"key":"channels.cli.enabled","value":false,"level":"mandatory"}]"#,
-        ),
-    )
-    .unwrap();
-    let local = temporary("channel-local");
-    fs::write(
-        &local,
-        policy(
-            "local",
-            "[]",
-            r#"[{"key":"channels.cli.enabled","value":true,"level":"recommended"}]"#,
-        ),
-    )
-    .unwrap();
-
-    let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
-    assert_eq!(
-        facade.admits_channel(IntakeChannel::Cli).reason,
-        ReasonCode::ChannelDenied,
-        "layers compose by intersection; local cannot hand access back"
-    );
-    // The negative control: the same local layer alone does admit it, so the refusal above
-    // is the managed layer's doing and not an accident of parsing.
-    let alone = GovernanceFacade::new(Some(local.clone()), None);
-    assert!(alone.admits_channel(IntakeChannel::Cli).allowed);
-    let _ = fs::remove_file(managed);
-    let _ = fs::remove_file(local);
-}
-
-#[test]
-fn an_unknown_channel_name_is_a_typo_not_a_silent_pass() {
-    use crate::intake::session::IntakeChannel;
-
-    let path = temporary("channel-typo");
-    fs::write(
-            &path,
-            r#"{"schema":3,"name":"typo","version":"1","grants":[],"config":[{"key":"channels.cli-tool.enabled","value":false,"level":"mandatory"}]}"#,
-        )
-        .unwrap();
-    let facade = GovernanceFacade::new(Some(path.clone()), None);
-    assert_eq!(
-        facade.admits_channel(IntakeChannel::Cli).reason,
-        ReasonCode::InvalidAuthority,
-        "a misspelled channel must fail closed rather than restrict nothing"
-    );
-    let _ = fs::remove_file(path);
 }
 
 /// A pause denies before any effect and a resume restores work, without anything waiting.

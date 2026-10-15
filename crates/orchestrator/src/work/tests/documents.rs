@@ -65,7 +65,7 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
     }
 }
 
-fn policy_file(mode: &str, notice: &str, child_read: bool) -> PathBuf {
+fn policy_file(child_read: bool) -> PathBuf {
     let path = std::env::temp_dir().join(format!("ghostlight-h6-{}.json", Uuid::new_v4()));
     let mut grants = vec![
         json!({"id":"main","hosts":{"allow":["example.com"]},"allowed":["read","action","write","execute"]}),
@@ -76,10 +76,7 @@ fn policy_file(mode: &str, notice: &str, child_read: bool) -> PathBuf {
     fs::write(
         &path,
         serde_json::to_vec(
-            &json!({"schema":3,"name":"H6","version":"1","grants":grants,"config":[
-                {"key":"content.frames.handling","value":mode,"level":"mandatory"},
-                {"key":"content.frames.notice","value":notice,"level":"mandatory"}
-            ]}),
+            &json!({"schema":4,"name":"H6","version":"1","grants":grants,"config":[]}),
         )
         .unwrap(),
     )
@@ -133,13 +130,8 @@ fn captured_image() -> BrowserOutcome {
 
 #[test]
 fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
-    for mode in [
-        None,
-        Some("permitted_content"),
-        Some("complete_operation"),
-        Some("complete_page"),
-    ] {
-        let path = mode.map(|mode| policy_file(mode, "when_affected", false));
+    for governed in [false, true] {
+        let path = governed.then(|| policy_file(false));
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(path.clone(), None));
         open(&executor, &browser, &workspace);
@@ -168,7 +160,7 @@ fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
 
 #[test]
 fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
-    let path = policy_file("permitted_content", "on_demand", true);
+    let path = policy_file(true);
     let (executor, browser, _, workspace, audit) =
         fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
     open(&executor, &browser, &workspace);
@@ -235,147 +227,114 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
 }
 
 #[test]
-fn page_modes_filter_before_extraction_and_keep_hosts_only_in_human_details() {
-    for mode in ["permitted_content", "complete_operation", "complete_page"] {
-        for notice in ["on_demand", "when_affected", "when_excluded"] {
-            let path = policy_file(mode, notice, false);
-            let (executor, browser, _, workspace, audit) =
-                fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
-            open(&executor, &browser, &workspace);
-            browser.set_documents(7, inventory(true));
-            if mode == "permitted_content" {
-                browser.push(Ok(BrowserOutcome::Text {
-                    tab_id: 7,
-                    text: "Permitted Sylin fixture content".into(),
-                    title: "Page".into(),
-                    url: "https://example.com/".into(),
-                    truncated: false,
-                }));
-            }
-            let result = executor.execute(
-                &workspace,
-                "browser_read",
-                json!({}),
-                None,
-                &CancellationToken::default(),
-            );
-            assert_eq!(
-                result.status,
-                if mode == "permitted_content" {
-                    Status::Succeeded
-                } else {
-                    Status::Blocked
-                },
-                "{}",
-                result.summary
-            );
-            assert_eq!(result.facts["coverage"]["excluded_documents"], 1);
-            if mode == "permitted_content" {
-                assert_eq!(browser.scopes().last().unwrap().allowed, ["top"]);
-            } else {
-                assert_eq!(browser.calls().len(), 1, "no content primitive may run");
-            }
-            let model = serde_json::to_string(&result).unwrap();
-            let retained = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
-            for hidden in ["private-frame.invalid", "HIDDEN_PATH"] {
-                assert!(!model.contains(hidden));
-                assert!(!retained.contains(hidden));
-            }
-            let facade = WorkbenchFacade::new(
-                executor.workbench.clone(),
-                executor.workspaces.clone(),
-                executor.governance.clone(),
-                Arc::new(crate::browser::RelayBrowserPort::new(
-                    "test".into(),
-                    crate::browser::adapter::chromium::protocol4::assets::page_assets(),
-                )),
-                crate::diagnostics::DiagnosticsHub::for_tests(),
-            );
-            let snapshot = facade.snapshot();
-            let details = snapshot
-                .document_coverage
-                .iter()
-                .find(|item| item.invocation == result.invocation)
-                .unwrap();
-            assert_eq!(details.excluded_hosts, ["private-frame.invalid"]);
-            assert_eq!(details.proactive, notice != "on_demand");
-            assert!(audit.0.lock().unwrap().last().unwrap().coverage.is_some());
-            fs::remove_file(path).unwrap();
-        }
+fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_details() {
+    let path = policy_file(false);
+    let (executor, browser, _, workspace, audit) =
+        fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+    open(&executor, &browser, &workspace);
+    browser.set_documents(7, inventory(true));
+    browser.push(Ok(BrowserOutcome::Text {
+        tab_id: 7,
+        text: "Permitted Sylin fixture content".into(),
+        title: "Page".into(),
+        url: "https://example.com/".into(),
+        truncated: false,
+    }));
+    let result = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    assert_eq!(result.facts["coverage"]["excluded_documents"], 1);
+    assert_eq!(browser.scopes().last().unwrap().allowed, ["top"]);
+    let model = serde_json::to_string(&result).unwrap();
+    let retained = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    for hidden in ["private-frame.invalid", "HIDDEN_PATH"] {
+        assert!(!model.contains(hidden));
+        assert!(!retained.contains(hidden));
     }
+    let facade = WorkbenchFacade::new(
+        executor.workbench.clone(),
+        executor.workspaces.clone(),
+        executor.governance.clone(),
+        Arc::new(crate::browser::RelayBrowserPort::new(
+            "test".into(),
+            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
+        )),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let snapshot = facade.snapshot();
+    let details = snapshot
+        .document_coverage
+        .iter()
+        .find(|item| item.invocation == result.invocation)
+        .unwrap();
+    assert_eq!(details.excluded_hosts, ["private-frame.invalid"]);
+    assert!(
+        details.proactive,
+        "an exclusion that affects the work is announced"
+    );
+    assert!(audit.0.lock().unwrap().last().unwrap().coverage.is_some());
+    fs::remove_file(path).unwrap();
 }
 
 #[test]
-fn permitted_target_survives_unrelated_exclusion_except_under_complete_page() {
-    for mode in ["permitted_content", "complete_operation", "complete_page"] {
-        for child_supported in [true, false] {
-            let path = policy_file(mode, "when_affected", false);
-            let (executor, browser, _, workspace, _) =
-                fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
-            open(&executor, &browser, &workspace);
-            browser.push(Ok(BrowserOutcome::targets(
-                7,
-                vec![ObservedTarget {
-                    locator: "button".into(),
-                    role: "button".into(),
-                    name: "Continue".into(),
-                    state: vec![],
-                    credential_class: false,
-                    ..Default::default()
-                }],
-            )));
-            let observed = executor.execute(
-                &workspace,
-                "browser_inspect",
-                json!({}),
-                None,
-                &CancellationToken::default(),
-            );
-            let target = observed.facts["items"][0]["target"].as_str().unwrap();
-            let mut documents = inventory(child_supported);
-            documents.subjects = vec!["top".into()];
-            browser.set_documents(7, documents);
-            if mode != "complete_page" {
-                browser.push(Ok(BrowserOutcome::Activated {
-                    tab: tab(7, "https://example.com/"),
-                    subject: None,
-                    committed_urls: vec![],
-                }));
-            }
-            let result = executor.execute(
-                &workspace,
-                "browser_click",
-                json!({"target":target}),
-                None,
-                &CancellationToken::default(),
-            );
-            assert_eq!(
-                result.status,
-                if mode == "complete_page" {
-                    if child_supported {
-                        Status::Blocked
-                    } else {
-                        Status::Failed
-                    }
-                } else {
-                    Status::Succeeded
-                },
-                "{}",
-                result.summary
-            );
-            assert_eq!(result.facts["coverage"]["excluded_documents"], 0);
-            assert_eq!(
-                result.facts["coverage"]["page_excluded_documents"],
-                usize::from(child_supported)
-            );
-            fs::remove_file(path).unwrap();
-        }
+fn a_permitted_target_survives_an_unrelated_exclusion() {
+    for child_supported in [true, false] {
+        let path = policy_file(false);
+        let (executor, browser, _, workspace, _) =
+            fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+        open(&executor, &browser, &workspace);
+        browser.push(Ok(BrowserOutcome::targets(
+            7,
+            vec![ObservedTarget {
+                locator: "button".into(),
+                role: "button".into(),
+                name: "Continue".into(),
+                state: vec![],
+                credential_class: false,
+                ..Default::default()
+            }],
+        )));
+        let observed = executor.execute(
+            &workspace,
+            "browser_inspect",
+            json!({}),
+            None,
+            &CancellationToken::default(),
+        );
+        let target = observed.facts["items"][0]["target"].as_str().unwrap();
+        let mut documents = inventory(child_supported);
+        documents.subjects = vec!["top".into()];
+        browser.set_documents(7, documents);
+        browser.push(Ok(BrowserOutcome::Activated {
+            tab: tab(7, "https://example.com/"),
+            subject: None,
+            committed_urls: vec![],
+        }));
+        let result = executor.execute(
+            &workspace,
+            "browser_click",
+            json!({"target":target}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+        assert_eq!(result.facts["coverage"]["excluded_documents"], 0);
+        assert_eq!(
+            result.facts["coverage"]["page_excluded_documents"],
+            usize::from(child_supported)
+        );
+        fs::remove_file(path).unwrap();
     }
 }
 
 #[test]
 fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
-    let path = policy_file("permitted_content", "when_affected", true);
+    let path = policy_file(true);
     let (executor, browser, _, workspace, _) =
         fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
     open(&executor, &browser, &workspace);
@@ -417,7 +376,7 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
 
 #[test]
 fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
-    let path = policy_file("permitted_content", "on_demand", false);
+    let path = policy_file(false);
     let (executor, browser, _, workspace, _) =
         fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
     open(&executor, &browser, &workspace);
@@ -513,7 +472,7 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
         json!({"download":true}),
         json!({"target":"target_fixture"}),
     ] {
-        let path = policy_file("permitted_content", "on_demand", false);
+        let path = policy_file(false);
         let (executor, browser, _, workspace, _) =
             fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
         open(&executor, &browser, &workspace);
@@ -547,7 +506,7 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
 #[test]
 fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch() {
     for supported in [false, true] {
-        let path = policy_file("permitted_content", "on_demand", false);
+        let path = policy_file(false);
         let (executor, browser, _, workspace, audit) =
             fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
         open(&executor, &browser, &workspace);

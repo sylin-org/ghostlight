@@ -8,13 +8,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
-use super::{managed, manifest, CapabilitySet, GovernanceFacade};
-use crate::language::capability_map;
+use super::{managed, manifest, migrate, CapabilitySet, GovernanceFacade};
+use crate::language::{capability_map, migration};
 
 /// One local policy inspection command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
-    /// Parse and validate one strict schema-3 manifest.
+    /// Parse and validate one strict schema-4 manifest.
     Validate(PathBuf),
     /// Render one manifest and the exact product capability map.
     Explain(PathBuf),
@@ -25,6 +25,8 @@ pub enum Command {
         /// Existing Ghostlight audit JSONL.
         audit: PathBuf,
     },
+    /// Rewrite a schema-3 manifest as schema 4 where the meaning is kept.
+    Migrate(PathBuf),
     /// Create keys or signed organization policy bundles without browser work.
     Author(managed::cli::Command),
 }
@@ -34,6 +36,7 @@ pub fn parse(arguments: &[String]) -> Result<Command> {
     match arguments {
         [action, policy] if action == "validate" => Ok(Command::Validate(policy.into())),
         [action, policy] if action == "explain" => Ok(Command::Explain(policy.into())),
+        [action, policy] if action == "migrate" => Ok(Command::Migrate(policy.into())),
         [action, policy, audit] if action == "simulate" => Ok(Command::Simulate {
             policy: policy.into(),
             audit: audit.into(),
@@ -42,7 +45,7 @@ pub fn parse(arguments: &[String]) -> Result<Command> {
             managed::cli::parse(arguments).map(Command::Author)
         }
         _ => Err(anyhow!(
-            "usage: ghostlight policy <validate|explain> <policy.json>\n       ghostlight policy simulate <policy.json> <audit.jsonl>\n       ghostlight policy <keygen|pubkey|sign|publish> ..."
+            "usage: ghostlight policy <validate|explain|migrate> <policy.json>\n       ghostlight policy simulate <policy.json> <audit.jsonl>\n       ghostlight policy <keygen|pubkey|sign|publish> ..."
         )),
     }
 }
@@ -54,13 +57,14 @@ pub fn run(command: &Command, out: &mut impl Write) -> Result<()> {
             let policy = load(path)?;
             writeln!(
                 out,
-                "Valid schema-3 policy: {} {} ({})",
+                "Valid schema-4 policy: {} {} ({})",
                 policy.name,
                 policy.version,
                 short_hash(&policy.hash)
             )?;
         }
         Command::Explain(path) => explain(&load(path)?, out)?,
+        Command::Migrate(path) => migrate(path, out)?,
         Command::Simulate { policy, audit } => simulate(policy, audit, out)?,
         Command::Author(command) => managed::cli::run(command, out)?,
     }
@@ -73,10 +77,27 @@ fn load(path: &Path) -> Result<manifest::Manifest> {
     manifest::parse(&text, &path.display().to_string()).map_err(anyhow::Error::new)
 }
 
+fn migrate(path: &Path, out: &mut impl Write) -> Result<()> {
+    match migrate::migrate_file(path) {
+        Ok(None) => writeln!(out, "{}", migration::already_current(path))?,
+        Ok(Some((backup, moved))) => {
+            writeln!(
+                out,
+                "{}",
+                migration::migrated(path, &backup, &moved.removed)
+            )?;
+        }
+        Err(migrate::MigrateError::Refused(reasons)) => {
+            return Err(anyhow!(migration::kept(path, &reasons)));
+        }
+        Err(error) => return Err(anyhow!(error)),
+    }
+    Ok(())
+}
+
 fn explain(policy: &manifest::Manifest, out: &mut impl Write) -> Result<()> {
     writeln!(out, "Policy: {} {}", policy.name, policy.version)?;
     writeln!(out, "Identity: {}", short_hash(&policy.hash))?;
-    writeln!(out, "Mode: {}", policy.mode.unwrap_or_default().as_str())?;
     if let Some(identity) = &policy.identity {
         if let Some(principal) = &identity.principal {
             writeln!(out, "Principal: {principal}")?;
@@ -105,8 +126,7 @@ fn explain(policy: &manifest::Manifest, out: &mut impl Write) -> Result<()> {
             if !grant.hosts.deny.is_empty() {
                 write!(out, "; except {}", grant.hosts.deny.join(", "))?;
             }
-            let mode = grant.mode.or(policy.mode).unwrap_or_default();
-            writeln!(out, "; mode {}", mode.as_str())?;
+            writeln!(out)?;
             if let Some(description) = &grant.description {
                 writeln!(out, "    {description}")?;
             }
@@ -172,7 +192,7 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
         records += 1;
         let requirements = record.requirements();
         let decision = decide_record(&snapshot, requirements, record.observed.host.as_deref());
-        if !decision.allowed || decision.observed {
+        if !decision.allowed {
             denied += 1;
             let host = record.observed.host.as_deref().unwrap_or("no host");
             writeln!(
@@ -253,7 +273,7 @@ mod tests {
         let audit = temporary("audit.jsonl");
         fs::write(
             &policy,
-            r#"{"schema":3,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
         fs::write(

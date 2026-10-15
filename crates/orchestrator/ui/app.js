@@ -393,7 +393,6 @@ function wire() {
 
   el["sacred-hosts"].addEventListener("input", (event) => view.setSacred(event.target.value));
   el["add-rule"].addEventListener("click", () => view.addRule());
-  el["observe-mode"].addEventListener("change", (event) => view.setObserve(event.target.checked));
   el["check-policy"].addEventListener("click", () => checkPolicy());
   el["apply-policy"].addEventListener("click", () => applyPolicy());
   el["discard-policy"].addEventListener("click", () => view.discardDraft());

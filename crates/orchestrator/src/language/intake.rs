@@ -29,8 +29,6 @@ pub enum OpeningRefusal {
     Capacity,
     /// The service is quitting.
     ShuttingDown,
-    /// Configured authority does not admit this intake channel. Carries the channel name.
-    ChannelNotAdmitted(&'static str),
 }
 
 impl OpeningRefusal {
@@ -50,9 +48,6 @@ impl OpeningRefusal {
             Self::ShuttingDown => {
                 "Ghostlight is quitting and takes no new connections. Try again in a moment."
                     .into()
-            }
-            Self::ChannelNotAdmitted(channel) => {
-                format!("Configured authority does not admit the {channel} intake channel.")
             }
         }
     }
@@ -203,7 +198,6 @@ mod tests {
             OpeningRefusal::Malformed,
             OpeningRefusal::Capacity,
             OpeningRefusal::ShuttingDown,
-            OpeningRefusal::ChannelNotAdmitted("cli"),
         ] {
             let message = refusal.message();
             assert!(message.is_ascii());

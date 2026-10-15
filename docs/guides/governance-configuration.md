@@ -1,4 +1,4 @@
-# Configure Ghostlight 1.0 governance
+# Configure Ghostlight governance
 
 Ghostlight needs no policy for personal use. With no policy configured, ordinary HTTP(S) browser
 work is open, including localhost, loopback, and link-local destinations. Runtime controls,
@@ -8,7 +8,7 @@ HTTP(S)-only boundary still apply. Host restrictions belong to policy.
 A policy can only narrow that baseline. Managed policy, local policy, and per-request restrictions
 intersect. No lower layer can restore authority removed above it.
 
-## Write a schema-3 policy
+## Write a schema-4 policy
 
 Read, Action, Write, and Execute are independent capabilities. A compound operation needs every
 capability in its set; Execute does not imply the other three. The exact operation map lives in
@@ -16,10 +16,9 @@ capability in its set; Execute does not imply the other three. The exact operati
 
 ```json
 {
-  "schema": 3,
+  "schema": 4,
   "name": "Support workspace",
   "version": "2026-08-14",
-  "mode": "enforce",
   "identity": {
     "principal": "support-agent",
     "groups": ["support"]
@@ -38,14 +37,13 @@ capability in its set; Execute does not imply the other three. The exact operati
   "config": [
     {"key": "browser.tabs.allow_close", "value": false, "level": "mandatory"},
     {"key": "privacy.preserve_target_names", "value": false, "level": "mandatory"},
-    {"key": "channels.cli.enabled", "value": false, "level": "mandatory"},
     {"key": "browser.startup", "value": "manual", "level": "mandatory"},
     {"key": "content.security.sacred_domains", "value": ["vault.example.com"], "level": "mandatory"}
   ]
 }
 ```
 
-The document is typo-closed. Unknown fields, settings, capabilities, modes, and malformed host
+The document is typo-closed. Unknown fields, settings, capabilities, and malformed host
 patterns invalidate it. A configured source with no valid initial policy fails closed.
 
 Host patterns are `*`, an exact hostname, or one leading suffix wildcard such as
@@ -53,9 +51,15 @@ Host patterns are `*`, an exact hostname, or one leading suffix wildcard such as
 denies. A grant's deny patterns shrink only that grant. Grants are checked in written order, and
 the first grant admitting the complete capability set wins.
 
-`mode` is `enforce` or `observe`. Observe records what would have been denied while allowing
-ordinary work to continue. Protected destinations always enforce. A per-grant mode may override
-the manifest mode; the strictest effective layer wins.
+Every denial is enforced. Observe mode was removed in 2.0; `ghostlight policy simulate` replays a
+candidate against recorded audit instead, and lists what it would have refused.
+
+Schema 4 is schema 3 without `mode`, the channel switches (`channels.mcp.enabled`,
+`channels.cli.enabled`), `policy.user.enabled`, and the frame options (`content.frames.handling`,
+`content.frames.notice`). Pages with embedded documents behave one way: Ghostlight reads the
+documents policy permits, leaves the others out, and reports what it left out. A file in the retired
+schema 3 fails with `unsupported policy schema 3; run ghostlight policy migrate <file>`, and the
+next section moves it.
 
 Supported settings are:
 
@@ -70,24 +74,37 @@ remain separate.
 | `browser.tabs.allow_close` | boolean | `false` removes model-driven close. |
 | `browser.screenshots.enabled` | boolean | `false` refuses every screenshot; enabled by default. |
 | `privacy.preserve_target_names` | boolean | `false` keeps page-authored target names out of results and audit. |
-| `channels.mcp.enabled` | boolean | `false` refuses MCP session admission. |
-| `channels.cli.enabled` | boolean | `false` refuses `ghostlight call` admission. |
-| `audit.availability` | `keep_working` or `require_audit` | Defaults to continuing with visible history degradation. Require audit stops subsequent browser work during a known saving failure. Either layer can require it; observe mode does not relax it. |
+| `audit.availability` | `keep_working` or `require_audit` | Defaults to continuing with visible history degradation. Require audit stops subsequent browser work during a known saving failure. Either layer can require it. |
 | `browser.startup` | `on_demand` or `manual` | Controls whether admitted work may request one bounded browser-startup attempt. Windows defaults to `on_demand`; Linux defaults to `manual`. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
-| `policy.user.enabled` | boolean | `false` stops this machine's user from authoring a local policy. |
-
-`policy.user.enabled` is honored only from an organization layer, and it gates authoring rather than
-enforcement. A user policy that already exists keeps applying when it is switched off, because a
-user layer can only subtract authority and ignoring it would hand authority back. It is not a
-security control: a user layer could never widen anything. Use it when a fleet needs to stay
-predictable, and supply an `organization.statement` so the person reads a reason rather than a
-missing button.
 
 `browser.startup` is an operational control, not a security boundary. `on_demand` permits one
 bounded recovery attempt when admitted work finds no connected browser; `manual` returns a
 diagnosis and leaves startup to the person. An organization-authored `manual` value is a ceiling a
 user layer cannot relax.
+
+## Move a schema-3 policy
+
+```sh
+ghostlight policy migrate policy.json
+```
+
+The command rewrites a schema-3 file as schema 4 only where the meaning stays the same. It drops
+`mode` when it is `enforce`, a channel switch set to `true`, `policy.user.enabled` (a user layer can
+only tighten, so dropping it never widens anything), and a frame option at its default
+(`permitted_content` and `when_affected`). It copies the original to `policy.json.schema3.bak`,
+writes the result in one step, and prints each part it removed.
+
+It refuses anything else, because moving it would change what the policy does: `mode: "observe"`,
+a channel set to `false`, a frame option set to anything but its default, and any content schema 4
+would also refuse. The refusal prints one sentence per part and leaves the file untouched. Edit the
+file to say what you mean in schema 4, then run the command again.
+
+Ghostlight moves the user policy it owns the same way when it loads it, and keeps the same backup.
+When that policy cannot move, the user layer stays invalid and Ghostlight fails closed until you
+run the command. Files an administrator owns are never rewritten: the managed file, the signed
+bundles, and a file named by `GHOSTLIGHT_POLICY_FILE` fail closed in schema 3 until their owner moves
+them.
 
 ## Say who wrote the policy
 
@@ -122,7 +139,7 @@ bundles already deployed keep behaving exactly as they do.
 
 There is exactly one user layer. Its document comes from one of two places, in this order:
 
-1. `GHOSTLIGHT_POLICY_FILE`, when set to the absolute path of a schema-3 JSON file before starting
+1. `GHOSTLIGHT_POLICY_FILE`, when set to the absolute path of a schema-4 JSON file before starting
    Ghostlight. Ghostlight reads that file and never writes to it. The workbench shows it read-only
    and says why.
 2. Otherwise the file Ghostlight owns, beside the managed cache in the per-user state directory:
@@ -140,18 +157,16 @@ It shows the compiled result rather than the configuration: what agents may do r
 layer decided each line, the rules behind those lines, the boundaries no policy can lift, and the
 exact document and path for every layer in force.
 
-When Ghostlight owns the user file and no organization has switched authoring off, the same page
-edits it. Rules read as sentences, host patterns are read back in plain words as they are typed,
+When Ghostlight owns the user file, the same page edits it. Rules read as sentences, host patterns are read back in plain words as they are typed,
 capabilities an organization refuses are shown refused on the control itself, and a rule that can
 never fire says so in place. Before applying, the page replays the candidate through the production
 decision engine against this machine's recorded audit and reports what would have been refused.
 
-The same page authors the registered settings, grouped by what they are about -- where agents may
-connect, in the browser, privacy. Boolean permissions start on. Turning one off is the only thing
+The same page authors the registered settings, grouped by what they are about -- history, in the
+browser, privacy. Boolean permissions start on. Turning one off is the only thing
 its switch does: the permissive value is never written, because a user layer cannot hand authority
 back. Browser startup is a closed two-choice select instead of a free-form field. A control pinned
-by an organization renders disabled and names who set it. `policy.user.enabled` stays
-organization-only and is refused if a user document tries to author it. Sacred destinations are
+by an organization renders disabled and names who set it. Sacred destinations are
 edited as a list with the same plain-words readback host patterns get.
 
 Applying validates before it replaces anything and writes atomically, so no action in the window
@@ -228,7 +243,7 @@ credentials.
 ## Denials and explicit user control
 
 An enforced denial carries a deterministic `D-` id, the deciding tier, grant, rule, complete RAWX
-set, effective authority identity, mode, and managed sequence in audit. Repeated refusals do not
+set, effective authority identity, and managed sequence in audit. Repeated refusals do not
 pause the workspace or create a review/resume requirement. Each subsequent request follows the
 same configured authority and explicit human controls.
 
@@ -250,8 +265,8 @@ open a direct syslog or HTTP delivery channel. See [`siem-integration.md`](siem-
 
 Policy never grants non-HTTP(S) schemes. Localhost, its subdomains, loopback, and link-local
 addresses use the ordinary host rules. An exact host such as `localhost` or `127.0.0.1` can be
-allowed or denied by a grant, and `content.security.sacred_domains` can mark a host never-touch
-even in observe mode. No special local-access setting or exception is needed.
+allowed or denied by a grant, and `content.security.sacred_domains` can mark a host never-touch.
+No special local-access setting or exception is needed.
 
 Committed landings are checked again before their content is accepted. These checks govern
 browser operations and observed destinations; they do not filter every network request a page
@@ -263,7 +278,7 @@ closure always remains the user's action.
 
 ## When history cannot be saved
 
-The H7 source supports `audit.availability` in the existing schema-3 `config` array:
+The H7 source supports `audit.availability` in the schema-4 `config` array:
 
 ```json
 {"key":"audit.availability","value":"require_audit","level":"mandatory"}

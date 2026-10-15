@@ -1,8 +1,7 @@
 {
-  "schema": 3,
+  "schema": 4,
   "name": "Your rules",
   "version": "2026-08-14",
-  "mode": "observe",
   "grants": [
     {
       "id": "work-sites",

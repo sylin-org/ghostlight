@@ -2,7 +2,6 @@
 
 use crate::browser::adapter::documents::{DocumentInventory, DocumentScope, DOCUMENT_LIMIT};
 
-use crate::governance::documents::{Handling, Notice};
 use crate::language::coverage::{Coverage, HumanCoverage};
 
 use super::*;
@@ -199,16 +198,11 @@ impl ApplicationExecutor {
             }
             retained.insert(context.invocation.into(), coverage.clone());
         }
-        let notice = context.snapshot.document_policy().notice;
         self.workbench.document_coverage(HumanCoverage {
             summary: language::coverage::human_summary(&coverage),
             explanation: language::coverage::HUMAN_EXPLANATION.into(),
             invocation: context.invocation.into(),
-            proactive: match notice {
-                Notice::OnDemand => false,
-                Notice::WhenAffected => coverage.limited(),
-                Notice::WhenExcluded => coverage.page_excluded_documents > 0 || coverage.limited(),
-            },
+            proactive: coverage.limited(),
             coverage: coverage.clone(),
             excluded_hosts: hosts,
         });
@@ -352,7 +346,6 @@ impl ApplicationExecutor {
             _ => return Err(BrowserError::Protocol("expected document inventory".into())),
         };
         validate_inventory(&inventory)?;
-        let policy = context.snapshot.document_policy();
         let mut allowed = Vec::new();
         let mut hosts = Vec::new();
         let mut first_denial = None;
@@ -397,9 +390,9 @@ impl ApplicationExecutor {
         if inventory.incomplete || inventory.unresolved {
             coverage.unavailable_documents += 1;
         }
-        let denied = if policy.handling == Handling::CompletePage || requested.unbounded {
+        let denied = if requested.unbounded {
             first_denial
-        } else if !requested.whole || policy.handling == Handling::CompleteOperation {
+        } else if !requested.whole {
             required_denial
         } else {
             None
@@ -412,10 +405,8 @@ impl ApplicationExecutor {
         if inventory.unresolved
             || inventory.incomplete
             || allowed.is_empty()
-            || (policy.handling == Handling::CompleteOperation
-                && coverage.unavailable_documents > 0)
-            || ((requested.unbounded && !unrestricted_documents
-                || policy.handling == Handling::CompletePage)
+            || (requested.unbounded
+                && !unrestricted_documents
                 && inventory
                     .documents
                     .iter()
@@ -432,8 +423,7 @@ impl ApplicationExecutor {
                 subjects: inventory.subjects,
                 mask: None,
                 watch_changes: !unrestricted_documents,
-                strict_tree: policy.handling == Handling::CompletePage
-                    || (requested.unbounded && !unrestricted_documents),
+                strict_tree: requested.unbounded && !unrestricted_documents,
                 settle_ms: Duration::from_millis(settle_ms)
                     .saturating_sub(preparation_started.elapsed())
                     .as_millis() as u64,
@@ -481,11 +471,7 @@ impl ApplicationExecutor {
                         | BrowserOutcome::DocumentTree { .. }
                         | BrowserOutcome::Observed { .. }
                 );
-                if observation_result
-                    && (coverage.inspected_documents == 0
-                        || (policy.handling != Handling::PermittedContent
-                            && coverage.unavailable_documents > 0))
-                {
+                if observation_result && coverage.inspected_documents == 0 {
                     return Err(BrowserError::DocumentUnavailable);
                 }
                 if let BrowserOutcome::Observed { satisfied, .. } = &mut result {

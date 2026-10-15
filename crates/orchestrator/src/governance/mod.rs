@@ -10,6 +10,7 @@ pub mod evidence;
 pub mod inspection;
 pub mod managed;
 pub mod manifest;
+pub mod migrate;
 pub mod paths;
 
 use std::env;
@@ -222,8 +223,6 @@ pub enum ReasonCode {
     RuntimeHold,
     /// Runtime control ended the session.
     SessionEnded,
-    /// An authority layer does not admit this intake channel.
-    ChannelDenied,
     /// Policy requires working audit storage at the next browser boundary.
     AuditUnavailable,
 }
@@ -243,7 +242,6 @@ impl ReasonCode {
             Self::InvalidRequest => "invalid_request",
             Self::RuntimeHold => "runtime_hold",
             Self::SessionEnded => "session_ended",
-            Self::ChannelDenied => "channel_denied",
             Self::AuditUnavailable => "audit_unavailable",
         }
     }
@@ -264,8 +262,6 @@ pub enum PolicyRule {
     TabClose,
     /// A binary setting prevents screenshots.
     Screenshot,
-    /// A manifest does not admit an intake channel.
-    Channel,
 }
 
 impl PolicyRule {
@@ -278,7 +274,6 @@ impl PolicyRule {
             Self::Capability => "capability",
             Self::TabClose => "tab_close",
             Self::Screenshot => "screenshot",
-            Self::Channel => "channel",
             Self::AuditAvailability => "audit_availability",
         }
     }
@@ -291,7 +286,6 @@ struct PolicyAttribution {
     grant: Option<u16>,
     rule: PolicyRule,
     denial: [u8; 4],
-    mode: manifest::PolicyMode,
 }
 
 /// A final-boundary permission decision.
@@ -301,8 +295,6 @@ pub struct Decision {
     pub allowed: bool,
     /// Stable reason.
     pub reason: ReasonCode,
-    /// Whether ordinary policy would deny but observe mode admitted the work.
-    pub observed: bool,
     attribution: Option<PolicyAttribution>,
 }
 
@@ -311,7 +303,6 @@ impl Decision {
         Self {
             allowed: true,
             reason: ReasonCode::Permitted,
-            observed: false,
             attribution: None,
         }
     }
@@ -319,7 +310,6 @@ impl Decision {
         Self {
             allowed: false,
             reason,
-            observed: false,
             attribution: None,
         }
     }
@@ -336,25 +326,11 @@ impl Decision {
         Self::deny(reason)
     }
 
-    fn policy(
-        reason: ReasonCode,
-        attribution: PolicyAttribution,
-        effective_mode: manifest::PolicyMode,
-    ) -> Self {
-        if effective_mode == manifest::PolicyMode::Observe {
-            Self {
-                allowed: true,
-                reason,
-                observed: true,
-                attribution: Some(attribution),
-            }
-        } else {
-            Self {
-                allowed: false,
-                reason,
-                observed: false,
-                attribution: Some(attribution),
-            }
+    const fn policy(reason: ReasonCode, attribution: PolicyAttribution) -> Self {
+        Self {
+            allowed: false,
+            reason,
+            attribution: Some(attribution),
         }
     }
 
@@ -376,12 +352,6 @@ impl Decision {
     #[must_use]
     pub fn policy_rule(self) -> Option<&'static str> {
         self.attribution.map(|value| value.rule.as_str())
-    }
-
-    /// Effective mode when authored policy decided this boundary.
-    #[must_use]
-    pub fn policy_mode(self) -> Option<&'static str> {
-        self.attribution.map(|value| value.mode.as_str())
     }
 }
 
@@ -431,7 +401,6 @@ struct RawDenial {
 struct LayerOutcome {
     grants: Vec<u16>,
     denial: Option<RawDenial>,
-    mode: manifest::PolicyMode,
 }
 
 impl AuthoritySnapshot {
@@ -450,9 +419,7 @@ impl AuthoritySnapshot {
                         grant: None,
                         rule: PolicyRule::Screenshot,
                         denial: denial_bytes(&layer.manifest.hash, "", PolicyRule::Screenshot),
-                        mode: manifest::PolicyMode::Enforce,
                     },
-                    manifest::PolicyMode::Enforce,
                 );
             }
         }
@@ -523,9 +490,7 @@ impl AuthoritySnapshot {
                     grant: None,
                     rule: PolicyRule::TabClose,
                     denial: denial_bytes(source, "", PolicyRule::TabClose),
-                    mode: manifest::PolicyMode::Enforce,
                 },
-                manifest::PolicyMode::Enforce,
             )
         }
     }
@@ -593,15 +558,7 @@ impl AuthoritySnapshot {
             .iter()
             .map(|layer| decide_potential_host(layer, requirements))
             .collect();
-        if outcomes.iter().all(|outcome| outcome.denial.is_none()) {
-            return true;
-        }
-        outcomes
-            .iter()
-            .fold(manifest::PolicyMode::Observe, |mode, outcome| {
-                mode.strictest(outcome.mode)
-            })
-            == manifest::PolicyMode::Observe
+        outcomes.iter().all(|outcome| outcome.denial.is_none())
     }
 
     fn resolve_outcomes(&self, outcomes: &[LayerOutcome]) -> Option<Decision> {
@@ -609,11 +566,6 @@ impl AuthoritySnapshot {
             .iter()
             .enumerate()
             .find_map(|(index, outcome)| outcome.denial.map(|denial| (index, denial)))?;
-        let effective_mode = outcomes
-            .iter()
-            .fold(manifest::PolicyMode::Observe, |mode, outcome| {
-                mode.strictest(outcome.mode)
-            });
         let layer = &self.layers[denial.0];
         let grant_id = denial
             .1
@@ -627,9 +579,7 @@ impl AuthoritySnapshot {
                 grant: denial.1.grant,
                 rule: denial.1.rule,
                 denial: denial_bytes(&layer.manifest.hash, grant_id, denial.1.rule),
-                mode: effective_mode,
             },
-            effective_mode,
         ))
     }
 
@@ -647,13 +597,12 @@ impl AuthoritySnapshot {
 }
 
 fn decide_potential_host(layer: &PolicyLayer, requirements: CapabilitySet) -> LayerOutcome {
-    if let Some(grant) = layer.manifest.grants.iter().find(|grant| {
+    if layer.manifest.grants.iter().any(|grant| {
         requirements.is_subset_of(grant.allowed_set()) && grant_has_possible_host(grant)
     }) {
         return LayerOutcome {
             grants: vec![],
             denial: None,
-            mode: grant.mode.or(layer.manifest.mode).unwrap_or_default(),
         };
     }
     LayerOutcome {
@@ -663,7 +612,6 @@ fn decide_potential_host(layer: &PolicyLayer, requirements: CapabilitySet) -> La
             rule: PolicyRule::Capability,
             grant: None,
         }),
-        mode: layer.manifest.mode.unwrap_or_default(),
     }
 }
 
@@ -688,14 +636,6 @@ fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> Lay
         .fold(CapabilitySet::EMPTY, |set, grant| {
             set.union(grant.allowed_set())
         });
-    let mode = layer
-        .manifest
-        .grants
-        .iter()
-        .filter(|grant| grant.allowed_set().intersects(requirements))
-        .map(|grant| grant.mode.or(layer.manifest.mode).unwrap_or_default())
-        .reduce(manifest::PolicyMode::strictest)
-        .unwrap_or_else(|| layer.manifest.mode.unwrap_or_default());
     if requirements.is_subset_of(allowed) {
         return LayerOutcome {
             grants: layer
@@ -707,7 +647,6 @@ fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> Lay
                 .map(|(index, _)| u16::try_from(index).expect("bounded grants"))
                 .collect(),
             denial: None,
-            mode,
         };
     }
     LayerOutcome {
@@ -725,23 +664,19 @@ fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> Lay
             },
             grant: None,
         }),
-        mode,
     }
 }
 
 fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str) -> LayerOutcome {
     let mut first_denial = None;
-    let mut first_denial_mode = None;
     for (index, grant) in layer.manifest.grants.iter().enumerate() {
         let grant_index = u16::try_from(index).expect("grant count is bounded");
-        let mode = grant.mode.or(layer.manifest.mode).unwrap_or_default();
         match evaluate_host(host, &grant.hosts) {
             HostOutcome::Allowed => {
                 if requirements.is_subset_of(grant.allowed_set()) {
                     return LayerOutcome {
                         grants: vec![grant_index],
                         denial: None,
-                        mode,
                     };
                 }
                 if first_denial.is_none() {
@@ -750,7 +685,6 @@ fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str)
                         rule: PolicyRule::Capability,
                         grant: Some(grant_index),
                     });
-                    first_denial_mode = Some(mode);
                 }
             }
             HostOutcome::Denied if first_denial.is_none() => {
@@ -759,7 +693,6 @@ fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str)
                     rule: PolicyRule::DeniedHost,
                     grant: Some(grant_index),
                 });
-                first_denial_mode = Some(mode);
             }
             HostOutcome::Denied | HostOutcome::Unmatched => {}
         }
@@ -771,7 +704,6 @@ fn decide_for_host(layer: &PolicyLayer, requirements: CapabilitySet, host: &str)
             rule: PolicyRule::UnmatchedHost,
             grant: None,
         })),
-        mode: first_denial_mode.unwrap_or_else(|| layer.manifest.mode.unwrap_or_default()),
     }
 }
 
@@ -1068,12 +1000,14 @@ fn passport_source(passport: &ManagedPolicyPassport) -> String {
 #[derive(Debug)]
 struct PolicySource {
     path: Option<PathBuf>,
-    /// Whether an absent file means "no layer" rather than "configured but unreadable".
+    /// Whether Ghostlight owns this file.
     ///
     /// The user policy Ghostlight owns is optional: a machine with no such file is all-open, not
     /// failing closed. A path someone else named is not optional, because naming a file that is not
-    /// there is a mistake worth refusing over.
-    optional: bool,
+    /// there is a mistake worth refusing over. Ghostlight also moves a file it owns from the
+    /// retired schema 3 to schema 4 when the move keeps its meaning; it never rewrites a file
+    /// someone else named, or the organization's.
+    owned: bool,
     present: bool,
     active: Option<manifest::Manifest>,
     last_load_valid: bool,
@@ -1085,10 +1019,10 @@ impl PolicySource {
         Self::with_options(path, tier, false)
     }
 
-    fn with_options(path: Option<PathBuf>, tier: &str, optional: bool) -> Self {
+    fn with_options(path: Option<PathBuf>, tier: &str, owned: bool) -> Self {
         let mut source = Self {
             last_load_valid: path.is_none(),
-            optional,
+            owned,
             present: path.is_some(),
             path,
             active: None,
@@ -1100,7 +1034,7 @@ impl PolicySource {
 
     fn refresh(&mut self, tier: &str) {
         let Some(path) = &self.path else { return };
-        if self.optional && !path.exists() {
+        if self.owned && !path.exists() {
             self.present = false;
             self.active = None;
             self.last_load_valid = true;
@@ -1108,7 +1042,7 @@ impl PolicySource {
             return;
         }
         self.present = true;
-        match read_policy(path) {
+        match read_policy(path, self.owned) {
             Ok(policy) => {
                 self.active = Some(policy);
                 self.last_load_valid = true;
@@ -1304,36 +1238,6 @@ impl GovernanceFacade {
         self.controls.state()
     }
 
-    /// Decide whether an intake channel may open a session at all.
-    ///
-    /// This is admission, not capability: an admitted channel is still bound by every ceiling the
-    /// same layers impose, and no layer can raise one channel above another. Layers compose by
-    /// intersection, so a managed refusal cannot be undone locally, and an invalid layer denies.
-    #[must_use]
-    pub fn admits_channel(&self, channel: IntakeChannel) -> Decision {
-        self.refresh_policies();
-        let key = match channel {
-            IntakeChannel::Mcp => "channels.mcp.enabled",
-            IntakeChannel::Cli => "channels.cli.enabled",
-        };
-        let policies = self
-            .policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !policies.authority_valid() {
-            return Decision::deny(ReasonCode::InvalidAuthority);
-        }
-        for policy in [policies.managed_manifest(), policies.user.active.as_ref()]
-            .into_iter()
-            .flatten()
-        {
-            if policy.boolean_setting(key) == Some(false) {
-                return Decision::deny(ReasonCode::ChannelDenied);
-            }
-        }
-        Decision::allow()
-    }
-
     /// Author the band chip without compiling the whole destination.
     ///
     /// The band redraws on every snapshot, so this reads what it needs under one lock rather than
@@ -1383,10 +1287,6 @@ impl GovernanceFacade {
         let organization = policies.managed_manifest().cloned();
         let user = policies.user.active.clone();
         let passport = policies.managed_passport();
-        let authoring_allowed = organization
-            .as_ref()
-            .and_then(|policy| policy.boolean_setting("policy.user.enabled"))
-            .unwrap_or(true);
         let inputs = effective::Inputs {
             organization: organization.as_ref(),
             user: user.as_ref(),
@@ -1409,7 +1309,6 @@ impl GovernanceFacade {
                 effective::UserLayerSource::None
             },
             owned_user_path: paths::user_policy_path().map(|path| path.display().to_string()),
-            authoring_allowed,
             windows: cfg!(windows),
             passport: passport.clone(),
         };
@@ -1435,7 +1334,6 @@ impl GovernanceFacade {
             user_document: None,
             user_layer_source: effective::UserLayerSource::None,
             owned_user_path: None,
-            authoring_allowed: true,
             windows: cfg!(windows),
             passport: policies.managed_passport(),
         };
@@ -1495,26 +1393,6 @@ impl GovernanceFacade {
             rules,
         })
     }
-
-    /// Whether an organization layer permits a locally authored user policy.
-    ///
-    /// This gates authoring, never enforcement. A user layer that already exists keeps applying,
-    /// because it can only subtract: dropping it at decision time would restore authority no upper
-    /// layer removed, which is the one thing the monotonic rule forbids. The switch exists so an
-    /// organization can keep a fleet predictable, and it is not a security boundary -- a user layer
-    /// could never widen anything in the first place (ADR-0122 Decision 5).
-    #[must_use]
-    pub fn user_authoring_allowed(&self) -> bool {
-        self.refresh_policies();
-        let policies = self
-            .policies
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        policies
-            .managed_manifest()
-            .and_then(|policy| policy.boolean_setting("policy.user.enabled"))
-            .unwrap_or(true)
-    }
 }
 
 /// One candidate policy, decided but not applied.
@@ -1532,9 +1410,6 @@ pub struct Candidate {
 /// Why a locally authored user policy could not be applied.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum AuthoringError {
-    /// An organization layer switched local authoring off.
-    #[error("{0}")]
-    NotAllowed(String),
     /// Ghostlight reads this policy but does not own its file.
     #[error("An environment variable points Ghostlight at a policy file it does not own, so this window cannot change it.")]
     NotOwned,
@@ -1544,9 +1419,6 @@ pub enum AuthoringError {
     /// The document is not a valid policy.
     #[error("{0}")]
     Invalid(String),
-    /// Only an organization layer may author this setting.
-    #[error("Only your organization can set {0}.")]
-    OrganizationOnlySetting(String),
     /// The file could not be replaced.
     #[error("{0}")]
     Unwritable(String),
@@ -1561,24 +1433,12 @@ impl GovernanceFacade {
     pub fn apply_user_policy(&self, document: &str) -> Result<manifest::Manifest, AuthoringError> {
         let policy = manifest::parse(document, "this policy")
             .map_err(|error| AuthoringError::Invalid(error.to_string()))?;
-        if policy.boolean_setting("policy.user.enabled").is_some() {
-            return Err(AuthoringError::OrganizationOnlySetting(
-                "policy.user.enabled".into(),
-            ));
-        }
         let path = self.writable_user_policy_path()?;
         let parent = path.parent().ok_or(AuthoringError::NoHome)?;
         fs::create_dir_all(parent)
             .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
-        // A per-call unique name, not a fixed one, so two overlapping calls to apply_user_policy
-        // never share a staging file and cannot interleave or clobber each other's write.
-        let staged = path.with_extension(format!("json.{}.writing", uuid::Uuid::new_v4().simple()));
-        fs::write(&staged, document.as_bytes())
+        migrate::replace_atomically(&path, document.as_bytes())
             .map_err(|error| AuthoringError::Unwritable(error.to_string()))?;
-        fs::rename(&staged, &path).map_err(|error| {
-            let _ = fs::remove_file(&staged);
-            AuthoringError::Unwritable(error.to_string())
-        })?;
         self.refresh_policies();
         Ok(policy)
     }
@@ -1597,22 +1457,6 @@ impl GovernanceFacade {
 
     /// The user policy path this window may write, or why it may not.
     fn writable_user_policy_path(&self) -> Result<PathBuf, AuthoringError> {
-        if !self.user_authoring_allowed() {
-            let policies = self
-                .policies
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let name = policies
-                .managed_manifest()
-                .and_then(|policy| policy.organization.as_ref())
-                .map_or_else(
-                    || "Your organization".to_owned(),
-                    |organization| organization.name.clone(),
-                );
-            return Err(AuthoringError::NotAllowed(format!(
-                "{name} does not allow rules to be set on this machine."
-            )));
-        }
         let policies = self
             .policies
             .lock()
@@ -1685,10 +1529,27 @@ impl GovernanceFacade {
     }
 }
 
-fn read_policy(path: &Path) -> Result<manifest::Manifest, GovernanceError> {
+/// Read and validate one policy file, moving it to the current schema first when Ghostlight owns
+/// it and the move keeps its meaning. A file that cannot move keeps the error that names the
+/// migrate command, so the layer stays invalid and fails closed.
+fn read_policy(path: &Path, owned: bool) -> Result<manifest::Manifest, GovernanceError> {
     let text = fs::read_to_string(path)
         .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))?;
-    manifest::parse(&text, &path.display().to_string())
+    let origin = path.display().to_string();
+    match manifest::parse(&text, &origin) {
+        Err(manifest::ManifestError::RetiredSchema { .. }) if owned => {
+            if let Ok(Some((backup, moved))) = migrate::migrate_file(path) {
+                eprintln!(
+                    "{}",
+                    crate::language::migration::upgraded_user_policy(path, &backup)
+                );
+                return manifest::parse(&moved.document, &origin)
+                    .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()));
+            }
+        }
+        _ => {}
+    }
+    manifest::parse(&text, &origin)
         .map_err(|error| GovernanceError::InvalidPolicy(error.to_string()))
 }
 
@@ -1770,12 +1631,6 @@ pub struct AuditRecord {
     pub allowed: bool,
     /// Stable reason code.
     pub reason: ReasonCode,
-    /// Whether policy shadowed a denial while allowing work to continue.
-    #[serde(default)]
-    pub policy_observed: bool,
-    /// Effective enforce or observe mode when policy made this decision.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy_mode: Option<String>,
     /// Stable authored rule when policy made this decision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_rule: Option<String>,
@@ -1867,8 +1722,6 @@ impl AuditRecord {
             policy_seq: None,
             allowed: decision.allowed,
             reason: decision.reason,
-            policy_observed: false,
-            policy_mode: None,
             policy_rule: None,
             denial_id: None,
             policy_tier: None,
@@ -1916,8 +1769,6 @@ impl AuditRecord {
     #[must_use]
     pub fn with_policy(mut self, snapshot: &AuthoritySnapshot, decision: Decision) -> Self {
         self.policy_seq = snapshot.managed_sequence;
-        self.policy_observed = decision.observed;
-        self.policy_mode = decision.policy_mode().map(str::to_owned);
         self.policy_rule = decision.policy_rule().map(str::to_owned);
         self.denial_id = decision.denial_id();
         if let Some((tier, grant)) = snapshot.attribution(decision) {

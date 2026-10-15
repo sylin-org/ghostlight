@@ -13,6 +13,7 @@ pub mod field_echo;
 pub mod field_problem;
 pub mod history;
 pub mod intake;
+pub mod migration;
 pub mod outcome;
 pub mod provenance;
 pub mod readiness;

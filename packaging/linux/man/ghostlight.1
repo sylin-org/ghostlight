@@ -50,7 +50,12 @@ writes bounded binary content such as a screenshot.
 lists the available tools.
 .TP
 .BI "policy validate" " file"
-Validate one schema-3 policy document.
+Validate one schema-4 policy document.
+.TP
+.BI "policy migrate" " file"
+Move a schema-3 policy document to schema 4. The command keeps a copy as
+.IB file .schema3.bak
+and refuses, leaving the file as it is, when moving it would change what the policy does.
 .TP
 .BI "policy explain" " file"
 Explain a policy and the RAWX capability map in plain language.

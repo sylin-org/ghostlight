@@ -473,7 +473,7 @@ impl WorkbenchFacade {
             DiagnosticItem::failing(
                 "authority",
                 "Authority",
-                "A configured authority source is invalid; work fails closed.",
+                "A configured authority source is invalid; work fails closed. A policy file still in schema 3 needs ghostlight policy migrate <file>.",
             )
         } else if !governance.local_policy_valid {
             DiagnosticItem::warning(
@@ -750,7 +750,7 @@ impl WorkbenchFacade {
                 || snapshot.authorize_requirements(item.requirements),
                 |host| snapshot.authorize_landing(item.requirements, &format!("https://{host}")),
             );
-            if decision.allowed && !decision.observed {
+            if decision.allowed {
                 continue;
             }
             let host = item.observed.host.clone();

@@ -789,8 +789,7 @@
         if (!layer.document) return "";
         const where = layer.path ? `<span class="doc-path">${escapeHtml(layer.path)}</span>` : "";
         return `<details class="layer-doc"><summary>${escapeHtml(layer.title)}: `
-          + `${escapeHtml(layer.policy_name)} ${escapeHtml(layer.version)}, `
-          + `${escapeHtml(layer.mode === "observe" ? "watch only" : "enforced")}</summary>`
+          + `${escapeHtml(layer.policy_name)} ${escapeHtml(layer.version)}</summary>`
           + where + `<pre>${escapeHtml(layer.document)}</pre></details>`;
       }).join("");
     }
@@ -800,9 +799,8 @@
     /** Turn the applied user layer into an editable draft, or start an empty one. */
     function draftFrom(view) {
       const layer = view.layers.find((entry) => entry.kind === "user");
-      if (!layer) return { rules: [], settings: emptySettings(), observe: false, dirty: false };
+      if (!layer) return { rules: [], settings: emptySettings(), dirty: false };
       return {
-        observe: layer.mode === "observe",
         dirty: false,
         rules: layer.rules.map((rule) => ({
           id: rule.id,
@@ -884,25 +882,18 @@
       const detail = forcedBy
         ? `${escapeHtml(forcedBy)} already turned this off.`
         : escapeHtml(checked ? item.on : item.off);
-      const link = !forcedBy && item.link
-        ? `<button class="link-button" type="button" `
-          + (item.link.view
-            ? `data-view="${escapeHtml(item.link.view)}"`
-            : `data-destination="${escapeHtml(item.link.destination)}"`)
-          + `>${escapeHtml(item.link.label)}</button>`
-        : "";
       return `<div class="setting-row${forcedBy ? " setting-forced" : ""}">`
         + `<label class="toggle">`
         + `<input type="checkbox" data-restriction="${escapeHtml(item.key)}"`
         + `${checked ? " checked" : ""}${forcedBy ? " disabled" : ""}>`
         + `<span class="toggle-track"><span class="toggle-thumb"></span></span></label>`
         + `<div class="setting-body"><span class="setting-name">${escapeHtml(item.name)}</span>`
-        + `<span class="setting-detail">${detail}</span>${link}</div></div>`;
+        + `<span class="setting-detail">${detail}</span></div></div>`;
     }
 
     /** Render the first closed string setting without turning it into a free-form field. */
     function choiceRow(item) {
-      if (item.key !== "browser.startup") return documentChoiceRow(item);
+      if (item.key !== "browser.startup") return authoredChoiceRow(item);
       const ceiling = applied?.browser_startup?.organization_ceiling;
       const forcedBy = ceiling === "manual"
         ? applied?.organization?.name ?? "Your organization"
@@ -926,8 +917,8 @@
     }
 
     // Closed choices share the effective policy's authored source and organization floor.
-    function documentChoiceRow(item) {
-      const authority = applied?.[item.authority ?? "documents"];
+    function authoredChoiceRow(item) {
+      const authority = applied?.[item.authority];
       const ceiling = authority?.[`organization_${item.field}`];
       const minimum = Math.max(0, item.choices.findIndex((choice) => choice.value === ceiling));
       const desired = draft.settings.choices[item.key] ?? authority?.[item.field] ?? item.default;
@@ -1026,7 +1017,6 @@
       el["rule-list"].innerHTML = rows.concat(mine).join("")
         || `<p class="rules-empty">No rules anywhere. Agents may work on ordinary websites.</p>`;
       if (draft) {
-        el["observe-mode"].checked = draft.observe;
         el["discard-policy"].hidden = !draft.dirty;
         renderSettings();
       }
@@ -1046,13 +1036,11 @@
     function organizationRow(rule, layer) {
       const key = `org:${layer.title}:${rule.id}`;
       const open = opened.has(key);
-      const mode = rule.mode === "observe" ? "watch only" : "enforced";
       const detail = `<div class="rule-detail">`
         + (rule.description ? `<p>${escapeHtml(rule.description)}</p>` : "")
         + `<dl><dt>Sites</dt><dd>${rule.allow.map(escapeHtml).join(", ") || "none"}</dd>`
         + (rule.deny.length ? `<dt>Never</dt><dd>${rule.deny.map(escapeHtml).join(", ")}</dd>` : "")
-        + `<dt>Named</dt><dd>${escapeHtml(rule.id)}</dd>`
-        + `<dt>When it decides</dt><dd>${mode}</dd></dl></div>`;
+        + `<dt>Named</dt><dd>${escapeHtml(rule.id)}</dd></dl></div>`;
       return `<article class="rule rule-theirs${open ? " open" : ""}" data-rule-key="${escapeHtml(key)}">`
         + `<button class="rule-row" type="button" data-rule-toggle="${escapeHtml(key)}"`
         + ` aria-expanded="${open}">`
@@ -1178,10 +1166,9 @@
     function draftDocument() {
       if (!draft) return null;
       return JSON.stringify({
-        schema: 3,
+        schema: 4,
         name: "Your rules",
         version: new Date().toISOString().slice(0, 10),
-        mode: draft.observe ? "observe" : "enforce",
         grants: draft.rules.map((rule, index) => {
           const grant = {
             id: rule.id && /^[A-Za-z0-9._-]+$/.test(rule.id) ? rule.id : `rule-${index + 1}`,
@@ -1293,14 +1280,6 @@
       renderRules();
       const inputs = el["rule-list"].querySelectorAll(".hosts");
       inputs[inputs.length - 1]?.focus();
-    }
-
-    function setObserve(on) {
-      if (!draft) return;
-      draft.observe = on;
-      draft.dirty = true;
-      el["discard-policy"].hidden = false;
-      editorReady();
     }
 
     function discardDraft() {
@@ -1494,7 +1473,7 @@
       band, collections, navigate, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
-      setObserve, discardDraft, renderRules, previewResult, previewCleared, editorStatus,
+      discardDraft, renderRules, previewResult, previewCleared, editorStatus,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
       confirmRemoval, confirmFix, answerConfirmation,
       tickElapsed, tickAges, armCard

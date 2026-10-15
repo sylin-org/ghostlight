@@ -1,6 +1,6 @@
-# Ghostlight 1.0 policy examples
+# Ghostlight policy examples
 
-These files use the strict schema-3 policy format the orchestrator decodes. Every one of them is
+These files use the strict schema-4 policy format the orchestrator decodes. Every one of them is
 checked by the test suite, so an example that stops being valid fails the build rather than
 misleading you.
 
@@ -26,6 +26,11 @@ ghostlight policy explain examples/personal-starter.json
 ghostlight policy simulate examples/personal-starter.json audit.jsonl
 ```
 
+Observe mode was removed in 2.0. `ghostlight policy simulate` previews a policy against recorded
+audit instead: it lists the recorded work the policy would have refused. A file still in schema 3
+moves with `ghostlight policy migrate <file>`, which keeps a `.schema3.bak` copy and refuses to
+move a file whose meaning would change.
+
 ## Two ways a policy points
 
 This is the distinction worth understanding before adapting anything. Rules do not "configure" a
@@ -46,7 +51,7 @@ is how you turn off page-code execution; there is no separate switch for it.
 
 | File | What it shows |
 | --- | --- |
-| [personal-starter.json](personal-starter.json) | The one to copy first. Two named-site rules, and `"mode": "observe"` so nothing is actually blocked while you watch what a real policy would have refused. Switch it to `enforce` when the reported refusals look right. |
+| [personal-starter.json](personal-starter.json) | The one to copy first. Two named-site rules. Run `ghostlight policy simulate` against your recorded audit to see what it would have refused before you rely on it. |
 | [no-page-code.json](no-page-code.json) | Ordinary work anywhere, with page-code execution left out of every rule and therefore refused everywhere. The common "everything except running JavaScript" ask. |
 | [personal-everywhere-except.json](personal-everywhere-except.json) | The other polarity: `"*"` with holes cut in it, plus never-touch destinations and model-driven tab close turned off. |
 
@@ -58,21 +63,19 @@ Delivered for real, these are signed into a bundle; the manifest inside is exact
 
 | File | What it shows |
 | --- | --- |
-| [organization-support.json](organization-support.json) | A worked support-desk policy: named identity, contacts, two rules with a carve-out, and four settings including turning off the command-line channel. |
-| [organization-locked-fleet.json](organization-locked-fleet.json) | `policy.user.enabled: false`, which stops this machine's user from authoring their own rules, plus `browser.startup: manual`, which keeps missing-browser recovery diagnostic-only. The authoring switch gates authoring, not enforcement, and it is not a security control -- a user layer can only ever tighten. Supply a `statement` when you use it, or the person reads a missing button instead of a reason. |
+| [organization-support.json](organization-support.json) | A worked support-desk policy: named identity, contacts, two rules with a carve-out, and three settings. |
+| [organization-locked-fleet.json](organization-locked-fleet.json) | One agreed configuration for a fleet: read and ordinary interaction on the approved applications, model-driven tab closing off, and `browser.startup: manual`, which keeps missing-browser recovery diagnostic-only. Supply a `statement` so the person reads a reason for the limits. A rule set on a machine can only narrow it further. |
 
 ## Older examples, kept
 
 | File | What it shows |
 | --- | --- |
 | [developer-unrestricted.json](developer-unrestricted.json) | All-open written out explicitly. With no policy configured at all, Ghostlight is already this. |
-| [developer-observe.json](developer-observe.json) | Shadow enforcement with no rules: everything is reported as a refusal while work continues. |
 | [research-read-only.json](research-read-only.json) | Reading a short list of research sites and nothing else. |
 | [qa-staging.json](qa-staging.json) | Ordinary work across one domain with the admin console carved out. |
 | [enterprise-healthcare.json](enterprise-healthcare.json) | Named internal applications with a carve-out. |
 | [demo-policy.json](demo-policy.json) | The sylin.org demo surface. |
 | [dev-live-test.json](dev-live-test.json) | The live browser-journey fixture. |
-| [scripting-disabled.json](scripting-disabled.json) | Refusing the `ghostlight call` intake channel. |
 
 ## Things that will bite you
 
@@ -90,8 +93,8 @@ Delivered for real, these are signed into a bundle; the manifest inside is exact
   closed, and no policy can reach localhost, loopback, link-local, or non-HTTP(S) addresses.
 - `browser.startup` accepts only `on_demand` or `manual`. Windows defaults to `on_demand`; Linux
   defaults to `manual`. An organization-authored `manual` value pins the effective choice.
-- `organization` and `policy.user.enabled` are newer than 1.0's first release. A document using
-  either is refused by an older Ghostlight, so keep them out of a mixed fleet until it has moved.
+- Schema 4 is the policy format from 2.0 on. An older Ghostlight refuses it, so move a mixed fleet
+  to 2.0 before you deploy these files.
 
 See [`../docs/guides/governance-configuration.md`](../docs/guides/governance-configuration.md) for
 the full reference, and [`../docs/1.0/LANGUAGE.md`](../docs/1.0/LANGUAGE.md) for the exact operation

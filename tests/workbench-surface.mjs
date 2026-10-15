@@ -235,22 +235,21 @@ const compiled = (editable) => ({
     { capability: "execute", label: "Run page code", covers: "Run JavaScript.", state: "unavailable", detail: "Not available. Example Org does not allow it anywhere.", decided_by: ["organization"] }
   ],
   layers: [
-    { kind: "organization", title: "Example Org", policy_name: "Support", version: "1", mode: "enforce",
-      rules: [{ id: "support", description: "Ordinary support work", allow: ["support.example.test"], deny: [], allowed: ["read"], mode: "enforce", note: null }],
+    { kind: "organization", title: "Example Org", policy_name: "Support", version: "1",
+      rules: [{ id: "support", description: "Ordinary support work", allow: ["support.example.test"], deny: [], allowed: ["read"], note: null }],
       settings: [
         { key: "privacy.preserve_target_names", value: "false", level: "mandatory" },
         { key: "browser.startup", value: '"on_demand"', level: "mandatory" }
       ],
-      path: null, document: '{"schema": 3}' },
-    { kind: "user", title: "Your rules", policy_name: "Your rules", version: "1", mode: "enforce",
-      rules: [{ id: "leftover", description: null, allow: ["other.test"], deny: [], allowed: ["read"], mode: "enforce", note: "no_effect" }],
+      path: null, document: '{"schema": 4}' },
+    { kind: "user", title: "Your rules", policy_name: "Your rules", version: "1",
+      rules: [{ id: "leftover", description: null, allow: ["other.test"], deny: [], allowed: ["read"], note: "no_effect" }],
       settings: [{ key: "browser.tabs.allow_close", value: "false", level: "mandatory" }],
-      path: "state/user-policy.json", document: '{"schema": 3}' }
+      path: "state/user-policy.json", document: '{"schema": 4}' }
   ],
   ceilings: ["Anything that is not an ordinary http or https address."],
   user_layer: {
     source: "workbench",
-    authoring_allowed: editable,
     editable,
     path: "state/user-policy.json",
     blocked_reason: editable ? null : "Example Org does not allow rules to be set on this machine."
@@ -389,16 +388,13 @@ const rules = nodes.get("rule-list").innerHTML;
 const editorShown = !nodes.get("policy-editor").hidden;
 // Permissions are authored here too, phrased as what a person can do, and only ever in the
 // direction that tightens underneath. The fixture's user layer already restricts tab closing and
-// the fixture's organization layer already forces the command line off, so the first render
+// the fixture's organization layer already forces page-authored names off, so the first render
 // exercises both a person's own toggle and an organization ceiling at once.
 const permissionsOnLoad = nodes.get("setting-groups").innerHTML;
 const authoredOnLoad = JSON.parse(view.draftDocument()).config;
 view.setChoice("browser.startup", "manual");
 const authoredAfterStartup = JSON.parse(view.draftDocument()).config;
-view.setChoice("content.frames.handling", "complete_operation");
-view.setChoice("content.frames.notice", "on_demand");
-const authoredCoverage = JSON.parse(view.draftDocument()).config;
-view.setPermission("channels.mcp.enabled", false);
+view.setPermission("browser.screenshots.enabled", false);
 view.setSacred("vault.example.test, *.finance.example.test");
 const authoredAfterEdit = JSON.parse(view.draftDocument()).config;
 view.setPermission("browser.tabs.allow_close", true);
@@ -417,11 +413,6 @@ startupPinned.browser_startup = {
 };
 view.policy(startupPinned);
 const pinnedStartupControl = nodes.get("setting-groups").innerHTML;
-const pinnedCoverage = compiled(true);
-pinnedCoverage.documents = { handling: "complete_operation", notice: "when_excluded", handling_source: "organization", notice_source: "organization",
-  organization_handling: "complete_operation", organization_notice: "when_excluded" };
-view.policy(pinnedCoverage);
-const pinnedCoverageControl = nodes.get("setting-groups").innerHTML;
 
 view.policy(compiled(false));
 const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
@@ -606,12 +597,6 @@ const checks = [
     `before=${queueBeforeClear} after=${queueAfterClear} resync=${queueAfterResync} invoked=${JSON.stringify(invokedByClear)}`],
   ["audit health stays visible through recovery gaps and quiet when healthy", auditNoticeVisible && recoveredGapVisible && healthyAuditQuiet],
   ["audit policy authors a closed choice and organization requirement disables relaxation", authoredAudit.some((item) => item.key === "audit.availability" && item.value === "require_audit") && /value="keep_working"[^>]*disabled/.test(auditPinnedMarkup)],
-  ["coverage handling and notices author separate closed choices",
-    authoredCoverage.some((item) => item.key === "content.frames.handling" && item.value === "complete_operation")
-      && authoredCoverage.some((item) => item.key === "content.frames.notice" && item.value === "on_demand")],
-  ["organization coverage requirements disable weaker choices and name the author",
-    /value="permitted_content"[^>]*disabled/.test(pinnedCoverageControl)
-      && /value="on_demand"[^>]*disabled/.test(pinnedCoverageControl) && pinnedCoverageControl.includes("Example Org")],
   ...historyChecks,
   ...provenanceChecks,
   ["boot completed without throwing", bootThrew === null, bootThrew],
@@ -815,24 +800,18 @@ const checks = [
       && documents.includes("state/user-policy.json"),
     `documents: ${JSON.stringify(documents)}`],
   ["permissions are grouped by what a person thinks about, not by registered key",
-    permissionsOnLoad.includes("Where agents may connect")
-      && permissionsOnLoad.includes("In the browser")
+    permissionsOnLoad.includes("In the browser")
       && permissionsOnLoad.includes("Privacy")
-      && permissionsOnLoad.includes("MCP clients")
-      && permissionsOnLoad.includes("Command line")
-      && !permissionsOnLoad.includes("channels.cli.enabled</span>"),
+      && permissionsOnLoad.includes("Screenshots")
+      && !permissionsOnLoad.includes("browser.screenshots.enabled</span>"),
     `permissions: ${JSON.stringify(permissionsOnLoad)}`],
   ["a permission on by default renders checked, and a person's own restriction renders unchecked",
-    /data-restriction="channels\.mcp\.enabled"\s+checked/.test(permissionsOnLoad)
+    /data-restriction="browser\.screenshots\.enabled"\s+checked/.test(permissionsOnLoad)
       && /data-restriction="browser\.tabs\.allow_close"(?!\s+checked)/.test(permissionsOnLoad),
     `permissions: ${JSON.stringify(permissionsOnLoad)}`],
   ["an organization ceiling disables the switch and names who set it",
     permissionsOnLoad.includes("Example Org already turned this off.")
       && /data-restriction="privacy\.preserve_target_names"[^>]*disabled/.test(permissionsOnLoad),
-    `permissions: ${JSON.stringify(permissionsOnLoad)}`],
-  ["the way in is a real destination, not prose: MCP links to Integrations, CLI to the scripting guide",
-    permissionsOnLoad.includes('data-view="integrations"')
-      && permissionsOnLoad.includes('data-destination="scripting_guide"'),
     `permissions: ${JSON.stringify(permissionsOnLoad)}`],
   ["an authored restriction is read back into the draft",
     authoredOnLoad.length === 1
@@ -852,7 +831,7 @@ const checks = [
       && pinnedStartupControl.includes("Example Org requires browser auto-open to stay off."),
     `permissions: ${JSON.stringify(pinnedStartupControl)}`],
   ["turning a permission off authors only the tightening value",
-    authoredAfterEdit.some((entry) => entry.key === "channels.mcp.enabled" && entry.value === false)
+    authoredAfterEdit.some((entry) => entry.key === "browser.screenshots.enabled" && entry.value === false)
       && authoredAfterEdit.some((entry) =>
         entry.key === "content.security.sacred_domains"
         && JSON.stringify(entry.value) === '["vault.example.test","*.finance.example.test"]'),

@@ -45,7 +45,6 @@ impl ApplicationExecutor {
                 "title": layer.title,
                 "policy_name": layer.policy_name,
                 "version": layer.version,
-                "mode": layer.mode,
                 "rules": layer.rules,
                 "settings": layer.settings,
             })).collect::<Vec<Value>>(),
@@ -53,7 +52,6 @@ impl ApplicationExecutor {
             "browser_startup": authority.browser_startup,
             "audit": authority.audit,
             "audit_health": self.audit.health(),
-            "documents": authority.documents,
         });
         self.succeeded(
             context,

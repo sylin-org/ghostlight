@@ -528,14 +528,6 @@ fn serve_mcp(
         }
     };
     let intake_channel = crate::intake::intake_channel(channel);
-    // Admission, before any workspace exists: an authority layer may decline an intake entirely.
-    if !intake.governance.admits_channel(intake_channel).allowed {
-        listener::refuse(
-            &mut connection,
-            OpeningRefusal::ChannelNotAdmitted(intake_channel.as_str()),
-        );
-        return Ok(());
-    }
     let resumed = resume
         .and_then(|token| ResumeState::decode(token).ok())
         .map(|mut state| {
@@ -1295,7 +1287,7 @@ mod tests {
 
         let (directory, _) = runtime_path("passive-browsing");
         let policy = directory.join("policy.json");
-        std::fs::write(&policy, r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["allowed.example"]},"allowed":["read"]}]}"#).unwrap();
+        std::fs::write(&policy, r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["allowed.example"]},"allowed":["read"]}]}"#).unwrap();
         let governance = GovernanceFacade::new(Some(policy), None);
         let workspaces = WorkspaceStore::default();
         let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);

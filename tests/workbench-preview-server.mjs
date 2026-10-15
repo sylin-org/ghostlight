@@ -164,21 +164,21 @@ const policyView = {
   ],
   layers: [
     {
-      kind: "organization", title: "Northwind", policy_name: "Support workspace", version: "2026-08-14", mode: "enforce",
-      rules: [{ id: "support-sites", description: "Ordinary support work", allow: ["support.northwind.example", "*.support.northwind.example"], deny: ["admin.support.northwind.example"], allowed: ["read", "action"], mode: "enforce", note: null }],
+      kind: "organization", title: "Northwind", policy_name: "Support workspace", version: "2026-08-14",
+      rules: [{ id: "support-sites", description: "Ordinary support work", allow: ["support.northwind.example", "*.support.northwind.example"], deny: ["admin.support.northwind.example"], allowed: ["read", "action"], note: null }],
       settings: [{ key: "browser.tabs.allow_close", value: "false", level: "mandatory" }],
       path: null,
-      document: '{\n  "schema": 3,\n  "name": "Support workspace",\n  "version": "2026-08-14"\n}'
+      document: '{\n  "schema": 4,\n  "name": "Support workspace",\n  "version": "2026-08-14"\n}'
     },
     {
-      kind: "user", title: "Your rules", policy_name: "Your rules", version: "2026-08-14", mode: "enforce",
+      kind: "user", title: "Your rules", policy_name: "Your rules", version: "2026-08-14",
       rules: [
-        { id: "rule-1", description: null, allow: ["*.support.northwind.example"], deny: [], allowed: ["read", "action"], mode: "enforce", note: null },
-        { id: "rule-2", description: "Left over from last week", allow: ["one.support.northwind.example"], deny: [], allowed: ["read"], mode: "enforce", note: "unreachable" }
+        { id: "rule-1", description: null, allow: ["*.support.northwind.example"], deny: [], allowed: ["read", "action"], note: null },
+        { id: "rule-2", description: "Left over from last week", allow: ["one.support.northwind.example"], deny: [], allowed: ["read"], note: "unreachable" }
       ],
       settings: [],
       path: "C:/Users/you/AppData/Local/Ghostlight/user-policy.json",
-      document: '{\n  "schema": 3,\n  "name": "Your rules",\n  "version": "2026-08-14"\n}'
+      document: '{\n  "schema": 4,\n  "name": "Your rules",\n  "version": "2026-08-14"\n}'
     }
   ],
   ceilings: [
@@ -186,7 +186,6 @@ const policyView = {
   ],
   user_layer: {
     source: "workbench",
-    authoring_allowed: true,
     editable: true,
     path: "C:/Users/you/AppData/Local/Ghostlight/user-policy.json",
     blocked_reason: null
@@ -214,7 +213,7 @@ const script = [
 // A stable H4 scenario exercises the real bundled view with bounded synthetic receipts.
 const historyScenario = process.env.GHOSTLIGHT_PREVIEW_SCENARIO === "h4";
 if (historyScenario) {
-  const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, observed: false, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed, mode: "enforce" }], request_restricted: false, request_evaluated: false }], truncated: false });
+  const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed }], request_restricted: false, request_evaluated: false }], truncated: false });
   const child = (tool, summary, status, effect, capability) => ({ invocation: "history_example", workspace: "workspace_codex", tool, summary, status, effect, capability, allowed: status === "succeeded", complete: true, duration_ms: 120, observed: {}, permissions: permission(status === "succeeded", capability), permission_explanations: [status === "succeeded" ? "Allowed: organization policy permits this work (browsing)." : "Refused: organization policy refuses this work (browsing)."] });
   snapshot.operations = [];
   snapshot.history.unshift({ invocation: "history_example", workspace: "workspace_codex", tool: "browser_flow", capability: "", allowed: false, reason: "capability_denied", status: "blocked", effect: "partial", summary: "Completed 2 of 4 steps. Step 3 blocked by policy.", complete: true, timestamp_ms: Date.now(), duration_ms: 920, observed: {}, steps: [

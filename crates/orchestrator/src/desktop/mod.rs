@@ -32,7 +32,7 @@ use crate::workbench::{
 
 const MAIN_WINDOW: &str = "main";
 const SEARCH_QUERY_LIMIT: usize = 120;
-/// Upper bound on a policy document arriving from the surface. A schema-3 policy is bounded at 256
+/// Upper bound on a policy document arriving from the surface. A policy is bounded at 256
 /// grants of bounded patterns; this leaves generous room and still refuses anything absurd.
 const POLICY_DOCUMENT_LIMIT: usize = 256 * 1024;
 /// Single channel the disposable workbench listens on for sequenced orchestrator changes.
@@ -883,7 +883,7 @@ mod tests {
         // check right here, at the one place the untrusted WebView's bytes actually cross, would
         // have passed every other test in the suite.
         assert!(
-            validate_policy_document(r#"{"schema":3,"name":"x","version":"1","grants":[]}"#)
+            validate_policy_document(r#"{"schema":4,"name":"x","version":"1","grants":[]}"#)
                 .is_ok()
         );
         assert!(validate_policy_document("").is_err());

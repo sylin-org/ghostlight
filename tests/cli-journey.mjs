@@ -19,7 +19,6 @@ const runtimeFile = join(binDir, `.ghostlight-cli-journey-runtime-${process.pid}
 const auditFile = join(repository, `tests/.ghostlight-cli-audit-${process.pid}.jsonl`);
 // The service holds its lifetime lease beside the runtime file; killing it leaves the lease behind.
 const leaseFile = runtimeFile.replace(/\.json$/, ".lock");
-const scriptingDisabledPolicyFile = join(repository, "examples/scripting-disabled.json");
 // The whole native-host registration surface (manifests and Windows registry keys) is isolated
 // below this directory. Recovery silently repairs Ghostlight-owned registrations toward the
 // running tree (ADR-0149), so an un-isolated journey would adopt the machine's real browser
@@ -234,49 +233,6 @@ try {
     "calls from one caller must reach one workspace, whatever process each ran in"
   );
 
-  // An authority layer may decline the intake outright. Governance belongs to the service, so
-  // this needs its own authority with the policy in its environment.
-  const governedRuntime = `${runtimeFile}.governed.json`;
-  const governedAudit = `${auditFile}.governed.jsonl`;
-  const governedEnvironment = {
-    ...process.env,
-    GHOSTLIGHT_RUNTIME_FILE: governedRuntime,
-    GHOSTLIGHT_AUDIT_FILE: governedAudit,
-    GHOSTLIGHT_POLICY_FILE: scriptingDisabledPolicyFile
-  };
-  cleanup.push(governedRuntime, governedAudit, governedRuntime.replace(/\.json$/, ".lock"));
-  const governedService = spawn(ghostlight, [], {
-    env: governedEnvironment,
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-  services.push(governedService);
-  for (let attempt = 0; attempt < 80 && !existsSync(governedRuntime); attempt += 1) await sleep(50);
-  assert.equal(existsSync(governedRuntime), true, "the governed service never started");
-
-  const refused = spawnSync(ghostlight, ["call", "browser_tabs", '{"action":"list"}'], {
-    env: governedEnvironment,
-    encoding: "utf8"
-  });
-  assert.notEqual(refused.status, 0, "a disabled channel must not succeed");
-  assert.match(
-    refused.stderr,
-    /channel_denied/,
-    `expected a channel refusal, saw: ${refused.stderr}`
-  );
-  // The refusal lands at admission, before a workspace exists, so nothing was invoked.
-  assert.equal(
-    existsSync(governedAudit) ? readFileSync(governedAudit, "utf8").trim() : "",
-    "",
-    "a refused intake must not write an audit record"
-  );
-  // The negative control: the same service admits the MCP intake, so the refusal is this policy
-  // naming this channel rather than the authority being broken.
-  assert.equal(
-    JSON.parse(readFileSync(governedRuntime, "utf8")).service_bridge_major,
-    2,
-    "the governed service is otherwise healthy"
-  );
-
   // The strongest guarantee this journey owns: after every beat, the machine's real
   // native-host registration is byte-identical to the snapshot taken before the first process.
   assert.equal(
@@ -285,7 +241,7 @@ try {
     "the journey changed the machine's native-host registration"
   );
 
-  console.log("cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session -> channel refusal");
+  console.log("cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session");
 } finally {
   for (const child of services) if (!child.killed) child.kill();
   for (const file of cleanup) rmSync(file, { force: true });

@@ -446,7 +446,7 @@ fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
     let policy = temporary_policy("dialog-denied");
     fs::write(
         &policy,
-        serde_json::to_vec(&json!({"schema": 3, "name": "dialogs", "version": "1",
+        serde_json::to_vec(&json!({"schema": 4, "name": "dialogs", "version": "1",
             "grants": [{"id": "main", "hosts": {"allow": ["example.com"]},
                 "allowed": ["read", "action", "write", "execute"]}],
             "config": []}))

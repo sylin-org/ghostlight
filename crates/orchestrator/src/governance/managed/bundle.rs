@@ -231,7 +231,7 @@ mod tests {
     use crate::governance::managed::crypto::{self, verification_key};
 
     fn manifest() -> serde_json::Value {
-        serde_json::json!({"schema":3,"name":"org","version":"1","grants":[]})
+        serde_json::json!({"schema":4,"name":"org","version":"1","grants":[]})
     }
 
     #[test]

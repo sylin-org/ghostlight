@@ -60,13 +60,12 @@ function channel(write) {
     }
   };
 }
-function policy(mode = "permitted_content", child = "denied", notice = "when_affected", screenshots = true) {
-  writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({ schema: 3, name: "H6 isolated Sylin journey", version: randomUUID(),
+function policy(child = "denied", screenshots = true) {
+  writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({ schema: 4, name: "H6 isolated Sylin journey", version: randomUUID(),
     grants: [{ id: "parent", hosts: { allow: child === "unrestricted" ? ["*"] : ["sylin.org", "localhost"] }, allowed: ["read", "action", "write", "execute"] },
       ...(["denied", "unrestricted"].includes(child) ? [] : [{ id: "child", hosts: { allow: ["127.0.0.1"] }, allowed: child === "read" ? ["read"] : ["read", "action", "write", "execute"] }])],
     config: [{ key: "browser.startup", value: "manual", level: "mandatory" },
-      { key: "content.frames.handling", value: mode, level: "mandatory" },
-      { key: "content.frames.notice", value: notice, level: "mandatory" }, { key: "browser.screenshots.enabled", value: screenshots, level: "mandatory" }]
+      { key: "browser.screenshots.enabled", value: screenshots, level: "mandatory" }]
   }));
 }
 const sourceUrls = ["https://sylin.org/ghostlight/demo/iframe/", "https://sylin.org/ghostlight/demo/iframe/form/"];
@@ -212,17 +211,12 @@ try {
   await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).length >= 2, "fixture frame")
     .catch(async (error) => { console.error(await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`));
       console.error(await rawWorker(`chrome.debugger.sendCommand({tabId:${physical}}, 'Page.getFrameTree')`)); throw error; });
-  for (const mode of ["permitted_content", "complete_operation", "complete_page"]) {
-    if (mode !== "permitted_content") await freshFixture();
-    for (const notice of ["on_demand", "when_affected", "when_excluded"]) {
-      policy(mode, "denied", notice);
-      result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
-      assert.equal(result.status, mode === "permitted_content" ? "succeeded" : "blocked", JSON.stringify(result));
-      assert.equal(result.facts.coverage.excluded_documents, 1);
-      assert.doesNotMatch(JSON.stringify(result), /127\.0\.0\.1|Project name|ifxf-project/);
-      check(`${mode}/${notice}: excluded child never extracted`);
-    }
-  }
+  policy("denied");
+  result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  assert.equal(result.facts.coverage.excluded_documents, 1);
+  assert.doesNotMatch(JSON.stringify(result), /127\.0\.0\.1|Project name|ifxf-project/);
+  check("excluded child never extracted");
   policy();
   await freshFixture();
   const beforeBlockedScript = commands.length;
@@ -258,7 +252,7 @@ try {
     world: "MAIN", func: () => document.getElementById("capture-pixel-fixture")?.remove() })`);
   assert.equal(await rawPage("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
   check("complete screenshot remains available with embedded text access excluded");
-  policy("permitted_content", "denied", "when_affected", false);
+  policy("denied", false);
   const beforeDeniedCapture = commands.length;
   for (const full_page of [false, true]) {
     result = await call("browser_screenshot", { tab, full_page });
@@ -267,7 +261,7 @@ try {
   }
   assert.ok(!dispatchedSince(beforeDeniedCapture).some(command => command.startsWith("screenshot")));
   check("binary screenshot refusal dispatches no capture and returns no image");
-  policy("permitted_content", "all");
+  policy("all");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
   const runtimeCoverage = await rawWorker(`chrome.scripting.executeScript({
     target: { tabId: ${physical}, allFrames: true }, world: "MAIN",
@@ -276,17 +270,13 @@ try {
   assert.ok(runtimeCoverage.length >= 2 && runtimeCoverage.every((kind) => kind === "function"), JSON.stringify(runtimeCoverage));
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.match(JSON.stringify(result), /Project name/);
   check("same Sylin content fully available when allowed");
-  for (const mode of ["permitted_content", "complete_operation", "complete_page"]) {
-    for (const notice of ["on_demand", "when_affected", "when_excluded"]) {
-      policy(mode, "all", notice);
-      result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
-      assert.equal(result.status, "succeeded", JSON.stringify(result));
-      assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0);
-      assert.equal(result.facts.coverage?.unavailable_documents ?? 0, 0);
-      assert.match(JSON.stringify(result), /Project name/);
-      check(`${mode}/${notice}: fully permitted content remains available`);
-    }
-  }
+  policy("all");
+  result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0);
+  assert.equal(result.facts.coverage?.unavailable_documents ?? 0, 0);
+  assert.match(JSON.stringify(result), /Project name/);
+  check("fully permitted content remains available");
   result = await call("browser_execute", { tab, script: "document.body.dataset.executionCount=String(Number(document.body.dataset.executionCount||0)+1); await Promise.resolve(); return Number(document.body.dataset.executionCount);" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.value, 1);
@@ -297,12 +287,12 @@ try {
   const project = result.facts.items.find((item) => item.name === "Project name");
   const parent = result.facts.items.find((item) => item.name === "Parent note");
   assert.ok(project && parent, JSON.stringify(result));
-  policy("permitted_content", "read");
+  policy("read");
   result = await call("browser_fill_form", { tab, fields: [{ target: parent.target, value: "MUST_NOT_FILL" }, { target: project.target, value: "MUST_NOT_FILL" }] });
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.equal(await rawPage("document.getElementById('h6-parent').value"), "");
   check("readable child cannot be written; known batch denial precedes parent write");
-  policy("permitted_content", "all");
+  policy("all");
   await rawPage(`document.querySelector('iframe').src='http://127.0.0.1:${port}/form?readonly-fixture'; true`);
   await delay(200);
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
@@ -316,12 +306,9 @@ try {
   assert.equal(result.status, "failed", JSON.stringify(result)); assert.equal(result.effect, "none");
   check("later embedded readonly field refuses before editing an allowed parent document");
   policy();
-  for (const mode of ["permitted_content", "complete_operation"]) {
-    policy(mode);
-    result = await call("browser_fill_form", { tab, fields: [{ target: parent.target, value: mode }] });
-    assert.equal(result.status, "succeeded", JSON.stringify(result));
-    assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0); check(`${mode}: unrelated parent target remains usable`);
-  }
+  result = await call("browser_fill_form", { tab, fields: [{ target: parent.target, value: "unrelated parent" }] });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  assert.equal(result.facts.coverage?.excluded_documents ?? 0, 0); check("unrelated parent target remains usable");
   policy();
   result = await call("browser_fill_form", { tab, fields: [
     { selector: { name: "Parent note", role: "textbox", exact: true }, value: "Standalone semantic draft" }
@@ -349,7 +336,7 @@ try {
   result = await call("browser_screenshot", { view, x: 300, y: 350, width: 400, height: 250, timeout_ms: 30000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.coverage, undefined);
   check("viewport and magnified captures return complete images");
-  policy("permitted_content", "all");
+  policy("all");
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
   const oldProject = result.facts.items.find((item) => item.name === "Project name"); assert.ok(oldProject);
   const oldDocument = (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).find((frame) => frame.frameId !== 0);
@@ -380,7 +367,7 @@ try {
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.ok(!lastResponse.content.some((item) => item.type === "image"));
   check("replay export rechecks its captured embedded sources against current policy");
-  policy("permitted_content", "all");
+  policy("all");
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
   const field = (name) => result.facts.items.find((item) => item.name === name)?.target;
   const values = [["Project name", "Ghostlight H6 fixture"], ["Contact email", "h6@example.invalid"],
@@ -395,7 +382,7 @@ try {
   assert.match(JSON.stringify(result), /The frame confirmed receipt locally/);
   check("permitted Sylin embedded form fills and submits its local simulation");
   policy();
-  policy("permitted_content", "denied", "when_affected", false);
+  policy("denied", false);
   result = await call("browser_screenshot", { tab });
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.ok(!lastResponse.content.some(item => item.type === "image"));
@@ -422,7 +409,7 @@ try {
   result = await call("browser_execute", { tab, script: "document.title='UNAVAILABLE_SCRIPT'" });
   assert.equal(result.status, "failed", JSON.stringify(result)); assert.equal(result.effect, "none");
   check("unavailable embedded documents are separate and bounded scripts refuse");
-  policy("permitted_content", "unrestricted");
+  policy("unrestricted");
   result = await call("browser_execute", { tab, script: "document.body.dataset.allOpen='AVAILABLE'; return document.body.dataset.allOpen;" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.value, "AVAILABLE");
@@ -442,7 +429,7 @@ try {
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.ok(lastResponse.content.some((item) => item.type === "image"));
   check("unrestricted recording survives document navigation and exports its retained replay");
-  policy("permitted_content", "all");
+  policy("all");
   result = await call("browser_record", { action: "save", recording: unrestrictedRecording });
   assert.equal(result.status, "failed", JSON.stringify(result));
   assert.equal(result.facts.reason, "document_unavailable");
@@ -662,7 +649,7 @@ try {
   writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, editorPolicy);
   // Exercise the shipped renderer in its closed shadow tree. Holding an observation or script
   // gives us time to inspect the actual live elements while another controlled tab is active.
-  policy("permitted_content", "all"); await newSession();
+  policy("all"); await newSession();
   const openVisualTab = async name => {
     const url = `http://localhost:${port}/editor#${name}`;
     const opened = await call("browser_navigate", { url, new_tab: true });

@@ -475,7 +475,6 @@ fn blocked_reasons() -> Vec<BlockedReason> {
         BlockedReason::InvalidAuthority,
         BlockedReason::Hold,
         BlockedReason::SessionEnded,
-        BlockedReason::Channel,
         BlockedReason::Unspecified,
     ];
     for reason in &all {
@@ -489,7 +488,6 @@ fn blocked_reasons() -> Vec<BlockedReason> {
             | BlockedReason::InvalidAuthority
             | BlockedReason::Hold
             | BlockedReason::SessionEnded
-            | BlockedReason::Channel
             | BlockedReason::Unspecified => {}
         }
     }

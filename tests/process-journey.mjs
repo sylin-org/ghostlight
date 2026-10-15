@@ -538,7 +538,7 @@ try {
   rmSync(auditBackup, { force: true });
   rmSync(policyFile, { force: true });
   writeFileSync(policyFile, JSON.stringify({
-    schema: 3,
+    schema: 4,
     name: "Process journey",
     version: "1",
     grants: [{
@@ -1157,7 +1157,6 @@ try {
   const unrecordedRead = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: unrecorded.facts.tab } }));
   assert.equal(unrecordedRead.status, "succeeded", "default policy keeps useful work available");
   const requireAuditPolicy = JSON.parse(readFileSync(policyFile, "utf8"));
-  requireAuditPolicy.mode = "observe";
   requireAuditPolicy.config.push({ key: "audit.availability", value: "require_audit", level: "mandatory" });
   writeFileSync(policyFile, JSON.stringify(requireAuditPolicy));
   const explainedHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
@@ -1196,7 +1195,7 @@ try {
   assert.equal(repairedRecords.some((record) => record.invocation === unrecorded.invocation), false, "no delayed receipt backfill");
   assert.equal(JSON.stringify(repairedRecords.filter((record) => record.audit_gap)).includes("example.com"), false);
   await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: unrecorded.facts.tab } });
-  console.log("audit health ok: real write failure -> default continuation -> strict stop in observe mode -> human controls -> automatic repair -> explicit gap, no replay");
+  console.log("audit health ok: real write failure -> default continuation -> strict stop -> human controls -> automatic repair -> explicit gap, no replay");
 
   // A real sink failure first becomes known at an acknowledged child's completion. Continue
   // cannot cross the next audit boundary, and recovery cannot manufacture the missing receipts.

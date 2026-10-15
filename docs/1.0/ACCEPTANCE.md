@@ -159,8 +159,12 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    separately. Empty wrapper or local-window operations do not invent authority. Current audit has
    one parent composition record plus safe incremental child receipts. Grouped history and policy
    previews use the child evidence without double-counting the aggregate (ADR-0156).
-4. Strict schema-3 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant
-   deny, observe/enforce, and layer-intersection rules from ADR-0121.
+4. Strict schema-4 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant
+   deny, and layer-intersection rules from ADR-0121. Schema 4 has no observe mode, channel
+   switches, user-policy switch or frame options. A schema-3 file fails closed with the migrate
+   sentence, `ghostlight policy migrate <file>` moves a file only where its meaning is kept and
+   keeps a `.schema3.bak` copy, Ghostlight's own user file moves at load by the same rule, and
+   administrator files are never rewritten.
 5. Tool calls cannot author host or capability policy. Obsolete request fields fail before effects.
    Started work keeps one immutable configured authority snapshot even if configuration changes.
 6. A configured invalid cold source fails closed. An invalid replacement retains last valid for
@@ -510,7 +514,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 1. Equivalent direct and composed work retains equivalent decisions, requirements, effects,
    measurements, and safe summaries. Caller labels, results, and arbitrary errors stay out.
 2. Actual policy evaluation records all evaluated layers and distinguishes all-open, granted,
-   refused, and observe-mode admission. Legacy request restriction receipts remain explainable
+   and refused work. Legacy request restriction receipts remain explainable
    without blaming human policy. Permission traces are bounded and disclose omission.
 3. The workbench keeps the parent active as child receipts arrive; restored incomplete groups
    state that completion was not recorded. Missing evidence never becomes a no-effect claim.
@@ -554,8 +558,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 1. Admit each supported document for actual RAWX requirements before extracting content. A denied
    child contributes no text, labels, values, or target handles. Frame-id reuse cannot revive a
    stale document-bound target. Known denied batch targets refuse before the first effect.
-2. All three handling and notice choices compose monotonically with authored organization floors.
-   Unrelated permitted targets remain usable under permitted-content and complete-operation modes.
+2. Document handling is fixed: permitted documents are read, excluded ones are left out and
+   reported, and a notice appears when an exclusion affects the work. Unrelated permitted targets
+   remain usable.
 3. Distinguish unavailable content, policy exclusions, and size limits; negatives describe only
    inspected content. Durable coverage excludes observed origins and payloads; human host details
    are volatile. Preserve limitations across physical preparation and action receipts.
@@ -568,7 +573,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    every export destination. Source-bound overflow is explicit rather than silent eviction.
 5. Scripts refuse when document exclusions or unavailable evidence prevent bounded admission.
    All-open scripts keep browser behavior without an inferred sandbox or website network filter.
-6. `tests/frame-browser-journey.mjs` passes 70 Chrome/MV3 checks on Windows using independently
+6. `tests/frame-browser-journey.mjs` passes its Chrome/MV3 checks on Windows using independently
    checked Sylin iframe demo snapshots and form content on distinct local hosts, with real orchestrator and
    connector processes.
    Native-port discovery alone is a test pipe; installed registration and other platforms are
@@ -580,7 +585,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    and human history distinguish confirmed storage from a volatile receipt. A saved parent does
    not upgrade children whose storage was unconfirmed.
 2. Keep working is the default. Either policy layer can require audit; a lower layer and grant
-   observe mode cannot relax the requirement. Known failure refuses browser work before startup
+   grant cannot relax the requirement. Known failure refuses browser work before startup
    recovery and at the final dispatch callback, including later children under Continue.
 3. Storage recovery is bounded and serialized with writes. It reopens the repaired destination,
    synchronizes a content-free gap marker, and permits new requests without replay or backfill.

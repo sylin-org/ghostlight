@@ -194,7 +194,7 @@ The unpacked extension is a complete local product surface, not an invisible rel
 
 - No configured policy leaves HTTP(S) browser work open, including localhost, loopback, and
   link-local destinations. Host restrictions belong to policy.
-- Configured schema-3 grants admit complete independent RAWX sets; every authority tier and
+- Configured schema-4 grants admit complete independent RAWX sets; every authority tier and
   request restriction can only tighten them.
 - Started work uses one immutable configured authority snapshot. Tool calls do not author policy.
 - Ownership, leases, runtime controls, and landing authority are checked at their final boundary.

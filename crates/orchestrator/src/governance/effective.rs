@@ -101,8 +101,6 @@ pub struct RuleView {
     pub deny: Vec<String>,
     /// Capabilities the rule permits.
     pub allowed: Vec<Capability>,
-    /// Effective mode for this rule.
-    pub mode: &'static str,
     /// Set only when Ghostlight can prove the rule does nothing.
     pub note: Option<RuleNote>,
 }
@@ -140,8 +138,6 @@ pub struct LayerView {
     pub policy_name: String,
     /// Authored policy version label.
     pub version: String,
-    /// Effective default mode.
-    pub mode: &'static str,
     /// Ordered rules.
     pub rules: Vec<RuleView>,
     /// Authored settings.
@@ -193,8 +189,6 @@ pub enum UserLayerSource {
 pub struct UserLayer {
     /// Where the layer comes from.
     pub source: UserLayerSource,
-    /// Whether an organization permits authoring here at all.
-    pub authoring_allowed: bool,
     /// Whether the workbench may write, which also requires owning the file.
     pub editable: bool,
     /// The path the workbench would write, when this environment has one.
@@ -208,8 +202,6 @@ pub struct UserLayer {
 pub struct EffectiveAuthority {
     /// Effective requirement for saving audit receipts.
     pub audit: super::audit::AuditPolicy,
-    /// Effective document coverage choices and their deciding policy layers.
-    pub documents: super::documents::DocumentPolicy,
     /// Which layers are in force.
     pub situation: Situation,
     /// One sentence stating the situation, naming the organization when there is one.
@@ -303,7 +295,6 @@ pub(super) struct Inputs<'a> {
     pub(super) user_document: Option<String>,
     pub(super) user_layer_source: UserLayerSource,
     pub(super) owned_user_path: Option<String>,
-    pub(super) authoring_allowed: bool,
     pub(super) windows: bool,
     pub(super) passport: ManagedPolicyPassport,
 }
@@ -373,7 +364,6 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
     }
     EffectiveAuthority {
         audit: super::audit::AuditPolicy::resolve(inputs.organization, inputs.user),
-        documents: super::documents::DocumentPolicy::resolve(inputs.organization, inputs.user),
         situation,
         headline,
         organization,
@@ -607,7 +597,6 @@ fn layer_view(
     path: Option<String>,
     document: Option<String>,
 ) -> LayerView {
-    let default_mode = policy.mode.unwrap_or_default();
     let rules = policy
         .grants
         .iter()
@@ -618,7 +607,6 @@ fn layer_view(
             allow: grant.hosts.allow.clone(),
             deny: grant.hosts.deny.clone(),
             allowed: grant.allowed.clone(),
-            mode: grant.mode.unwrap_or(default_mode).as_str(),
             note: note(index, grant, &policy.grants, ceiling),
         })
         .collect();
@@ -627,7 +615,6 @@ fn layer_view(
         title,
         policy_name: policy.name.clone(),
         version: policy.version.clone(),
-        mode: default_mode.as_str(),
         rules,
         settings: policy
             .config
@@ -726,10 +713,8 @@ fn ceilings(sacred: &[String]) -> Vec<String> {
 
 fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
     let owned = inputs.user_layer_source != UserLayerSource::Environment;
-    let editable = inputs.authoring_allowed && owned && inputs.owned_user_path.is_some();
-    let blocked_reason = if !inputs.authoring_allowed {
-        Some(organization_refusal(inputs))
-    } else if !owned {
+    let editable = owned && inputs.owned_user_path.is_some();
+    let blocked_reason = if !owned {
         Some(
             "An environment variable points Ghostlight at a policy file it does not own, so this \
              window shows it without changing it."
@@ -742,28 +727,10 @@ fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
     };
     UserLayer {
         source: inputs.user_layer_source,
-        authoring_allowed: inputs.authoring_allowed,
         editable,
         path: inputs.owned_user_path.clone(),
         blocked_reason,
     }
-}
-
-fn organization_refusal(inputs: &Inputs<'_>) -> String {
-    let identity = inputs.organization.and_then(identity);
-    let name = identity.as_ref().map_or_else(
-        || "Your organization".to_owned(),
-        |named| named.name.clone(),
-    );
-    identity
-        .as_ref()
-        .and_then(|named| named.statement.clone())
-        .map_or_else(
-            || format!("{name} does not allow rules to be set on this machine."),
-            |statement| {
-                format!("{name} does not allow rules to be set on this machine. {statement}")
-            },
-        )
 }
 
 #[cfg(test)]
@@ -812,7 +779,6 @@ mod tests {
                 UserLayerSource::None
             },
             owned_user_path: Some("state/user-policy.json".into()),
-            authoring_allowed: true,
             windows: cfg!(windows),
             passport: passport(),
         }
@@ -849,7 +815,7 @@ mod tests {
     #[test]
     fn every_narrowed_capability_names_the_layer_that_narrowed_it() {
         let organization = policy(
-            r#"{"schema":3,"name":"org","version":"1","organization":{"name":"Example Organization"},"grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
+            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Example Organization"},"grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
         );
         let view = compile(&inputs(Some(&organization), None));
         assert_eq!(view.situation, Situation::OrganizationOnly);
@@ -876,7 +842,7 @@ mod tests {
         // An open baseline with holes cut in it, and a closed one with holes opened. Both leave a
         // capability available on "some sites" and they are opposite situations.
         let carved = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"everywhere-but","hosts":{"allow":["*"],"deny":["intranet.example"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"everywhere-but","hosts":{"allow":["*"],"deny":["intranet.example"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(None, Some(&carved)));
         assert_eq!(view.capabilities[0].state, CapabilityState::SomeBlocked);
@@ -886,7 +852,7 @@ mod tests {
         );
 
         let opened = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"just-here","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"just-here","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(None, Some(&opened)));
         assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
@@ -912,7 +878,7 @@ mod tests {
         // allowed" here would tell a person a site is reachable that the real decision path
         // refuses on every single call.
         let self_canceling = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"pointless","hosts":{"allow":["*.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"pointless","hosts":{"allow":["*.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(None, Some(&self_canceling)));
         assert_eq!(view.capabilities[0].state, CapabilityState::Unavailable);
@@ -920,7 +886,7 @@ mod tests {
         // A deny that only removes ONE host under a wildcard allow does not cancel the rest:
         // every other host under that suffix is still genuinely admitted.
         let partly_canceling = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"minus-one","hosts":{"allow":["*.example.com"],"deny":["admin.example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"minus-one","hosts":{"allow":["*.example.com"],"deny":["admin.example.com"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(None, Some(&partly_canceling)));
         assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
@@ -928,7 +894,7 @@ mod tests {
         // A broader deny loses the specificity tie at every host the narrower allow matches --
         // covering the same hosts is not the same as outranking them.
         let broader_deny_never_wins = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"narrow-allow","hosts":{"allow":["*.a.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"narrow-allow","hosts":{"allow":["*.a.example.com"],"deny":["*.example.com"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(None, Some(&broader_deny_never_wins)));
         assert_eq!(view.capabilities[0].state, CapabilityState::SomeAllowed);
@@ -937,7 +903,7 @@ mod tests {
     #[test]
     fn whoever_refused_is_named_in_their_own_grammar() {
         let mine = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(None, Some(&mine)));
         let execute = &view.capabilities[3];
@@ -949,7 +915,7 @@ mod tests {
         assert_eq!(execute.decided_by, vec![LayerKind::User]);
 
         let anonymous = policy(
-            r#"{"schema":3,"name":"org","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(Some(&anonymous), None));
         assert_eq!(
@@ -974,10 +940,10 @@ mod tests {
     #[test]
     fn inert_rules_are_marked_only_when_they_can_be_proven_inert() {
         let organization = policy(
-            r#"{"schema":3,"name":"org","version":"1","grants":[{"id":"approved","hosts":{"allow":["*.example.com"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"approved","hosts":{"allow":["*.example.com"]},"allowed":["read"]}]}"#,
         );
         let user = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"wide","hosts":{"allow":["*.example.com"]},"allowed":["read"]},{"id":"shadowed","hosts":{"allow":["a.example.com"]},"allowed":["read"]},{"id":"elsewhere","hosts":{"allow":["other.test"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"wide","hosts":{"allow":["*.example.com"]},"allowed":["read"]},{"id":"shadowed","hosts":{"allow":["a.example.com"]},"allowed":["read"]},{"id":"elsewhere","hosts":{"allow":["other.test"]},"allowed":["read"]}]}"#,
         );
         let view = compile(&inputs(Some(&organization), Some(&user)));
         assert_eq!(view.situation, Situation::Layered);
@@ -988,31 +954,30 @@ mod tests {
     }
 
     #[test]
-    fn an_organization_refusal_is_explained_in_its_own_words() {
-        let organization = policy(
-            r#"{"schema":3,"name":"org","version":"1","organization":{"name":"Example Organization","statement":"Ask the service desk for an exception."},"grants":[{"id":"work","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"policy.user.enabled","value":false,"level":"mandatory"}]}"#,
+    fn a_user_file_ghostlight_does_not_own_is_shown_and_never_editable() {
+        let user = policy(
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"work","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
         );
-        let mut refused = inputs(Some(&organization), None);
-        refused.authoring_allowed = false;
-        let view = compile(&refused);
+        let mut named = inputs(None, Some(&user));
+        named.user_layer_source = UserLayerSource::Environment;
+        let view = compile(&named);
         assert!(!view.user_layer.editable);
-        let reason = view.user_layer.blocked_reason.expect("a stated reason");
-        assert!(reason.contains("Example Organization"));
-        assert!(reason.contains("Ask the service desk for an exception."));
-        // A wide-open organization grant narrows nothing, so no capability line invents a decider.
+        assert!(view.user_layer.blocked_reason.is_some());
+        // A wide-open grant narrows nothing, so no capability line invents a decider.
         assert!(view
             .capabilities
             .iter()
             .all(|line| line.state == CapabilityState::Available));
+        assert!(compile(&inputs(None, Some(&user))).user_layer.editable);
     }
 
     #[test]
     fn an_organization_ceiling_pins_browser_startup() {
         let organization = policy(
-            r#"{"schema":3,"name":"org","version":"1","grants":[],"config":[{"key":"browser.startup","value":"manual","level":"mandatory"}]}"#,
+            r#"{"schema":4,"name":"org","version":"1","grants":[],"config":[{"key":"browser.startup","value":"manual","level":"mandatory"}]}"#,
         );
         let user = policy(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[],"config":[{"key":"browser.startup","value":"on_demand","level":"mandatory"}]}"#,
+            r#"{"schema":4,"name":"mine","version":"1","grants":[],"config":[{"key":"browser.startup","value":"on_demand","level":"mandatory"}]}"#,
         );
         let mut facts = inputs(Some(&organization), Some(&user));
         facts.windows = true;

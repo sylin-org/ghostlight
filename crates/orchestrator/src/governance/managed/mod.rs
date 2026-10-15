@@ -641,7 +641,7 @@ mod tests {
 
     fn manifest(name: &str, capability: &str) -> serde_json::Value {
         serde_json::json!({
-            "schema": 3,
+            "schema": 4,
             "name": name,
             "version": "1",
             "grants": [{

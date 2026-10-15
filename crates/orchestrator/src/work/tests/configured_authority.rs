@@ -300,7 +300,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
         for (request, destination_action) in [("action", true), ("read", true), ("action", false)] {
             let policy = temporary_policy("typing-action-landing");
             fs::write(&policy, serde_json::to_vec(&json!({
-                "schema":3,"name":"typing without write","version":"1","grants":[
+                "schema":4,"name":"typing without write","version":"1","grants":[
                     {"id":"source","hosts":{"allow":["example.com"]},"allowed":["read","action"]},
                     {"id":"landing","hosts":{"allow":["landing.example"]},"allowed":[if destination_action {"action"} else {"read"}]}
                 ]
@@ -423,7 +423,7 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
         for composed in [false, true] {
             let policy = temporary_policy("typing-postcondition-landing");
             fs::write(&policy, serde_json::to_vec(&json!({
-                "schema":3,"name":"Observe source, act at destination","version":"1","grants":[
+                "schema":4,"name":"Observe source, act at destination","version":"1","grants":[
                     {"id":"source","hosts":{"allow":["example.com"]},"allowed":["read","action"]},
                     {"id":"landing","hosts":{"allow":["landing.example"]},"allowed":["action"]}
                 ]

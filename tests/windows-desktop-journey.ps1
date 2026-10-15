@@ -18,7 +18,7 @@ $null = New-Item -ItemType Directory -Path $evidence
 $env:GHOSTLIGHT_AUDIT_FILE = Join-Path $evidence 'audit.jsonl'
 $env:GHOSTLIGHT_POLICY_FILE = Join-Path $evidence 'policy.json'
 @{
-    schema=3; name='Native desktop fixture'; version='1'
+    schema=4; name='Native desktop fixture'; version='1'
     grants=@(@{ id='ordinary'; hosts=@{ allow=@('*') }; allowed=@('read', 'action', 'write', 'execute') })
     config=@(@{ key='browser.startup'; value='manual'; level='mandatory' })
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $env:GHOSTLIGHT_POLICY_FILE -Encoding utf8

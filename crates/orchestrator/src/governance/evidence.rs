@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 const PERMISSION_CHECK_LIMIT: usize = 64;
 
 /// The evaluated grant identities in one authority layer, without its policy payload.
+///
+/// Receipts written before a field left this type still read, so it does not deny unknown fields.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct LayerEvidence {
     pub tier: String,
     pub grants: Vec<String>,
     pub allowed: bool,
-    pub mode: super::manifest::PolicyMode,
 }
 
 #[cfg(test)]
@@ -24,7 +24,7 @@ mod tests {
     fn positive_evidence_preserves_ordered_grants_and_every_layer() {
         let mut snapshot = GovernanceFacade::new(None, None).snapshot();
         for tier in [AuthorityTier::Managed, AuthorityTier::User] {
-            snapshot.layers.push(PolicyLayer { tier, manifest: manifest::parse(r#"{"schema":3,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap() });
+            snapshot.layers.push(PolicyLayer { tier, manifest: manifest::parse(r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap() });
         }
         let requirements = CapabilitySet::READ.union(CapabilitySet::WRITE);
         let (decision, evidence) = snapshot.authorize_with_evidence(
@@ -55,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn all_open_observe_and_protected_denials_keep_their_actual_meaning() {
+    fn all_open_and_protected_denials_keep_their_actual_meaning() {
         let facade = GovernanceFacade::new(None, None);
         let mut snapshot = facade.snapshot();
         let (decision, open) =
@@ -69,28 +69,26 @@ mod tests {
         snapshot.layers.push(PolicyLayer {
             tier: AuthorityTier::User,
             manifest: manifest::parse(
-                r#"{"schema":3,"name":"test","version":"1","mode":"observe","grants":[]}"#,
+                r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
                 "test",
             )
             .unwrap(),
         });
-        let (decision, observed) =
+        let (decision, refused) =
             snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
-        assert!(decision.allowed && decision.observed);
-        assert!(!observed.layers[0].allowed);
-        assert!(!observed.request_restricted && !observed.request_evaluated);
-        assert!(
-            crate::language::history::permission(&observed).starts_with("Allowed in observe mode")
-        );
+        assert!(!decision.allowed);
+        assert!(!refused.layers[0].allowed);
+        assert!(!refused.request_restricted && !refused.request_evaluated);
+        assert!(crate::language::history::permission(&refused).starts_with("Refused"));
         let (decision, protected) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("chrome://extensions"));
-        assert!(!decision.allowed && !decision.observed);
+        assert!(!decision.allowed);
         assert!(
             protected.layers.is_empty(),
             "protected rejection never evaluated grants"
         );
         snapshot.layers[0].manifest = manifest::parse(
-            r#"{"schema":3,"name":"enforced","version":"1","grants":[]}"#,
+            r#"{"schema":4,"name":"enforced","version":"1","grants":[]}"#,
             "test",
         )
         .unwrap();
@@ -120,13 +118,13 @@ mod tests {
 }
 
 /// One actual permission boundary; a host never includes its URL path or query.
+///
+/// Receipts written before a field left this type still read, so it does not deny unknown fields.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PermissionCheck {
     pub requirements: CapabilitySet,
     pub host: Option<String>,
     pub allowed: bool,
-    pub observed: bool,
     pub reason: ReasonCode,
     pub layers: Vec<LayerEvidence>,
     /// Legacy receipt field: a retired caller restriction was supplied.
@@ -175,11 +173,7 @@ impl AuthoritySnapshot {
             .iter()
             .zip(outcomes)
             .map(|(layer, outcome)| {
-                let LayerOutcome {
-                    grants,
-                    denial,
-                    mode,
-                } = outcome;
+                let LayerOutcome { grants, denial } = outcome;
                 let indices = if grants.is_empty() {
                     denial.and_then(|d| d.grant).into_iter().collect()
                 } else {
@@ -193,7 +187,6 @@ impl AuthoritySnapshot {
                         .map(|grant| grant.id.clone())
                         .collect(),
                     allowed: denial.is_none(),
-                    mode,
                 }
             })
             .collect();
@@ -214,7 +207,6 @@ impl AuthoritySnapshot {
                 .and_then(|url| url::Url::parse(url).ok())
                 .and_then(|url| url.host_str().map(str::to_ascii_lowercase)),
             allowed: decision.allowed,
-            observed: decision.observed,
             reason: decision.reason,
             layers: vec![],
             request_restricted: false,

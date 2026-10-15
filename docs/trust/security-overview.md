@@ -17,15 +17,13 @@ automatically.
 
 ## Governance
 
-Read, Action, Write, and Execute are independent capabilities. Ordered schema-3 grants bind a
+Read, Action, Write, and Execute are independent capabilities. Ordered schema-4 grants bind a
 complete requirement set to exact, suffix-wildcard, or universal host patterns. Managed policy,
 local policy, and request restrictions intersect. Localhost, loopback, and link-local HTTP(S)
 destinations follow those policies; they have no built-in address restriction. Non-HTTP(S)
 schemes and configured sacred domains remain hard ceilings.
 
-Observe mode records ordinary would-deny decisions without blocking them; enforce mode blocks.
-Explicit request restrictions still enforce under observe policy.
-Every enforced policy denial receives deterministic attribution to authority, tier, grant, and
+Every policy denial receives deterministic attribution to authority, tier, grant, and
 rule. Repeated refusals do not pause a session; later permitted work remains available. Human
 Pause/Stop and explicit global attention remain authoritative. Controls are rechecked at browser
 transmission, while already dispatched work retains its actual effect evidence.

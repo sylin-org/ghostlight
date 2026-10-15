@@ -1652,7 +1652,7 @@ mod tests {
         ));
         fs::write(
             &path,
-            r#"{"schema":3,"name":"read only","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+            r#"{"schema":4,"name":"read only","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
         let read_only = GovernanceFacade::new(Some(path.clone()), None).snapshot();
@@ -1666,14 +1666,6 @@ mod tests {
         assert!(!names.contains(&"browser_click".into()));
         assert!(!names.contains(&"browser_fill_form".into()));
         assert!(!names.contains(&"browser_execute".into()));
-
-        fs::write(
-            &path,
-            r#"{"schema":3,"name":"observe","version":"1","mode":"observe","grants":[]}"#,
-        )
-        .unwrap();
-        let observe = GovernanceFacade::new(Some(path.clone()), None).snapshot();
-        assert_eq!(catalog_for(&observe), catalog());
         let _ = fs::remove_file(path);
     }
 

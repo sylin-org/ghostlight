@@ -23,7 +23,7 @@ const environment = { ...process.env, USERPROFILE: user, HOME: user,
   GHOSTLIGHT_NATIVE_HOST_DIR: join(area, "native-host"), GHOSTLIGHT_POLICY_FILE: join(area, "policy.json"),
   GHOSTLIGHT_AUDIT_FILE: join(area, "audit.jsonl"), GHOSTLIGHT_DIAGNOSTICS_DIR: join(area, "diagnostics") };
 delete environment.GHOSTLIGHT_RUNTIME_FILE;
-writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({ schema: 3, name: "Isolated package test", version: "1",
+writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({ schema: 4, name: "Isolated package test", version: "1",
   grants: [{ id: "all", hosts: { allow: ["*"] }, allowed: ["read", "action", "write", "execute"] }],
   config: [{ key: "browser.startup", value: "manual", level: "mandatory" }] }));
 for (const name of names) copyFileSync(join(binaries, name + suffix), join(stage, name + suffix));

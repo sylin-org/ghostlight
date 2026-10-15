@@ -965,7 +965,6 @@ may do: 4 capability areas, no policy layers.`
 
 ## Explicit human control and request guidance (ADR-0185)
 
-Configured observe-mode policy reports would-deny decisions without refusing ordinary work.
 Enforced denials retain their actual policy explanation regardless of how often they occur; they
 never open a session hold or require review/resume. Credential input without the user's explicit
 authorization returns guidance for that request and leaves later permitted work available.

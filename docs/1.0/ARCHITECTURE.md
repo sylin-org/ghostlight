@@ -185,7 +185,7 @@ Invocation carries a tool name and JSON input. Catalog, result, and readiness pr
 opaque to the bridge; their meaning remains in the orchestrator. One small typed content vocabulary
 lets the edge render bounded screenshots and GIFs without knowing which tool produced them. MCP
 request ids and protocol revisions do not cross this bridge. Readiness inspection returns before
-channel admission or workspace creation and never demand-starts the authority or writes audit.
+workspace creation and never demand-starts the authority or writes audit.
 The MCP edge renders each result as the lean model view in `structuredContent`, with the authored
 summary and safe next steps in the ordinary text block; a session on an MCP revision before
 2025-06-18 gets the same lean JSON in that block too. The view only omits fields at their default.
@@ -566,12 +566,13 @@ localhost, loopback, and link-local destinations. Host restrictions belong to po
 (ADR-0155). Non-HTTP(S) schemes, including browser-internal and extension pages, remain outside
 the browser automation contract.
 
-`GHOSTLIGHT_POLICY_FILE` selects an optional strict schema-3 local policy. Ordered grants combine
+`GHOSTLIGHT_POLICY_FILE` selects an optional strict schema-4 local policy. Ordered grants combine
 host allow and deny patterns with complete independent RAWX sets. Exact hosts outrank longer
 suffix wildcards, which outrank `*`; an exact tie denies. Managed and local policy intersect. Sacred destinations compose by union. False tab-close and target-name
-settings are monotonic. Observe mode records ordinary would-deny decisions while protected
-destinations continue to enforce. A malformed cold source fails closed; an invalid replacement
-keeps the last valid authority for future snapshots.
+settings are monotonic. Every denial is enforced. A malformed cold source fails closed; an invalid
+replacement keeps the last valid authority for future snapshots. A schema-3 file is invalid. The
+user policy Ghostlight owns moves to schema 4 when it loads, with a `.schema3.bak` copy, if the move
+keeps its meaning; administrator files are never rewritten.
 
 Signed managed policy is opt-in through `%PROGRAMDATA%\Ghostlight\managed.json` on Windows or
 `/etc/ghostlight/managed.json` on Linux. With no bootstrap, no policy network work occurs. A
@@ -750,8 +751,7 @@ The page renderer creates only passive messages and animations, never buttons, f
 or a pointer-intercepting layer. That property holds when CSS fails. Runtime-state changes alone do not create a page dialog.
 Interactive runtime control belongs in the Tauri workbench.
 
-Observe-mode policy allowance remains useful. Obsolete request fields fail during decoding;
-they cannot turn observation into enforcement. Permission receipts retain the final decision and actual evaluated layers. The executor supplies a live
+Obsolete request fields fail during decoding. Permission receipts retain the final decision and actual evaluated layers. The executor supplies a live
 admission callback to the common browser port; the relay invokes it after writer acquisition and
 before transmission. The same check guards compensating close. Control authority is not locked
 while waiting for a browser receipt. Already dispatched work retains acknowledged and uncertain
@@ -773,8 +773,7 @@ Language owns the content-free coverage qualification. Completion adds bounded c
 model results and audit. Volatile workbench details hold excluded host names for the human only.
 Screenshots use binary `browser.screenshots.enabled` permission (ADR-0194). Existing tab Read
 and custody checks remain. Allowed images include visible embedded content without inventory or
-masking. A false value in either layer refuses all four branches before dispatch, even in observe
-mode. Screenshot coordinates confer no extra semantic or action authority.
+masking. A false value in either layer refuses all four branches before dispatch. Screenshot coordinates confer no extra semantic or action authority.
 Restricted recordings stop when their admitted document set changes. Every replay destination
 rechecks recorded embedded sources; incomplete provenance cannot pass restricted disclosure.
 
