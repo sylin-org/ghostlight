@@ -6,15 +6,14 @@
     revision and its own checksums, then delegate to the deep candidate checks.
 
 .DESCRIPTION
-    The custody half of G2, in one command. Runs four steps:
+    The custody half of G2, in one command. Runs three steps:
 
       1. Source revision: the candidate manifest's sourceRevision must equal the commit
          that -Revision resolves to.
       2. Deep candidate checks: scripts/check-release-candidate.ps1 (manifest shape, exact
-         artifact roster and coordinates, hashes).
-      3. SHA256SUMS recomputation: every line is rehashed from bytes on disk; the line set
-         must be exactly the manifest's asset set.
-      4. Custody instruction: the verified directory must be copied somewhere local and this
+         artifact roster and coordinates). It rehashes every asset from bytes on disk and
+         requires SHA256SUMS to equal the sorted manifest exactly.
+      3. Custody instruction: the verified directory must be copied somewhere local and this
          command re-run against the copy before anything publishes or submits.
 
     Provenance attestation verification against GitHub requires network access and gh
@@ -81,27 +80,6 @@ Assert-Step "source revision" {
 Assert-Step "deep candidate checks (check-release-candidate)" {
     & (Join-Path $repository "scripts/check-release-candidate.ps1") -CandidateDirectory $candidateDirectory
     if ($LASTEXITCODE -ne 0) { throw "deep checks reported failures" }
-}
-
-Assert-Step "SHA256SUMS recomputation (18 assets)" {
-    $sumsPath = Join-Path $candidateDirectory "SHA256SUMS"
-    $lines = Get-Content -LiteralPath $sumsPath | Where-Object { $_.Trim() }
-    if ($lines.Count -ne 18) {
-        throw ("expected 18 checksum lines, found {0}" -f $lines.Count)
-    }
-    foreach ($line in $lines) {
-        $parts = $line -split "\s+", 2
-        $expectedHash = $parts[0].ToLowerInvariant()
-        $relative = $parts[1].TrimStart("*")
-        # SHA256SUMS carries bare asset names; the assembled layout keeps them under assets/.
-        $file = Join-Path (Join-Path $candidateDirectory "assets") $relative
-        if (-not (Test-Path -LiteralPath $file)) {
-            $file = Join-Path $candidateDirectory $relative
-        }
-        if (-not (Test-Path -LiteralPath $file)) { throw "checksummed file missing: $relative" }
-        $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actual -ne $expectedHash) { throw "hash mismatch: $relative" }
-    }
 }
 
 if ($IncludeProvenance) {
