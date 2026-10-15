@@ -13,8 +13,9 @@
 //! installer learns whether it runs inside an app's container), whether the process token is
 //! elevated in `elevation` (the service refuses to run elevated), owner-private runtime-file
 //! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
-//! `item_id_list` (named by the installer's Start-menu shortcut), and joining the parent
-//! process's console in `console`. Starting the service, process identity and the session
+//! `item_id_list` (named by the installer's Start-menu shortcut), joining the parent
+//! process's console in `console`, and announcing a change of the user's environment variables to
+//! running programs in `settings_change`. Starting the service, process identity and the session
 //! listener live in the relay's audited `os` module (ADR-0199 Decisions
 //! 3 and 14). Non-Windows targets compile the portable surface returning an empty answer.
 
@@ -28,6 +29,8 @@ mod item_id_list;
 mod private_file;
 #[cfg(target_os = "windows")]
 mod process;
+#[cfg(target_os = "windows")]
+mod settings_change;
 
 /// Executable paths of this process's ancestors, nearest parent first, walking at most `limit`
 /// parents. Empty where the platform cannot answer.
@@ -77,4 +80,13 @@ pub fn item_id_list(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
 pub fn attach_parent_console() {
     #[cfg(target_os = "windows")]
     console::attach_parent();
+}
+
+/// Tell the programs running in this session that the user's environment variables changed, so
+/// Explorer and the terminals opened afterwards read the new `Path`. A program that is hung or
+/// slow is skipped after a bounded wait, and every failure is ignored: the change itself is
+/// already stored. Programs that already read their environment keep what they read.
+#[cfg(target_os = "windows")]
+pub fn broadcast_environment_change() {
+    settings_change::environment_changed();
 }

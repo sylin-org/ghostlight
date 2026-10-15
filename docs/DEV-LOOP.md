@@ -54,9 +54,10 @@ hand. An edge that was not replaced keeps running and reconnects.
 Agents that run inside Claude desktop or Codex: Windows runs every process those apps start in
 the app's container, where registry and `%APPDATA%` writes reach only that app and no browser
 sees them. Run `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal. It
-writes the browser registrations, whose `HKCU` values name the manifest in
-`~/.ghostlight/manifests`. Later dev loops then work from inside the container: they rewrite
-only that manifest and report any registration they had to leave for a regular terminal.
+puts `ghostlight` on the user PATH and writes the browser registrations, whose `HKCU` values
+name the manifest in `~/.ghostlight/manifests`. Later dev loops then work from inside the
+container: they rewrite only that manifest and report any registration they had to leave for a
+regular terminal.
 `doctor` inside a container cannot see what other apps see, and says so.
 
 `-Restore` runs `~/.ghostlight/bin/ghostlight-service deployment install --restore`. It is

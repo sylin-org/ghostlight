@@ -17,6 +17,7 @@ pub mod record;
 pub(crate) mod scratch;
 pub mod swap;
 pub mod user_assets;
+pub mod user_path;
 #[cfg(windows)]
 pub mod windows_entry;
 

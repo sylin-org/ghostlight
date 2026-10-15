@@ -9,6 +9,7 @@ use crate::install::deployment::{self, MarkerChange, Mode, Outcome, Request, Ser
 use crate::install::layout::Layout;
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
 use crate::install::reconcile::ReconcileReport;
+use crate::language::environment;
 
 /// Run `request` and report it on standard output.
 pub fn run(request: &Request) -> anyhow::Result<()> {
@@ -123,6 +124,9 @@ fn report_registrations(report: &ReconcileReport, layout: &Layout) {
     }
     for entry in &report.platform {
         println!("Updated the {entry}.");
+    }
+    if report.needs_new_terminal {
+        println!("{}", environment::OPEN_NEW_TERMINAL);
     }
     if let Some(container) = &report.container {
         for line in container::kept_private_lines(container, &report.kept_private, layout) {

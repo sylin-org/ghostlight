@@ -5,26 +5,45 @@
 //! shell looks in, so `ghostlight doctor` did not work in a fresh terminal unless the person had
 //! installed the npm package globally.
 //!
-//! This owns one symlink at `~/.local/bin/ghostlight`, the de facto user executable directory that
-//! modern distributions already place on PATH. Shell startup files are never edited: rewriting a
-//! person's `.bashrc` to fix PATH is exactly the kind of uninvited change this product does not
-//! make. When the directory is not on PATH, the install output still names the absolute path, so
-//! the terminal route works either way.
+//! On Unix this owns one symlink at `~/.local/bin/ghostlight`, the de facto user executable
+//! directory that modern distributions already place on PATH. Shell startup files are never
+//! edited: rewriting a person's `.bashrc` to fix PATH is exactly the kind of uninvited change this
+//! product does not make. When the directory is not on PATH, the install output still names the
+//! absolute path, so the terminal route works either way.
 //!
 //! Ownership is conservative. A symlink whose target is named `ghostlight` is ours to update or
 //! remove. Anything else -- a regular file, a directory, a symlink pointing somewhere else -- is
 //! someone else's and is left exactly as it is.
+//!
+//! On Windows the command is the installed `bin` directory on the per-user `Path` (see
+//! [`super::user_path`]). Install appends that one entry, uninstall removes only it, and each
+//! change is announced so terminals opened afterwards see it. Inside an app container the registry
+//! write would land in that app's private view, so the entry is neither read nor written and the
+//! state is [`CommandPathState::PrivateView`].
 
 use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::Serialize;
 use thiserror::Error;
 
+use super::container::{AppContainer, Residence, NOT_VISIBLE};
+use super::user_path::{self, PathValue, UserPathStore};
+
 /// The command name a person types.
 const COMMAND_NAME: &str = "ghostlight";
+
+/// What an install calls the command's `Path` entry when an app container kept it private.
+pub const PATH_ENTRY_REGISTRATION: &str = "PATH entry";
+
+/// The variable whose value the home-relative form of a `Path` entry names.
+const PROFILE_VARIABLE: &str = "USERPROFILE";
+
+/// The subcommand of the installed edge that puts the command on the `Path`.
+const FIXING_SUBCOMMAND: &str = "install";
 
 /// Current state of the per-user command entry.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -40,6 +59,9 @@ pub enum CommandPathState {
     Updatable,
     /// Something not owned by Ghostlight occupies the location.
     NeedsAttention,
+    /// An app container keeps the entry private, so this process can neither see nor set the real
+    /// one.
+    PrivateView,
 }
 
 impl CommandPathState {
@@ -52,6 +74,7 @@ impl CommandPathState {
             Self::Current => "installed",
             Self::Updatable => "installed, needs an update",
             Self::NeedsAttention => "needs attention",
+            Self::PrivateView => "private to an app",
         }
     }
 }
@@ -63,7 +86,7 @@ pub struct CommandPathReport {
     pub state: CommandPathState,
     /// Product-authored explanation of the state.
     pub detail: String,
-    /// Exact entry location.
+    /// Exact entry location: the symlink on Unix, the directory on the `Path` on Windows.
     pub link: PathBuf,
     /// The executable a person runs, whether or not the entry exists.
     pub executable: PathBuf,
@@ -72,8 +95,10 @@ pub struct CommandPathReport {
 /// Result of a command-entry install or uninstall request.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct CommandPathActionResult {
-    /// Whether an owned file changed.
+    /// Whether an owned link or value changed.
     pub changed: bool,
+    /// Whether a terminal that is already open still lacks the change. A new terminal has it.
+    pub needs_new_terminal: bool,
     /// State observed after the action.
     pub report: CommandPathReport,
 }
@@ -85,11 +110,17 @@ pub struct CommandPath {
 }
 
 impl CommandPath {
-    /// Discover the current executable and the user executable directory.
+    /// Discover the current executable and where this platform keeps the command entry.
     #[must_use]
     pub fn discover() -> Self {
+        Self::in_residence(&Residence::detect())
+    }
+
+    /// The same, for a process that runs in `residence`.
+    #[must_use]
+    pub fn in_residence(residence: &Residence) -> Self {
         Self {
-            context: CommandPathContext::system(),
+            context: CommandPathContext::system(residence),
         }
     }
 
@@ -114,10 +145,16 @@ struct CommandPathContext {
     unix: bool,
     executable: PathBuf,
     bin_home: PathBuf,
+    /// Where the per-user `Path` is stored, on a platform that keeps the command there.
+    user_path: Option<Arc<dyn UserPathStore>>,
+    /// The user profile directory the home-relative `Path` entry names.
+    profile: Option<PathBuf>,
+    /// The app container this process runs in, when there is one.
+    container: Option<AppContainer>,
 }
 
 impl CommandPathContext {
-    fn system() -> Self {
+    fn system(residence: &Residence) -> Self {
         let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
         Self {
             unix: cfg!(unix),
@@ -125,6 +162,9 @@ impl CommandPathContext {
                 .map(|layout| layout.edge())
                 .unwrap_or_default(),
             bin_home: home.join(".local/bin"),
+            user_path: system_user_path(),
+            profile: env::var_os(PROFILE_VARIABLE).map(PathBuf::from),
+            container: residence.container().cloned(),
         }
     }
 
@@ -140,9 +180,48 @@ impl CommandPathContext {
     fn applicable(&self) -> bool {
         self.unix && !self.system_package()
     }
+
+    /// The directory the `Path` entry names: the one holding the edge.
+    fn bin_directory(&self) -> Option<&Path> {
+        self.executable
+            .parent()
+            .filter(|directory| !directory.as_os_str().is_empty())
+    }
+
+    /// The value of environment variable `name`, with the profile directory this context was built
+    /// with answering for `USERPROFILE`.
+    fn variable(&self, name: &str) -> Option<String> {
+        if name.eq_ignore_ascii_case(PROFILE_VARIABLE) {
+            return self
+                .profile
+                .as_ref()
+                .map(|profile| profile.to_string_lossy().into_owned());
+        }
+        env::var(name).ok()
+    }
+}
+
+/// The per-user `Path` in the registry on Windows. Under a test home there is none, so a journey
+/// never changes the `Path` of the person running it.
+fn system_user_path() -> Option<Arc<dyn UserPathStore>> {
+    #[cfg(windows)]
+    {
+        use ghostlight_relay::home::TEST_HOME_VARIABLE;
+
+        env::var_os(TEST_HOME_VARIABLE)
+            .is_none()
+            .then(|| Arc::new(user_path::Registry) as Arc<dyn UserPathStore>)
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
 }
 
 fn inspect(context: &CommandPathContext) -> Result<CommandPathReport, CommandPathError> {
+    if let Some(store) = &context.user_path {
+        return inspect_user_path(context, store.as_ref());
+    }
     let link = context.link();
     let executable = context.executable.clone();
     if !context.applicable() {
@@ -167,6 +246,121 @@ fn inspect(context: &CommandPathContext) -> Result<CommandPathReport, CommandPat
     })
 }
 
+/// The state of the `Path` entry on a platform that keeps the command there.
+fn inspect_user_path(
+    context: &CommandPathContext,
+    store: &dyn UserPathStore,
+) -> Result<CommandPathReport, CommandPathError> {
+    let executable = context.executable.clone();
+    let Some(directory) = context.bin_directory() else {
+        return Ok(CommandPathReport {
+            state: CommandPathState::NotApplicable,
+            detail: not_applicable_detail(context),
+            link: PathBuf::new(),
+            executable,
+        });
+    };
+    let (state, detail) = if let Some(container) = &context.container {
+        (
+            CommandPathState::PrivateView,
+            format!(
+                "{NOT_VISIBLE}: Windows gives {} its own view of the user PATH.",
+                container.app
+            ),
+        )
+    } else if on_user_path(context, store, directory)? {
+        (
+            CommandPathState::Current,
+            format!("{} is on your PATH.", directory.display()),
+        )
+    } else {
+        (
+            CommandPathState::Missing,
+            format!(
+                "{} is not on your PATH. To add it, run: {} {FIXING_SUBCOMMAND}",
+                directory.display(),
+                executable.display()
+            ),
+        )
+    };
+    Ok(CommandPathReport {
+        state,
+        detail,
+        link: directory.to_path_buf(),
+        executable,
+    })
+}
+
+/// Whether some entry of the stored `Path` names `directory`.
+fn on_user_path(
+    context: &CommandPathContext,
+    store: &dyn UserPathStore,
+    directory: &Path,
+) -> Result<bool, CommandPathError> {
+    Ok(read_user_path(store)?.is_some_and(|value| {
+        user_path::names_directory(&value, directory, &|name| context.variable(name))
+    }))
+}
+
+fn read_user_path(store: &dyn UserPathStore) -> Result<Option<PathValue>, CommandPathError> {
+    store.read().map_err(|source| CommandPathError::Read {
+        path: PathBuf::from(user_path::LOCATION),
+        source,
+    })
+}
+
+/// Store `value` and tell running programs. The announcement cannot fail the install: the value is
+/// already written.
+fn write_user_path(store: &dyn UserPathStore, value: &PathValue) -> Result<(), CommandPathError> {
+    store
+        .write(value)
+        .map_err(|source| CommandPathError::Write {
+            path: PathBuf::from(user_path::LOCATION),
+            source,
+        })?;
+    store.announce();
+    Ok(())
+}
+
+/// Append `directory` to the per-user `Path`.
+fn install_user_path(
+    context: &CommandPathContext,
+    store: &dyn UserPathStore,
+    directory: &Path,
+) -> Result<(), CommandPathError> {
+    let value = read_user_path(store)?.unwrap_or_else(PathValue::empty);
+    let entry = user_path::entry_for(directory, value.expandable, context.profile.as_deref());
+    write_user_path(
+        store,
+        &PathValue {
+            text: user_path::append(&value.text, &entry),
+            expandable: value.expandable,
+        },
+    )
+}
+
+/// Remove the entries that name `directory` from the per-user `Path`.
+fn uninstall_user_path(
+    context: &CommandPathContext,
+    store: &dyn UserPathStore,
+    directory: &Path,
+) -> Result<(), CommandPathError> {
+    let remaining = read_user_path(store)?
+        .and_then(|value| user_path::remove(&value, directory, &|name| context.variable(name)));
+    match remaining {
+        Some(remaining) => write_user_path(store, &remaining),
+        None => Ok(()),
+    }
+}
+
+fn unchanged(report: CommandPathReport) -> CommandPathActionResult {
+    CommandPathActionResult {
+        changed: false,
+        needs_new_terminal: false,
+        report,
+    }
+}
+
 fn apply_install(
     context: &CommandPathContext,
 ) -> Result<CommandPathActionResult, CommandPathError> {
@@ -176,10 +370,16 @@ fn apply_install(
         CommandPathState::NotApplicable
             | CommandPathState::NeedsAttention
             | CommandPathState::Current
+            | CommandPathState::PrivateView
     ) {
+        return Ok(unchanged(before));
+    }
+    if let (Some(store), Some(directory)) = (&context.user_path, context.bin_directory()) {
+        install_user_path(context, store.as_ref(), directory)?;
         return Ok(CommandPathActionResult {
-            changed: false,
-            report: before,
+            changed: true,
+            needs_new_terminal: true,
+            report: inspect(context)?,
         });
     }
     let link = context.link();
@@ -196,6 +396,7 @@ fn apply_install(
     create_symlink(&context.executable, &link)?;
     Ok(CommandPathActionResult {
         changed: true,
+        needs_new_terminal: false,
         report: inspect(context)?,
     })
 }
@@ -208,14 +409,16 @@ fn apply_uninstall(
         before.state,
         CommandPathState::Current | CommandPathState::Updatable
     ) {
-        return Ok(CommandPathActionResult {
-            changed: false,
-            report: before,
-        });
+        return Ok(unchanged(before));
     }
-    remove(&context.link())?;
+    if let (Some(store), Some(directory)) = (&context.user_path, context.bin_directory()) {
+        uninstall_user_path(context, store.as_ref(), directory)?;
+    } else {
+        remove(&context.link())?;
+    }
     Ok(CommandPathActionResult {
         changed: true,
+        needs_new_terminal: false,
         report: inspect(context)?,
     })
 }
@@ -295,7 +498,7 @@ fn not_applicable_detail(context: &CommandPathContext) -> String {
 
 fn detail_for(state: CommandPathState, link: &Path, executable: &Path) -> String {
     match state {
-        CommandPathState::NotApplicable => String::new(),
+        CommandPathState::NotApplicable | CommandPathState::PrivateView => String::new(),
         CommandPathState::Missing => format!(
             "No ghostlight command entry exists. Run it directly at {}.",
             executable.display()
@@ -350,6 +553,9 @@ mod tests {
             unix: true,
             executable: root.join(".ghostlight/bin/v1.0.0/ghostlight"),
             bin_home: root.join(".local/bin"),
+            user_path: None,
+            profile: None,
+            container: None,
         }
     }
 
@@ -359,6 +565,9 @@ mod tests {
             unix: true,
             executable: PathBuf::from("/usr/bin/ghostlight"),
             bin_home: PathBuf::from("/nonexistent/.local/bin"),
+            user_path: None,
+            profile: None,
+            container: None,
         };
         let report = inspect(&context).unwrap();
         assert_eq!(report.state, CommandPathState::NotApplicable);
@@ -366,8 +575,8 @@ mod tests {
     }
 
     #[test]
-    fn a_non_unix_platform_reports_not_applicable() {
-        let mut context = context("windows");
+    fn a_platform_with_neither_route_reports_not_applicable() {
+        let mut context = context("neither");
         context.unix = false;
         let report = inspect(&context).unwrap();
         assert_eq!(report.state, CommandPathState::NotApplicable);
@@ -396,6 +605,7 @@ mod tests {
 
         let first = apply_install(&context).unwrap();
         assert!(first.changed);
+        assert!(!first.needs_new_terminal);
         assert_eq!(first.report.state, CommandPathState::Current);
         assert_eq!(fs::read_link(context.link()).unwrap(), context.executable);
 
@@ -487,5 +697,200 @@ mod tests {
         assert_eq!(fs::read_link(context.link()).unwrap(), stranger);
 
         fs::remove_dir_all(context.bin_home.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[cfg(windows)]
+    mod user_path_route {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Mutex;
+
+        use super::*;
+
+        /// The per-user `Path` held in memory, counting how often it is written and announced.
+        #[derive(Debug, Default)]
+        struct FakeUserPath {
+            value: Mutex<Option<PathValue>>,
+            writes: AtomicUsize,
+            announcements: AtomicUsize,
+        }
+
+        impl FakeUserPath {
+            fn holding(text: &str, expandable: bool) -> Arc<Self> {
+                Arc::new(Self {
+                    value: Mutex::new(Some(PathValue {
+                        text: text.to_owned(),
+                        expandable,
+                    })),
+                    ..Self::default()
+                })
+            }
+
+            fn text(&self) -> Option<String> {
+                self.value
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|value| value.text.clone())
+            }
+
+            fn expandable(&self) -> Option<bool> {
+                self.value
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|value| value.expandable)
+            }
+        }
+
+        impl UserPathStore for FakeUserPath {
+            fn read(&self) -> io::Result<Option<PathValue>> {
+                Ok(self.value.lock().unwrap().clone())
+            }
+
+            fn write(&self, value: &PathValue) -> io::Result<()> {
+                *self.value.lock().unwrap() = Some(value.clone());
+                self.writes.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            fn announce(&self) {
+                self.announcements.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        const PROFILE: &str = r"C:\Users\person";
+
+        fn windows(store: &Arc<FakeUserPath>) -> CommandPathContext {
+            CommandPathContext {
+                unix: false,
+                executable: PathBuf::from(r"C:\Users\person\.ghostlight\bin\ghostlight.exe"),
+                bin_home: PathBuf::new(),
+                user_path: Some(store.clone()),
+                profile: Some(PathBuf::from(PROFILE)),
+                container: None,
+            }
+        }
+
+        #[test]
+        fn windows_install_appends_the_bin_directory_once_and_announces_it() {
+            let store = FakeUserPath::holding(r"C:\Windows;C:\Tools;", true);
+            let context = windows(&store);
+            assert_eq!(inspect(&context).unwrap().state, CommandPathState::Missing);
+
+            let first = apply_install(&context).unwrap();
+            assert!(first.changed);
+            assert!(first.needs_new_terminal);
+            assert_eq!(first.report.state, CommandPathState::Current);
+            assert_eq!(
+                store.text().unwrap(),
+                r"C:\Windows;C:\Tools;%USERPROFILE%\.ghostlight\bin;"
+            );
+            assert_eq!(store.expandable(), Some(true));
+            assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
+
+            let second = apply_install(&context).unwrap();
+            assert!(!second.changed);
+            assert!(!second.needs_new_terminal);
+            assert_eq!(store.writes.load(Ordering::SeqCst), 1);
+            assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
+        }
+
+        #[test]
+        fn windows_install_keeps_a_literal_value_literal() {
+            let store = FakeUserPath::holding(r"C:\Windows", false);
+            apply_install(&windows(&store)).unwrap();
+            assert_eq!(
+                store.text().unwrap(),
+                r"C:\Windows;C:\Users\person\.ghostlight\bin"
+            );
+            assert_eq!(store.expandable(), Some(false));
+        }
+
+        #[test]
+        fn windows_install_creates_an_expandable_value_when_there_is_none() {
+            let store = Arc::new(FakeUserPath::default());
+            let context = windows(&store);
+            assert_eq!(inspect(&context).unwrap().state, CommandPathState::Missing);
+            apply_install(&context).unwrap();
+            assert_eq!(store.text().unwrap(), r"%USERPROFILE%\.ghostlight\bin");
+            assert_eq!(store.expandable(), Some(true));
+        }
+
+        #[test]
+        fn windows_recognizes_an_entry_written_another_way() {
+            for entry in [
+                r"%USERPROFILE%\.ghostlight\bin",
+                r"c:\users\PERSON\.ghostlight\bin\",
+            ] {
+                let store = FakeUserPath::holding(&format!(r"C:\Windows;{entry}"), true);
+                let context = windows(&store);
+                assert_eq!(inspect(&context).unwrap().state, CommandPathState::Current);
+                assert!(!apply_install(&context).unwrap().changed);
+                assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+            }
+        }
+
+        #[test]
+        fn windows_missing_names_the_fix() {
+            let store = FakeUserPath::holding(r"C:\Windows", true);
+            let report = inspect(&windows(&store)).unwrap();
+            assert_eq!(report.state, CommandPathState::Missing);
+            assert!(
+                report.detail.contains("ghostlight.exe install"),
+                "{report:?}"
+            );
+            assert_eq!(
+                report.link,
+                PathBuf::from(r"C:\Users\person\.ghostlight\bin")
+            );
+        }
+
+        #[test]
+        fn windows_uninstall_removes_only_the_bin_entry() {
+            let store = FakeUserPath::holding(
+                r"C:\Windows;%USERPROFILE%\.ghostlight\bin;C:\Users\person\.ghostlight\bin\old;;C:\Tools",
+                true,
+            );
+            let context = windows(&store);
+            let removed = apply_uninstall(&context).unwrap();
+            assert!(removed.changed);
+            assert!(!removed.needs_new_terminal);
+            assert_eq!(removed.report.state, CommandPathState::Missing);
+            assert_eq!(
+                store.text().unwrap(),
+                r"C:\Windows;C:\Users\person\.ghostlight\bin\old;;C:\Tools"
+            );
+            assert_eq!(store.announcements.load(Ordering::SeqCst), 1);
+
+            assert!(!apply_uninstall(&context).unwrap().changed);
+            assert_eq!(store.writes.load(Ordering::SeqCst), 1);
+        }
+
+        #[test]
+        fn windows_install_then_uninstall_restores_the_value() {
+            let original = r"C:\Windows;;C:\Tools\;%SystemRoot%\x;";
+            let store = FakeUserPath::holding(original, true);
+            let context = windows(&store);
+            apply_install(&context).unwrap();
+            apply_uninstall(&context).unwrap();
+            assert_eq!(store.text().as_deref(), Some(original));
+        }
+
+        #[test]
+        fn inside_an_app_container_the_path_is_never_read_or_written() {
+            let store = FakeUserPath::holding(r"C:\Windows", true);
+            let mut context = windows(&store);
+            context.container = Some(AppContainer {
+                app: "Claude".to_owned(),
+            });
+
+            let report = inspect(&context).unwrap();
+            assert_eq!(report.state, CommandPathState::PrivateView);
+            assert!(report.detail.contains("Claude"));
+            assert!(!apply_install(&context).unwrap().changed);
+            assert!(!apply_uninstall(&context).unwrap().changed);
+            assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+            assert_eq!(store.text().as_deref(), Some(r"C:\Windows"));
+        }
     }
 }

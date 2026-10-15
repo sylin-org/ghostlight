@@ -285,6 +285,7 @@ mod tests {
             CommandPathState::Current.label(),
             CommandPathState::Updatable.label(),
             CommandPathState::NeedsAttention.label(),
+            CommandPathState::PrivateView.label(),
             UserAssetState::NotApplicable.label(),
             UserAssetState::Missing.label(),
             UserAssetState::Current.label(),

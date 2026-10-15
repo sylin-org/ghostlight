@@ -172,10 +172,15 @@ package update, use Ghostlight's Quit action, then open Ghostlight from Applicat
 `ghostlight doctor` for the running service version; `ghostlight --version` reports the executable
 on disk and can differ until the old process has exited.
 
+On Windows an install adds `~/.ghostlight/bin` to your user PATH and removes it again on
+uninstall. `ghostlight` works in terminals opened after the install; one that was already open
+needs to be reopened. The machine PATH is never changed.
+
 On Windows the browsers' registration names one manifest, `~/.ghostlight/manifests/org.sylin.ghostlight.json`.
 Windows runs the processes of an MSIX-packaged app, Claude desktop and Codex among them, in that
 app's container, where registry and `AppData` writes are visible only to that app. An install run
-from such a terminal writes everything else and says which registrations it left; run
+from such a terminal writes everything else and says which registrations it left, the PATH entry
+among them; run
 `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal to finish them. After that,
 installs from inside the container only rewrite the manifest.
 

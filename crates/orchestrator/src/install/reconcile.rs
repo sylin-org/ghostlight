@@ -17,7 +17,7 @@ use std::env;
 use ghostlight_relay::home::TEST_HOME_VARIABLE;
 use serde::Serialize;
 
-use super::command_path::CommandPath;
+use super::command_path::{CommandPath, CommandPathState, PATH_ENTRY_REGISTRATION};
 use super::container::{AppContainer, Residence};
 use super::desktop_entry::DesktopIntegration;
 use super::layout::Layout;
@@ -59,6 +59,9 @@ pub struct ReconcileReport {
     pub clients_unchanged: Vec<UnchangedEntry>,
     /// Platform entries that were written, in plain words.
     pub platform: Vec<String>,
+    /// Whether a terminal that is already open lacks a change made to the command line; a new
+    /// terminal has it.
+    pub needs_new_terminal: bool,
     /// Registrations that could not be reconciled, each with its reason.
     pub failures: Vec<String>,
     /// The app container the reconcile ran in, when it had to leave registrations unwritten.
@@ -264,10 +267,16 @@ fn reconcile_platform(
     residence: &Residence,
     report: &mut ReconcileReport,
 ) {
-    match CommandPath::discover().install() {
-        Ok(result) if result.changed => report
-            .platform
-            .push(format!("command link: {}", result.report.state.label())),
+    match CommandPath::in_residence(residence).install() {
+        Ok(result) if result.changed => {
+            report
+                .platform
+                .push(format!("command link: {}", result.report.state.label()));
+            report.needs_new_terminal |= result.needs_new_terminal;
+        }
+        Ok(result) if result.report.state == CommandPathState::PrivateView => {
+            report.kept_private.push(PATH_ENTRY_REGISTRATION.to_owned());
+        }
         Ok(_) => {}
         Err(error) => report.failures.push(format!("Command link: {error}")),
     }

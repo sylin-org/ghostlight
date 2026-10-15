@@ -89,6 +89,9 @@ and writes the marker; `--restore` removes it. As soon as `bin` holds the execut
 `install/reconcile.rs` points every registration at `bin`: native-host manifests (reclaiming
 one that names another path), owned MCP client entries, the Linux desktop entry, command link and
 manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install/windows_entry.rs`).
+On Windows the command line is the `bin` directory on the per-user `Path` (`install/user_path.rs`):
+install appends it, uninstall removes only it, a `WM_SETTINGCHANGE` broadcast tells new terminals,
+and a container leaves it for a regular terminal like the other redirected registrations.
 A client entry Ghostlight does not own, such as an `npx` launcher, is reported and left alone.
 On Windows the one manifest lives in `manifests`, which no app container redirects, and each
 browser's `HKCU` value names it; a value is written only when it differs from what is read

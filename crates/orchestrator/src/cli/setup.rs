@@ -21,9 +21,12 @@ struct KeptPrivate {
 
 /// Run installation or uninstallation across detected browsers and MCP clients.
 pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
+    use crate::install::command_path::{CommandPath, CommandPathState, PATH_ENTRY_REGISTRATION};
+    use crate::install::container::Residence;
     use crate::install::desktop_entry::DesktopIntegration;
     use crate::install::native_host::{NativeHostRegistry, NativeHostState};
     use crate::install::{HarnessAction, HarnessRegistry};
+    use crate::language::environment;
 
     ghostlight_relay::home::home()?;
     let native_hosts = NativeHostRegistry::discover();
@@ -78,7 +81,7 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         print_native_host_report(&result.report);
     }
 
-    let command_path = crate::install::command_path::CommandPath::discover();
+    let command_path = CommandPath::discover();
     if options.dry_run {
         print_command_path_report(&command_path.check()?);
     } else {
@@ -87,8 +90,19 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
         } else {
             command_path.uninstall()?
         };
-        if result.report.state != crate::install::command_path::CommandPathState::NotApplicable {
+        if result.report.state != CommandPathState::NotApplicable {
             print_command_path_report(&result.report);
+        }
+        if install && result.report.state == CommandPathState::PrivateView {
+            if kept_private.container.is_none() {
+                kept_private.container = Residence::detect().container().cloned();
+            }
+            kept_private
+                .registrations
+                .push(PATH_ENTRY_REGISTRATION.to_owned());
+        }
+        if result.needs_new_terminal {
+            println!("{}", environment::OPEN_NEW_TERMINAL);
         }
     }
 
@@ -396,8 +410,8 @@ pub(crate) fn print_command_path_report(report: &crate::install::command_path::C
     use crate::install::command_path::CommandPathState;
 
     if report.state == CommandPathState::NotApplicable {
-        // Still name the executable: a person on a system package or on Windows needs the path as
-        // much as anyone else does.
+        // Still name the executable: a person on a system package or on a test home needs the path
+        // as much as anyone else does.
         println!("Command: {}", report.executable.display());
         return;
     }
