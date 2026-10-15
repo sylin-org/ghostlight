@@ -18,7 +18,7 @@ const CREATE_NEW: u32 = 1;
 const FILE_ATTRIBUTE_NORMAL: u32 = 0x0000_0080;
 
 #[repr(C)]
-struct SecurityAttributes {
+pub(crate) struct SecurityAttributes {
     length: u32,
     descriptor: *mut c_void,
     inherit: i32,
