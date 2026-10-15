@@ -474,27 +474,6 @@ pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Manage Flatpak Chromium native messaging registration on Linux.
-#[cfg(target_os = "linux")]
-pub fn run_flatpak_native_host(
-    command: NativeHostCommand,
-    allow_activation: bool,
-) -> anyhow::Result<()> {
-    let registry = crate::install::flatpak::FlatpakRegistry::discover()?;
-    let report = match command {
-        NativeHostCommand::Check => registry.check()?,
-        NativeHostCommand::Install => {
-            if allow_activation {
-                eprintln!("Selected app-wide permission: Flatpak Chromium may start the one installed Ghostlight host application. No general host execution is granted. Existing browser sandboxes need a restart for this new permission; Ghostlight will not restart them.");
-            }
-            registry.install(allow_activation)?
-        }
-        NativeHostCommand::Uninstall => registry.uninstall()?,
-    };
-    println!("{}", serde_json::to_string_pretty(&report)?);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

@@ -13,11 +13,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-async-io = "=2.6.0"
-futures-lite = "=2.6.1"
-zbus = "=5.19.0"
-
 [dev-dependencies]
 uuid.workspace = true
 

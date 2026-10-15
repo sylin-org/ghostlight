@@ -290,11 +290,6 @@ pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
         parse::LaunchMode::Diagnostics(command) => diagnostics::run(&command),
         parse::LaunchMode::Policy(command) => desktop::run_policy(&command),
         parse::LaunchMode::NativeHost(command) => setup::run_native_host(command),
-        #[cfg(target_os = "linux")]
-        parse::LaunchMode::FlatpakNativeHost {
-            command,
-            allow_activation,
-        } => setup::run_flatpak_native_host(command, allow_activation),
         parse::LaunchMode::Install(options) => setup::run_setup(true, &options),
         parse::LaunchMode::Uninstall(options) => setup::run_setup(false, &options),
         parse::LaunchMode::Doctor { fix, json } => doctor::run_doctor(fix, json),

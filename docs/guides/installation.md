@@ -150,7 +150,8 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 - **A client needs attention:** inspect its configuration. Ghostlight deliberately did not
   overwrite malformed or foreign data.
 - **Browser is a Snap or Flatpak:** install Chrome, Edge, Brave, or Chromium as a native package,
-  then run `ghostlight doctor --fix`. Ghostlight does not punch through the browser sandbox.
+  then run `ghostlight doctor --fix`. Ghostlight does not punch through the browser sandbox. The
+  install removes the Flatpak connection a 1.x install left in your home, and says what it did.
 - **A tab close was blocked:** the tab is retained as visible evidence. Change both applicable
   orchestrator policy and the extension's local preserve-tabs setting only if the user wants
   model-driven close.

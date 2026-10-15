@@ -42,14 +42,6 @@ pub enum LaunchMode {
     Policy(crate::governance::inspection::Command),
     /// The narrow package-facing Chromium registration seam (ADR-0115).
     NativeHost(NativeHostCommand),
-    /// Flatpak Chromium registration on Linux.
-    #[cfg(target_os = "linux")]
-    FlatpakNativeHost {
-        /// Native host action.
-        command: NativeHostCommand,
-        /// Explicit app-wide permission for Flatpak Chromium.
-        allow_activation: bool,
-    },
     /// Install the browser and selected MCP-client integrations.
     Install(SetupOptions),
     /// Remove only Ghostlight-owned browser and MCP-client integrations.
@@ -186,24 +178,6 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
             Some("uninstall") => NativeHostCommand::Uninstall,
             _ => anyhow::bail!("usage: ghostlight native-host <check|install|uninstall>"),
         };
-        #[cfg(target_os = "linux")]
-        if arguments
-            .get(2)
-            .is_some_and(|value| value == "--flatpak-chromium")
-        {
-            let allow_activation = arguments
-                .get(3)
-                .is_some_and(|value| value == "--allow-flatpak-activation");
-            if arguments.len() != if allow_activation { 4 } else { 3 }
-                || (allow_activation && command != NativeHostCommand::Install)
-            {
-                anyhow::bail!("usage: ghostlight native-host <check|install|uninstall> --flatpak-chromium [--allow-flatpak-activation (install only)]");
-            }
-            return Ok(LaunchMode::FlatpakNativeHost {
-                command,
-                allow_activation,
-            });
-        }
         if arguments.len() != 2 {
             anyhow::bail!("usage: ghostlight native-host <check|install|uninstall>");
         }
@@ -374,41 +348,28 @@ mod tests {
 
     use super::{help_text, launch_mode, LaunchMode, NativeHostCommand, SetupOptions, SUBCOMMANDS};
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn flatpak_permission_selection_is_explicit_and_install_only() {
-        assert!(matches!(
-            launch_mode(
-                [
-                    "native-host",
-                    "install",
-                    "--flatpak-chromium",
-                    "--allow-flatpak-activation"
-                ]
-                .map(Into::into)
-            )
-            .unwrap(),
-            LaunchMode::FlatpakNativeHost {
-                allow_activation: true,
-                ..
-            }
-        ));
-        for command in ["check", "uninstall"] {
-            assert!(launch_mode(
-                [
-                    "native-host",
-                    command,
-                    "--flatpak-chromium",
-                    "--allow-flatpak-activation"
-                ]
-                .map(Into::into)
-            )
-            .is_err());
+    fn the_flatpak_form_is_a_usage_error() {
+        for command in ["check", "install", "uninstall"] {
+            assert!(
+                launch_mode(["native-host", command, "--flatpak-chromium"].map(Into::into))
+                    .is_err()
+            );
         }
         assert!(launch_mode(
-            ["native-host", "install", "--flatpak-chromium", "typo"].map(Into::into)
+            [
+                "native-host",
+                "install",
+                "--flatpak-chromium",
+                "--allow-flatpak-activation"
+            ]
+            .map(Into::into)
         )
         .is_err());
+        assert!(matches!(
+            launch_mode(["native-host", "install"].map(Into::into)).unwrap(),
+            LaunchMode::NativeHost(NativeHostCommand::Install)
+        ));
     }
 
     /// The shell completions offer exactly the subcommands the command line has.

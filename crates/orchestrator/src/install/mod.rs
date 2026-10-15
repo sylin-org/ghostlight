@@ -6,8 +6,6 @@ pub mod container;
 pub mod deployment;
 pub mod desktop_entry;
 pub mod entry;
-#[cfg(target_os = "linux")]
-pub mod flatpak;
 pub mod handoff;
 pub mod layout;
 pub mod marker;

@@ -1,7 +1,5 @@
 //! Diagnostics and framing the service still shares with its desktop.
 
-#[cfg(target_os = "linux")]
-pub mod desktop_activation;
 pub mod diagnostics;
 pub mod framing;
 

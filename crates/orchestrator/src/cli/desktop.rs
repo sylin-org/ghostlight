@@ -26,12 +26,6 @@ pub enum ActivationState {
 
 /// Start the orchestrator desktop application or activate an existing running instance.
 pub fn start_or_activate_desktop() -> anyhow::Result<()> {
-    #[cfg(target_os = "linux")]
-    if desktop_bus_start(std::env::var_os("DBUS_STARTER_BUS_TYPE").as_deref()) {
-        // A bus launch requests existence, never Open. In a cold-start race a losing
-        // process must exit at the lifetime lease instead of revealing the winner's UI.
-        return crate::desktop::run(crate::desktop::Startup::interactive());
-    }
     match crate::cli::client::activate_workbench() {
         Ok(true) => return Ok(()),
         Ok(false) => return finish_activation(wait_for_workbench_activation(), None),
@@ -63,12 +57,6 @@ pub fn settle_serve(ended: anyhow::Result<()>) -> anyhow::Result<()> {
         Err(error) if error.is::<crate::service::AuthorityAlreadyRunning>() => Ok(()),
         other => other,
     }
-}
-
-/// Check if a Linux D-Bus starter invocation specifies a session bus.
-#[cfg(target_os = "linux")]
-pub fn desktop_bus_start(bus_type: Option<&std::ffi::OsStr>) -> bool {
-    bus_type.is_some_and(|value| value == "session")
 }
 
 /// Request an existing Ghostlight service or newly started service to reveal its window.
@@ -170,15 +158,6 @@ pub fn wait_for_service() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn session_bus_launch_means_start_without_workbench_reveal() {
-        use std::ffi::OsStr;
-        assert!(super::desktop_bus_start(Some(OsStr::new("session"))));
-        assert!(!super::desktop_bus_start(Some(OsStr::new("system"))));
-        assert!(!super::desktop_bus_start(None));
-    }
 
     #[test]
     fn serve_exits_quietly_while_another_service_holds_the_lease() {

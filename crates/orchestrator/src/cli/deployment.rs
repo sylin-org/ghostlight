@@ -7,6 +7,7 @@
 use crate::install::container;
 use crate::install::deployment::{self, MarkerChange, Mode, Outcome, Request, ServiceDidNotStart};
 use crate::install::layout::Layout;
+use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
 use crate::install::reconcile::ReconcileReport;
 
 /// Run `request` and report it on standard output.
@@ -27,7 +28,7 @@ pub fn run(request: &Request) -> anyhow::Result<()> {
 /// Print one line for each thing `outcome` changed.
 fn report(outcome: &Outcome, layout: &Layout) {
     let plan = &outcome.plan;
-    if !plan.migration.is_empty() {
+    if plan.migration.has_earlier_installation() {
         println!(
             "Moved the files of the earlier Ghostlight installation into {}.",
             layout.home().display()
@@ -65,6 +66,35 @@ fn report(outcome: &Outcome, layout: &Layout) {
     }
     if let Some(registrations) = &outcome.registrations {
         report_registrations(registrations, layout);
+    }
+    for step in &outcome.flatpak {
+        report_flatpak(step);
+    }
+}
+
+/// Print what became of one file the earlier Flatpak browser route left in the home.
+fn report_flatpak(step: &FlatpakStep) {
+    let what = match step.part {
+        FlatpakPart::Manifest => "the Flatpak browser connection",
+        FlatpakPart::Registration => "the Flatpak browser start-up registration",
+        FlatpakPart::PermissionOverride => "the Flatpak browser permission",
+        FlatpakPart::Custody => "the record of the Flatpak browser permission",
+    };
+    let path = step.path.display();
+    match &step.result {
+        FlatpakResult::Removed => {
+            println!("Removed {what} ({path}); Ghostlight no longer uses it.")
+        }
+        FlatpakResult::Restored => println!("Restored {what} ({path}) to how it was before."),
+        FlatpakResult::LeftForeign => {
+            println!("Left {what} ({path}) as it is; it is not Ghostlight's.")
+        }
+        FlatpakResult::LeftChanged => {
+            println!("Left {what} ({path}) as it is; it changed after Ghostlight set it.")
+        }
+        FlatpakResult::Failed(reason) => {
+            eprintln!("Could not update {what} ({path}): {reason}. The next install tries again.")
+        }
     }
 }
 

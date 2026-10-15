@@ -99,18 +99,25 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f01a-flatpak. It starts only after shell-spike-1 has committed.
+Next: f01b-peer-observation.
 
 ## Landed
 
 | Slice | What | Commit |
 |---|---|---|
 | f00-adrs | ADR-0199 is filed and indexed with Decisions 1 to 23 and the owner's 2026-10-15 rulings (2.0 waits for the frozen set only, the shell ships in the service's build and is not frozen, the extension opens its setup page only when the service is absent, one-shot commands in 2.0). ADR-0198 gains its dispositions amendment. The ADR index gains the 0199 row and the status notes of the ADRs 0199 touches. This ledger starts, and switch.md points here. | see `git log` |
+| f01a-flatpak | The Flatpak route and its D-Bus activation are gone (ADR-0197 D22, ADR-0165 superseded): `install/flatpak.rs`, `bridge/src/desktop_activation.rs`, `LaunchMode::FlatpakNativeHost` with its parsing and `run_flatpak_native_host`, `desktop_bus_start` and its `DBUS_STARTER_BUS_TYPE` branch, the desktop's activation-name claim, and bridge's Linux dependencies (`zbus`, `async-io`, `futures-lite`). `native-host ... --flatpak-chromium` is an ordinary usage error. The break migration gains one leftover step, `retire_flatpak_route`: it removes the Flatpak manifest and the D-Bus registration only when their content names Ghostlight, restores the override file only when it still holds the record's `permission_after`, then deletes the custody record, writes no grant, and reports each step. | see `git log` |
 
 ## Owed live checks
 
-None yet. The coordinator runs every live check a slice names and records it here; implementers
-never run them.
+The coordinator runs every live check a slice names and records it here; implementers never run
+them.
+
+- f01a: on a Linux host whose home holds a 1.x Flatpak route (the Flatpak Chromium manifest, the
+  D-Bus service file, the override grant and `flatpak-activation.json`), `deployment install`
+  removes or restores each file and prints one line per file; a second install prints none.
+  `cargo clippy -p ghostlight --target x86_64-unknown-linux-gnu` was not run (the orchestrator
+  needs the GTK and WebKit system libraries); the removed Linux-only code left no references.
 
 ## Notes
 
@@ -122,5 +129,17 @@ never run them.
 - Owner question Q2, answered the same day: the setup page shows the get-script one-liners
   (Windows: `irm <main>/scripts/get.ps1 | iex`; Linux: the `get.sh` line), with no Node.js
   requirement. The install journey's ADR records it.
+- f01a: the tree differed from the spec in four places. (1) No Linux journey under `tests/linux`
+  exercised the route, so none changed. (2) `fs2` was used only by `install/flatpak.rs`; it is
+  dropped from the orchestrator and the workspace manifest. `zbus`, `async-io` and `futures-lite`
+  stay in `Cargo.lock` through `tauri` on Linux, but no Ghostlight crate depends on them. (3) The
+  leftover cleanup is planned only when a file is Ghostlight's own (a manifest naming the host, a
+  registration starting a `ghostlight` executable, a readable custody record), so a person's
+  foreign file never makes every install a migration; a file that changes between the plan and
+  the step is left and reported. A failed step keeps the custody record so the next install tries
+  again. (4) `native_host::manifest_bytes` and `owned_manifest_connector` served only the route;
+  they are replaced by `names_ghostlight_host`. The leftover sentences print from
+  `cli/deployment.rs` beside the other install lines, not from `language/`, which holds no
+  install sentences.
 - Where ADR-0199's draft differed from the approved text, the ADR as filed wins: the edge has a
   carrier check and three rules and knows no verb, and 2.0.0 waits for the frozen set only.

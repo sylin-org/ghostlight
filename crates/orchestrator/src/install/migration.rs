@@ -25,7 +25,12 @@
 //!    that diverged from a changed copy is set aside under a name no plan reads, so the next
 //!    install is never blocked by it;
 //! 5. [`finish`] deletes the old lifecycle files, the installation record last, once the last
-//!    old program has stopped and cannot write them again.
+//!    old program has stopped and cannot write them again;
+//! 6. [`retire_flatpak_route`] removes what the 1.x Flatpak Chromium route left in the user's
+//!    home: the Flatpak browser's host manifest, the D-Bus activation registration, and the
+//!    permission grant the route added to the browser's override file. Each is touched only
+//!    when its content is still the route's own, and every step is reported; the install never
+//!    fails on a leftover.
 //!
 //! The plan is data: `deployment install --plan` prints it. Stopping the old programs is the
 //! installer's step, not this module's: it must happen after the registrations name the new
@@ -52,7 +57,7 @@ use super::entry;
 use super::layout::{
     Layout, BROWSER_CONNECTOR_EXECUTABLE_NAME, INSTALL_RECORD_NAME, MCP_CONNECTOR_EXECUTABLE_NAME,
 };
-use super::native_host::NativeHostRegistry;
+use super::native_host::{self, NativeHostRegistry};
 use super::record::{self, InstallRecord, Version};
 use super::{HarnessRegistry, HarnessState};
 
@@ -112,6 +117,32 @@ const COPY_BASE_SUFFIX: &str = "copied-sha256";
 
 /// Label used in the archived audit file name when the old version cannot be read.
 const UNKNOWN_VERSION_LABEL: &str = "pre-2.0";
+
+/// The Flatpak Chromium application the 1.x Flatpak route registered with.
+const FLATPAK_CHROMIUM_APP: &str = "org.chromium.Chromium";
+
+/// The host manifest of the Flatpak Chromium route, below the user's home.
+const FLATPAK_MANIFEST_RELATIVE: &str =
+    ".var/app/org.chromium.Chromium/config/chromium/NativeMessagingHosts/org.sylin.ghostlight.json";
+
+/// The D-Bus session activation registration of the route, below the user's home.
+const ACTIVATION_REGISTRATION_RELATIVE: &str =
+    ".local/share/dbus-1/services/org.sylin.ghostlight.service";
+
+/// The directory of per-application Flatpak overrides, below the user's home.
+const FLATPAK_OVERRIDES_RELATIVE: &str = ".local/share/flatpak/overrides";
+
+/// The record the route kept of the permission it added, below the user's home.
+const FLATPAK_CUSTODY_RELATIVE: &str = ".local/share/ghostlight/flatpak-activation.json";
+
+/// The only record version the 1.x Flatpak route wrote.
+const FLATPAK_CUSTODY_VERSION: u8 = 1;
+
+/// The file name of the executable the activation registration started.
+const ACTIVATION_EXECUTABLE_NAME: &str = "ghostlight";
+
+/// Largest Flatpak route file the migration reads.
+const FLATPAK_FILE_LIMIT: u64 = 64 * 1024;
 
 /// Why the migration could not be planned or carried out. Each message names the path involved.
 #[derive(Debug, Error)]
@@ -507,17 +538,118 @@ pub struct MigrationPlan {
     pub registrations_to_reclaim: Vec<Registration>,
     /// Directories read that lie inside a packaged app's private storage.
     pub virtualized_sources: Vec<PathBuf>,
+    /// What the 1.x Flatpak route left behind, when Ghostlight's own files are still there.
+    pub flatpak: Option<FlatpakLeftovers>,
+}
+
+/// The places the 1.x Flatpak Chromium route wrote below the user's home.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct FlatpakLeftovers {
+    /// The Flatpak browser's native-messaging manifest.
+    pub manifest: PathBuf,
+    /// The D-Bus session activation registration.
+    pub registration: PathBuf,
+    /// The browser's Flatpak override file, where the route added a permission.
+    pub permission_override: PathBuf,
+    /// The record of the permission the route added.
+    pub custody: PathBuf,
+}
+
+impl FlatpakLeftovers {
+    /// The route's files below `user_home`.
+    pub(super) fn below(user_home: &Path) -> Self {
+        Self {
+            manifest: user_home.join(FLATPAK_MANIFEST_RELATIVE),
+            registration: user_home.join(ACTIVATION_REGISTRATION_RELATIVE),
+            permission_override: user_home
+                .join(FLATPAK_OVERRIDES_RELATIVE)
+                .join(FLATPAK_CHROMIUM_APP),
+            custody: user_home.join(FLATPAK_CUSTODY_RELATIVE),
+        }
+    }
+
+    /// Whether any of the files is still Ghostlight's own.
+    fn present(&self) -> bool {
+        let owned = |path: &Path, is_owned: fn(&[u8]) -> bool| matches!(find(path), Ok(Found::Regular(bytes)) if is_owned(&bytes));
+        owned(&self.manifest, native_host::names_ghostlight_host)
+            || owned(&self.registration, names_ghostlight_activation)
+            || owned(&self.custody, |bytes| {
+                FlatpakCustody::parse(bytes).is_some()
+            })
+    }
+}
+
+/// The record the 1.x Flatpak route kept of the permission it added to the browser's override.
+#[derive(Debug, Deserialize)]
+struct FlatpakCustody {
+    version: u8,
+    permission_before: Option<String>,
+    permission_after: Option<String>,
+    permission_added: bool,
+}
+
+impl FlatpakCustody {
+    /// The record in `bytes`, when it is one this route wrote.
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        let record: Self = serde_json::from_slice(bytes).ok()?;
+        (record.version == FLATPAK_CUSTODY_VERSION).then_some(record)
+    }
+}
+
+/// Which of the route's files a step concerns.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FlatpakPart {
+    /// The Flatpak browser's native-messaging manifest.
+    Manifest,
+    /// The D-Bus session activation registration.
+    Registration,
+    /// The browser's Flatpak override file.
+    PermissionOverride,
+    /// The record of the permission the route added.
+    Custody,
+}
+
+/// What became of one of the route's files.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FlatpakResult {
+    /// The file was Ghostlight's own and is deleted.
+    Removed,
+    /// The override file holds what it held before the route added its permission.
+    Restored,
+    /// The file is not Ghostlight's own and was left as it is.
+    LeftForeign,
+    /// The override file changed after the route wrote it and was left as it is.
+    LeftChanged,
+    /// The file could not be read or changed; the next install tries again.
+    Failed(String),
+}
+
+/// One reported step of [`retire_flatpak_route`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FlatpakStep {
+    /// Which file.
+    pub part: FlatpakPart,
+    /// Where it is.
+    pub path: PathBuf,
+    /// What became of it.
+    pub result: FlatpakResult,
 }
 
 impl MigrationPlan {
     /// Whether there is nothing to do.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.moves.is_empty()
+        !self.has_earlier_installation() && self.flatpak.is_none()
+    }
+
+    /// Whether a 1.x installation left files, programs or registrations to move or retire.
+    #[must_use]
+    pub fn has_earlier_installation(&self) -> bool {
+        !(self.moves.is_empty()
             && self.audit_archive.is_none()
             && self.deletions.is_empty()
             && self.images_to_stop.is_empty()
-            && self.registrations_to_reclaim.is_empty()
+            && self.registrations_to_reclaim.is_empty())
     }
 
     /// Every file transfer, the archive last.
@@ -633,6 +765,8 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
         }
     }
     plan.registrations_to_reclaim = legacy.registrations.clone();
+    plan.flatpak =
+        Some(FlatpakLeftovers::below(&legacy.roots.user_home)).filter(FlatpakLeftovers::present);
     Ok(plan)
 }
 
@@ -721,6 +855,145 @@ pub fn finish(plan: &MigrationPlan) -> Result<(), MigrationError> {
 }
 
 /// Make the destination directory and refuse a destination that holds something else.
+/// Remove what the 1.x Flatpak route left in the user's home, and say what became of each file.
+///
+/// A manifest or an activation registration is deleted only when its content still names
+/// Ghostlight's host or executable. The override file is restored to what it held before the
+/// route added its permission only when it still holds what the route wrote; a person's later
+/// edit is never undone. Nothing is ever granted. The record of the route goes last, and only
+/// when every step before it succeeded, so a step that failed is tried again by the next
+/// install. A leftover never fails the install: the result is the steps.
+pub fn retire_flatpak_route(plan: &MigrationPlan) -> Vec<FlatpakStep> {
+    let Some(route) = &plan.flatpak else {
+        return Vec::new();
+    };
+    let mut steps = Vec::new();
+    let mut step = |part, path: &Path, result| {
+        steps.push(FlatpakStep {
+            part,
+            path: path.to_owned(),
+            result,
+        });
+    };
+    let custody = match find(&route.custody) {
+        Ok(Found::Regular(bytes)) => FlatpakCustody::parse(&bytes),
+        _ => None,
+    };
+    for (part, path, is_owned) in [
+        (
+            FlatpakPart::Manifest,
+            &route.manifest,
+            native_host::names_ghostlight_host as fn(&[u8]) -> bool,
+        ),
+        (
+            FlatpakPart::Registration,
+            &route.registration,
+            names_ghostlight_activation,
+        ),
+    ] {
+        match find(path) {
+            Ok(Found::Absent) => {}
+            Ok(Found::Regular(bytes)) if is_owned(&bytes) => step(part, path, remove_file(path)),
+            Ok(_) => step(part, path, FlatpakResult::LeftForeign),
+            Err(error) => step(part, path, FlatpakResult::Failed(error.to_string())),
+        }
+    }
+    if let Some(custody) = custody.filter(|record| record.permission_added) {
+        let part = FlatpakPart::PermissionOverride;
+        let path = &route.permission_override;
+        match find(path) {
+            Ok(Found::Absent) => {}
+            Ok(Found::Regular(bytes))
+                if custody.permission_after.as_deref().map(str::as_bytes) == Some(&bytes) =>
+            {
+                step(
+                    part,
+                    path,
+                    restore_override(path, custody.permission_before.as_deref()),
+                );
+            }
+            Ok(_) => step(part, path, FlatpakResult::LeftChanged),
+            Err(error) => step(part, path, FlatpakResult::Failed(error.to_string())),
+        }
+    }
+    let settled = steps
+        .iter()
+        .all(|done| !matches!(done.result, FlatpakResult::Failed(_)));
+    if settled && matches!(find(&route.custody), Ok(Found::Regular(_))) {
+        let result = remove_file(&route.custody);
+        steps.push(FlatpakStep {
+            part: FlatpakPart::Custody,
+            path: route.custody.clone(),
+            result,
+        });
+    }
+    steps
+}
+
+/// What a Flatpak route path holds.
+enum Found {
+    /// Nothing is there.
+    Absent,
+    /// A regular file of a size the route could have written.
+    Regular(Vec<u8>),
+    /// A directory, a link or an oversized file, which the route never wrote.
+    Other,
+}
+
+/// Look at `path` without following a link.
+fn find(path: &Path) -> io::Result<Found> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Found::Absent),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file() || metadata.len() > FLATPAK_FILE_LIMIT {
+        return Ok(Found::Other);
+    }
+    fs::read(path).map(Found::Regular)
+}
+
+/// Whether `bytes` is the D-Bus activation registration that started Ghostlight's executable.
+fn names_ghostlight_activation(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let head = format!("[D-BUS Service]\nName={}\nExec=\"", native_host::HOST_NAME);
+    text.strip_prefix(&head)
+        .and_then(|rest| rest.strip_suffix("\"\n"))
+        .is_some_and(|command| {
+            Path::new(command)
+                .file_name()
+                .is_some_and(|name| name == ACTIVATION_EXECUTABLE_NAME)
+        })
+}
+
+/// Delete `path`; a file that is already gone counts as removed.
+fn remove_file(path: &Path) -> FlatpakResult {
+    match fs::remove_file(path) {
+        Ok(()) => FlatpakResult::Removed,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => FlatpakResult::Removed,
+        Err(error) => FlatpakResult::Failed(error.to_string()),
+    }
+}
+
+/// Put the override file back to `before`: its text, or no file at all.
+fn restore_override(path: &Path, before: Option<&str>) -> FlatpakResult {
+    let Some(text) = before else {
+        return remove_file(path);
+    };
+    let mut staged = path.as_os_str().to_owned();
+    staged.push(".restore");
+    let staged = PathBuf::from(staged);
+    match fs::write(&staged, text).and_then(|()| fs::rename(&staged, path)) {
+        Ok(()) => FlatpakResult::Restored,
+        Err(error) => {
+            let _ = fs::remove_file(&staged);
+            FlatpakResult::Failed(error.to_string())
+        }
+    }
+}
+
 fn prepare_transfer(transfer: &Move) -> Result<(), MigrationError> {
     if !transfer.from.is_file() || same_location(&transfer.from, &transfer.to) {
         return Ok(());
@@ -1893,6 +2166,7 @@ mod tests {
             [
                 "audit_archive",
                 "deletions",
+                "flatpak",
                 "images_to_stop",
                 "moves",
                 "registrations_to_reclaim",
@@ -2004,5 +2278,204 @@ mod tests {
             ..LegacyInstallation::default()
         });
         assert_eq!(legacy.old_version(), None);
+    }
+
+    /// The override file of a person who had their own settings before the 1.x route.
+    const OVERRIDE_BEFORE: &str = "[Context]\nfilesystems=xdg-download;\n";
+
+    /// The same file after the route added its permission.
+    const OVERRIDE_AFTER: &str =
+        "[Context]\nfilesystems=xdg-download;\n[Session Bus Policy]\norg.sylin.ghostlight=talk\n";
+
+    /// Custody text naming `before` as what the override held.
+    fn custody(before: Option<&str>, added: bool) -> String {
+        json!({
+            "version": 1,
+            "executable": "/home/user/.ghostlight/bin/ghostlight",
+            "permission_before": before,
+            "permission_after": OVERRIDE_AFTER,
+            "permission_added": added,
+        })
+        .to_string()
+    }
+
+    /// The files a 1.x Flatpak route install left below the user's home.
+    fn flatpak_route(fixture: &Fixture, before: Option<&str>) -> FlatpakLeftovers {
+        let route = FlatpakLeftovers::below(&fixture.roots.user_home);
+        fixture.write(
+            &route.manifest,
+            &json!({
+                "name": native_host::HOST_NAME,
+                "description": "Ghostlight browser connector",
+                "path": "/home/user/.ghostlight/bin/ghostlight-browser-connector",
+                "type": "stdio",
+                "allowed_origins": ["chrome-extension://abc/"],
+            })
+            .to_string(),
+        );
+        fixture.write(
+            &route.registration,
+            &format!(
+                "[D-BUS Service]\nName={}\nExec=\"/home/user/.ghostlight/bin/ghostlight\"\n",
+                native_host::HOST_NAME
+            ),
+        );
+        fixture.write(&route.permission_override, OVERRIDE_AFTER);
+        fixture.write(&route.custody, &custody(before, true));
+        route
+    }
+
+    fn results(steps: &[FlatpakStep]) -> Vec<(FlatpakPart, FlatpakResult)> {
+        steps
+            .iter()
+            .map(|step| (step.part, step.result.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn the_flatpak_route_is_removed_and_the_override_restored_then_a_second_run_does_nothing() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+        let plan = fixture.plan();
+        assert!(!plan.is_empty());
+        assert!(!plan.has_earlier_installation());
+        assert_eq!(plan.flatpak.as_ref(), Some(&route));
+
+        let steps = retire_flatpak_route(&plan);
+        assert_eq!(
+            results(&steps),
+            [
+                (FlatpakPart::Manifest, FlatpakResult::Removed),
+                (FlatpakPart::Registration, FlatpakResult::Removed),
+                (FlatpakPart::PermissionOverride, FlatpakResult::Restored),
+                (FlatpakPart::Custody, FlatpakResult::Removed),
+            ]
+        );
+        assert!(!route.manifest.exists());
+        assert!(!route.registration.exists());
+        assert!(!route.custody.exists());
+        assert_eq!(
+            fs::read_to_string(&route.permission_override).unwrap(),
+            OVERRIDE_BEFORE
+        );
+
+        assert!(fixture.plan().is_empty());
+        assert!(retire_flatpak_route(&fixture.plan()).is_empty());
+        assert!(retire_flatpak_route(&plan).is_empty());
+    }
+
+    #[test]
+    fn an_override_the_route_created_is_deleted() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, None);
+        let steps = retire_flatpak_route(&fixture.plan());
+        assert!(
+            results(&steps).contains(&(FlatpakPart::PermissionOverride, FlatpakResult::Removed))
+        );
+        assert!(!route.permission_override.exists());
+    }
+
+    #[test]
+    fn an_override_a_person_changed_since_is_left_and_reported() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+        let changed = format!("{OVERRIDE_AFTER}[Environment]\nKEY=value\n");
+        fixture.write(&route.permission_override, &changed);
+        let steps = retire_flatpak_route(&fixture.plan());
+        assert_eq!(
+            results(&steps),
+            [
+                (FlatpakPart::Manifest, FlatpakResult::Removed),
+                (FlatpakPart::Registration, FlatpakResult::Removed),
+                (FlatpakPart::PermissionOverride, FlatpakResult::LeftChanged),
+                (FlatpakPart::Custody, FlatpakResult::Removed),
+            ]
+        );
+        assert_eq!(
+            fs::read_to_string(&route.permission_override).unwrap(),
+            changed
+        );
+        assert!(fixture.plan().is_empty());
+    }
+
+    #[test]
+    fn a_manifest_or_registration_that_is_not_ghostlights_is_left_and_reported() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+        let plan = fixture.plan();
+        fixture.write(&route.manifest, "{\"name\":\"org.example.other\"}");
+        fixture.write(
+            &route.registration,
+            "[D-BUS Service]\nName=org.sylin.ghostlight\nExec=\"/usr/bin/other\"\n",
+        );
+        let steps = retire_flatpak_route(&plan);
+        assert_eq!(
+            results(&steps),
+            [
+                (FlatpakPart::Manifest, FlatpakResult::LeftForeign),
+                (FlatpakPart::Registration, FlatpakResult::LeftForeign),
+                (FlatpakPart::PermissionOverride, FlatpakResult::Restored),
+                (FlatpakPart::Custody, FlatpakResult::Removed),
+            ]
+        );
+        assert!(route.manifest.is_file() && route.registration.is_file());
+        assert!(fixture.plan().is_empty());
+    }
+
+    #[test]
+    fn files_that_were_never_ghostlights_do_not_plan_anything() {
+        let fixture = Fixture::new(false);
+        let route = FlatpakLeftovers::below(&fixture.roots.user_home);
+        fixture.write(&route.manifest, "{\"name\":\"org.example.other\"}");
+        fixture.write(
+            &route.registration,
+            "[D-BUS Service]\nName=org.example.other\n",
+        );
+        fixture.write(&route.permission_override, OVERRIDE_AFTER);
+        fixture.write(&route.custody, "not a record");
+        let plan = fixture.plan();
+        assert!(plan.is_empty());
+        assert!(retire_flatpak_route(&plan).is_empty());
+        assert!(route.manifest.is_file() && route.permission_override.is_file());
+    }
+
+    #[test]
+    fn a_permission_that_was_already_there_is_left_alone() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, Some(OVERRIDE_AFTER));
+        fixture.write(&route.custody, &custody(Some(OVERRIDE_AFTER), false));
+        let steps = retire_flatpak_route(&fixture.plan());
+        assert!(!results(&steps)
+            .iter()
+            .any(|(part, _)| *part == FlatpakPart::PermissionOverride));
+        assert_eq!(
+            fs::read_to_string(&route.permission_override).unwrap(),
+            OVERRIDE_AFTER
+        );
+        assert!(!route.custody.exists());
+    }
+
+    #[test]
+    fn nothing_is_granted_when_the_override_is_gone() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+        fs::remove_file(&route.permission_override).unwrap();
+        retire_flatpak_route(&fixture.plan());
+        assert!(!route.permission_override.exists());
+    }
+
+    #[test]
+    fn a_directory_at_a_route_path_is_foreign() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+        let plan = fixture.plan();
+        fs::remove_file(&route.manifest).unwrap();
+        fs::create_dir(&route.manifest).unwrap();
+        let steps = retire_flatpak_route(&plan);
+        assert_eq!(
+            results(&steps)[0],
+            (FlatpakPart::Manifest, FlatpakResult::LeftForeign)
+        );
+        assert!(route.manifest.is_dir());
     }
 }

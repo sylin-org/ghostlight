@@ -44,7 +44,7 @@ use thiserror::Error;
 use super::entry::{canonical_path, same_path};
 use super::layout::{Layout, BROWSER_CONNECTOR_EXECUTABLE_NAME, MCP_CONNECTOR_EXECUTABLE_NAME};
 use super::marker::DevelopmentMarker;
-use super::migration::{self, Legacy, LegacyRoots, MigrationPlan};
+use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
 use super::record::{self, InstallRecord, PayloadRefused, Standing};
 use super::swap;
@@ -296,6 +296,8 @@ pub struct Outcome {
     pub service_started: Option<bool>,
     /// What the reconcile changed; `None` when nothing was installed.
     pub registrations: Option<ReconcileReport>,
+    /// What became of the files the 1.x Flatpak route left in the home.
+    pub flatpak: Vec<FlatpakStep>,
 }
 
 /// Why `--restore` would not run.
@@ -427,6 +429,7 @@ pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outco
             plan: plan(context, request.mode)?,
             service_started: None,
             registrations: None,
+            flatpak: Vec::new(),
         });
     }
     let _guard = hold_install_lock(&context.layout.install_lock())?;
@@ -518,8 +521,9 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 /// named it would write the 1.x installation record again. Once the last old program has stopped
 /// and cannot write them again, the originals are retired (a file a 1.x program rewrote after
 /// the copy is published over the copy first), the 1.x audit log, which an old service writes,
-/// is archived, and the 1.x lifecycle files are deleted. A migrating plan always restarts: a
-/// plan with nothing to place and a migration to run never reaches the unchanged shortcut.
+/// is archived, the 1.x lifecycle files are deleted, and what the 1.x Flatpak route left in the
+/// home is removed or restored, each file reported. A migrating plan always restarts: a plan
+/// with nothing to place and a migration to run never reaches the unchanged shortcut.
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
     if plan.unchanged {
@@ -527,6 +531,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             plan,
             service_started: None,
             registrations: None,
+            flatpak: Vec::new(),
         });
     }
     let migrating = !plan.migration.is_empty();
@@ -535,6 +540,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         "a migration is finished only by the restart"
     );
     let mut copied = Vec::new();
+    let mut flatpak = Vec::new();
     if migrating {
         migration::prepare(&plan.migration)?;
         copied = migration::copy_state(&plan.migration)?;
@@ -563,6 +569,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             migration::retire_state(&copied)?;
             migration::archive_audit(&plan.migration)?;
             migration::finish(&plan.migration)?;
+            flatpak = migration::retire_flatpak_route(&plan.migration);
         }
         Some(
             context.control.start_serve(layout).is_ok()
@@ -580,6 +587,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         plan,
         service_started,
         registrations: Some(registrations),
+        flatpak,
     })
 }
 
@@ -739,8 +747,9 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use super::super::migration::{
-        LegacyInstallation, MigrationError, AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME,
-        LEGACY_DEPLOY_LOCK_NAME, LEGACY_RECORD_NAME, LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
+        FlatpakLeftovers, FlatpakPart, FlatpakResult, LegacyInstallation, MigrationError,
+        AUDIT_FILE_NAME, HARNESS_LOCATIONS_NAME, LEGACY_DEPLOY_LOCK_NAME, LEGACY_RECORD_NAME,
+        LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
     };
     use super::super::native_host::NativeHostRegistry;
     use super::super::scratch::Scratch;
@@ -1258,6 +1267,37 @@ mod tests {
         );
         assert!(!policy.join(USER_POLICY_FILE_NAME).exists());
         assert!(fixture.layout.service_executable().is_file());
+    }
+
+    #[test]
+    fn the_flatpak_route_of_a_1x_install_is_removed_and_reported_once() {
+        let fixture = Fixture::new();
+        let route = FlatpakLeftovers::below(&fixture.scratch.path().join("profile"));
+        fs::create_dir_all(route.manifest.parent().unwrap()).unwrap();
+        fs::write(
+            &route.manifest,
+            serde_json::json!({
+                "name": super::super::native_host::HOST_NAME,
+                "description": "Ghostlight browser connector",
+                "path": "/home/user/.ghostlight/bin/ghostlight-browser-connector",
+                "type": "stdio",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(!outcome.plan.migration.is_empty());
+        assert_eq!(outcome.flatpak.len(), 1);
+        assert_eq!(outcome.flatpak[0].part, FlatpakPart::Manifest);
+        assert_eq!(outcome.flatpak[0].result, FlatpakResult::Removed);
+        assert!(!route.manifest.exists());
+        let again = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(again.plan.unchanged);
+        assert!(again.flatpak.is_empty());
     }
 
     #[test]

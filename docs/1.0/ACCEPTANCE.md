@@ -53,8 +53,7 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
      runtime publication or desktop initialization.
     Concurrent failed desktop starts share one bounded launch exchange and a short retry
     cooldown. Failed children are reaped, discovery remains unpublished, and corrected
-    desktop context recovers automatically. Native startup and named OS activation share
-    admission; activation never invents a child PID. Only lease contention waits for
+    desktop context recovers automatically. Only lease contention waits for
     another authority's workbench (ADR-0166).
 16. An explicit `ghostlight open` reveals the existing authenticated authority's workbench without
     a new listener or workspace. When absent, it asks the shared lifecycle seam to start the same
