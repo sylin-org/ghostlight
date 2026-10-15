@@ -166,7 +166,8 @@ Before committing, run the checks for what you changed. CI runs the full set on 
   `node --test tests/guards/connectors.test.mjs`.
 - The model surface changes on purpose: regenerate the catalog golden with
   `GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight the_catalog_matches` (slice f08a renames
-  the package), and the result goldens with the same variable on `the_result_envelope`.
+  the package), and the result goldens with the same variable on `work::tests::golden`
+  (`GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight work::tests::golden`).
 - Changed runtime JavaScript that no test runs: `node --check` on it.
 - Docs or other text: `pwsh -NoProfile -File scripts/check-repository-integrity.ps1` (ASCII and links).
 
