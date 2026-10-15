@@ -8,7 +8,9 @@
 //! The plans that come back say how each field takes its value. Consecutive fields the page sets
 //! itself share one call; a text field is one input that focuses the control as its
 //! precondition and types the value as trusted keystrokes. Then every document confirms its
-//! fields kept their values, and only then is the submit control clicked.
+//! fields kept their values and reports what the page holds in the fields worth reading back,
+//! and only then is the submit control clicked. Fields the page changed back are not a failure
+//! of the page asset: the fill reports them together, as a partly applied fill.
 //!
 //! The fill has its own time budget inside the command's deadline. Once a field was edited,
 //! every failure, including a spent budget or runtime control holding the work between fields,
@@ -23,9 +25,9 @@ use super::super::link::{Answers, Link};
 use super::super::locator::Locator;
 use super::super::scope::{PlannedCall, Scope};
 use super::super::wire::{CallAnswer, CallMode, DocumentGuard, FrameRef};
-use super::super::world::{self, FieldKind, FillPlan, Submitted};
+use super::super::world::{self, FieldKind, FillPlan, FillVerified, Submitted};
 use super::{input_for, reach, send_input, settled, value, OnDialog, Reach};
-use crate::browser::adapter::{BrowserOutcome, PhysicalField};
+use crate::browser::adapter::{BrowserOutcome, FieldNow, PhysicalField};
 use crate::browser::BrowserError;
 
 /// The longest a fill waits for its values to hold, in milliseconds.
@@ -42,8 +44,8 @@ const ORPHAN_SUBMIT: &str = "submit control is not contained in the resolved for
 const INVALID_PLAN: &str = "content primitive returned an invalid fill plan";
 /// The failure of a fill that ran out of its own time budget.
 const BUDGET_EXHAUSTED: &str = "form fill exhausted its physical execution budget";
-/// The failure of a fill whose values did not hold.
-const NOT_RETAINED: &str = "target did not retain filled value";
+/// The failure of a verification that named a position the document does not have.
+const INVALID_VERIFICATION: &str = "content primitive returned an invalid fill verification";
 
 /// What a fill asks for.
 #[derive(Clone, Copy, Debug)]
@@ -259,12 +261,7 @@ pub fn fill(
             budget,
         },
     )?;
-    if retained
-        .iter()
-        .any(|answer| value::<Value>(answer).is_err())
-    {
-        return Err(l.settle(BrowserError::Primitive(NOT_RETAINED.into())));
-    }
+    let held = verified(l, &groups, &retained, filled)?;
     let submitted = match &submit {
         Some(target) => {
             require_budget(l, budget)?;
@@ -295,8 +292,60 @@ pub fn fill(
     Ok(BrowserOutcome::Filled {
         tab: l.tab(tab_id)?.into(),
         filled_count: filled,
+        held,
         submitted,
         committed_urls: l.committed(),
+    })
+}
+
+/// What the page holds in the fields it reports, from every document's verification, by position
+/// in the whole call.
+///
+/// # Errors
+///
+/// Returns every field the documents report changed back together, as
+/// [`BrowserError::FieldsReverted`]; and any other failure of a verification as an unknown
+/// effect, because the fields were already edited.
+fn verified(
+    l: &Link<'_>,
+    groups: &[Group],
+    answers: &[CallAnswer],
+    total: usize,
+) -> Result<Vec<FieldNow>, BrowserError> {
+    let mut held = Vec::new();
+    let mut reverted = Vec::new();
+    for (group, answer) in groups.iter().zip(answers) {
+        let position = |local: usize| {
+            group
+                .positions
+                .get(local)
+                .copied()
+                .ok_or_else(|| BrowserError::Primitive(INVALID_VERIFICATION.into()))
+        };
+        match value::<FillVerified>(answer) {
+            Ok(verified) => {
+                for mut field in verified.fields {
+                    field.field = position(field.field).map_err(|error| l.settle(error))?;
+                    held.push(field);
+                }
+            }
+            Err(BrowserError::FieldsRejected { problems }) => {
+                for mut problem in problems {
+                    problem.field = position(problem.field).map_err(|error| l.settle(error))?;
+                    reverted.push(problem);
+                }
+            }
+            Err(error) => return Err(l.settle(error)),
+        }
+    }
+    if reverted.is_empty() {
+        held.sort_by_key(|field| field.field);
+        return Ok(held);
+    }
+    reverted.sort_by_key(|problem| problem.field);
+    Err(BrowserError::FieldsReverted {
+        set: total.saturating_sub(reverted.len()),
+        problems: reverted,
     })
 }
 

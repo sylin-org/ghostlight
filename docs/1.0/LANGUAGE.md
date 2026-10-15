@@ -498,7 +498,6 @@ The clauses by problem word:
 | `wrong_tool`, a file input | `The "<n>" field is a file input.` | `Attach the file with browser_upload on target_....` |
 | `wrong_tool`, a button | `The "<n>" control is a button, not a field.` | `Click it with browser_click on target_....` |
 | `wrong_tool`, a page widget | `The "<n>" dropdown is a page widget, not a form field.` | `Open it with browser_click on target_..., then browser_click the option by name.` |
-| `reverted` | `The "<n>" text field was changed back by the page.` | `Read target_... with browser_read to see what it holds now.` |
 | `submit_not_owned` | `The submit control does not belong to the form that holds these fields.` | `Repeat without submit_target, then click the submit control with browser_click.` |
 
 The control noun comes from its role and input type (`dropdown`, `date field`, `checkbox`, `text
@@ -517,6 +516,36 @@ problem carries the index into `fields`, the field's handle, the problem word an
 succeed (`options`, `options_total`, `containing`, `expected`, `limits`, `group`). The facts never
 hold the given value. The audit keeps one count and no names, options or values: `Refused a form
 fill before any edit: N fields could not take their values.`
+
+A fill says what the page now holds (ADR-0198 Decision 11). After the edits the page checks that
+every field kept its value, and reads back the fields worth reading: choice and typed controls
+(select, radio, checkbox, the date family, number, range, color), and a text field whose retained
+value differs from the given one only in formatting. Free text that equals what was given is not
+read back, and a credential-class control never is. The comparison removes white space, `(`, `)`,
+`-` and `/` and folds case on both sides; `.` and `,` stay significant, so `10.50` held as `1050`
+is a real difference. A tolerated difference is reported, not refused.
+
+With `preserve_target_names` on, the summary names each reading: `Filled 3 fields on example.com:
+Role = Administrator, Shipping method = Express. Phone now reads "(555) 123-4567".` A choice or
+typed control reads as `<name> = <value>` and a reformatted text field as its own sentence. Values
+are bounded to 40 characters on one line, and readings the summary has no room for are counted
+(`N readings more in the facts`). With it off the summary is `Filled 3 fields on example.com.` The
+facts carry every reading either way, because the fill was authorized to read the document:
+`"fields":[{"target":"target_12","now":"Administrator"},{"target":"target_9","now":"(555) 123-4567"}]`.
+A checkbox or radio button reads `checked` or `unchecked`. The audit keeps `Filled 3 fields on
+example.com.` and no name or value.
+
+When the page changes a field back after the fill set it, the fill is partly applied and says so.
+The result has status `failed`, effect `partial`, and is not safe to repeat. The summary is `Set 2
+of 3 fields; the "Role" dropdown went back to "Choose one..." after the page reacted.`; fields past
+the first three are counted, and a control that holds nothing reads `no value`. With names off the
+control is unnamed and its value is left out (`A dropdown went back`). The next step is `Read
+target_... with browser_read to see its current value.`, at most two in all. The facts are
+`{"reason":"fields_reverted","set":2,"reverted":[{"field":0,"target":"target_...","problem":"reverted",
+"now":"Choose one..."}]}`; a credential-class field never carries `now`. A submit control is not
+clicked after a revert. The audit keeps one count: `A form fill was partly applied: N fields held
+their values.` A page that never settles within the fill's budget, with no field it can name, still
+leaves the effect unknown.
 
 Credential-class targets return guidance before any grouped value dispatch unless
 `user_authorized_credentials` is `true`. The guidance names the control and its handle:

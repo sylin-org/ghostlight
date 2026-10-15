@@ -113,6 +113,21 @@ pub struct PhysicalField {
     pub value: String,
 }
 
+/// What the page holds in one filled field after the fill, as the page reports it.
+///
+/// Only choice and typed controls, and text fields the page reformatted, are reported. A
+/// credential-class control never is.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FieldNow {
+    /// The field's position in the call's list of fields.
+    pub field: usize,
+    /// The value the page holds, bounded by the page.
+    pub now: String,
+    /// Whether the page holds the given value in another format, such as a masked phone number.
+    #[serde(default)]
+    pub tolerated: bool,
+}
+
 /// One physical point in page CSS coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -910,6 +925,8 @@ pub enum BrowserOutcome {
     Filled {
         tab: PhysicalTab,
         filled_count: usize,
+        /// What the page holds in the fields it reports, in the call's field order.
+        held: Vec<FieldNow>,
         submitted: bool,
         committed_urls: Vec<String>,
     },

@@ -100,6 +100,7 @@ pub enum AuditRefusal {
     DeadlineExpired { before_dispatch: bool },
     BrowserPrimitiveFailed,
     FieldValuesRejected,
+    FieldsReverted,
     DocumentUnavailable,
     CancelledBeforeDispatch,
     BrowserUnavailable { cause: BrowserUnavailableReason },
@@ -127,13 +128,26 @@ pub enum AuditRefusal {
 impl Outcome {
     /// Project a completed operation's authored sentence without copying its result facts.
     ///
-    /// A dialog message is page-authored text, so the durable sentence omits it.
+    /// A dialog message is page-authored text, so the durable sentence omits it. So are the
+    /// values and names a fill read back.
     #[must_use]
     pub fn audit(&self) -> AuditProjection {
         let summary = match self {
             Self::DialogObserved { present, .. } => Self::DialogObserved {
                 present: *present,
                 message: None,
+            }
+            .summary(),
+            Self::FormFilled {
+                fields,
+                submitted,
+                host,
+                ..
+            } => Self::FormFilled {
+                fields: *fields,
+                submitted: *submitted,
+                host: host.clone(),
+                held: Vec::new(),
             }
             .summary(),
             _ => self.summary(),
@@ -176,6 +190,7 @@ impl Refusal {
             },
             Self::BrowserPrimitive { .. } => AuditRefusal::BrowserPrimitiveFailed,
             Self::FieldValuesRejected { .. } => AuditRefusal::FieldValuesRejected,
+            Self::FieldsReverted { .. } => AuditRefusal::FieldsReverted,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
             Self::CancelledBeforeDispatch => AuditRefusal::CancelledBeforeDispatch,
             Self::BrowserUnavailable { reason } => {
@@ -219,6 +234,16 @@ impl Refusal {
                     "Refused a form fill before any edit: {} could not take {}.",
                     counted(fields.len(), "field", "fields"),
                     if fields.len() == 1 {
+                        "its value"
+                    } else {
+                        "their values"
+                    },
+                ),
+                // Only how many fields held: which ones changed, and to what, stays out of history.
+                Self::FieldsReverted { set, .. } => format!(
+                    "A form fill was partly applied: {} held {}.",
+                    counted(*set, "field", "fields"),
+                    if *set == 1 {
                         "its value"
                     } else {
                         "their values"

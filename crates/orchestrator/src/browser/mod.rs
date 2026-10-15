@@ -1118,6 +1118,14 @@ pub enum BrowserError {
         /// Every refused field, by its position in the call, with what would succeed.
         problems: Vec<crate::language::field_problem::FieldProblem>,
     },
+    /// A fill was applied, but the page changed some fields back before their values settled.
+    #[error("the page changed filled fields back")]
+    FieldsReverted {
+        /// How many of the call's fields held their values.
+        set: usize,
+        /// Every field the page changed, by its position in the call, with what it holds now.
+        problems: Vec<crate::language::field_problem::FieldProblem>,
+    },
     /// A JavaScript dialog blocks the page, so the renderer cannot take the work.
     #[error("a JavaScript dialog blocks the page")]
     DialogOpen,

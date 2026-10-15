@@ -2305,6 +2305,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::RecoveryFailed { .. } => (CheckFailure::BrowserUnavailable, admitted),
         BrowserError::Primitive(_)
         | BrowserError::FieldsRejected { .. }
+        | BrowserError::FieldsReverted { .. }
         | BrowserError::StaleView
         | BrowserError::LocalInterlock(_)
         | BrowserError::EffectUnknown(_)

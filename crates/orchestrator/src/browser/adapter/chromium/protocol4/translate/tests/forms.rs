@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use super::super::super::keys;
 use super::*;
-use crate::browser::adapter::PhysicalField;
+use crate::browser::adapter::{FieldNow, PhysicalField};
 use crate::browser::BrowserDispatch;
 use crate::governance::ReasonCode;
 use crate::language::field_problem::FieldProblemKind;
@@ -62,7 +62,7 @@ fn answer(world: &wire::WorldCall) -> Value {
         "fill_local" => returned(json!({"filled": true})),
         "focus_text_field" => returned(json!({"focused": true,
             "subject": {"role": "textbox", "name": "Name"}})),
-        "verify_fill_retained" => returned(json!({"retained": true})),
+        "verify_fill_retained" => returned(json!({"retained": true, "fields": []})),
         "submit_fill" => returned(json!({"submitted": true})),
         _ => refused("unknown_kind"),
     }
@@ -347,7 +347,7 @@ fn a_refused_focus_is_a_plain_failure_with_no_key_sent() {
 }
 
 #[test]
-fn values_that_did_not_hold_after_edits_leave_the_effect_unknown() {
+fn values_that_never_settled_after_edits_leave_the_effect_unknown() {
     let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
         Some("verify_fill_retained") => refused("not_retained"),
         _ => answer(world),
@@ -360,9 +360,151 @@ fn values_that_did_not_hold_after_edits_leave_the_effect_unknown() {
         ),
     )
     .unwrap_err();
+    assert_eq!(error, BrowserError::EffectUnknown("not_retained".into()));
+}
+
+#[test]
+fn a_real_verification_failure_is_not_rewritten_as_values_that_did_not_hold() {
+    let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
+        Some("verify_fill_retained") => refused("disabled"),
+        _ => answer(world),
+    });
+    let error = call(
+        &port,
+        scoped(
+            all_open(),
+            fill(vec![field("T:t1:locator_a1_1", LOCAL_VALUE)], None, 10_000),
+        ),
+    )
+    .unwrap_err();
+    assert_eq!(error, BrowserError::EffectUnknown("disabled".into()));
+}
+
+/// A page's report that it changed filled fields back, naming them by place in the document.
+fn reverted(problems: Value) -> Value {
+    json!({"status": "returned", "envelope": {"ok": false, "error": {
+        "code": "not_retained",
+        "message": "target did not retain filled value",
+        "detail": {"problems": problems}
+    }}})
+}
+
+#[test]
+fn fields_the_page_changed_back_are_a_partial_fill_named_by_their_place_in_the_call() {
+    let (port, _fake) = rig(|world| {
+        let frame = world.frame.as_ref().map(|frame| frame.frame_id.as_str());
+        match (world.message["kind"].as_str(), frame) {
+            (Some("verify_fill_retained"), Some("C")) => reverted(json!([
+                {"field": 0, "problem": "reverted", "now": "Choose one..."}
+            ])),
+            (Some("verify_fill_retained"), Some("T")) => returned(json!({
+                "retained": true,
+                "fields": [{"field": 1, "now": "Express"}]
+            })),
+            _ => answer(world),
+        }
+    });
+    let error = call(
+        &port,
+        scoped(
+            all_open(),
+            fill(
+                vec![
+                    field("T:t1:locator_a1_1", LOCAL_VALUE),
+                    field("C:c1:locator_a1_2", LOCAL_VALUE),
+                    field("T:t1:locator_a1_3", LOCAL_VALUE),
+                ],
+                Some("T:t1:locator_a1_9"),
+                10_000,
+            ),
+        ),
+    )
+    .unwrap_err();
+    let BrowserError::FieldsReverted { set, problems } = error else {
+        panic!("expected the reverted fields, got {error:?}");
+    };
+    assert_eq!(set, 2);
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].field, 1);
+    assert_eq!(problems[0].kind, FieldProblemKind::Reverted);
+    assert_eq!(problems[0].now.as_deref(), Some("Choose one..."));
+}
+
+#[test]
+fn what_the_page_holds_comes_back_by_place_in_the_call() {
+    let (port, _fake) = rig(|world| {
+        let frame = world.frame.as_ref().map(|frame| frame.frame_id.as_str());
+        match (world.message["kind"].as_str(), frame) {
+            (Some("verify_fill_retained"), Some("C")) => returned(json!({
+                "retained": true,
+                "fields": [{"field": 0, "now": "(555) 123-4567", "tolerated": true}]
+            })),
+            (Some("verify_fill_retained"), Some("T")) => returned(json!({
+                "retained": true,
+                "fields": [{"field": 1, "now": "Express"}]
+            })),
+            _ => answer(world),
+        }
+    });
+    let (_, result) = unwrap_scoped(
+        call(
+            &port,
+            scoped(
+                all_open(),
+                fill(
+                    vec![
+                        field("T:t1:locator_a1_1", LOCAL_VALUE),
+                        field("C:c1:locator_a1_2", TEXT_VALUE),
+                        field("T:t1:locator_a1_3", LOCAL_VALUE),
+                    ],
+                    None,
+                    10_000,
+                ),
+            ),
+        )
+        .unwrap(),
+    );
+    let BrowserOutcome::Filled { held, .. } = result else {
+        panic!("a fill");
+    };
+    assert_eq!(
+        held,
+        [
+            FieldNow {
+                field: 1,
+                now: "(555) 123-4567".into(),
+                tolerated: true
+            },
+            FieldNow {
+                field: 2,
+                now: "Express".into(),
+                tolerated: false
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_reading_for_a_place_the_document_does_not_have_is_an_invalid_verification() {
+    let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
+        Some("verify_fill_retained") => {
+            returned(json!({"retained": true, "fields": [{"field": 4, "now": "x"}]}))
+        }
+        _ => answer(world),
+    });
+    let error = call(
+        &port,
+        scoped(
+            all_open(),
+            fill(vec![field("T:t1:locator_a1_1", LOCAL_VALUE)], None, 10_000),
+        ),
+    )
+    .unwrap_err();
     assert_eq!(
         error,
-        BrowserError::EffectUnknown("target did not retain filled value".into())
+        BrowserError::EffectUnknown(
+            "content primitive returned an invalid fill verification".into()
+        )
     );
 }
 

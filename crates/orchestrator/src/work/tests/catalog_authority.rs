@@ -260,6 +260,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
                 BrowserOutcome::Filled {
                     tab: tab(7, PAGE),
                     filled_count: 1,
+                    held: Vec::new(),
                     submitted: submit,
                     committed_urls: vec![PAGE.into()],
                 },

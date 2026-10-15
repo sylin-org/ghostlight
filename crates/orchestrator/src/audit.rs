@@ -507,6 +507,7 @@ mod tests {
                     fields: 1,
                     submitted: false,
                     host: Some("example.com".into()),
+                    held: Vec::new(),
                 }
                 .audit(),
                 1,

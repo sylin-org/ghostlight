@@ -623,9 +623,10 @@ fn a_fill_after_a_read_spent_the_budget_still_asks_the_page_to_settle() {
 const DROPDOWN: &str = "locator_a1_1";
 const CHECKBOX: &str = "locator_a1_2";
 
-/// A page with a dropdown named Role and a checkbox named Agree whose fill the page refuses with
-/// `detail`, as one refused `prepare_fill` envelope.
-fn refusing_form(detail: Value) -> Fault {
+/// A page with a dropdown named Role and a checkbox named Agree. `special` answers a world call
+/// first, when it has an answer; the form answers the controls' inspection and description, and
+/// the ordinary page answers the rest.
+fn form_page(special: impl Fn(&wire::WorldCall) -> Option<Value> + Send + 'static) -> Fault {
     Box::new(move |correlation, primitive| {
         let wire::Primitive::Call(call) = primitive else {
             return None;
@@ -639,27 +640,54 @@ fn refusing_form(detail: Value) -> Fault {
         let answers: Vec<Value> = call
             .calls
             .iter()
-            .map(
-                |world| match world.message["kind"].as_str().unwrap_or_default() {
-                    "inspect" => returned(json!({"targets": controls, "truncated": false})),
-                    "describe" => returned(json!({"targets": world.message["locators"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|locator| controls
-                        .iter()
-                        .find(|control| control["locator"] == *locator)
-                        .cloned()
-                        .unwrap())
-                    .collect::<Vec<_>>()})),
-                    "prepare_fill" => json!({"status": "returned", "envelope": {"ok": false,
-                    "error": {"code": "option_missing", "message": "select option not found",
-                        "detail": detail}}}),
-                    _ => page(world),
-                },
-            )
+            .map(|world| {
+                special(world).unwrap_or_else(|| {
+                    match world.message["kind"].as_str().unwrap_or_default() {
+                        "inspect" => returned(json!({"targets": controls, "truncated": false})),
+                        "describe" => returned(json!({"targets": world.message["locators"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|locator| controls
+                                .iter()
+                                .find(|control| control["locator"] == *locator)
+                                .cloned()
+                                .unwrap())
+                            .collect::<Vec<_>>()})),
+                        _ => page(world),
+                    }
+                })
+            })
             .collect();
         Some(FakeExtension::ok(correlation, json!({"answers": answers})))
+    })
+}
+
+/// A page whose fill the page refuses with `detail`, as one refused `prepare_fill` envelope.
+fn refusing_form(detail: Value) -> Fault {
+    form_page(move |world| {
+        (world.message["kind"] == "prepare_fill").then(|| {
+            json!({"status": "returned", "envelope": {"ok": false,
+                "error": {"code": "option_missing", "message": "select option not found",
+                    "detail": detail}}})
+        })
+    })
+}
+
+/// A page that takes every field as a page-set control and answers the verification with
+/// `verify`.
+fn verifying_form(verify: Value) -> Fault {
+    form_page(move |world| match world.message["kind"].as_str() {
+        Some("prepare_fill") => Some(returned(json!({"prepared": true,
+            "field_kinds": world.message["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|_| "local")
+                .collect::<Vec<_>>()}))),
+        Some("fill_local") => Some(returned(json!({"filled": true}))),
+        Some("verify_fill_retained") => Some(verify.clone()),
+        _ => None,
     })
 }
 
@@ -808,4 +836,136 @@ fn a_problem_for_a_field_the_call_does_not_have_is_an_invalid_plan() {
         result.facts["detail"],
         "content primitive returned an invalid fill plan"
     );
+}
+
+#[test]
+fn a_fill_says_what_the_page_now_holds() {
+    let verify = returned(json!({"retained": true, "fields": [
+        {"field": 0, "now": "Administrator"},
+        {"field": 1, "now": "checked"}
+    ]}));
+    let (executor, _fake, workspace, audit) =
+        opened_audited(verifying_form(verify), GovernanceFacade::new(None, None));
+    let (role, agree) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "Administrator"}, {"target": agree, "value": true}]}),
+    );
+
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    assert_eq!(
+        result.summary,
+        "Filled 2 fields on example.com: Role = Administrator, Agree = checked."
+    );
+    assert_eq!(
+        result.facts["fields"],
+        json!([
+            {"target": role, "now": "Administrator"},
+            {"target": agree, "now": "checked"}
+        ])
+    );
+    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    assert!(recorded.contains("Filled 2 fields on example.com."));
+    for private in ["Administrator", "Role", "Agree"] {
+        assert!(!recorded.contains(private), "{private} reached the audit");
+    }
+}
+
+#[test]
+fn a_fill_without_target_names_says_only_how_many_fields_it_filled() {
+    let policy = temporary_policy("fill-echo-names");
+    fs::write(
+        &policy,
+        all_open_policy_with(
+            r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    let verify =
+        returned(json!({"retained": true, "fields": [{"field": 0, "now": "Administrator"}]}));
+    let (executor, _fake, workspace) = opened_under(
+        verifying_form(verify),
+        GovernanceFacade::new(Some(policy.clone()), None),
+    );
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "Administrator"}]}),
+    );
+
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    assert_eq!(result.summary, "Filled 1 field on example.com.");
+    assert_eq!(
+        result.facts["fields"],
+        json!([{"target": role, "now": "Administrator"}])
+    );
+    let _ = fs::remove_file(policy);
+}
+
+#[test]
+fn a_fill_the_page_partly_undid_is_a_partial_failure_with_no_dialog_advice() {
+    let verify = json!({"status": "returned", "envelope": {"ok": false, "error": {
+        "code": "not_retained",
+        "message": "target did not retain filled value",
+        "detail": {"problems": [{"field": 0, "problem": "reverted", "now": "Choose one..."}]}
+    }}});
+    let (executor, _fake, workspace, audit) =
+        opened_audited(verifying_form(verify), GovernanceFacade::new(None, None));
+    let (role, agree) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "Administrator"}, {"target": agree, "value": true}]}),
+    );
+
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.effect, Effect::Partial);
+    assert!(!result.repeat_safe);
+    assert_eq!(
+        result.summary,
+        "Set 1 of 2 fields; the \"Role\" dropdown went back to \"Choose one...\" after the page reacted."
+    );
+    assert_eq!(
+        result.next_steps,
+        vec![format!(
+            "Read {role} with browser_read to see its current value."
+        )]
+    );
+    assert_eq!(result.facts["reason"], "fields_reverted");
+    assert_eq!(result.facts["set"], 1);
+    assert_eq!(
+        result.facts["reverted"],
+        json!([{"field": 0, "target": role, "problem": "reverted", "now": "Choose one..."}])
+    );
+    assert!(!result.model_text().to_lowercase().contains("dialog"));
+    let recorded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    assert!(recorded.contains("A form fill was partly applied: 1 field held its value."));
+    for private in ["Choose one", "Role", "Administrator"] {
+        assert!(!recorded.contains(private), "{private} reached the audit");
+    }
+}
+
+#[test]
+fn a_page_that_never_settled_is_still_an_unknown_effect_with_dialog_advice() {
+    let (executor, _fake, workspace) = opened(verifying_form(refused("not_retained")));
+    let (role, _) = form_handles(&executor, &workspace);
+
+    let result = execute(
+        &executor,
+        &workspace,
+        "browser_fill_form",
+        json!({"fields": [{"target": role, "value": "Administrator"}]}),
+    );
+
+    assert_eq!(result.status, Status::Unknown);
+    assert_eq!(result.effect, Effect::Unknown);
+    assert!(result.model_text().contains("browser_dialog"));
 }

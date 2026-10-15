@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use super::wire::{CallAnswer, Point, Readiness};
 use crate::browser::adapter::{
-    BrowserOutcome, ObservedTarget, PhysicalActionSubject, PhysicalField, PhysicalFile,
+    BrowserOutcome, FieldNow, ObservedTarget, PhysicalActionSubject, PhysicalField, PhysicalFile,
 };
 use crate::language::field_problem::FieldProblems;
 use EffectClass::{Effect, Prepare, Read};
@@ -344,8 +344,9 @@ pub fn prepare_fill(
     .settling()
 }
 
-/// Wait until every filled value has kept its value for the stable interval, or fail with
-/// `not_retained` at `limit_ms`.
+/// Wait until every filled value has kept its value for the stable interval and answer with what
+/// the page holds in the fields worth reading back, or fail with `not_retained` at `limit_ms`,
+/// naming the fields the page changed.
 #[must_use]
 pub fn verify_fill_retained(
     fields: &[PhysicalField],
@@ -870,6 +871,14 @@ pub enum FieldKind {
 pub struct FillPlan {
     /// One kind per field.
     pub field_kinds: Vec<FieldKind>,
+}
+
+/// The answer to verifying a fill whose values held.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+pub struct FillVerified {
+    /// What the page holds in the fields worth reading back, by position in the document's
+    /// field list.
+    pub fields: Vec<FieldNow>,
 }
 
 /// The answer to a submit.

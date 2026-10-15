@@ -117,6 +117,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                     browser.push(Ok(BrowserOutcome::Filled {
                         tab: tab(7, "https://example.com/"),
                         filled_count: 1,
+                        held: Vec::new(),
                         submitted: submit,
                         committed_urls: vec![],
                     }));
@@ -639,6 +640,7 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
             browser.push(Ok(BrowserOutcome::Filled {
                 tab: tab(7, "https://example.com/"),
                 filled_count: 1,
+                held: Vec::new(),
                 submitted: false,
                 committed_urls: vec![],
             }));

@@ -37,12 +37,18 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // The words a refused fill names a field problem with. The service decodes the same closed list.
   const FIELD_PROBLEMS = Object.freeze({
     optionMissing: "option_missing",
-    optionDisabled: "option_disabled"
+    optionDisabled: "option_disabled",
+    reverted: "reverted"
   });
   // The problems that make a fill refuse with the option code; any other refuses as not fillable.
   const OPTION_PROBLEMS = new Set([FIELD_PROBLEMS.optionMissing, FIELD_PROBLEMS.optionDisabled]);
   // How many options that contain the refused value a refusal lists when the select is long.
   const CONTAINING_MAX = 5;
+  // Input types whose retained value a fill reads back whether or not it matches what was given.
+  const ECHOED_INPUT_TYPES = new Set(["date", "time", "datetime-local", "month", "week", "number", "range", "color"]);
+  // What an input mask adds or moves without changing what was typed: white space, brackets, hyphens
+  // and slashes. A point or a comma stays significant, so 10.5 never matches 105.
+  const FORMATTING_CHARACTERS = /[\s()\-/]/g;
   // The largest serialized detail a refusal carries. Options go first when it is over.
   const PROBLEM_DETAIL_MAX = 4096;
   // How much of a rich editor's text is read to size it.
@@ -1029,12 +1035,72 @@ ${line}` : line;
   }
 
 
-  function fillValuesRetained(fields, allowCredentials = false) {
-    return fields.every((field) => {
+  // Whether the fill reads this control's value back: a choice or a typed control always, free
+  // text only when the page changed its formatting.
+  function echoedControl(element) {
+    if (element instanceof HTMLSelectElement) return true;
+    return element instanceof HTMLInputElement
+      && (element.type === "checkbox" || element.type === "radio" || ECHOED_INPUT_TYPES.has(element.type));
+  }
+
+  function foldedFormat(value) {
+    return String(value).replace(FORMATTING_CHARACTERS, "").toLowerCase();
+  }
+
+  // What the page holds in a filled control, in words that can be said. Undefined for a
+  // credential-class control, which never shows what it holds.
+  function heldNow(element) {
+    if (credentialClass(element)) return undefined;
+    if (element instanceof HTMLInputElement && (element.type === "checkbox" || element.type === "radio")) {
+      return element.checked ? "checked" : "unchecked";
+    }
+    if (element instanceof HTMLSelectElement) {
+      const chosen = Array.from(element.selectedOptions ?? []).map((option) => oneLine(option.text));
+      return shared.bounded(chosen.join(", "), VALUE_MAX);
+    }
+    return outwardValue(element)?.value;
+  }
+
+  // How each filled field stands against what was given: held as given, held in another format
+  // (text only), or changed by the page.
+  function fillStanding(fields, allowCredentials = false) {
+    return fields.map((field, index) => {
       const element = resolve(field.locator);
-      if (checkFillElement(element, field.value, allowCredentials).problem) return false;
-      return fillControlValue(element) === expectedFillValue(element, field.value);
+      if (checkFillElement(element, field.value, allowCredentials).problem) {
+        return { index, element, state: "changed", reacted: true };
+      }
+      const held = fillControlValue(element);
+      const expected = expectedFillValue(element, field.value);
+      if (held === expected) return { index, element, state: "held" };
+      const reformatted = !echoedControl(element) && typeof held === "string" && foldedFormat(held) === foldedFormat(expected);
+      return { index, element, state: reformatted ? "reformatted" : "changed" };
     });
+  }
+
+  // What a fill reports back once every value held: each choice and typed control with what it
+  // holds, and each text field the page reformatted. Free text that equals what was given is not
+  // echoed, and a credential-class control never is.
+  function fillEchoes(standing) {
+    const echoes = [];
+    for (const { index, element, state } of standing) {
+      if (credentialClass(element) || (state === "held" && !echoedControl(element))) continue;
+      const now = heldNow(element);
+      if (now === undefined) continue;
+      echoes.push(state === "reformatted" ? { field: index, now, tolerated: true } : { field: index, now });
+    }
+    return echoes;
+  }
+
+  // The failure of a fill whose values did not stay: every changed field and what it holds now.
+  // A field the page reacted to by refusing the value it set holds nothing worth quoting.
+  function revertedError(standing) {
+    const problems = standing
+      .filter(({ state }) => state === "changed")
+      .map(({ index, element, reacted }) => {
+        const now = reacted ? undefined : heldNow(element);
+        return now === undefined ? { field: index, problem: FIELD_PROBLEMS.reverted } : { field: index, problem: FIELD_PROBLEMS.reverted, now };
+      });
+    return new AssetError("not_retained", "target did not retain filled value", problems.length ? { problems } : undefined);
   }
 
   // A browser document can be ready while a client-rendered form is still hydrating from an
@@ -1077,7 +1143,8 @@ ${line}` : line;
 
   // The complete fill must be visible at the boundary the person sees: a later field can trigger
   // page code that rolls back or disables an earlier edit. Ok once every field has held its value
-  // for stable_ms; not_retained when limit_ms passes first.
+  // for stable_ms, with what the page now holds in the fields worth reading back; not_retained
+  // when limit_ms passes first, naming each field that was changed.
   async function verifyFillRetained(message, ctx) {
     const stableMs = message.stable_ms ?? FILL_RETAINED_STABLE_MS;
     const pollMs = message.poll_ms ?? FILL_RETAINED_POLL_MS;
@@ -1089,13 +1156,14 @@ ${line}` : line;
     while (true) {
       throwIfCancelled(ctx);
       const now = performance.now();
-      if (fillValuesRetained(message.fields, message.allow_credentials)) {
+      const standing = fillStanding(message.fields, message.allow_credentials);
+      if (standing.every(({ state }) => state !== "changed")) {
         if (stableSince === null) stableSince = now;
-        if (now - stableSince >= stableMs) return { retained: true };
+        if (now - stableSince >= stableMs) return { retained: true, fields: fillEchoes(standing) };
       } else {
         stableSince = null;
       }
-      if (now >= limit) throw new AssetError("not_retained", "target did not retain filled value");
+      if (now >= limit) throw revertedError(standing);
       await sleep(Math.max(1, Math.min(pollMs, limit - now)));
     }
   }

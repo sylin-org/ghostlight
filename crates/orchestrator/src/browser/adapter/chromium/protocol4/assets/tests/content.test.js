@@ -1422,7 +1422,7 @@ test("verify_fill_retained is ok once every field has held its value for stable_
   }
   await tick();
 
-  assert.deepEqual(answered, { ok: true, value: { retained: true } });
+  assert.deepEqual(answered, { ok: true, value: { retained: true, fields: [] } });
   const held = clock() - matched;
   assert.ok(held >= 250 && held < 350, `held for ${held} ms`);
 });
@@ -2885,4 +2885,113 @@ test("reading a select ends with a line naming every option and skips a credenti
   const secret = labelledSelect(harness, "Key kind", [{ value: "a", text: "Alpha" }, { value: "b", text: "Beta" }]);
   secret.setAttribute("name", "api_token");
   assert.equal((await read(await harness.locatorOf("Key kind"))).value.text, "[hidden]");
+});
+
+// ---- a fill says what the page now holds -----------------------------------------------------------
+
+const verifyFill = (fields, extra = {}) => ({ kind: "verify_fill_retained", fields, stable_ms: 10, poll_ms: 5, limit_ms: 60, ...extra });
+
+test("verify_fill_retained echoes what a choice or typed control holds and not plain text", async () => {
+  const harness = contentHarness();
+  const role = labelledSelect(harness, "Role", [
+    { value: "", text: "Choose one..." },
+    { value: "adm", text: "Administrator" }
+  ]);
+  const name = textInput(harness, { label: "Name", value: "Ada" });
+  const roleLocator = await harness.locatorOf("Role");
+  const nameLocator = await harness.locatorOf("Name");
+  role.value = "adm";
+
+  const reply = await harness.send(verifyFill([
+    { locator: nameLocator, value: "Ada" },
+    { locator: roleLocator, value: "Administrator" }
+  ]));
+
+  assert.deepEqual(reply, { ok: true, value: { retained: true, fields: [{ field: 1, now: "Administrator" }] } });
+  assert.equal(name.value, "Ada");
+});
+
+test("verify_fill_retained echoes a checkbox by its state and a date by its value", async () => {
+  const harness = contentHarness();
+  const box = textInput(harness, { label: "Agree" });
+  box.type = "checkbox";
+  box.checked = true;
+  const agree = await harness.locatorOf("Agree");
+  assert.deepEqual((await harness.send(verifyFill([{ locator: agree, value: "yes" }]))).value.fields, [{ field: 0, now: "checked" }]);
+
+  box.type = "date";
+  box.value = "2026-10-15";
+  assert.deepEqual((await harness.send(verifyFill([{ locator: agree, value: "2026-10-15" }]))).value.fields, [{ field: 0, now: "2026-10-15" }]);
+});
+
+test("a phone mask is held in another format, echoed and not a failure", async () => {
+  const harness = contentHarness();
+  textInput(harness, { label: "Phone", value: "(555) 123-4567" });
+  const locator = await harness.locatorOf("Phone");
+
+  const reply = await harness.send(verifyFill([{ locator, value: "5551234567" }]));
+
+  assert.deepEqual(reply, { ok: true, value: { retained: true, fields: [{ field: 0, now: "(555) 123-4567", tolerated: true }] } });
+});
+
+test("formatting tolerance folds case and ignores spaces, brackets, hyphens and slashes only", async () => {
+  const harness = contentHarness();
+  const input = textInput(harness, { label: "Code", value: "ab-12/34 cd" });
+  const locator = await harness.locatorOf("Code");
+
+  assert.equal((await harness.send(verifyFill([{ locator, value: "AB123 4CD" }]))).ok, true);
+
+  input.value = "1050";
+  const currency = await harness.send(verifyFill([{ locator, value: "10.50" }]));
+  assert.equal(currency.error.code, "not_retained", "a point is significant");
+  assert.deepEqual(currency.error.detail, { problems: [{ field: 0, problem: "reverted", now: "1050" }] });
+
+  input.value = "10,5";
+  assert.equal((await harness.send(verifyFill([{ locator, value: "105" }]))).error.code, "not_retained", "a comma is significant");
+});
+
+test("a select the page resets after its change is named with what it holds now", async () => {
+  const harness = contentHarness();
+  const role = labelledSelect(harness, "Role", [
+    { value: "", text: "Choose one..." },
+    { value: "adm", text: "Administrator" }
+  ]);
+  const plan = labelledSelect(harness, "Plan", [{ value: "free", text: "Free" }, { value: "pro", text: "Pro" }]);
+  const roleLocator = await harness.locatorOf("Role");
+  const planLocator = await harness.locatorOf("Plan");
+  role.value = "";
+  plan.value = "pro";
+
+  const reply = await harness.send(verifyFill([
+    { locator: planLocator, value: "Pro" },
+    { locator: roleLocator, value: "Administrator" }
+  ]));
+
+  assert.equal(reply.error.code, "not_retained");
+  assert.deepEqual(reply.error.detail, { problems: [{ field: 1, problem: "reverted", now: "Choose one..." }] });
+});
+
+test("a credential-class field is never echoed, and a reverted one carries no value", async () => {
+  const harness = contentHarness();
+  const secret = textInput(harness, { label: "Secret", value: "hunter2" });
+  secret.type = "password";
+  const locator = await harness.locatorOf("Secret");
+  const fields = [{ locator, value: "hunter2" }];
+
+  assert.deepEqual((await harness.send(verifyFill(fields, { allow_credentials: true }))).value, { retained: true, fields: [] });
+
+  secret.value = "other";
+  const reply = await harness.send(verifyFill(fields, { allow_credentials: true }));
+  assert.deepEqual(reply.error.detail, { problems: [{ field: 0, problem: "reverted" }] });
+});
+
+test("a field that is stable only part of the window still fails without naming a change", async () => {
+  const harness = contentHarness();
+  textInput(harness, { label: "Name", value: "Ada" });
+  const locator = await harness.locatorOf("Name");
+
+  const reply = await harness.send({ kind: "verify_fill_retained", fields: [{ locator, value: "Ada" }], stable_ms: 500, poll_ms: 5, limit_ms: 60 });
+
+  assert.equal(reply.error.code, "not_retained");
+  assert.equal("detail" in reply.error, false);
 });

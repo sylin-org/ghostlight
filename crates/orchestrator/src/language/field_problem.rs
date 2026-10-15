@@ -7,8 +7,11 @@
 //! layer decodes the detail by these types, so a word this build does not know makes the whole
 //! detail undecodable and the refusal falls back to the generic browser refusal.
 //!
-//! Page text (option text, group names) and the caller's given value only reach a sentence when
-//! the governed snapshot preserves target names. Facts carry the options, because the fill was
+//! A page can also change a field back after the fill set it. The same vocabulary names such a
+//! field, with what it holds now, and this module speaks the partly applied fill.
+//!
+//! Page text (option text, group names, a reverted value) and the caller's given value only reach
+//! a sentence when the governed snapshot preserves target names. Facts carry the options, because the fill was
 //! authorized to read the document, but never the given value. A credential-class control never
 //! lists options or echoes a value anywhere.
 
@@ -35,6 +38,12 @@ const HANDLE_REPLACEMENT: &str = "[handle]";
 const FILE_INPUT_TYPE: &str = "file";
 /// The `reason` fact of a fill that was refused before any edit.
 const REJECTED_REASON: &str = "field_value_rejected";
+/// The `reason` fact of a fill the page partly undid.
+const REVERTED_REASON: &str = "fields_reverted";
+/// What a summary says a reverted field holds when it holds nothing.
+const NO_VALUE: &str = "no value";
+/// The most reverted fields a summary describes one by one.
+const REVERTED_SHOWN_MAX: usize = 3;
 /// The most next steps a result carries.
 const NEXT_STEPS_MAX: usize = 2;
 
@@ -185,6 +194,9 @@ pub struct FieldProblem {
     /// The input type of the control, when its role does not imply it.
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     pub input_type: Option<String>,
+    /// What a reverted control holds now, when the page can say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
 }
 
 /// The detail of a page failure that refused a fill: every field it could not take.
@@ -246,6 +258,7 @@ impl RejectedField {
             problem.options.clear();
             problem.options_total = None;
             problem.containing.clear();
+            problem.now = None;
         }
         let subject = ActionSubject::with_role(control.role, &control.name, preserve_names);
         Self {
@@ -350,9 +363,33 @@ impl RejectedField {
         })
     }
 
+    /// What a reverted field holds, as sentence text: only when the snapshot lets values be named
+    /// and the control is not a credential.
+    fn reverted_value(&self) -> Option<String> {
+        if !self.named || self.credential {
+            return None;
+        }
+        let now = page_text(self.problem.now.as_deref()?, GIVEN_MAX_CHARS);
+        Some(if now.is_empty() {
+            NO_VALUE.to_owned()
+        } else {
+            format!("\"{now}\"")
+        })
+    }
+
+    /// The control that went back and where, inside a sentence: `the "Role" dropdown went back
+    /// to "Choose one..."`.
+    fn reverted_phrase(&self) -> String {
+        let control = self.inner_phrase();
+        match self.reverted_value() {
+            Some(value) => format!("{control} went back to {value}"),
+            None => format!("{control} went back"),
+        }
+    }
+
     /// The sentence for this field.
     fn clause(&self) -> String {
-        if self.credential {
+        if self.credential && self.problem.kind != FieldProblemKind::Reverted {
             return format!("{} is credential-class.", self.subject_phrase());
         }
         match self.problem.kind {
@@ -380,7 +417,7 @@ impl RejectedField {
             FieldProblemKind::Format => self.format_clause(),
             FieldProblemKind::WrongTool => self.wrong_tool_clause(),
             FieldProblemKind::Reverted => {
-                format!("{} was changed back by the page.", self.subject_phrase())
+                format!("{}.", capitalized(&self.reverted_phrase()))
             }
             FieldProblemKind::SubmitNotOwned => {
                 "The submit control does not belong to the form that holds these fields.".into()
@@ -502,7 +539,7 @@ impl RejectedField {
     /// The step that fixes this field.
     fn next_step(&self) -> String {
         let target = &self.target;
-        if self.credential {
+        if self.credential && self.problem.kind != FieldProblemKind::Reverted {
             return format!(
                 "Ask the user for the value, then repeat browser_fill_form with {target} set to it."
             );
@@ -548,7 +585,7 @@ impl RejectedField {
                 }
             }
             FieldProblemKind::Reverted => {
-                format!("Read {target} with browser_read to see what it holds now.")
+                format!("Read {target} with browser_read to see its current value.")
             }
             FieldProblemKind::SubmitNotOwned => {
                 "Repeat without submit_target, then click the submit control with browser_click."
@@ -591,6 +628,57 @@ pub fn rejected_summary(fields: &[RejectedField], total: usize, max_chars: usize
         summary.push_str(&format!(" {} more are in the facts.", fields.len() - shown));
     }
     summary
+}
+
+/// The summary of a fill the page partly undid: how many fields held their values and which ones
+/// went back after the page reacted. Fields past the first few are counted, and the facts carry
+/// all of them.
+#[must_use]
+pub fn reverted_summary(set: usize, fields: &[RejectedField], max_chars: usize) -> String {
+    let total = set + fields.len();
+    let head = format!("Set {set} of {}; ", counted(total, "field", "fields"));
+    let tail = " after the page reacted.";
+    let mut phrases: Vec<String> = fields
+        .iter()
+        .take(REVERTED_SHOWN_MAX)
+        .map(RejectedField::reverted_phrase)
+        .collect();
+    while phrases.len() > 1
+        && head.chars().count()
+            + tail.chars().count()
+            + phrases
+                .iter()
+                .map(|phrase| phrase.chars().count() + 5)
+                .sum::<usize>()
+            > max_chars
+    {
+        phrases.pop();
+    }
+    let hidden = fields.len() - phrases.len();
+    if hidden > 0 {
+        phrases.push(format!(
+            "{} went back too",
+            counted(hidden, "more field", "more fields")
+        ));
+    }
+    let last = phrases.pop().unwrap_or_default();
+    let list = if phrases.is_empty() {
+        last
+    } else {
+        format!("{} and {last}", phrases.join(", "))
+    };
+    format!("{head}{list}{tail}")
+}
+
+/// The facts of a fill the page partly undid: the reason, how many fields held, and one entry for
+/// each field that went back.
+#[must_use]
+pub fn reverted_facts(set: usize, fields: &[RejectedField]) -> Value {
+    json!({
+        "reason": REVERTED_REASON,
+        "set": set,
+        "reverted": fields.iter().map(RejectedField::fact).collect::<Vec<_>>(),
+    })
 }
 
 /// The steps for a refused fill: those of the first fields, at most two.
@@ -673,7 +761,7 @@ fn capitalized(word: &str) -> String {
 
 /// Page text as it may stand in a sentence: one line, bounded, quotes replaced, and anything
 /// shaped like a handle replaced by a marker so page text cannot pose as a reference.
-fn page_text(value: &str, max_chars: usize) -> String {
+pub(super) fn page_text(value: &str, max_chars: usize) -> String {
     one_line_bounded(value, max_chars)
         .unwrap_or_default()
         .split(' ')
@@ -1112,18 +1200,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reverted_field_and_a_foreign_submit_control_have_their_sentences() {
-        let reverted = one(
-            json!({"field": 0, "problem": "reverted"}),
-            TargetRole::Textbox,
-            "Email",
-            "a@b.c",
-            true,
-        );
-        assert_eq!(
-            reverted.summary(),
-            "Nothing was changed. The \"Email\" text field was changed back by the page."
-        );
+    fn a_foreign_submit_control_has_its_sentence() {
         let submit = one(
             json!({"field": 0, "problem": "submit_not_owned"}),
             TargetRole::Button,
@@ -1135,6 +1212,146 @@ mod tests {
             submit.summary(),
             "Nothing was changed. The submit control does not belong to the form that holds these fields."
         );
+    }
+
+    fn reverted(problem: Value, role: TargetRole, name: &str, preserve: bool) -> RejectedField {
+        let mut problem = problem;
+        problem["field"] = json!(0);
+        problem["problem"] = json!("reverted");
+        field(problem, role, name, "given", preserve)
+    }
+
+    #[test]
+    fn a_reverted_field_is_named_with_what_it_holds_now() {
+        let refusal = Refusal::FieldsReverted {
+            set: 2,
+            reverted: vec![reverted(
+                json!({"now": "Choose one..."}),
+                TargetRole::Combobox,
+                "Role",
+                true,
+            )],
+        };
+        assert_eq!(
+            refusal.summary(),
+            "Set 2 of 3 fields; the \"Role\" dropdown went back to \"Choose one...\" after the page reacted."
+        );
+        assert_eq!(
+            refusal.next_steps(),
+            [format!(
+                "Read {HANDLE} with browser_read to see its current value."
+            )]
+        );
+        let Refusal::FieldsReverted { set, reverted } = &refusal else {
+            panic!("a reverted fill");
+        };
+        assert_eq!(
+            reverted_facts(*set, reverted),
+            json!({"reason": "fields_reverted", "set": 2, "reverted": [
+                {"field": 0, "problem": "reverted", "now": "Choose one...", "target": HANDLE}
+            ]})
+        );
+    }
+
+    #[test]
+    fn several_reverted_fields_read_as_one_list_and_the_rest_are_counted() {
+        let many = |count: usize| Refusal::FieldsReverted {
+            set: 1,
+            reverted: (0..count)
+                .map(|index| {
+                    reverted(
+                        json!({"now": format!("Old {index}")}),
+                        TargetRole::Combobox,
+                        &format!("Field {index}"),
+                        true,
+                    )
+                })
+                .collect(),
+        };
+        assert_eq!(
+            many(2).summary(),
+            "Set 1 of 3 fields; the \"Field 0\" dropdown went back to \"Old 0\" and the \"Field 1\" dropdown went back to \"Old 1\" after the page reacted."
+        );
+        let five = many(5).summary();
+        assert!(five.starts_with("Set 1 of 6 fields; the \"Field 0\" dropdown"));
+        assert!(
+            five.ends_with("and 2 more fields went back too after the page reacted."),
+            "{five}"
+        );
+        assert_eq!(many(5).next_steps().len(), 2);
+    }
+
+    #[test]
+    fn a_reverted_field_names_nothing_when_names_are_not_preserved() {
+        let refusal = Refusal::FieldsReverted {
+            set: 0,
+            reverted: vec![reverted(
+                json!({"now": "PRIVATE_VALUE"}),
+                TargetRole::Combobox,
+                "PRIVATE_NAME",
+                false,
+            )],
+        };
+        let summary = refusal.summary();
+        assert_eq!(
+            summary,
+            "Set 0 of 1 field; a dropdown went back after the page reacted."
+        );
+        assert!(!refusal.audit().summary().contains("PRIVATE"));
+    }
+
+    #[test]
+    fn a_reverted_credential_never_carries_what_it_holds() {
+        let mut secret = control(TargetRole::Textbox, "Password", "PRIVATE_GIVEN");
+        secret.credential = true;
+        let field = RejectedField::new(
+            decode(json!({"field": 0, "problem": "reverted", "now": "PRIVATE_NOW"})),
+            secret,
+            true,
+        );
+        let fact = field.fact().to_string();
+        assert!(!fact.contains("PRIVATE"), "{fact}");
+        let refusal = Refusal::FieldsReverted {
+            set: 1,
+            reverted: vec![field],
+        };
+        assert_eq!(
+            refusal.summary(),
+            "Set 1 of 2 fields; the \"Password\" text field went back after the page reacted."
+        );
+        assert_eq!(
+            refusal.next_steps(),
+            [format!(
+                "Read {HANDLE} with browser_read to see its current value."
+            )]
+        );
+    }
+
+    #[test]
+    fn a_reverted_value_is_bounded_and_empty_reads_as_no_value() {
+        let long = "y".repeat(100);
+        let bounded = Refusal::FieldsReverted {
+            set: 0,
+            reverted: vec![reverted(
+                json!({ "now": long }),
+                TargetRole::Textbox,
+                "Note",
+                true,
+            )],
+        };
+        assert!(bounded
+            .summary()
+            .contains(&format!("\"{}...\"", "y".repeat(37))));
+        let empty = Refusal::FieldsReverted {
+            set: 0,
+            reverted: vec![reverted(
+                json!({"now": ""}),
+                TargetRole::Textbox,
+                "Note",
+                true,
+            )],
+        };
+        assert!(empty.summary().contains("went back to no value"));
     }
 
     #[test]

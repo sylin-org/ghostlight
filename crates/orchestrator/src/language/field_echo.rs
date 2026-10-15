@@ -1,0 +1,310 @@
+//! What a fill says the page now holds (ADR-0198 Decision 11).
+//!
+//! A fill reads back the fields worth reading: choice and typed controls, and text the page
+//! reformatted, such as a phone number a mask rewrote. This module owns how those readings join
+//! the sentence of a completed fill and its facts. A sentence carries a name and a value only
+//! when the governed snapshot preserves target names, bounded and on one line like every page
+//! string. The facts always carry the reading, because the fill was authorized to read the
+//! document. Audit never holds either: the audit projection of a fill is the sentence without
+//! its readings.
+
+use serde_json::{json, Value};
+
+use super::field_problem::page_text;
+use super::outcome::{counted, ActionSubject, TargetRole};
+
+/// The longest page value a sentence quotes.
+const NOW_MAX_CHARS: usize = 40;
+/// The longest page name a sentence quotes.
+const NAME_MAX_CHARS: usize = 60;
+/// The most characters the readings of one fill may take in its sentence.
+const READINGS_MAX_CHARS: usize = 260;
+/// What a sentence says a field holds when it holds nothing.
+const NO_VALUE: &str = "no value";
+
+/// One filled field and what the page holds in it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeldField {
+    target: String,
+    subject: ActionSubject,
+    now: String,
+    tolerated: bool,
+}
+
+impl HeldField {
+    /// Join the page's reading of a field with what the service knows about it. `preserve_names`
+    /// is the governed snapshot's `preserves_target_names()`. `tolerated` says the page holds the
+    /// given value in another format.
+    #[must_use]
+    pub fn new(
+        target: &str,
+        role: TargetRole,
+        name: &str,
+        now: &str,
+        tolerated: bool,
+        preserve_names: bool,
+    ) -> Self {
+        Self {
+            target: target.to_owned(),
+            subject: ActionSubject::with_role(role, name, preserve_names),
+            now: now.to_owned(),
+            tolerated,
+        }
+    }
+
+    /// The fact that describes this field: its handle and what it holds.
+    #[must_use]
+    pub fn fact(&self) -> Value {
+        json!({"target": self.target, "now": self.now})
+    }
+
+    /// The field's name as a sentence may say it, when the snapshot lets it be named.
+    fn name(&self) -> Option<String> {
+        self.subject
+            .label()
+            .map(|label| page_text(label, NAME_MAX_CHARS))
+            .filter(|label| !label.is_empty())
+    }
+
+    /// The value as a sentence may say it.
+    fn value(&self) -> String {
+        let value = page_text(&self.now, NOW_MAX_CHARS);
+        if value.is_empty() {
+            NO_VALUE.to_owned()
+        } else {
+            value
+        }
+    }
+
+    /// How a choice or typed control reads: `Role = Administrator`.
+    fn assignment(&self) -> Option<String> {
+        if self.tolerated {
+            return None;
+        }
+        Some(format!("{} = {}", self.name()?, self.value()))
+    }
+
+    /// How a reformatted text field reads: `Phone now reads "(555) 123-4567"`.
+    fn reading(&self) -> Option<String> {
+        if !self.tolerated {
+            return None;
+        }
+        Some(format!("{} now reads \"{}\"", self.name()?, self.value()))
+    }
+}
+
+/// The part of a completed fill's sentence that says what the page holds: the choice and typed
+/// readings after a colon, and a sentence for each reformatted text field. Empty when nothing is
+/// named. Readings the room does not hold are counted, and the facts carry all of them.
+#[must_use]
+pub fn readings(held: &[HeldField]) -> Readings {
+    let mut room = READINGS_MAX_CHARS;
+    let mut assignments = Vec::new();
+    let mut sentences = Vec::new();
+    let mut left_out = 0;
+    for field in held {
+        let (text, into) = match (field.assignment(), field.reading()) {
+            (Some(text), _) => (text, &mut assignments),
+            (None, Some(text)) => (text, &mut sentences),
+            (None, None) => continue,
+        };
+        let cost = text.chars().count() + 2;
+        if cost > room {
+            left_out += 1;
+            continue;
+        }
+        room -= cost;
+        into.push(text);
+    }
+    if left_out > 0 {
+        assignments.push(format!(
+            "{} more in the facts",
+            counted(left_out, "reading", "readings")
+        ));
+    }
+    Readings {
+        assignments: assignments.join(", "),
+        sentences,
+    }
+}
+
+/// The readings of a fill, ready to join its sentence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Readings {
+    assignments: String,
+    sentences: Vec<String>,
+}
+
+impl Readings {
+    /// The readings after the colon that follows the fill's first clause, or none.
+    #[must_use]
+    pub fn after_clause(&self) -> Option<&str> {
+        (!self.assignments.is_empty()).then_some(self.assignments.as_str())
+    }
+
+    /// The sentences that follow the fill's first sentence, each ending in a full stop.
+    #[must_use]
+    pub fn trailing(&self) -> String {
+        self.sentences
+            .iter()
+            .map(|sentence| format!(" {sentence}."))
+            .collect()
+    }
+}
+
+/// The facts of a completed fill: one entry for each field the page reported, or none.
+#[must_use]
+pub fn facts(held: &[HeldField]) -> Option<Value> {
+    (!held.is_empty()).then(|| Value::Array(held.iter().map(HeldField::fact).collect()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::language::outcome::Outcome;
+
+    const HANDLE: &str = "target_7k2nb5xe";
+
+    fn field(
+        role: TargetRole,
+        name: &str,
+        now: &str,
+        tolerated: bool,
+        preserve: bool,
+    ) -> HeldField {
+        HeldField::new(HANDLE, role, name, now, tolerated, preserve)
+    }
+
+    #[test]
+    fn a_choice_reads_as_an_assignment_and_a_reformatted_text_as_a_sentence() {
+        let held = [
+            field(TargetRole::Combobox, "Role", "Administrator", false, true),
+            field(TargetRole::Textbox, "Phone", "(555) 123-4567", true, true),
+        ];
+        let readings = readings(&held);
+        assert_eq!(readings.after_clause(), Some("Role = Administrator"));
+        assert_eq!(readings.trailing(), " Phone now reads \"(555) 123-4567\".");
+    }
+
+    #[test]
+    fn without_names_nothing_is_said_but_the_facts_still_hold_the_reading() {
+        let held = [field(
+            TargetRole::Combobox,
+            "Role",
+            "Administrator",
+            false,
+            false,
+        )];
+        let readings = readings(&held);
+        assert_eq!(readings.after_clause(), None);
+        assert_eq!(readings.trailing(), "");
+        assert_eq!(
+            facts(&held),
+            Some(json!([{"target": HANDLE, "now": "Administrator"}]))
+        );
+    }
+
+    #[test]
+    fn a_value_is_bounded_on_one_line_and_never_poses_as_a_handle() {
+        let long = "x".repeat(80);
+        let held = [
+            field(
+                TargetRole::Combobox,
+                "Note",
+                &format!("a\n\"b\" {long}"),
+                false,
+                true,
+            ),
+            field(TargetRole::Combobox, "Ref", "target_abcdefgh", false, true),
+            field(TargetRole::Combobox, "Empty", "", false, true),
+        ];
+        let said = readings(&held).assignments;
+        assert!(said.contains("Note = a 'b' xxx"));
+        assert!(said.contains("..."));
+        assert!(said.contains("Ref = [handle]"));
+        assert!(said.contains("Empty = no value"));
+        assert!(!said.contains('\n'));
+    }
+
+    #[test]
+    fn readings_the_room_does_not_hold_are_counted() {
+        let held: Vec<HeldField> = (0..12)
+            .map(|index| {
+                field(
+                    TargetRole::Combobox,
+                    &format!("Field number {index}"),
+                    &"v".repeat(30),
+                    false,
+                    true,
+                )
+            })
+            .collect();
+        let said = readings(&held).assignments;
+        assert!(said.chars().count() < 340);
+        assert!(said.ends_with("more in the facts"), "{said}");
+        assert_eq!(
+            facts(&held).and_then(|facts| facts.as_array().map(Vec::len)),
+            Some(12)
+        );
+    }
+
+    fn filled(preserve: bool, submitted: bool) -> Outcome {
+        Outcome::FormFilled {
+            fields: 3,
+            submitted,
+            host: Some("example.com".into()),
+            held: vec![
+                field(
+                    TargetRole::Combobox,
+                    "Role",
+                    "Administrator",
+                    false,
+                    preserve,
+                ),
+                field(
+                    TargetRole::Combobox,
+                    "Shipping method",
+                    "Express",
+                    false,
+                    preserve,
+                ),
+                field(
+                    TargetRole::Textbox,
+                    "Phone",
+                    "(555) 123-4567",
+                    true,
+                    preserve,
+                ),
+            ],
+        }
+    }
+
+    #[test]
+    fn a_completed_fill_says_what_the_page_holds_only_when_names_are_preserved() {
+        assert_eq!(
+            filled(true, false).summary(),
+            "Filled 3 fields on example.com: Role = Administrator, Shipping method = Express. Phone now reads \"(555) 123-4567\"."
+        );
+        assert_eq!(
+            filled(true, true).summary(),
+            "Filled 3 fields on example.com and submitted the form: Role = Administrator, Shipping method = Express. Phone now reads \"(555) 123-4567\"."
+        );
+        assert_eq!(
+            filled(false, false).summary(),
+            "Filled 3 fields on example.com."
+        );
+    }
+
+    #[test]
+    fn history_keeps_the_fill_without_what_the_page_held() {
+        let audit = filled(true, false).audit();
+        assert_eq!(audit.summary(), "Filled 3 fields on example.com.");
+        assert_eq!(filled(true, false).observed().count, Some(3));
+    }
+
+    #[test]
+    fn a_fill_that_reported_nothing_has_no_facts() {
+        assert_eq!(facts(&[]), None);
+        assert_eq!(readings(&[]).after_clause(), None);
+    }
+}

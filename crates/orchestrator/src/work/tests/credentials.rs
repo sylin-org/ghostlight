@@ -65,6 +65,7 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 BrowserOutcome::Filled {
                     tab: tab(7, "https://example.com/"),
                     filled_count: 1,
+                    held: Vec::new(),
                     submitted: false,
                     committed_urls: vec![],
                 }

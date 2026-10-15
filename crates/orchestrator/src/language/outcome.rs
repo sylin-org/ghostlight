@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
 use crate::workspace::WorkspaceError;
 
@@ -401,6 +402,8 @@ pub enum Outcome {
         fields: usize,
         submitted: bool,
         host: Option<String>,
+        /// What the page holds in the fields worth reading back. Audit never holds it.
+        held: Vec<HeldField>,
     },
     /// Ordinary text was typed through browser input events.
     TextTyped {
@@ -656,22 +659,27 @@ impl Outcome {
             } => format!("Hovered a point on {}.", place(host, "the page")),
             Self::FormFilled {
                 fields,
-                submitted: false,
+                submitted,
                 host,
-            } => format!(
-                "Filled {} on {}.",
-                counted(*fields, "field", "fields"),
-                place(host, "the page")
-            ),
-            Self::FormFilled {
-                fields,
-                submitted: true,
-                host,
-            } => format!(
-                "Filled {} on {} and submitted the form.",
-                counted(*fields, "field", "fields"),
-                place(host, "the page")
-            ),
+                held,
+            } => {
+                let readings = field_echo::readings(held);
+                let mut summary = format!(
+                    "Filled {} on {}",
+                    counted(*fields, "field", "fields"),
+                    place(host, "the page")
+                );
+                if *submitted {
+                    summary.push_str(" and submitted the form");
+                }
+                if let Some(after) = readings.after_clause() {
+                    summary.push_str(": ");
+                    summary.push_str(after);
+                }
+                summary.push('.');
+                summary.push_str(&readings.trailing());
+                summary
+            }
             Self::TextTyped {
                 host,
                 subject,
@@ -1220,6 +1228,13 @@ pub enum Refusal {
     },
     /// The browser answered the job with its own bounded refusal.
     BrowserPrimitive { detail: String },
+    /// A form fill was applied, but the page changed some fields back before the values settled.
+    FieldsReverted {
+        /// How many of the call's fields held their values.
+        set: usize,
+        /// Every field the page changed, with what it holds now.
+        reverted: Vec<RejectedField>,
+    },
     /// A form fill was refused before any edit because fields cannot take their values.
     FieldValuesRejected {
         /// Every field the page refused, with what would succeed.
@@ -1313,6 +1328,9 @@ impl Refusal {
             }
             Self::FieldValuesRejected { fields, total } => {
                 return field_problem::rejected_summary(fields, *total, SUMMARY_MAX_CHARS);
+            }
+            Self::FieldsReverted { set, reverted } => {
+                return field_problem::reverted_summary(*set, reverted, SUMMARY_MAX_CHARS);
             }
             Self::DocumentUnavailable => "Document access could not be verified.",
             Self::DeadlineExpired {
@@ -1456,6 +1474,7 @@ impl Refusal {
                     .into(),
             ],
             Self::FieldValuesRejected { fields, .. } => field_problem::rejected_next_steps(fields),
+            Self::FieldsReverted { reverted, .. } => field_problem::rejected_next_steps(reverted),
             Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
             // Only advice the decoder will take: timeout_ms never grows past its maximum, and an
             // edge-supplied deadline ignores it. After dispatch the first job is learning whether
@@ -2191,6 +2210,7 @@ mod tests {
                     fields: 1,
                     submitted: false,
                     host: Some("example.com".into()),
+                    held: Vec::new(),
                 },
                 "Filled 1 field on example.com.",
             ),
@@ -2199,6 +2219,7 @@ mod tests {
                     fields: 3,
                     submitted: true,
                     host: Some("example.com".into()),
+                    held: Vec::new(),
                 },
                 "Filled 3 fields on example.com and submitted the form.",
             ),
@@ -2553,6 +2574,7 @@ Changes are \"unsaved\".".into()),
                     fields: 3,
                     submitted: false,
                     host: Some("example.com".into()),
+                    held: Vec::new(),
                 },
                 3,
             ),

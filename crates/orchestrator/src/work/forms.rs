@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use crate::browser::adapter::{
-    BrowserCommand, BrowserOutcome, ObservedTarget, PhysicalActionSubject, PhysicalField,
+    BrowserCommand, BrowserOutcome, FieldNow, ObservedTarget, PhysicalActionSubject, PhysicalField,
 };
 use crate::browser::BrowserError;
 use crate::governance::Decision;
@@ -12,12 +12,14 @@ use serde_json::{json, Value};
 use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet};
 use crate::language::{
+    field_echo::{self, HeldField},
     field_problem::{self, ControlRef, FieldProblem, RejectedControl, RejectedField},
-    outcome::{Outcome, Refusal, TargetRole},
+    outcome::{Observed, Outcome, Refusal, TargetRole},
     FillForm, PressKey, RunScript, TypeText, UploadFiles, Wait,
 };
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
+use super::result::Readiness;
 use super::{
     action_subject, adapter_budget_ms, bounded, load_physical_files, named_key, observed_host,
     readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, ResolvedLocation,
@@ -184,14 +186,49 @@ impl ApplicationExecutor {
             Ok(BrowserOutcome::Filled {
                 tab,
                 filled_count,
+                held,
                 submitted,
                 committed_urls,
-            }) => self.finish_with_expectation(context, lease, decision, requirements, &selected, &tab, &committed_urls, Outcome::FormFilled { fields: filled_count, submitted, host: observed_host(&tab.url) }, json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted}), value.expect.as_ref()),
+            }) => {
+                let Some(held) = held_fields(context, &held, &given, &described) else {
+                    return self.protocol_failure(context, decision, Some(selected.physical_id));
+                };
+                let mut facts = json!({"tab":selected.handle.as_str(),"filled_count":filled_count,"submitted":submitted});
+                if let Some(fields) = field_echo::facts(&held) {
+                    facts["fields"] = fields;
+                }
+                self.finish_with_expectation(
+                    context,
+                    lease,
+                    decision,
+                    requirements,
+                    &selected,
+                    &tab,
+                    &committed_urls,
+                    Outcome::FormFilled {
+                        fields: filled_count,
+                        submitted,
+                        host: observed_host(&tab.url),
+                        held,
+                    },
+                    facts,
+                    value.expect.as_ref(),
+                )
+            }
             Ok(_) => self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(BrowserError::FieldsRejected { problems }) => self.fields_rejected(
                 context,
                 decision,
                 selected.physical_id,
+                problems,
+                &given,
+                &described,
+            ),
+            Err(BrowserError::FieldsReverted { set, problems }) => self.fields_reverted(
+                context,
+                decision,
+                selected.physical_id,
+                set,
                 problems,
                 &given,
                 &described,
@@ -216,27 +253,9 @@ impl ApplicationExecutor {
         given: &[(String, String)],
         described: &[ObservedTarget],
     ) -> Terminal {
-        let preserve = context.snapshot.preserves_target_names();
-        let mut rejected = Vec::with_capacity(problems.len());
-        for problem in problems {
-            let (Some((target, value)), Some(observed)) =
-                (given.get(problem.field), described.get(problem.field))
-            else {
-                return self.protocol_failure(context, decision, Some(physical_id));
-            };
-            let follows_choice = described[..problem.field]
-                .iter()
-                .any(|earlier| is_choice(TargetRole::classify(&earlier.role)));
-            let control = RejectedControl {
-                target: target.clone(),
-                role: TargetRole::classify(&observed.role),
-                name: observed.name.clone(),
-                given: value.clone(),
-                credential: observed.credential_class,
-                follows_choice,
-            };
-            rejected.push(RejectedField::new(problem, control, preserve));
-        }
+        let Some(rejected) = rejected_fields(context, problems, given, described) else {
+            return self.protocol_failure(context, decision, Some(physical_id));
+        };
         let facts = field_problem::rejected_facts(&rejected);
         self.failed(
             context,
@@ -248,6 +267,44 @@ impl ApplicationExecutor {
             },
             facts,
         )
+    }
+
+    /// The result of a fill the page partly undid: some fields hold their values and the named
+    /// ones went back after the page reacted. The effect is partial and repeating is not safe,
+    /// because the fields that held would be filled again.
+    #[allow(clippy::too_many_arguments)]
+    fn fields_reverted(
+        &self,
+        context: &InvocationContext<'_>,
+        decision: Decision,
+        physical_id: u64,
+        set: usize,
+        problems: Vec<FieldProblem>,
+        given: &[(String, String)],
+        described: &[ObservedTarget],
+    ) -> Terminal {
+        let Some(reverted) = rejected_fields(context, problems, given, described) else {
+            return self.protocol_failure(context, decision, Some(physical_id));
+        };
+        let facts = field_problem::reverted_facts(set, &reverted);
+        let refusal = Refusal::FieldsReverted { set, reverted };
+        let summary = refusal.summary();
+        Terminal {
+            result: InvocationResult::new(
+                context.invocation,
+                Status::Failed,
+                Effect::Partial,
+                Readiness::Unknown,
+                false,
+                &summary,
+                facts,
+                refusal.next_steps(),
+            ),
+            decision,
+            physical_id: Some(physical_id),
+            observed: Observed::default(),
+            audit: refusal.audit(),
+        }
     }
 
     pub(super) fn perform_type_text(
@@ -1181,6 +1238,64 @@ fn credential_control(
 }
 
 /// Whether answering this control can change the options another control offers.
+/// Pair each problem the page reported with the field it names: that field's handle, given
+/// value, and last observed role and name. A position the call does not have is a page that
+/// disagrees with the contract, and gives none.
+fn rejected_fields(
+    context: &InvocationContext<'_>,
+    problems: Vec<FieldProblem>,
+    given: &[(String, String)],
+    described: &[ObservedTarget],
+) -> Option<Vec<RejectedField>> {
+    let preserve = context.snapshot.preserves_target_names();
+    let mut rejected = Vec::with_capacity(problems.len());
+    for problem in problems {
+        let ((target, value), observed) =
+            (given.get(problem.field)?, described.get(problem.field)?);
+        let follows_choice = described[..problem.field]
+            .iter()
+            .any(|earlier| is_choice(TargetRole::classify(&earlier.role)));
+        let control = RejectedControl {
+            target: target.clone(),
+            role: TargetRole::classify(&observed.role),
+            name: observed.name.clone(),
+            given: value.clone(),
+            credential: observed.credential_class,
+            follows_choice,
+        };
+        rejected.push(RejectedField::new(problem, control, preserve));
+    }
+    Some(rejected)
+}
+
+/// Pair each field the page read back with the handle and the last observed role and name of
+/// the field it belongs to. A credential-class field is never read back, and a position the call
+/// does not have is a page that disagrees with the contract, and gives none.
+fn held_fields(
+    context: &InvocationContext<'_>,
+    held: &[FieldNow],
+    given: &[(String, String)],
+    described: &[ObservedTarget],
+) -> Option<Vec<HeldField>> {
+    let preserve = context.snapshot.preserves_target_names();
+    let mut fields = Vec::with_capacity(held.len());
+    for reading in held {
+        let ((target, _), observed) = (given.get(reading.field)?, described.get(reading.field)?);
+        if observed.credential_class {
+            continue;
+        }
+        fields.push(HeldField::new(
+            target,
+            TargetRole::classify(&observed.role),
+            &observed.name,
+            &reading.now,
+            reading.tolerated,
+            preserve,
+        ));
+    }
+    Some(fields)
+}
+
 const fn is_choice(role: TargetRole) -> bool {
     matches!(
         role,

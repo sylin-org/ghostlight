@@ -30,6 +30,7 @@ use crate::language::catalog;
 use crate::language::composition::{
     CompositionProgress, EffectCounts, StepCause, StepCounts, StepIssue,
 };
+use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
@@ -397,6 +398,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::DeadlineExpired { .. } => "DeadlineExpired",
         Refusal::BrowserPrimitive { .. } => "BrowserPrimitive",
         Refusal::FieldValuesRejected { .. } => "FieldValuesRejected",
+        Refusal::FieldsReverted { .. } => "FieldsReverted",
         Refusal::DocumentUnavailable => "DocumentUnavailable",
         Refusal::CancelledBeforeDispatch => "CancelledBeforeDispatch",
         Refusal::BrowserUnavailable { .. } => "BrowserUnavailable",
@@ -437,6 +439,7 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "DeadlineExpired",
     "BrowserPrimitive",
     "FieldValuesRejected",
+    "FieldsReverted",
     "DocumentUnavailable",
     "CancelledBeforeDispatch",
     "BrowserUnavailable",
@@ -764,6 +767,14 @@ fn outcome_samples() -> Vec<Outcome> {
             fields: 2,
             submitted: false,
             host: host(),
+            held: vec![HeldField::new(
+                "target_7k2nb5xe",
+                TargetRole::Combobox,
+                "Role",
+                "Administrator",
+                false,
+                true,
+            )],
         },
         Outcome::TextTyped {
             host: host(),
@@ -903,6 +914,7 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::RecordingExportFailed,
     ];
     samples.extend(rejected_fill_samples());
+    samples.extend(reverted_fill_samples());
     for before_dispatch in [false, true] {
         for timeout_adjustable in [false, true] {
             samples.push(Refusal::DeadlineExpired {
@@ -936,6 +948,34 @@ fn refusal_samples() -> Vec<Refusal> {
         });
     }
     samples
+}
+
+/// A fill the page partly undid, with a value the page can quote and with one it cannot.
+fn reverted_fill_samples() -> Vec<Refusal> {
+    use serde_json::json;
+    [(json!({"now": "Choose one..."}), false), (json!({}), true)]
+        .into_iter()
+        .map(|(mut problem, credential)| {
+            problem["field"] = json!(0);
+            problem["problem"] = json!("reverted");
+            let decoded = FieldProblems::decode(&json!({"problems": [problem]}))
+                .expect("a sample problem decodes")
+                .problems
+                .remove(0);
+            let control = RejectedControl {
+                target: "target_7k2nb5xe".into(),
+                role: TargetRole::Combobox,
+                name: "Role".into(),
+                given: "Engineer".into(),
+                credential,
+                follows_choice: false,
+            };
+            Refusal::FieldsReverted {
+                set: 2,
+                reverted: vec![RejectedField::new(decoded, control, true)],
+            }
+        })
+        .collect()
 }
 
 /// One refused fill for each way a field can be refused, so every step it can author is read.
@@ -1018,12 +1058,6 @@ fn rejected_fill_samples() -> Vec<Refusal> {
         (
             json!({"problem": "wrong_tool"}),
             TargetRole::Combobox,
-            false,
-            false,
-        ),
-        (
-            json!({"problem": "reverted"}),
-            TargetRole::Textbox,
             false,
             false,
         ),
