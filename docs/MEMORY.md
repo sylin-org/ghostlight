@@ -149,6 +149,12 @@ the owner wants, and what this project learned the hard way.
   desktop shell, install journey) while 1.x users stayed exposed to known hazards, and the owner
   had asked for lean (2026-10-14). Before adding work to a release in flight, ask whether it must
   freeze with it; if not, it waits.
+- **Show working software, and ask design questions as questions.** Every milestone ends with
+  something the owner can see or try, live, before the next one starts; summaries do not
+  replace it. Reuse what exists (adapting it) before building anew, and never build throwaways.
+  A choice that changes how something works (a transport, a seam, a security trade) goes to the
+  owner as an explicit choice with its trade-off, never folded into a description (owner,
+  2026-10-15, after a shell spike showed test content instead of the existing workbench).
 - **Delight is the purpose; dependable boundaries support it.** Ghostlight makes integrated
   tooling useful and natural for end users. Governance lets individuals and organizations choose
   reliable boundaries that work consistently whenever work passes through Ghostlight. Ordinary
