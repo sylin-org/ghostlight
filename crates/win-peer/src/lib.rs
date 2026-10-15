@@ -12,11 +12,14 @@
 //! The crate holds the executable paths of a process's ancestors in `process` (from which the
 //! installer learns whether it runs inside an app's container), whether the process token is
 //! elevated in `elevation` (the service refuses to run elevated), owner-private runtime-file
-//! creation in `private_file` (ADR-0160), and the shell's item identifier list of a file in
-//! `item_id_list` (named by the installer's Start-menu shortcut). Starting the service, process
-//! identity and the session listener live in the relay's audited `os` module (ADR-0199 Decisions
+//! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
+//! `item_id_list` (named by the installer's Start-menu shortcut), and joining the parent
+//! process's console in `console`. Starting the service, process identity and the session
+//! listener live in the relay's audited `os` module (ADR-0199 Decisions
 //! 3 and 14). Non-Windows targets compile the portable surface returning an empty answer.
 
+#[cfg(target_os = "windows")]
+mod console;
 #[cfg(target_os = "windows")]
 mod elevation;
 #[cfg(target_os = "windows")]
@@ -63,4 +66,15 @@ pub fn is_elevated() -> std::io::Result<bool> {
 #[cfg(target_os = "windows")]
 pub fn item_id_list(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
     item_id_list::of_file(path)
+}
+
+/// Attach this process to the console of the process that started it, so a typed command run
+/// from a terminal writes there and receives Ctrl-C itself. A failure is ignored: the parent has
+/// no console, or this process already has one. Does nothing off Windows.
+///
+/// ADR-0199 Decision 4: the service image is a GUI-subsystem program and so owns no console.
+/// The desktop shell track deletes this call when the image becomes console subsystem.
+pub fn attach_parent_console() {
+    #[cfg(target_os = "windows")]
+    console::attach_parent();
 }

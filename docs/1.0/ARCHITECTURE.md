@@ -39,7 +39,9 @@ local human
   exec. On Windows the edge is a console-subsystem process that runs the image as a child on its
   console, keeps running through Ctrl-C and Ctrl-Break and returns the child's exit code; its
   application manifest sets `consoleAllocationPolicy` to `detached`, so a double-click shows no
-  console on Windows 11 24H2 and later.
+  console on Windows 11 24H2 and later. The release service image is a GUI-subsystem program, so
+  a typed command attaches to its parent's console first and writes there and receives Ctrl-C
+  itself; `serve`, the bare launch and `open` never attach.
 - `extension` implements the full Chromium physical mechanism set, page-runtime installation,
   browser topology, content-free feedback, and the local toolbar/options experience.
 

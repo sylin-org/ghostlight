@@ -18,6 +18,8 @@ use ghostlight_service::install::layout::Layout;
 
 fn main() -> anyhow::Result<()> {
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    #[cfg(all(not(debug_assertions), target_os = "windows"))]
+    ghostlight_service::cli::console::attach_for_typed_command(&arguments);
     let _session = listen_unless_serving(&arguments);
     let current_exe = std::env::current_exe()?;
     match start(
