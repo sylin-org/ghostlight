@@ -126,18 +126,27 @@ live tree plus `docs/1.0/ARCHITECTURE.md` for current placement.
   retrieval, and generic invocation/result rendering only.
 - The browser bridge owns typed framing, correlation, connection lifecycle, and relay only.
 - The extension is policy-free. Chrome APIs, page-local DOM access, browser-specific recovery, and
-  visual rendering terminate there without making workspace-authority or journey decisions.
+  visual rendering terminate there without making workspace-authority or journey decisions. Thin
+  means nothing bleeds through the extension, not that it does little: a capability that is
+  physically the browser's belongs there, because only that layer has it (ADR-0109 corrects
+  ADR-0053).
 - Relays and adapters must remain stable as service capabilities evolve. Prefer negotiated closed
   mechanisms and orchestrator-owned semantics over feature-specific fringe changes.
 - All model-requested work crosses one executor, one workspace aggregate, one governance facade,
   one browser port, and one completion path.
-- Sessions, operations, browser instances, and harness connections are plural domain collections.
-  Do not build singleton assumptions into new contracts.
-- Use a small closed domain-event vocabulary. Do not add a generic event bus, actors, workflows,
-  CQRS, event sourcing, reflection registries, or microservices.
+- Sessions, workspaces, operations, browser instances, browser families, and harness connections
+  are plural domain collections. Do not build singleton assumptions into new contracts; a single
+  adapter slot once made a duplicate connection silently unrecoverable (ADR-0114). Bounded
+  per-owner bindings, such as one workspace per connection (ADR-0196) or one browser per
+  workspace, are fine.
+- Keep the design simple: add architecture only when a concrete invariant needs it. A logical
+  boundary does not by itself earn a process, crate, or service. Keep the small closed DomainEvent
+  vocabulary, and add no generic event bus, actors, workflows, CQRS, event sourcing, reflection
+  registries, microservices, or extra process or crate (ADR-0096, ADR-0176,
+  docs/1.0/INTENT.md). Domain registries such as the workspace and tool registries are not what
+  this rules out.
 - Never phone home. No telemetry, activation service, automatic update ping, or hidden network
   dependency is allowed.
-- Keep the design simple. Add architecture only when a concrete invariant requires it.
 - Keep release work equally simple. A gate must prevent a demonstrated failure, prove a user
   promise, or make recovery safer. Optional directories, repeated restamping, and one giant release
   conductor are not candidate gates.
