@@ -270,7 +270,7 @@ fn inspect_user_path(
         (
             CommandPathState::PrivateView,
             format!(
-                "{} is not on your PATH. Windows keeps a change made from {} private to that app.                  To add it, run this from a regular terminal: {} {FIXING_SUBCOMMAND}",
+                "{} is not on your PATH. Windows keeps a change made from {} private to that app. To add it, run this from a regular terminal: {} {FIXING_SUBCOMMAND}",
                 directory.display(),
                 container.app,
                 executable.display()
@@ -915,6 +915,7 @@ mod tests {
             let report = inspect(&context).unwrap();
             assert_eq!(report.state, CommandPathState::PrivateView);
             assert!(report.detail.contains("Claude"));
+            assert!(!report.detail.contains("  "));
             let installed = apply_install(&context).unwrap();
             assert!(!installed.changed);
             assert_eq!(installed.report.state, CommandPathState::PrivateView);
