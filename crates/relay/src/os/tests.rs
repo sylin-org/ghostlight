@@ -287,3 +287,26 @@ mod windows_only {
         assert!(!process_is_alive(process));
     }
 }
+
+mod app_user_model_id {
+    use std::io::ErrorKind;
+
+    use crate::os::set_app_user_model_id;
+
+    #[test]
+    fn an_empty_id_is_invalid_input() {
+        let error = set_app_user_model_id("").expect_err("empty id");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn an_id_with_an_interior_nul_is_invalid_input() {
+        let error = set_app_user_model_id("Sylin\0Ghostlight").expect_err("NUL in id");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn a_valid_id_is_accepted() {
+        set_app_user_model_id("Sylin.Ghostlight").expect("set the test process id");
+    }
+}

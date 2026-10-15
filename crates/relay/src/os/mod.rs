@@ -17,6 +17,7 @@
 //! pipe behind `crate::endpoint`; [`current_uid`] and [`peer_uid`] (Linux only) are its user
 //! check. [`session`] is the listener every Ghostlight process registers and the process-wide
 //! state that says the session is ending; [`spawn_detached`] refuses while it holds.
+//! [`set_app_user_model_id`] names the process's AppUserModelID for the desktop shell's window.
 //!
 //! The relay supports Windows and Linux. Each has its own files here.
 #![expect(
@@ -25,6 +26,7 @@
               process identity and named pipes, Unix peer credentials, and the session-end               window and signal handlers"
 )]
 
+mod app_id;
 pub mod session;
 
 #[cfg(target_os = "linux")]
@@ -46,6 +48,8 @@ pub use pipe::{
 pub use windows::{
     parent_process, process_identity, process_is_alive, spawn_detached, ProcessIdentity,
 };
+
+pub use app_id::set_app_user_model_id;
 
 #[cfg(test)]
 mod tests;
