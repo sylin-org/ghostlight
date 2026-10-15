@@ -46,7 +46,7 @@ through a manifest change. The network guard passes `--locked` to `cargo tree` o
 
 ## RESUME HERE
 
-Next: shell-spike-5.
+Next: shell-spike-6.
 
 `crates/desktop/Cargo.toml` declares every dependency the lane uses and may not change after
 shell-spike-1. A slice that needs another crate records a blocker instead.
@@ -59,6 +59,7 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
 | shell-spike-2 | `scheme.rs` and `BundleSet`. The private `ghostlight` scheme (`https://ghostlight.localhost` on Windows, `ghostlight://localhost` elsewhere, both forms parsed everywhere by `request_path`), the fixed `CONTENT_POLICY` (`default-src 'none'`), `respond` (GET and HEAD only, 404, 405, security headers, the policy repeated as a meta element in every HTML page, 500 for HTML with no head), `allows_navigation`, and `harden`, the one place the webview settings are applied. `BundleSet` serves `_shell/` paths from the shell bundle and every other path from the service bundle. | see `git log` |
 | shell-spike-3 | `bridge.rs` and `web/bridge.js`: the one post-and-receive JSON bridge. `bridge.js` is injected into the main frame and defines the frozen, non-writable, non-configurable `window.ghostlightShell` (`post`, `listen`) and the hidden `__ghostlightShellDeliver`. `decode_page_message` takes only a JSON object of at most 1 MiB, `delivery_script` encodes the message as a JSON string literal inside the call, and `page_origin` sorts a URL into shell page, service page or foreign (foreign messages are dropped). | see `git log` |
 | shell-spike-4 | `tray.rs`: the tray built from a model. `TrayModel` (`tooltip`, `items`) and `TrayItem` (`id`, `label`, `enabled`) with `validate` (1 to 16 items, unique ids of `[a-z0-9_]{1,32}`, labels of 1 to 64 printable characters, a tooltip of at most 64), `icon_image` and `decode_rgba` (PNG to 8-bit RGBA), `Tray::build` and `Tray::show`, and `install_events` mapping a left-button-up click to `TrayEvent::Activate` and a menu choice to `TrayEvent::Item(id)`. The shell owns no item; Linux reports no clicks, so Open must be a menu item there. | see `git log` |
+| shell-spike-5 | `window.rs`: the window and its webview, moved unchanged from the Tauri glue. `WindowLifecycle` is the pure rule set (`Absent`, `Open`, `Replacing`; `OpenRequested`, `CloseRequested`, `Destroyed`, `RendererLost` give `Create`, `Focus` or `Destroy`): Windows focuses an open window, Linux destroys it and builds a fresh one after the destroyed event and coalesces Opens meanwhile (ADR-0120), a lost renderer discards the window and nothing rebuilds it (ADR-0119). `renderer_policy` and `apply_renderer_policy`, `prepare_identity` and `init_display` are the Linux startup helpers, no-ops on Windows. `ShellWindow::create` builds the tao window (title, 1180 by 760, minimum 880 by 620, centered by the pure `centered_origin`, product icons, Windows class `Ghostlight Window`) and the hardened wry webview with the private scheme, the IPC handler and the injected bridge; `focus`, `navigate`, `deliver`, `id` and, on Linux, `on_renderer_lost`. | see `git log` |
 
 ## Owed live checks
 
@@ -88,6 +89,21 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
   an item reports `Item(id)`, that `Tray::show` replaces the menu and tooltip, and that a Linux
   indicator shows the menu but reports no click.
 
+- shell-spike-5: on a Linux test machine, `cargo clippy -p ghostlight-desktop --all-targets -- -D
+  warnings` and `cargo test -p ghostlight-desktop`. The Linux-only code in `window.rs`
+  (`apply_renderer_policy`, `prepare_identity`, `init_display`, the GTK container path of the
+  webview build and `on_renderer_lost`) has not been compiled on the coordinator's host.
+- shell-spike-5: live, once the event loop exists (shell-spike-6 or later): that the window opens
+  titled Ghostlight at 1180 by 760 centered on its monitor and cannot be resized below 880 by
+  620; that on Windows its class is `Ghostlight Window` and the taskbar shows the product icon;
+  that on Windows a second Open restores a minimized window and focuses it; that on Linux a
+  second Open destroys the window and builds a fresh one, and five quick Opens build one; that
+  closing the window leaves the process running; that on Linux killing the WebKit web process
+  discards only that window and the next Open builds a new one; that on Linux with the NVIDIA
+  driver loaded `WEBKIT_DISABLE_DMABUF_RENDERER` is set to 1 unless the user set it; that the
+  Wayland app id and X11 class match the installed entry; and that a session with no display
+  makes `init_display` return `NoDisplay` instead of panicking.
+
 ## Blockers
 
 None.
@@ -101,3 +117,9 @@ None.
   as in Tauri's build, because CI installs no `libxdo`.
 - `embed-resource` is declared now for the Windows `build.rs` that shell-spike-7 adds; Cargo finds
   `build.rs` and `src/main.rs` without a manifest change.
+- `ShellWindow::create` builds the window hidden, centers it with `centered_origin` (pure, in
+  physical pixels on the window's monitor) and then shows it, which replaces the `center: true` of
+  the Tauri configuration without a flash at a default position. Wayland ignores the position.
+  The caller calls `focus` after `Create`, as the Tauri glue did.
+- If a `Create` act fails, the caller feeds `LifecycleEvent::Destroyed` so the lifecycle returns to
+  `Absent`.
