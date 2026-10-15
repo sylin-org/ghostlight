@@ -26,8 +26,10 @@ const EXECUTABLES = [
 const TEST_HOME_VARIABLE = "GHOSTLIGHT_TEST_HOME";
 /** Record the installer writes into the install directory once a service is running. */
 const INSTALL_RECORD_NAME = "install.json";
-/** Marker file in the Ghostlight home that selects a development installation. */
-const DEVELOPMENT_MARKER_NAME = "development";
+/** The channel `install.json` records for a build the development loop installed. */
+const DEVELOPMENT_CHANNEL = "development";
+/** First argument of the installer command, which always runs this package's own service image. */
+const DEPLOYMENT_COMMAND = "deployment";
 /** First arguments of the commands that never install (ADR-0197 Decision 13). */
 const NEVER_INSTALL_COMMANDS = new Set(["doctor", "status", "help", "--help", "-h", "--version", "-V"]);
 /** Commands whose own help the service prints when exactly one help flag follows them. */
@@ -286,11 +288,13 @@ async function stageDownloads({ indexes, packageJson, manifest, platform, archit
 }
 
 /**
- * Decides what to run and makes it ready. Every command except the never-install ones (see
- * `neverInstalls`) runs the installed set when `install.json` is the same as or newer than this
- * package, or when the development marker exists; otherwise the verified download installs itself
- * first. The never-install commands run the installed service, or a verified staged copy that
- * installs nothing.
+ * Decides what to run and makes it ready. `deployment` (`deployment install`, also with
+ * `--restore`) runs this package's own verified service image from a staged copy, never the
+ * installed one, because the installer installs the image it belongs to. Every other command
+ * except the never-install ones (see `neverInstalls`) runs the installed set when `install.json`
+ * is the same as or newer than this package, or records the development channel; otherwise the
+ * verified download installs itself first. The never-install commands run the installed service,
+ * or a verified staged copy that installs nothing.
  *
  * Resolves to the executable, its arguments, and `cleanup` for any staged files.
  */
@@ -318,9 +322,20 @@ export async function prepareLaunch({
   };
   const stageOptions = { platform, architecture, cacheRoot: home, fetchImpl, reporter };
 
+  if (arguments_[0] === DEPLOYMENT_COMMAND) {
+    const { packageJson, manifest } = await readPackage();
+    requireLinuxLibraries(platform, libraryProbe);
+    const stage = await stageDownloads({ ...stageOptions, indexes: executables.map((_, index) => index), packageJson, manifest });
+    return {
+      executable: join(stage, executables[0]),
+      arguments_,
+      cleanup: () => rm(stage, { recursive: true, force: true }),
+    };
+  }
+
   if (launch) {
     const packageVersion = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
-    const development = existsSync(join(home, DEVELOPMENT_MARKER_NAME));
+    const development = (await readInstallRecord(directory))?.channel === DEVELOPMENT_CHANNEL;
     if (development || (existsSync(installed) && await installedSetIsCurrent(directory, packageVersion))) {
       requireLinuxLibraries(platform, libraryProbe);
       return { executable: installed, arguments_, cleanup: nothingToClean };

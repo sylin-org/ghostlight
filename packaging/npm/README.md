@@ -11,6 +11,9 @@ version-matched Ghostlight binaries from the GitHub release into temporary stora
 three against the checksums carried by the package, and runs `ghostlight deployment install` from
 there. The four never-install commands run the installed service, or with nothing installed a
 verified temporary copy that installs nothing.
+`npx ghostlight deployment install` always runs this package's own verified copy, and with
+`--restore` it replaces a development installation (a build the development loop installed) with
+this release; a release package never installs over one by itself.
 A bare `npx ghostlight` starts `ghostlight-mcp-connector`, the stdio server your client talks to;
 `npx ghostlight install` connects the browser side. On Linux the service needs
 `libwebkit2gtk-4.1`; the launcher names the package to install when it is missing.

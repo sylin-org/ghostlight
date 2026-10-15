@@ -256,10 +256,12 @@ async function launcherFixture() {
       await writeFile(join(destination, "install.json"), JSON.stringify({ service_version: PACKAGE_VERSION }));
     },
   };
-  const install = async (version, contents = "installed") => {
+  const install = async (version, contents = "installed", channel = undefined) => {
     await mkdir(bin, { recursive: true });
     for (const name of names) await writeFile(join(bin, name), `${contents}:${name}`);
-    if (version !== undefined) await writeFile(join(bin, "install.json"), JSON.stringify({ service_version: version }));
+    if (version !== undefined) {
+      await writeFile(join(bin, "install.json"), JSON.stringify({ service_version: version, ...(channel ? { channel } : {}) }));
+    }
   };
   const cleanup = () => rm(area, { recursive: true, force: true });
   return { area, home, bin, names, options, activity, install, prepareLaunch, cleanup };
@@ -342,16 +344,50 @@ test("a launch installs when the executable it would run is missing", async () =
   }
 });
 
-test("the development marker keeps the installed set whatever its version", async () => {
+test("the development channel keeps the installed set whatever its version", async () => {
   const f = await launcherFixture();
   try {
-    await f.install("1.0.0");
-    await writeFile(join(f.home, "development"), "");
+    await f.install("1.0.0", "installed", "development");
     const launch = await f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD });
     assert.equal(launch.executable, join(f.bin, "ghostlight-mcp-connector"));
     assert.equal(f.activity.installs.length, 0);
   } finally {
     await f.cleanup();
+  }
+});
+
+test("a release channel record does not keep an older installed set", async () => {
+  const f = await launcherFixture();
+  try {
+    await f.install("1.0.0", "installed", "release");
+    await f.prepareLaunch({ ...f.options, arguments_: [] });
+    assert.equal(f.activity.installs.length, 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("deployment runs the package's own verified service image, whatever is installed", async () => {
+  for (const [version, channel] of [[undefined, undefined], ["1.0.0", "development"], ["9.0.0", "release"]]) {
+    const f = await launcherFixture();
+    try {
+      if (version) await f.install(version, "installed", channel);
+      const arguments_ = ["deployment", "install", "--restore"];
+      const launch = await f.prepareLaunch({ ...f.options, arguments_ });
+      assert.notEqual(dirname(launch.executable), f.bin, "the installed image is never the one that installs");
+      assert.equal(dirname(launch.executable).startsWith(f.home), true);
+      assert.deepEqual(launch.arguments_, arguments_);
+      assert.match(await readFile(launch.executable, "utf8"), /^2\.0\.0:/, "the package's verified download");
+      assert.equal(f.activity.installs.length, 0, "the launcher installs nothing itself");
+      assert.equal(f.activity.downloads.length, 3, "the whole set is staged beside the image that installs it");
+      if (version) {
+        assert.match(await readFile(join(f.bin, "ghostlight"), "utf8"), /^installed:/, "the installed set is untouched");
+      }
+      await launch.cleanup();
+      assert.deepEqual((await readdir(f.home)).filter(name => name !== "bin"), [], "the stage goes away");
+    } finally {
+      await f.cleanup();
+    }
   }
 });
 
