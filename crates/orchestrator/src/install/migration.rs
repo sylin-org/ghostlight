@@ -854,7 +854,6 @@ pub fn finish(plan: &MigrationPlan) -> Result<(), MigrationError> {
     Ok(())
 }
 
-/// Make the destination directory and refuse a destination that holds something else.
 /// Remove what the 1.x Flatpak route left in the user's home, and say what became of each file.
 ///
 /// A manifest or an activation registration is deleted only when its content still names
@@ -912,6 +911,8 @@ pub fn retire_flatpak_route(plan: &MigrationPlan) -> Vec<FlatpakStep> {
                     restore_override(path, custody.permission_before.as_deref()),
                 );
             }
+            Ok(Found::Regular(bytes))
+                if custody.permission_before.as_deref().map(str::as_bytes) == Some(&bytes) => {}
             Ok(_) => step(part, path, FlatpakResult::LeftChanged),
             Err(error) => step(part, path, FlatpakResult::Failed(error.to_string())),
         }
@@ -994,6 +995,7 @@ fn restore_override(path: &Path, before: Option<&str>) -> FlatpakResult {
     }
 }
 
+/// Make the destination directory and refuse a destination that holds something else.
 fn prepare_transfer(transfer: &Move) -> Result<(), MigrationError> {
     if !transfer.from.is_file() || same_location(&transfer.from, &transfer.to) {
         return Ok(());
@@ -2453,6 +2455,28 @@ mod tests {
             OVERRIDE_AFTER
         );
         assert!(!route.custody.exists());
+    }
+
+    #[test]
+    fn an_override_an_earlier_run_already_restored_is_not_reported_as_changed() {
+        let fixture = Fixture::new(false);
+        let route = flatpak_route(&fixture, Some(OVERRIDE_BEFORE));
+        // An earlier run restored the override and then failed a later step, so the record stays.
+        fixture.write(&route.permission_override, OVERRIDE_BEFORE);
+        let steps = retire_flatpak_route(&fixture.plan());
+        assert_eq!(
+            results(&steps),
+            [
+                (FlatpakPart::Manifest, FlatpakResult::Removed),
+                (FlatpakPart::Registration, FlatpakResult::Removed),
+                (FlatpakPart::Custody, FlatpakResult::Removed),
+            ]
+        );
+        assert_eq!(
+            fs::read_to_string(&route.permission_override).unwrap(),
+            OVERRIDE_BEFORE
+        );
+        assert!(fixture.plan().is_empty());
     }
 
     #[test]
