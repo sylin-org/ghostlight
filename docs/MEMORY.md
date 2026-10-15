@@ -483,7 +483,7 @@ Every one of these cost something to learn.
   as refusal. Expanded details stay open without extra alerts; wrappers never repeat action or
   denial counts. Automatic resumption needs a separate decision (ADR-0156).
 - **Completed means succeeded.** Flow keeps unsuccessful and unreached work distinct
-  (browser_sequence was folded into browser_flow; older sequence receipts still read back). Continue
+  (browser_sequence was folded into browser_flow). Continue
   permits later work, never a false overall success. Known partial progress stays known; recovery
   respects confirmed changes and never proposes replaying the entire composition. Human controls and
   invocation limits take precedence (ADR-0133 H2b amendment).

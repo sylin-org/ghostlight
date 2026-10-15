@@ -1,8 +1,9 @@
-//! Golden files of the model surface: compare, or rewrite on request.
+//! Golden files: compare, or rewrite on request.
 //!
 //! The catalog golden pins `tools/list`; the result goldens pin what a model receives from
 //! `tools/call` for one success and one refusal. Volatile values (handles, times) are replaced
-//! by a placeholder so the files stay stable between runs.
+//! by a placeholder so the files stay stable between runs. The audit line goldens reuse the same
+//! comparison with their own update variable.
 
 use serde_json::{json, Value};
 
@@ -57,8 +58,15 @@ fn normalize(value: &mut Value) {
 
 /// Compare `actual` with the golden file, or rewrite the file when the update variable is set.
 pub(crate) fn check_golden(relative: &str, actual: &str) {
+    check_golden_with(relative, actual, UPDATE_VARIABLE, "the model surface");
+}
+
+/// Compare `actual` with the golden file, or rewrite it when `variable` is set.
+///
+/// `subject` names what the file pins, for the failure message.
+pub(crate) fn check_golden_with(relative: &str, actual: &str, variable: &str, subject: &str) {
     let path = repository_path(relative);
-    if std::env::var_os(UPDATE_VARIABLE).is_some() {
+    if std::env::var_os(variable).is_some() {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("golden directory is writable");
         }
@@ -75,7 +83,10 @@ pub(crate) fn check_golden(relative: &str, actual: &str) {
         .position(|(left, right)| left != right)
         .unwrap_or_else(|| expected.lines().count().min(actual.lines().count()));
     panic!(
-        "{relative} differs from the model surface at line {}:\n  file:   {}\n  actual: {}\nrun the test with {UPDATE_VARIABLE}=1 to rewrite it when the change is deliberate",
+        "{relative} differs from {subject} at line {}:
+  file:   {}
+  actual: {}
+run the test with {variable}=1 to rewrite it when the change is deliberate",
         line + 1,
         expected.lines().nth(line).unwrap_or("<end of file>"),
         actual.lines().nth(line).unwrap_or("<end of file>"),

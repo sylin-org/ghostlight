@@ -39,9 +39,9 @@ use crate::browser::recovery::{
 use crate::browser::{choose_browser, Availability, BrowserError, BrowserPort, RETURN_GRACE};
 use crate::events::{DenialPresentation, DomainEvent};
 
+use crate::audit::AuditRecord;
 use crate::governance::{
-    AuditRecord, AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade,
-    ReasonCode,
+    AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode,
 };
 use crate::language::{
     self,
@@ -2636,7 +2636,8 @@ mod tests {
     use crate::browser::testing::{summary, FakeBrowser, FAKE_BROWSER};
     use crate::intake::session::IntakeChannel;
 
-    use crate::governance::{AuditRecord, AuditSink, GovernanceFacade};
+    use crate::audit::AuditRecord;
+    use crate::governance::{AuditSink, GovernanceFacade};
     use crate::install::browser_package::BrowserPackage;
     use crate::install::native_host::NativeHostState;
     use crate::language::outcome::Observed;

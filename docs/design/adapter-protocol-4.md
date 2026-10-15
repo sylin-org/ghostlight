@@ -2128,7 +2128,7 @@ impl Scope {
 
     pub fn observation(&self, result: &BrowserOutcome) -> DocumentObservation {
         DocumentObservation { visited: self.observation.visited_ids(), unavailable: self.observation.unavailable_ids(),
-                              limited_by_size: self.observation.limited || truncated(result), masked_regions: 0 }
+                              limited_by_size: self.observation.limited || truncated(result) }
     }
 }
 ```

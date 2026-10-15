@@ -158,7 +158,7 @@ try {
           truncated: serialized.length > command.max_result_chars, committed_urls: [] };
       } else throw new Error(`Unexpected physical command: ${command.command}`);
       if (scope) result = { outcome: "in_documents", result, observation: {
-        visited: scope.allowed, unavailable: [], limited_by_size: Boolean(result.truncated), masked_regions: 0
+        visited: scope.allowed, unavailable: [], limited_by_size: Boolean(result.truncated)
       } };
       writeNative({ kind: "receipt", receipt: { correlation, result } });
     } catch (error) {

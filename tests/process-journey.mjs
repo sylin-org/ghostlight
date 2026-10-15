@@ -346,7 +346,7 @@ async function runAdapter(peer) {
       setTimeout(() => {
         let observed = { outcome: "observed", tab_id: command.tab_id, satisfied: true, elapsed_ms: 1000, readiness: "complete" };
         if (scope) observed = { outcome: "in_documents", result: observed,
-          observation: { visited: scope.allowed, unavailable: [], limited_by_size: false, masked_regions: 0 } };
+          observation: { visited: scope.allowed, unavailable: [], limited_by_size: false } };
         peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: observed } });
       }, 1000);
       continue;
@@ -447,7 +447,7 @@ async function runAdapter(peer) {
     }
     else throw new Error(`Unexpected physical primitive ${command.command}`);
     if (scope) result = { outcome: "in_documents", result, observation: {
-      visited: scope.allowed, unavailable: [], limited_by_size: Boolean(result.truncated), masked_regions: 0
+      visited: scope.allowed, unavailable: [], limited_by_size: Boolean(result.truncated)
     } };
     peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
   }

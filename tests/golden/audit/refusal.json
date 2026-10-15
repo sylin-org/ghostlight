@@ -1,0 +1,60 @@
+{
+  "timestamp_ms": 1790000000000,
+  "invocation": "invocation_00000000000000000000000000000002",
+  "workspace": "workspace_00000000000000000000000000000001",
+  "tool": "browser_click",
+  "capabilities": [
+    "action"
+  ],
+  "authority": "authority_00000000000000000000000000000001",
+  "allowed": false,
+  "reason": "capability_denied",
+  "policy_rule": "capability",
+  "denial_id": "D-e8b8cd01",
+  "policy_tier": "user",
+  "grant_id": "reading",
+  "status": "blocked",
+  "effect": "none",
+  "summary": "Blocked: this session may not take that kind of action.",
+  "refusal_facts": {
+    "reason": "authority_blocked",
+    "cause": "capability"
+  },
+  "permissions": {
+    "checks": [
+      {
+        "requirements": [
+          "action"
+        ],
+        "host": "example.com",
+        "allowed": false,
+        "reason": "capability_denied",
+        "layers": [
+          {
+            "tier": "user",
+            "grants": [
+              "reading"
+            ],
+            "allowed": false
+          }
+        ]
+      }
+    ],
+    "truncated": false
+  },
+  "duration_ms": 3,
+  "observed": {
+    "host": "example.com",
+    "readiness": null,
+    "count": null,
+    "width": null,
+    "height": null
+  },
+  "channel": "mcp",
+  "provenance": {
+    "connection_id": "connection_00000000000000000000000000000001",
+    "observed_at_ms": 1790000000000,
+    "channel": "mcp"
+  },
+  "browser": "Chromium"
+}

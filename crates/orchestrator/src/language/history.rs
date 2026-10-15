@@ -4,43 +4,14 @@ use crate::governance::evidence::PermissionCheck;
 use crate::governance::ReasonCode;
 use serde::{Deserialize, Serialize};
 
-/// Retired passive browser-event receipt. It was never an agent invocation.
-pub const RETIRED_BROWSER_LANDING: &str = "browser_landing";
-
 /// Maximum child count supported by a composition, including restored history.
 pub const COMPOSITION_STEP_LIMIT: usize = 20;
 
-/// Current flow and historical sequence identities; caller labels never supply an identity.
+/// The composition identity; caller labels never supply one.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompositionKind {
     Flow,
-    /// Retained for receipts written before sequence was consolidated into flow.
-    Sequence,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn retired_request_and_sequence_receipts_keep_their_original_meaning() {
-        let check: PermissionCheck = serde_json::from_value(json!({
-            "requirements":["execute"],"host":null,"allowed":false,"observed":false,
-            "reason":"host_denied","layers":[],"request_restricted":true,"request_evaluated":true
-        }))
-        .unwrap();
-        assert_eq!(
-            permission(&check),
-            "Refused: request restrictions refused this work."
-        );
-        let receipt: StepReceipt = serde_json::from_value(json!({
-            "parent":"sequence","position":2,"total":3,"preparation_failed":false
-        }))
-        .unwrap();
-        assert_eq!(receipt.parent.tool(), "browser_sequence");
-    }
 }
 
 impl CompositionKind {
@@ -49,14 +20,12 @@ impl CompositionKind {
     pub const fn tool(self) -> &'static str {
         match self {
             Self::Flow => "browser_flow",
-            Self::Sequence => "browser_sequence",
         }
     }
 }
 
 /// Parent invocation plus position identifies one child receipt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StepReceipt {
     pub parent: CompositionKind,
     pub position: usize,
@@ -68,17 +37,16 @@ pub struct StepReceipt {
 #[must_use]
 pub fn permission(check: &PermissionCheck) -> String {
     let verdict = if check.allowed { "Allowed" } else { "Refused" };
-    if check.reason != ReasonCode::Permitted && check.layers.is_empty() && !check.request_evaluated
-    {
+    if check.reason != ReasonCode::Permitted && check.layers.is_empty() {
         return format!("{verdict}: {}.", check.reason.as_str().replace('_', " "));
     }
     if check.requirements.is_empty() {
         return format!("{verdict}; no capability grant was required.");
     }
-    if check.layers.is_empty() && !check.request_restricted {
+    if check.layers.is_empty() {
         return format!("{verdict} without configured policy.");
     }
-    let mut sources: Vec<String> = check
+    let sources: Vec<String> = check
         .layers
         .iter()
         .map(|layer| {
@@ -100,17 +68,5 @@ pub fn permission(check: &PermissionCheck) -> String {
             format!("{source} {verdict} ({rules})")
         })
         .collect();
-    if check.request_restricted {
-        sources.push(
-            if !check.request_evaluated {
-                "request restrictions were not evaluated"
-            } else if check.allowed {
-                "request restrictions permit this work"
-            } else {
-                "request restrictions refused this work"
-            }
-            .into(),
-        );
-    }
     format!("{verdict}: {}.", sources.join("; "))
 }

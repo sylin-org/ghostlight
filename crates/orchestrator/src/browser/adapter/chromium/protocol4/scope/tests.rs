@@ -316,7 +316,6 @@ fn an_answer_marks_its_document_visited_and_a_failure_marks_it_unavailable() {
     assert_eq!(observed.visited, ["T.t1"]);
     assert_eq!(observed.unavailable, ["C.c1"]);
     assert!(!observed.limited_by_size);
-    assert_eq!(observed.masked_regions, 0);
 }
 
 #[test]

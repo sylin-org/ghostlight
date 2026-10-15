@@ -190,7 +190,7 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
             crate::audit::AuditLine::Empty => continue,
         };
         records += 1;
-        let requirements = record.requirements();
+        let requirements = record.capabilities;
         let decision = decide_record(&snapshot, requirements, record.observed.host.as_deref());
         if !decision.allowed {
             denied += 1;
@@ -299,6 +299,46 @@ mod tests {
         .unwrap();
         let simulation = String::from_utf8(simulation).unwrap();
         assert!(simulation.contains("Would deny line 1: browser_click [action]"));
+        assert!(simulation.contains("1 would be denied"));
+        let _ = fs::remove_file(policy);
+        let _ = fs::remove_file(audit);
+    }
+
+    #[test]
+    fn simulate_replays_the_golden_audit_lines() {
+        let policy = temporary("policy.json");
+        let audit = temporary("audit.jsonl");
+        fs::write(
+            &policy,
+            r#"{"schema":4,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
+        )
+        .unwrap();
+        let mut lines = String::new();
+        for golden in ["success", "refusal"] {
+            let text = fs::read_to_string(crate::language::self_check::golden::repository_path(
+                &format!("tests/golden/audit/{golden}.json"),
+            ))
+            .unwrap();
+            let line: serde_json::Value = serde_json::from_str(&text).unwrap();
+            lines.push_str(&format!(
+                "{line}
+"
+            ));
+        }
+        fs::write(&audit, lines).unwrap();
+
+        let mut simulation = Vec::new();
+        run(
+            &Command::Simulate {
+                policy: policy.clone(),
+                audit: audit.clone(),
+            },
+            &mut simulation,
+        )
+        .unwrap();
+        let simulation = String::from_utf8(simulation).unwrap();
+        assert!(simulation.contains("Would deny line 2: browser_click [action] on example.com"));
+        assert!(simulation.contains("Simulated 2 record(s)"));
         assert!(simulation.contains("1 would be denied"));
         let _ = fs::remove_file(policy);
         let _ = fs::remove_file(audit);

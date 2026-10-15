@@ -461,7 +461,6 @@ impl ApplicationExecutor {
                 coverage.inspected_documents = observation.visited.len();
                 coverage.unavailable_documents += observation.unavailable.len();
                 coverage.limited_by_size = observation.limited_by_size;
-                coverage.masked_regions = observation.masked_regions;
                 self.retain_coverage(context, coverage.clone(), hosts);
                 let mut result = *result;
                 let observation_result = matches!(

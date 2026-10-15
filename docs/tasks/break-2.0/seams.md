@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f04-audit-v2.
+Next: f05-refresher.
 
 ## Landed
 
@@ -112,6 +112,7 @@ Next: f04-audit-v2.
 | f02-catalog-golden | The model surface is pinned (ADR-0197 D8 and D17, ADR-0198 D26). `ToolDefinition.output_schema`, `outcome_schema()`, the strip in `render_catalog`, `listed_tools()` and the tests that only read the output schema are gone; `tools_list_carries_no_output_schema` stays. `docs/1.0/catalog.json` is the exact `tools` array of `tools/list`, pretty-printed; `the_catalog_matches_docs_1_0_catalog_json` and `the_catalog_golden_is_ascii` guard it. `tests/golden/model/success.json` and `refusal.json` pin the complete `tools/call` result (content, structuredContent, isError) at the latest MCP revision through the real session and `lean::project`, with volatile ids normalized; `a_listed_tab_matches_the_success_golden` and `a_call_that_does_not_decode_matches_the_refusal_golden` (in `work/tests/golden.rs`) guard them, and `GHOSTLIGHT_CATALOG_UPDATE=1` rewrites all three. These two files are the envelope pin. ACCEPTANCE, ARCHITECTURE and LANGUAGE stop promising an output schema; AGENTS.md names the regeneration command. | see `git log` |
 | f03a-attention-state | The attention runtime state and its control file are gone (ADR-0197 D19). `RuntimeControls` holds active, held and ended in memory only; `GHOSTLIGHT_RUNTIME_CONTROL_FILE`, `with_runtime_control_file`, `require_attention` and `runtime_control_file_configured` are removed, so `runtime_decision` reads only the in-memory controls. `ReasonCode::RuntimeAttention`, `Status::AttentionRequired`, `Refusal::AttentionRequired`, `CheckFailure::AttentionRequired`, `AuditRefusal::AttentionRequired`, `DomainEvent::AttentionRequired` with its presentation and workbench reactions, `PresentationKind::Attention` (service and wire mirror), `RuntimeControlState::Attention`, `StepCounts.attention_required` and `EXIT_ATTENTION` are removed; the other exit codes keep their numbers. `StepCause::AttentionRequired` stays for the local interlock. `StepCounts` no longer denies unknown fields and an unknown refusal reason already reads as no refusal facts, so earlier audit lines still read. The page assets lose the attention branch and `tests/golden/protocol4/assets.sha256` is refreshed. LANGUAGE, ARCHITECTURE, ACCEPTANCE, INTENT, the scripting and SIEM guides, the adapter-protocol-4 note and the man page stop naming the state. | see `git log` |
 | f03b-policy-schema4 | Policy schema 4 (ADR-0197 D19, blueprint F3). Schema 4 is schema 3 without `mode` (on the policy and on each grant), `channels.mcp.enabled`, `channels.cli.enabled`, `policy.user.enabled`, `content.frames.handling` and `content.frames.notice`; identity and the canonical hash are unchanged. `parse` accepts only schema 4 and refuses schema 3 with `unsupported policy schema 3; run ghostlight policy migrate <file>` (`ManifestError::RetiredSchema`). `governance/migrate.rs` and `language/migration.rs` carry `ghostlight policy migrate <file>`: it drops `mode` enforce, a channel set to true, the user switch and a frame option at its default, refuses everything else with one sentence per part and leaves the file untouched, and on success copies the original to `<file>.schema3.bak` and replaces the file in one step. Ghostlight's own `policy/user-policy.json` moves at load by the same rule; administrator files (the managed file and bundles, `GHOSTLIGHT_POLICY_FILE`) are never rewritten and fail closed. `PolicyMode`, `Decision.observed`, `PermissionCheck.observed`, the layer mode, `AuditRecord.policy_observed` and `policy_mode`, `admits_channel` with `ReasonCode::ChannelDenied`, `PolicyRule::Channel`, `BlockedReason::Channel` and `OpeningRefusal::ChannelNotAdmitted`, `user_authoring_allowed`, and the `DocumentPolicy` resolution (frame handling is fixed at permitted content, the notice at when affected) are gone. `PermissionCheck` and `LayerEvidence` no longer deny unknown fields, so earlier audit lines still read. The workbench editor writes schema 4 and has no watch-only, channel or frame controls. Every example moved to schema 4; `developer-observe.json` and `scripting-disabled.json` are deleted. | see `git log` |
+| f04-audit-v2 | Audit line v2 (ADR-0197 D17, blueprint F4). `AuditRecord` lives in `audit.rs` beside its writer and reader (no re-export; every use imports `crate::audit::AuditRecord`). The singular `capability` field and `requirements()` are gone (readers use `capabilities`), as are `PermissionCheck.request_restricted` and `request_evaluated` with `permission()`'s restriction branches, `RETIRED_BROWSER_LANDING` with its workbench filters and test, `CompositionKind::Sequence` with the branches that read it, `Coverage.masked_regions` and `DocumentObservation.masked_regions` with their producers and the lean-view entry, and `AuditRefusal::RequestRestricted`. `read_refusal` no longer calls its facts legacy. `deny_unknown_fields` is dropped from every type an audit line reaches (`AuditRefusal`, `Coverage`, `StepReceipt`, `StepCounts` earlier, `StepIssue`, `CompositionProgress`, `EffectCounts`, `Observed`, `PermissionTrace`), so a later release's line reads and unknown fields are never written back. `tests/golden/audit/success.json`, `refusal.json` and `flow.json` pin the line (`GHOSTLIGHT_AUDIT_GOLDEN_UPDATE=1` rewrites them); one test reads each golden with an unknown field in every object and gets an equal record, another reads a line carrying every retired field through history reload, and `policy simulate` replays the success and refusal goldens. `docs/guides/siem-integration.md` shows the golden line, its field table without the removed fields, and says readers ignore unknown fields. | see `git log` |
 
 ## Owed live checks
 
@@ -152,6 +153,11 @@ them.
   schema-3 file with `mode: "observe"` prints the refusal and changes nothing. `node
   tests/workbench-surface.mjs` and `node tests/policy-grammar.mjs` were run and pass (neither starts
   a Ghostlight program).
+- f04: `node tests/history-compatibility.mjs` (it starts the built service, so only the coordinator
+  runs it) passes; `node tests/process-journey.mjs`, `tests/provenance-journey.mjs`,
+  `tests/script-browser-journey.mjs`, `tests/local-resilience-journey.mjs` and
+  `tests/cli-powershell-journey.mjs` pass (their fake browsers no longer send `masked_regions`).
+  `node --check` passes on all five.
 
 ## Notes
 
@@ -225,3 +231,15 @@ them.
   options changed rather than gained replacements: `tests/cli-journey.mjs` drops the channel refusal,
   `tests/frame-browser-journey.mjs` runs the one remaining coverage behavior, and the Linux
   `governance.mjs` phase for `complete_page` now asserts the permitted-content result.
+- f04: the tree differed from the spec in five places. (1) The `AuditRecord` tests moved with the
+  record into `audit/record_tests.rs` (declared from `audit.rs`), together with the golden and
+  reader tests; `governance/tests.rs` keeps only the policy attribution test and imports the record
+  from `crate::audit`. (2) The golden comparison is the existing helper in
+  `language/self_check/golden.rs`, which gained `check_golden_with(relative, actual, variable,
+  subject)`; `check_golden` calls it. (3) `flow.json` is a pretty JSON array of two records (the
+  child receipt, then the parent); the other two hold one record each. (4) `AuthoritySnapshot`
+  gained `managed_sequence()` because `with_policy` now lives outside `governance`. (5) A line
+  whose `step.parent` is `sequence` no longer reads as a receipt (it counts as an unreadable
+  entry), and a `browser_landing` line reads as an ordinary history item; both were pre-2.0 only and
+  the spec deletes the types that handled them. `DocumentObservation` stays strict: it is built in
+  the adapter and never read from a line.

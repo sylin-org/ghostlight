@@ -1,13 +1,11 @@
-use crate::audit::AuditRecorder;
+use crate::audit::{AuditRecord, AuditRecorder};
 use std::io;
 use std::sync::{Arc, Mutex};
 
 use crate::browser::adapter::PresentationActivity;
 
 use crate::events::{DenialPresentation, DomainEvent};
-use crate::governance::{
-    AuditRecord, AuditSink, Capability, CapabilitySet, Decision, GovernanceFacade,
-};
+use crate::governance::{AuditSink, Capability, CapabilitySet, Decision, GovernanceFacade};
 use crate::language::outcome::Observed;
 
 use super::{

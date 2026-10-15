@@ -1745,7 +1745,6 @@ pub fn tab_already_closed_summary() -> String {
 /// two as separate closed types makes copying one into the other impossible rather than merely
 /// discouraged.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Observed {
     /// Governed host the action attempted or landed on, lowercased.
     ///

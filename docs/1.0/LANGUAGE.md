@@ -40,7 +40,7 @@ Authority comes from configured managed/local policy and human controls. Tools d
 `restrict_hosts`, `restrict_capabilities`, or `browser_flow.dry_run`. The retired `browser_sequence`
 tool is replaced by ordinary tool steps in `browser_flow`. The retired `browser_workspace` tool is
 gone because a session works only in its own workspace. Obsolete calls fail before browser work
-with catalog-refresh guidance; nothing retries automatically. Existing history remains readable.
+with catalog-refresh guidance; nothing retries automatically.
 See [ADR-0162](../adr/0162-configured-authority-and-one-flow-tool.md) and
 [ADR-0196](../adr/0196-simple-pipeline-and-contained-boundaries.md).
 
@@ -978,14 +978,13 @@ No-effect claims apply only to work that has not dispatched; lost effectful repl
 ## Document coverage (ADR-0158)
 
 Scoped results carry `facts.coverage` in the canonical envelope: targeted versus whole-page
-scope, inspected/excluded/page excluded/unavailable document counts and `limited_by_size`. Historical `masked_regions` is retained
-for receipt compatibility; new operations report zero. Counts retain
+scope, inspected/excluded/page excluded/unavailable document counts and `limited_by_size`. Counts retain
 observed maxima across physical preparation and execution, not repeated-read sums. Policy
 exclusions, unavailable content, and size ceilings have separate qualifications. Negative findings
 are limited to inspected content; absence across unseen content is never established.
 
 The model view carries `facts.coverage` only when something limited the read: an excluded, page
-excluded or unavailable document, `limited_by_size`, or masked regions. A read without it saw every
+excluded or unavailable document, or `limited_by_size`. A read without it saw every
 document in scope. A composition carries a limited child's coverage even when the child's result
 was cut from the parent (ADR-0198 Decision 22). The durable audit is unchanged.
 

@@ -20,17 +20,12 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
-use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
-
-use crate::language::audit::{AuditProjection, AuditRefusal};
-use crate::language::outcome::Observed;
 
 const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
@@ -581,6 +576,12 @@ impl AuthoritySnapshot {
                 denial: denial_bytes(&layer.manifest.hash, grant_id, denial.1.rule),
             },
         ))
+    }
+
+    /// Monotonic signed managed-policy publish sequence, when managed authority was active.
+    #[must_use]
+    pub const fn managed_sequence(&self) -> Option<u64> {
+        self.managed_sequence
     }
 
     /// Policy tier and grant id for one decision, when authored policy decided it.
@@ -1586,210 +1587,6 @@ fn host_matches(host: &str, pattern: &str) -> bool {
             && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.')
     } else {
         host == pattern
-    }
-}
-
-fn unix_ms() -> u64 {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    u64::try_from(millis).unwrap_or(u64::MAX)
-}
-
-/// A content-minimized audit record produced after a terminal outcome.
-/// Historical receipts ignore additional fields without retaining or reserializing them.
-/// This is a persistence reader, never an authority or command input (ADR-0163).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AuditRecord {
-    /// Child receipts whose storage could not be confirmed.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub unconfirmed_history_steps: u32,
-    /// Closed document coverage facts, excluding human-only embedded host names.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub coverage: Option<crate::language::coverage::Coverage>,
-    /// Wall-clock time in Unix milliseconds.
-    pub timestamp_ms: u64,
-    /// Opaque invocation handle.
-    pub invocation: String,
-    /// Opaque workspace handle.
-    pub workspace: String,
-    /// Exact catalog tool name.
-    pub tool: String,
-    /// Complete independent RAWX requirement set.
-    #[serde(default)]
-    pub capabilities: CapabilitySet,
-    /// Singular field retained only to read audit lines written before ADR-0121.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub capability: Option<Capability>,
-    /// Opaque immutable authority version.
-    pub authority: String,
-    /// Monotonic signed managed-policy publish sequence, when managed authority was active.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy_seq: Option<u64>,
-    /// Whether final-boundary authority admitted the work.
-    pub allowed: bool,
-    /// Stable reason code.
-    pub reason: ReasonCode,
-    /// Stable authored rule when policy made this decision.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy_rule: Option<String>,
-    /// Stable content-free correlation handle for an authored denial.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub denial_id: Option<String>,
-    /// Tighten-only tier that supplied the deciding rule.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy_tier: Option<String>,
-    /// Stable grant id that supplied the deciding rule.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grant_id: Option<String>,
-    /// Terminal status vocabulary.
-    pub status: String,
-    /// Terminal effect class.
-    pub effect: String,
-    /// Ghostlight-authored sentence naming what happened, with an optional governed target name.
-    #[serde(default)]
-    pub summary: String,
-    /// Closed language-authored failure metadata. Legacy arbitrary facts are discarded on read.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::language::audit::read_refusal"
-    )]
-    pub refusal_facts: Option<AuditRefusal>,
-    /// Payload-free counts and recovery cause for a flow or sequence.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composition: Option<crate::language::composition::CompositionProgress>,
-    /// Child correlation; absence identifies a direct operation or parent aggregate.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub step: Option<crate::language::history::StepReceipt>,
-    /// Canonical child tools, without caller-supplied labels or arguments.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub composition_tools: Vec<String>,
-    /// Evidence from actual permission evaluations under this invocation's snapshot.
-    #[serde(default)]
-    pub permissions: evidence::PermissionTrace,
-    /// How long the invocation took, from decode to terminal outcome.
-    ///
-    /// For a navigation this is the time to a governed, settled landing.
-    #[serde(default)]
-    pub duration_ms: u64,
-    /// What the action did, merged from browser-seam landing facts and outcome measurements.
-    #[serde(default)]
-    pub observed: Observed,
-    /// Which intake the work arrived on. Attribution only, never authority (ADR-0105).
-    ///
-    /// Absent when the workspace was already gone by the time the record was written.
-    #[serde(default)]
-    pub channel: Option<IntakeChannel>,
-    /// Bounded original-connection evidence; claimed labels never enter this durable type.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provenance: Option<crate::provenance::Attribution>,
-    /// Persistent browser family or product name that performed this work.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub browser: Option<String>,
-}
-
-fn is_zero(value: &u32) -> bool {
-    *value == 0
-}
-
-impl AuditRecord {
-    /// Construct a content-minimized audit record at the current time.
-    #[allow(clippy::too_many_arguments)]
-    #[must_use]
-    pub fn now(
-        invocation: &str,
-        workspace: &str,
-        tool: &'static str,
-        capabilities: impl Into<CapabilitySet>,
-        authority: &str,
-        decision: Decision,
-        status: &str,
-        effect: &str,
-        language: &AuditProjection,
-        duration_ms: u64,
-    ) -> Self {
-        Self {
-            unconfirmed_history_steps: language.unconfirmed_history_steps(),
-            timestamp_ms: unix_ms(),
-            invocation: invocation.into(),
-            workspace: workspace.into(),
-            tool: tool.into(),
-            capabilities: capabilities.into(),
-            capability: None,
-            authority: authority.into(),
-            policy_seq: None,
-            allowed: decision.allowed,
-            reason: decision.reason,
-            policy_rule: None,
-            denial_id: None,
-            policy_tier: None,
-            grant_id: None,
-            status: status.into(),
-            effect: effect.into(),
-            summary: language.summary().chars().take(500).collect(),
-            refusal_facts: language.refusal().cloned(),
-            composition: language.composition(),
-            coverage: language.coverage().cloned(),
-            step: None,
-            composition_tools: language.tools().to_vec(),
-            permissions: evidence::PermissionTrace::default(),
-            duration_ms,
-            observed: Observed::default(),
-            channel: None,
-            provenance: None,
-            browser: None,
-        }
-    }
-
-    /// Attach the browser family or product name that performed the work.
-    #[must_use]
-    pub fn with_browser(mut self, browser: Option<String>) -> Self {
-        self.browser = browser;
-        self
-    }
-
-    /// Attach the intake the work arrived on.
-    #[must_use]
-    pub fn from_channel(mut self, channel: Option<IntakeChannel>) -> Self {
-        self.channel = channel;
-        self
-    }
-
-    /// Attach one immutable connection snapshot and align the channel.
-    #[must_use]
-    pub fn with_provenance(mut self, provenance: Option<&crate::provenance::Attribution>) -> Self {
-        self.provenance = provenance.cloned();
-        self.channel = provenance.map(|value| value.channel);
-        self
-    }
-
-    /// Attach content-free policy attribution from the immutable snapshot that made the decision.
-    #[must_use]
-    pub fn with_policy(mut self, snapshot: &AuthoritySnapshot, decision: Decision) -> Self {
-        self.policy_seq = snapshot.managed_sequence;
-        self.policy_rule = decision.policy_rule().map(str::to_owned);
-        self.denial_id = decision.denial_id();
-        if let Some((tier, grant)) = snapshot.attribution(decision) {
-            self.policy_tier = Some(tier.into());
-            self.grant_id = grant.map(str::to_owned);
-        }
-        self
-    }
-
-    /// Return the truthful requirement set, including a pre-ADR-0121 historical record.
-    #[must_use]
-    pub fn requirements(&self) -> CapabilitySet {
-        self.capabilities
-            .union(self.capability.map_or(CapabilitySet::EMPTY, Into::into))
-    }
-
-    /// Attach the action's closed observation after completion.
-    #[must_use]
-    pub fn with_observation(mut self, observed: Observed) -> Self {
-        self.observed = observed;
-        self
     }
 }
 

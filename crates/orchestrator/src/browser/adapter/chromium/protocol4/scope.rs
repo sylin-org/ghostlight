@@ -338,7 +338,6 @@ impl Scope {
             visited: ids(&self.observation.visited),
             unavailable: ids(&self.observation.unavailable),
             limited_by_size: self.observation.limited || truncated(result),
-            masked_regions: 0,
         }
     }
 

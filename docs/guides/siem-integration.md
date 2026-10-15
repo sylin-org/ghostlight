@@ -11,43 +11,65 @@ Set `GHOSTLIGHT_AUDIT_FILE` to an absolute local path before starting Ghostlight
 opens the file append-only, writes one LF-terminated record, and flushes it. The workbench rebuilds
 its bounded History view from the same file.
 
-## Record shape
+## Record shape (version 2)
 
 ```json
 {
-  "timestamp_ms": 1786334400000,
-  "invocation": "invocation_opaque",
-  "workspace": "workspace_opaque",
-  "tool": "browser_fill_form",
-  "capabilities": ["read", "write"],
-  "authority": "authority_opaque",
-  "policy_seq": 12,
-  "allowed": false,
-  "reason": "capability_denied",
-  "policy_rule": "capability",
-  "denial_id": "D-opaque",
-  "policy_tier": "managed",
-  "grant_id": "support-sites",
-  "status": "blocked",
+  "timestamp_ms": 1790000000000,
+  "invocation": "invocation_00000000000000000000000000000001",
+  "workspace": "workspace_00000000000000000000000000000001",
+  "tool": "browser_navigate",
+  "capabilities": [
+    "read"
+  ],
+  "authority": "authority_00000000000000000000000000000001",
+  "allowed": true,
+  "reason": "permitted",
+  "status": "succeeded",
   "effect": "none",
-  "summary": "Blocked: this session may not take that kind of action.",
-  "duration_ms": 4,
+  "summary": "Navigated to example.com.",
+  "permissions": {
+    "checks": [
+      {
+        "requirements": [
+          "read"
+        ],
+        "host": "example.com",
+        "allowed": true,
+        "reason": "permitted",
+        "layers": []
+      }
+    ],
+    "truncated": false
+  },
+  "duration_ms": 412,
   "observed": {
-    "host": "support.example.com",
-    "readiness": null,
+    "host": "example.com",
+    "readiness": "complete",
     "count": null,
     "width": null,
     "height": null
   },
-  "channel": "mcp"
+  "channel": "mcp",
+  "provenance": {
+    "connection_id": "connection_00000000000000000000000000000001",
+    "observed_at_ms": 1790000000000,
+    "channel": "mcp"
+  },
+  "browser": "Chromium"
 }
 ```
+
+The line above is `tests/golden/audit/success.json`: a navigate that succeeded. Records are written
+on one line each; they are shown indented here. `refusal.json` (a click that policy refused) and
+`flow.json` (a two-step flow: one child receipt, then the parent) sit beside it, and a test fails
+when the service writes a different shape.
 
 | Field | Meaning |
 | --- | --- |
 | `timestamp_ms` | Local observation time as Unix milliseconds. |
 | `invocation`, `workspace` | Opaque correlation handles. |
-| `tool` | Catalog tool name, `unknown_tool` for an unrecognized request name, or the service's `browser_landing` event. |
+| `tool` | Catalog tool name, or `unknown_tool` for an unrecognized request name. |
 | `capabilities` | Complete independent RAWX requirement set. Empty is valid. |
 | `authority` | Opaque immutable authority snapshot id. |
 | `policy_seq` | Signed managed publish sequence, when active. |
@@ -63,11 +85,15 @@ its bounded History view from the same file.
 | `composition` | Optional safe parent progress. Aggregate wrappers do not represent another attempted child. |
 | `composition_tools` | Optional bounded canonical tool plan. Caller labels and arguments are excluded. |
 | `permissions` | Bounded actual evaluation checks and a `truncated` flag; includes allowed work as well as refusals. |
+| `coverage` | Optional document coverage of a read: `targeted`, the inspected, excluded, page excluded and unavailable document counts, and `limited_by_size`. |
+| `unconfirmed_history_steps` | Optional count of child receipts whose storage was not confirmed; absent when zero. |
 | `channel` | `mcp` or `cli`; attribution, not authority. |
+| `provenance` | Opaque `connection_id`, `observed_at_ms` and `channel` of the connection that sent the work. |
+| `browser` | Browser family or product name that performed the work. |
 
-The optional singular `capability` field exists only so 1.0 can read historical pre-ADR-0121
-records. New records write `capabilities`. Lines written before 2.0 can carry `policy_observed` and
-`policy_mode`; 2.0 writes neither.
+Readers ignore any field they do not know and never write it back, so a collector, `ghostlight
+policy simulate` and the workbench read lines written by a later release. A field this version
+writes keeps its meaning.
 
 The H1 source correction replaces arbitrary failure-facts retention with typed metadata. For
 example, a primitive browser error records `{"reason":"browser_primitive_failed"}` while its
@@ -83,17 +109,16 @@ and denial totals. A missing receipt does not establish that work did not run. P
 can establish an unattempted suffix; a missing parent leaves completion unconfirmed.
 
 Permission checks retain complete requirements, normalized host, verdict, reason, and each
-evaluated layer's bounded grant identities and mode. `request_restricted` records restriction
-presence; `request_evaluated` says whether this decision reached those checks. A trace can omit
-checks after its bound, disclosed by `truncated`; it is never permission for omitted work. This
+evaluated layer's bounded grant identities. A trace can omit checks after its bound, disclosed by
+`truncated`; it is never permission for omitted work. This
 evidence comes from the original immutable-snapshot evaluation. See [H4 source and verification
 state](../tasks/security-hardening/h4-grouped-history.md) before assuming an installed version
 writes these fields.
 
 Older versions could retain page content in failed-flow records and browser text in failure
-summaries. This correction does not rewrite old files. The reader ignores legacy arbitrary
-failure-facts content while preserving the historical record. Historical summary text remains
-historical text. See [H1 source and verification state](../tasks/security-hardening/h1-readable-audit.md)
+summaries. This correction does not rewrite old files. The reader ignores arbitrary
+failure-facts content while preserving the record. Historical summary text remains historical
+text. See [H1 source and verification state](../tasks/security-hardening/h1-readable-audit.md)
 before assuming an installed version includes the correction.
 
 `observed` has exactly five fields:

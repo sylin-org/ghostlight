@@ -1655,7 +1655,7 @@ fn direct_and_composed_reads_keep_equivalent_safe_receipts() {
     assert_eq!(records[2].step.unwrap().position, 1);
     let safe = |record: &AuditRecord| {
         json!({
-            "tool":record.tool,"requirements":record.requirements(),"status":record.status,
+            "tool":record.tool,"requirements":record.capabilities,"status":record.status,
             "effect":record.effect,"summary":record.summary,"observed":record.observed,
             "permissions":record.permissions,"reason":record.reason
         })
@@ -1704,7 +1704,7 @@ fn child_receipts_share_authority_without_holding_the_session() {
             .all(|record| record.authority == records[0].authority));
         assert!(records[..2]
             .iter()
-            .all(|record| record.requirements() == crate::governance::CapabilitySet::READ));
+            .all(|record| record.capabilities == crate::governance::CapabilitySet::READ));
         assert!(!serde_json::to_string(&*records)
             .unwrap()
             .contains("PRIVATE_"));

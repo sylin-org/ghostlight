@@ -64,12 +64,11 @@ const COVERAGE: &str = "coverage";
 
 /// The coverage fields that signal a limitation. A count above zero or a true flag keeps the
 /// whole block; `inspected_documents` and `targeted` describe scope, not a limit.
-const COVERAGE_LIMITATIONS: [&str; 5] = [
+const COVERAGE_LIMITATIONS: [&str; 4] = [
     "excluded_documents",
     "page_excluded_documents",
     "unavailable_documents",
     "limited_by_size",
-    "masked_regions",
 ];
 
 /// The `facts` keys that hold the addressable items Ghostlight mints: the controls of an inspect
@@ -265,7 +264,7 @@ mod tests {
         let mut block = json!({
             "targeted": false, "inspected_documents": 2, "excluded_documents": 0,
             "page_excluded_documents": 0, "unavailable_documents": 0,
-            "limited_by_size": false, "masked_regions": 0,
+            "limited_by_size": false,
         });
         for (key, value) in overrides.as_object().into_iter().flatten() {
             block[key] = value.clone();
@@ -291,7 +290,6 @@ mod tests {
             json!({"page_excluded_documents": 3}),
             json!({"unavailable_documents": 1}),
             json!({"limited_by_size": true}),
-            json!({"masked_regions": 2}),
         ] {
             let envelope = json!({"facts": {"coverage": coverage(limit)}});
             assert_eq!(project(&envelope), envelope);

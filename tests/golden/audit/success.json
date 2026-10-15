@@ -1,0 +1,44 @@
+{
+  "timestamp_ms": 1790000000000,
+  "invocation": "invocation_00000000000000000000000000000001",
+  "workspace": "workspace_00000000000000000000000000000001",
+  "tool": "browser_navigate",
+  "capabilities": [
+    "read"
+  ],
+  "authority": "authority_00000000000000000000000000000001",
+  "allowed": true,
+  "reason": "permitted",
+  "status": "succeeded",
+  "effect": "none",
+  "summary": "Navigated to example.com.",
+  "permissions": {
+    "checks": [
+      {
+        "requirements": [
+          "read"
+        ],
+        "host": "example.com",
+        "allowed": true,
+        "reason": "permitted",
+        "layers": []
+      }
+    ],
+    "truncated": false
+  },
+  "duration_ms": 412,
+  "observed": {
+    "host": "example.com",
+    "readiness": "complete",
+    "count": null,
+    "width": null,
+    "height": null
+  },
+  "channel": "mcp",
+  "provenance": {
+    "connection_id": "connection_00000000000000000000000000000001",
+    "observed_at_ms": 1790000000000,
+    "channel": "mcp"
+  },
+  "browser": "Chromium"
+}

@@ -7,7 +7,7 @@ const PERMISSION_CHECK_LIMIT: usize = 64;
 
 /// The evaluated grant identities in one authority layer, without its policy payload.
 ///
-/// Receipts written before a field left this type still read, so it does not deny unknown fields.
+/// A reader ignores fields it does not know, so this type does not deny unknown fields.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LayerEvidence {
     pub tier: String,
@@ -78,7 +78,6 @@ mod tests {
             snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
         assert!(!decision.allowed);
         assert!(!refused.layers[0].allowed);
-        assert!(!refused.request_restricted && !refused.request_evaluated);
         assert!(crate::language::history::permission(&refused).starts_with("Refused"));
         let (decision, protected) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("chrome://extensions"));
@@ -119,7 +118,7 @@ mod tests {
 
 /// One actual permission boundary; a host never includes its URL path or query.
 ///
-/// Receipts written before a field left this type still read, so it does not deny unknown fields.
+/// A reader ignores fields it does not know, so this type does not deny unknown fields.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PermissionCheck {
     pub requirements: CapabilitySet,
@@ -127,15 +126,10 @@ pub struct PermissionCheck {
     pub allowed: bool,
     pub reason: ReasonCode,
     pub layers: Vec<LayerEvidence>,
-    /// Legacy receipt field: a retired caller restriction was supplied.
-    pub request_restricted: bool,
-    /// Legacy receipt field: that historical decision evaluated the caller restriction.
-    pub request_evaluated: bool,
 }
 
 /// A bounded trace. Omission is explicit and never implies complete policy coverage.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PermissionTrace {
     pub checks: Vec<PermissionCheck>,
     pub truncated: bool,
@@ -209,8 +203,6 @@ impl AuthoritySnapshot {
             allowed: decision.allowed,
             reason: decision.reason,
             layers: vec![],
-            request_restricted: false,
-            request_evaluated: false,
         }
     }
 }

@@ -77,6 +77,4 @@ pub struct DocumentObservation {
     pub unavailable: Vec<String>,
     /// The single output budget omitted supported content.
     pub limited_by_size: bool,
-    /// Historical masked-region count; current adapters report zero.
-    pub masked_regions: usize,
 }

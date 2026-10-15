@@ -83,14 +83,13 @@ impl AuditProjection {
 
 /// Failure facts permitted in durable history. No variant can hold arbitrary text or results.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "reason", rename_all = "snake_case")]
 pub enum AuditRefusal {
     InvalidRequest,
     CancelledBeforeStart,
     DeadlineBeforeStart,
     Capacity,
     AuthorityBlocked { cause: BlockedReason },
-    RequestRestricted { cause: BlockedReason },
     LocalInterlock,
     CredentialHandoff,
     CredentialAuthorization,
@@ -260,10 +259,10 @@ impl Refusal {
     }
 }
 
-/// Read legacy audit failure facts without keeping their arbitrary payloads.
+/// Read audit failure facts without keeping arbitrary payloads.
 ///
-/// Historical records predate the closed projection. Retain recognized closed metadata and
-/// discard arbitrary details; unrecognized shapes omit this optional field, preserving the record.
+/// Retain recognized closed metadata and discard the rest. A fact this release does not know
+/// omits this optional field and preserves the record.
 pub fn read_refusal<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<AuditRefusal>, D::Error> {

@@ -16,12 +16,11 @@ use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::audit::AuditRecord;
 use crate::browser::BrowserPort;
 use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
-use crate::governance::{
-    AuditRecord, AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport,
-};
+use crate::governance::{AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessError, HarnessRegistry,
     HarnessSetupResult, HarnessSummary,
@@ -158,10 +157,7 @@ impl WorkbenchProjection {
             while let Some(line) = crate::audit::read_line(&mut reader)? {
                 match line {
                     crate::audit::AuditLine::Receipt(record) => {
-                        // Keep the audit bytes intact, but never present passive browsing as work.
-                        if record.tool != crate::language::history::RETIRED_BROWSER_LANDING {
-                            history::merge(&mut restored, &record, false);
-                        }
+                        history::merge(&mut restored, &record, false);
                     }
                     crate::audit::AuditLine::Gap(gap) => {
                         // A failed sync may have written the marker before a retry wrote it again.
@@ -1304,7 +1300,7 @@ impl From<AuditRecord> for HistoryItem {
                     .channel
                     .map(|channel| crate::provenance::Attribution::legacy(channel).details())
             });
-        let requirements = value.requirements();
+        let requirements = value.capabilities;
         let capability = requirements.label();
         let permission_explanations = value
             .permissions

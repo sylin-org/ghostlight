@@ -9,8 +9,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::governance::AuditRecord;
+use crate::governance::{evidence, AuthoritySnapshot, CapabilitySet, Decision, ReasonCode};
+use crate::intake::session::IntakeChannel;
+use crate::language::audit::{AuditProjection, AuditRefusal};
 use crate::language::audit_health::{AuditHealth, Storage, StorageFailure};
+use crate::language::outcome::Observed;
 use crate::workbench::WorkbenchProjection;
 
 /// A failed destination receives at most one recovery attempt per interval.
@@ -30,6 +33,192 @@ pub struct AuditGap {
 #[derive(Serialize, Deserialize)]
 struct GapEntry {
     audit_gap: AuditGap,
+}
+
+/// A content-minimized audit record produced after a terminal outcome.
+///
+/// The line is frozen at version 2. A reader ignores fields it does not know and never writes
+/// them back. This is a persistence reader, never an authority or command input (ADR-0163).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AuditRecord {
+    /// Child receipts whose storage could not be confirmed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub unconfirmed_history_steps: u32,
+    /// Closed document coverage facts, excluding human-only embedded host names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<crate::language::coverage::Coverage>,
+    /// Wall-clock time in Unix milliseconds.
+    pub timestamp_ms: u64,
+    /// Opaque invocation handle.
+    pub invocation: String,
+    /// Opaque workspace handle.
+    pub workspace: String,
+    /// Exact catalog tool name.
+    pub tool: String,
+    /// Complete independent RAWX requirement set.
+    #[serde(default)]
+    pub capabilities: CapabilitySet,
+    /// Opaque immutable authority version.
+    pub authority: String,
+    /// Monotonic signed managed-policy publish sequence, when managed authority was active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_seq: Option<u64>,
+    /// Whether final-boundary authority admitted the work.
+    pub allowed: bool,
+    /// Stable reason code.
+    pub reason: ReasonCode,
+    /// Stable authored rule when policy made this decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_rule: Option<String>,
+    /// Stable content-free correlation handle for an authored denial.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denial_id: Option<String>,
+    /// Tighten-only tier that supplied the deciding rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_tier: Option<String>,
+    /// Stable grant id that supplied the deciding rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<String>,
+    /// Terminal status vocabulary.
+    pub status: String,
+    /// Terminal effect class.
+    pub effect: String,
+    /// Ghostlight-authored sentence naming what happened, with an optional governed target name.
+    #[serde(default)]
+    pub summary: String,
+    /// Closed language-authored failure metadata. Facts this release does not know are dropped on read.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::language::audit::read_refusal"
+    )]
+    pub refusal_facts: Option<AuditRefusal>,
+    /// Payload-free counts and recovery cause for a flow or sequence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<crate::language::composition::CompositionProgress>,
+    /// Child correlation; absence identifies a direct operation or parent aggregate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<crate::language::history::StepReceipt>,
+    /// Canonical child tools, without caller-supplied labels or arguments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub composition_tools: Vec<String>,
+    /// Evidence from actual permission evaluations under this invocation's snapshot.
+    #[serde(default)]
+    pub permissions: evidence::PermissionTrace,
+    /// How long the invocation took, from decode to terminal outcome.
+    ///
+    /// For a navigation this is the time to a governed, settled landing.
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// What the action did, merged from browser-seam landing facts and outcome measurements.
+    #[serde(default)]
+    pub observed: Observed,
+    /// Which intake the work arrived on. Attribution only, never authority (ADR-0105).
+    ///
+    /// Absent when the workspace was already gone by the time the record was written.
+    #[serde(default)]
+    pub channel: Option<IntakeChannel>,
+    /// Bounded original-connection evidence; claimed labels never enter this durable type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::provenance::Attribution>,
+    /// Persistent browser family or product name that performed this work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+impl AuditRecord {
+    /// Construct a content-minimized audit record at the current time.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn now(
+        invocation: &str,
+        workspace: &str,
+        tool: &'static str,
+        capabilities: impl Into<CapabilitySet>,
+        authority: &str,
+        decision: Decision,
+        status: &str,
+        effect: &str,
+        language: &AuditProjection,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            unconfirmed_history_steps: language.unconfirmed_history_steps(),
+            timestamp_ms: unix_ms(),
+            invocation: invocation.into(),
+            workspace: workspace.into(),
+            tool: tool.into(),
+            capabilities: capabilities.into(),
+            authority: authority.into(),
+            policy_seq: None,
+            allowed: decision.allowed,
+            reason: decision.reason,
+            policy_rule: None,
+            denial_id: None,
+            policy_tier: None,
+            grant_id: None,
+            status: status.into(),
+            effect: effect.into(),
+            summary: language.summary().chars().take(500).collect(),
+            refusal_facts: language.refusal().cloned(),
+            composition: language.composition(),
+            coverage: language.coverage().cloned(),
+            step: None,
+            composition_tools: language.tools().to_vec(),
+            permissions: evidence::PermissionTrace::default(),
+            duration_ms,
+            observed: Observed::default(),
+            channel: None,
+            provenance: None,
+            browser: None,
+        }
+    }
+
+    /// Attach the browser family or product name that performed the work.
+    #[must_use]
+    pub fn with_browser(mut self, browser: Option<String>) -> Self {
+        self.browser = browser;
+        self
+    }
+
+    /// Attach the intake the work arrived on.
+    #[must_use]
+    pub fn from_channel(mut self, channel: Option<IntakeChannel>) -> Self {
+        self.channel = channel;
+        self
+    }
+
+    /// Attach one immutable connection snapshot and align the channel.
+    #[must_use]
+    pub fn with_provenance(mut self, provenance: Option<&crate::provenance::Attribution>) -> Self {
+        self.provenance = provenance.cloned();
+        self.channel = provenance.map(|value| value.channel);
+        self
+    }
+
+    /// Attach content-free policy attribution from the immutable snapshot that made the decision.
+    #[must_use]
+    pub fn with_policy(mut self, snapshot: &AuthoritySnapshot, decision: Decision) -> Self {
+        self.policy_seq = snapshot.managed_sequence();
+        self.policy_rule = decision.policy_rule().map(str::to_owned);
+        self.denial_id = decision.denial_id();
+        if let Some((tier, grant)) = snapshot.attribution(decision) {
+            self.policy_tier = Some(tier.into());
+            self.grant_id = grant.map(str::to_owned);
+        }
+        self
+    }
+
+    /// Attach the action's closed observation after completion.
+    #[must_use]
+    pub fn with_observation(mut self, observed: Observed) -> Self {
+        self.observed = observed;
+        self
+    }
 }
 
 /// Separate content-minimized persistence port. Success acknowledges storage, not a browser effect.
@@ -490,134 +679,133 @@ mod tests {
             .history
         };
 
-        for kind in [CompositionKind::Flow, CompositionKind::Sequence] {
-            let sink = Arc::new(SwitchSink::default());
-            let projection = WorkbenchProjection::default();
-            let recorder = AuditRecorder::new(sink.clone(), projection.clone());
-            let mut child = AuditRecord::now(
-                "composition",
-                "workspace",
-                "browser_fill_form",
-                CapabilitySet::READ.union(CapabilitySet::WRITE),
-                "authority",
-                Decision::permitted(),
-                "succeeded",
-                "applied",
-                &Outcome::FormFilled {
-                    fields: 1,
-                    submitted: false,
-                    host: Some("example.com".into()),
-                    held: Vec::new(),
-                }
-                .audit(),
-                1,
-            );
-            child.step = Some(StepReceipt {
-                parent: kind,
-                position: 1,
-                total: 2,
-                preparation_failed: false,
-            });
-            sink.fails.store(true, Ordering::SeqCst);
-            assert_eq!(recorder.record(&child), Storage::Unconfirmed);
-            sink.fails.store(false, Ordering::SeqCst);
-            recorder.recover_at(Instant::now() + RECOVERY_INTERVAL);
-            assert!(!recorder.health().unavailable());
+        let kind = CompositionKind::Flow;
+        let sink = Arc::new(SwitchSink::default());
+        let projection = WorkbenchProjection::default();
+        let recorder = AuditRecorder::new(sink.clone(), projection.clone());
+        let mut child = AuditRecord::now(
+            "composition",
+            "workspace",
+            "browser_fill_form",
+            CapabilitySet::READ.union(CapabilitySet::WRITE),
+            "authority",
+            Decision::permitted(),
+            "succeeded",
+            "applied",
+            &Outcome::FormFilled {
+                fields: 1,
+                submitted: false,
+                host: Some("example.com".into()),
+                held: Vec::new(),
+            }
+            .audit(),
+            1,
+        );
+        child.step = Some(StepReceipt {
+            parent: kind,
+            position: 1,
+            total: 2,
+            preparation_failed: false,
+        });
+        sink.fails.store(true, Ordering::SeqCst);
+        assert_eq!(recorder.record(&child), Storage::Unconfirmed);
+        sink.fails.store(false, Ordering::SeqCst);
+        recorder.recover_at(Instant::now() + RECOVERY_INTERVAL);
+        assert!(!recorder.health().unavailable());
 
-            let mut second = record("composition");
-            second.step = Some(StepReceipt {
-                parent: kind,
-                position: 2,
+        let mut second = record("composition");
+        second.step = Some(StepReceipt {
+            parent: kind,
+            position: 2,
+            total: 2,
+            preparation_failed: false,
+        });
+        assert_eq!(recorder.record(&second), Storage::Saved);
+        let progress = CompositionProgress {
+            counts: StepCounts {
                 total: 2,
-                preparation_failed: false,
-            });
-            assert_eq!(recorder.record(&second), Storage::Saved);
-            let progress = CompositionProgress {
-                counts: StepCounts {
-                    total: 2,
-                    succeeded: 2,
-                    ..Default::default()
-                },
-                effects: EffectCounts {
-                    applied: 1,
-                    none: 1,
-                    ..Default::default()
-                },
+                succeeded: 2,
                 ..Default::default()
-            };
-            let parent = AuditRecord::now(
-                "composition",
-                "workspace",
-                kind.tool(),
-                CapabilitySet::EMPTY,
-                "authority",
-                Decision::permitted(),
-                "succeeded",
-                "applied",
-                &Outcome::CompositionRan(progress)
-                    .audit()
-                    .with_unconfirmed_history(1),
-                2,
-            );
-            assert_eq!(recorder.record(&parent), Storage::Saved);
-            let live = history(projection.clone());
-            assert_eq!(live.len(), 1);
-            assert_eq!(live[0].status, "succeeded");
-            assert_eq!(live[0].effect, "applied");
-            assert_eq!(live[0].storage, Storage::Saved);
-            assert!(live[0].storage_detail.contains("Some step history"));
-            let first = live[0].steps[0].record.as_ref().unwrap();
-            assert_eq!(first.storage, Storage::Unconfirmed);
-            assert_eq!(first.status, "succeeded");
-            assert_eq!(first.effect, "applied");
-            assert_eq!(
-                sink.writes.load(Ordering::SeqCst),
-                3,
-                "recovery does not retry the failed receipt"
-            );
+            },
+            effects: EffectCounts {
+                applied: 1,
+                none: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let parent = AuditRecord::now(
+            "composition",
+            "workspace",
+            kind.tool(),
+            CapabilitySet::EMPTY,
+            "authority",
+            Decision::permitted(),
+            "succeeded",
+            "applied",
+            &Outcome::CompositionRan(progress)
+                .audit()
+                .with_unconfirmed_history(1),
+            2,
+        );
+        assert_eq!(recorder.record(&parent), Storage::Saved);
+        let live = history(projection.clone());
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].status, "succeeded");
+        assert_eq!(live[0].effect, "applied");
+        assert_eq!(live[0].storage, Storage::Saved);
+        assert!(live[0].storage_detail.contains("Some step history"));
+        let first = live[0].steps[0].record.as_ref().unwrap();
+        assert_eq!(first.storage, Storage::Unconfirmed);
+        assert_eq!(first.status, "succeeded");
+        assert_eq!(first.effect, "applied");
+        assert_eq!(
+            sink.writes.load(Ordering::SeqCst),
+            3,
+            "recovery does not retry the failed receipt"
+        );
 
-            // Reload only what the destination confirmed, including its explicit gap marker.
-            let path = std::env::temp_dir().join(format!(
-                "ghostlight-composition-recovery-{}.jsonl",
-                uuid::Uuid::new_v4()
-            ));
-            let mut persisted = Vec::new();
-            for gap in sink.gaps.lock().unwrap().iter() {
-                assert_eq!(gap.unconfirmed_receipts, 1);
-                serde_json::to_writer(
-                    &mut persisted,
-                    &GapEntry {
-                        audit_gap: gap.clone(),
-                    },
-                )
-                .unwrap();
-                persisted.push(b'\n');
-            }
-            for record in sink.records.lock().unwrap().iter() {
-                serde_json::to_writer(&mut persisted, record).unwrap();
-                persisted.push(b'\n');
-            }
-            assert!(!String::from_utf8_lossy(&persisted).contains("PRIVATE_"));
-            fs::write(&path, persisted).unwrap();
-            let restored = WorkbenchProjection::default();
-            restored.load_history(&path).unwrap();
-            fs::remove_file(path).unwrap();
-            let history = history(restored.clone());
-            assert_eq!(history.len(), 1);
-            assert_eq!(history[0].status, "succeeded");
-            assert_eq!(history[0].effect, "applied");
-            assert_eq!(history[0].storage, Storage::Saved);
-            assert_eq!(history[0].steps[0].state, StepHistoryState::Unconfirmed);
-            assert!(
-                history[0].steps[0].record.is_none(),
-                "restart must not fabricate the missing child's receipt"
-            );
-            assert_eq!(
-                history[0].steps[1].record.as_ref().unwrap().storage,
-                Storage::Saved
-            );
-            assert_eq!(restored.audit_health().unconfirmed_receipts, 1);
+        // Reload only what the destination confirmed, including its explicit gap marker.
+        let path = std::env::temp_dir().join(format!(
+            "ghostlight-composition-recovery-{}.jsonl",
+            uuid::Uuid::new_v4()
+        ));
+        let mut persisted = Vec::new();
+        for gap in sink.gaps.lock().unwrap().iter() {
+            assert_eq!(gap.unconfirmed_receipts, 1);
+            serde_json::to_writer(
+                &mut persisted,
+                &GapEntry {
+                    audit_gap: gap.clone(),
+                },
+            )
+            .unwrap();
+            persisted.push(b'\n');
         }
+        for record in sink.records.lock().unwrap().iter() {
+            serde_json::to_writer(&mut persisted, record).unwrap();
+            persisted.push(b'\n');
+        }
+        assert!(!String::from_utf8_lossy(&persisted).contains("PRIVATE_"));
+        fs::write(&path, persisted).unwrap();
+        let restored = WorkbenchProjection::default();
+        restored.load_history(&path).unwrap();
+        fs::remove_file(path).unwrap();
+        let history = history(restored.clone());
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].status, "succeeded");
+        assert_eq!(history[0].effect, "applied");
+        assert_eq!(history[0].storage, Storage::Saved);
+        assert_eq!(history[0].steps[0].state, StepHistoryState::Unconfirmed);
+        assert!(
+            history[0].steps[0].record.is_none(),
+            "restart must not fabricate the missing child's receipt"
+        );
+        assert_eq!(
+            history[0].steps[1].record.as_ref().unwrap().storage,
+            Storage::Saved
+        );
+        assert_eq!(restored.audit_health().unconfirmed_receipts, 1);
     }
 
     #[test]
@@ -744,3 +932,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod record_tests;

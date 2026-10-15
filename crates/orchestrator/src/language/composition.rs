@@ -21,7 +21,6 @@ pub struct StepCounts {
 
 /// Child effect counts retain known progress even when another child is uncertain.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct EffectCounts {
     pub none: usize,
     pub applied: usize,
@@ -77,7 +76,6 @@ impl StepCause {
 
 /// One-based position and reason for the problem most relevant to recovery.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StepIssue {
     pub step: usize,
     pub cause: StepCause,
@@ -85,7 +83,6 @@ pub struct StepIssue {
 
 /// One composition's bounded, payload-free account, shared by results and retained history.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct CompositionProgress {
     pub counts: StepCounts,
     pub effects: EffectCounts,

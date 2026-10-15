@@ -71,13 +71,12 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
         assert_eq!(executor.governance.runtime_state(), control);
         let records = audit.0.lock().unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].requirements(), CapabilitySet::EMPTY);
+        assert_eq!(records[0].capabilities, CapabilitySet::EMPTY);
         assert_eq!(records[0].permissions.checks.len(), 1);
         let evidence = &records[0].permissions.checks[0];
         assert!(evidence.allowed);
         assert_eq!(evidence.requirements, CapabilitySet::EMPTY);
         assert!(evidence.layers.is_empty());
-        assert!(!evidence.request_evaluated);
         drop(records);
         drop(lease);
         let blocked = executor.execute(

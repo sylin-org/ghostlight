@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 /// Coverage relative to the requested supported scope, independent of browser effects.
 /// Multi-primitive operations retain each count's observed maximum, not a sum of repeated reads.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Coverage {
     /// The operation targets selected documents rather than the whole composed page.
     pub targeted: bool,
@@ -19,8 +18,6 @@ pub struct Coverage {
     pub unavailable_documents: usize,
     /// An output ceiling omitted otherwise permitted content.
     pub limited_by_size: bool,
-    /// Historical masked-capture count. New screenshots are complete or refused.
-    pub masked_regions: usize,
 }
 
 impl Coverage {
@@ -36,7 +33,6 @@ impl Coverage {
             .unavailable_documents
             .max(previous.unavailable_documents);
         self.limited_by_size |= previous.limited_by_size;
-        self.masked_regions = self.masked_regions.max(previous.masked_regions);
     }
     /// Whether the requested observation has an explicit coverage limitation.
     #[must_use]

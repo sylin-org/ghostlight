@@ -169,7 +169,7 @@ async function runAdapter(peer) {
     if (scope) {
       assert.deepEqual(scope.allowed, ["powershell-document"], "the CLI observes only the admitted document");
       result = { outcome: "in_documents", result, observation: {
-        visited: scope.allowed, unavailable: [], limited_by_size: false, masked_regions: 0
+        visited: scope.allowed, unavailable: [], limited_by_size: false
       } };
     }
     peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });

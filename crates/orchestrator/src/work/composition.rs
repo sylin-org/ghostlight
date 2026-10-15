@@ -215,13 +215,12 @@ impl Composition {
 
 /// The child's coverage when something limited it, read from the canonical child envelope.
 ///
-/// A limitation is any exclusion, unavailable document, size ceiling or masked region. A child
-/// that inspected everything it was asked to contributes nothing.
+/// A limitation is any exclusion, unavailable document or size ceiling. A child that inspected
+/// everything it was asked to contributes nothing.
 fn limited_coverage(terminal: &Terminal) -> Option<Coverage> {
     let coverage: Coverage =
         serde_json::from_value(terminal.result.facts.get(COVERAGE)?.clone()).ok()?;
-    let limited =
-        coverage.limited() || coverage.page_excluded_documents > 0 || coverage.masked_regions > 0;
+    let limited = coverage.limited() || coverage.page_excluded_documents > 0;
     limited.then_some(coverage)
 }
 

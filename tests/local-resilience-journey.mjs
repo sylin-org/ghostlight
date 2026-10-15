@@ -108,7 +108,7 @@ try {
     const command = request.command.primitive ?? request.command;
     requests.push({ ...request, command });
     function reply(result) {
-      if (scope) result = { outcome: "in_documents", result, observation: { visited: scope.allowed, unavailable: [], limited_by_size: false, masked_regions: 0 } };
+      if (scope) result = { outcome: "in_documents", result, observation: { visited: scope.allowed, unavailable: [], limited_by_size: false } };
       browser.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
     }
     if (command.command === "present") reply({ outcome: "presented", rendered: true });

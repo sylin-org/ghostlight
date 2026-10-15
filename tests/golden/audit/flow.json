@@ -1,0 +1,116 @@
+[
+  {
+    "coverage": {
+      "targeted": false,
+      "inspected_documents": 1,
+      "excluded_documents": 0,
+      "page_excluded_documents": 0,
+      "unavailable_documents": 0,
+      "limited_by_size": false
+    },
+    "timestamp_ms": 1790000000000,
+    "invocation": "invocation_00000000000000000000000000000003",
+    "workspace": "workspace_00000000000000000000000000000001",
+    "tool": "browser_read",
+    "capabilities": [
+      "read"
+    ],
+    "authority": "authority_00000000000000000000000000000001",
+    "allowed": true,
+    "reason": "permitted",
+    "status": "succeeded",
+    "effect": "none",
+    "summary": "Read 120 words from example.com.",
+    "step": {
+      "parent": "flow",
+      "position": 1,
+      "total": 2,
+      "preparation_failed": false
+    },
+    "permissions": {
+      "checks": [
+        {
+          "requirements": [
+            "read"
+          ],
+          "host": "example.com",
+          "allowed": true,
+          "reason": "permitted",
+          "layers": []
+        }
+      ],
+      "truncated": false
+    },
+    "duration_ms": 38,
+    "observed": {
+      "host": "example.com",
+      "readiness": null,
+      "count": 120,
+      "width": null,
+      "height": null
+    },
+    "channel": "mcp",
+    "provenance": {
+      "connection_id": "connection_00000000000000000000000000000001",
+      "observed_at_ms": 1790000000000,
+      "channel": "mcp"
+    },
+    "browser": "Chromium"
+  },
+  {
+    "timestamp_ms": 1790000000000,
+    "invocation": "invocation_00000000000000000000000000000003",
+    "workspace": "workspace_00000000000000000000000000000001",
+    "tool": "browser_flow",
+    "capabilities": [],
+    "authority": "authority_00000000000000000000000000000001",
+    "allowed": true,
+    "reason": "permitted",
+    "status": "succeeded",
+    "effect": "applied",
+    "summary": "Completed all 2 steps.",
+    "composition": {
+      "counts": {
+        "total": 2,
+        "succeeded": 2,
+        "failed": 0,
+        "blocked": 0,
+        "cancelled": 0,
+        "unknown": 0,
+        "not_started": 0,
+        "not_run": 0
+      },
+      "effects": {
+        "none": 1,
+        "applied": 1,
+        "partial": 0,
+        "unknown": 0
+      },
+      "stopped": false,
+      "issue": null
+    },
+    "composition_tools": [
+      "browser_read",
+      "browser_click"
+    ],
+    "permissions": {
+      "checks": [],
+      "truncated": false
+    },
+    "duration_ms": 951,
+    "observed": {
+      "host": null,
+      "readiness": null,
+      "count": null,
+      "width": null,
+      "height": null
+    },
+    "channel": "mcp",
+    "provenance": {
+      "connection_id": "connection_00000000000000000000000000000001",
+      "observed_at_ms": 1790000000000,
+      "channel": "mcp"
+    },
+    "browser": "Chromium"
+  }
+]

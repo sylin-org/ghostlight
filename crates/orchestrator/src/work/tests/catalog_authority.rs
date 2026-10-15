@@ -684,9 +684,7 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
                         "{label}: retain every required capability"
                     );
                     assert!(
-                        checks
-                            .iter()
-                            .all(|check| !check.request_restricted && !check.layers.is_empty()),
+                        checks.iter().all(|check| !check.layers.is_empty()),
                         "{label}: configured policy owns the denial"
                     );
                 }
