@@ -5,9 +5,12 @@
 //! stable across service upgrades: length-prefixed framing, the fixed home and its file names,
 //! the tolerant runtime-file reader, the opening frame and its replies, and the failure-template
 //! file, plus the mechanics every connector repeats: starting the service, watching the parent,
-//! writing diagnostics, and opening a connection. It authors no words and makes no product
-//! decisions. The `os` module is the audited platform layer: the only `unsafe` in the crate, it
-//! starts the service with no inherited handles and, on Windows, identifies a process.
+//! writing diagnostics, and opening a connection. The `endpoint` module is the relay protocol 4
+//! transport, a named pipe on Windows and a Unix socket on Linux, with a connection type both
+//! ends share. It authors no words and makes no product decisions. The `os` module is the
+//! audited platform layer: the only `unsafe` in the crate, it starts the service with no
+//! inherited handles, identifies a process on Windows, and holds the pipe and peer-user calls the
+//! endpoint needs.
 //!
 //! A change under a published relay revision needs a revision bump (`RELAY` and the crate
 //! version); `tests/guards/connectors.test.mjs` checks the source against the last release tag
@@ -17,6 +20,7 @@
 use std::time::Duration;
 
 pub mod client;
+pub mod endpoint;
 mod file;
 pub mod frame;
 pub mod home;

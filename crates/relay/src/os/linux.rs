@@ -1,7 +1,10 @@
-//! Linux detached process creation with no inherited descriptors.
+//! Linux detached process creation with no inherited descriptors, and the user identities the
+//! relay endpoint compares.
 
-use std::ffi::{c_int, c_long, c_ulong, OsStr};
+use std::ffi::{c_int, c_long, c_ulong, c_void, OsStr};
 use std::io;
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -32,6 +35,20 @@ const FALLBACK_DESCRIPTOR_LIMIT: u32 = 1024;
 /// The most descriptors the per-descriptor fallback sweeps, however high the limit is set.
 const MAX_SWEEP: u32 = 1 << 20;
 
+/// Socket option level: the socket layer itself.
+const SOL_SOCKET: c_int = 1;
+
+/// Socket option: the credentials of the peer of a connected Unix socket.
+const SO_PEERCRED: c_int = 17;
+
+/// The C `struct ucred`.
+#[repr(C)]
+struct Credentials {
+    process_id: i32,
+    user_id: u32,
+    group_id: u32,
+}
+
 /// The C `struct rlimit`.
 #[repr(C)]
 struct RLimit {
@@ -43,6 +60,47 @@ extern "C" {
     fn syscall(number: c_long, ...) -> c_long;
     fn fcntl(descriptor: c_int, command: c_int, ...) -> c_int;
     fn getrlimit(resource: c_int, limit: *mut RLimit) -> c_int;
+    fn getuid() -> u32;
+    fn getsockopt(
+        socket: c_int,
+        level: c_int,
+        option: c_int,
+        value: *mut c_void,
+        length: *mut u32,
+    ) -> c_int;
+}
+
+/// The user id this process runs as.
+#[must_use]
+pub fn current_uid() -> u32 {
+    // SAFETY: getuid takes no arguments, cannot fail and touches no memory.
+    unsafe { getuid() }
+}
+
+/// The user id of the process on the other end of the connected Unix socket `stream`, as the
+/// kernel recorded it when the connection was made.
+pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    let mut credentials = Credentials {
+        process_id: 0,
+        user_id: 0,
+        group_id: 0,
+    };
+    let mut length = size_of::<Credentials>() as u32;
+    // SAFETY: the descriptor is open for the borrow; value and length describe the writable
+    // credentials struct for the whole call.
+    let read = unsafe {
+        getsockopt(
+            stream.as_raw_fd(),
+            SOL_SOCKET,
+            SO_PEERCRED,
+            (&raw mut credentials).cast(),
+            &mut length,
+        )
+    };
+    if read != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(credentials.user_id)
 }
 
 /// Start `executable` with `arguments` in its own process group, with `directory` as its working

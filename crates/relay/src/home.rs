@@ -26,6 +26,12 @@ pub const LEASE_FILE_NAME: &str = "ghostlight-runtime.lock";
 /// Failure-template file: the sentences the service handed the MCP connector in advance.
 pub const TEMPLATES_FILE_NAME: &str = "relay-templates.json";
 
+/// Directory under the home that holds the service's run-time objects.
+pub const RUN_DIRECTORY_NAME: &str = "run";
+
+/// The relay socket under the run directory, on Linux.
+pub const RELAY_SOCKET_NAME: &str = "relay.sock";
+
 /// Directory holding the installed executables.
 pub const BIN_DIRECTORY_NAME: &str = "bin";
 
