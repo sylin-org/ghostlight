@@ -24,16 +24,14 @@
       <h2>Install it</h2>
       <p>In a terminal:</p>
       <pre><code>npx -y ghostlight install</code></pre>
-      <p>On Debian or Ubuntu you can install the package instead:</p>
-      <pre><code>sudo apt install ./ghostlight_&lt;version&gt;_amd64.deb</code></pre>
-      <p>Either route registers this browser and any MCP clients it finds. Nothing runs in the
-      background until an agent or your browser asks for it.</p>
+      <p>This installs Ghostlight on this computer and registers this browser and the MCP clients it
+      finds.</p>
 
       <hr>
       <h2>Then check it</h2>
-      <p>Run <code>ghostlight doctor</code>. It reports the whole chain: this extension, the native
-      messaging registration, the connector, and the local service. When it is green, this
-      extension's connection turns green on its own.</p>
+      <p>Run <code>ghostlight doctor</code>. It reports this computer's side: the browser
+      registrations, the MCP clients and whether Ghostlight is running. When this computer is
+      ready, this extension connects on its own.</p>
 
       <hr>
       <h2>If your browser came from Snap or Flatpak</h2>

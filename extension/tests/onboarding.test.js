@@ -90,6 +90,7 @@ test("the bundled setup page needs no network and contains no product state", ()
   assert.ok(markup.includes(NOT_INSTALLED_HERE));
   assert.ok(markup.includes("npx -y ghostlight install"));
   assert.ok(markup.includes("ghostlight doctor"));
+  assert.doesNotMatch(markup, /apt install|\.deb|background/i);
   // One outbound link is allowed, to the canonical walkthrough. Nothing may be fetched to render.
   assert.doesNotMatch(markup, /<script/);
   assert.doesNotMatch(markup, /<img[^>]+src="https?:/);

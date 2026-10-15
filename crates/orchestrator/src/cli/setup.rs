@@ -316,7 +316,6 @@ pub fn finish_setup(
     println!("Ghostlight's local connection is ready.");
     let here = environment::current();
     println!("{}", here.location());
-    println!("{}", environment::BACKGROUND_POSTURE);
     if let Some(caveat) = here.caveat() {
         println!("{caveat}");
     }

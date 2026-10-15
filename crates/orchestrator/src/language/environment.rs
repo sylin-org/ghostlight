@@ -18,12 +18,6 @@ const WSL_KERNEL_MARKER: &str = "microsoft";
 /// Where a Linux kernel reports its release string.
 const KERNEL_RELEASE_PATH: &str = "/proc/sys/kernel/osrelease";
 
-/// What Ghostlight says once, at the end of a successful install, about running in the background.
-///
-/// A person arriving from a platform where this class of tool starts at login will otherwise read
-/// the absence of a resident process as a defect.
-pub const BACKGROUND_POSTURE: &str = "Ghostlight starts when your agent or your browser asks for it. Nothing runs in the background until then.";
-
 /// One row of the environment table.
 ///
 /// Rows are distinguished only where Ghostlight has something different to say. A desktop shell
@@ -257,14 +251,6 @@ mod tests {
         // A row that claims a tray must not be one of the shells that does not draw one.
         assert!(!Environment::LinuxGnome.location().contains("tray"));
         assert!(Environment::LinuxKde.location().contains("tray"));
-    }
-
-    #[test]
-    fn background_posture_sentence_matches_the_pinned_value() {
-        assert_eq!(
-            BACKGROUND_POSTURE,
-            "Ghostlight starts when your agent or your browser asks for it. Nothing runs in the background until then."
-        );
     }
 
     #[test]
