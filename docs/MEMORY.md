@@ -348,24 +348,21 @@ the owner wants, and what this project learned the hard way.
   [Bluefin evidence](testing/bluefin-fleet-2026-09-09.md) and the
   [Alpine installed repair](testing/alpine-musl-fleet-2026-09-09.md).
 
-- **An installer exit and a refreshed tool catalog do not prove replacement.** A
-  running old MCP connector can reconnect to the new service while retaining old
-  executable bytes. Compare every installed sibling to its intended package,
-  quiesce only exact image paths under the existing deployment lock, and verify
-  that a separate installation and an unrelated file reader both survive.
-- **Normalize only a proven packager transformation.** Tauri's NSIS bundler patches
-  the authority's bundle marker from `UNK` to `NSS` and then restores the raw build.
-  Full byte comparison after that exact in-memory substitution explains the hash
-  difference; a version string or an arbitrary hash exception does not.
+- **A deployment lock, an installer exit, or a refreshed tool catalog does not prove replacement**
+  (dev loop and the Windows installer alike). Clients respawn connectors during a swap, and a
+  running old connector can reconnect while keeping old bytes. Compare every installed sibling to
+  its intended package. Under the deployment lock, stop only exact destination image paths, bound to
+  process identity rather than file registration. Verify that a separate installation and an
+  unrelated file reader survive. Evidence: testing/windows-fleet-packaging-2026-09-09.md.
 
 - **Release identity precedes asset transport.** GitHub redirects release assets to a signed CDN
   URL that does not identify the release tag. Resolve the latest release page first, validate the
   stable tag, then pin checksums and every sibling download to that one release. The actual Linux
   one-line installation and `tests/installer-shell.mjs` caught the old final-asset-URL assumption.
-- **Fixed archive timestamps do not guarantee reproducible bytes.** .NET's Pax writer also puts
-  the packager PID into extended-header names. The portable package's fixed short roster uses
-  Ustar now; test it in separate packager processes, since two calls in one process miss this bug.
-  Compression-runtime identity remains part of the reproduction environment.
+- **Fixed archive timestamps do not guarantee reproducible bytes.** A writer can embed per-process
+  data (the retired .NET tar path put the packager PID in Pax headers, 4a7f4dc4). Two packaging
+  calls in one process miss this, so prove determinism across separate packager processes, as
+  tests/winget-archive.ps1 does. The compression runtime is part of the reproduction environment.
 
 Every one of these cost something to learn.
 
@@ -376,28 +373,18 @@ Every one of these cost something to learn.
   Compare actual serialized fields against every catalog output schema and retain
   at least one real client that validates structured output.
 
-
 - **A filled DOM is not proof that a controlled editor retained the draft.** Reddit discarded
   `textContent` plus generic synthetic input while Ghostlight reported success. Native browser
   editing preserves the editor's transaction; regression fixtures must reject the old mechanism,
   and installed verification must read the retained editor value or inspect a screenshot.
-- **A dirty indicator is not proof that an ordinary form retained the draft.** A React profile
-  form lost synthetic edits, but later native edits also reached the actual React Hook Form model
-  before the page replaced that model. Absence of a DOM reset event does not exclude a library
-  reset. The site's focus-triggered user refresh changed an object dependency and reran profile
-  initialization, which reset valid edits. Both Ghostlight and Codex reproduced it under normal
-  tab lifecycle. The initial input-only diagnosis was too strong. Verify retained values through a later
-  framework render and real tab lifecycle, not just immediate DOM readback or event delivery.
-- **Automation focus emulation can invalidate a tab-switch comparison.** An inactive Codex-controlled
-  tab reported visible/focused until focus emulation was disabled. Playwright intentionally uses
-  this mechanism too. A controlled comparison passed with emulation and failed without it for
-  both tools. Verify browser tab state and document visibility together, and restore
-  ordinary lifecycle behavior before declaring a draft retained for the user.
-- **Framework diagnostics must follow current state.** A wrapper in one React props object can
-  log only the first change while later renders replace that object and the current handler
-  continues updating the model. Use an authored real-framework fixture and current state reads.
-  See [Research 29](research/29-form-retention-focus-and-frameworks-2026-09.md) for the September
-  13 correction, live evidence, and matching upstream reports.
+- **A dirty indicator is not proof that a form retained the draft.** Verify retained values after a
+  later framework render under ordinary tab lifecycle: restore normal focus behavior and check tab
+  state against document visibility. Ghostlight itself emulates focus on controlled tabs (ADR-0168),
+  so a pass under Ghostlight control alone is not retention evidence. Absence of a DOM reset event
+  does not exclude a library reset. Diagnose with an authored real-framework fixture and
+  current-state reads; a wrapper on one React props object can log only the first change. Evidence
+  and the September 13 correction: [Research
+  29](research/29-form-retention-focus-and-frameworks-2026-09.md).
 - **Controlled-tab focus has an explicit lifetime.** The owner approved focus emulation while
   controlled debugger tabs have active runtime control (ADR-0168). Keep it between tool calls;
   restore normal behavior on pause, stop, disconnect, or release. A model's final response is
@@ -407,14 +394,14 @@ Every one of these cost something to learn.
   tabs afterward. Restore the adapter's opaque cache from explicit service work, without using
   group labels, opener relationships, or passive browser events as ownership (ADR-0168).
 - **Guardrail tests must prove permitted work too.** A caller supplying exactly the advertised
-  capability set must complete the operation, including its landing and export checks. Assert
-  actual retained values, effect counts, and captured pixels independently of receipts. Form-batch
-  validation must cover every frame before the first edit; checking each field only when its turn
-  arrives can change an earlier field before discovering a known invalid later one. The full
-  hardening suite and its feature map live in `docs/tasks/security-hardening/regression-suite.md`.
-  A tool name alone is not a complete input matrix: handles, selectors, and postconditions can
-  require different capabilities. Advertise and admit the complete request before effects, while
-  keeping the action's landing requirement separate from earlier lookup and later observation.
+  capability set must complete the operation, including its landing and export checks. Assert actual
+  retained values, effect counts, and captured pixels independently of receipts. For batches,
+  include a known-invalid later item and assert the earlier ones were not changed (ADR-0158 records
+  the September 7 failure and the preparation rule). The full hardening suite and its feature map
+  live in `docs/tasks/security-hardening/regression-suite.md`. A tool name alone is not a complete
+  input matrix: handles, selectors, and postconditions can require different capabilities. Advertise
+  and admit the complete request before effects, while keeping the action's landing requirement
+  separate from earlier lookup and later observation.
 
 - **Mocked debugger replies do not prove JavaScript completion semantics.** H3's real Chromium
   lane found that `awaitPromise` plus `replMode` returned an async wrapper's promise as `{}`;
@@ -423,12 +410,12 @@ Every one of these cost something to learn.
 
 - **A launcher channel re-verifies its download on every launch, so a hand-staged binary at its
   versioned cache path never runs.** `npx -y ghostlight` checksum-validates
-  `~/.ghostlight/bin/<version>/` against the published manifest before each spawn and
-  re-downloads on mismatch (2026-09-02, during the ADR-0150 verification): deploying to the npx
-  stage means publishing a release, and verifying an unreleased connector belongs in a
-  directory the launcher does not checksum. Routing, meanwhile, is configuration: the
-  `GHOSTLIGHT_RUNTIME_FILE` override (ADR-0150) steers a floating launcher entry at the
-  machine's real authority without touching its checksums.
+  `~/.ghostlight/bin/<version>/` against the published manifest before each spawn and re-downloads
+  on mismatch (2026-09-02, during the ADR-0150 verification): deploying to the npx stage means
+  publishing a release, and verifying an unreleased connector belongs in a directory the launcher
+  does not checksum. There is one fixed home per OS user (ADR-0197 Decision 10); journeys isolate
+  with the test-only GHOSTLIGHT_TEST_HOME, and an unreleased build runs from the development
+  marker's executable, not the npx cache.
 
 - **Cross-tree registration adoption requires a deliberate install.** Silent registration
   repair once adopted the machine toward whichever tree crossed the no-browser seam, which let
@@ -448,10 +435,14 @@ Every one of these cost something to learn.
   discarded frame's duration, so a thinned replay played back faster than the work it recorded.
   Fixed by moving the whole capability to the side that physically has it (ADR-0109), not by
   syncing the copies.
-- **Put a rule in the shape, not in a reviewer's memory.** "Bytes never cross" survives as a
-  variant that has nowhere to put them; a field everyone agrees not to fill does not. Where a
-  budget differs by path, say so per path: one number for every path is a contradiction waiting to
-  be discovered, and raising it only moves the contradiction.
+- **Put the rule in the shape; correctness kept by memory rots.** A rule a reviewer must remember,
+  or a hand-maintained list each new case must join, eventually misses one: the reduced-motion
+  selector list silently skipped new effects, and per-tool fact reporting would have left new tools
+  silent (7a33c4f6). Make it a type variant with nowhere to put the forbidden thing ("bytes never
+  cross"; a field everyone agrees not to fill does not survive). Otherwise derive the list from a
+  registry, or observe at the one seam every case already crosses. Where a budget differs by path,
+  state it per path: one number for every path is a contradiction waiting to be found, and raising
+  it only moves the contradiction.
 - **Trade fidelity, never coverage.** A bounded recorder that stops at its limit produces a replay
   that silently omits everything after. Whoever drops a frame folds its time into the frame before
   it, or the artifact misreports how long the work took.
@@ -460,16 +451,15 @@ Every one of these cost something to learn.
 - **Model-facing names describe authority, not implementation APIs.** CDP calls the primitive
   `Runtime.evaluate`, but page JavaScript can mutate and navigate, so the tool is
   `browser_execute`. Keep physical vocabulary behind the language boundary.
-- **Correctness kept by memory rots.** A hand-maintained list that each new case must join will
-  eventually miss one. Derive it from a registry, or observe at the one seam every case already
-  crosses.
 - **A guard that parses nothing passes everything.** Check every source-scraping test against a
   negative control. A guard can also go stale in the same commit that makes it stale: once a
   rendered string carries a fact, asserting that the fact appears *separately* stops protecting
   anything and starts pinning duplication in place.
-- **Replace only what changed**, decided from the per-crate source diff rather than the build
-  output. A binary that merely recompiled is not a changed fringe, and swapping it costs a killed
-  native host, an extension reload, and a browser reconnect for nothing.
+- **Replace only what changed.** A binary that merely recompiled is not a changed fringe; swapping
+  it costs a killed native host, an extension reload and a browser reconnect for nothing. The
+  installer replaces connectors only when the relay revision changes (ADR-0197 Decision 14); a
+  connector source change under one revision reaches an installed home only by a revision bump or
+  the forced replacement in DEV-LOOP.md.
 - **A delegated batch spec must say what a change makes redundant**, not only what it adds, or the
   executor is correct and the surface is repetitive.
 - **History helps people resume work.** Readable history is the default, with detail on demand
@@ -482,10 +472,11 @@ Every one of these cost something to learn.
   never proof that work did not run. Explain allowance from the actual evaluated grants as well
   as refusal. Expanded details stay open without extra alerts; wrappers never repeat action or
   denial counts. Automatic resumption needs a separate decision (ADR-0156).
-- **Completed means succeeded.** Flow and sequence keep unsuccessful and unreached work distinct.
-  Continue permits later work, never a false overall success. Known partial progress stays known;
-  recovery respects confirmed changes and never proposes replaying the entire composition.
-  Human controls and invocation limits take precedence (ADR-0133 H2b amendment).
+- **Completed means succeeded.** Flow keeps unsuccessful and unreached work distinct
+  (browser_sequence was folded into browser_flow; older sequence receipts still read back). Continue
+  permits later work, never a false overall success. Known partial progress stays known; recovery
+  respects confirmed changes and never proposes replaying the entire composition. Human controls and
+  invocation limits take precedence (ADR-0133 H2b amendment).
 - **Audit is metadata-only.** Never persist page content, results, screenshots, form values,
   scripts, paths, or file bytes. Governed attempted or landed hosts and normalized bounded names of
   action targets are the deliberate exceptions: they answer where the agent went and which visible
@@ -496,9 +487,10 @@ Every one of these cost something to learn.
   second describe call is both less truthful and more expensive.
 - **Reconnection is not availability, and attachment is not availability.** Put one idempotent
   recovery action at the failed-connection seam, then let a service-held lifetime lease decide
-  authority before discovery or presentation state exists. At the browser shore, only an
-  end-to-end acknowledgement proves that the extension consumes the attached relay stream;
-  operation silence cannot prove the opposite because healthy browser work may be quiet.
+  authority before discovery or presentation state exists. At the browser shore, only an end-to-end
+  acknowledgement proves that the extension consumes the attached relay stream; operation silence
+  cannot prove the opposite because healthy browser work may be quiet. (ADR-0104 D2, ADR-0113,
+  amended by ADR-0196 D12; see also the deadline lesson below).
 - **Async connection entry points must be single-flight.** A guard checked only before an `await`
   does not establish exclusive ownership. Startup, installation, and retry signals can all pass it,
   create competing native hosts, and leave two structurally live pipes with only one active
@@ -525,21 +517,16 @@ Every one of these cost something to learn.
   extension's visual layer, so verify visuals externally.
 - **Persistent scope and transient activity are different visual promises.** The border says what is
   controlled; cursors, scans, ripples, frames, and captions say what is happening now.
-- **Isolate live stacks when testing.** Build into a separate target directory, and stop processes
-  only by exact executable path, never by image name.
-- **A procfs PID may belong to an outer namespace.** A package fixture saw host PIDs in
-  `/proc` while its Python children and signals used guest PIDs. An `ESRCH` from the
-  mismatched number did not mean the authority had exited. Match the process's PID
-  namespace to the caller, retain both procfs and `NSpid` identities with start time,
-  and signal only the exact test process in the caller's namespace.
-- **Persistent package-test overlays need candidate-scoped user state.** A retained runtime file can
-  satisfy a file-exists wait before the new authority publishes, producing a truthful result about
-  the wrong candidate. Namespace the test home by candidate, and pass the effective Cargo target
-  directory explicitly when packaging so a host profile cannot redirect the binaries under test.
-- **An internal rewrite does not reset the user experience.** Preserve observable commands,
-  launchers, packages, identity, tests, and accumulated platform evidence unless the owner changes
-  them explicitly. The npm launcher is a mandatory Ghostlight entry point, and 1.0 may not ship
-  with a user-experience regression from 0.8.
+- **Stop processes only by exact executable path, never by image name.** This covers test cleanup as
+  well as installers: the user's installed stack, browser, and MCP clients may be running. An
+  image-name check matched the authority, missed the connectors, and would have stopped a separate
+  installation (docs/testing/windows-fleet-packaging-2026-09-09.md). Give each candidate fresh
+  state, because leftover runtime files or binaries can make a check pass for the wrong build.
+- **An internal rewrite does not reset the user experience.** The 1.0 rewrite dropped the 0.8 entry
+  points and 7022c6bd had to restore them. A rewrite keeps observable commands, launchers and
+  packages unless the owner changes them (AGENTS.md, Authority and historical continuity). The npm
+  launcher (`npx -y ghostlight install`, and a bare npm launch as MCP stdio) is a mandatory entry
+  point.
 - **A Windows GUI-subsystem executable is not a normal PowerShell pipeline child.** Ghostlight keeps
   its console-free desktop launch, but scripts that invoke the binary directly must use an explicit
   waited process with redirected stdout and stderr. `$LASTEXITCODE` and `&` are not a reliable CLI
@@ -548,31 +535,27 @@ Every one of these cost something to learn.
   event-loop helpers, and console hosts can make `MainWindowHandle` look healthy after the actual
   Tauri workbench has died. Windows desktop acceptance identifies the exact `Ghostlight` / `Tauri
   Window` HWND and checks its visible, minimized, Close, activation, and recreation states.
-- **Diff the public surfaces by name, not just the source tree.** The clean-room inventory compared
-  implementation and tests and still dropped the README's hero GIF, badge row, and onboarding
-  spine, the Homebrew formula template, the website publish path, the icon generator, and the
-  store-justification length guard -- a file-level "missing on the new branch" list reads as
-  intentional rewrite when it is really identity and release machinery. Root documents,
-  `packaging/`, `scripts/`, and legal guards need an explicit main-vs-branch reconciliation before
-  any rewrite is called complete (restored 2026-08-25).
-- **Two frame-id vocabularies do not translate; the parent's DOM is the truth.** CDP names frames
-  with strings, `chrome.webNavigation` with numbers, and the tab-level debugger session cannot see
-  out-of-process frames at all, so any bridge built on CDP identity silently covers only
-  same-process frames. The parent document's own DOM answers honestly: match the embed element by
-  URL, take its content-box origin, and compose offsets recursively (ADR-0138). One mechanism for
-  same-origin and cross-origin beats a fast path plus a fallback that fails exactly where the
-  fallback was for.
+- **Diff the public surfaces by name before calling a rewrite complete.** A file-level 'missing'
+  list reads as intentional rewrite when it is really identity and release machinery: the 1.0
+  clean-room dropped the README hero GIF, badge row and onboarding spine, the Homebrew template, the
+  website publish path, the icon generator and the store-justification length guard (restored
+  2026-08-25, 14397e9c). Before a break set lands on main, reconcile root documents, packaging/,
+  scripts/, store justifications and legal guards against main by name, and confirm each removal
+  against its ADR.
+- **Two frame-id vocabularies do not translate; the parent DOM is the truth.** CDP frame strings and
+  webNavigation numbers do not map onto each other, and the tab-level debugger cannot see
+  out-of-process frames, so a bridge built on CDP identity silently covers only same-process frames.
+  One mechanism for same- and cross-origin frames (ADR-0138 owns it) beats a fast path plus a
+  fallback that fails exactly where the fallback was for.
 - **Capability coverage does not transfer between sibling observation paths.** Shadow-aware form
-  inspection did not make page reading shadow-aware, and explicit visible reads did not make the
-  shortest read use that path. Trace the default call through decoding, dispatch, negotiation, and
-  the page-local collector. Chromium `innerText` stops at shadow boundaries; a composed read needs
-  an explicit open-root and slot traversal, plus a capability revision so an older adapter cannot
-  answer with narrower semantics (ADR-0151).
-- **A composed page is a shared semantic and geometry boundary.** Fixing full-page text still left
-  waits, find, document trees, point receipts, target capture, and drops on narrower DOM or frame
-  paths. Put open-root traversal, visibility, frame aggregation, and point routing at shared
-  adapter seams, then revision every affected capability family so old adapters refuse instead of
-  returning plausible partial truth (ADR-0152 and ADR-0153).
+  inspection did not make page reading shadow-aware, and an explicit visible read did not make the
+  shortest `browser_read {}` take that path. After the text fix, waits, find, document trees, point
+  receipts, target capture and drops were still on narrower DOM or frame paths. Chromium `innerText`
+  stops at shadow boundaries, so a composed read needs explicit open-root and slot traversal. Trace
+  the default call through decoding, dispatch, negotiation and the page-local collector. Put
+  traversal, visibility, frame aggregation and point routing at shared adapter seams. Then revision
+  every affected capability family so an older adapter refuses instead of returning plausible
+  partial truth (ADR-0151, ADR-0152, ADR-0153).
 - **An anchored effect without a live box renders nowhere.** A zero-size or hidden target resolves
   to the frame origin, and inside an embedded frame the frame boundary clips the effect in half.
   Suppression is the honest rendering of "nothing to point at."
@@ -582,17 +565,18 @@ Every one of these cost something to learn.
   -- no error, no deadline, no recovery, across reconnects. When a success arm asserts a fallback,
   the fallback must be produced on that same path (ADR-0138's describe now feeds the receipt), and
   a test must walk the full success path, not just the refusals around it.
-- **Per-host reproducibility is not determinism; pin every platform-derived byte.** The extension
-  ZIP was "deterministic" (two runs byte-identical) on each host and still differed across hosts:
+- **Per-host reproducibility is not determinism for a published artifact.** The extension ZIP was
+  "deterministic" (two runs byte-identical) on each host and still differed across hosts:
   `ConvertTo-Json` writes the platform newline into rewritten JSON, and .NET's `ZipArchive` stamps
   the central directory's host-system marker and Unix mode bits from the running OS. Identical
   sources, two archives, 99 differing bytes of pure metadata -- and only one of them was the
-  reviewed Chrome Web Store artifact. A packager used for publication must pin serialization and
-  container fields explicitly to the reviewed artifact's exact shape, and a release must prove
-  determinism across operating systems, not just across runs on one machine.
-  The runtime matters too: on 2026-09-08, PowerShell 7.5.2 and 7.6.5 produced identical extracted
-  adapter files but different compressed ZIP bytes. Only 7.6.5 reproduced the submitted 1.1.2
-  hash. Record the packaging runtime with artifact custody; fixed ZIP metadata alone is insufficient.
+  reviewed Chrome Web Store artifact. The runtime matters too: on 2026-09-08, PowerShell 7.5.2 and
+  7.6.5 produced identical extracted adapter files but different compressed ZIP bytes. Only 7.6.5
+  reproduced the submitted 1.1.2 hash. A packager for a published artifact pins serialization and
+  container fields to the reviewed artifact's exact shape, proves determinism across operating
+  systems, and names its packaging runtime (pwsh version) in the custody note. Source and
+  test-fixture hashes are not published artifacts: compute them from committed (LF / git blob)
+  bytes, never from working-copy bytes.
 - **A READY card covers only the roster.** Registration state is per-client, read from that
   client's own configuration; a client with no registry row is invisible no matter how broken
   its hand-written entry is, and one client's green card never contradicts another's failure
@@ -600,19 +584,12 @@ Every one of these cost something to learn.
   support means a registry row with the client's real config dialect, pinned against what the
   client itself writes -- never the assumption that a known sibling binary doubles as a stdio
   server.
-- **An npm maintainership move needs a one-time code that a passkey-only account cannot
-  produce.** The website has no organization-as-maintainer flow (the invite box resolves
-  users only), and npm's 2026 restriction bars bypass-2FA tokens from account changes, so
-  the release token cannot run `npm owner add` either. The one org grant the website can
-  make is team package access (org settings, developers team, add existing package), which
-  does not change the public maintainers list. Finishing a transfer takes a recovery code
-  or an npm support request; pin the maintainer assertion in the online truth check only
-- **Heuristic timing delays become dead debt once root causes are resolved.** During GenAI.Works
-  debugging, a 6-second navigation delay (`FILL_DOCUMENT_MIN_AGE_MS`) was added to guard form hydration
-  before ADR-0168 identified that site-side React Hook Form visibility handlers caused draft resets
-  (which was cured by CDP focus emulation). The artificial delay remained as dead latency on all form
-  fills across all sites until ADR-0169 removed it. When a root cause is resolved by an authoritative
-  browser mechanism, audit and retire temporary timing heuristics immediately.
+- **The npm maintainer-of-record transfer to sylin-org is owed.** Org team package access (the
+  developers team's read-write grant) does not change the public npm maintainers list, so it does
+  not count as the transfer. The account is passkey-only, the website has no org-as-maintainer flow,
+  and bypass-2FA tokens cannot run `npm owner add`, so finishing needs a recovery code or npm
+  support. Until it lands, leave `glama.json` maintainers as they are and keep the maintainer
+  assertion out of `check-public-surfaces.ps1 -Online` (docs/STATUS.md, 2026-09-01).
 - **Packaged Chrome extensions clamp alarms to 60 seconds.** `chrome.alarms` enforces a minimum 1-minute
   delay in packaged extensions regardless of smaller fractional values like 0.05m (3s). Active background
   workers need in-memory timers (`setTimeout`) for fast sub-minute retry loops, with alarms serving as the
@@ -621,39 +598,19 @@ Every one of these cost something to learn.
   `std::net::TcpListener` lacks a timeout on `accept()`, tempting short sleep loops with nonblocking sockets.
   Connecting a brief loopback probe (`TcpStream::connect`) during shutdown wakes the blocking listener thread
   immediately with zero idle CPU wakeups during service lifetime.
-- **Condition variables prevent presentation event flooding during resource contention.** Polling with
-  short sleeps to wait for exclusive workspace leases generated 200 events/second of "Waiting for workspace..."
-  activity updates to clients. Condvar notification upon lease drop wakes waiting callers immediately without
-  spurious status churn.
-- **Autonomous settle defaults eliminate visual race artifacts without caller overhead.** Defaulting
-  `visual_settle: true` on `browser_screenshot` and composite `browser_wait` conditions ensures LLMs and users
-  capture rendered layouts rather than mid-transition frames, without requiring explicit configuration on
-  every call (ADR-0174).
-- **Sessions are contained.** ADR-0196 removed `browser_workspace` and its live rebinding: each
-  connection keeps one workspace, and a handle from another session is refused with a pointer to
-  the session's own tabs.
-- **The service chooses which tab to reuse.** Default reuse adopts only a tab Ghostlight opened
-  and a released session of the same client label left open, from the service's released-tab
-  pool, and names it exactly. Reuse never regroups, and the group title is
-  `Ghostlight - <client label>`, so a tab from another client would stay under that client's
-  group.
-  The adapter is always sent `reuse:"never"`. Its own map is cleared on extension reload and
-  cannot tell a released tab from the person's, which is how person-opened tabs used to be taken
-  over (ADR-0196 Decision 9). A released tab becomes claimable only after its release close comes
-  back refused by preserve-tabs. Claiming it earlier lets the dead session's pending close forget,
-  unretain, or close the new owner's tab, because the extension does not check whose tab a close
-  names.
-- **One call's deadline is not evidence about the connection.** A dispatch probe's
-  acknowledgement shares one ordered stream with every receipt, so it can sit behind a large
-  screenshot or recording transfer. Quarantining the adapter on a 500 ms presentation deadline, and
-  failing every other pending call with it, turned healthy browsers into false disconnects that
-  then read as "wrong profile". ADR-0196 Decision 12: a probe must be unanswered for five seconds
-  before it marks the adapter unavailable, only the heartbeat timeout or end-of-stream fails
-  pending calls, a waiting call probes a silent adapter at once, and a bound session waits a
-  bounded grace for its own browser instead of entering recovery. A busy writer is never closed
-  over a best-effort frame such as a cancel or probe. Evidence that earns an unbound call that
-  wait must lapse with time and be read again on every poll: "some browser once reported
-  attention" never lapses, and it spent the deadline browser startup needed to launch a browser.
+- **The service, not the adapter, chooses which tab to reuse (ADR-0196 Decision 9).** The adapter's
+  own map clears on extension reload and cannot tell a released tab from the person's, which is how
+  person-opened tabs were taken over. Reuse adopts only a tab a released session of the same client
+  label left open. A released tab is claimable only after its release close comes back refused by
+  preserve-tabs, because the extension does not check whose tab a close names (released pool and
+  PooledTab docs in crates/orchestrator/src/workspace/mod.rs).
+- **One call's deadline is not evidence about the connection.** A probe acknowledgement shares one
+  ordered stream with every receipt and can sit behind a large screenshot, so a short deadline
+  turned healthy browsers into false disconnects. Evidence that earns a call a wait must lapse and
+  be re-read on every poll; evidence that never lapses spent the deadline browser startup needed.
+  Policy: ADR-0196 Decision 12. Mechanics (5 s probe verdict, only heartbeat timeout or
+  end-of-stream fails pending calls, busy writer skipped for best-effort frames):
+  docs/1.0/ARCHITECTURE.md waiting and liveness. Fix: commit 2b59f56c.
 - **Windows session shutdown messages require a top-level window, not a message-only window.**
   Windows broadcasts `WM_QUERYENDSESSION` and `WM_ENDSESSION` only to top-level windows (`parent == NULL`),
   not to `HWND_MESSAGE` windows. Applications that run as system-tray background authorities (ADR-0119)
@@ -662,44 +619,24 @@ Every one of these cost something to learn.
   calling into a native event loop that shutdown may already have destroyed; a console handler alone
   is insufficient and must not suppress Windows' default process exit (ADR-0180 amendment).
 
-- **A reply is not yet validated effect evidence.** Match request identity and admitted document
-  scope before confirming effects. Preserve acknowledged keyboard landings before later strokes.
-  Journal a fresh command before the first awaited save and serialize snapshots across overlapping
-  commands and acknowledgments. Work freezes action truth; Language projects its readings (ADR-0190).
+- **A reply is not yet validated effect evidence.** A reply proves an attempt, not its effect:
+  confirm an effect only when the receipt matches the request identity and the admitted document
+  scope. A refusal reply is not an effect, and a dispatched effect whose reply is lost or unreadable
+  stays uncertain (44ec184f, 989be757). Journal, keyboard-prefix and snapshot ordering rules are in
+  ADR-0190; protocol-4 effect classification is in ADR-0197 D5/D7.
 
-- **A timed-out wait is not resource cleanup.** Correlated Cancel must retire the exact evaluator,
-  attachment generation and document scope before observations can enter. Confirm custody release
-  and handler settlement; require exclusive attachment ownership before targeted detach. All
-  ordinary releases must carry their acquired generation token; register counts after serialized
-  setup and fence old finally from new ownership. Page effects may continue after
-  release, so cleanup does not revise an unknown result or authorize replay (ADR-0191).
-
-- **The first next read proves cancellation recovery.** Use a long observation budget and a
-  still-running finite animation. Read before polling for scope release, retrying or resetting.
-  Zero active requests/evaluations/watchers does not prove document custody released. Dispose
-  exact page observation tokens and await the original handler/finally within the existing
-  cleanup bound; count its timers, RAF and listeners separately from page animation (ADR-0191).
-
-## Where to look
+- **A timed-out wait is not resource cleanup.** Cancel must stop the service issuing steps and stop
+  page loops. A late finally must release only what it acquired, never a newer owner's resources.
+  Page effects may outlive release, so cleanup never revises an unknown result or authorizes replay
+  (ADR-0191 history; current requirement in ADR-0196 Appendix A). Prove recovery with the first next
+  read, taken before any polling, retry or reset, against a long budget and a still-running
+  animation; zero active requests does not prove custody release.
 
 - **A Chrome tab can contain several outermost pages.** Build document authority and routing
   from the active tree, excluding prerender, cached and pending-deletion pages before root checks.
   Keep exact active identities and fail closed on ambiguous lifecycle or malformed active graphs.
   Generic verification refusals need per-operation evidence before assigning a cause (ADR-0189).
 
-| Need | Source |
-| --- | --- |
-| How to work here, and the boundaries | [`AGENTS.md`](../AGENTS.md) |
-| What is true right now | [`STATUS.md`](STATUS.md) |
-| A map of this documentation tree | [`README.md`](README.md) |
-| Intent, language, architecture, acceptance | [`1.0/`](1.0/) |
-| Every decision, and why | [`adr/`](adr/README.md) |
-| Build, restart, deploy, validate | [`DEV-LOOP.md`](DEV-LOOP.md) |
-| Task-oriented guides for people | [`guides/README.md`](guides/README.md) |
-| Design notes, living and dated | [`design/README.md`](design/README.md) |
-| Dated security assessment and evidence | [`design/security-assessment-2026-09-06.md`](design/security-assessment-2026-09-06.md) |
-| Security-hardening epic, decisions, dependencies, and acceptance | [`tasks/security-hardening/EPIC.md`](tasks/security-hardening/EPIC.md) |
-| Unresolved hardening choices for ideation before implementation | [`tasks/security-hardening/IDEATION.md`](tasks/security-hardening/IDEATION.md) |
-| Agreed security-hardening scope and current progress | [`tasks/security-hardening/LEDGER.md`](tasks/security-hardening/LEDGER.md) |
-| What each task batch was, and where it stopped | [`tasks/README.md`](tasks/README.md) |
-| The source licensing boundary | [`../LICENSING.md`](../LICENSING.md) |
+## Where to look
+
+The documentation map is [docs/README.md](README.md); onboarding order is AGENTS.md 'Read this first'; task batches are in [tasks/README.md](tasks/README.md).

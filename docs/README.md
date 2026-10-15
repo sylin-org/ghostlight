@@ -5,7 +5,7 @@ It says what lives where and nothing about current state, because state belongs 
 place and would rot here.
 
 **Start with [MEMORY.md](MEMORY.md)** if you are an agent or a new contributor: it carries the
-owner's standing preferences, the durable learnings, and a pointer index by need. **Start with
+owner's standing preferences, the durable learnings, and a pointer to the documentation map. **Start with
 [STATUS.md](STATUS.md)** if you want to know where the project stands right now. The repository's
 onboarding document is [AGENTS.md](../AGENTS.md) at the root.
 
@@ -13,7 +13,7 @@ onboarding document is [AGENTS.md](../AGENTS.md) at the root.
 
 | File | What it is |
 | --- | --- |
-| [MEMORY.md](MEMORY.md) | Cross-agent project memory: standing preferences, durable learnings, pointer index. Read first. |
+| [MEMORY.md](MEMORY.md) | Cross-agent project memory: standing preferences, durable learnings, pointer to the documentation map. Read first. |
 | [STATUS.md](STATUS.md) | The mutable snapshot: what is implemented, what is verified, what is owed. |
 | [DEV-LOOP.md](DEV-LOOP.md) | Build, run, restart, and validate on a dev machine. Read before touching a live stack. |
 | [RELEASE.md](RELEASE.md) | The planned release procedure. |

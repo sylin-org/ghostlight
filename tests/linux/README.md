@@ -97,3 +97,8 @@ dbus-run-session -- bash tests/linux/run.sh acceptance/no-tray/check.py
 
 Use a new area or fresh profile state when a driver requires cold startup. The source adapter and development desktop
 results do not establish store-adapter, provenance-bound package, or GNOME acceptance.
+
+## Fixture lessons
+
+- **Guest PIDs.** procfs can show outer-namespace PIDs. Match the PID namespace to the caller, record procfs and NSpid identities with start time, and signal only the exact guest process. An ESRCH from a mismatched PID is not authority death. Helpers that scan /proc and signal by PID today: tests/linux/acceptance/cleanup.py, acceptance/no-tray/desktop-check.py, acceptance/managed/run.mjs, installed-journey.mjs. See docs/testing/linux-combined-packaging-2026-09-09.md.
+- **Candidate state.** Give every candidate and journey a fresh test home, because a retained runtime file can satisfy a readiness wait for the wrong candidate. Pass the effective Cargo target directory explicitly when packaging. See docs/testing/linux-container-evidence-2026-08-15.md.
