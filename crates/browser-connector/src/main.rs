@@ -57,3 +57,13 @@ fn main() -> Result<()> {
     record(LogEvent::ProcessExited, ended.as_str());
     Ok(())
 }
+
+#[cfg(test)]
+mod version_tests {
+    /// The crate version major is the relay revision, so a published connector names its revision.
+    #[test]
+    fn crate_version_major_equals_relay_revision() {
+        let major: u16 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
+        assert_eq!(major, ghostlight_relay::RELAY);
+    }
+}

@@ -1,17 +1,18 @@
 // Connector guards (ADR-0197 D25, connector half).
 //
-// Two frozen facts per connector crate and for the relay crate they share:
+// Two facts per connector crate and for the relay crate they share:
 //   1. the normal dependency tree of each connector on each supported target
 //      (tests/golden/cargo-tree/<crate>.<target>.txt);
-//   2. a hash of the crate's tracked source, recorded with the relay revision it
-//      was frozen at (tests/golden/frozen-hashes.json).
+//   2. the connector and relay source equals the last published tag at the same
+//      relay revision, so a published revision never changes underneath users.
 //
 // Run `GHOSTLIGHT_GUARD_UPDATE=1 node --test tests/guards/connectors.test.mjs`
-// to rewrite the golden files, then commit them with a message saying why.
+// to rewrite the dependency-tree goldens, then commit them with a message saying why.
+// A source change under a published revision is fixed by bumping RELAY and the
+// crate versions, never by editing a recorded hash.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -19,18 +20,13 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TREE_DIR = join(ROOT, "tests", "golden", "cargo-tree");
-const HASH_FILE = join(ROOT, "tests", "golden", "frozen-hashes.json");
 const UPDATE = process.env.GHOSTLIGHT_GUARD_UPDATE === "1";
 
 const CONNECTORS = ["ghostlight-mcp-connector", "ghostlight-browser-connector"];
 const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
 
-/** Frozen source directories, with the message shown when one changes. */
-const FROZEN = {
-  "crates/relay": "crates/relay changed: bump the relay revision and refresh tests/golden/frozen-hashes.json in a commit that says why",
-  "crates/mcp-connector": "crates/mcp-connector changed: bump the relay revision and refresh tests/golden/frozen-hashes.json in a commit that says why",
-  "crates/browser-connector": "crates/browser-connector changed: bump the relay revision and refresh tests/golden/frozen-hashes.json in a commit that says why",
-};
+/** Source paths locked to the published relay revision; tests directories are excluded. */
+const LOCKED = ["crates/relay", "crates/mcp-connector", "crates/browser-connector", ":(exclude)crates/*/tests/**"];
 
 /** Cargo stderr that means the registry was unreachable, so the tree cannot be resolved offline. */
 const OFFLINE_FAILURE = /failed to download|attempting to make an HTTP request, but --offline was specified/i;
@@ -40,14 +36,6 @@ export function relayRevision() {
   const source = readFileSync(join(ROOT, "crates", "relay", "src", "lib.rs"), "utf8");
   const match = /pub const RELAY: u16 = (\d+);/.exec(source);
   assert.ok(match, "crates/relay/src/lib.rs no longer declares `pub const RELAY: u16`");
-  return Number(match[1]);
-}
-
-/** The major version of the crate in `dir`, which must track the relay revision. */
-function crateMajor(dir) {
-  const manifest = readFileSync(join(ROOT, dir, "Cargo.toml"), "utf8");
-  const match = /^version = "(\d+)\./m.exec(manifest);
-  assert.ok(match, `${dir}/Cargo.toml has no version`);
   return Number(match[1]);
 }
 
@@ -88,17 +76,26 @@ ${stderr}`);
   }
 }
 
-/** Hash of the sorted tracked paths and their LF-normalized bytes under `dir`. */
-export function hashTracked(dir) {
-  const listing = execFileSync("git", ["ls-files", "-z", "--", dir], { cwd: ROOT, encoding: "utf8" });
-  const paths = listing.split("\0").filter(Boolean).sort();
-  const hash = createHash("sha256");
-  for (const path of paths) {
-    const bytes = readFileSync(join(ROOT, path)).toString("latin1").replace(/\r\n/g, "\n");
-    hash.update(`${path}\0${Buffer.byteLength(bytes, "latin1")}\0`);
-    hash.update(Buffer.from(bytes, "latin1"));
+/** Runs git in the repository root and returns trimmed stdout. */
+function git(...args) {
+  return execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+/** True when `git` exits zero for `args`. */
+function gitOk(...args) {
+  try {
+    git(...args);
+    return true;
+  } catch {
+    return false;
   }
-  return hash.digest("hex");
+}
+
+/** The relay revision declared in the relay source at `tag`, or null when the tag has no relay crate. */
+function revisionAt(tag) {
+  if (!gitOk("cat-file", "-e", `${tag}:crates/relay/src/lib.rs`)) return null;
+  const match = /pub const RELAY: u16 = (\d+);/.exec(git("show", `${tag}:crates/relay/src/lib.rs`));
+  return match ? Number(match[1]) : null;
 }
 
 for (const crate of CONNECTORS) {
@@ -131,22 +128,17 @@ test("the offline skip message is built from the field cargoTree returns", () =>
   assert.equal(message, "cargo cannot resolve crate-a for target-b offline: failed to download x");
 });
 
-test("frozen sources match tests/golden/frozen-hashes.json", () => {
+test("connector source is unchanged since the last published tag at this relay revision", () => {
+  const tags = git("tag", "--list", "v[0-9]*", "--sort=-v:refname").split(/\r?\n/).filter((tag) => tag && !tag.startsWith("archive/"));
+  assert.ok(tags.length > 0, "no release tags: fetch with tags (fetch-depth: 0)");
   const revision = relayRevision();
-  for (const dir of Object.keys(FROZEN)) {
-    assert.equal(crateMajor(dir), revision, `${dir} version major must equal the relay revision ${revision}`);
-  }
-  const actual = Object.fromEntries(
-    Object.keys(FROZEN).map((dir) => [dir, { revision, sha256: hashTracked(dir) }]),
-  );
-  if (UPDATE) {
-    writeFileSync(HASH_FILE, JSON.stringify(actual, null, 2) + "\n");
+  const tag = tags.find((candidate) => revisionAt(candidate) === revision);
+  if (!tag) {
+    console.log(`relay revision ${revision} is unpublished; nothing to compare`);
     return;
   }
-  const expected = JSON.parse(readFileSync(HASH_FILE, "utf8"));
-  for (const [dir, message] of Object.entries(FROZEN)) {
-    const frozen = expected[dir];
-    assert.ok(frozen, `no frozen entry for ${dir}`);
-    assert.equal(frozen.sha256 === actual[dir].sha256 && frozen.revision === revision, true, `${message} (frozen at revision ${frozen.revision}, now ${revision})`);
-  }
+  assert.ok(
+    gitOk("diff", "--quiet", tag, "--", ...LOCKED),
+    `connector source changed since ${tag} at relay revision ${revision}: bump RELAY`,
+  );
 });

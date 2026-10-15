@@ -49,6 +49,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Install Linux desktop build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -60,6 +62,8 @@ jobs:
           key: ${{ matrix.os }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked --no-fail-fast
+      - run: cargo fetch --locked
+      - run: node --test tests/guards/connectors.test.mjs
 
   extension:
     strategy:

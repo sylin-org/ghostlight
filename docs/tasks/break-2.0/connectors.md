@@ -114,8 +114,8 @@ Next slice: the remaining deferrable connectors slices, per the lane plan. No bl
   `cargo tree -p <crate> -e normal --target <target> --prefix none --locked --offline` for both
   connectors on `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`, strips machine paths and
   versions of path crates, and diffs against `tests/golden/cargo-tree/`; it skips with the cargo
-  message when offline resolution fails. It also hashes the tracked files of `crates/relay`,
-  `crates/mcp-connector` and `crates/browser-connector` against `tests/golden/frozen-hashes.json`.
+  message when offline resolution fails. It also diffs `crates/relay`,
+  `crates/mcp-connector` and `crates/browser-connector` against the last published tag at the same relay revision.
   Set `GHOSTLIGHT_GUARD_UPDATE=1` to rewrite the goldens. Crate counts (unique lines): 17 on
   Windows and 16 on Linux for each connector; the Windows extra is `ghostlight-win-peer`. The
   extension entry arrives with switch-17.

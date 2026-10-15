@@ -47,3 +47,15 @@ pub const BACKOFF_MAX: Duration = Duration::from_millis(30_000);
 
 /// Time a peer has to send its opening frame before the service drops the connection.
 pub const OPENING_DEADLINE: Duration = Duration::from_millis(5_000);
+
+#[cfg(test)]
+mod version_tests {
+    use super::RELAY;
+
+    /// The crate version major is the relay revision, so a published connector names its revision.
+    #[test]
+    fn crate_version_major_equals_relay_revision() {
+        let major: u16 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
+        assert_eq!(major, RELAY);
+    }
+}

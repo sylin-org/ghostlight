@@ -293,3 +293,12 @@ differ, this section wins.
   directory is removed when empty.
 - **Development.** An agent that runs inside Claude desktop or Codex runs the install once from a
   regular terminal; later development loops then work from inside the container.
+
+## Amendment 2026-10-14: connector source lock
+
+Connector and relay source is locked to the last published tag at the same relay revision. The
+check is `tests/guards/connectors.test.mjs`, run in CI, not a committed hash file. It diffs
+`crates/relay`, `crates/mcp-connector` and `crates/browser-connector` against that tag and fails
+until `RELAY` is bumped. Test directories (`crates/*/tests/**`) are excluded; inline unit tests
+still count. The `extension/` half of Decision 25 (page-asset hashes) is unchanged by this
+amendment.
