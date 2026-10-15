@@ -1,0 +1,79 @@
+//! Failure templates: the sentences an MCP edge may say when it cannot reach the service.
+//!
+//! The edge authors no words. The service hands it these in every accepted [`Reply`]: for each
+//! kind of failure, a JSON-RPC response object per request method, plus a `default`. When a
+//! request is cut off or expires, the edge fills the matching template with the request's id and
+//! sends it. With no reply at all, which only happens before the first connection, the edge
+//! answers a bare internal error with an empty message.
+//!
+//! [`Reply`]: super::Reply
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+/// Key of the template used when none is named for a request's method.
+pub const DEFAULT_TEMPLATE: &str = "default";
+
+/// JSON-RPC internal error code, used when there is no template.
+pub const INTERNAL_ERROR_CODE: i64 = -32603;
+
+/// Which failure the edge is reporting.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Failure {
+    /// The service went away while the request was outstanding.
+    CutOff,
+    /// The request was held for a returning service until the hold limit passed.
+    Expired,
+}
+
+/// The failure sentences carried by an accepted reply.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Templates {
+    /// Responses for requests cut off by the service going away, by request method.
+    #[serde(default)]
+    pub cut_off: BTreeMap<String, Value>,
+    /// Responses for held requests that expired, by request method.
+    #[serde(default)]
+    pub expired: BTreeMap<String, Value>,
+}
+
+impl Templates {
+    /// The template for `method` under `failure`, falling back to the `default` entry.
+    #[must_use]
+    pub fn template(&self, failure: Failure, method: &str) -> Option<&Value> {
+        let templates = match failure {
+            Failure::CutOff => &self.cut_off,
+            Failure::Expired => &self.expired,
+        };
+        templates
+            .get(method)
+            .or_else(|| templates.get(DEFAULT_TEMPLATE))
+    }
+}
+
+/// Fill a template with a request id. The id keeps its JSON type: a number stays a number.
+///
+/// A template that is not a JSON object cannot carry an id, so it yields the bare error instead.
+#[must_use]
+pub fn fill(template: &Value, id: &Value) -> Value {
+    match template {
+        Value::Object(fields) => {
+            let mut response = fields.clone();
+            response.insert("id".to_owned(), id.clone());
+            Value::Object(response)
+        }
+        _ => bare_error(id),
+    }
+}
+
+/// A JSON-RPC internal error with an empty message: the answer when no template exists.
+#[must_use]
+pub fn bare_error(id: &Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {"code": INTERNAL_ERROR_CODE, "message": ""},
+    })
+}

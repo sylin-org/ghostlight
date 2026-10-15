@@ -1,0 +1,5 @@
+{
+  "kind": "message",
+  "line": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}",
+  "trace": "x"
+}

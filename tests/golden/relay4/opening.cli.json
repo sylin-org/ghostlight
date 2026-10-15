@@ -1,0 +1,17 @@
+{
+  "relay": 4,
+  "role": "mcp",
+  "edge": {
+    "program": "service",
+    "revision": 4,
+    "build": "2.0.0"
+  },
+  "reason": "command",
+  "channel": "cli",
+  "session": {
+    "kind": "process",
+    "pid": 18244,
+    "started_at": 1790000123,
+    "name": "ghostlight"
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "relay": 4,
+  "frame": {
+    "header": "u32_le",
+    "payload": "utf8_json",
+    "max_bytes": 8388608
+  },
+  "roles": [
+    "mcp",
+    "browser",
+    "control",
+    "desktop",
+    "command"
+  ],
+  "start_reasons": [
+    "agent",
+    "browser",
+    "command",
+    "person",
+    "recover",
+    "update"
+  ],
+  "goodbye_reasons": [
+    "quit",
+    "replace",
+    "uninstall",
+    "session_end"
+  ],
+  "quit_reasons": [
+    "quit",
+    "replace",
+    "uninstall"
+  ],
+  "edge_programs": [
+    "edge",
+    "service",
+    "desktop"
+  ],
+  "control_ops": [
+    "readiness",
+    "status",
+    "show",
+    "quit"
+  ],
+  "refusal_codes": [
+    "unsupported",
+    "capacity",
+    "shutting_down",
+    "malformed"
+  ],
+  "mcp_frame_kinds": [
+    "message",
+    "resume",
+    "goodbye"
+  ],
+  "control_result_kind": "result",
+  "failure_template_kinds": [
+    "cut_off",
+    "expired"
+  ],
+  "failure_template_default": "default",
+  "browser_goodbye": {
+    "prefix": "{\"goodbye\":\"",
+    "suffix": "\"}"
+  },
+  "endpoint": {
+    "windows": {
+      "pipe_prefix": "\\\\.\\pipe\\ghostlight-",
+      "name": "<pipe_prefix><user_sid>-<home_hash>",
+      "home_hash": "fnv1a32 of the home path with ASCII letters lowercased, as 8 lowercase hexadecimal digits",
+      "fnv1a32_offset_basis": 2166136261,
+      "fnv1a32_prime": 16777619,
+      "example": {
+        "user_sid": "S-1-5-21-1004336348-1177238915-682003330-1001",
+        "home": "C:\\Users\\Ada\\.ghostlight",
+        "lowercased_home": "c:\\users\\ada\\.ghostlight",
+        "fnv1a32": 2981217699,
+        "home_hash": "b1b1c5a3",
+        "name": "\\\\.\\pipe\\ghostlight-S-1-5-21-1004336348-1177238915-682003330-1001-b1b1c5a3"
+      }
+    },
+    "unix": {
+      "socket": "<home>/<run_directory>/<relay_socket>",
+      "directory_mode": "0700",
+      "socket_mode": "0600"
+    }
+  },
+  "files": {
+    "home_directory": ".ghostlight",
+    "run_directory": "run",
+    "relay_socket": "relay.sock",
+    "service_lock": "service.lock"
+  },
+  "test_home_variable": "GHOSTLIGHT_TEST_HOME",
+  "hold_limit_bytes": 4194304,
+  "hold_limit_ms": 30000,
+  "backoff_first_ms": 500,
+  "backoff_max_ms": 30000,
+  "opening_deadline_ms": 5000
+}

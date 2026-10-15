@@ -1,0 +1,9 @@
+{
+  "relay": 4,
+  "role": "telemetry",
+  "edge": {
+    "program": "edge",
+    "revision": 4,
+    "build": "2.0.0"
+  }
+}

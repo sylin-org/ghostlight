@@ -1,0 +1,54 @@
+{
+  "accepted": true,
+  "service": "2.0.1",
+  "instance": "9f3a61c2d0b84e17",
+  "templates": {
+    "cut_off": {
+      "tools/call": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Ghostlight restarted before this call finished. It may have happened; check before repeating."
+            }
+          ],
+          "isError": true
+        }
+      },
+      "default": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": {
+          "code": -32603,
+          "message": "Ghostlight restarted before this request finished."
+        }
+      }
+    },
+    "expired": {
+      "tools/call": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Ghostlight did not come back in time. Try the call again."
+            }
+          ],
+          "isError": true
+        }
+      },
+      "default": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": {
+          "code": -32603,
+          "message": "Ghostlight did not come back in time."
+        }
+      }
+    }
+  },
+  "later_field": true
+}

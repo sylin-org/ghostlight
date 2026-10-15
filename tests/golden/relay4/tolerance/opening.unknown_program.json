@@ -1,0 +1,10 @@
+{
+  "relay": 4,
+  "role": "mcp",
+  "edge": {
+    "program": "firefox-edge",
+    "revision": 4,
+    "build": "2.0.0"
+  },
+  "channel": "mcp"
+}

@@ -10,7 +10,8 @@
 //! ends share. It authors no words and makes no product decisions. The `os` module is the
 //! audited platform layer: the only `unsafe` in the crate, it starts the service with no
 //! inherited handles, identifies a process on Windows, and holds the pipe and peer-user calls the
-//! endpoint needs.
+//! endpoint needs. The `protocol` module is the relay protocol 4 vocabulary that runs over that
+//! transport.
 //!
 //! A change under a published relay revision needs a revision bump (`RELAY` and the crate
 //! version); `tests/guards/connectors.test.mjs` checks the source against the last release tag
@@ -28,6 +29,7 @@ pub mod log;
 pub mod opening;
 pub mod os;
 pub mod private;
+pub mod protocol;
 pub mod runtime;
 pub mod spawn;
 pub mod templates;

@@ -17,6 +17,7 @@ Maintained, and still describing the product as built.
 | [tool-visual-signatures.md](tool-visual-signatures.md) | Which visual signature each tool carries. |
 | [action-observations.md](action-observations.md) | Where per-action facts belong, and the two structural owners that keep the account complete. |
 | [adapter-protocol-4.md](adapter-protocol-4.md) | Adapter protocol 4, the implementation spec behind ADR-0197: frozen primitives, isolated-world assets, and the service-side Chromium translation. |
+| [relay-protocol-4.md](relay-protocol-4.md) | Relay protocol 4, the frozen contract between the service and everything that connects to it: endpoint, peer checks, opening and reply, the frames of each role, goodbye and start reasons. Its executable form is `tests/golden/relay4`. |
 
 ## Dated reviews and plans
 

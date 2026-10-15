@@ -1,0 +1,11 @@
+{
+  "relay": 4,
+  "role": "browser",
+  "edge": {
+    "program": "edge",
+    "revision": 4,
+    "build": "2.0.0"
+  },
+  "reason": "browser",
+  "origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
+}

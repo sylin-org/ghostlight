@@ -1,0 +1,13 @@
+{
+  "relay": 4,
+  "role": "control",
+  "edge": {
+    "program": "service",
+    "revision": 4,
+    "build": "2.0.0"
+  },
+  "control": {
+    "op": "quit",
+    "reason": "crash"
+  }
+}

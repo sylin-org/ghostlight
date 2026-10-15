@@ -1,0 +1,12 @@
+{
+  "relay": 4,
+  "role": "mcp",
+  "edge": {
+    "program": "edge",
+    "revision": 4,
+    "build": "2.0.0"
+  },
+  "reason": "agent",
+  "resume": "r1-7c9e2b40a1d34f58",
+  "channel": "mcp"
+}
