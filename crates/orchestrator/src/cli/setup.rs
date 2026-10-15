@@ -219,8 +219,9 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
 }
 
 /// Stop what an older Ghostlight installation left running, so one install leaves nothing behind
-/// that `doctor` would name. The service that answers is never touched. A program that will not
-/// stop is said so and does not fail the install.
+/// that `doctor` would name. The service that answers is spared unless it runs from the retired
+/// development directory, which an install removes, so that one is stopped too. A program that
+/// will not stop is said so and does not fail the install.
 fn stop_older_installation_programs() -> anyhow::Result<()> {
     let layout = Layout::current()?;
     let service_pid = crate::cli::client::status_at(layout.home())

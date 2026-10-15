@@ -349,7 +349,8 @@ fn stray_refresh() -> ProcessRefreshKind {
 /// Only executables under the Ghostlight home count, so a program of the same name elsewhere is
 /// left alone. Anything running from the retired development directory is a leftover; elsewhere
 /// the name decides, so a process whose file has since been removed is still found. The current
-/// edge, the shell and the current service image are never strays, nor is the process asking.
+/// edge, the shell and the current service image are never strays, nor is the process asking. The
+/// retired directory comes first, so the answering service is a stray when it runs from there.
 fn classify(
     image: &Path,
     pid: u32,
@@ -3031,6 +3032,12 @@ mod tests {
                 "{name}"
             );
         }
+        let answering = directory.join(SERVICE_EXECUTABLE_NAME);
+        assert_eq!(
+            kind_of(&layout, &answering, 7024, Some(7024)),
+            Some(StrayKind::RetiredDevelopment),
+            "the answering service is not spared when it runs from the retired directory"
+        );
         let beside = directory.with_file_name("development-notes").join("helper");
         assert_eq!(kind_of(&layout, &beside, 7022, None), None);
         let elsewhere = fs::canonicalize(scratch.path())
