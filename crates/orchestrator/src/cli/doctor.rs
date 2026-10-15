@@ -15,9 +15,11 @@ use crate::cli::status::{
     observe_runtime, render_runtime_status, runtime_document, RuntimeObservation,
 };
 use crate::install::container;
+use crate::install::deployment::{stop_strays, stray_processes, StrayProcess};
 use crate::install::layout::Layout;
 use crate::install::marker::DevelopmentMarker;
 use crate::install::record::InstallRecord;
+use crate::language::workbench as words;
 
 /// Everything `doctor` observed, gathered once.
 ///
@@ -36,6 +38,7 @@ pub struct DoctorObservation {
     desktop: crate::install::desktop_entry::DesktopIntegrationReport,
     harnesses: Vec<crate::install::HarnessSummary>,
     runtime: RuntimeObservation,
+    strays: Vec<StrayProcess>,
     readiness: Option<crate::workbench::ReadinessSummary>,
     diagnostics: crate::diagnostics::DiagnosticsReport,
 }
@@ -62,6 +65,7 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         None
     };
     let diagnostics = crate::diagnostics::observe(layout.home());
+    let strays = stray_processes(&layout, runtime.status.as_ref().map(|status| status.pid));
     Ok(DoctorObservation {
         installed: InstallRecord::read(&layout.install_record())?,
         development: DevelopmentMarker::read(&layout.development_marker())?,
@@ -77,6 +81,7 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         desktop: DesktopIntegration::discover().check()?,
         harnesses: HarnessRegistry::discover().refresh()?,
         runtime,
+        strays,
         readiness,
         diagnostics,
     })
@@ -91,6 +96,7 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     }
     println!("Ghostlight {} diagnostics", env!("CARGO_PKG_VERSION"));
     println!("Home: {}", observation.home.display());
+    println!("{}", words::endpoint_line(&observation.runtime.endpoint));
     match &observation.installed {
         Some(record) => println!(
             "Installed: Ghostlight {} -- relay {}",
@@ -158,6 +164,9 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         }
     }
     render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
+    for stray in &observation.strays {
+        println!("{}", words::stray_line(&stray.image.display().to_string()));
+    }
     let report = &observation.diagnostics;
     match (report.layer, &report.directory) {
         (layer, Some(directory)) => println!(
@@ -169,10 +178,25 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         ),
     }
     if fix {
+        stop_listed_strays(&observation.strays);
         println!("Applying ownership-safe repairs.");
         run_setup(true, &SetupOptions::default())?;
     }
     Ok(())
+}
+
+/// Stop the strays `doctor` named and say what became of each. One that will not stop is a fault
+/// that is reported; the repairs that follow still run.
+fn stop_listed_strays(strays: &[StrayProcess]) {
+    let stuck = stop_strays(strays);
+    for stray in strays {
+        let image = stray.image.display().to_string();
+        if stuck.contains(stray) {
+            println!("{}", words::stray_not_stopped_line(&image));
+        } else {
+            println!("{}", words::stray_stopped_line(&image));
+        }
+    }
 }
 
 /// The JSON document `doctor --json` prints, built from the same observation the text path uses.
@@ -207,6 +231,7 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "applications": observation.desktop,
         "mcp_clients": observation.harnesses,
         "service": runtime_document(&observation.runtime),
+        "strays": observation.strays,
         "readiness": observation.readiness,
         "process_diagnostics": observation.diagnostics,
     })
@@ -221,7 +246,113 @@ pub fn readiness_line(readiness: &crate::workbench::ReadinessSummary) -> String 
 mod tests {
     use std::path::PathBuf;
 
-    use super::readiness_line;
+    use super::{doctor_document, readiness_line, DoctorObservation};
+
+    /// An observation of a machine where the service answers and one retired connector runs.
+    fn observation(strays: Vec<crate::install::deployment::StrayProcess>) -> DoctorObservation {
+        use crate::install::command_path::{CommandPathReport, CommandPathState};
+        use crate::install::desktop_entry::{DesktopIntegrationReport, DesktopIntegrationState};
+        use crate::install::native_host::NativeHostReport;
+        use crate::install::user_assets::{UserAssetReport, UserAssetState};
+
+        DoctorObservation {
+            home: PathBuf::from("home"),
+            installed: None,
+            development: None,
+            environment: crate::language::environment::current(),
+            binaries: Vec::new(),
+            sibling_set_ready: true,
+            native_host: NativeHostReport {
+                connector: PathBuf::from("ghostlight"),
+                browsers: Vec::new(),
+                private_view: None,
+            },
+            command_path: CommandPathReport {
+                state: CommandPathState::NotApplicable,
+                detail: String::new(),
+                link: PathBuf::new(),
+                executable: PathBuf::new(),
+            },
+            user_assets: UserAssetReport {
+                state: UserAssetState::NotApplicable,
+                detail: String::new(),
+                directory: PathBuf::new(),
+            },
+            desktop: DesktopIntegrationReport {
+                state: DesktopIntegrationState::NotApplicable,
+                detail: String::new(),
+                desktop_entry: None,
+                icon: None,
+            },
+            harnesses: Vec::new(),
+            runtime: crate::cli::status::RuntimeObservation {
+                endpoint: "endpoint".into(),
+                status: Some(crate::intake::listener::control::Status {
+                    service: "2.0.0".into(),
+                    instance: "instance_a".into(),
+                    pid: 42,
+                    started_by: ghostlight_relay::protocol::StartReason::Agent,
+                    connections: Some(crate::language::workbench::ConnectionCounts {
+                        mcp_clients: 1,
+                        command_line: 0,
+                        browsers: 1,
+                    }),
+                    workbench: Some(crate::intake::listener::control::WorkbenchStatus {
+                        url: "http://127.0.0.1:47600/".into(),
+                        usual_port: true,
+                        watching: false,
+                    }),
+                }),
+            },
+            strays,
+            readiness: None,
+            diagnostics: crate::diagnostics::DiagnosticsReport {
+                layer: "off",
+                directory: None,
+                used_bytes: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn doctor_json_carries_the_strays_and_the_service_fields() {
+        use crate::install::deployment::{StrayKind, StrayProcess};
+
+        let document = doctor_document(&observation(vec![StrayProcess {
+            pid: 99,
+            image: PathBuf::from("bin/ghostlight-mcp-connector"),
+            kind: StrayKind::RetiredConnector,
+        }]));
+        assert_eq!(
+            document["strays"],
+            serde_json::json!([{
+                "pid": 99,
+                "image": "bin/ghostlight-mcp-connector",
+                "kind": "retired_connector",
+            }])
+        );
+        assert_eq!(document["service"]["running"], true);
+        assert_eq!(
+            document["service"]["connections"],
+            serde_json::json!({"mcp_clients": 1, "command_line": 0, "browsers": 1})
+        );
+        assert_eq!(
+            document["service"]["workbench"],
+            serde_json::json!({
+                "url": "http://127.0.0.1:47600/",
+                "watching": false,
+                "usual_port": true,
+            })
+        );
+    }
+
+    #[test]
+    fn doctor_json_lists_no_strays_when_nothing_is_left_running() {
+        assert_eq!(
+            doctor_document(&observation(Vec::new()))["strays"],
+            serde_json::json!([])
+        );
+    }
 
     #[test]
     fn doctor_renders_every_workbench_readiness_state_in_the_same_words() {

@@ -41,9 +41,13 @@ nothing Ghostlight does contacts the vendor.
 
 - `audit.jsonl`, or the path in `GHOSTLIGHT_AUDIT_FILE`, contains content-minimized terminal
   records. Use the endpoint's existing file collector for SIEM delivery.
-- There is no discovery file. The workbench listens on one loopback port; it carries no MCP and
-  starts no browser work. `run/` in the home holds the service lock
-  and, on Linux, the relay socket.
+- There is no discovery file. The workbench listens on one loopback port, which ghostlight status
+  shows on its Workbench line; it carries no MCP and starts no browser work. `run/` in the home
+  holds the service lock and, on Linux, the relay socket.
+- `state/desktop-webview` in the home holds the web storage and caches of the Ghostlight window
+  (WebView2 on Windows, WebKitGTK on Linux): only what the workbench page stores for its own
+  loopback origin, such as the Density and Motion choices. It is readable only by the user and
+  can be deleted at any time.
 - Managed deployments keep a verified signed bundle cache and a content-minimized status sidecar.
   The sidecar includes verification, sequence, freshness, source class, timing, organization, and
   contacts, but no source address, bearer token, verification key, or policy rules.

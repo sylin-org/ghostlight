@@ -829,19 +829,35 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     Ok(())
 }
 
+/// The answer to a control `status`: who this service is, what is connected and where the
+/// workbench is. The workbench's bearer is never part of it.
+fn control_status(intake: &Intake) -> control::Status {
+    control::Status {
+        service: env!("CARGO_PKG_VERSION").into(),
+        instance: intake.instance.clone(),
+        pid: std::process::id(),
+        started_by: intake.started_by,
+        connections: Some(intake.workbench.connection_counts()),
+        workbench: intake
+            .workbench_server
+            .get()
+            .map(|server| control::WorkbenchStatus {
+                url: server.address().url().to_owned(),
+                usual_port: server.address().usual(),
+                watching: intake.workbench.watching(),
+            }),
+    }
+}
+
 /// Answer one control operation and close.
 fn serve_control(connection: Connection, operation: Option<Control>, intake: &Intake) {
     let value = match operation {
         Some(Control::Readiness) => {
             serde_json::to_value(intake.workbench.snapshot().readiness).unwrap_or(Value::Null)
         }
-        Some(Control::Status) => serde_json::to_value(control::Status {
-            service: env!("CARGO_PKG_VERSION").into(),
-            instance: intake.instance.clone(),
-            pid: std::process::id(),
-            started_by: intake.started_by,
-        })
-        .unwrap_or(Value::Null),
+        Some(Control::Status) => {
+            serde_json::to_value(control_status(intake)).unwrap_or(Value::Null)
+        }
         Some(Control::Show) => serde_json::to_value(control::Shown {
             shown: intake.workbench.reveal().is_ok(),
         })
@@ -2495,9 +2511,43 @@ mod tests {
                 instance: TEST_INSTANCE.into(),
                 pid: std::process::id(),
                 started_by: StartReason::Agent,
+                connections: Some(crate::language::workbench::ConnectionCounts::default()),
+                workbench: None,
             }
         );
         drop(served);
+    }
+
+    #[test]
+    fn control_status_after_publishing_names_the_workbench_and_never_its_bearer() {
+        let home = TestHome::new("control-status-workbench");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let address = host.workbench_address().expect("the workbench is served");
+        let bearer = host
+            .intake
+            .workbench_server
+            .get()
+            .unwrap()
+            .bearer()
+            .to_owned();
+
+        let status = cli_client::status().unwrap();
+        assert_eq!(
+            status.workbench,
+            Some(control::WorkbenchStatus {
+                url: address.url().to_owned(),
+                usual_port: address.usual(),
+                watching: true,
+            })
+        );
+        assert_eq!(
+            status.connections,
+            Some(crate::language::workbench::ConnectionCounts::default())
+        );
+        let sent = serde_json::to_string(&status).unwrap();
+        assert!(!sent.contains(&bearer));
+        drop(host);
     }
 
     #[test]

@@ -22,7 +22,24 @@ pub mod control {
     use ghostlight_relay::protocol::StartReason;
     use serde::{Deserialize, Serialize};
 
+    use crate::language::workbench::ConnectionCounts;
+
+    /// Where the workbench is served and whether other screens may watch it. The bearer that
+    /// opens the window is never part of it.
+    #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+    pub struct WorkbenchStatus {
+        /// The address a person opens, ending in a slash.
+        pub url: String,
+        /// Whether this is the usual port; it is not when the usual port was taken.
+        pub usual_port: bool,
+        /// Whether other screens on this computer may watch.
+        pub watching: bool,
+    }
+
     /// The answer to `status`: which service answered, and which start of it.
+    ///
+    /// A service that predates the connection counts and the workbench answers without them, and
+    /// its answer still reads.
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
     pub struct Status {
         /// The service's product version.
@@ -33,6 +50,12 @@ pub mod control {
         pub pid: u32,
         /// Why this service was started.
         pub started_by: StartReason,
+        /// How many of each kind of connection the service has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub connections: Option<ConnectionCounts>,
+        /// Where the workbench is served, once it is.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub workbench: Option<WorkbenchStatus>,
     }
 
     /// The answer to `show`: whether a window was there to come forward.

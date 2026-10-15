@@ -42,6 +42,7 @@ use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME, TEST
 use ghostlight_relay::private;
 use ghostlight_relay::protocol::{Control, QuitReason, StartReason};
 use serde::Serialize;
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
 use super::entry::{canonical_path, same_path};
@@ -150,6 +151,11 @@ pub trait ProcessControl {
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()>;
     /// Whether any process runs one of `images`.
     fn is_running(&self, images: &[PathBuf]) -> bool;
+    /// The programs of an older installation that still run in `layout`'s home, other than the
+    /// service `service_pid`.
+    fn strays(&self, layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess>;
+    /// Stop `strays` and wait for them to exit. Returns the ones that would not stop.
+    fn stop_strays(&self, strays: &[StrayProcess]) -> Vec<StrayProcess>;
     /// Start `bin/ghostlight-service serve --reason update` in `layout`'s home, detached, without waiting
     /// for it.
     fn start_serve(&self, layout: &Layout) -> io::Result<()>;
@@ -208,6 +214,14 @@ impl ProcessControl for SystemProcessControl {
         migration::any_running_from(&other_than_running_installer(images))
     }
 
+    fn strays(&self, layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess> {
+        stray_processes(layout, service_pid)
+    }
+
+    fn stop_strays(&self, strays: &[StrayProcess]) -> Vec<StrayProcess> {
+        stop_strays(strays)
+    }
+
     fn start_serve(&self, layout: &Layout) -> io::Result<()> {
         ghostlight_relay::spawn::spawn_serve(
             &layout.service_executable(),
@@ -244,6 +258,186 @@ fn other_than_running_installer(images: &[PathBuf]) -> Vec<PathBuf> {
         })
         .cloned()
         .collect()
+}
+
+/// The kinds of program an older Ghostlight installation leaves running.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrayKind {
+    /// A connector from the layout before the edge: the MCP or browser connector.
+    RetiredConnector,
+    /// A service image a deploy moved aside whose process is not the service that answers.
+    ReplacedService,
+}
+
+/// A process of an older installation that is still running.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StrayProcess {
+    /// The process id.
+    pub pid: u32,
+    /// The executable the process runs, which may no longer exist under that name.
+    pub image: PathBuf,
+    /// What kind of leftover it is.
+    pub kind: StrayKind,
+}
+
+/// How long a stopped stray is given to exit.
+const STRAY_STOP_WAIT: Duration = Duration::from_secs(5);
+
+/// The text the swap puts before the number in the name of an image it moves aside.
+const MOVED_ASIDE_MARKER: &str = ".old-";
+
+/// The processes of this home that an older installation left running.
+///
+/// `service_pid` is the service that answers, when one does: its image is never a stray. The
+/// process table is read once.
+#[must_use]
+pub fn stray_processes(layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess> {
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        stray_refresh().with_exe(UpdateKind::Always),
+    );
+    let own_pid = std::process::id();
+    let mut strays: Vec<StrayProcess> = system
+        .processes()
+        .values()
+        .filter_map(|process| {
+            let image = process.exe()?;
+            let pid = process.pid().as_u32();
+            classify(image, pid, layout, service_pid, own_pid).map(|kind| StrayProcess {
+                pid,
+                image: image.to_path_buf(),
+                kind,
+            })
+        })
+        .collect();
+    strays.sort_by_key(|stray| stray.pid);
+    strays
+}
+
+/// What to read of each process when looking for strays or checking that one is gone.
+fn stray_refresh() -> ProcessRefreshKind {
+    ProcessRefreshKind::nothing().without_tasks()
+}
+
+/// Whether the process running `image` is a leftover of an older installation.
+///
+/// Only executables under the Ghostlight home count, so a program of the same name elsewhere is
+/// left alone. The name decides, so a process whose file has since been removed is still found.
+/// The current edge, the shell and the current service image are never strays, nor is the
+/// process asking.
+fn classify(
+    image: &Path,
+    pid: u32,
+    layout: &Layout,
+    service_pid: Option<u32>,
+    own_pid: u32,
+) -> Option<StrayKind> {
+    if pid == own_pid || !lies_under(image, layout.home()) {
+        return None;
+    }
+    let file_name = image.file_name()?.to_str()?;
+    let (base, moved_aside) = match file_name.rsplit_once(MOVED_ASIDE_MARKER) {
+        Some((base, number))
+            if !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            (base, true)
+        }
+        _ => (file_name, false),
+    };
+    if migration::retired_connector_names()
+        .iter()
+        .any(|name| same_file_name(name, base))
+    {
+        return Some(StrayKind::RetiredConnector);
+    }
+    (moved_aside && same_file_name(SERVICE_EXECUTABLE_NAME, base) && Some(pid) != service_pid)
+        .then_some(StrayKind::ReplacedService)
+}
+
+/// Whether two file names are the same file name on this platform.
+fn same_file_name(left: &str, right: &str) -> bool {
+    if cfg!(windows) {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
+}
+
+/// Whether `image` lies under `home`, however either is spelled. The image's file may be gone.
+fn lies_under(image: &Path, home: &Path) -> bool {
+    let resolved = image
+        .parent()
+        .zip(image.file_name())
+        .map(|(directory, name)| canonical_path(directory).join(name));
+    let homes = [home.to_path_buf(), canonical_path(home)];
+    std::iter::once(image)
+        .chain(resolved.as_deref())
+        .flat_map(Path::ancestors)
+        .any(|ancestor| homes.iter().any(|home| same_path(ancestor, home)))
+}
+
+/// Stop each stray and wait for it to exit. Returns the ones that would not stop.
+///
+/// A process that is already gone, or whose pid now belongs to another program, counts as
+/// stopped. The calling process is never stopped.
+#[must_use]
+pub fn stop_strays(strays: &[StrayProcess]) -> Vec<StrayProcess> {
+    let own_pid = std::process::id();
+    let (own, others): (Vec<_>, Vec<_>) = strays.iter().partition(|stray| stray.pid == own_pid);
+    let mut stuck: Vec<StrayProcess> = own.into_iter().cloned().collect();
+    if others.is_empty() {
+        return stuck;
+    }
+    let pids: Vec<Pid> = others
+        .iter()
+        .map(|stray| Pid::from_u32(stray.pid))
+        .collect();
+    let mut system = System::new();
+    let refresh = |system: &mut System| {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&pids),
+            true,
+            stray_refresh().with_exe(UpdateKind::Always),
+        );
+    };
+    let runs = |system: &System, stray: &StrayProcess| {
+        system
+            .process(Pid::from_u32(stray.pid))
+            .is_some_and(|process| {
+                process.status() != sysinfo::ProcessStatus::Zombie
+                    && process
+                        .exe()
+                        .is_some_and(|exe| same_path(exe, &stray.image))
+            })
+    };
+    refresh(&mut system);
+    for stray in &others {
+        if runs(&system, stray) {
+            if let Some(process) = system.process(Pid::from_u32(stray.pid)) {
+                process.kill();
+            }
+        }
+    }
+    let deadline = Instant::now() + STRAY_STOP_WAIT;
+    loop {
+        refresh(&mut system);
+        let running: Vec<&StrayProcess> = others
+            .iter()
+            .copied()
+            .filter(|stray| runs(&system, stray))
+            .collect();
+        if running.is_empty() {
+            return stuck;
+        }
+        if Instant::now() >= deadline {
+            stuck.extend(running.into_iter().cloned());
+            return stuck;
+        }
+        std::thread::sleep(POLL);
+    }
 }
 
 /// One executable placed by a rename-swap.
@@ -575,6 +769,11 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         if !context.control.quit(layout) {
             context.control.stop_image(&running_images(layout))?;
         }
+        let strays = context.control.strays(layout, None);
+        if !strays.is_empty() {
+            // A program that will not stop is left for `doctor` to name; it blocks nothing here.
+            let _ = context.control.stop_strays(&strays);
+        }
         if migrating {
             migration::retire_state(&copied)?;
             migration::archive_audit(&plan.migration)?;
@@ -827,6 +1026,7 @@ mod tests {
         Quit,
         Stop(Vec<PathBuf>),
         Running,
+        StopStrays(Vec<u32>),
         Start,
         Wait,
     }
@@ -862,6 +1062,8 @@ mod tests {
         writes_on_stop: Vec<(PathBuf, String)>,
         /// How many of the next requests to stop an image fail.
         failing_stops: Cell<u32>,
+        /// The programs of an older installation the fake finds running.
+        strays: Vec<StrayProcess>,
         calls: RefCell<Vec<Call>>,
         sightings: RefCell<Vec<Sighting>>,
     }
@@ -878,6 +1080,7 @@ mod tests {
                 policy_witness: None,
                 writes_on_stop: Vec::new(),
                 failing_stops: Cell::new(0),
+                strays: Vec::new(),
                 calls: RefCell::new(Vec::new()),
                 sightings: RefCell::new(Vec::new()),
             }
@@ -940,6 +1143,17 @@ mod tests {
             let remaining = self.respawns.get();
             self.respawns.set(remaining.saturating_sub(1));
             remaining > 0
+        }
+
+        fn strays(&self, _layout: &Layout, _service_pid: Option<u32>) -> Vec<StrayProcess> {
+            self.strays.clone()
+        }
+
+        fn stop_strays(&self, strays: &[StrayProcess]) -> Vec<StrayProcess> {
+            self.note(Call::StopStrays(
+                strays.iter().map(|stray| stray.pid).collect(),
+            ));
+            Vec::new()
         }
 
         fn start_serve(&self, _layout: &Layout) -> io::Result<()> {
@@ -1133,13 +1347,58 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_stops_what_an_older_installation_left_running_after_the_quit_and_before_the_start()
+    {
+        let fixture = Fixture::new();
+        let mut control = FakeControl::new();
+        control.strays = vec![StrayProcess {
+            pid: 4242,
+            image: fixture
+                .layout
+                .bin()
+                .join(retired_connector_names()[0].as_str()),
+            kind: StrayKind::RetiredConnector,
+        }];
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(
+            control.calls(),
+            [
+                Call::Quit,
+                Call::StopStrays(vec![4242]),
+                Call::Start,
+                Call::Wait
+            ]
+        );
+    }
+
+    #[test]
+    fn an_install_that_finds_no_stray_stops_none() {
+        let fixture = Fixture::new();
+        let control = FakeControl::new();
+        fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert!(!control
+            .calls()
+            .iter()
+            .any(|call| matches!(call, Call::StopStrays(_))));
+    }
+
+    #[test]
     fn the_same_version_is_left_alone() {
         let fixture = Fixture::new();
         fixture
             .run(Mode::Release, VERSION, &FakeControl::new())
             .unwrap();
         let before = fixture.snapshot();
-        let control = FakeControl::new();
+        let mut control = FakeControl::new();
+        control.strays = vec![StrayProcess {
+            pid: 4242,
+            image: fixture
+                .layout
+                .bin()
+                .join(retired_connector_names()[0].as_str()),
+            kind: StrayKind::RetiredConnector,
+        }];
         let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
         assert!(outcome.plan.unchanged);
         assert!(control.calls().is_empty());
@@ -1945,6 +2204,8 @@ mod tests {
                         instance: "instance_new".to_owned(),
                         pid: std::process::id(),
                         started_by: StartReason::Update,
+                        connections: None,
+                        workbench: None,
                     },
                 )
                 .unwrap();
@@ -2149,5 +2410,137 @@ mod tests {
             .run(Mode::Release, VERSION, &FakeControl::new())
             .unwrap();
         assert!(!fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME).exists());
+    }
+
+    /// A temporary home with its `bin` and `dev` directories.
+    fn stray_home() -> (Scratch, Layout) {
+        let scratch = Scratch::new();
+        let root = fs::canonicalize(scratch.path()).unwrap();
+        let layout = Layout::new(root.join("home"));
+        fs::create_dir_all(layout.bin()).unwrap();
+        fs::create_dir_all(layout.dev()).unwrap();
+        (scratch, layout)
+    }
+
+    /// The stray kind of a process running `image`, which need not exist.
+    fn kind_of(
+        layout: &Layout,
+        image: &Path,
+        pid: u32,
+        service_pid: Option<u32>,
+    ) -> Option<StrayKind> {
+        classify(image, pid, layout, service_pid, std::process::id())
+    }
+
+    #[test]
+    fn a_retired_connector_under_the_home_is_a_stray_whether_or_not_its_file_exists() {
+        let (_scratch, layout) = stray_home();
+        for name in retired_connector_names() {
+            let present = layout.bin().join(&name);
+            fs::write(&present, "connector").unwrap();
+            let moved = layout.bin().join(format!("{name}.old-2"));
+            let gone = layout.bin().join(format!("{name}.old-9"));
+            for image in [&present, &moved, &gone] {
+                assert_eq!(
+                    kind_of(&layout, image, 7001, None),
+                    Some(StrayKind::RetiredConnector),
+                    "{}",
+                    image.display()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_moved_aside_service_is_a_stray_unless_it_is_the_service_that_answers() {
+        let (_scratch, layout) = stray_home();
+        let old = layout
+            .bin()
+            .join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"));
+        assert_eq!(
+            kind_of(&layout, &old, 7002, Some(7003)),
+            Some(StrayKind::ReplacedService)
+        );
+        assert_eq!(
+            kind_of(&layout, &old, 7002, None),
+            Some(StrayKind::ReplacedService)
+        );
+        assert_eq!(kind_of(&layout, &old, 7002, Some(7002)), None);
+    }
+
+    #[test]
+    fn the_current_programs_and_programs_elsewhere_are_never_strays() {
+        let (scratch, layout) = stray_home();
+        let mut current = Vec::new();
+        for directory in [layout.bin(), layout.dev()] {
+            for name in [
+                EDGE_EXECUTABLE_NAME,
+                SERVICE_EXECUTABLE_NAME,
+                DESKTOP_EXECUTABLE_NAME,
+            ] {
+                current.push(directory.join(name));
+            }
+            current.push(directory.join(format!("{EDGE_EXECUTABLE_NAME}.old-1")));
+            current.push(directory.join(format!("{DESKTOP_EXECUTABLE_NAME}.old-1")));
+        }
+        for image in &current {
+            assert_eq!(
+                kind_of(&layout, image, 7004, None),
+                None,
+                "{}",
+                image.display()
+            );
+        }
+        let elsewhere = fs::canonicalize(scratch.path()).unwrap().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        for name in retired_connector_names() {
+            let image = elsewhere.join(&name);
+            assert_eq!(kind_of(&layout, &image, 7005, None), None);
+        }
+        let image = elsewhere.join(format!("{SERVICE_EXECUTABLE_NAME}.old-1"));
+        assert_eq!(kind_of(&layout, &image, 7005, None), None);
+    }
+
+    #[test]
+    fn the_calling_process_is_never_a_stray() {
+        let (_scratch, layout) = stray_home();
+        let image = layout.bin().join(&retired_connector_names()[0]);
+        assert_eq!(
+            classify(&image, 7006, &layout, None, 7006),
+            None,
+            "the caller"
+        );
+        assert_eq!(
+            classify(&image, 7006, &layout, None, 7007),
+            Some(StrayKind::RetiredConnector)
+        );
+    }
+
+    #[test]
+    fn stopping_nothing_and_stopping_the_caller_leave_everything_running() {
+        assert!(stop_strays(&[]).is_empty());
+        let caller = StrayProcess {
+            pid: std::process::id(),
+            image: PathBuf::from("caller"),
+            kind: StrayKind::ReplacedService,
+        };
+        assert_eq!(stop_strays(std::slice::from_ref(&caller)), [caller]);
+    }
+
+    #[test]
+    fn a_stray_is_described_for_doctor_json() {
+        let stray = StrayProcess {
+            pid: 12,
+            image: PathBuf::from("a/b"),
+            kind: StrayKind::RetiredConnector,
+        };
+        assert_eq!(
+            serde_json::to_value(&stray).unwrap(),
+            serde_json::json!({"pid": 12, "image": "a/b", "kind": "retired_connector"})
+        );
+        assert_eq!(
+            serde_json::to_value(StrayKind::ReplacedService).unwrap(),
+            serde_json::json!("replaced_service")
+        );
     }
 }

@@ -40,7 +40,8 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-11-status-and-doctor (m1-12-honest-names landed out of order).
+Milestone 1 is complete (m1-12-honest-names landed out of order, before m1-11). The live demo with the
+owner is next; the coordinator runs it from DEMO.md beside the plan.
 
 ## Landed
 
@@ -56,6 +57,7 @@ Next: m1-11-status-and-doctor (m1-12-honest-names landed out of order).
 | m1-08-controls-sheet | One shared Controls sheet on the band of every Ghostlight web app (`ui/kit/controls.js`, `ui/kit/kit.css`): "On this screen" (Density, Motion, kept in the browser) and "For Ghostlight on this computer" (Pause and the session, "Others can watch", process diagnostics, the notification test). The service gains the `controls` part, `WorkbenchChange::ControlsChanged`, `WorkbenchFacade::set_watching` (the only way watching changes; while it is off every watching stream ends with `closed`), `connection_counts` and `service_line`; the Status page loses its session, notification and process-diagnostics strips. | see `git log` |
 | m1-09-desktop-role | The service serves relay protocol 4's `desktop` role to a shell of its own build: `S/intake/desktop.rs` holds the same-build frames (`workbench`, `goodbye`, `tray`), the shell is handed the workbench address and the bearer and is enrolled for the goodbye, and a tray click holds, resumes or quits. The installer places `ghostlight-desktop` beside every service image it places when the payload has one. Goldens in `tests/golden/desktop/`. | see `git log` |
 | m1-10-shell-webview | `ghostlight-desktop` is the Ghostlight window: a webview on the service's loopback workbench. It opens the relay `desktop` stream (`link.rs`), takes the address, the bearer and the tray from the `workbench` frame, hands the bearer to that origin's page only (`webview::access_script`) and keeps its web storage in `state/desktop-webview` under the home. The private scheme, the in-memory bundle, the page bridge and the spike page are gone; the shell depends on `ghostlight-relay` and nothing else in the workspace. | see `git log` |
+| m1-11-status-and-doctor | `ghostlight status` counts connections and names the workbench; `doctor` names what an older installation left running and `doctor --fix` stops it. The control `status` answer gains `connections` and `workbench` (never the bearer); the text and `--json` forms say the same; the endpoint moves to doctor's `Endpoint:` line. `install::deployment` owns the stray scan (`stray_processes`, `classify`, `stop_strays`); a restart deploy stops strays after the old service quits and before the new one starts. | see `git log` |
 | m1-12-honest-names | The edge carries a version resource: FileDescription "Ghostlight connection", ProductName "Ghostlight", CompanyName "Sylin", FileVersion and ProductVersion 4.0.0 (the relay revision). `embed-resource` becomes a Windows build dependency of the edge. The window keeps "Ghostlight". | see `git log` |
 
 ## Route table
@@ -180,6 +182,14 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
   `dev/ghostlight.exe` ("Ghostlight connection"), force-replace `bin`'s edge once (owner answer Q4: no
   new refresh rule; the DEV-LOOP step), and confirm Task Manager lists each connection as
   "Ghostlight connection", the window as "Ghostlight" and the service by the description above.
+
+- m1-11, Windows and Linux, after the dev loop: `ghostlight status` reads "Ghostlight service is up; ..." with the
+  real counts and a "Workbench: <url> -- ..." line, and `ghostlight status --json` carries `connections` and
+  `workbench`. Turn "Others can watch" off in the window and run `status` again: the line reads "watching is off".
+  `ghostlight doctor` prints an `Endpoint:` line after `Home:` and names no stray. With a connector from the
+  pre-edge layout still running (if one is), `doctor` names its image and `doctor --fix` stops it and prints
+  "Stopped <image>."; `ghostlight doctor --json` lists it under `strays`. Stop the service and run `status`: it
+  reads "Ghostlight service is not running." and `doctor` adds how it starts.
 
 ## Blockers
 
@@ -396,11 +406,26 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
   not a workbench frame, a decode failure, an address other than `http://127.0.0.1:<port>/` and a bearer that is not
   43 URL-safe base64 characters are each `LinkError::Contract` with a fixed reason; no error text holds frame content.
 - m1-10: with a tray, the shell keeps the process after the window closes; without one it exits. A window that
-  cannot be created also ends a shell with no tray. `Shell::start` returns whether the shell goes on.
+  cannot be created also ends a shell with no tray. `Shell::start` returns whether the shell goes on. A shell with
+  no tray also ends when its window is destroyed, including after a lost Linux renderer (fix `14c3174b`), so it
+  never holds the service's only shell place with nothing that can open the window again.
 - Owner question: Theme and "Hold this screen" are not part of this milestone's "On this screen" group. Should
   either be added once the demo has been seen?
 
 - m1-12: built resources read from `.target-lane-shell-m1/debug`: `ghostlight.exe` FileDescription
   "Ghostlight connection" (FileVersion 4.0.0), `ghostlight-desktop.exe` "Ghostlight",
-  `ghostlight-service.exe` "Ghostlight". The ledger's RESUME line still names m1-11 because that slice
-  has not landed.
+  `ghostlight-service.exe` "Ghostlight".
+
+- m1-11: the spec's decisions give the stray sentence "Close it, or run ghostlight doctor --fix." while owner
+  answer Q5 says `ghostlight install` also stops strays. `ghostlight install` is registration repair only
+  (`cli/setup.rs`, not this lane's), so the sentence names `doctor --fix`; the deploy (`ghostlight deployment
+  install`) does stop strays.
+- m1-11: a service that answered without `connections` (an older one) reads "Ghostlight service is up." because
+  `service_line` takes counts and `None` means not running; the sentence is `SERVICE_UP` in `language/workbench.rs`.
+- m1-11: `ProcessControl::stop_strays` returns the strays that would not stop. The deploy lets them stand and goes
+  on (a retired connector that will not stop must not block a release); `doctor` names them afterwards.
+- m1-11: `stop_strays` stops a pid only while it still runs the image the scan saw, so a pid the system gave to
+  another program meanwhile is left alone and counts as stopped.
+- m1-11: docs/trust/data-flows.md says again that `ghostlight status` shows the workbench port (it prints the
+  "Workbench:" line), and its Local artifacts list gains the shell's webview profile under
+  `~/.ghostlight/state/desktop-webview`.

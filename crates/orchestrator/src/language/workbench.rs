@@ -3,7 +3,10 @@
 //!
 //! The page asks the service what context it is in and renders what it is told. Every sentence a
 //! request can end in lives here, so the server routes and decides and never words anything
-//! itself (ADR-0199, amendment of 2026-10-15).
+//! itself (ADR-0199, amendment of 2026-10-15). It also holds the lines `status` and `doctor` print
+//! about the service, the workbench and anything an older installation left running.
+
+use serde::{Deserialize, Serialize};
 
 /// The word for the context that carries the right key: the Ghostlight window.
 pub const WORD_CONTROL: &str = "Full control";
@@ -160,7 +163,7 @@ pub const WATCHING_NOT_SERVED: &str = "Ghostlight is not serving a watch view on
 pub const WATCHING_NOT_SAVED: &str = "Ghostlight could not save that setting. Try again.";
 
 /// How many of each kind of connection the service has right now.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ConnectionCounts {
     /// Connections whose channel is MCP, across every session.
     pub mcp_clients: usize,
@@ -201,6 +204,67 @@ pub fn service_line(counts: Option<ConnectionCounts>) -> String {
         Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
     };
     format!("Ghostlight service is up; {connected} connected.")
+}
+
+/// What `status` says about a service that answered but did not report its connections.
+pub const SERVICE_UP: &str = "Ghostlight service is up.";
+
+/// What `status` adds to "not running" when nothing needs doing: the service starts by itself.
+pub const SERVICE_STARTS_ON_DEMAND: &str = "It starts when a browser or an MCP client connects.";
+
+/// The line that says the service is not running, with how it starts when `idle_is_ready`.
+#[must_use]
+pub fn service_not_running_line(idle_is_ready: bool) -> String {
+    let line = service_line(None);
+    if idle_is_ready {
+        format!("{line} {SERVICE_STARTS_ON_DEMAND}")
+    } else {
+        line
+    }
+}
+
+/// The line that says where the workbench is and whether others on this computer can watch it.
+///
+/// `usual_port` is false when the usual port was taken and the service chose another.
+#[must_use]
+pub fn workbench_line(url: &str, watching: bool, usual_port: bool) -> String {
+    let who = if watching {
+        "others on this computer can watch"
+    } else {
+        "watching is off"
+    };
+    let port = if usual_port {
+        ""
+    } else {
+        " (the usual port was taken)"
+    };
+    format!("Workbench: {url} -- {who}{port}")
+}
+
+/// The line `doctor` prints for the endpoint the service listens on.
+#[must_use]
+pub fn endpoint_line(endpoint: &str) -> String {
+    format!("Endpoint: {endpoint}")
+}
+
+/// The line that names something from an older Ghostlight installation that is still running.
+#[must_use]
+pub fn stray_line(image: &str) -> String {
+    format!(
+        "Something from an older Ghostlight installation is still running: {image}. Close it, or run ghostlight doctor --fix."
+    )
+}
+
+/// The line `doctor --fix` prints for a stray it stopped.
+#[must_use]
+pub fn stray_stopped_line(image: &str) -> String {
+    format!("Stopped {image}.")
+}
+
+/// The line `doctor --fix` prints for a stray that would not stop.
+#[must_use]
+pub fn stray_not_stopped_line(image: &str) -> String {
+    format!("Could not stop {image}. Close it yourself.")
 }
 
 /// A search that is longer than the search box allows.
@@ -268,6 +332,8 @@ mod tests {
             CONTROLS_NOTIFICATIONS_WORD,
             WATCHING_NOT_SERVED,
             WATCHING_NOT_SAVED,
+            SERVICE_UP,
+            SERVICE_STARTS_ON_DEMAND,
         ] {
             assert!(sentence.is_ascii(), "{sentence}");
             assert!(sentence.ends_with('.'), "{sentence}");
@@ -295,6 +361,48 @@ mod tests {
             command_line,
             browsers,
         })
+    }
+
+    #[test]
+    fn the_workbench_line_says_who_can_watch_and_names_a_taken_port() {
+        let url = "http://127.0.0.1:47600/";
+        assert_eq!(
+            workbench_line(url, true, true),
+            "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch"
+        );
+        assert_eq!(
+            workbench_line(url, false, true),
+            "Workbench: http://127.0.0.1:47600/ -- watching is off"
+        );
+        assert_eq!(
+            workbench_line(url, true, false),
+            "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch (the usual port was taken)"
+        );
+    }
+
+    #[test]
+    fn an_idle_service_says_how_it_starts() {
+        assert_eq!(
+            service_not_running_line(false),
+            "Ghostlight service is not running."
+        );
+        assert_eq!(
+            service_not_running_line(true),
+            "Ghostlight service is not running. It starts when a browser or an MCP client connects."
+        );
+    }
+
+    #[test]
+    fn the_stray_lines_name_the_image_and_the_fix() {
+        assert_eq!(
+            stray_line("C:/gl/bin/old.exe"),
+            "Something from an older Ghostlight installation is still running: C:/gl/bin/old.exe. Close it, or run ghostlight doctor --fix."
+        );
+        assert_eq!(stray_stopped_line("old.exe"), "Stopped old.exe.");
+        assert_eq!(
+            stray_not_stopped_line("old.exe"),
+            "Could not stop old.exe. Close it yourself."
+        );
     }
 
     #[test]
