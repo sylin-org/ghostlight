@@ -2,14 +2,14 @@
 
 <#
 .SYNOPSIS
-    Verify one assembled candidate directory against the declared freeze and its own
-    checksums, then delegate to the deep candidate checks.
+    Verify one assembled candidate directory against an independently supplied source
+    revision and its own checksums, then delegate to the deep candidate checks.
 
 .DESCRIPTION
     The custody half of G2, in one command. Runs four steps:
 
-      1. Freeze binding: the candidate manifest's sourceRevision must equal the revision
-         declared in docs/release/freeze.json.
+      1. Source revision: the candidate manifest's sourceRevision must equal the commit
+         that -Revision resolves to.
       2. Deep candidate checks: scripts/check-release-candidate.ps1 (manifest shape, exact
          artifact roster and coordinates, hashes).
       3. SHA256SUMS recomputation: every line is rehashed from bytes on disk; the line set
@@ -23,16 +23,24 @@
 .PARAMETER CandidateDirectory
     Directory containing release-candidate.json, SHA256SUMS, and assets/.
 
+.PARAMETER Revision
+    A commit or a tag naming the revision the candidate must have been built from. The
+    value must come from the dispatched workflow run's head SHA (for example
+    gh run view <run-id> --json headSha) or from the release tag, never copied from the
+    candidate's own release-candidate.json.
+
 .PARAMETER IncludeProvenance
-    Additionally verify GitHub artifact attestations for every raw asset via gh CLI.
+    Additionally verify GitHub artifact attestations for every raw asset via gh CLI,
+    bound to the resolved source revision.
 
 .EXAMPLE
-    pwsh scripts/verify-custody.ps1 build/release-candidate -IncludeProvenance
+    pwsh scripts/verify-custody.ps1 build/release-candidate -Revision <sha or tag> -IncludeProvenance
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $CandidateDirectory,
+    [Parameter(Mandatory)] [string] $Revision,
     [switch] $IncludeProvenance
 )
 
@@ -55,17 +63,18 @@ function Assert-Step {
 
 Write-Host "Custody verification for $candidateDirectory"
 
-Assert-Step "freeze binding" {
-    $freezePath = Join-Path $repository "docs/release/freeze.json"
-    if (-not (Test-Path -LiteralPath $freezePath)) {
-        throw "no freeze declared; declare the revision at G0 first."
+$expectedRevision = ""
+Assert-Step "source revision" {
+    $resolved = (git -C $repository rev-parse --verify "$Revision^{commit}" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $resolved) {
+        throw "-Revision '$Revision' does not resolve to a commit in this repository; fetch it or pass a full SHA or tag."
     }
-    $freeze = Get-Content -LiteralPath $freezePath -Raw | ConvertFrom-Json
+    $script:expectedRevision = "$resolved".Trim()
     $manifestPath = Join-Path $candidateDirectory "release-candidate.json"
     if (-not (Test-Path -LiteralPath $manifestPath)) { throw "candidate manifest missing" }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.sourceRevision -ne $freeze.revision) {
-        throw ("sourceRevision mismatch: freeze={0} candidate={1}" -f $freeze.revision, $manifest.sourceRevision)
+    if ($manifest.sourceRevision -ne $script:expectedRevision) {
+        throw ("sourceRevision mismatch: expected={0} candidate={1}" -f $script:expectedRevision, $manifest.sourceRevision)
     }
 }
 
@@ -106,7 +115,7 @@ if ($IncludeProvenance) {
             "ghostlight-mcp-connector-x86_64-unknown-linux-gnu",
             "ghostlight-browser-connector-x86_64-unknown-linux-gnu"
         )) {
-            gh attestation verify (Join-Path $assets $name) -R sylin-org/ghostlight
+            gh attestation verify (Join-Path $assets $name) -R sylin-org/ghostlight --source-digest $script:expectedRevision
             if ($LASTEXITCODE -ne 0) { throw "provenance failed for $name" }
         }
     }
@@ -116,5 +125,5 @@ if ($IncludeProvenance) {
 
 Write-Host ""
 Write-Host "Custody instruction: copy this directory somewhere local, re-run this command"
-Write-Host "against the copy, and only then treat the candidate as held. Nothing publishes"
-Write-Host "or submits until G3 rows are checked by the owner."
+Write-Host "against the copy with the same -Revision, and only then treat the candidate as held."
+Write-Host "Nothing publishes or submits until G3 rows are checked by the owner."

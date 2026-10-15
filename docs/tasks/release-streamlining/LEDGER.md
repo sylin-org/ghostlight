@@ -1,3 +1,5 @@
+CLOSED 2026-10-14. The freeze layer (P2) was retired; custody binds to verify-custody -Revision.
+
 # LEDGER -- release streamlining
 
 One task = one logical commit set. This ledger is the authority on progress.

@@ -1,3 +1,5 @@
+CLOSED 2026-10-14. The freeze layer (P2) was retired; custody binds to verify-custody -Revision.
+
 # BOOTSTRAP -- release streamlining
 
 Purpose: five owner-approved improvements (2026-08-24) to the release process. Automate the

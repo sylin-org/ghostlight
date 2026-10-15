@@ -293,23 +293,13 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "preview server syntax" }
     } }
 
-    $freezePath = Join-Path $repository "docs/release/freeze.json"
-    $stages += @{
-        Name   = "freeze binding (docs/release/freeze.json)"
-        Skip   = if (Test-Path -LiteralPath $freezePath) { "" } else { "no freeze declared yet (declared at G0)" }
-        Action = {
-            & (Join-Path $repository "scripts/assert-freeze.ps1")
-            Assert-LastExitZero "HEAD does not match the declared freeze revision"
-        }
-    }
-
     $missingDependencyTools = @()
     if (-not (Get-Command cargo-deny -ErrorAction SilentlyContinue)) { $missingDependencyTools += "cargo-deny" }
     if (-not (Get-Command cargo-audit -ErrorAction SilentlyContinue)) { $missingDependencyTools += "cargo-audit" }
     $dependencySkip = if ($missingDependencyTools.Count -gt 0) {
         "$($missingDependencyTools -join ' and ') not installed; CI runs license/ban/source/advisory"
     } elseif (-not $IncludeDependencyGates) {
-        "rechecked against the frozen graph when run with -IncludeDependencyGates (or by CI)"
+        "run with -IncludeDependencyGates (or by CI)"
     } else {
         ""
     }
@@ -376,7 +366,7 @@ try {
 
 | Row | Where it runs |
 | --- | --- |
-| Dependency license/ban/source/advisory detail | CI dependency gate on the frozen revision |
+| Dependency license/ban/source/advisory detail | CI dependency gate on the release revision |
 | Repository truth, documentation links, ASCII policy | CI repository-integrity job |
 | Complete 0.8 recovery disposition | tracked matrix plus release-environment lanes |
 | Clean Windows/Linux install, upgrade, uninstall | release-environment machines (owner) |

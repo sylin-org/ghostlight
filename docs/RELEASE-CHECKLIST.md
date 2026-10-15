@@ -117,18 +117,18 @@ installed-product observation, or the checklist deadlocks against itself.
   table supplies the words to both install and `doctor`, the KDE accessibility half runs on the
   existing host, and the WSL sentence needs a WSL harness rather than the clean Windows machine.
   The observation-dependent rows are evidence and close under G8.
-- [x] Name one final source revision and stop product and packaging changes while its candidate is
-  evaluated. First frozen 2026-08-24 (UTC) at `08f368606f3deac4115a148f6c20590a7c9afb9b`;
+- [x] Name the source revision the candidate is built from.
+  First frozen 2026-08-24 (UTC) at `08f368606f3deac4115a148f6c20590a7c9afb9b`;
   re-declared the same session at `e7d8986bb96625335cd9cff7d04d7e8b083f845d` after ordinary CI
   exposed a Linux-only Clippy failure in the new `ghostlight-win-peer` test module -- fixed at
   its owning seam with a cross-platform negative-control pin, then re-frozen per the gate rule
-  that a journey which cannot close honestly is repaired, not waived. Machine-readable
-  declaration: [release/freeze.json](release/freeze.json). From this moment, no product or
-  packaging changes: anything discovered goes to the batch ledgers as a documented limitation
-  unless the owner declares it a blocker. Unfreezing means re-declaring and restarting the
-  affected gates. `extension/` remains byte-identical to its state at `70869631`, so the pending
-  STAGED_PUBLISH store review continues to cover the candidate's extension bytes without a
-  resubmission.
+  that a journey which cannot close honestly is repaired, not waived. `extension/` remains
+  byte-identical to its state at `70869631`, so the pending STAGED_PUBLISH store review continues
+  to cover the candidate's extension bytes without a resubmission.
+
+The release revision is the commit `release.yml` is dispatched at. It is recorded as
+`sourceRevision` in `release-candidate.json` and in the custody record, and verify-custody checks it
+with `-Revision <sha or tag>`. A fix means a new candidate run.
 
 Evidence:
 

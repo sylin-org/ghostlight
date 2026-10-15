@@ -1,7 +1,9 @@
 {
   "revision": "d1e9fdd3b35b1fc7d5a0e1604b141cbb49855af9",
   "schemaVersion": 1,
-  "note": "Published screenshot-only 1.3.14 on stable 1.3.13; unchanged compatible Chrome adapter 1.3.12; candidate run 37085021976",
+  "status": "retired",
+  "note": "Retired 2026-10-14 (owner dropped the freeze in 16ccf057). No tooling reads this file; custody binds to verify-custody -Revision.",
+  "previousNote": "Published screenshot-only 1.3.14 on stable 1.3.13; unchanged compatible Chrome adapter 1.3.12; candidate run 37085021976",
   "frozen_at_utc": "2026-10-03T01:35:10.630Z",
   "frozen_by": "Leo"
 }
