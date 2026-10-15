@@ -1025,6 +1025,41 @@ fn new_audit_records_serialize_the_complete_set_without_a_highest_capability() {
 }
 
 #[test]
+fn audit_reads_lines_written_with_peer_observation_without_reemitting_it() {
+    use crate::intake::session::IntakeChannel;
+
+    let connection = format!("connection_{}", uuid::Uuid::new_v4().simple());
+    let mut encoded = serde_json::to_value(sample_record()).unwrap();
+    encoded["peer_image"] = "client.exe".into();
+    encoded["provenance"] = serde_json::json!({
+        "connection_id": connection,
+        "observed_at_ms": 7,
+        "channel": "mcp",
+        "peer": { "state": "observed", "executable": "client.exe" },
+        "signature": "not_checked",
+    });
+    let record: AuditRecord =
+        serde_json::from_value(encoded).expect("lines with peer observation stay readable");
+    let provenance = record.provenance.as_ref().expect("provenance survives");
+    assert_eq!(provenance.channel, IntakeChannel::Mcp);
+    assert_eq!(provenance.observed_at_ms, Some(7));
+    assert_eq!(
+        provenance.connection_id.as_deref(),
+        Some(connection.as_str())
+    );
+
+    let rewritten = serde_json::to_value(&record).unwrap();
+    let mut found = Vec::new();
+    keys(&rewritten, &mut found);
+    for retired in ["peer_image", "peer", "signature", "executable"] {
+        assert!(
+            !found.contains(&retired.to_owned()),
+            "the record re-emitted {retired}"
+        );
+    }
+}
+
+#[test]
 fn audit_reads_legacy_failure_payloads_without_reemitting_them() {
     for legacy in [
         serde_json::json!({"reason":"browser_primitive_failed","detail":"PRIVATE_EXCEPTION"}),
