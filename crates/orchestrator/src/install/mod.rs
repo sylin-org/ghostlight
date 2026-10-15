@@ -1073,9 +1073,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             "A foreign entry holds this target's Ghostlight registration; it was left untouched."
                 .into()
         }
-        Err(HarnessError::Malformed(_)) => {
-            "This configuration could not be parsed; it was left untouched.".into()
-        }
+        Err(error @ HarnessError::Malformed(_)) => error.to_string(),
         Err(_) => "This configuration could not be read; it was left untouched.".into(),
         _ if manual => manual_setup_sentence(definition),
         _ => match state {
@@ -1177,21 +1175,27 @@ enum RegistrationState {
 /// arguments follow it, and nothing of their text.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ForeignCommand {
-    /// The bounded file name of the program, up to its first whitespace.
+    /// The bounded file name of the program.
     program: String,
     /// The `args` array length plus every further word of a whole-command-line `command`.
     arguments: usize,
 }
 
 impl ForeignCommand {
-    /// Reduce a foreign entry's command to its program and argument count. A command with no
-    /// file name part yields `None`.
+    /// Reduce a foreign entry's command to its program and argument count. A command that
+    /// names an existing file is that program whole. Any other command is cut at its first
+    /// whitespace before a file name is taken, so no word after the program is ever read as a
+    /// path. A command with no file name part yields `None`.
     fn from_entry(command: &str, args: Option<&[&str]>) -> Option<Self> {
-        let file_name = Path::new(command).file_name()?.to_string_lossy();
-        let bounded = bounded_disclosure(&file_name)?;
-        let mut words = bounded.split_whitespace();
-        let program = words.next()?.to_string();
-        let extra_words = words.count();
+        let (program_path, extra_words) = if Path::new(command).is_file() {
+            (command, 0)
+        } else {
+            let mut words = command.split_whitespace();
+            let first = words.next()?;
+            (first, words.count())
+        };
+        let file_name = Path::new(program_path).file_name()?.to_string_lossy();
+        let program = bounded_disclosure(&file_name)?;
         Some(Self {
             program,
             arguments: args.map_or(0, <[&str]>::len) + extra_words,
@@ -1254,9 +1258,7 @@ fn inspect_toml(
     edge: &Path,
     windows: bool,
 ) -> Result<RegistrationState, HarnessError> {
-    let document = source
-        .parse::<DocumentMut>()
-        .map_err(|error| HarnessError::Malformed(error.to_string()))?;
+    let document = parse_toml(source)?;
     let Some(entry) = document
         .get("mcp_servers")
         .and_then(Item::as_table)
@@ -1290,24 +1292,25 @@ fn missing_codex_desktop_environment(
     let forwarded = entry
         .get("env_vars")
         .map(|item| {
-            let values = item.as_array().ok_or_else(|| {
-                HarnessError::Malformed("Ghostlight's env_vars is not a TOML array".into())
-            })?;
+            let values = item.as_array().ok_or(HarnessError::Malformed(None))?;
             // Validate every member before deciding whether any handoff is missing.
             // Codex accepts a name or a closed name/source object, not arbitrary TOML.
-            for (index, value) in values.iter().enumerate() {
+            for value in values.iter() {
                 let valid = value.as_str().is_some()
                     || value.as_inline_table().is_some_and(|table| {
-                        table.get("name").and_then(toml_edit::Value::as_str).is_some()
+                        table
+                            .get("name")
+                            .and_then(toml_edit::Value::as_str)
+                            .is_some()
                             && table.get("source").is_none_or(|source| {
                                 matches!(source.as_str(), Some("local" | "remote"))
                             })
-                            && table.iter().all(|(key, _)| matches!(key, "name" | "source"))
+                            && table
+                                .iter()
+                                .all(|(key, _)| matches!(key, "name" | "source"))
                     });
                 if !valid {
-                    return Err(HarnessError::Malformed(format!(
-                        "Ghostlight's env_vars member {index} must be a string or a name/source table with a string name and optional local/remote source"
-                    )));
+                    return Err(HarnessError::Malformed(None));
                 }
             }
             Ok(values)
@@ -1529,16 +1532,13 @@ fn edit_json_with(
     } else if !intent.installs() {
         return Ok(false);
     }
-    let root = CstRootNode::parse(&source, &jsonc_options())
-        .map_err(|error| HarnessError::Malformed(error.to_string()))?;
+    let root = CstRootNode::parse(&source, &jsonc_options()).map_err(malformed_json_at)?;
     let object = root
         .object_value_or_create()
-        .ok_or_else(|| HarnessError::Malformed("configuration root is not an object".into()))?;
+        .ok_or(HarnessError::Malformed(None))?;
     let collection = json_collection(&object, dialect, intent.installs())?;
     if intent.installs() {
-        let collection = collection.ok_or_else(|| {
-            HarnessError::Malformed("could not create the harness server collection".into())
-        })?;
+        let collection = collection.ok_or(HarnessError::Malformed(None))?;
         let entry = cst_input(expected_json_entry(edge, dialect));
         if let Some(existing) = collection.get(SERVER_NAME) {
             existing.set_value(entry);
@@ -1575,9 +1575,7 @@ fn edit_toml_with(
     intent: RegistrationEdit,
 ) -> Result<bool, HarnessError> {
     let source = read_or_empty(path)?;
-    let mut document = source
-        .parse::<DocumentMut>()
-        .map_err(|error| HarnessError::Malformed(error.to_string()))?;
+    let mut document = parse_toml(&source)?;
     let existing = document
         .get("mcp_servers")
         .and_then(Item::as_table)
@@ -1623,7 +1621,7 @@ fn edit_toml_with(
         }
         let servers = document["mcp_servers"]
             .as_table_mut()
-            .ok_or_else(|| HarnessError::Malformed("mcp_servers is not a TOML table".into()))?;
+            .ok_or(HarnessError::Malformed(None))?;
         servers[SERVER_NAME] = updated;
     } else if let Some(servers) = document["mcp_servers"].as_table_mut() {
         servers.remove(SERVER_NAME);
@@ -1680,7 +1678,7 @@ fn json_collection(
         };
         let Some(mcp) = mcp else {
             return if create && root.get("mcp").is_some() {
-                Err(HarnessError::Malformed("mcp is not an object".into()))
+                Err(HarnessError::Malformed(None))
             } else {
                 Ok(None)
             };
@@ -1691,9 +1689,7 @@ fn json_collection(
             mcp.object_value("servers")
         };
         return if create && servers.is_none() && mcp.get("servers").is_some() {
-            Err(HarnessError::Malformed(
-                "mcp.servers is not an object".into(),
-            ))
+            Err(HarnessError::Malformed(None))
         } else {
             Ok(servers)
         };
@@ -1711,7 +1707,7 @@ fn json_collection(
         root.object_value(key)
     };
     if create && collection.is_none() && root.get(key).is_some() {
-        return Err(HarnessError::Malformed(format!("{key} is not an object")));
+        return Err(HarnessError::Malformed(None));
     }
     Ok(collection)
 }
@@ -1841,8 +1837,7 @@ fn manual_json_setup(edge: &Path, dialect: JsonDialect) -> Result<String, Harnes
             json!({"mcp": {"servers": {SERVER_NAME: entry}}})
         }
     };
-    serde_json::to_string_pretty(&document)
-        .map_err(|error| HarnessError::Malformed(error.to_string()))
+    serde_json::to_string_pretty(&document).map_err(|_| HarnessError::Malformed(None))
 }
 
 fn manual_yaml_setup(edge: &Path, dialect: ManualDialect) -> String {
@@ -1985,18 +1980,46 @@ fn jsonc_options() -> ParseOptions {
     }
 }
 
+/// What a person reads when a harness configuration cannot be parsed. It names the line of
+/// the parse error and nothing the file says.
+fn malformed_sentence(line: Option<usize>) -> String {
+    match line {
+        Some(line) => {
+            format!("This configuration could not be parsed at line {line}; it was left untouched.")
+        }
+        None => "This configuration could not be parsed; it was left untouched.".into(),
+    }
+}
+
+/// A JSON-with-comments parse error reduced to its line.
+fn malformed_json_at(error: jsonc_parser::errors::ParseError) -> HarnessError {
+    HarnessError::Malformed(Some(error.line_display()))
+}
+
+/// Parse a TOML configuration. A parse error is reduced to the line its span starts on.
+fn parse_toml(source: &str) -> Result<DocumentMut, HarnessError> {
+    source.parse::<DocumentMut>().map_err(|error| {
+        let line = error.span().map(|span| {
+            let start = span.start.min(source.len());
+            1 + source.as_bytes()[..start]
+                .iter()
+                .filter(|byte| **byte == b'\n')
+                .count()
+        });
+        HarnessError::Malformed(line)
+    })
+}
+
 fn parse_jsonc(source: &str) -> Result<Value, HarnessError> {
     let value = if source.trim().is_empty() {
         Value::Object(Default::default())
     } else {
         parse_to_serde_value(source, &jsonc_options())
-            .map_err(|error| HarnessError::Malformed(error.to_string()))?
-            .ok_or_else(|| HarnessError::Malformed("configuration has no value".into()))?
+            .map_err(malformed_json_at)?
+            .ok_or(HarnessError::Malformed(None))?
     };
     if !value.is_object() {
-        return Err(HarnessError::Malformed(
-            "configuration root is not an object".into(),
-        ));
+        return Err(HarnessError::Malformed(None));
     }
     Ok(value)
 }
@@ -2033,10 +2056,7 @@ fn validate_located_config(path: &Path, dialect: ConfigDialect) -> Result<(), Ha
     }
     let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
     match dialect {
-        ConfigDialect::CodexToml => source
-            .parse::<DocumentMut>()
-            .map(|_| ())
-            .map_err(|error| HarnessError::Malformed(error.to_string())),
+        ConfigDialect::CodexToml => parse_toml(&source).map(|_| ()),
         ConfigDialect::Json(_) | ConfigDialect::OpenCode => parse_jsonc(&source).map(|_| ()),
         ConfigDialect::Manual(_) => Ok(()),
     }
@@ -2177,9 +2197,10 @@ pub enum HarnessError {
     /// The harness config could not be written.
     #[error("could not write harness configuration: {0}")]
     Write(io::Error),
-    /// The config is not structurally safe to edit.
-    #[error("harness configuration is malformed: {0}")]
-    Malformed(String),
+    /// The config is not structurally safe to edit. The payload is the 1-indexed line of the
+    /// parse error, when the parser located one. Nothing the file says is ever carried.
+    #[error("{}", malformed_sentence(*.0))]
+    Malformed(Option<usize>),
     /// The client's file is never edited by Ghostlight; the person pastes the setup.
     #[error("{0}")]
     ManualSetup(String),
@@ -3195,11 +3216,15 @@ mod tests {
 
     /// A blocked card names what was actually found beside the claim (ADR-0135).
     fn inspected_summary(directory: &Path) -> HarnessSummary {
+        inspected_summary_of(directory, "claude-desktop")
+    }
+
+    fn inspected_summary_of(directory: &Path, id: &str) -> HarnessSummary {
         let context = context(directory);
         let definition = definitions(&context)
             .into_iter()
-            .find(|definition| definition.id == "claude-desktop")
-            .expect("claude-desktop stays in the closed roster");
+            .find(|definition| definition.id == id)
+            .expect("the target stays in the closed roster");
         inspect(&context, &definition)
     }
 
@@ -3314,36 +3339,88 @@ mod tests {
     }
 
     #[test]
-    fn malformed_configurations_disclose_nothing_from_the_file() {
+    fn malformed_configurations_name_the_line_and_disclose_nothing_from_the_file() {
         let directory = temporary("malformed-evidence");
         let path = claude_desktop_config(&directory);
         edge(&directory);
-        fs::write(&path, "{\"mcpServers\": {").unwrap();
+        fs::write(&path, "{\n  \"token\" \"sk-test-secret\"\n}\n").unwrap();
 
         let summary = inspected_summary(&directory);
 
         assert_eq!(summary.state, HarnessState::NeedsAttention);
-        assert!(
-            summary
-                .detail
-                .starts_with("This configuration could not be parsed"),
-            "{}",
-            summary.detail
+        assert_eq!(
+            summary.detail,
+            "This configuration could not be parsed at line 2; it was left untouched."
         );
         assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
         assert!(!summary.can_fix);
-
-        let toml = directory.join("codex.toml");
-        fs::write(
-            &toml,
-            "[mcp_servers.ghostlight\ntoken = \"sk-test-secret\"\n",
-        )
-        .unwrap();
-        let source = fs::read_to_string(&toml).unwrap();
-        let error = inspect_toml(&source, &directory.join("edge"), false).unwrap_err();
-        assert!(matches!(error, HarnessError::Malformed(_)));
         let serialized = serde_json::to_string(&summary).unwrap();
         assert!(!serialized.contains("sk-test-secret"), "{serialized}");
+
+        let codex = context(&directory).codex_config;
+        fs::create_dir_all(codex.parent().unwrap()).unwrap();
+        fs::write(&codex, "[mcp_servers.ghostlight]\ntoken = sk-test-secret\n").unwrap();
+
+        let summary = inspected_summary_of(&directory, "codex");
+
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        assert_eq!(
+            summary.detail,
+            "This configuration could not be parsed at line 2; it was left untouched."
+        );
+        assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
+        let serialized = serde_json::to_string(&summary).unwrap();
+        assert!(!serialized.contains("sk-test-secret"), "{serialized}");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_structural_fault_names_no_line() {
+        let directory = temporary("malformed-structure");
+        let path = claude_desktop_config(&directory);
+        edge(&directory);
+        fs::write(
+            &path, "[]
+",
+        )
+        .unwrap();
+
+        let summary = inspected_summary(&directory);
+
+        assert_eq!(
+            summary.detail,
+            "This configuration could not be parsed; it was left untouched."
+        );
+        assert!(summary.evidence.is_none());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_command_line_command_discloses_only_its_first_word() {
+        let line =
+            ForeignCommand::from_entry("C:/tools/other-server.exe --token sk/test-secret", None)
+                .expect("a program is named");
+        assert_eq!(line.program, "other-server.exe");
+        assert_eq!(line.arguments, 2);
+
+        let npx = ForeignCommand::from_entry("npx -y @scope/server-x --api-key abc", None)
+            .expect("a program is named");
+        assert_eq!(npx.program, "npx");
+        assert_eq!(npx.arguments, 4);
+
+        let both = ForeignCommand::from_entry("npx -y @scope/server-x", Some(&["--port", "9"]))
+            .expect("a program is named");
+        assert_eq!(both.program, "npx");
+        assert_eq!(both.arguments, 4);
+
+        let directory = temporary("foreign-spaced-file");
+        let spaced = directory.join("tools with spaces").join("other-server");
+        fs::create_dir_all(spaced.parent().unwrap()).unwrap();
+        fs::write(&spaced, "").unwrap();
+        let whole = ForeignCommand::from_entry(&spaced.to_string_lossy(), Some(&["serve"]))
+            .expect("a program is named");
+        assert_eq!(whole.program, "other-server");
+        assert_eq!(whole.arguments, 1);
         fs::remove_dir_all(directory).unwrap();
     }
 

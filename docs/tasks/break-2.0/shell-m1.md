@@ -74,4 +74,4 @@ None.
   `service/mod.rs` refuses it again; `desktop/mod.rs` still has its `tauri::generate_handler!`
   list. No name differs from the spec.
 
-- m1-02: the foreign entry's `program` keeps the file name of `command` up to its first whitespace; later words count as arguments. The malformed-file case no longer names a line number, because the detail alone says it could not be parsed; the parse-error line number of owner answer Q3 is left to a later slice if the owner wants it on the page.
+- m1-02: the foreign entry's `program` is the file name of `command` when `command` names an existing file; otherwise the command is cut at its first whitespace before a file name is taken, and every later word counts as an argument. A configuration that cannot be parsed names the line of the parse error (taken from the parser, never any file text) in its detail and carries no evidence (owner answer Q3); `HarnessError::Malformed` carries only that line.
