@@ -1,10 +1,9 @@
 //! The window and its webview (ADR-0199 Decision 7; behavior ADR-0119 and ADR-0120).
 //!
-//! The shell has at most one window. Closing it destroys the window and leaves the process
-//! running; only the service's Quit ends the process. [`WindowLifecycle`] is the pure rule set
-//! that decides what to do with the window when something happens to it. [`ShellWindow`] is the
-//! thin native glue that creates the `tao` window and its `wry` webview and carries out the
-//! lifecycle's decisions.
+//! The shell has at most one window. Closing it destroys the window; whether the process goes on
+//! is the application's decision. [`WindowLifecycle`] is the pure rule set that decides what to
+//! do with the window when something happens to it. [`ShellWindow`] is the thin native glue that
+//! creates the `tao` window and its `wry` webview and carries out the lifecycle's decisions.
 //!
 //! Linux keeps one extra rule. Wayland gives a client no way to unminimize its own window, so on
 //! Linux an Open request destroys the existing window and builds a fresh one after the destroyed
@@ -17,20 +16,16 @@
 //!
 //! Everything but the native glue is pure and unit tested. The glue is checked live.
 
-use std::cell::RefCell;
 use std::ffi::OsStr;
-use std::rc::Rc;
+use std::path::PathBuf;
 
-use serde_json::Value;
 use tao::dpi::{LogicalSize, PhysicalPosition};
 use tao::event_loop::EventLoopWindowTarget;
 use tao::window::{Icon, Window, WindowBuilder, WindowId};
-use wry::{WebView, WebViewBuilder};
+use wry::{WebContext, WebView, WebViewBuilder};
 
-use crate::bridge::{delivery_script, BRIDGE_SCRIPT};
-use crate::bundle::BundleSet;
-use crate::scheme::{harden, page_url, respond, SCHEME};
 use crate::tray::icon_image;
+use crate::webview::{access_script, harden};
 
 /// The window title, the product name.
 pub const WINDOW_TITLE: &str = "Ghostlight";
@@ -247,21 +242,32 @@ pub fn centered_origin(
     )
 }
 
-/// What a window shows and how it hears the page.
+/// What a window shows and what its page is handed.
 pub struct ShellView {
-    /// The first URL to load, a page of the private scheme.
+    /// The first URL to load, the workbench address.
     pub start_url: String,
-    /// The pages the scheme serves. The service replaces its bundle through this handle.
-    pub bundles: Rc<RefCell<BundleSet>>,
-    /// Receives each message a page posts, as the page URL and the message body.
-    pub on_ipc: Box<dyn Fn(String, String)>,
+    /// The workbench origin: the only place the webview may navigate to and the only page that is
+    /// handed the bearer.
+    pub origin: String,
+    /// The secret that makes the page's requests the window's.
+    pub bearer: String,
+    /// The folder the webview keeps web storage in.
+    pub profile: PathBuf,
 }
 
 /// The shell's one window with its webview.
 pub struct ShellWindow {
-    // The webview drops before the window it is attached to.
+    // The webview drops before the window it is attached to, and both before the context.
+    #[cfg_attr(
+        not(target_os = "linux"),
+        expect(
+            dead_code,
+            reason = "only the Linux renderer-lost hook reads it; elsewhere it is held alive"
+        )
+    )]
     webview: WebView,
     window: Window,
+    _context: WebContext,
 }
 
 fn window_icon(rgba: Vec<u8>, width: u32, height: u32) -> Result<Icon, WindowError> {
@@ -296,26 +302,22 @@ impl ShellWindow {
 
         let ShellView {
             start_url,
-            bundles,
-            on_ipc,
+            origin,
+            bearer,
+            profile,
         } = view;
-        let webview_builder = harden(WebViewBuilder::new())
-            .with_custom_protocol(SCHEME.into(), move |_, request| {
-                respond(
-                    &bundles.borrow(),
-                    request.method().as_str(),
-                    &request.uri().to_string(),
-                )
-            })
-            .with_ipc_handler(move |request| {
-                on_ipc(request.uri().to_string(), request.into_body());
-            })
-            .with_initialization_script_for_main_only(BRIDGE_SCRIPT, true)
+        let mut context = WebContext::new(Some(profile));
+        let webview_builder = harden(WebViewBuilder::new_with_web_context(&mut context), &origin)
+            .with_initialization_script_for_main_only(access_script(&origin, &bearer), true)
             .with_url(start_url);
         let webview = build_webview(webview_builder, &window)?;
 
         window.set_visible(true);
-        Ok(ShellWindow { webview, window })
+        Ok(ShellWindow {
+            webview,
+            window,
+            _context: context,
+        })
     }
 
     /// Restores the window from minimized, shows it and gives it focus.
@@ -330,18 +332,6 @@ impl ShellWindow {
         present_when_idle(&self.window);
         #[cfg(not(target_os = "linux"))]
         self.window.set_focus();
-    }
-
-    /// Loads the bundle page at `path`.
-    pub fn navigate(&self, path: &str) -> Result<(), WindowError> {
-        self.webview.load_url(&page_url(path)).map_err(native)
-    }
-
-    /// Delivers `message` to the page's listeners.
-    pub fn deliver(&self, message: &Value) -> Result<(), WindowError> {
-        self.webview
-            .evaluate_script(&delivery_script(message))
-            .map_err(native)
     }
 
     /// The window's id in the event loop.

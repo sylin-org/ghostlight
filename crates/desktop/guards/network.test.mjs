@@ -1,11 +1,11 @@
 // Network-crate guard for the window process (ADR-0028, never phone home; ADR-0197 connector
 // source lock amendment; ADR-0199 Decision 21, docs/adr/0199-one-service-thin-shells.md).
 //
-// ghostlight-desktop renders pages it serves from memory through a private scheme and opens no
-// network port, so no network client may be in its normal dependency tree on any supported
-// target. One name is allowed, with its reason: `http`, the request and response types that
-// wry's custom-scheme and IPC callbacks take. It does no I/O and opens no socket. Each exception
-// must still appear in the tree, so a stale exception fails and is deleted.
+// ghostlight-desktop renders the service's loopback workbench and opens no network port, so no
+// network client may be in its normal dependency tree on any supported target. One name is
+// allowed, with its reason: `http`, which wry's own API types bring. The shell registers no custom
+// scheme and no IPC handler, and it does no I/O and opens no socket. Each exception must still
+// appear in the tree, so a stale exception fails and is deleted.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -23,7 +23,7 @@ const NETWORK_CRATES = /^(hyper|reqwest|ureq|h2|http|rustls|native-tls|openssl|c
 
 /** Banned names that may stay in the tree, each with the reason it holds. */
 const EXCEPTIONS = new Map([
-  ["http", "request and response types for wry's custom-scheme and IPC callbacks; no I/O and no socket"],
+  ["http", "request and response types that wry's own API brings; the shell registers no custom scheme and no IPC handler, does no I/O and opens no socket"],
 ]);
 
 /** Cargo stderr that means the registry was unreachable, so the tree cannot be resolved. */

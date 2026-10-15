@@ -3,7 +3,6 @@
 //! The service sends a [`TrayModel`]: a tooltip and an ordered list of menu items. The shell
 //! renders it and reports clicks as [`TrayEvent`]s. The shell owns no item of its own: which
 //! entries exist, what they say and whether they are enabled are all the service's decisions.
-//! The spike drives the tray from a test model.
 //!
 //! Thread rule: the tray is created and updated on the event-loop thread, after the loop has
 //! started (on Linux `tao` has then initialized GTK). [`install_events`] may run on any thread

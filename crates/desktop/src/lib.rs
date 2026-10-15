@@ -1,9 +1,11 @@
-//! The Ghostlight window process (ADR-0199 Decisions 1 and 7).
+//! The Ghostlight window process (ADR-0199 Decisions 1 and 7, and its amendment of 2026-10-15).
 //!
 //! `ghostlight-desktop` is the third executable of one build, next to the service and the
-//! connectors. It owns the window, the tray and the notifications, and nothing else. It decides
-//! nothing, stores nothing and opens no network port: it renders only pages it serves from memory
-//! through a private custom scheme, and every fact it shows or acts on comes from the service.
+//! connectors. It owns the window and the tray, and nothing else. It decides nothing and opens no
+//! network port: the window renders the service's loopback workbench, and every fact it shows or
+//! acts on comes from the service. The shell learns the workbench address and the bearer that
+//! makes the page the window's over the relay's `desktop` stream, and hands the bearer to that
+//! origin's page only.
 //!
 //! The shell is built on `wry` (the operating system webview), `tao` (window and event loop) and
 //! `tray-icon` (tray and menu). It is not built on Tauri: Tauri brings `tokio`, `reqwest` and
@@ -16,18 +18,18 @@
 //! package to `Cargo.lock` except itself.
 //!
 //! The dependency tree holds exactly one name on the network-crate ban list of ADR-0028 and
-//! ADR-0197: `http`, the request and response types that `wry`'s custom-scheme and IPC callbacks
-//! take. It does no I/O and opens no socket. `crates/desktop/guards/network.test.mjs` names it as
-//! the one exception and fails if it ever leaves the tree.
+//! ADR-0197: `http`, which `wry`'s own API types bring. The shell registers no custom scheme and
+//! no IPC handler, does no I/O of its own over it and opens no socket.
+//! `crates/desktop/guards/network.test.mjs` names it as the one exception and fails if it ever
+//! leaves the tree.
 
 use std::ffi::OsString;
 
-pub mod bridge;
-pub mod bundle;
-pub mod scheme;
+pub mod app;
+pub mod link;
 pub mod session;
-pub mod spike;
 pub mod tray;
+pub mod webview;
 pub mod window;
 
 /// The exit code of a run with arguments the program does not accept.

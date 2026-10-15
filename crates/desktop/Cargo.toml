@@ -5,14 +5,13 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "The Ghostlight window: one webview, a tray and notifications around pages the service sends"
+description = "The Ghostlight window: one webview on the service's loopback workbench, and a tray"
 publish = false
 
 [dependencies]
-anyhow.workspace = true
+ghostlight-relay = { path = "../relay" }
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 thiserror.workspace = true
 png = "0.18.1"
 tao = "=0.35.3"

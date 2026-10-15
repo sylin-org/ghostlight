@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-10-shell-webview.
+Next: m1-11-status-and-doctor.
 
 ## Landed
 
@@ -55,6 +55,7 @@ Next: m1-10-shell-webview.
 | m1-07-page-transport | The page speaks loopback HTTP and renders its context. `transport.js` gains `overHttp` (one table maps each Tauri command name to a route) and the live stream with reconnect; `app.js` reads `GET /api/context` first and renders what it is told: Control as before, Watch as state with one Continue line per panel, Closed as one sentence per data view with the About page in full. The page drops the pull on every focus and the rescan on every focus; opening Integrations rescans once. The Tauri window keeps its path and gains `workbench_context`, `set_diagnostics` and `continue_in_window`. | see `git log` |
 | m1-08-controls-sheet | One shared Controls sheet on the band of every Ghostlight web app (`ui/kit/controls.js`, `ui/kit/kit.css`): "On this screen" (Density, Motion, kept in the browser) and "For Ghostlight on this computer" (Pause and the session, "Others can watch", process diagnostics, the notification test). The service gains the `controls` part, `WorkbenchChange::ControlsChanged`, `WorkbenchFacade::set_watching` (the only way watching changes; while it is off every watching stream ends with `closed`), `connection_counts` and `service_line`; the Status page loses its session, notification and process-diagnostics strips. | see `git log` |
 | m1-09-desktop-role | The service serves relay protocol 4's `desktop` role to a shell of its own build: `S/intake/desktop.rs` holds the same-build frames (`workbench`, `goodbye`, `tray`), the shell is handed the workbench address and the bearer and is enrolled for the goodbye, and a tray click holds, resumes or quits. The installer places `ghostlight-desktop` beside every service image it places when the payload has one. Goldens in `tests/golden/desktop/`. | see `git log` |
+| m1-10-shell-webview | `ghostlight-desktop` is the Ghostlight window: a webview on the service's loopback workbench. It opens the relay `desktop` stream (`link.rs`), takes the address, the bearer and the tray from the `workbench` frame, hands the bearer to that origin's page only (`webview::access_script`) and keeps its web storage in `state/desktop-webview` under the home. The private scheme, the in-memory bundle, the page bridge and the spike page are gone; the shell depends on `ghostlight-relay` and nothing else in the workspace. | see `git log` |
 
 ## Route table
 
@@ -158,6 +159,19 @@ person answers. Errors are `{ "error": { "code", "message" } }`; what a facade c
   and, on a development install that changes the edge, in `bin` too) and `ghostlight doctor` still reads clean. A
   running shell does not block the deploy: the swap moves it aside and the next service start clears the old copy.
   Nothing starts the shell yet (m1-10), so this is a file check only.
+
+- m1-10, Windows (the demo): `Start-Process` the installed `ghostlight-desktop` while the service runs. One window
+  opens, dark from the first frame, on the workbench with the chip "Full control"; there is no console. With the
+  service's own Tauri tray present the shell draws no second tray icon, and closing the shell's window ends the shell
+  (no process stays behind). Quitting Ghostlight from the tray closes the shell's window within about a
+  second. Start the shell with no service running: it writes one line to standard error and exits 1, and opens
+  nothing. A Copy button (setup text, the watch address) puts the text on the clipboard in the shell's window.
+- m1-10, Windows: change Density or Motion under Controls, close the shell and start it again: the choice is still
+  there. `state/desktop-webview` exists under the home and holds only web storage.
+- m1-10, Windows: while the shell is open, the Tauri window and the shell show the same live state; pausing from
+  either changes the other's band within a second.
+- m1-10, Linux (later): the same window over WebKitGTK, the clipboard copy, closing the window with and without a
+  tray, and the renderer-lost recovery on Open.
 
 ## Blockers
 
@@ -354,5 +368,20 @@ None.
 - m1-09: a release install of the same version that is intact is still "already installed" and places nothing, so a
   `bin` that was installed before the payload carried the shell gets it with the next version or the next
   development install, not with a same-version release install.
+- m1-10: the slice spec has two statements about the webview's profile. Its binding owner answer (Q7) gives the
+  window a persistent profile folder `state/desktop-webview` under the home, created owner-private, so "On this
+  screen" settings last across launches; its decisions text keeps incognito and asks the owner. The owner answer
+  wins: `harden` no longer sets incognito and `ShellWindow::create` gives the webview a `WebContext` on that folder
+  (`webview::profile_directory`, `webview::prepare_profile`, which uses `ghostlight_relay::private::create_dir_all`).
+  The folder name is a shell constant: `S/install/layout.rs` has no accessor for it, because nothing in the service
+  reads it.
+- m1-10: `anyhow` was a declared but unused dependency of `ghostlight-desktop`; it is removed with `sha2`. The
+  Cargo.lock block of `ghostlight-desktop` now lists `ghostlight-relay` and drops both.
+- m1-10: `link.rs` writes its own `DesktopFrame`, `TrayItemId` and `Workbench` (the shell links no service crate); the
+  goldens in `tests/golden/desktop/` are the shared bytes and the shell tests read all four. A first frame that is
+  not a workbench frame, a decode failure, an address other than `http://127.0.0.1:<port>/` and a bearer that is not
+  43 URL-safe base64 characters are each `LinkError::Contract` with a fixed reason; no error text holds frame content.
+- m1-10: with a tray, the shell keeps the process after the window closes; without one it exits. A window that
+  cannot be created also ends a shell with no tray. `Shell::start` returns whether the shell goes on.
 - Owner question: Theme and "Hold this screen" are not part of this milestone's "On this screen" group. Should
   either be added once the demo has been seen?

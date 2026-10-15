@@ -485,6 +485,11 @@ its context cannot make is shown as state, with one line that leads to the Ghost
 Inside the Tauri window it speaks Tauri commands; anywhere else it speaks JSON and one live stream
 over loopback. Both paths use the same command names, through one transport.
 
+`ghostlight-desktop` is the webview over the loopback workbench. It gets the workbench address and
+the bearer over the relay's `desktop` role and gives the bearer to the page of that origin only,
+which is therefore in the Control context. It registers no custom scheme and no page bridge. Tauri
+stays the service's own window until the shell track removes it.
+
 ## Chokepoints and unit of work
 
 Every direct call and flow enters `ApplicationExecutor::execute`. One invocation owns one

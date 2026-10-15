@@ -10,12 +10,12 @@
 //! operating system cancels. Every code path that starts a process (the service, a URL, a
 //! folder) asks [`SessionState::may_start_process`] first.
 //!
-//! Signal sources in this spike: on Windows the event loop maps its destroyed event to
+//! Signal sources: on Windows the event loop maps its destroyed event to
 //! [`SessionSignal::Final`], because `tao` answers the query itself with true. On Linux
 //! `install_unix_signals` maps SIGTERM, SIGHUP and SIGINT to the final signal. The query-time
-//! ending state on Windows arrives with the shared session listener in the relay crate when the
-//! shell lane wires the shell; that listener then replaces both sources, and no signal ever gets
-//! two handlers. Nothing in this crate blocks or delays the end of a session.
+//! ending state on Windows arrives with the shared session listener in the relay crate; that
+//! listener then replaces both sources, and no signal ever gets two handlers. Nothing in this
+//! crate blocks or delays the end of a session.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
