@@ -163,6 +163,8 @@ the owner wants, and what this project learned the hard way.
 - **Host restrictions belong to policy.** The owner removed the built-in localhost, loopback, and
   link-local ban. All-open includes local HTTP(S) browser work; do not reintroduce a hard-coded
   address block, a local-access toggle, or an exception flow (ADR-0155).
+  The one exception is the workbench's own loopback origin, which agents can never open (owner,
+  2026-10-15; ADR-0199 amendment).
 - **Model calls describe work; people configure authority.** The owner removed caller-supplied
   host/capability restrictions and flow dry-run, and consolidated sequence into ordinary flow
   steps. Do not recreate a model-authored policy layer or simulation mode under another name.

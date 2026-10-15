@@ -20,8 +20,9 @@ automatically.
 Read, Action, Write, and Execute are independent capabilities. Ordered schema-4 grants bind a
 complete requirement set to exact, suffix-wildcard, or universal host patterns. Managed policy,
 local policy, and request restrictions intersect. Localhost, loopback, and link-local HTTP(S)
-destinations follow those policies; they have no built-in address restriction. Non-HTTP(S)
-schemes and configured sacred domains remain hard ceilings.
+destinations follow those policies, with one exception: agents can never open or read
+Ghostlight's own workbench address. Non-HTTP(S) schemes and configured sacred domains remain
+hard ceilings.
 
 Every policy denial receives deterministic attribution to authority, tier, grant, and
 rule. Repeated refusals do not pause a session; later permitted work remains available. Human

@@ -40,7 +40,7 @@ Rules:
 
 ## RESUME HERE
 
-Next: m1-03 (the next slice key in the lane plan).
+Next: m1-04-loopback-server (it must call `GovernanceFacade::protect_workbench_port` as soon as the port is bound, before the first request can reach the page).
 
 ## Landed
 
@@ -48,6 +48,7 @@ Next: m1-03 (the next slice key in the lane plan).
 |---|---|---|
 | m1-01-adr-amendment | The owner-approved amendment of 2026-10-15 is appended to ADR-0199 (the Ghostlight web apps over loopback), with its README row, this ledger, and the pointers from the shell-spike ledger and the task index. Docs only. | see `git log` |
 | m1-02-harness-evidence | Harness evidence names a foreign program and its argument count, never its arguments; a configuration that cannot be parsed carries no evidence (owner answers Q3 and Q8). | see `git log` |
+| m1-03-own-origin | Agents can never open or read the workbench's own loopback origin: `GovernanceFacade::protect_workbench_port` shares the port with every snapshot, and the landing decision refuses a loopback address on that port with `ProtectedHost` whatever the policy says. The authority id does not depend on the port. | see `git log` |
 
 ## Route table
 

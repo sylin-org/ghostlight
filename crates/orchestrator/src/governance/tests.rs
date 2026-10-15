@@ -178,6 +178,87 @@ fn no_policy_allows_local_and_remote_http_destinations() {
     }
 }
 
+const WORKBENCH_PORT: u16 = 41234;
+
+#[test]
+fn the_workbench_origin_is_denied_to_agents_under_all_open() {
+    let facade = GovernanceFacade::new(None, None);
+    facade.protect_workbench_port(WORKBENCH_PORT);
+    let snapshot = facade.snapshot();
+    for url in [
+        "http://127.0.0.1:41234/",
+        "http://127.0.0.1:41234/api/snapshot",
+        "https://127.0.0.1:41234/",
+        "http://localhost:41234/",
+        "http://LOCALHOST:41234/x",
+        "http://app.localhost:41234/",
+        "http://127.8.9.10:41234/",
+        "http://[::1]:41234/",
+        "http://[::ffff:127.0.0.1]:41234/",
+        "http://2130706433:41234/",
+        "http://0.0.0.0:41234/",
+    ] {
+        for capability in [Capability::Read, Capability::Action] {
+            assert_eq!(
+                snapshot.authorize_landing(capability, url).reason,
+                ReasonCode::ProtectedHost,
+                "{capability:?} at {url} must be refused"
+            );
+        }
+    }
+    for url in [
+        "http://127.0.0.1:41235/",
+        "http://localhost:3000/",
+        "https://example.com:41234/",
+    ] {
+        assert!(
+            snapshot.authorize_landing(Capability::Read, url).allowed,
+            "{url} is not the workbench origin"
+        );
+    }
+}
+
+#[test]
+fn a_policy_grant_cannot_open_the_workbench_origin() {
+    let path = temporary("own-origin-grant");
+    fs::write(
+        &path,
+        r#"{"schema":4,"name":"loopback","version":"1","grants":[{"id":"loopback","hosts":{"allow":["127.0.0.1"]},"allowed":["read","action","write","execute"]}]}"#,
+    )
+    .unwrap();
+    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    let _ = fs::remove_file(path);
+    facade.protect_workbench_port(WORKBENCH_PORT);
+    let snapshot = facade.snapshot();
+    assert!(
+        snapshot
+            .authorize_landing(Capability::Read, "http://127.0.0.1:41235/")
+            .allowed
+    );
+    assert_eq!(
+        snapshot
+            .authorize_landing(Capability::Read, "http://127.0.0.1:41234/")
+            .reason,
+        ReasonCode::ProtectedHost
+    );
+}
+
+#[test]
+fn a_snapshot_taken_before_the_port_is_known_sees_it_once_set() {
+    let facade = GovernanceFacade::new(None, None);
+    let snapshot = facade.snapshot();
+    let url = "http://127.0.0.1:41234/";
+    assert!(snapshot.authorize_landing(Capability::Read, url).allowed);
+    let id = snapshot.id.clone();
+    facade.protect_workbench_port(WORKBENCH_PORT);
+    assert_eq!(
+        snapshot.authorize_landing(Capability::Read, url).reason,
+        ReasonCode::ProtectedHost
+    );
+    assert_eq!(snapshot.id, id);
+    assert_eq!(facade.snapshot().id, id);
+}
+
 #[test]
 fn non_http_schemes_still_refuse_without_policy() {
     let snapshot = GovernanceFacade::new(None, None).snapshot();

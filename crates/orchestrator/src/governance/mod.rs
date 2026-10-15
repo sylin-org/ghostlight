@@ -17,9 +17,10 @@ pub mod paths;
 use std::env;
 use std::fs;
 use std::io;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
@@ -29,7 +30,7 @@ use file_state::FileState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use url::Url;
+use url::{Host, Url};
 
 const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
@@ -365,6 +366,50 @@ pub struct AuthoritySnapshot {
     preserve_target_names: bool,
     sacred_hosts: Vec<String>,
     valid: bool,
+    own_origin: OwnOrigin,
+}
+
+/// The loopback port of the workbench's own origin, shared by the facade and every snapshot it
+/// builds so that a snapshot published before the port is known sees it as soon as it is set.
+#[derive(Clone, Debug, Default)]
+struct OwnOrigin(Arc<AtomicU16>);
+
+impl OwnOrigin {
+    /// No port is protected until the workbench binds.
+    const UNSET: u16 = 0;
+
+    fn set(&self, port: u16) {
+        self.0.store(port, Ordering::Release);
+    }
+
+    /// True when `url` is an HTTP(S) address on a loopback host at the protected port.
+    fn covers(&self, url: &Url) -> bool {
+        let port = self.0.load(Ordering::Acquire);
+        port != Self::UNSET
+            && matches!(url.scheme(), "http" | "https")
+            && url.port_or_known_default() == Some(port)
+            && url.host().is_some_and(|host| is_loopback_host(&host))
+    }
+}
+
+/// Whether a parsed host names this machine's loopback interface.
+///
+/// The URL parser has already normalized decimal, hexadecimal and short IPv4 spellings.
+fn is_loopback_host(host: &Host<&str>) -> bool {
+    match host {
+        Host::Domain(name) => {
+            let name = name.to_ascii_lowercase();
+            name == "localhost" || name.ends_with(".localhost")
+        }
+        Host::Ipv4(address) => is_loopback_v4(*address),
+        Host::Ipv6(address) => {
+            *address == Ipv6Addr::LOCALHOST || address.to_ipv4_mapped().is_some_and(is_loopback_v4)
+        }
+    }
+}
+
+fn is_loopback_v4(address: Ipv4Addr) -> bool {
+    address.is_loopback() || address == Ipv4Addr::UNSPECIFIED
 }
 
 /// Where one policy layer sits in the tighten-only authority order.
@@ -519,6 +564,7 @@ impl AuthoritySnapshot {
         };
         if !matches!(parsed.scheme(), "http" | "https")
             || protected_by_policy(&parsed, &self.sacred_hosts)
+            || self.own_origin.covers(&parsed)
         {
             return (Decision::deny(ReasonCode::ProtectedHost), vec![]);
         }
@@ -888,6 +934,7 @@ pub struct GovernanceFacade {
     /// fetch.
     remote: Arc<Mutex<Option<managed::ManagedAuthority>>>,
     controls: Arc<RuntimeControls>,
+    own_origin: OwnOrigin,
 }
 
 /// One immutable publication of authority, with every view the workbench reads built from it.
@@ -905,7 +952,7 @@ struct Published {
 }
 
 impl Published {
-    fn build(sources: &PolicySources) -> Self {
+    fn build(sources: &PolicySources, own_origin: &OwnOrigin) -> Self {
         let managed = sources.managed_manifest().cloned();
         let managed_sequence = sources.managed_sequence();
         let valid = sources.authority_valid();
@@ -916,6 +963,7 @@ impl Published {
             ],
             managed_sequence,
             valid,
+            own_origin,
         ));
         let passport = sources.managed_passport();
         let user = sources.user.active.as_ref();
@@ -1409,12 +1457,14 @@ impl GovernanceFacade {
             remote.load_offline();
             sources.remote = Some(RemoteView::of(remote));
         }
-        let published = Arc::new(Published::build(&sources));
+        let own_origin = OwnOrigin::default();
+        let published = Arc::new(Published::build(&sources, &own_origin));
         Self {
             published: Arc::new(Mutex::new(published)),
             sources: Arc::new(Mutex::new(sources)),
             remote: Arc::new(Mutex::new(remote)),
             controls: Arc::new(RuntimeControls::default()),
+            own_origin,
         }
     }
 
@@ -1461,7 +1511,7 @@ impl GovernanceFacade {
     }
 
     fn publish(&self, sources: &PolicySources) {
-        *lock(&self.published) = Arc::new(Published::build(sources));
+        *lock(&self.published) = Arc::new(Published::build(sources, &self.own_origin));
     }
 
     /// Hold the sources lock, as a refresher mid-read does.
@@ -1519,6 +1569,15 @@ impl GovernanceFacade {
         self.published().startup
     }
 
+    /// Protect the workbench's own loopback port: no agent can open or read an address on it.
+    ///
+    /// This is the one product-owned ceiling of ADR-0199's amendment. It applies to every
+    /// snapshot, including those published earlier, and does not change the authority id.
+    /// The workbench calls it once, when it binds.
+    pub fn protect_workbench_port(&self, port: u16) {
+        self.own_origin.set(port);
+    }
+
     /// The published authority: an immutable snapshot that no call can change.
     ///
     /// This clones an `Arc` and reads no file and no network. A hand edit to a policy file shows
@@ -1545,6 +1604,7 @@ impl GovernanceFacade {
                 ],
                 published.managed_sequence,
                 published.managed_valid,
+                &self.own_origin,
             ),
             rules,
         })
@@ -1626,6 +1686,7 @@ fn assemble(
     sources: [(Option<manifest::Manifest>, AuthorityTier); 2],
     managed_sequence: Option<u64>,
     valid: bool,
+    own_origin: &OwnOrigin,
 ) -> AuthoritySnapshot {
     let mut layers = Vec::new();
     let mut tab_close_allowed = true;
@@ -1661,6 +1722,7 @@ fn assemble(
         preserve_target_names,
         sacred_hosts,
         valid,
+        own_origin: own_origin.clone(),
     }
 }
 
