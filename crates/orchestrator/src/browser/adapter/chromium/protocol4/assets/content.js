@@ -23,6 +23,8 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   ]);
   const TEXT_OMIT_TAGS = new Set(["input", "noscript", "option", "script", "select", "style", "template", "textarea"]);
   const DOCUMENT_TREE_NODE_LIMIT = 400;
+  // Elements the outline walk may visit, kept or pruned, before it stops and reports truncation.
+  const DOCUMENT_TREE_VISIT_LIMIT = 4000;
   // What a masked credential value reads as. One short marker keeps masking cheap to read.
   const MASKED_VALUE = "[hidden]";
   // Caps on what an observed control carries. The service bounds the same keys again.
@@ -857,26 +859,44 @@ ${line}` : line;
 
   function inspectTree(rootElement, maxDepth, maximum = DOCUMENT_TREE_NODE_LIMIT) {
     const controlRoles = ["button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "tab", "menuitem", "option", "slider", "spinbutton"];
+    // `count` holds the nodes kept so far; a node is counted on entry and given back if it is pruned.
     let count = 0;
-    function build(element, depth) {
+    let visits = 0;
+    let visitLimitHit = false;
+    // Returns the node, or null when it is an unlabeled container whose children were all pruned.
+    function build(element, depth, isRoot) {
       count += 1;
+      visits += 1;
       const role = roleFor(element);
       const kind = controlRoles.includes(role) ? "control" : /^h[1-6]$/.test(element.tagName.toLowerCase()) ? "heading" : "container";
       // A container's text is its descendants' text, which their own nodes already carry, so a
       // container is labelled only by a name the page declared for it.
       const label = kind === "container" ? declaredName(element) ?? "" : accessibleName(element);
       const node = { kind, label: shared.bounded(label, 120), children: [] };
-      if (depth < maxDepth && count < maximum) {
-        for (const child of composedChildren(element)) {
-          if (count >= maximum) break;
-          if (child.nodeType !== 1 || !isComposedVisible(child)) continue;
-          node.children.push(build(child, depth + 1));
+      // Whether every visible child was visited. A cut node may hide content, so it is kept.
+      let explored = true;
+      for (const child of composedChildren(element)) {
+        if (child.nodeType !== 1 || !isComposedVisible(child)) continue;
+        if (visits >= DOCUMENT_TREE_VISIT_LIMIT) {
+          visitLimitHit = true;
+          explored = false;
+          break;
         }
+        if (depth >= maxDepth || count >= maximum) {
+          explored = false;
+          break;
+        }
+        const built = build(child, depth + 1, false);
+        if (built) node.children.push(built);
+      }
+      if (!isRoot && explored && kind === "container" && node.label === "" && node.children.length === 0) {
+        count -= 1;
+        return null;
       }
       return node;
     }
-    const tree = build(rootElement, 1);
-    return { tree, nodes: count, truncated: count >= maximum };
+    const tree = build(rootElement, 1, true);
+    return { tree, nodes: count, truncated: count >= maximum || visitLimitHit };
   }
 
   function setNativeValue(element, value) {

@@ -364,15 +364,17 @@ A `document` scope returns no target handles. Its facts are `tab`, `document_gen
 structure-only composed tree. Each node has a `kind` of `control`, `heading`, or `container`, a
 `label` of at most 120 characters, and a `children` array. A control or heading is labelled by its
 accessible name. A container is labelled only by a name the page declared for it, and by no text
-from inside it, because its descendants carry that text themselves. Without a root, the tree includes open
+from inside it, because its descendants carry that text themselves. An unlabeled container whose
+children were all left out is itself left out and does not count against the node ceiling; a
+container cut by depth or budget stays, and so does the root. Without a root, the tree includes open
 shadow roots, assigned slots, and http(s) embedded frames in stable order under one 400-node
 ceiling. A root limits it to that target's composed subtree. Editable values, hidden
 content, closed roots, and frame identity are never returned. A summary reads, for example:
-`Returned the document tree: 283 nodes.`
+`Returned the document outline: 283 nodes.`
 
 The tree is also recorded under a `snapshot` handle, superseded per tab. When the previous
 snapshot of that tab, in the same document, used the same `root` and `max_depth`, the result adds
-`diff` and the summary counts the differences. Trees of another root or depth are never compared,
+`diff` and the summary counts the differences, or says the outline matches the previous one. Trees of another root or depth are never compared,
 because they differ without the page changing. `diff` compares nodes by position and counts
 `added`, `removed`, and `changed` nodes. Its `paths` list up to 50 positions in the returned
 `tree`: `/` is the root and `/1/0` is the first child of the root's second child. A path names a

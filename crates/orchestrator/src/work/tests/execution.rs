@@ -3817,7 +3817,7 @@ fn document_inspection_returns_the_tree_it_describes() {
         .as_str()
         .is_some_and(|handle| handle.starts_with("snapshot_")));
     assert!(first.facts.get("diff").is_none());
-    assert_eq!(first.summary, "Returned the document tree: 4 nodes.");
+    assert_eq!(first.summary, "Returned the document outline: 4 nodes.");
 
     let changed = json!({"kind":"container","label":"","children":[
         {"kind":"heading","label":"Account settings","children":[]},
@@ -3852,7 +3852,7 @@ fn document_inspection_returns_the_tree_it_describes() {
     }
     assert_eq!(
         second.summary,
-        "Returned the document tree: 5 nodes, 2 differences from the previous snapshot."
+        "Returned the document outline: 5 nodes, 2 differences from the previous outline."
     );
 
     let shallow = json!({"kind":"container","label":"","children":[

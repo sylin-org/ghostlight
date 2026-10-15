@@ -309,7 +309,7 @@ test("find and document trees use composed shadow content", async () => {
   assert.equal(inspected.ok, true);
   assert.equal(inspected.value.tree.children[0].kind, "control");
   assert.equal(inspected.value.tree.children[0].label, "Approve garden task");
-  assert.equal(inspected.value.tree.children[0].children[0].label, "");
+  assert.deepEqual(inspected.value.tree.children[0].children, []);
   assert.doesNotMatch(JSON.stringify(inspected.value.tree), /unassigned decoy/);
 });
 
@@ -518,11 +518,68 @@ test("document tree containers carry a declared name only, never a dump of their
     [section.kind, section.label],
     ["container", "Billing"]
   );
-  const [title, text, control] = section.children;
+  const [title, control] = section.children;
+  assert.equal(section.children.length, 2);
   assert.deepEqual([title.kind, title.label], ["heading", "Invoices"]);
-  assert.deepEqual([text.kind, text.label], ["container", ""]);
   assert.deepEqual([control.kind, control.label], ["control", "Pay now"]);
   assert.doesNotMatch(JSON.stringify(inspected.value.tree), /long paragraph/);
+});
+
+test("the document tree leaves out unlabeled containers that hold nothing", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const wrapper = harness.element("div");
+  const textOnly = harness.element("div");
+  textOnly.append(harness.text("Only text here."));
+  const named = harness.element("section");
+  named.setAttribute("aria-label", "Billing");
+  const button = harness.element("button");
+  button.append(harness.text("Pay now"));
+  wrapper.append(textOnly, named, button);
+  body.append(wrapper);
+  harness.setBody(body);
+
+  const inspected = await harness.send({ kind: "inspect_tree", max_depth: 5, max_nodes: 400 });
+
+  const [kept] = inspected.value.tree.children;
+  assert.deepEqual(kept.children.map((node) => node.label), ["Billing", "Pay now"]);
+  assert.equal(inspected.value.nodes, 4);
+  assert.equal(inspected.value.truncated, false);
+});
+
+test("the document tree keeps a container cut by depth and an empty root", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const outer = harness.element("div");
+  const inner = harness.element("div");
+  const button = harness.element("button");
+  button.append(harness.text("Hidden by depth"));
+  inner.append(button);
+  outer.append(inner);
+  body.append(outer);
+  harness.setBody(body);
+
+  const cut = await harness.send({ kind: "inspect_tree", max_depth: 2, max_nodes: 400 });
+  assert.deepEqual(cut.value.tree.children.map((node) => node.kind), ["container"]);
+  assert.equal(cut.value.nodes, 2);
+
+  const empty = harness.element("body");
+  harness.setBody(empty);
+  const bare = await harness.send({ kind: "inspect_tree", max_depth: 5, max_nodes: 400 });
+  assert.deepEqual(bare.value.tree.children, []);
+  assert.equal(bare.value.nodes, 1);
+});
+
+test("the document tree stops after the visit cap and says it was cut", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  for (let index = 0; index < 4100; index += 1) body.append(harness.element("div"));
+  harness.setBody(body);
+
+  const inspected = await harness.send({ kind: "inspect_tree", max_depth: 5, max_nodes: 400 });
+
+  assert.equal(inspected.value.truncated, true);
+  assert.deepEqual(inspected.value.tree.children, []);
 });
 
 test("a field with no label, aria-label or title is found by its placeholder", async () => {

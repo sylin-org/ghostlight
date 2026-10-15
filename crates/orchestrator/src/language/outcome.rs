@@ -499,14 +499,15 @@ impl Outcome {
                 differences,
             } => {
                 let returned = format!(
-                    "Returned the document tree: {}",
+                    "Returned the document outline: {}",
                     counted(*nodes, "node", "nodes")
                 );
                 match differences {
                     None => format!("{returned}."),
+                    Some(0) => format!("{returned}, matching the previous outline."),
                     Some(differences) => format!(
-                        "{returned}, {} from the previous snapshot.",
-                        counted_or_none(*differences, "difference", "differences")
+                        "{returned}, {} from the previous outline.",
+                        counted(*differences, "difference", "differences")
                     ),
                 }
             }
@@ -2017,7 +2018,7 @@ mod tests {
                     truncated: false,
                     differences: None,
                 },
-                "Returned the document tree: 283 nodes.",
+                "Returned the document outline: 283 nodes.",
             ),
             (
                 Outcome::DocumentInspected {
@@ -2025,7 +2026,7 @@ mod tests {
                     truncated: false,
                     differences: Some(0),
                 },
-                "Returned the document tree: 283 nodes, no differences from the previous snapshot.",
+                "Returned the document outline: 283 nodes, matching the previous outline.",
             ),
             (
                 Outcome::DocumentInspected {
@@ -2033,7 +2034,7 @@ mod tests {
                     truncated: false,
                     differences: Some(6),
                 },
-                "Returned the document tree: 1 node, 6 differences from the previous snapshot.",
+                "Returned the document outline: 1 node, 6 differences from the previous outline.",
             ),
             (
                 Outcome::PolicyExplained {
