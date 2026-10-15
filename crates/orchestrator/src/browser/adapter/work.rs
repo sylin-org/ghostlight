@@ -89,6 +89,13 @@ pub struct ObservedTarget {
     /// Why the control is invalid, when it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The page area the item sits in, as the page words it. The service keeps only the words
+    /// of the closed area list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<String>,
+    /// The ordinal of the form that owns the item, counted from 1 in the document it belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<u32>,
 }
 
 /// The browser-observed identity of the element an action actually used.

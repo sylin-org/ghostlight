@@ -2,13 +2,16 @@
 //!
 //! The browser adapter already bounds what it sends; this module bounds it again, because the
 //! service never trusts a size it did not check. An item always carries its handle, role, name,
-//! state and credential flag. A control adds `value`, `options`, `type`, `limits`, `hint`,
+//! state and credential flag. An item adds `area` when the page puts it in a landmark and `form`
+//! when a form owns it (ADR-0198 decision 19); both are structure, so a credential-class control
+//! carries them too. A control adds `value`, `options`, `type`, `limits`, `hint`,
 //! `group` and `error` only when the page gave them (ADR-0198 decision 7). A credential-class
 //! control carries its masked value and nothing else, whatever the adapter sent.
 
 use serde_json::{json, Map, Value};
 
 use crate::browser::adapter::ObservedTarget;
+use crate::language::area::PageArea;
 
 use super::bounded;
 
@@ -53,6 +56,12 @@ pub(super) fn control_item(handle: &str, target: &ObservedTarget) -> Value {
     item.insert("target".into(), json!(handle));
     item.insert("role".into(), json!(bounded(&target.role, ROLE_MAX)));
     item.insert("name".into(), json!(bounded(&target.name, NAME_MAX)));
+    if let Some(area) = target.area.as_deref().and_then(PageArea::classify) {
+        item.insert("area".into(), json!(area.word()));
+    }
+    if let Some(form) = target.form {
+        item.insert("form".into(), json!(form));
+    }
     item.insert("state".into(), json!(target.state));
     item.insert("credential_class".into(), json!(target.credential_class));
     if target.credential_class {
@@ -193,6 +202,44 @@ mod tests {
             name: "Role".into(),
             ..ObservedTarget::default()
         }
+    }
+
+    #[test]
+    fn an_item_names_its_area_and_form_only_when_it_has_them() {
+        let mut placed = target();
+        placed.area = Some("nav".into());
+        placed.form = Some(3);
+        let item = control_item("target_1", &placed);
+        assert_eq!(item["area"], json!("nav"));
+        assert_eq!(item["form"], json!(3));
+
+        let bare = control_item("target_1", &target());
+        assert!(bare.get("area").is_none() && bare.get("form").is_none());
+    }
+
+    #[test]
+    fn an_area_word_off_the_list_is_dropped() {
+        for word in ["main", "banner", "", "Nav", "<script>"] {
+            let mut odd = target();
+            odd.area = Some(word.into());
+            assert!(
+                control_item("target_1", &odd).get("area").is_none(),
+                "{word:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_credential_control_keeps_its_structure_and_nothing_else() {
+        let mut secret = target();
+        secret.credential_class = true;
+        secret.area = Some("dialog".into());
+        secret.form = Some(1);
+        secret.hint = Some("seven characters".into());
+        let item = control_item("target_1", &secret);
+        assert_eq!(item["area"], json!("dialog"));
+        assert_eq!(item["form"], json!(1));
+        assert!(item.get("hint").is_none());
     }
 
     #[test]
@@ -363,6 +410,14 @@ mod tests {
         assert_eq!(full.input_type.as_deref(), Some("date"));
         assert_eq!(full.value, Some(json!("Other")));
         assert_eq!(full.options_total, Some(1));
+
+        let placed: ObservedTarget = serde_json::from_value(json!({
+            "locator": "l4", "role": "textbox", "name": "Email", "state": [], "credential_class": false,
+            "area": "dialog", "form": 2
+        }))
+        .unwrap();
+        assert_eq!(placed.area.as_deref(), Some("dialog"));
+        assert_eq!(placed.form, Some(2));
 
         let stray = serde_json::from_value::<ObservedTarget>(json!({
             "locator": "l3", "role": "button", "name": "Go", "credential_class": false, "surprise": 1

@@ -1548,7 +1548,7 @@ test("an empty rich editor counts as retained when its text is blank", async () 
 test("submit_fill answers before it clicks, and only the verified submit control is clicked", async () => {
   const harness = contentHarness();
   textInput(harness);
-  harness.input.closest = (selector) => (selector === "form" ? { contains: () => true } : null);
+  harness.input.form = harness.element("form");
   const locator = await harness.locatorOf("Name");
   const order = [];
   harness.input.click = () => order.push("submit");
@@ -2787,9 +2787,9 @@ test("every throw site carries its code and keeps its message", async () => {
   await check("requireUploadTarget disabled", { kind: "upload_files", locator: (await harness.targets()).find((t) => t.name === "").locator, files: [FILE] }, "disabled", /disabled for upload/);
   harness.input.disabled = false;
 
-  const form = { contains: () => false };
-  const inForm = await textLocator({ label: "In form", props: { closest: (selector) => (selector === "form" ? form : null) } });
-  await check("prepareFill submit_outside_form", { kind: "submit_fill", fields: [{ locator: inForm.locator, value: "x" }], submit_locator: inForm.locator, allow_credentials: false }, "submit_outside_form", /not contained in the resolved form/);
+  const inForm = await textLocator({ label: "In form", props: { form: harness.element("form") } });
+  const outside = await textLocator({ label: "Outside form" });
+  await check("prepareFill submit_outside_form", { kind: "submit_fill", fields: [{ locator: inForm.locator, value: "x" }], submit_locator: outside.locator, allow_credentials: false }, "submit_outside_form", /not contained in the resolved form/);
 
   harness.document.activeElement = harness.document.body;
   await check("describe_focused", { kind: "describe_focused" }, "no_focused_control", /no editable control is focused/);
@@ -3044,8 +3044,9 @@ async function goldenPage() {
   country.setAttribute("aria-label", "Country");
   harness.document.body.append(country);
   harness.document.body.append(harness.text("Saved"));
-  const form = { contains: (element) => element === send };
-  name.closest = (selector) => (selector === "form" ? form : null);
+  const form = harness.element("form");
+  name.form = form;
+  send.form = form;
   const selects = [];
   const select = name.select.bind(name);
   name.select = () => { selects.push(name); select(); };
@@ -3658,4 +3659,189 @@ test("a field that is stable only part of the window still fails without naming 
 
   assert.equal(reply.error.code, "not_retained");
   assert.equal("detail" in reply.error, false);
+});
+
+// ---- items name their page area and form ---------------------------------------------------------
+
+/** The inspected items of the page, by name. */
+async function itemsByName(harness, kind = "all") {
+  const reply = await harness.send({ kind: "inspect", inspect_kind: kind, max_items: 100, visual_settle: false });
+  return Object.fromEntries(reply.value.targets.filter((target) => target.name).map((target) => [target.name, target]));
+}
+
+/** A button named `label` appended to `parent`. */
+function labelledButton(harness, parent, label) {
+  const button = harness.element("button");
+  button.setAttribute("aria-label", label);
+  parent.append(button);
+  return button;
+}
+
+/** An element of `tag`, with `attributes`, appended to `parent`. */
+function wrapper(harness, parent, tag, attributes = {}) {
+  const element = harness.element(tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  parent.append(element);
+  return element;
+}
+
+test("an item names the landmark that holds it, by HTML-AAM scoping", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const banner = wrapper(harness, body, "header");
+  labelledButton(harness, banner, "Logo");
+  const navigation = wrapper(harness, banner, "nav");
+  labelledButton(harness, navigation, "Pricing");
+  const main = wrapper(harness, body, "main");
+  labelledButton(harness, main, "Content");
+  const article = wrapper(harness, main, "article");
+  labelledButton(harness, wrapper(harness, article, "header"), "Article head");
+  labelledButton(harness, wrapper(harness, article, "footer"), "Article foot");
+  labelledButton(harness, wrapper(harness, wrapper(harness, main, "section"), "header"), "Section head");
+  labelledButton(harness, wrapper(harness, main, "aside"), "Related");
+  labelledButton(harness, wrapper(harness, main, "dialog"), "Close");
+  labelledButton(harness, wrapper(harness, main, "search"), "Find");
+  labelledButton(harness, wrapper(harness, main, "div", { role: "search" }), "Query");
+  labelledButton(harness, wrapper(harness, main, "div", { role: "alertdialog" }), "Dismiss");
+  labelledButton(harness, wrapper(harness, body, "div", { role: "banner" }), "Role banner");
+  labelledButton(harness, wrapper(harness, body, "div", { role: "contentinfo" }), "Role info");
+  labelledButton(harness, wrapper(harness, body, "div", { role: "navigation" }), "Role nav");
+  labelledButton(harness, wrapper(harness, body, "div", { role: "complementary" }), "Role aside");
+  labelledButton(harness, wrapper(harness, body, "nav", { role: "presentation" }), "Not a landmark");
+  labelledButton(harness, wrapper(harness, body, "footer"), "Page foot");
+  harness.setBody(body);
+
+  const items = await itemsByName(harness, "controls");
+  const areas = Object.fromEntries(Object.entries(items).map(([name, item]) => [name, item.area ?? null]));
+
+  assert.deepEqual(areas, {
+    Logo: "header",
+    Pricing: "nav",
+    Content: null,
+    "Article head": null,
+    "Article foot": null,
+    "Section head": null,
+    Related: "aside",
+    Close: "dialog",
+    Find: "search",
+    Query: "search",
+    Dismiss: "dialog",
+    "Role banner": "header",
+    "Role info": "footer",
+    "Role nav": "nav",
+    "Role aside": "aside",
+    "Not a landmark": null,
+    "Page foot": "footer"
+  });
+  assert.ok(!Object.hasOwn(items.Content, "area"), "page content carries no area key");
+});
+
+test("a landmark item names its own area, and find and describe agree with inspect", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const navigation = wrapper(harness, body, "nav", { "aria-label": "Site" });
+  labelledButton(harness, navigation, "Pricing");
+  harness.setBody(body);
+
+  const structure = await itemsByName(harness, "structure");
+  assert.equal(structure.Site.area, "nav");
+  const found = await harness.send({ kind: "find", text: "Pricing", find_kind: "control", max_results: 5 });
+  assert.equal(found.value.targets[0].area, "nav");
+  const described = await harness.send({ kind: "describe", locators: [found.value.targets[0].locator] });
+  assert.equal(described.value.targets[0].area, "nav");
+  const semantic = await harness.send({ kind: "query_semantic", name: "Pricing", exact: true });
+  assert.equal(semantic.value.targets[0].area, "nav");
+});
+
+test("a control belongs to the form its form attribute names", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const first = wrapper(harness, body, "form", { id: "first" });
+  first.id = "first";
+  const second = wrapper(harness, body, "form", { id: "second" });
+  second.id = "second";
+  nativeControl(harness, first, "Inside first", "input", { type: "text" });
+  nativeControl(harness, body, "Pointed at second", "input", { type: "text", form: "second" });
+  nativeControl(harness, first, "Pulled into second", "button", { form: "second" });
+  nativeControl(harness, body, "Loose", "input", { type: "text" });
+  nativeControl(harness, body, "Pointed at nothing", "input", { type: "text", form: "missing" });
+  harness.setBody(body);
+
+  const items = await itemsByName(harness, "controls");
+  const forms = Object.fromEntries(Object.entries(items).map(([name, item]) => [name, item.form ?? null]));
+
+  assert.deepEqual(forms, {
+    "Inside first": 1,
+    "Pointed at second": 2,
+    "Pulled into second": 2,
+    Loose: null,
+    "Pointed at nothing": null
+  });
+});
+
+test("a form numbers itself, and ordinals follow the order of the forms in the document", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  wrapper(harness, body, "form", { "aria-label": "Newsletter" });
+  const search = wrapper(harness, body, "form", { "aria-label": "Account" });
+  harness.setBody(body);
+  nativeControl(harness, search, "Email", "input", { type: "text" });
+
+  const structure = await itemsByName(harness, "all");
+
+  assert.equal(structure.Newsletter.form, 1);
+  assert.equal(structure.Account.form, 2);
+  assert.equal(structure.Email.form, 2);
+});
+
+test("an input in a shadow root inside a light-DOM form belongs to that form", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const form = wrapper(harness, body, "form");
+  const host = wrapper(harness, form, "email-field");
+  const shadow = harness.fragment();
+  shadow.host = host;
+  const inner = harness.element("input");
+  inner.setAttribute("aria-label", "Inner email");
+  shadow.append(inner);
+  host.shadowRoot = shadow;
+  nativeControl(harness, body, "Outside", "input", { type: "text" });
+  harness.setBody(body);
+
+  const items = await itemsByName(harness, "controls");
+
+  assert.equal(items["Inner email"].form, 1);
+  assert.ok(!Object.hasOwn(items.Outside, "form"));
+});
+
+test("shadow content comes out where its host sits in the page", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  labelledButton(harness, body, "One");
+  const host = wrapper(harness, body, "x-widget");
+  const shadow = harness.fragment();
+  shadow.host = host;
+  const inner = harness.element("button");
+  inner.setAttribute("aria-label", "Two");
+  shadow.append(inner);
+  host.shadowRoot = shadow;
+  labelledButton(harness, body, "Three");
+  const slotHost = wrapper(harness, body, "x-slotted");
+  const slotShadow = harness.fragment();
+  slotShadow.host = slotHost;
+  const slot = harness.element("slot");
+  const lead = harness.element("button");
+  lead.setAttribute("aria-label", "Four");
+  slotShadow.append(lead, slot);
+  slotHost.shadowRoot = slotShadow;
+  const slotted = labelledButton(harness, slotHost, "Five");
+  slot.assignedNodes = () => [slotted];
+  labelledButton(harness, body, "Six");
+  harness.setBody(body);
+
+  const reply = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 100, visual_settle: false });
+
+  assert.deepEqual(reply.value.targets.map((target) => target.name).filter(Boolean), ["One", "Two", "Three", "Four", "Five", "Six"]);
+  const cut = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 2, visual_settle: false });
+  assert.deepEqual(cut.value.targets.map((target) => target.name), ["One", "Two"]);
 });

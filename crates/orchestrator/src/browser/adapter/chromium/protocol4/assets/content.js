@@ -36,6 +36,31 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   const GROUP_MAX = 80;
   const ERROR_MAX = 120;
   const LIMIT_MAX = 120;
+  // The page areas an item can belong to (ADR-0198 decision 19). The service decodes the same closed
+  // list. Content outside every landmark has no area.
+  const AREA_WORDS = Object.freeze(["header", "nav", "aside", "footer", "dialog", "search"]);
+  // The area an explicit ARIA landmark role names.
+  const LANDMARK_ROLE_AREAS = new Map([
+    ["banner", "header"],
+    ["contentinfo", "footer"],
+    ["navigation", "nav"],
+    ["complementary", "aside"],
+    ["dialog", "dialog"],
+    ["alertdialog", "dialog"],
+    ["search", "search"]
+  ]);
+  // The area a native element names when it has no role of its own.
+  const LANDMARK_TAG_AREAS = new Map([
+    ["header", "header"],
+    ["footer", "footer"],
+    ["nav", "nav"],
+    ["aside", "aside"],
+    ["dialog", "dialog"],
+    ["search", "search"]
+  ]);
+  // A header or footer inside one of these belongs to that section, not to the page (HTML-AAM).
+  const SECTIONING_TAGS = new Set(["article", "aside", "main", "nav", "section"]);
+  const SECTIONING_ROLES = new Set(["article", "complementary", "main", "navigation", "region"]);
   // The words a refused fill names a field problem with. The service decodes the same closed list.
   const FIELD_PROBLEMS = Object.freeze({
     optionMissing: "option_missing",
@@ -323,7 +348,13 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return new AssetError("credential_authorization_required", `credential-class target requires user authorization: the ${roleFor(element)}${name ? ` "${name}"` : ""}`);
   }
 
-  function observation(element) {
+  // What one read remembers about the page so each element is placed once: the area of every
+  // element already walked, and the ordinal of each form, counted on first use.
+  function observationView() {
+    return { areas: new Map(), forms: null };
+  }
+
+  function observation(element, view = observationView()) {
     const observed = {
       locator: locatorFor(element),
       role: roleFor(element),
@@ -331,7 +362,78 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       state: stateFor(element),
       credential_class: credentialClass(element)
     };
+    const area = pageArea(element, view);
+    if (area) observed.area = area;
+    const form = formOrdinal(element, view);
+    if (form) observed.form = form;
     return Object.assign(observed, controlFacts(element, observed.role, observed.name));
+  }
+
+  // The first word of an element's role attribute, lower case, or an empty string.
+  function explicitRole(element) {
+    return String(element.getAttribute("role") ?? "").trim().split(/\s+/)[0].toLowerCase();
+  }
+
+  // The area word an element names for itself, or null. An explicit role decides alone. A native
+  // header or footer names an area only when no section contains it.
+  function landmarkRole(element) {
+    const explicit = explicitRole(element);
+    if (explicit) return LANDMARK_ROLE_AREAS.get(explicit) ?? null;
+    const area = LANDMARK_TAG_AREAS.get(tagOf(element)) ?? null;
+    if ((area === "header" || area === "footer") && insideSection(element)) return null;
+    return area;
+  }
+
+  function insideSection(element) {
+    for (let node = composedParent(element); node; node = composedParent(node)) {
+      if (node.nodeType !== 1) continue;
+      const explicit = explicitRole(node);
+      if (explicit ? SECTIONING_ROLES.has(explicit) : SECTIONING_TAGS.has(tagOf(node))) return true;
+    }
+    return false;
+  }
+
+  // The area that holds an element: its own landmark, else the nearest enclosing one, across
+  // shadow boundaries. Null for page content.
+  function pageArea(element, view) {
+    const walked = [];
+    let area = null;
+    for (let node = element; node; node = composedParent(node)) {
+      if (view.areas.has(node)) {
+        area = view.areas.get(node);
+        break;
+      }
+      walked.push(node);
+      const own = node.nodeType === 1 ? landmarkRole(node) : null;
+      if (own) {
+        area = own;
+        break;
+      }
+    }
+    for (const node of walked) view.areas.set(node, area);
+    return AREA_WORDS.includes(area) ? area : null;
+  }
+
+  // The form that owns an element: the browser's own answer when it has one, which honors the
+  // form attribute, else the nearest form around it in the composed tree, which reaches a
+  // control inside a shadow root. The form element owns itself.
+  function formOwner(element) {
+    if (tagOf(element) === "form") return element;
+    if (element.form) return element.form;
+    for (let node = composedParent(element); node; node = composedParent(node)) {
+      if (node.nodeType === 1 && tagOf(node) === "form") return node;
+    }
+    return null;
+  }
+
+  // The 1-based place of the element's form among the document's forms in composed order, or 0.
+  function formOrdinal(element, view) {
+    const owner = formOwner(element);
+    if (!owner) return 0;
+    if (!view.forms) {
+      view.forms = new Map(queryAll("form").map((form, index) => [form, index + 1]));
+    }
+    return view.forms.get(owner) ?? 0;
   }
 
   function oneLine(value) {
@@ -653,12 +755,38 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return found;
   }
 
+  // Matches in composed tree order. A shadow root's matches belong where its host sits, not
+  // after the whole document's.
   function queryAll(selector) {
     const unique = new Set();
-    for (const root of roots()) {
+    const found = roots();
+    for (const root of found) {
       for (const element of root.querySelectorAll(selector)) unique.add(element);
     }
-    return Array.from(unique);
+    return found.length > 1 ? composedOrder(Array.from(unique)) : Array.from(unique);
+  }
+
+  // The elements sorted into the order the page renders them. An open shadow root replaces its
+  // host's light children, and a slot holds the nodes assigned to it. An element the composed
+  // tree never reaches, such as an unslotted light child, goes last in its given order.
+  function composedOrder(elements) {
+    const wanted = new Set(elements);
+    const place = new Map();
+    const seen = new Set();
+    const stack = [document.body, document.documentElement].filter(Boolean);
+    while (stack.length) {
+      const node = stack.pop();
+      if (seen.has(node)) continue;
+      seen.add(node);
+      if (wanted.has(node)) place.set(node, place.size);
+      const children = composedChildren(node);
+      for (let index = children.length - 1; index >= 0; index -= 1) stack.push(children[index]);
+    }
+    const unplaced = place.size;
+    return elements
+      .map((element, index) => ({ element, key: place.get(element) ?? unplaced + index }))
+      .sort((a, b) => a.key - b.key)
+      .map(({ element }) => element);
   }
 
   // innerText stops at both iframe and shadow boundaries in Chromium. Frames are folded by
@@ -776,7 +904,8 @@ ${line}` : line;
 
   function inspect(kind, maximum) {
     const pool = candidates(kind).filter((element) => element.isConnected);
-    return { targets: pool.slice(0, maximum).map(observation), truncated: pool.length > maximum };
+    const view = observationView();
+    return { targets: pool.slice(0, maximum).map((element) => observation(element, view)), truncated: pool.length > maximum };
   }
 
   // The parent in the composed tree: a slotted node's slot, else its parent, and a shadow
@@ -815,8 +944,9 @@ ${line}` : line;
     }
     const kept = hits.filter((hit) => hit.isControl || !containers.has(hit.element));
     // Only the returned targets are observed, so only they get locators.
+    const view = observationView();
     return {
-      targets: kept.slice(0, maximum).map((hit) => observation(hit.element)),
+      targets: kept.slice(0, maximum).map((hit) => observation(hit.element, view)),
       truncated: kept.length > maximum || pool.length > 3000,
     };
   }
@@ -838,10 +968,11 @@ ${line}` : line;
   function querySemanticTargets(message) {
     const matches = [];
     const pool = candidates("controls");
+    const view = observationView();
     for (const element of pool.slice(0, 3000)) {
       if (!element.isConnected) continue;
       if (matchesSemanticSelector(element, message)) {
-        matches.push(observation(element));
+        matches.push(observation(element, view));
         if (matches.length > 8) break;
       }
     }
@@ -1328,8 +1459,8 @@ ${line}` : line;
     let submitElement = null;
     if (message.submit_locator) {
       submitElement = requireActionable(resolve(message.submit_locator), "activate");
-      const owner = elements[0]?.closest?.("form") ?? null;
-      if (!owner || !owner.contains(submitElement)) throw new AssetError("submit_outside_form", "submit control is not contained in the resolved form");
+      const owner = elements[0] ? formOwner(elements[0]) : null;
+      if (!owner || formOwner(submitElement) !== owner) throw new AssetError("submit_outside_form", "submit control is not contained in the resolved form");
     }
     return { elements, submitElement, fieldKinds: elements.map((element) => isTextual(element) ? "browser_text" : "local") };
   }
@@ -1756,7 +1887,10 @@ ${line}` : line;
       const extract = () => findTargets(message.text, message.find_kind, message.max_results);
       return sampled(message, ctx, extract, (res) => res.targets.length > 0);
     }
-    if (message.kind === "describe") return { targets: message.locators.map((locator) => observation(resolve(locator))) };
+    if (message.kind === "describe") {
+      const view = observationView();
+      return { targets: message.locators.map((locator) => observation(resolve(locator), view)) };
+    }
     if (message.kind === "query_semantic") {
       const extract = () => querySemanticTargets(message);
       return sampled(message, ctx, extract, (res) => res.targets.length > 0);

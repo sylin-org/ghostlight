@@ -118,6 +118,58 @@ fn a_document_that_found_more_than_it_returned_makes_the_merge_over() {
     assert!(merged.over);
 }
 
+fn in_forms(forms: &[Option<u32>]) -> DocumentTargets {
+    DocumentTargets {
+        targets: forms
+            .iter()
+            .enumerate()
+            .map(|(index, form)| ObservedTarget {
+                form: *form,
+                ..target(&format!("t{index}"))
+            })
+            .collect(),
+        truncated: false,
+    }
+}
+
+fn form_ordinals(merged: &MergedTargets) -> Vec<Option<u32>> {
+    merged.targets.iter().map(|target| target.form).collect()
+}
+
+#[test]
+fn form_ordinals_are_renumbered_across_documents() {
+    let merged = targets(
+        [
+            in_forms(&[Some(1), None, Some(2), Some(1)]),
+            in_forms(&[Some(1), Some(2)]),
+            in_forms(&[None, Some(1)]),
+        ],
+        20,
+    );
+    assert_eq!(
+        form_ordinals(&merged),
+        [
+            Some(1),
+            None,
+            Some(2),
+            Some(1),
+            Some(3),
+            Some(4),
+            None,
+            Some(5)
+        ]
+    );
+}
+
+#[test]
+fn a_cut_target_still_counts_its_form_for_the_documents_after_it() {
+    let merged = targets([in_forms(&[Some(1), Some(2)]), in_forms(&[Some(1)])], 1);
+    assert_eq!(form_ordinals(&merged), [Some(1)]);
+    assert!(merged.over);
+    let wide = targets([in_forms(&[Some(1), Some(2)]), in_forms(&[Some(1)])], 3);
+    assert_eq!(form_ordinals(&wide), [Some(1), Some(2), Some(3)]);
+}
+
 #[test]
 fn text_keeps_document_order_under_one_page_wide_ceiling() {
     let sections = [

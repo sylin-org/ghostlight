@@ -34,6 +34,9 @@ function selectorMatches(element, selector) {
   });
 }
 
+/** The tags whose elements have a form owner. */
+const FORM_ASSOCIATED = new Set(["BUTTON", "FIELDSET", "INPUT", "OBJECT", "OUTPUT", "SELECT", "TEXTAREA"]);
+
 const DATE_PARTS = /^(\d{4,})-(\d{2})-(\d{2})$/;
 const TIME_PARTS = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/;
 const NUMBER_SHAPE = /^-?(?:\d+|\d*\.\d+)(?:[eE][-+]?\d+)?$/;
@@ -169,6 +172,25 @@ function createFakeDom({ top = true } = {}) {
         }
       };
     }
+
+    /**
+     * The form that owns a form-associated control, as the browser answers it: the form its `form`
+     * attribute names in the same tree, else the nearest form around it in the same tree. Null
+     * when there is none, so a control in a shadow root never reaches a form outside it. A test
+     * may assign a form to override the answer. Elements that cannot be form-associated have none.
+     */
+    get form() {
+      if (!FORM_ASSOCIATED.has(this.tagName)) return undefined;
+      const named = this.getAttribute("form");
+      if (named !== null) {
+        const target = descendantsOf(this.getRootNode(), "*").find((element) => element.id === named);
+        return target && target.tagName === "FORM" ? target : null;
+      }
+      for (let node = this.parentNode; node; node = node.parentNode) if (node.tagName === "FORM") return node;
+      return null;
+    }
+
+    set form(value) { Object.defineProperty(this, "form", { value, writable: true, configurable: true }); }
 
     get className() { return [...this.classes].join(" "); }
     set className(value) { this.classes = new Set(String(value).split(/\s+/).filter(Boolean)); }

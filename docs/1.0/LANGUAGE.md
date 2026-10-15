@@ -350,6 +350,17 @@ offered nothing of that kind:
 | `group` | For a radio or checkbox, the fieldset legend or the nearest labelled group. At most 80 characters. |
 | `error` | Present when the control is invalid after the person touched it, or the page says `aria-invalid`. The page's own error text when it names one; otherwise a phrase such as `is required`, `is not a valid email address` or `is too short (at least 8 characters)`. The browser's validation message is never used except for a custom error. |
 
+Any item, control or not, also says where it sits, with these keys only when they apply (ADR-0198
+decision 19):
+
+| Key | Meaning |
+|---|---|
+| `area` | The page area that holds the item: `header`, `nav`, `aside`, `footer`, `dialog` or `search`. A native `header` or `footer` is a page area only when no `article`, `aside`, `main`, `nav` or `section` contains it. Absence means page content. |
+| `form` | The number of the form that owns the item, counted from 1 over the forms of the page in the order they appear. The `form` attribute counts, and so does a control inside a component that sits in a form. Absence means no form owns the item. |
+
+Items come out in the order the page shows them, including content inside components, before
+`max_items` cuts the list.
+
 State words gain `required`, `readonly` and `invalid`. A control inside a disabled fieldset reads
 `disabled` and is refused as not actionable, as one with the `disabled` attribute is.
 

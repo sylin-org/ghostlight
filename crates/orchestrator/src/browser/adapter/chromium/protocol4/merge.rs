@@ -34,6 +34,10 @@ pub struct MergedTargets {
 
 /// Fold the targets of every document, top first, under one ceiling. The first documents win
 /// their share first.
+///
+/// Each document numbers its forms from 1. The fold renumbers them so one number names one form
+/// in the merged answer: a document's ordinals are offset by the forms counted before it, and
+/// a document counts the highest ordinal it reported, kept or cut.
 #[must_use]
 pub fn targets(
     per_document: impl IntoIterator<Item = DocumentTargets>,
@@ -41,14 +45,23 @@ pub fn targets(
 ) -> MergedTargets {
     let mut merged = Vec::new();
     let mut over = false;
+    let mut forms_before = 0;
     for document in per_document {
-        for target in document.targets {
+        let forms_here = document
+            .targets
+            .iter()
+            .filter_map(|target| target.form)
+            .max()
+            .unwrap_or(0);
+        for mut target in document.targets {
             if merged.len() >= maximum {
                 over = true;
                 break;
             }
+            target.form = target.form.map(|ordinal| ordinal + forms_before);
             merged.push(target);
         }
+        forms_before += forms_here;
         over = over || document.truncated;
     }
     MergedTargets {
