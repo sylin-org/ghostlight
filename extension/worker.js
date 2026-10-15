@@ -235,8 +235,7 @@ const commandChunks = globalThis.GhostlightCommandChunks.create({
   sha256Hex: async (bytes) => {
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  },
-  correlationOf: (request) => request.correlation
+  }
 });
 const lifecycle = globalThis.GhostlightSessions.create(chrome.debugger, {
   installer: (session) => world.register(session),

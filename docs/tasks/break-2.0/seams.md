@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: f06f-one-chunk-shape.
+Next: f07a-service-owns-opening.
 
 ## Landed
 
@@ -120,6 +120,7 @@ Next: f06f-one-chunk-shape.
 | f06c-notice-label | The notice carries the service's activity label (blueprint F6c). `wire::NoticeSignal` gains `label: Option<String>` (default, skipped when none); the physical `PresentationSignal` carries `label: String`, set from `activity_label` for every signal the presentation reactor builds, and `translate::present` sends it. `notice.js` shows a non-empty frame label (bounded to the phase limit) in the popup's activity list and falls back to `shared.activityLabel` only when it is absent. `tests/golden/protocol4/frames/notice.json` gains `"label":"Clicking"`; adapter-protocol-4 documents the field. | see `git log` |
 | f06d-setup-page | The bundled setup page and the install say only what is true in 2.0 (blueprint F6d). `extension/setup.html` drops the Debian package lines, says the command installs Ghostlight on this computer and registers this browser and the MCP clients it finds, and describes `ghostlight doctor` as this computer's side. `environment::BACKGROUND_POSTURE`, its test and its println in `finish_setup` are gone. | see `git log` |
 | f06e-welcome-on-absence | The extension opens a page at install only when the service is absent (ADR-0199 D23, blueprint F6e, owner question Q1 bundled branch). `onInstalled` with reason install marks a welcome pending and connects; `settleWelcome` resolves it on the first definite outcome only: hello_accepted opens nothing, a `connectNative` throw or a port disconnect whose reason `shared.linkState` classifies as host_absent opens `chrome.runtime.getURL('setup.html')` once, any other reason or the hello timeout opens nothing. A port that is open and unanswered is never an outcome. An outcome that happened before `onInstalled` fired (the worker's own first connect) resolves at once; update, chrome_update, shared_module_update and later retries open nothing, and a worker restart loses the flag and opens nothing. `SERVICE_INSTALL_URL` is gone from `worker.js` (popup and options keep their own routes). `worker.test.js` replaces the old test with five covering the install-with-no-host, pending-then-host-not-found, accepted, other-reason and hello-timeout, and update cases. `data-flows.md`, `faq.md` and `extension/README.md` say it plainly. | see `git log` |
+| f06f-one-chunk-shape | Protocol 4 is the only command-chunk shape (blueprint F6f). `lib/chunks.js` loses `nestedCorrelation` and the `correlationOf` option: a reassembled request must be `kind: "request"` with `request.correlation` equal to the transfer's. `worker.js` stops passing the option. `chunks.test.js` builds protocol-4 request frames only and keeps a mismatched-correlation refusal test. | see `git log` |
 
 ## Owed live checks
 

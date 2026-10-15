@@ -37,7 +37,7 @@ function framesFor(request, chunkSize = 8, transferId = "chunk_1") {
   return Array.from({ length: count }, (_value, index) => ({
     kind: "command_chunk",
     transfer_id: transferId,
-    correlation: request.request.correlation,
+    correlation: request.correlation,
     index,
     count,
     total_bytes: bytes.length,
@@ -50,7 +50,7 @@ function settle() { return new Promise((resolve) => setImmediate(resolve)); }
 
 test("verified chunks deliver the ordinary request exactly once", async () => {
   const h = harness();
-  const request = { kind: "request", request: { correlation: "physical_1", command: { command: "upload_files" } } };
+  const request = { kind: "request", correlation: "physical_1", primitive: { name: "list_tabs", args: {} } };
   for (const frame of framesFor(request)) h.accept(frame);
   await settle();
   assert.deepEqual(h.delivered, [request]);
@@ -64,7 +64,7 @@ test("verified chunks deliver the ordinary request exactly once", async () => {
 });
 
 test("digest and correlation mismatches never dispatch", async () => {
-  const request = { kind: "request", request: { correlation: "physical_2", command: {} } };
+  const request = { kind: "request", correlation: "physical_2", primitive: { name: "list_tabs", args: {} } };
   const digestHarness = harness();
   const badDigest = framesFor(request, 1000)[0];
   badDigest.sha256 = "0".repeat(64);
@@ -83,7 +83,7 @@ test("digest and correlation mismatches never dispatch", async () => {
 });
 
 test("duplicates, expiry, and all hard bounds erase partial bytes", () => {
-  const request = { kind: "request", request: { correlation: "physical_3", command: { payload: "long enough" } } };
+  const request = { kind: "request", correlation: "physical_3", primitive: { name: "list_tabs", args: {} } };
   const duplicate = harness();
   const frames = framesFor(request, 5);
   duplicate.accept(frames[0]);
@@ -120,7 +120,7 @@ test("duplicates, expiry, and all hard bounds erase partial bytes", () => {
 
 test("disconnect clearing forgets every partial transfer", () => {
   const h = harness();
-  const request = { kind: "request", request: { correlation: "physical_4", command: { payload: "long enough" } } };
+  const request = { kind: "request", correlation: "physical_4", primitive: { name: "list_tabs", args: {} } };
   h.accept(framesFor(request, 5)[0]);
   assert.equal(h.chunks.stats().active, 1);
   h.chunks.clear();
@@ -132,7 +132,7 @@ test("disconnect during digest verification cannot dispatch into a later connect
   const h = harness({
     sha256Hex: () => new Promise((resolve) => { finishDigest = resolve; })
   });
-  const request = { kind: "request", request: { correlation: "physical_5", command: {} } };
+  const request = { kind: "request", correlation: "physical_5", primitive: { name: "list_tabs", args: {} } };
   h.accept(framesFor(request, 1000)[0]);
   await settle();
   h.chunks.clear();
@@ -145,7 +145,7 @@ test("disconnect during digest verification cannot dispatch into a later connect
 test("logical expiry rejects late chunks even when a worker timer is delayed", () => {
   let time = 0;
   const h = harness({ now: () => time });
-  const request = { kind: "request", request: { correlation: "physical_6", command: { payload: "long enough" } } };
+  const request = { kind: "request", correlation: "physical_6", primitive: { name: "list_tabs", args: {} } };
   const frames = framesFor(request, 5);
   h.accept(frames[0]);
   time = 15_000;
@@ -160,7 +160,8 @@ test("completed transfer tombstones preserve exact-once behavior at their count 
   const h = harness({ maxCompleted: 2, now: () => time, ttlMs: 100 });
   const requests = ["one", "two", "three"].map((name) => ({
     kind: "request",
-    request: { correlation: `physical_${name}`, command: {} }
+    correlation: `physical_${name}`,
+    primitive: { name: "list_tabs", args: {} }
   }));
 
   for (const [index, request] of requests.entries()) {
@@ -184,7 +185,7 @@ test("completed transfer tombstones preserve exact-once behavior at their count 
 
 test("clearing a connection erases completed transfer tombstones", async () => {
   const h = harness();
-  const request = { kind: "request", request: { correlation: "physical_clear", command: {} } };
+  const request = { kind: "request", correlation: "physical_clear", primitive: { name: "list_tabs", args: {} } };
   const frames = framesFor(request, 1000);
   for (const frame of frames) h.accept(frame);
   await settle();
@@ -205,7 +206,7 @@ test("logical expiry also fences delayed digest completion", async () => {
     now: () => time,
     sha256Hex: () => new Promise((resolve) => { finishDigest = resolve; })
   });
-  const request = { kind: "request", request: { correlation: "physical_7", command: {} } };
+  const request = { kind: "request", correlation: "physical_7", primitive: { name: "list_tabs", args: {} } };
   h.accept(framesFor(request, 1000)[0]);
   await settle();
   time = 15_000;
@@ -227,12 +228,12 @@ test("a cancelled verifier cannot erase a later transfer with the same id", asyn
       return Promise.resolve(digest(bytes));
     }
   });
-  const oldRequest = { kind: "request", request: { correlation: "physical_old", command: {} } };
+  const oldRequest = { kind: "request", correlation: "physical_old", primitive: { name: "list_tabs", args: {} } };
   h.accept(framesFor(oldRequest, 1000)[0]);
   await settle();
   h.chunks.clear();
 
-  const newRequest = { kind: "request", request: { correlation: "physical_new", command: {} } };
+  const newRequest = { kind: "request", correlation: "physical_new", primitive: { name: "list_tabs", args: {} } };
   h.accept(framesFor(newRequest, 1000)[0]);
   rejectOldDigest(new Error("old verifier ended"));
   await settle();
@@ -240,20 +241,12 @@ test("a cancelled verifier cannot erase a later transfer with the same id", asyn
   assert.deepEqual(h.rejected, []);
 });
 
-test("a caller that names where the correlation lives receives requests of that shape", async () => {
-  const h = harness({ correlationOf: (request) => request.correlation });
-  const request = { kind: "request", correlation: "p4_flat", primitive: { name: "list_tabs", args: {} } };
-  const frames = framesFor({ ...request, request: { correlation: request.correlation } }, 1000);
-  const flat = Buffer.from(JSON.stringify(request));
-  for (const frame of frames) h.accept({ ...frame, total_bytes: flat.length, sha256: digest(flat), data: flat.toString("base64") });
+test("a reassembled request whose correlation differs from the transfer is refused", async () => {
+  const h = harness();
+  const request = { kind: "request", correlation: "physical_6", primitive: { name: "list_tabs", args: {} } };
+  const frames = framesFor(request, 1000).map((frame) => ({ ...frame, correlation: "physical_other" }));
+  for (const frame of frames) h.accept(frame);
   await settle();
-  assert.deepEqual(h.delivered, [request]);
-  assert.deepEqual(h.rejected, []);
-
-  const nested = harness({ correlationOf: (value) => value.correlation });
-  const wrong = { kind: "request", request: { correlation: "physical_6", command: {} } };
-  nested.accept(framesFor(wrong, 1000)[0]);
-  await settle();
-  assert.deepEqual(nested.delivered, []);
-  assert.equal(nested.rejected.length, 1);
+  assert.deepEqual(h.delivered, []);
+  assert.equal(h.rejected.length, 1);
 });
