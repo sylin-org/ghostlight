@@ -20,9 +20,34 @@
 //! take. It does no I/O and opens no socket. `crates/desktop/guards/network.test.mjs` names it as
 //! the one exception and fails if it ever leaves the tree.
 
+use std::ffi::OsString;
+
 pub mod bridge;
 pub mod bundle;
 pub mod scheme;
 pub mod session;
+pub mod spike;
 pub mod tray;
 pub mod window;
+
+/// The exit code of a run with arguments the program does not accept.
+pub const EXIT_USAGE: u8 = 2;
+
+/// Whether the command line, without the program name, is one the program accepts.
+///
+/// The window process takes no arguments: everything it does is decided by the service.
+pub fn accepts_arguments(args: &[OsString]) -> bool {
+    args.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_arguments_are_accepted_and_any_argument_is_refused() {
+        assert!(accepts_arguments(&[]));
+        assert!(!accepts_arguments(&[OsString::from("--help")]));
+        assert!(!accepts_arguments(&[OsString::new()]));
+    }
+}

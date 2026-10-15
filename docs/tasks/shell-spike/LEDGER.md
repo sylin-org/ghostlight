@@ -46,7 +46,9 @@ through a manifest change. The network guard passes `--locked` to `cargo tree` o
 
 ## RESUME HERE
 
-Next: shell-spike-7.
+All seven slices have landed. Next: the coordinator runs the live checks under Owed live checks
+and records the results per platform. The shell lane then wires the service and deletes
+`crates/desktop/src/spike.rs` and `crates/desktop/spike/`.
 
 `crates/desktop/Cargo.toml` declares every dependency the lane uses and may not change after
 shell-spike-1. A slice that needs another crate records a blocker instead.
@@ -61,6 +63,7 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
 | shell-spike-4 | `tray.rs`: the tray built from a model. `TrayModel` (`tooltip`, `items`) and `TrayItem` (`id`, `label`, `enabled`) with `validate` (1 to 16 items, unique ids of `[a-z0-9_]{1,32}`, labels of 1 to 64 printable characters, a tooltip of at most 64), `icon_image` and `decode_rgba` (PNG to 8-bit RGBA), `Tray::build` and `Tray::show`, and `install_events` mapping a left-button-up click to `TrayEvent::Activate` and a menu choice to `TrayEvent::Item(id)`. The shell owns no item; Linux reports no clicks, so Open must be a menu item there. | see `git log` |
 | shell-spike-5 | `window.rs`: the window and its webview, moved unchanged from the Tauri glue. `WindowLifecycle` is the pure rule set (`Absent`, `Open`, `Replacing`; `OpenRequested`, `CloseRequested`, `Destroyed`, `RendererLost` give `Create`, `Focus` or `Destroy`): Windows focuses an open window, Linux destroys it and builds a fresh one after the destroyed event and coalesces Opens meanwhile (ADR-0120), a lost renderer discards the window and nothing rebuilds it (ADR-0119). `renderer_policy` and `apply_renderer_policy`, `prepare_identity` and `init_display` are the Linux startup helpers, no-ops on Windows. `ShellWindow::create` builds the tao window (title, 1180 by 760, minimum 880 by 620, centered by the pure `centered_origin`, product icons, Windows class `Ghostlight Window`) and the hardened wry webview with the private scheme, the IPC handler and the injected bridge; `focus`, `navigate`, `deliver`, `id` and, on Linux, `on_renderer_lost`. | see `git log` |
 | shell-spike-6 | `session.rs`: the end of the session (ADR-0199 Decisions 13 and 14). `SessionState` (clones share two flags) maps `SessionSignal` (`Query`, `Cancelled`, `Final`) to `SessionAct`: a query marks the session ending, a cancel lifts it unless the final signal came, the first final signal gives `ArmFallbackThenExit` and the state stays ending, a later one does nothing. `may_start_process` is false while ending; every later path that starts a process asks it first. `handle` arms, then exits. `arm_fallback_exit(FALLBACK_EXIT)` spawns the `ghostlight-desktop-exit` thread (1500 ms, `exit(0)`, at once if the thread cannot spawn). Sources: on Linux `install_unix_signals` maps SIGTERM, SIGHUP and SIGINT to `Final` on the GTK main context; on Windows the event loop maps its destroyed event to `Final` (`tao` answers the query with true). The query-time ending state on Windows arrives with relay's shared listener when the shell lane wires the shell, which replaces both sources. | see `git log` |
+| shell-spike-7 | `main.rs`, `spike.rs`, `spike/` and `build.rs`: the standalone spike window that composes every module, not wired to the service. `main` is a GUI-subsystem program on Windows in debug builds too (PE subsystem 2 checked in both profiles), takes no arguments (`accepts_arguments`; anything else exits 2) and returns `spike::run()`. `run` applies the Linux startup helpers (exit 3 with no display), builds the event loop with a user-event proxy, forwards tray events to it, and on `Init` builds the tray from `tray_model()` (Open, Close, Quit; a failure goes to stderr), installs the Linux signals and sends an Open to the lifecycle. The scheme serves `spike_bundles()`: a placeholder `_shell/index.html` and the spike page (`spike/index.html`, `spike.css`, `spike.js`, `mascot.png` from the product icon). `reply_to_page` drops a foreign page and any non-object body and echoes the rest with `"from": "shell"`. Close and Destroyed feed the lifecycle, Linux renderer loss feeds `RendererLost`, and `LoopDestroyed` feeds the final session signal. `build.rs` (Windows hosts targeting Windows) embeds the product icon and a version block with the description Ghostlight. | see `git log` |
 
 ## Owed live checks
 
@@ -115,6 +118,31 @@ shell-spike-1. A slice that needs another crate records a blocker instead.
   shutdown with the window open ends the process in under 2 s with no "this app is preventing"
   screen; that on Linux SIGTERM, SIGHUP and SIGINT each end the process at once through the
   fallback path and in under 2 s.
+- shell-spike-7: on a Linux test machine, `cargo clippy -p ghostlight-desktop --all-targets -- -D
+  warnings` and `cargo test -p ghostlight-desktop`. `spike.rs` compiles Linux-only code
+  (`RendererLost`, the signal install) that has not been built on the coordinator's host.
+- shell-spike-7: the coordinator's live checklist. Run `ghostlight-desktop` from
+  `.target-lane-shell-spike/debug` on Windows 10, Windows 11, and GNOME and KDE on Wayland (X11
+  too where available), and record the result per platform:
+  1. The tray icon and one window with the spike page appear within 2 s, dark from the first
+     frame, with no console.
+  2. Post a message gets an echo marked `"from":"shell"`.
+  3. Probes fetch, img and script say "blocked by the content policy", window.open says "new
+     window denied", location.assign says "navigation denied".
+  4. Closing the window keeps the tray. Tray Open (on Windows also a left click on the icon)
+     creates exactly one window, also after five quick Opens. On Windows count top-level windows
+     of class "Ghostlight Window" owned by the process, hidden ones included; on Linux count
+     toplevels.
+  5. Minimize, then Open: Windows restores the same window, Linux replaces it with exactly one
+     fresh window.
+  6. Linux: killing the WebKitWebProcess discards only the window, and Open makes a fresh one.
+  7. Signing out with the spike running shows no "This app is preventing shutdown", and the
+     process is gone within 2 s.
+  8. Task Manager shows the description Ghostlight with the ghost icon.
+  9. No connection to 192.0.2.1 is ever attempted (Resource Monitor, or `ss -tn` on Linux).
+- shell-spike-7: if the window stays blank because a webview navigates to `about:blank` first,
+  the follow-up for the shell lane is to allow exactly `about:blank` in
+  `scheme::allows_navigation`, with the reason in a comment.
 
 ## Blockers
 
@@ -137,3 +165,8 @@ None.
   a window freshly created hidden is in exactly that state.
 - If a `Create` act fails, the caller feeds `LifecycleEvent::Destroyed` so the lifecycle returns to
   `Absent`.
+- Release size of `ghostlight-desktop.exe` (`cargo build --release -p ghostlight-desktop`, built
+  never run): 1,457,152 bytes (1.39 MiB) on `x86_64-pc-windows-msvc`. Record the Linux size when
+  the Linux machine builds it.
+- The spike has no `about:blank` allowance in `scheme::allows_navigation`; the live checks say
+  whether a platform needs one.
