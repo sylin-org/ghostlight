@@ -362,6 +362,12 @@ the owner wants, and what this project learned the hard way.
 
 ## Durable lessons
 
+- **Agents share the owner's machine; their processes must end with their step.** On 2026-10-15 a coding agent ran `find / -maxdepth 6 -name <crate>` in Git Bash to locate a crate's source.
+  Git Bash's root reaches every drive, its shell timed out, and the orphaned `find` burned 20
+  CPU-minutes until another session noticed. Never search a drive or the filesystem root;
+  dependency sources are in the Cargo home's `registry/src`, or ask `cargo metadata`. Give long
+  commands a timeout and leave nothing running when a step ends.
+
 - **Execution world is part of browser correctness.** A service-owned MAIN-world runtime cannot
   use extension-context messaging. Another installed extension can expose a webpage messaging API
   with different calling requirements, so an isolated test profile can conceal a startup failure.
