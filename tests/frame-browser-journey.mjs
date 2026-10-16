@@ -83,15 +83,46 @@ const source = liveSylin
     assert.equal(createHash("sha256").update(page.body).digest("hex"), page.sha256);
     return page.body;
   });
+// The public stage builds its form iframe inside the open shadow root of <composed-iframe-stage>
+// and puts the <frame-proof role="button"> control in that same root. Page code reaches both here.
+const STAGE_ROOT = "document.querySelector('composed-iframe-stage').shadowRoot";
+const frameElement = `${STAGE_ROOT}.querySelector('iframe')`;
+const PROOF_LABEL = "Verify composed frame";
+const PROVEN_LABEL = "Composed frame verified";
+// Site files the pages load from the public origin: the snapshot holds them, live mode fetches them.
+const SITE_ORIGIN = "https://sylin.org";
+const siteAssetPath = /^\/(?:assets|cdn-cgi)\//;
+const referencedAssets = (html) => [...html.matchAll(/<(?:link|script|img)\b[^>]*?\s(?:href|src)="(\/(?:assets|cdn-cgi)\/[^"]+)"/g)].map((match) => match[1]);
+if (!liveSylin) {
+  const held = new Set(snapshot.assets.map((item) => item.path));
+  for (const path of source.flatMap(referencedAssets)) assert.ok(held.has(path), `the snapshot is missing ${path}; recapture it with scripts/capture-sylin-iframe.mjs`);
+  assert.ok(source[0].includes("<composed-iframe-stage"), "the snapshot predates the composed stage");
+}
+const assetFailures = [];
+const liveAssets = new Map();
+// The bytes and content type of a site file, or null when the mode cannot serve it.
+async function siteAsset(url) {
+  if (!liveSylin) {
+    const item = snapshot.assets.find((entry) => entry.path.split("?")[0] === url.split("?")[0]);
+    if (!item) return null;
+    const bytes = Buffer.from(item.data_base64, "base64");
+    assert.equal(createHash("sha256").update(bytes).digest("hex"), item.sha256);
+    return { bytes, type: item.content_type };
+  }
+  if (!liveAssets.has(url)) {
+    liveAssets.set(url, fetch(`${SITE_ORIGIN}${url}`, { signal: AbortSignal.timeout(20000) }).then(async (response) =>
+      response.status === 200 ? { bytes: Buffer.from(await response.arrayBuffer()), type: response.headers.get("content-type") } : null));
+  }
+  return liveAssets.get(url);
+}
 const sourceEvidence = source.map((html, index) => ({ url: sourceUrls[index], sha256: createHash("sha256").update(html).digest("hex") }));
 let port;
 const server = createServer(async (request, response) => {
   response.setHeader("content-type", "text/html");
-  const asset = snapshot.assets.find((item) => item.path.split("?")[0] === request.url.split("?")[0]);
-  if (asset) {
-    const bytes = Buffer.from(asset.data_base64, "base64");
-    assert.equal(createHash("sha256").update(bytes).digest("hex"), asset.sha256);
-    response.setHeader("content-type", asset.content_type); response.end(bytes); return;
+  if (siteAssetPath.test(request.url)) {
+    const asset = await siteAsset(request.url).catch(() => null);
+    if (!asset) { assetFailures.push(request.url); response.statusCode = 404; response.end(); return; }
+    response.setHeader("content-type", asset.type); response.end(asset.bytes); return;
   }
   if (request.url === "/editor") {
     response.end(readFileSync(join(repository, "tests/fixtures/contenteditable.html"), "utf8"));
@@ -143,6 +174,12 @@ try {
   await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).length >= 2, "fixture frame")
     .catch(async (error) => { console.error(await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`));
       console.error(await (await rig.page(physical)).send("Page.getFrameTree")); throw error; });
+  assert.deepEqual(await rawPage(`(() => {
+    const root = document.querySelector("composed-iframe-stage")?.shadowRoot;
+    return { open: Boolean(root), lightFrames: document.querySelectorAll("iframe").length,
+      shadowFrames: root?.querySelectorAll("iframe").length ?? 0, proofRole: root?.querySelector("frame-proof")?.getAttribute("role") ?? null };
+  })()`), { open: true, lightFrames: 0, shadowFrames: 1, proofRole: "button" });
+  check("the form iframe and the proof control live in the open shadow root of the composed stage");
   await policy("denied");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
@@ -157,7 +194,7 @@ try {
   assert.ok(!dispatchedSince(beforeBlockedScript).includes("evaluate_main"));
   assert.notEqual(await rawPage("document.title"), "must not execute"); check("script refused before execution");
   const embedAt = async (path) => {
-    await rawPage(`document.querySelector('iframe').src = 'http://127.0.0.1:${port}/${path}'; true`);
+    await rawPage(`${frameElement}.src = 'http://127.0.0.1:${port}/${path}'; true`);
     await delay(200);
     await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).some((frame) => frame.url.endsWith(`/${path}`)), `embedded ${path}`);
   };
@@ -172,7 +209,7 @@ try {
     await image.decode(); const canvas = document.createElement("canvas");
     canvas.width = image.width; canvas.height = image.height;
     const context = canvas.getContext("2d"); context.drawImage(image, 0, 0);
-    const box = document.querySelector("iframe").getBoundingClientRect();
+    const box = ${frameElement}.getBoundingClientRect();
     const scale = image.width / document.documentElement.scrollWidth;
     return [...context.getImageData(Math.round((box.left + scrollX + 25) * scale),
       Math.round((box.top + scrollY + 25) * scale), 1, 1).data];
@@ -180,7 +217,7 @@ try {
   assert.ok(embeddedPixel[0] > 200 && embeddedPixel[1] < 40 && embeddedPixel[2] > 200,
     `Complete capture must contain the actual embedded pixels: ${embeddedPixel}`);
   await embedAt("form");
-  assert.equal(await rawPage("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
+  assert.equal(await rawPage(`getComputedStyle(${frameElement}).visibility`), "visible");
   check("complete screenshot remains available with embedded text access excluded");
   await policy("denied", false);
   const beforeDeniedCapture = rig.bridge.sent.length;
@@ -206,6 +243,18 @@ try {
   assert.equal(result.facts.coverage?.unavailable_documents ?? 0, 0);
   assert.match(JSON.stringify(result), /Project name/);
   check("fully permitted content remains available");
+  result = await call("browser_find", { tab, text: PROOF_LABEL });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  const proof = result.facts.matches.find((match) => match.role === "button" && match.name?.includes(PROOF_LABEL));
+  assert.ok(proof, JSON.stringify(result));
+  check("the control inside the open shadow root is found by its label");
+  result = await call("browser_click", { tab, target: proof.target });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  assert.equal(await rawPage(`${STAGE_ROOT}.querySelector('frame-proof [slot="label"]').textContent`), PROVEN_LABEL);
+  result = await call("browser_find", { tab, text: PROVEN_LABEL });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
+  assert.ok(result.facts.matches.some((match) => match.name?.includes(PROVEN_LABEL)), JSON.stringify(result));
+  check("clicking the shadow-hosted control changes its label");
   result = await call("browser_execute", { tab, script: "document.body.dataset.executionCount=String(Number(document.body.dataset.executionCount||0)+1); await Promise.resolve(); return Number(document.body.dataset.executionCount);" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.value, 1);
@@ -222,7 +271,7 @@ try {
   assert.equal(await rawPage("document.getElementById('h6-parent').value"), "");
   check("readable child cannot be written; known batch denial precedes parent write");
   await policy("all");
-  await rawPage(`document.querySelector('iframe').src='http://127.0.0.1:${port}/form?readonly-fixture'; true`);
+  await rawPage(`${frameElement}.src='http://127.0.0.1:${port}/form?readonly-fixture'; true`);
   await delay(200);
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
   const embeddedReadonly = result.facts.items.find((item) => item.name === "Embedded read only draft");
@@ -269,7 +318,7 @@ try {
   result = await call("browser_inspect", { tab, scope: "controls", max_items: 100 });
   const oldProject = result.facts.items.find((item) => item.name === "Project name"); assert.ok(oldProject);
   const oldDocument = (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).find((frame) => frame.frameId !== 0);
-  await rawPage(`document.querySelector('iframe').src = 'http://127.0.0.1:${port}/form?new-document'; true`);
+  await rawPage(`${frameElement}.src = 'http://127.0.0.1:${port}/form?new-document'; true`);
   const newDocument = await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`))
     .find((frame) => frame.frameId === oldDocument.frameId && frame.documentId !== oldDocument.documentId), "replacement embedded document");
   assert.equal(newDocument.frameId, oldDocument.frameId);
@@ -280,7 +329,7 @@ try {
   result = await call("browser_record", { action: "start", tab });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.ok(result.facts.frame_count > 0, JSON.stringify(result));
-  await rawPage(`document.querySelector('iframe').src = 'http://127.0.0.1:${port}/form?recording-boundary'; true`);
+  await rawPage(`${frameElement}.src = 'http://127.0.0.1:${port}/form?recording-boundary'; true`);
   await delay(300);
   result = await call("browser_record", { action: "status" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
@@ -327,11 +376,11 @@ try {
   check("target captures use the same binary screenshot permission");
   await rawPage("window.scrollTo(0,0); true");
   result = await call("browser_screenshot", { tab }); const pointView = result.facts.view;
-  const point = await rawPage("(()=>{const box=document.querySelector('iframe').getBoundingClientRect();return {x:box.left+60,y:box.top+60};})()");
+  const point = await rawPage(`(()=>{const box=${frameElement}.getBoundingClientRect();return {x:box.left+60,y:box.top+60};})()`);
   result = await call("browser_click", { view: pointView, x: point.x, y: point.y });
   assert.equal(result.status, "blocked", JSON.stringify(result)); assert.equal(result.effect, "none");
   check("complete screenshot coordinates do not grant action inside an excluded document");
-  await rawPage("document.querySelector('iframe').src='about:blank'; true"); await delay(200);
+  await rawPage(`${frameElement}.src='about:blank'; true`); await delay(200);
   result = await call("browser_read", { tab });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.coverage.excluded_documents, 0); assert.equal(result.facts.coverage.unavailable_documents, 1);
@@ -348,7 +397,7 @@ try {
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   result = await call("browser_record", { action: "start", tab });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
-  await rawPage(`document.querySelector('iframe').src = 'http://127.0.0.1:${port}/form?unrestricted-recording'; true`);
+  await rawPage(`${frameElement}.src = 'http://127.0.0.1:${port}/form?unrestricted-recording'; true`);
   await delay(300);
   result = await call("browser_record", { action: "status" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
@@ -723,6 +772,7 @@ try {
     for (const request of visualRequests) request.peer.notify("notifications/cancelled", { requestId: request.id, reason: "visual fixture cleanup" });
     await Promise.allSettled(visualRequests.map(request => request.promise));
   }
+  assert.deepEqual(assetFailures, [], "every site file the pages load was served");
   const audit = readFileSync(home.auditFile, "utf8");
   assert.doesNotMatch(audit, /127\.0\.0\.1|h6@example\.invalid|Ghostlight H6 fixture|ifxf-project|Draft line one|Shadow draft|Replacement draft|action draft|Complete allowlist draft|Ordinary replacement|MUST_NOT_CHANGE_|PARTIAL_DRAFT_EFFECT|Standalone semantic|Standalone handle|standalone-upload\.txt|SYNTHETIC_UPLOAD_/);
   check("durable audit excludes embedded origins, values, and selectors");

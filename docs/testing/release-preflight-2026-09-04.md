@@ -38,6 +38,13 @@ connector or relay.
   inspect, find, text wait, shadow-hosted iframe target geometry and screenshot, semantic form fill,
   submission, completion wait, and completion read.
 
+  Correction, 2026-10-16: the line above over-claims what the public page offered. On 2026-09-04
+  the public iframe demo had no shadow-hosted iframe; the composed stage existed only in an
+  unpushed local website commit. The composed stage went live on 2026-10-16 (website 7a2ff94, the
+  form iframe inside the open shadow root of `<composed-iframe-stage>`, plus the "Verify composed
+  frame" control). The frame journey covers it from that date, against a fixture recaptured the same
+  day (tests/fixtures/README.md).
+
 ## Stage results
 
 | Stage | Result | Detail |

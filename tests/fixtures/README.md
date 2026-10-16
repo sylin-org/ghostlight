@@ -4,11 +4,19 @@
 generic synthetic input, while accepting native editing transactions. Its retained values and
 submission counter test the user-visible result independently of Ghostlight's receipt.
 
-`sylin-iframe.json` snapshots the owner's public Sylin iframe demo on 2026-09-07. It carries the
-exact two HTML responses, eight referenced CSS/JavaScript/image responses, their source locations,
-content types, and SHA-256 digests. Unicode is JSON-escaped and binary responses are base64 so the
-fixture remains ASCII. Decoding restores the original bytes; the browser journey verifies hashes.
-No authenticated page, entered form value, or machine-local data is included.
+`sylin-iframe.json` snapshots the owner's public Sylin iframe demo on 2026-10-16, the composed
+stage. It carries the exact two HTML responses, nine referenced CSS/JavaScript/image responses,
+their source locations, content types, and SHA-256 digests. Unicode is JSON-escaped and binary
+responses are base64 so the fixture remains ASCII. Decoding restores the original bytes; the
+browser journey verifies hashes. No authenticated page, entered form value, or machine-local data
+is included.
+
+The stage builds its form iframe inside the open shadow root of a `<composed-iframe-stage>`
+element, from a `<template>`, with `demo-iframe.js`. That shadow root also holds a
+`<frame-proof role="button">` control labelled "Verify composed frame", which reads "Composed
+frame verified" once pressed. The frame holds the application form, whose completion notice sits in
+a second open shadow root. The frame journey drives all of it: the form inside the frame inside the
+shadow root, and the control in the shadow root (find, click, label change).
 
 The frame journey serves these responses on its disposable local server, adjusts the HTML base
 and child origin, and adds one parent input. The original form's local-only submission script is
@@ -16,9 +24,13 @@ preserved. Browser geometry and form behavior therefore do not depend on the pub
 or future edits. This is captured Sylin content, not a claim about the current live website.
 
 Set `GHOSTLIGHT_TEST_LIVE_SYLIN=1` to fetch current HTML and additionally navigate the public demo.
-That optional lane requires network access. The default suite uses the checked-in snapshot and
-its assets. Refresh this fixture deliberately when the public demo changes, review the changed
-bytes, and repeat both browser lanes before recording new evidence.
+That optional lane requires network access. It serves every site file the live HTML references by
+fetching it from the public site; the default suite uses the checked-in snapshot and its assets,
+and refuses to run when the snapshot lacks a file its own HTML references.
+
+Refresh the fixture with `node scripts/capture-sylin-iframe.mjs` when the public demo changes. It
+fetches the two pages and every file they reference, and rewrites `sylin-iframe.json`. Review the
+changed bytes and repeat both browser lanes before recording new evidence.
 
 `agent-ux/rerender-list.html` is a song library that re-renders the way a React list does: named
 rows that each hold their own `/song/<id>` link and a "More options" button whose id changes on
