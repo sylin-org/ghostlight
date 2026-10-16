@@ -1233,6 +1233,9 @@ fn update_extension_then_repeat() -> String {
     )
 }
 
+/// The one recovery step when the selected browser did not start or its adapter did not arrive.
+const START_BROWSER_YOURSELF: &str = "Start the selected browser yourself, then repeat the call.";
+
 /// Whether a refusal that sends the person to the browser also says where the extension comes
 /// from.
 ///
@@ -1443,7 +1446,9 @@ pub enum Refusal {
     BrowserRecoveryFailed {
         reason: BrowserRecoveryReason,
         /// Whether the person also needs to hear where the extension comes from. It only
-        /// changes the advice for [`BrowserRecoveryReason::ExtensionAbsent`].
+        /// changes the advice for [`BrowserRecoveryReason::ExtensionAbsent`] and
+        /// [`BrowserRecoveryReason::HandshakeTimeout`]: a browser Ghostlight started whose
+        /// adapter never arrived is, while no profile has the extension, a browser without it.
         extension: ExtensionAdvice,
     },
     /// The connection was lost after dispatch, before a completion receipt.
@@ -1714,9 +1719,10 @@ impl Refusal {
                     "Install Ghostlight in the selected browser profile, then repeat the call."
                         .into()
                 })],
-                BrowserRecoveryReason::LaunchFailed | BrowserRecoveryReason::HandshakeTimeout => {
-                    vec!["Start the selected browser yourself, then repeat the call.".into()]
-                }
+                BrowserRecoveryReason::HandshakeTimeout => vec![extension.step().unwrap_or_else(|| {
+                    START_BROWSER_YOURSELF.into()
+                })],
+                BrowserRecoveryReason::LaunchFailed => vec![START_BROWSER_YOURSELF.into()],
             },
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
             Self::FilesUnreadable => vec![
@@ -3991,6 +3997,27 @@ Changes are \"unsaved\".".into()),
     }
 
     #[test]
+    fn a_launched_browser_whose_adapter_never_arrived_sends_the_person_to_the_store_only_when_advised(
+    ) {
+        let timed_out = |extension| Refusal::BrowserRecoveryFailed {
+            reason: BrowserRecoveryReason::HandshakeTimeout,
+            extension,
+        };
+        assert_eq!(
+            timed_out(ExtensionAdvice::Plain).next_steps(),
+            vec!["Start the selected browser yourself, then repeat the call."]
+        );
+        assert_eq!(
+            timed_out(ExtensionAdvice::AddFromStore).next_steps(),
+            vec![store_step()]
+        );
+        assert_eq!(
+            timed_out(ExtensionAdvice::Plain).summary(),
+            timed_out(ExtensionAdvice::AddFromStore).summary()
+        );
+    }
+
+    #[test]
     fn advice_changes_no_other_recovery_failure() {
         for reason in [
             BrowserRecoveryReason::BrowserAbsent,
@@ -3998,7 +4025,6 @@ Changes are \"unsaved\".".into()),
             BrowserRecoveryReason::SandboxedPackage,
             BrowserRecoveryReason::NativeHostUnavailable,
             BrowserRecoveryReason::OwnedElsewhere,
-            BrowserRecoveryReason::HandshakeTimeout,
         ] {
             let with =
                 |extension| Refusal::BrowserRecoveryFailed { reason, extension }.next_steps();

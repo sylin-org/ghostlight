@@ -285,7 +285,8 @@ choice also retains the singular `browser` fact. The summary contains the whole 
 instruction, so `next_steps` is empty, with one exception: while setup is incomplete and no
 browser profile holds the extension, one step asks the user to add Ghostlight in Browser from the
 store listing, or to open the Ghostlight window for the setup steps (ADR-0200). The same step
-replaces the extension-absent recovery step under the same condition. Stale Ghostlight-owned
+replaces the extension-absent recovery step, and the step after a launched browser whose adapter
+never arrived, under the same condition. Stale Ghostlight-owned
 registrations among several installed browsers are repaired silently first, so the named browsers can actually connect; when
 no installed browser has a usable registration, the refusal names the browsers found and one
 choice-free remedy instead. No browser refusal ever says that Ghostlight declined to choose.

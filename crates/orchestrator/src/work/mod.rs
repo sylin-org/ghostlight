@@ -2259,7 +2259,10 @@ fn routing_refusal(
         BrowserError::RecoveryFailed { reason, details } => Some((
             Refusal::BrowserRecoveryFailed {
                 reason: recovery_reason(*reason),
-                extension: if *reason == RecoveryFailure::ExtensionAbsent {
+                extension: if matches!(
+                    reason,
+                    RecoveryFailure::ExtensionAbsent | RecoveryFailure::HandshakeTimeout
+                ) {
                     extension()
                 } else {
                     ExtensionAdvice::Plain

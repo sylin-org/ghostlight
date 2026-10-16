@@ -204,6 +204,15 @@ j11b-agent-outcomes has landed. Next: j12-setup-part. Rule 8 still binds: a pack
   check; that page does not mention Developer mode, which is the spec's procedure and is kept. Edge and Brave open `chrome://extensions` on their
   own extensions pages. "Within a day" is the owner's wording from the spec. (5) Tests set
   `ApplicationExecutor::extension_probe` directly, so no test scans the machine it runs on.
+  (6) Review finding, fixed in a follow-up: `RecoveryFailure::ExtensionAbsent` is never
+  constructed, so advice on it alone was unreachable. On the Windows default (on demand, one
+  native browser) Ghostlight launches the browser, no adapter arrives without the extension, and
+  recovery reports `HandshakeTimeout`. `BrowserRecoveryReason::HandshakeTimeout` now carries the
+  advice too, replacing "Start the selected browser yourself" with the store step under the same
+  condition; `LaunchFailed` keeps its step. The `ExtensionAbsent` variant stays unreachable and
+  is left for a later slice to retire or construct. Tests: an executor-level timeout case on an
+  on-demand policy (new `BrowserRecovery::set_test_launch_without_adapter`, no process starts).
+  Gate re-run: fmt, workspace clippy, `cargo test -p ghostlight-service` and the integrity script.
 - j01: the tree and the spec differed in these places.
   (1) The spec's dashboard line in Decision 15 ("the remote-code answer changes from No to Yes")
   is overridden by the owner ruling of 2026-10-16: the page code is local and never pulled from a

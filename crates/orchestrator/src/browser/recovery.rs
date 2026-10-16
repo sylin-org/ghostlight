@@ -186,6 +186,32 @@ impl BrowserInventory for SystemBrowserInventory {
     }
 }
 
+/// A mechanism whose repair and launch both succeed and connect nothing.
+#[cfg(test)]
+#[derive(Debug)]
+struct LaunchWithoutAdapter;
+
+#[cfg(test)]
+impl RecoveryMechanism for LaunchWithoutAdapter {
+    fn repair(
+        &self,
+        _browser: &RecoveryCandidate,
+        _deadline: Instant,
+        _cancelled: &AtomicBool,
+    ) -> Result<(), MechanismError> {
+        Ok(())
+    }
+
+    fn launch(
+        &self,
+        _browser: &RecoveryCandidate,
+        _deadline: Instant,
+        _cancelled: &AtomicBool,
+    ) -> Result<(), MechanismError> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[derive(Debug)]
 struct FixedBrowserInventory {
@@ -408,6 +434,13 @@ impl BrowserRecovery {
     #[cfg(test)]
     pub(crate) fn set_test_candidates(&mut self, candidates: Vec<RecoveryCandidate>) {
         self.inventory = Arc::new(FixedBrowserInventory { candidates });
+    }
+
+    /// Make every launch succeed without an adapter ever arriving, as a browser does when it
+    /// starts without the Ghostlight extension. No process is started.
+    #[cfg(test)]
+    pub(crate) fn set_test_launch_without_adapter(&mut self) {
+        self.mechanism = Arc::new(LaunchWithoutAdapter);
     }
 
     /// Decide one missing-browser recovery request for a session that works in no browser yet,

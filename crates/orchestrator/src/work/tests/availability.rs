@@ -122,6 +122,21 @@ fn navigate(
     )
 }
 
+/// A navigation bounded by `timeout_ms`, from a session that works in no browser yet.
+fn navigate_for(
+    executor: &ApplicationExecutor,
+    workspace: &crate::workspace::WorkspaceId,
+    timeout_ms: u64,
+) -> crate::work::result::InvocationResult {
+    executor.execute(
+        workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com","new_tab":true,"timeout_ms":timeout_ms}),
+        None,
+        &CancellationToken::default(),
+    )
+}
+
 /// Wait until the port has dropped the browser's registration after its stream closed.
 fn await_unregistered(port: &RelayBrowserPort) {
     let until = Instant::now() + Duration::from_secs(5);
@@ -426,4 +441,79 @@ fn the_no_browser_answer_is_unchanged_with_an_extension_or_a_finished_setup() {
     assert!(manual_refusal(false, true).next_steps.is_empty());
     assert!(manual_refusal(true, false).next_steps.is_empty());
     assert!(manual_refusal(true, true).next_steps.is_empty());
+}
+
+/// Governance that starts a browser on demand, the Windows default, and an executor whose launch
+/// succeeds but never brings an adapter: Edge on a machine without the extension.
+fn launch_without_extension(
+    setup_complete: bool,
+    extension_in_a_profile: bool,
+) -> crate::work::result::InvocationResult {
+    let scratch = crate::install::scratch::Scratch::new();
+    let record = scratch.path().join("setup.json");
+    if setup_complete {
+        crate::install::setup_state::record_if_absent(
+            &record,
+            &crate::install::setup_state::SetupRecord {
+                first_request_ms: 1,
+            },
+        )
+        .unwrap();
+    }
+    let policy = temporary_policy("on-demand-browser-startup");
+    fs::write(
+        &policy,
+        all_open_policy_with(
+            r#"[{"key":"browser.startup","value":"on_demand","level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
+    let (mut executor, _, workspace) = relay_fixture(
+        Arc::clone(&port),
+        GovernanceFacade::new(Some(policy.clone()), None),
+    );
+    executor
+        .workbench
+        .attach_setup(crate::workbench::setup::SetupProgress::load(&record));
+    executor.extension_probe = Arc::new(move || extension_in_a_profile);
+    executor.recovery.set_test_launch_without_adapter();
+    port.backdate(RETURN_GRACE);
+    let refused = navigate_for(&executor, &workspace, 300);
+    let _ = fs::remove_file(policy);
+    assert_eq!(
+        refused.facts["reason"],
+        json!("browser_handshake_timeout"),
+        "{:?}",
+        refused.facts
+    );
+    refused
+}
+
+/// A browser Ghostlight started whose adapter never arrived, while setup is incomplete and no
+/// profile has the extension, sends the person to the store: the extension is what is missing.
+#[test]
+fn a_launched_browser_without_the_extension_names_the_store_while_setup_is_incomplete() {
+    let refused = launch_without_extension(false, false);
+    assert!(refused
+        .summary
+        .starts_with("The browser started, but its Ghostlight adapter did not connect"));
+    assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
+    assert!(
+        refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL),
+        "{}",
+        refused.next_steps[0]
+    );
+}
+
+/// With the extension in some profile, or setup finished, the timeout keeps its own step.
+#[test]
+fn a_launched_browser_that_timed_out_keeps_its_own_step_with_an_extension_or_a_finished_setup() {
+    for (complete, present) in [(false, true), (true, false), (true, true)] {
+        let refused = launch_without_extension(complete, present);
+        assert_eq!(
+            refused.next_steps,
+            vec!["Start the selected browser yourself, then repeat the call."]
+        );
+    }
 }
