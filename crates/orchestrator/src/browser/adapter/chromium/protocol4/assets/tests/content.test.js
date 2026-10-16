@@ -4457,7 +4457,7 @@ test("without a link a row label counts only if it was unique at mint", async ()
   assert.equal((await lookupOf(harness, handles[0])).same_count, 1, "a row's own link is proof even when its name is link text");
 });
 
-test("a control that sat in no row is the same only for a node in no row", async () => {
+test("a control that sat in no row is never the same control", async () => {
   const harness = contentHarness();
   const toolbar = (inRow) => {
     const body = harness.element("body");
@@ -4468,11 +4468,30 @@ test("a control that sat in no row is the same only for a node in no row", async
 
   toolbar(false);
   let handles = await rerendered(harness, () => toolbar(false), "Save");
-  assert.equal((await lookupOf(harness, handles[0])).same_count, 1);
+  let lookup = await lookupOf(harness, handles[0]);
+  assert.equal(lookup.matched, 1, "the node is still a candidate");
+  assert.equal(lookup.same_count, 0, "a name alone is not proof");
 
   toolbar(false);
   handles = await rerendered(harness, () => toolbar(true), "Save");
   assert.equal((await lookupOf(harness, handles[0])).same_count, 0);
+});
+
+test("a deleted message leaves the other message's button not same", async () => {
+  const harness = contentHarness();
+  const messages = (texts) => {
+    const body = harness.element("body");
+    for (const text of texts) body.append(node(harness, "div", {}, node(harness, "span", {}, text), node(harness, "button", { "aria-label": "Delete" })));
+    harness.setBody(body);
+  };
+
+  messages(["First", "Second"]);
+  const handles = await rerendered(harness, () => messages(["Second"]), "Delete");
+  const lookup = await lookupOf(harness, handles[0]);
+
+  assert.equal(lookup.matched, 1);
+  assert.equal(lookup.same_count, 0, "one control with the same name in no row is not the deleted one");
+  assert.equal(lookup.candidates[0].same, false);
 });
 
 test("a changed view (URL, title or region) gives no same", async () => {
@@ -4552,6 +4571,21 @@ test("a recycled connected row whose link changed refuses as removed", async () 
 
   body.children[1].setAttribute("aria-label", "Renamed");
   assert.equal(await staleWordOf(harness, { kind: "describe", locators: [beta] }), "removed", "a changed row name recycles it too");
+});
+
+test("a recycled row refuses its old handle even after another read sees the node", async () => {
+  const harness = contentHarness();
+  const body = libraryRows(harness, [["Alpha", 1], ["Beta", 2]]);
+  const [alpha] = (await findControls(harness, "More options")).map((target) => target.locator);
+
+  const row = body.children[0];
+  row.setAttribute("aria-label", "Gamma");
+  row.children[0].setAttribute("href", "/song/3");
+  const reread = (await findControls(harness, "More options")).map((target) => target.locator);
+
+  assert.equal(reread.includes(alpha), false, "the recycled node gets a new handle");
+  assert.equal(await staleWordOf(harness, { kind: "describe", locators: [alpha] }), "removed");
+  assert.equal(await harness.codeOf({ kind: "describe", locators: [reread[0]] }), null, "the new handle works");
 });
 
 test("a row without a recorded link or declared name never reads as recycled", async () => {

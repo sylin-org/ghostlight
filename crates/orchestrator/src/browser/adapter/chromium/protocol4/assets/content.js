@@ -259,6 +259,12 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // record, so the latest view the agent saw is the one the record describes.
   function locatorFor(element, view, role, name) {
     let locator = reverse.get(element);
+    // A node a list recycled for another row is no longer the control its locator named: that
+    // locator refuses as removed, and the node is a new control with a new locator.
+    if (locator && recycled(locators.get(locator))) {
+      retireLocator(locators.get(locator));
+      locator = undefined;
+    }
     if (!locator) {
       locator = `${LOCATOR_PREFIX}${nextLocator++}`;
       reverse.set(element, locator);
@@ -1086,7 +1092,6 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       name,
       credential,
       context: "",
-      hasItem: false,
       itemDeclared: null,
       itemUnique: false,
       anchor: null,
@@ -1099,7 +1104,6 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const item = itemOf(element);
     record.context = contextWithin(element, item, view.labels);
     if (!item) return record;
-    record.hasItem = true;
     const label = labelOf(item, view.labels);
     if (label.declared && label.text) record.itemDeclared = label.text;
     record.anchor = ownLink(item, view);
@@ -1136,8 +1140,9 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // Whether a node is the control a record describes, by one conjunction: its context equals the
   // recorded one, the view and the dialog are unchanged, and the row proves itself. A row proves
   // itself by its own link when the record has one, else by its declared name when that was
-  // unique when recorded and is unique now. A control that sat in no row needs a node in no row.
-  // Position is never part of the test. The caller has already matched role, name and class.
+  // unique when recorded and is unique now. A control that sat in no row, or in a row with
+  // neither proof, is never the same control: a name alone is not proof. Position is never part
+  // of the test. The caller has already matched role, name and class.
   function matchesRecord(record, element, view) {
     if (record.credential) return false;
     const place = placeOf(element);
@@ -1145,7 +1150,6 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const item = itemOf(element);
     if (contextWithin(element, item, view.labels) !== record.context) return false;
     if (record.anchor !== null) return item !== null && ownLink(item, view) === record.anchor;
-    if (!record.hasItem) return item === null;
     if (!item || record.itemDeclared === null || !record.itemUnique) return false;
     const label = labelOf(item, view.labels);
     return label.declared && label.text === record.itemDeclared && labelIsUnique(label.text, view);
