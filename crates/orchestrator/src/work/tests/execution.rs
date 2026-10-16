@@ -4515,6 +4515,36 @@ fn a_tombstoned_handle_refuses_before_dispatch() {
         .all(|call| matches!(call, BrowserCommand::QuerySemantic { .. })));
 }
 
+/// Every operation that names exactly one handle tombstones it, not only the ones that read or
+/// click: the search box a page re-renders while it is typed into refuses on the next use.
+#[test]
+fn a_typed_into_handle_the_page_removed_is_tombstoned() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(BrowserError::StaleLocator {
+        reason: StaleReason::Removed,
+    }));
+    let typed = executor.execute(
+        &workspace,
+        "browser_type_text",
+        json!({"tab":tab_handle,"target":target,"text":"hello"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_stale_removed(&typed);
+    let before = browser.calls().len();
+    let again = executor.execute(
+        &workspace,
+        "browser_type_text",
+        json!({"tab":tab_handle,"target":target,"text":"hello"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_stale_removed(&again);
+    assert!(browser.calls()[before..]
+        .iter()
+        .all(|call| matches!(call, BrowserCommand::QuerySemantic { .. })));
+}
+
 /// A page that does not know the handle (evicted, or from another world) says unknown, and that
 /// word retires nothing: the handle is tried again at the page.
 #[test]

@@ -2204,7 +2204,8 @@ fn operation_tab(operation: &Operation) -> Option<&str> {
     }
 }
 
-/// The target handle named by this operation, if its parameters name one.
+/// The target handle named by this operation, if its parameters name exactly one. A fill_form
+/// field list and a drag name several, so they have none.
 fn operation_target(operation: &Operation) -> Option<&str> {
     match operation {
         Operation::ReadPage(value) => value.target.as_deref(),
@@ -2213,6 +2214,12 @@ fn operation_target(operation: &Operation) -> Option<&str> {
         Operation::Hover(value) => value.target.as_deref(),
         Operation::PressKey(value) => value.target.as_deref(),
         Operation::Wait(value) => value.target.as_deref(),
+        Operation::TypeText(value) => {
+            Some(value.target.as_str()).filter(|target| !target.is_empty())
+        }
+        Operation::UploadFiles(value) => value.target.as_deref(),
+        Operation::TakeScreenshot(value) => value.target.as_deref(),
+        Operation::Record(value) => value.target.as_deref(),
         _ => None,
     }
 }
