@@ -250,7 +250,7 @@ function Assert-IsolatedWebView([int] $Round, [int] $ShellProcessId) {
         }
     }
     # The window keeps one persistent profile under the home, state/desktop-webview (ADR-0199
-    # Decision 7). WebView2 keeps Chromium's browser profile in EBWebView beneath it. Every
+    # Decision 19, as amended by "shell milestone 2"; owner answer Q7). WebView2 keeps Chromium's browser profile in EBWebView beneath it. Every
     # WebView2 process of the shell must use exactly that folder, so the window shares a profile
     # with neither Edge nor any other application.
     $expected = [IO.Path]::GetFullPath((Join-Path $ghostlightHome 'state/desktop-webview/EBWebView'))
