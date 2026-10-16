@@ -22,15 +22,21 @@ without it `ghostlight status` names the window reason.
 
 ## Quick start
 
-Install the service, browser connection, and detected MCP-client entries in one idempotent step:
+1. Install the service, browser connection, and detected MCP-client entries in one idempotent
+   step. It opens the Ghostlight window on its setup steps:
 
-```
-npx -y ghostlight install
-```
+   ```
+   npx -y ghostlight install
+   ```
 
-Restart your MCP clients when both halves are installed. Full walkthrough, client buttons, and
-manual paths:
-https://sylin.org/ghostlight/
+2. Add Ghostlight in Browser from the step the window shows. Add opens the Chrome Web Store
+   listing in the browser you pick; if that browser already holds the extension, the row reads
+   Open.
+3. Ask your agent: "Open sylin.org/ghostlight/demo/desk and ring the bell." The window shows
+   Ready.
+
+If the install named an agent to restart, restart it first. There is no other restart step. More
+at https://sylin.org/ghostlight/
 
 Check the local connection at any time:
 

@@ -6,12 +6,17 @@ account, no extra service to stand up, no activation.
 
 ## Start
 
-1. Install the matching provenance-verified 1.0 package and `Ghostlight in Browser` 1.0 adapter
-   when the release is available. For the source candidate, follow
-   [`installation.md`](installation.md).
-2. Open Ghostlight from the tray.
-3. In **MCP integrations**, find your MCP client and choose **Connect**.
-4. Reconnect that client and ask for the bounded `example.com` proof in the README.
+1. Install Ghostlight with `npx -y ghostlight install`, or with the one-line installer for your
+   system when you have no Node.js (both are in the [README](../../README.md) and
+   [`installation.md`](installation.md)). It connects the MCP clients it finds and opens the
+   Ghostlight window on its setup steps.
+2. Add Ghostlight in Browser from the step the window shows. Add opens the Chrome Web Store
+   listing in the browser you pick; if that browser already holds the extension, the row reads
+   Open.
+3. Ask your agent: "Open sylin.org/ghostlight/demo/desk and ring the bell." The window shows
+   Ready.
+
+If the install named an agent to restart, restart it first. There is no other restart step.
 
 Ghostlight creates one blue group named for that client. If the group already exists in another
 normal browser window, new work goes there. If none exists, Ghostlight opens a dedicated window

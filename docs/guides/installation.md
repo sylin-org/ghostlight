@@ -109,7 +109,7 @@ orchestrator.
 
 ## Build from source
 
-Use Rust 1.82 or newer:
+Use Rust 1.89 or newer:
 
 ```sh
 git clone https://github.com/sylin-org/ghostlight
@@ -167,12 +167,17 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 ## Recovery
 
 - **Service is not running:** reconnect the MCP integration or enable the matching extension.
-  The edge, as either relay, demand-starts the installed service and keeps retrying.
-- **Workbench window is gone:** launch Ghostlight directly or open it from the tray. Closing the
-  window destroys only that disposable surface; browser service and the tray remain available.
-- **Workbench cannot initialize:** the orchestrator exits instead of leaving an invisible
-  authority. Fix the native WebView environment, then launch Ghostlight again. If only the tray is
-  unavailable, use the Applications entry or `ghostlight open`.
+  Either edge starts the installed service when none answers: the MCP edge keeps retrying, and
+  the extension reconnects on its own.
+- **Workbench window is gone:** open Ghostlight from the Start menu or Applications, run
+  `ghostlight open`, or choose Open in the tray. Closing the window leaves the service and the
+  tray running.
+- **There is no window:** the service and the browser connection work without one, because the
+  window is a separate program that draws what the service shows. `ghostlight status` says why in
+  one line: no display, the window program missing from `~/.ghostlight/bin`, no web view
+  (WebView2 on Windows, WebKitGTK 4.1 on Linux), or no tray. Fix that, then run
+  `ghostlight open`. A desktop that shows no tray icons can still open the window from
+  Applications or `ghostlight open`.
 - **Tools are absent:** re-check the registration in MCP integrations, then reconnect that MCP
   server in its own client.
 - **Browser is disconnected:** keep Ghostlight running, enable the matching extension, and inspect

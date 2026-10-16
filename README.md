@@ -201,7 +201,7 @@ why there is no window.
 
 ## Build it from source
 
-Rust 1.82 or newer, plus Chromium 125 or newer for browser validation.
+Rust 1.89 or newer, plus Chromium 125 or newer for browser validation.
 
 ```sh
 cargo build --workspace
