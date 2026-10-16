@@ -927,6 +927,18 @@ check("window", "(18) window zoom 150 then 100, and resize", async (t) => {
   assert.ok(within(outer[0], 1000, 24) && within(outer[1], 760, 24), `outer size is ${outer}`);
 });
 
+const COMPOSED_PROOF = "Verify composed frame";
+const COMPOSED_PROVEN = "Composed frame verified";
+
+/** Find and press the proof control in the open shadow root of the composed Sylin stage, then read its new label. */
+async function verifyComposedFrame(t, tab, urlPart) {
+  const proof = (await t.matches(tab, COMPOSED_PROOF, "button"))[0];
+  await t.succeed("browser_click", { tab, target: proof.target });
+  const label = await t.evalIn(urlPart, "document.querySelector('composed-iframe-stage').shadowRoot.querySelector('frame-proof [slot=label]').textContent");
+  assert.equal(label, COMPOSED_PROVEN, "the shadow-hosted proof control did not change its label");
+  assert.ok((await t.matches(tab, COMPOSED_PROVEN)).some((match) => match.name?.includes(COMPOSED_PROVEN)), "the changed label is not found");
+}
+
 check("cross-origin-frames", "(19) two-level cross-origin iframes: read, find, click, type; identical embeds resolved", async (t) => {
   const tab = await t.openFixture("/frames-outer");
   await t.succeed("browser_wait", { tab, condition: "text_present", value: "Inner form", timeout_ms: 30000 });
@@ -950,6 +962,7 @@ check("cross-origin-frames", "(19) two-level cross-origin iframes: read, find, c
   await t.succeed("browser_wait", { tab: snapshot, condition: "text_present", value: "Project name", timeout_ms: 30000 });
   await t.succeed("browser_type_text", { tab: snapshot, target: (await t.matches(snapshot, "Project name", "textbox"))[0].target, text: "Snapshot project" });
   assert.match((await t.succeed("browser_read", { tab: snapshot, max_chars: 20000 })).facts.text, /Snapshot project/);
+  await verifyComposedFrame(t, snapshot, t.tag);
 });
 
 check("shadow-dom", "(20) open shadow DOM: find, click, type", async (t) => {
@@ -1204,6 +1217,7 @@ live("live-iframe", "live /demo/iframe/ and /demo/iframe/form/: cross-origin rea
   const project = (await t.matches(tab, "Project name", "textbox"))[0].target;
   await t.succeed("browser_type_text", { tab, target: project, text: "Live journey project" });
   assert.match((await t.succeed("browser_read", { tab, max_chars: 20000 })).facts.text, /Live journey project/);
+  await verifyComposedFrame(t, tab, "/demo/iframe/");
   await t.succeed("browser_click", { tab, target: (await t.matches(tab, "Submit application", "button"))[0].target });
   const direct = await liveOpen(t, "iframe/form/");
   assert.match((await t.succeed("browser_read", { tab: direct, max_chars: 20000 })).facts.text, /Project name/);

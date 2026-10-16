@@ -70,7 +70,7 @@ while (queue.length > 0) {
 }
 
 const text = JSON.stringify({ captured_on: new Date().toISOString().slice(0, 10), pages, assets }, null, 2)
-  .replace(/[\u0080-￿]/g, (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  .replace(/[\u0080-\uffff]/g, (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`);
 writeFileSync(out, `${text}\n`);
 console.log(`${out}: ${pages.length} pages, ${assets.length} assets`);
 for (const asset of assets) console.log(`  ${asset.path} ${asset.content_type} ${asset.sha256}`);
