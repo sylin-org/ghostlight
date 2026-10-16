@@ -568,3 +568,116 @@ fn no_tree_at_all_is_none() {
     assert_eq!(merged.tree, None);
     assert!(!merged.truncated);
 }
+
+/// A button named `name` in the row `context`, numbered `nth` by its own document.
+fn repeated(locator: &str, name: &str, context: Option<&str>, nth: Option<u32>) -> ObservedTarget {
+    ObservedTarget {
+        name: name.into(),
+        context: context.map(str::to_owned),
+        nth,
+        ..target(locator)
+    }
+}
+
+fn keys(merged: &MergedTargets) -> Vec<(Option<&str>, Option<u32>)> {
+    merged
+        .targets
+        .iter()
+        .map(|target| (target.context.as_deref(), target.nth))
+        .collect()
+}
+
+#[test]
+fn a_cut_that_leaves_one_repeat_leaves_it_without_context_or_nth() {
+    let merged = targets(
+        [document(vec![
+            repeated("a", "More options", Some("Alpha"), Some(1)),
+            ObservedTarget {
+                state: vec![HIDDEN_STATE.to_owned()],
+                ..repeated("b", "More options", Some("Alpha"), Some(2))
+            },
+        ])],
+        1,
+    );
+    assert_eq!(locators(&merged), ["a"]);
+    assert_eq!(keys(&merged), [(None, None)]);
+}
+
+#[test]
+fn a_cut_that_removes_the_first_of_a_place_renumbers_from_one() {
+    let hidden_first = ObservedTarget {
+        state: vec![HIDDEN_STATE.to_owned()],
+        ..repeated("a", "More options", Some("Alpha"), Some(1))
+    };
+    let merged = targets(
+        [document(vec![
+            hidden_first,
+            repeated("b", "More options", Some("Alpha"), Some(2)),
+            repeated("c", "More options", Some("Alpha"), Some(3)),
+            repeated("d", "More options", Some("Beta"), None),
+        ])],
+        3,
+    );
+    assert_eq!(locators(&merged), ["b", "c", "d"]);
+    assert_eq!(
+        keys(&merged),
+        [
+            (Some("Alpha"), Some(1)),
+            (Some("Alpha"), Some(2)),
+            (Some("Beta"), None)
+        ]
+    );
+}
+
+#[test]
+fn two_documents_with_the_same_row_label_number_their_repeats_page_wide() {
+    let merged = targets(
+        [
+            document(vec![
+                repeated("a", "More options", Some("Alpha"), None),
+                repeated("b", "More options", Some("Beta"), None),
+            ]),
+            document(vec![
+                repeated("c", "More options", Some("Alpha"), None),
+                repeated("d", "More options", Some("Beta"), None),
+            ]),
+        ],
+        10,
+    );
+    assert_eq!(
+        keys(&merged),
+        [
+            (Some("Alpha"), Some(1)),
+            (Some("Beta"), Some(1)),
+            (Some("Alpha"), Some(2)),
+            (Some("Beta"), Some(2))
+        ]
+    );
+}
+
+#[test]
+fn a_name_unique_in_each_document_but_repeated_across_them_is_numbered() {
+    let merged = targets(
+        [
+            document(vec![repeated("a", "Close", None, None)]),
+            document(vec![repeated("b", "Close", None, None)]),
+        ],
+        10,
+    );
+    assert_eq!(keys(&merged), [(None, Some(1)), (None, Some(2))]);
+}
+
+#[test]
+fn a_credential_class_target_never_carries_context_or_nth() {
+    let secret = |locator: &str| ObservedTarget {
+        credential_class: true,
+        role: "textbox".into(),
+        name: "Password".into(),
+        ..target(locator)
+    };
+    let merged = targets(
+        [document(vec![secret("a")]), document(vec![secret("b")])],
+        10,
+    );
+    assert_eq!(keys(&merged), [(None, None), (None, None)]);
+}

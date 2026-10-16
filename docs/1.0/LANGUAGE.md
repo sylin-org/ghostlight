@@ -369,7 +369,7 @@ offered nothing of that kind:
 | `hint` | A placeholder that says something other than the name, else the text `aria-describedby` points to, else the select's placeholder option. At most 120 characters. |
 | `group` | For a radio or checkbox, the fieldset legend or the nearest labelled group. At most 80 characters. |
 | `context` | The label of the control's row or group, only when its role and name repeat among the results. A row is the nearest list item, table row, article, tree item, named group or fieldset; its label is the name the page declares, else a legend, else its first heading, else its first link's text. With no row, the group or the nearest named region or panel. One line of at most 80 characters, never a field's value. Never on a credential-class control. |
-| `nth` | The control's position, counted from 1 in document order, among the results that share its role, name and context. Present only when that set has two or more. For display only; use the handle to act. |
+| `nth` | The control's position, counted from 1 in document order, among the results that share its role, name and context. Present only when that set has two or more. Counted over the whole page's results, across frames, after any cut. For display only; use the handle to act. |
 | `error` | Present when the control is invalid after the person touched it, or the page says `aria-invalid`. The page's own error text when it names one; otherwise a phrase such as `is required`, `is not a valid email address` or `is too short (at least 8 characters)`. The browser's validation message is never used except for a custom error. |
 
 Any item, control or not, also says where it sits, with these keys only when they apply (ADR-0198

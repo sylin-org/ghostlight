@@ -8,6 +8,8 @@
 //!
 //! All of it is pure. Nothing here talks to the browser or decides what a document may reveal.
 
+use std::collections::HashMap;
+
 use super::world::{Text, TreeNode, TreeValue};
 use crate::browser::adapter::ObservedTarget;
 use crate::language::area::{LeftOut, LeftOutKey};
@@ -54,6 +56,10 @@ pub struct MergedTargets {
 /// Each document numbers its forms from 1. The fold renumbers them page-wide so one number names
 /// one form whatever each answer kept: a document's ordinals are offset by the number of forms
 /// the documents before it hold.
+///
+/// Each document also decides alone which of its controls repeat. The fold decides again over
+/// the kept targets: a role and name that no longer repeats loses `context` and `nth`, and `nth`
+/// is counted afresh, in the merged order, among the targets that share role, name and place.
 #[must_use]
 pub fn targets(
     per_document: impl IntoIterator<Item = DocumentTargets>,
@@ -78,11 +84,64 @@ pub fn targets(
         over = true;
         found = cut_by_tier(found, maximum, &mut left_out);
     }
+    renumber_repeats(&mut found);
     MergedTargets {
         targets: found,
         over,
         left_out,
         modal_open,
+    }
+}
+
+/// Make `context` and `nth` true of the targets the model sees.
+///
+/// Targets that share a role and name repeat; a credential-class target never takes part and
+/// never carries either key. A target whose role and name are unique keeps neither key. Among
+/// a repeat, targets that share a place (their `context`, else their `group`, else none) are
+/// numbered from 1 in the given order, and a target alone in its place carries no `nth`.
+fn renumber_repeats(found: &mut [ObservedTarget]) {
+    let mut repeats: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
+    for (index, target) in found.iter().enumerate() {
+        if !target.credential_class {
+            repeats
+                .entry((target.role.as_str(), target.name.as_str()))
+                .or_default()
+                .push(index);
+        }
+    }
+    let mut nths: Vec<Option<u32>> = vec![None; found.len()];
+    let mut unique = Vec::new();
+    for members in repeats.into_values() {
+        if let [only] = members[..] {
+            unique.push(only);
+            continue;
+        }
+        let mut places: HashMap<&str, Vec<usize>> = HashMap::new();
+        for index in members {
+            let target = &found[index];
+            let place = target
+                .context
+                .as_deref()
+                .or(target.group.as_deref())
+                .unwrap_or_default();
+            places.entry(place).or_default().push(index);
+        }
+        for same in places.into_values() {
+            if same.len() >= 2 {
+                for (position, index) in same.into_iter().enumerate() {
+                    nths[index] = u32::try_from(position + 1).ok();
+                }
+            }
+        }
+    }
+    for index in unique {
+        found[index].context = None;
+    }
+    for (target, nth) in found.iter_mut().zip(nths) {
+        target.nth = nth;
+        if target.credential_class {
+            target.context = None;
+        }
     }
 }
 
