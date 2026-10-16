@@ -99,7 +99,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j10-profiles has landed. Next: j11-setup-language. Rule 8 still binds: a packaged extension file changes only with a recorded owner decision to withdraw and resubmit. The release order is unchanged: release candidate as a prerelease, pinned install proof, staged submission, approval, then the one-sitting cutover (ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval"). j12 reads `WorkbenchFacade::setup()` for `is_complete()`, `finished()` and `on_complete()`.
+j11-setup-language has landed. Next: j11b-agent-outcomes. Rule 8 still binds: a packaged extension file changes only with a recorded owner decision to withdraw and resubmit. The release order is unchanged: release candidate as a prerelease, pinned install proof, staged submission, approval, then the one-sitting cutover (ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval"). j12 composes with `language::setup::compose` and j15 prints `language::setup::install_lines`; j12 reads `WorkbenchFacade::setup()` for `is_complete()`, `finished()` and `on_complete()`.
 
 ## Landed
 
@@ -118,11 +118,13 @@ j10-profiles has landed. Next: j11-setup-language. Rule 8 still binds: a package
 | x02-release-order | Reviewers and the owner can install 2.0 before the cutover, and the cutover waits for store approval. `scripts/get.ps1` and `scripts/get.sh` install exactly `GHOSTLIGHT_VERSION` when it is set: the release is found by its tag (`v<version>`) through the GitHub releases API, a prerelease included, and a version with no release (HTTP 404) is refused in one sentence with a non-zero exit, and any other failed lookup (a rate limit, a server error, no connection) is reported as a failure and never as an absent release. Unset, they resolve `releases/latest` as before. Everything after the release is chosen is unchanged. `tests/installer-shell.mjs` and `tests/installer-powershell.ps1` cover a requested stable and prerelease version resolving its own tag, never asking for latest, an absent or malformed version refused, and a 403, a 503 and a failed connection not called absent. `scripts/publish-github-release.ps1` takes `-Prerelease <suffix>` (tag `v<version>-<suffix>`, `--prerelease`, the same custody checks, a draft whose prerelease flag differs refused), so the rc is published with the release tooling. `docs/release/store-disclosure-2.0.md` has the new release order with the exact commands (rc prerelease, pinned proof, staged submission with the drafted "Notes for certification", approval, then the cutover in one sitting) and says the rc carries the 2.0.0 build, so its binaries report 2.0.0. ADR-0200 gains the amendment "reviewers install a pinned prerelease, and the cutover waits for approval"; the ADR index row says so. | see `git log` |
 | j09-first-request | Setup is remembered. `state/setup.json` is `{"first_request_ms": <u64>}` (`install/setup_state.rs`: `SetupRecord`, `is_complete`, `read`, `record_if_absent`, written with `record::atomic_replace`; read leniently, and a file that exists but does not parse counts as complete). `workbench/setup.rs` holds `SetupProgress` (`load`, `is_complete`, `finished`, `observe`, `on_complete`): the first non-child record that is on the MCP channel, allowed, `Status::Succeeded.stored_name()` and has a browser writes the record once and remembers the workspace in memory. `WorkbenchProjection::attach_setup` and `record_with_provenance` feed it, the service attaches it from `Layout::setup_record()`, and `WorkbenchFacade::setup()` hands it to j12. `Status::stored_name()` is the one rendering of the stored status, now also used by `work/receipt.rs`. The break migration writes the record (dated at the migration) when it migrates a 1.x home with no record, and the 1.x `extension-handoff-v1` marker is no longer moved but deleted. | see `git log` |
 | j10-profiles | The service can tell "extension added, browser closed" from "extension missing". `install/native_host.rs`: `BrowserSpec` gains `short` (Chrome, Edge, Brave, Chromium); `NativeHostRegistry::user_data_directory(browser_id)` (the vendor path under `LOCALAPPDATA` plus `User Data` on Windows; the XDG config home plus `linux_directory` minus `NativeMessagingHosts` on Linux) and `browser_identities() -> Vec<BrowserIdentity { id, name, short }>` in table order. `install/browser_profiles.rs` (new): `ExtensionProfile { directory, name }`, `ProfileScan { profiles, with_extension }`, `scan_user_data(user_data, extension_id)` (never errors; reads at most 8 MiB of `Local State` `profile.info_cache` in file order, uses only keys of 1 to 64 characters that are one plain path component, shows names cleaned and cut to 40 characters, and falls back to an unnamed `Default`, counted when its directory exists) and `scan(registry)` for every browser whose executable is found, returning `BrowserProfiles { browser, scan }`. Read-only, local, nothing written, logged, stored or sent. Nothing uses the result until j12. | see `git log` |
+| j11-setup-language | `crates/orchestrator/src/language/setup.rs` (new, pure, no I/O, shaped like `readiness.rs`) holds the words of the setup view and of the install summary. `compose(&SetupFacts) -> SetupView` resolves the stage (Done, Retired, Computer, Browser, Agent) and builds the headline, steps, code panels, rows and live lines; `RowAction`, `SetupAction` (tag `kind`: `add_in_browser`, `open_browser`, `get_chrome`, `connect_agent`, `review_agent`) and `Pending` carry the actions and the words the page shows after a click. `install_lines(&InstallFacts)` is the whole success output of a real install, with exactly one Next line while setup is incomplete. `STORE_LISTING_URL`, `PROMPT`, `TAGLINE` and the step names are constants. The module doc classifies which deployment lines print beside the summary and which only in `--dry-run`. Nothing calls it yet (j12 and j15 do). | see `git log` |
 
 ## Owed live checks
 
 - j01: none. Docs only.
 - j10: none. Nothing uses the scan until j12; the first live check is the setup part reading a real Chrome, Edge or Brave profile (an extension added from the Chrome Web Store, browser closed) on Windows and Linux.
+- j11: none. Pure words; the first live check is the window's setup view (j14) and the install output (j15).
 - j02: none. The page markup that links the kit lands in j04, j06 and j07; the live look is checked there.
 - j03: the unpacked extension's Open Ghostlight brings the window forward on Windows and Linux (live, once j04 lands the button). The button has landed in j04; the check is still owed.
 - j04: the unpacked extension in a fresh profile on a machine with no Ghostlight: the page opens once, the command copies (and `Copied` is announced), the meeting plays once when the service from the development channel answers, and Open Ghostlight shows the window. Also reduced motion, a 390 px window, and the Documentation link opening in a new tab.
@@ -157,6 +159,30 @@ j10-profiles has landed. Next: j11-setup-language. Rule 8 still binds: a package
 
 ## Notes
 
+- j11: ran gate checks (1) fmt, workspace clippy and `cargo test -p ghostlight-service`, and (10) the
+  integrity script. No extension, golden or page-asset file changed, so (3) to (9) did not apply.
+  The tree and the spec differed in these places, and these are the choices made.
+  (1) JQ8 = launch and JQ9 = yes, so there is no `open_store_listing` action and Edge gets Add like
+  Chrome, Brave and Chromium: every native browser without the extension gets one Add row, primary
+  for the first. `OpenBrowser` carries `profile` only when the browser has two or more profiles;
+  with one profile it is none and the browser chooses.
+  (2) `SetupView` has no `note` field. The spec listed one but named no sentence for it, and every
+  approved sentence already has a place. j14 should not draw a note.
+  (3) `StepState` has no `Off` and the screen-reader suffix ", not supported" is not carried: the
+  service never runs on a computer Ghostlight does not support. `sr` is the step name plus ", done"
+  or ", current step".
+  (4) `Live { text, done }` is kept as specified. A composed view always has `done` false; the page
+  turns it on when it swaps in `connected_line` (j14).
+  (5) `connected_line` is set in the Agent stage only. The Retired view carries no words.
+  (6) The install's restart line reads "then ask it" for one changed agent and "then ask one" for
+  several, and the Agents suffix reads "restart it" or "restart them" by how many changed, so the
+  English is right for one agent. Agents with no entry are not listed on the Agents line; when no
+  agent is detected at all the MCP command line prints.
+  (7) `InstallFacts` carries the browser facts, not a flag: "extension in some profile" is any
+  browser that is connected or holds the extension, and the browser in the Next line is the first
+  native one in row order, from the same ordering the setup view uses.
+  (8) Sandboxed rows (Snap, Flatpak) show only when no browser is native; each carries Get Google
+  Chrome, primary on the first. A browser with the extension counts as native.
 - j01: the tree and the spec differed in these places.
   (1) The spec's dashboard line in Decision 15 ("the remote-code answer changes from No to Yes")
   is overridden by the owner ruling of 2026-10-16: the page code is local and never pulled from a

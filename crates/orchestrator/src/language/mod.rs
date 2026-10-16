@@ -21,6 +21,7 @@ pub mod readiness;
 #[cfg(test)]
 pub(crate) mod self_check;
 pub(crate) mod settlement;
+pub mod setup;
 #[path = "catalog.rs"]
 mod tool_catalog;
 pub mod workbench;
