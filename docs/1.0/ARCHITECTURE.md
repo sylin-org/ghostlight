@@ -214,7 +214,20 @@ absent. Wayland cannot report or unset a client's minimized state, so Linux Open
 destroys any existing view, waits for the destroyed event, and rebuilds from the canonical
 configuration. On Linux, abnormal WebKit renderer termination discards that exact window after the
 signal callback; the next explicit Open creates a fresh WebView without an automatic crash loop.
-Explicit Quit alone ends the service, and it holds (see above).
+A person's Quit and the end of the session are not the only ways out. The service counts the
+open streams of every role (`mcp`, `browser`, `control` and `desktop`), and an attached shell is
+one. When the count reaches zero it arms an idle limit of 10 minutes, `idle::IDLE_EXIT`, and any
+accepted opening disarms it; a control call such as `status` is an opening, so it restarts the
+span. If the limit passes with no stream open and the executor holds no work, the service stops
+through the quit path without a goodbye, since no stream is open, and without writing the latch:
+the next edge, command or person starts it again for its own reason, and a browser start after an
+idle exit is not refused. If the executor still holds work, the limit is armed again for another
+10 minutes. The idle stop is the service's own reason, not relay vocabulary; it is recorded as the
+`idle_exit` process-diagnostics event. Presence launches nothing for it, because a quit has begun.
+With presence a shell is attached on every desktop that can show one, so the idle exit fires only
+on a headless service, such as one an agent started over SSH or in CI. Pause and Stop are service
+state the shell shows; they do not affect it. Explicit Quit alone ends a service that has streams,
+and it holds (see above).
 Every Ghostlight process honors the end of the session: the service, the edge in every role, and
 every one-shot command. The listener is one module, `ghostlight_relay::os::session`. On Windows it is a
 hidden top-level window on its own thread, never a message-only window, plus the console handler;

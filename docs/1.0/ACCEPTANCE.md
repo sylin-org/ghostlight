@@ -103,6 +103,16 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     next steps, plus the same lean JSON only for an MCP revision before 2025-06-18. The canonical
     envelope stays in the service. The edge has no tool-name dispatch, and image content remains
     separate.
+22. A service that holds no stream of any role for 10 minutes exits (ADR-0199 Decision 12). An
+    opening of any role disarms the limit and the last close arms it again, an attached shell is a
+    stream and keeps the service indefinitely, and work the executor still holds re-arms the limit
+    instead of leaving. The idle exit says no goodbye and writes no `state/quit`, so a browser
+    start after it is not refused, it launches no shell, and it does nothing once a quit or the
+    end of the session is already under way. It is recorded as the `idle_exit` diagnostics event.
+    Live: on Linux over SSH a service started by `ghostlight call` exits 10 minutes after the last
+    command and `ghostlight status` then says it is not running; on Windows over OpenSSH `status`
+    reports `no_interactive_desktop` and the service exits 10 minutes after the last command; on
+    the owner's desktop the service never idles out while the icon is shown.
 
 ## Executor and truth gates
 

@@ -67,14 +67,10 @@ Rules:
 
 ## RESUME HERE
 
-m2-01 to m2-05 have landed (see Landed). The service links no UI toolkit: its dependency tree holds
-no Tauri, GTK, WebKit, tray or async network crate, and a guard in `tests/guards/connectors.test.mjs`
-keeps it so. It is a console-subsystem program with the edge's manifest (no console on a start with
-none to join) and a version resource of its own ("Ghostlight service"). It serves with no display,
-binds its endpoint at start, and presence (`service/presence.rs`) starts `ghostlight-desktop --tray`
-2 s after it is ready and whenever a shell vanishes without a goodbye. The shell draws the tray the
-service describes. Next: the coordinator deploys m2-05 and runs its live checks with the owner
-(below), then m2-06-idle-exit starts: a service with nothing connected for 10 minutes exits.
+m2-01 to m2-06 have landed (see Landed): shell milestone 2 is complete, pending the owner's live
+demo. A service with no stream of any role for 10 minutes exits (`service/idle.rs`); an attached
+shell is a stream, so only a headless service idles out. Next: the coordinator deploys m2-06 and
+runs its live checks with the owner (below), then the install journey track starts.
 
 ## Landed
 
@@ -85,6 +81,7 @@ service describes. Next: the coordinator deploys m2-05 and runs its live checks 
 | m2-03-shell-lifecycle | One shell at a time: the service holds one desktop place, and a second shell is sent `already_open` (new frame, golden `already-open.json`) and exits 0 while the attached shell is sent `show`. The shell takes `--tray` and `--updating` (`Launch`). Its life is a pure state machine (`machine.rs`) with four screens in one built-in document (`states.rs`): a person's launch starts the service once and shows Starting, the update hand-over shows Updating or relaunches the shell on the new build, a loss without goodbye shows Restarting and starts the service up to three times, and Stopped offers Start and Diagnostics. A new workbench frame rebuilds the webview. The shell adopts the relay's session listener and drops its own signal sources. | see `git log` |
 | m2-04-the-switch | The service brings up the shell by itself and the shell draws the service's tray. `crates/orchestrator/src/desktop/` (Tauri's tray, window, 21 commands) is deleted and `serve` binds its endpoint at start. Presence (`service/presence.rs`) launches `ghostlight-desktop --tray` 2 s after ready and after a shell vanishes, launches a shell with no argument for a Show and shows the window when it attaches, and latches `did_not_stay` after three launches in two minutes. `TrayModel` gained a state and live items; `tray_model`, `unavailable` and `closed` frames; the state dot is drawn at run time. `status` and `doctor` carry `window`. The Start-menu shortcut names the shell with the AUMID; the Linux entry runs the shell. The page has one transport. The shell moves an open page by navigating to the section, not by a script that a loading page loses (the Continue finding; a live check is owed). | see `git log` |
 | m2-05-tauri-out | Tauri leaves the service. `crates/orchestrator/Cargo.toml` loses `tauri`, its four plugins, `glib`, `webkit2gtk` and `tauri-build`, and gains `embed-resource` as a Windows build dependency; `Cargo.lock` loses 201 package entries (the service tree is 129 crates on Windows). `build.rs` embeds the icon and a version resource ("Ghostlight service", "Ghostlight", "Sylin") and, on MSVC, the edge's manifest by path. The service is a console-subsystem program: the `windows_subsystem` line, `cli/console.rs` and win-peer's `console.rs` with `attach_parent_console` are deleted. `tauri.conf.json`, `capabilities/` and the orphan `hooks.nsh` are deleted. A guard test checks that `ghostlight-service` links no UI toolkit and none of `tokio`, `reqwest`, `hyper` or `socket2` on both targets. The npm launcher no longer refuses on Linux without `libwebkit2gtk-4.1.so.0`, and the service-only CI journeys run without `dbus-run-session` and `xvfb-run`. | see `git log` |
+| m2-06-idle-exit | The service exits after 10 minutes with no stream of any role. `service/idle.rs` holds `Streams`, the open-stream count with an injected clock, and its rule (`Verdict`: streams open, wait, or leave); `watch` is the thread that asks it. `serve_connection` holds a guard per accepted `mcp`, `control` and `desktop` stream and per `browser` opening, and `CountBrowsers` counts browser streams from the port's lifecycle events and passes each on to diagnostics. `Quit::idle_exit` refuses new work and makes the quit signal with no goodbye and no `state/quit`. The event name `idle_exit` joined the closed diagnostics vocabulary. | see `git log` |
 
 ## Owner questions
 
@@ -123,6 +120,17 @@ Each has a default the work uses until the owner answers.
   starts.
 
 ## Owed live checks
+
+After the coordinator deploys m2-06, with the owner:
+
+- m2-06, Linux over SSH: a service started by `ghostlight call` (no display) exits 10 minutes after
+  the last command, and `ghostlight status` then says it is not running. A `status` or any other
+  command inside the 10 minutes restarts the span.
+- m2-06, Windows over OpenSSH: `ghostlight status` reports `no_interactive_desktop`, and a service
+  started there exits 10 minutes after the last command. `~/.ghostlight/state/quit` does not exist
+  afterwards, and the next `ghostlight call` starts the service again.
+- m2-06, the owner's desktop: with the icon shown, the service is still there after an hour with
+  no agent connected. `idle_exit` appears in diagnostics (when on) only for a service that left.
 
 After the coordinator deploys m2-05, with the owner (Windows unless it says Linux):
 
@@ -603,3 +611,28 @@ frame as a contract failure and exits.
   real Chrome it drives needs a display. The apt build packages stay in both jobs.
 - m2-05: no serve test harness exists in `crates/orchestrator/tests` (only the listing-copy test),
   so "readiness without `DISPLAY`" is owed as a live check, not a test.
+- m2-06: the count is event-driven, not a poll of connection tables, so a stream that opens and
+  closes between two looks (a `status` call) still restarts the span. The watch thread only reads
+  the rule once a second (a tenth of the limit for a test's short limit).
+- m2-06: what counts. An `mcp`, `control` or `desktop` stream is counted from its judged opening
+  to the end of its serve function; a refused opening (capacity, a second shell told
+  `already_open`) is counted for the moment it takes, which restarts the span. A `browser` stream
+  outlives its opening, so `CountBrowsers` (the port's lifecycle observer, wrapping the diagnostics
+  hub) adds one per attached browser and takes it off on detach; a connection that replaces
+  another for the same browser is still one. `Role::Command` and unknown roles are refused and not
+  counted.
+- m2-06: "the executor holds work" is the drain's in-flight count. When the limit passes with work
+  held, the span restarts from that moment (another 10 minutes), without a log line. A `Leave`
+  verdict is final: the count admits no stream afterwards, and an opening that races it is refused
+  `shutting_down`, which the edges already treat as a service that is leaving.
+- m2-06: `StartTerms` gained `idle_exit` (default `IDLE_EXIT`) so a service-level test can run
+  the real intake with a short limit. The unit tests of the rule use a fake clock. The seven
+  service tests (leave and a browser start after it, an open stream, a control call, an attached
+  shell, held work, the end of the session, presence) run the real listener on a test home with a
+  limit of 300 to 800 ms and a fake presence world.
+- m2-06: a shell that attaches and then ends on its own (for example GNOME with no tray
+  extension, `no_tray`) leaves no stream, so such a desktop can idle out like a headless one.
+  Presence is not asked to keep the service alive; the spec says a shell is a stream, nothing more.
+- m2-06: the pre-existing comment at `owner_alive` that called the service's lifetime "rather than
+  an invented idle policy" was rewritten. Nothing else in the tree described the absence of idle
+  exit.

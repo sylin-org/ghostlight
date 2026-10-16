@@ -42,6 +42,7 @@ pub mod event {
     pub const PROCESS_CONTEXT: &str = "process_context";
     pub const PROCESS_FAILED: &str = "process_failed";
     pub const PROCESS_EXITED: &str = "process_exited";
+    pub const IDLE_EXIT: &str = "idle_exit";
     pub const NATIVE_HELLO_RECEIVED: &str = "native_hello_received";
     pub const NATIVE_INPUT_CLOSED: &str = "native_input_closed";
     pub const NATIVE_INPUT_FAILED: &str = "native_input_failed";

@@ -15,10 +15,13 @@
 //! held lock and the quit latch mean to it ([`lifetime`], [`latch`]). A person's Quit sets the
 //! latch, and every quit says goodbye on each live stream before the service exits ([`Quit`]). The
 //! end of the session is the fourth goodbye: the service says `session_end` on every stream and
-//! leaves without the latch and without waiting for work in flight (ADR-0199 Decision 13).
+//! leaves without the latch and without waiting for work in flight (ADR-0199 Decision 13). The
+//! last way out is the idle exit: after [`idle::IDLE_EXIT`] with no stream of any role open the
+//! service leaves with no goodbye and no latch (ADR-0199 Decision 12).
 
 mod admission;
 pub mod hint;
+pub mod idle;
 pub mod latch;
 pub mod lifetime;
 pub mod lock;
@@ -98,7 +101,8 @@ const RESTORE_DEADLINE: Duration = Duration::from_secs(5);
 const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
 use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
-use lifetime::{Drain, ReadyWatch, QUIT_GRACE, READY_LIMIT};
+use idle::Streams;
+use lifetime::{Drain, ReadyWatch, SystemClock, QUIT_GRACE, READY_LIMIT};
 use lock::ServiceLock;
 
 /// What the runtime-published diagnostics line says: where the relay and the workbench listen.
@@ -126,6 +130,8 @@ pub struct StartTerms {
     pub reason: StartReason,
     /// How long to keep asking for the lock while another process holds it.
     pub lock_wait: Duration,
+    /// How long the service may hold no stream of any role before it exits.
+    pub idle_exit: Duration,
 }
 
 impl StartTerms {
@@ -136,6 +142,7 @@ impl StartTerms {
         Self {
             reason,
             lock_wait: lifetime::lock_wait(reason),
+            idle_exit: idle::IDLE_EXIT,
         }
     }
 }
@@ -181,14 +188,9 @@ impl ServiceHost {
     /// binding the endpoint and without the elevation check a production start makes.
     #[cfg(test)]
     pub(crate) fn start(home: &Path) -> Result<Self> {
-        Self::start_with_token(
-            home,
-            StartTerms {
-                reason: StartReason::Agent,
-                lock_wait: Duration::ZERO,
-            },
-            || Ok(false),
-        )
+        Self::start_with_token(home, StartTerms::for_reason(StartReason::Agent), || {
+            Ok(false)
+        })
     }
 
     /// Like [`ServiceHost::start`], with presence acting on `world` and so starting no process.
@@ -199,10 +201,7 @@ impl ServiceHost {
     ) -> Result<Self> {
         Self::start_with_world(
             home,
-            StartTerms {
-                reason: StartReason::Agent,
-                lock_wait: Duration::ZERO,
-            },
+            StartTerms::for_reason(StartReason::Agent),
             || Ok(false),
             world,
         )
@@ -302,8 +301,11 @@ impl ServiceHost {
         let service_epoch = format!("service_{}", Uuid::new_v4().simple());
         let browser = Arc::new(RelayBrowserPort::new(service_epoch, page_assets()));
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
-        browser
-            .set_lifecycle_observer(Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>);
+        let streams = Streams::new(Arc::new(SystemClock), terms.idle_exit);
+        browser.set_lifecycle_observer(Arc::new(idle::CountBrowsers::new(
+            Arc::clone(&streams),
+            Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>,
+        )));
         governance.relay_runtime_state(browser_port.clone());
         let presentation = PresentationReactor::new(Arc::new(BrowserPresentation::new(
             browser_port.clone(),
@@ -358,6 +360,17 @@ impl ServiceHost {
         let tray_relay = TrayRelay::spawn(quit.shells(), Arc::clone(&stop))?;
         workbench.attach_tray(tray_relay.0);
         let presence_thread = presence.spawn(Arc::clone(&stop))?;
+        let idle_thread = {
+            let held = Arc::clone(&quit.drain);
+            let leaving = quit.clone();
+            let limit = terms.idle_exit;
+            idle::watch(
+                Arc::clone(&streams),
+                Arc::clone(&stop),
+                move || held.in_flight() > 0,
+                move || leaving.idle_exit(limit),
+            )?
+        };
         let refresher = spawn_refresher(governance.clone(), workbench.clone(), Arc::clone(&stop))?;
         let refresher_thread = refresher.thread().clone();
         let audit_stop = stop.clone();
@@ -385,6 +398,7 @@ impl ServiceHost {
             stop: Arc::clone(&stop),
             workbench_server: OnceLock::new(),
             presence,
+            streams,
             layout,
         });
         Ok(Self {
@@ -393,7 +407,13 @@ impl ServiceHost {
             browser,
             audit,
             stop,
-            threads: vec![audit_thread, refresher, tray_relay.1, presence_thread],
+            threads: vec![
+                audit_thread,
+                refresher,
+                tray_relay.1,
+                presence_thread,
+                idle_thread,
+            ],
             refresher: refresher_thread,
             home: home.into(),
             intake,
@@ -673,6 +693,26 @@ impl Quit {
         }
     }
 
+    /// Leave because no stream of any role was open for the idle limit: refuse new work and make
+    /// the quit signal. Returns at once, and neither says goodbye (no stream is open) nor sets the
+    /// latch, so the next edge, command or person starts the service again for its own reason.
+    /// A quit or a session end already under way is left to finish alone.
+    fn idle_exit(&self, idle: Duration) {
+        if !self.drain.begin_quit() {
+            return;
+        }
+        self.farewell.shells.close();
+        self.diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::IDLE_EXIT,
+            ghostlight_bridge::diagnostics::Level::Info,
+            None,
+            &format!("no stream of any role for {} s", idle.as_secs()),
+        );
+        if let Some(signal) = lock(&self.signal).clone() {
+            signal();
+        }
+    }
+
     /// Record `writer` as a live MCP stream until the returned guard is dropped, so a quit says
     /// goodbye on it.
     fn enroll(&self, writer: Arc<SocketWriter>) -> Enrolled {
@@ -779,6 +819,8 @@ struct Intake {
     workbench_server: OnceLock<Arc<WorkbenchServer>>,
     /// Keeps the shell running whenever the desktop can show it.
     presence: Arc<Presence>,
+    /// The open streams of every role, which the idle exit counts.
+    streams: Arc<Streams>,
     /// Where the installation keeps its files.
     layout: install::layout::Layout,
 }
@@ -840,19 +882,34 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
         Judgement::Refuse(refusal) => listener::refuse(&connection, refusal),
         Judgement::Admit(opening) => match opening.role {
             Role::Browser => {
+                // Only the opening is held here; the port counts the stream while it lives.
+                let Some(_opening) = intake.streams.admit() else {
+                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                };
                 if listener::accept(&connection, &intake.accepted(Role::Browser)).is_ok() {
                     // The first frame on the stream is the extension's own hello.
                     let _ = intake.browser.attach(connection);
                     intake.workbench.refresh_live_parts();
                 }
             }
-            Role::Control => serve_control(connection, opening.control, intake),
+            Role::Control => {
+                let Some(_stream) = intake.streams.admit() else {
+                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                };
+                serve_control(connection, opening.control, intake);
+            }
             Role::Mcp => {
+                let Some(_stream) = intake.streams.admit() else {
+                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                };
                 if serve_mcp(connection, intake, &opening).is_err() {
                     eprintln!("MCP session ended after an invalid or interrupted exchange.");
                 }
             }
             Role::Desktop => {
+                let Some(_stream) = intake.streams.admit() else {
+                    return listener::refuse(&connection, OpeningRefusal::ShuttingDown);
+                };
                 // A shell that goes away abruptly or sends a frame this build cannot read ends
                 // its own stream and nothing else.
                 let _ = serve_desktop(connection, intake);
@@ -1769,8 +1826,8 @@ fn cleanup_released_tabs(
 
 /// Whether the process that owns a session is still running.
 ///
-/// A declared key names no process, so it lives until the service does. That bound is the service's
-/// own lifetime rather than an invented idle policy, and the workspace registry is in memory.
+/// A declared key names no process, so it lives until the service exits, by a quit or by the idle
+/// exit ([`idle`]). The workspace registry is in memory, so the key goes with the service.
 fn owner_alive(marker: &SessionMarker) -> bool {
     let SessionMarker::Process {
         pid, started_at, ..
@@ -2520,6 +2577,7 @@ mod tests {
             stop: Arc::default(),
             workbench_server: std::sync::OnceLock::new(),
             presence: Arc::new(super::Presence::new(Arc::new(Fake::default()).world())),
+            streams: super::Streams::new(Arc::new(super::SystemClock), super::idle::IDLE_EXIT),
             layout: crate::install::layout::Layout::new(home.path()),
         });
         let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
@@ -3196,7 +3254,10 @@ mod tests {
 
     /// The terms of a start for `reason` that waits `lock_wait` for a held lock.
     fn waiting(reason: StartReason, lock_wait: Duration) -> StartTerms {
-        StartTerms { reason, lock_wait }
+        StartTerms {
+            lock_wait,
+            ..StartTerms::for_reason(reason)
+        }
     }
 
     /// Start for `terms` in `directory` with a token that is not elevated.
@@ -3240,8 +3301,8 @@ mod tests {
         ] {
             let started = Instant::now();
             let terms = StartTerms {
-                reason,
                 lock_wait: Duration::ZERO,
+                ..StartTerms::for_reason(reason)
             };
             let error = start_for(&directory, terms)
                 .err()
@@ -3346,14 +3407,7 @@ mod tests {
     #[test]
     fn the_service_reports_the_reason_it_was_started_for() {
         let home = TestHome::new("started-by");
-        let host = start_for(
-            home.path(),
-            StartTerms {
-                reason: StartReason::Person,
-                lock_wait: Duration::ZERO,
-            },
-        )
-        .unwrap();
+        let host = start_for(home.path(), StartTerms::for_reason(StartReason::Person)).unwrap();
         host.publish_ready().unwrap();
         assert_eq!(
             cli_client::status().unwrap().started_by,
@@ -4714,6 +4768,202 @@ mod tests {
         eventually(|| {
             host.workbench.snapshot().configuration.runtime_state == RuntimeControlState::Held
         });
+        drop(host);
+    }
+
+    /// Terms of an agent start whose service idles out after `idle`.
+    fn idling(idle: Duration) -> StartTerms {
+        StartTerms {
+            idle_exit: idle,
+            ..agent()
+        }
+    }
+
+    /// A world that also ends when a quit has begun, as the service's real one does, and
+    /// otherwise acts as `inner`.
+    struct EndsWithQuit(Box<dyn super::presence::Outside>, super::presence::Ending);
+
+    impl super::presence::Outside for EndsWithQuit {
+        fn now(&self) -> Instant {
+            self.0.now()
+        }
+
+        fn display(&self) -> Result<(), crate::language::workbench::WindowReason> {
+            self.0.display()
+        }
+
+        fn launch(&self, tray: bool) -> Result<(), super::presence::LaunchRefusal> {
+            self.0.launch(tray)
+        }
+
+        fn ending(&self) -> bool {
+            self.0.ending() || (self.1)()
+        }
+    }
+
+    /// A published host that idles out after `idle`, whose quit signal is a channel and whose
+    /// presence acts on `fake`.
+    fn idling_host(
+        name: &str,
+        idle: Duration,
+        fake: &Arc<Fake>,
+    ) -> (TestHome, ServiceHost, std::sync::mpsc::Receiver<()>) {
+        let home = TestHome::new(name);
+        let fake = Arc::clone(fake);
+        let host = ServiceHost::start_with_world(
+            home.path(),
+            idling(idle),
+            || Ok(false),
+            move |_, ending| Box::new(EndsWithQuit(fake.world(), ending)),
+        )
+        .unwrap();
+        let (quit, quit_requested) = std::sync::mpsc::channel();
+        host.install_quit_signal(Arc::new(move || {
+            let _ = quit.send(());
+        }));
+        host.publish_ready().unwrap();
+        (home, host, quit_requested)
+    }
+
+    #[test]
+    fn a_service_with_no_stream_exits_and_a_browser_start_after_it_is_not_refused() {
+        let (home, host, quit_requested) =
+            idling_host("idle-exit", Duration::from_millis(300), &Arc::default());
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the idle service asks the process to exit");
+        assert!(
+            !super::latch::is_set(&home.path().join("state").join("quit")),
+            "an idle exit is not a person's Quit"
+        );
+        assert!(
+            host.intake.quit.drain.admit().is_err(),
+            "no new work is admitted once the service is leaving"
+        );
+        assert!(
+            host.intake.streams.admit().is_none(),
+            "no stream is admitted once the service is leaving"
+        );
+        drop(host);
+
+        let browser = start_for(home.path(), StartTerms::for_reason(StartReason::Browser));
+        assert!(browser.is_ok(), "the next browser start serves");
+    }
+
+    #[test]
+    fn an_open_stream_keeps_the_service_and_the_last_close_arms_the_limit_again() {
+        let (_home, host, quit_requested) =
+            idling_host("idle-stream", Duration::from_millis(500), &Arc::default());
+        let socket = open_mcp(None);
+        assert!(
+            quit_requested
+                .recv_timeout(Duration::from_millis(1500))
+                .is_err(),
+            "an open stream holds the service past three limits"
+        );
+        drop(socket);
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the last close arms the limit and the service leaves");
+        drop(host);
+    }
+
+    #[test]
+    fn a_control_call_restarts_the_span() {
+        let (_home, host, quit_requested) =
+            idling_host("idle-control", Duration::from_millis(800), &Arc::default());
+        for _ in 0..4 {
+            thread::sleep(Duration::from_millis(400));
+            cli_client::status().expect("the service answers a status call");
+        }
+        assert!(
+            quit_requested.try_recv().is_err(),
+            "each call came before the limit passed"
+        );
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the service leaves after the last call");
+        drop(host);
+    }
+
+    #[test]
+    fn an_attached_shell_is_a_stream_and_keeps_the_service() {
+        let (_home, host, quit_requested) =
+            idling_host("idle-shell", Duration::from_millis(500), &Arc::default());
+        let (shell, _handed) = open_desktop();
+        assert!(
+            quit_requested
+                .recv_timeout(Duration::from_millis(1500))
+                .is_err(),
+            "an attached shell holds the service past three limits"
+        );
+        drop(shell);
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the service leaves once the shell has gone");
+        drop(host);
+    }
+
+    #[test]
+    fn work_the_executor_still_holds_re_arms_the_limit() {
+        let (_home, host, quit_requested) =
+            idling_host("idle-work", Duration::from_millis(300), &Arc::default());
+        let running = host.quit.drain.admit().unwrap();
+        assert!(
+            quit_requested
+                .recv_timeout(Duration::from_millis(1200))
+                .is_err(),
+            "held work keeps the service past four limits"
+        );
+        drop(running);
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the service leaves a limit after the work finished");
+        drop(host);
+    }
+
+    #[test]
+    fn the_end_of_the_session_leaves_once_and_the_idle_path_adds_nothing() {
+        let (_home, host, quit_requested) = idling_host(
+            "idle-session-end",
+            Duration::from_millis(300),
+            &Arc::default(),
+        );
+        host.quit_handle().session_end();
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the session end asks the process to exit");
+        assert!(
+            quit_requested
+                .recv_timeout(Duration::from_millis(900))
+                .is_err(),
+            "the idle limit passing during the exit makes no second request"
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn presence_launches_no_shell_after_an_idle_stop() {
+        let fake = Arc::new(Fake::default());
+        let (home, host, quit_requested) =
+            idling_host("idle-presence", Duration::from_millis(300), &fake);
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the idle service asks the process to exit");
+        fake.advance(Duration::from_secs(10));
+        thread::sleep(Duration::from_millis(1200));
+        assert!(
+            fake.launches().is_empty(),
+            "a service that is leaving starts no shell"
+        );
+        drop(host);
+        drop(home);
+
+        let live = Arc::new(Fake::default());
+        let (_home, host, _quit_requested) =
+            idling_host("idle-presence-control", Duration::from_secs(600), &live);
+        live.advance(Duration::from_secs(10));
+        eventually(|| live.launches() == vec![true]);
         drop(host);
     }
 }
