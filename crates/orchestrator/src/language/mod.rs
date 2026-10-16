@@ -997,7 +997,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
         "browser_navigate" => decode_navigate(input),
         "browser_history" => decode_history(input),
         "browser_window" => decode_window(input),
-        "browser_read" => Operation::ReadPage(parse(
+        "browser_read" => Ok(Operation::ReadPage(parse(
             input,
             &[
                 "visual_settle",
@@ -1019,9 +1019,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_range(value.max_chars, 500, 50_000, "max_chars")?;
                 Ok(())
             },
-        )?)
-        .into_ok(),
-        "browser_inspect" => Operation::InspectPage(parse(
+        )?)),
+        "browser_inspect" => Ok(Operation::InspectPage(parse(
             input,
             &[
                 "visual_settle",
@@ -1055,9 +1054,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_range(value.max_items, 1, MAX_INSPECT_ITEMS, "max_items")?;
                 Ok(())
             },
-        )?)
-        .into_ok(),
-        "browser_find" => Operation::Find(parse(
+        )?)),
+        "browser_find" => Ok(Operation::Find(parse(
             input,
             &[
                 "visual_settle",
@@ -1075,9 +1073,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_range(value.max_results, 1, 50, "max_results")?;
                 Ok(())
             },
-        )?)
-        .into_ok(),
-        "browser_screenshot" => Operation::TakeScreenshot(parse(
+        )?)),
+        "browser_screenshot" => Ok(Operation::TakeScreenshot(parse(
             input,
             &[
                 "tab",
@@ -1092,9 +1089,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_screenshot,
-        )?)
-        .into_ok(),
-        "browser_click" => Operation::Click(parse(
+        )?)),
+        "browser_click" => Ok(Operation::Click(parse(
             input,
             &[
                 "visual_settle",
@@ -1111,9 +1107,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_click,
-        )?)
-        .into_ok(),
-        "browser_scroll" => Operation::ScrollPage(parse(
+        )?)),
+        "browser_scroll" => Ok(Operation::ScrollPage(parse(
             input,
             &[
                 "visual_settle",
@@ -1128,9 +1123,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_scroll,
-        )?)
-        .into_ok(),
-        "browser_hover" => Operation::Hover(parse(
+        )?)),
+        "browser_hover" => Ok(Operation::Hover(parse(
             input,
             &[
                 "visual_settle",
@@ -1142,9 +1136,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_hover,
-        )?)
-        .into_ok(),
-        "browser_fill_form" => Operation::FillForm(parse(
+        )?)),
+        "browser_fill_form" => Ok(Operation::FillForm(parse(
             input,
             &[
                 "visual_settle",
@@ -1156,9 +1149,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_fill,
-        )?)
-        .into_ok(),
-        "browser_type_text" => Operation::TypeText(parse(
+        )?)),
+        "browser_type_text" => Ok(Operation::TypeText(parse(
             input,
             &[
                 "visual_settle",
@@ -1173,9 +1165,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_type_text,
-        )?)
-        .into_ok(),
-        "browser_press_key" => Operation::PressKey(parse(
+        )?)),
+        "browser_press_key" => Ok(Operation::PressKey(parse(
             input,
             &[
                 "visual_settle",
@@ -1189,9 +1180,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_press_key,
-        )?)
-        .into_ok(),
-        "browser_drag" => Operation::Drag(parse(
+        )?)),
+        "browser_drag" => Ok(Operation::Drag(parse(
             input,
             &[
                 "visual_settle",
@@ -1206,9 +1196,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_drag,
-        )?)
-        .into_ok(),
-        "browser_upload" => Operation::UploadFiles(parse(
+        )?)),
+        "browser_upload" => Ok(Operation::UploadFiles(parse(
             input,
             &[
                 "visual_settle",
@@ -1224,9 +1213,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_upload,
-        )?)
-        .into_ok(),
-        "browser_execute" => Operation::RunScript(parse(
+        )?)),
+        "browser_execute" => Ok(Operation::RunScript(parse(
             input,
             &[
                 "visual_settle",
@@ -1242,9 +1230,8 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 validate_timeout(value.timeout_ms)?;
                 Ok(())
             },
-        )?)
-        .into_ok(),
-        "browser_wait" => Operation::Wait(parse(
+        )?)),
+        "browser_wait" => Ok(Operation::Wait(parse(
             input,
             &[
                 "condition",
@@ -1256,24 +1243,13 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             validate_wait,
-        )?)
-        .into_ok(),
+        )?)),
         "browser_flow" => decode_flow(input),
         "browser_dialog" => decode_dialog(input),
         "browser_record" => decode_record(input),
         "browser_diagnose" => decode_diagnose(input),
         "policy_explain" => decode_explain_policy(input),
         other => Err(LanguageError::UnknownTool(other.into())),
-    }
-}
-
-trait OperationResult {
-    fn into_ok(self) -> Result<Operation, LanguageError>;
-}
-
-impl OperationResult for Operation {
-    fn into_ok(self) -> Result<Operation, LanguageError> {
-        Ok(self)
     }
 }
 
