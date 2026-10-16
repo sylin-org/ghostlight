@@ -1,7 +1,7 @@
 # STATUS -- Ghostlight 1.3.14 published; 2.0 release candidate in preparation
 
 This page is the current state and nothing else. Every earlier dated section, from the 1.0 rebuild
-to 2026-10-14, moved verbatim to [history/status-through-2026-10-16.md](history/status-through-2026-10-16.md).
+through 2026-10-16, moved verbatim to [history/status-through-2026-10-16.md](history/status-through-2026-10-16.md).
 Decisions live in [adr/](adr/README.md), standing preferences in [MEMORY.md](MEMORY.md).
 
 ## Published
@@ -66,11 +66,11 @@ The week of daily use started on 2026-10-16, once the shell was complete. Only a
 service or shell lifecycle (start, stop, presence, session end, update) restarts it; install-time
 work does not (the owner delegated this call to the coordinator, 2026-10-16).
 
-Release order (`docs/release/store-disclosure-2.0.md`, ADR-0200): the `v2.0.0-rc.1` GitHub
-prerelease, the pinned install proof on Windows PowerShell 5.1, PowerShell 7 and a Linux shell, the
-staged store submission, approval and the live privacy text, then in one sitting `v2.0.0` as
-latest, `main` fast-forwarded, the frozen install strings and the staged publish. Not before
-approval.
+Release order (`docs/RELEASE.md`, The 2.0 cutover; `docs/release/store-disclosure-2.0.md`;
+ADR-0200): the `v2.0.0-rc.1` GitHub prerelease, the pinned install proof on Windows PowerShell 5.1,
+PowerShell 7 and a Linux shell, the staged store submission, approval and the live privacy text,
+then in one sitting `v2.0.0` as latest, `main` fast-forwarded, the npm launcher published, the
+frozen install strings proved and the staged extension published. Not before approval.
 
 ## CI
 

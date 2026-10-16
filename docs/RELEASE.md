@@ -5,8 +5,8 @@ This is the release plan for the current implementation, the 2.0 line (ADR-0197)
 history. The old raw-binary packages and implementation cannot be relabeled; their accumulated
 platform facts and publication lessons are carried by this pipeline and its records.
 
-Current gate state and evidence are tracked in the
-[1.0 release checklist](RELEASE-CHECKLIST.md). This file remains the process authority; the
+Gate state and evidence for the 1.x releases are kept in the
+[1.x release gate record](RELEASE-CHECKLIST.md). This file remains the process authority; the
 checklist points here instead of restating the process.
 
 No release action is authorized merely by this document. Tags, pushes, packages, store
@@ -123,7 +123,7 @@ published relay revision. The extension freeze, `tests/guards/extension-freeze.t
 every packaged extension file (ADR-0200 Decision 16). Review each release's diff against that rule
 rather than against an empty one. ADR-0102's own acceptance item 9 states the boundary more strictly
 than its decision body does; reconciling the two in a marked amendment is a G0 item in the
-[1.0 release checklist](RELEASE-CHECKLIST.md).
+[1.x release gate record](RELEASE-CHECKLIST.md).
 
 ### Desktop and package
 
