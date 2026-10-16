@@ -370,17 +370,33 @@ test("native controls get their HTML-AAM roles", async () => {
   }
 });
 
-// Keep this list equal to SEMANTIC_ROLES in crates/orchestrator/src/language/mod.rs. The test
-// below reads that file, so a role added on one side and not the other fails here.
-const SEMANTIC_ROLES = [
-  "button", "link", "checkbox", "radio", "textbox", "searchbox", "combobox", "listbox",
-  "slider", "spinbutton", "tab", "menuitem", "option"
-];
+// The semantic roles a selector may name, read from the role enum of the frozen tool catalog. The
+// catalog carries one copy per tool that takes a selector; the copies must be one list.
+function catalogSemanticRoles() {
+  const catalog = JSON.parse(fs.readFileSync(path.join(REPO, "docs", "1.0", "catalog.json"), "utf8"));
+  const copies = [];
+  const collect = (node) => {
+    if (Array.isArray(node)) {
+      node.forEach(collect);
+    } else if (node && typeof node === "object") {
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "role" && value && Array.isArray(value.enum)) {
+          copies.push(value.enum);
+        }
+        collect(value);
+      }
+    }
+  };
+  collect(catalog);
+  assert.ok(copies.length > 0, "the catalog names the semantic roles");
+  for (const copy of copies) {
+    assert.deepEqual(copy, copies[0]);
+  }
+  return copies[0];
+}
 
 test("every semantic role is producible", async () => {
-  const rust = fs.readFileSync(path.join(REPO, "crates", "orchestrator", "src", "language", "mod.rs"), "utf8");
-  const literal = /const SEMANTIC_ROLES: &\[&str\] = &\[([^\]]*)\];/.exec(rust)[1];
-  assert.deepEqual([...literal.matchAll(/"([a-z]+)"/g)].map((match) => match[1]), SEMANTIC_ROLES);
+  const SEMANTIC_ROLES = catalogSemanticRoles();
 
   const harness = contentHarness();
   const body = harness.element("body");
