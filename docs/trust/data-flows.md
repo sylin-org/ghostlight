@@ -10,7 +10,7 @@ audit run on the endpoint.
 | MCP client to MCP connector | stdio | Same endpoint. |
 | MCP connector to service | A per-user named pipe (Windows) or Unix socket (Linux) that only the same user can open; each end checks the other's user before anything is sent. Typed framing | Same endpoint. |
 | Service to browser connector | The same per-user named pipe or Unix socket, with the same checks. Typed framing | Same endpoint. |
-| Ghostlight window to service | The same per-user named pipe or Unix socket, with the same checks. It carries the workbench address and the secret that lets the window make changes | Same endpoint. |
+| Ghostlight window to service | The same per-user named pipe or Unix socket, with the same checks. It carries the workbench address and the secret that lets the window make changes, requests to show the window at a section, notice titles and bodies, links and folders the person asked to open, and file paths the person picked. All of it stays on this computer, and nothing new leaves it | Same endpoint. |
 | Browser connector to extension | Chromium native messaging | Same endpoint. |
 | Extension to the controlled page | Chrome DevTools Protocol | The user's existing browser profile. |
 | Browser page traffic | Browser networking | Sites the user or MCP client directs the browser to. |

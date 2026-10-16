@@ -3,8 +3,10 @@
 //!
 //! [`open_link`] connects to the service of a Ghostlight home, opens it as the desktop shell and
 //! reads the one frame that matters: where the workbench is and the bearer that makes its page
-//! the window's. After that the stream carries a goodbye from the service and a click on a tray
-//! entry from the shell, and nothing else.
+//! the window's. After that the stream carries a goodbye, a request to show the window, a notice
+//! and an act to carry out from the service, and a click on a tray entry and the result of each
+//! act from the shell. A frame this build cannot read is skipped, so a newer service's frame never
+//! ends an older shell during a hand-over.
 //!
 //! The frames are the service's `intake::desktop` contract, written again here because the shell
 //! depends on no workspace crate but the relay. `tests/golden/desktop/` holds the bytes both
@@ -63,9 +65,77 @@ pub enum DesktopFrame {
         /// The entry.
         item: TrayItemId,
     },
+    /// From the service: bring the window forward, opening it first when it is not open.
+    Show {
+        /// Where in the page to open it. The service has checked it against the page's list.
+        address: Option<String>,
+    },
+    /// From the service: show one notice, best effort.
+    Notice {
+        /// The notice's title.
+        title: String,
+        /// The notice's body.
+        body: String,
+    },
+    /// From the service: carry out one act on this computer, then answer with an
+    /// [`DesktopFrame::ActResult`] of the same `id`.
+    Act {
+        /// Names this act in its result.
+        id: u64,
+        /// What to do.
+        act: NativeAct,
+    },
+    /// From the shell: how the act with this `id` ended.
+    ActResult {
+        /// The act it answers.
+        id: u64,
+        /// How it ended.
+        outcome: ActOutcome,
+    },
     /// A frame kind this build does not know. Readers skip it.
     #[serde(other)]
     Unknown,
+}
+
+/// What the service asks of this computer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NativeAct {
+    /// Open a secure address in the person's browser.
+    OpenUrl {
+        /// The address.
+        url: String,
+    },
+    /// Show a folder in the file manager.
+    OpenFolder {
+        /// The folder.
+        path: String,
+    },
+    /// Ask the person to choose a file.
+    PickFile {
+        /// The dialog's title.
+        title: String,
+    },
+    /// An act this build does not know. It is answered as failed.
+    #[serde(other)]
+    Unknown,
+}
+
+/// How an act ended.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActOutcome {
+    /// The link or the folder was opened.
+    Done,
+    /// The person chose a file.
+    Picked {
+        /// The file.
+        path: String,
+    },
+    /// The person closed the dialog without choosing.
+    Cancelled,
+    /// This computer would not do it, or the session is ending.
+    Failed,
 }
 
 impl fmt::Debug for DesktopFrame {
@@ -83,6 +153,25 @@ impl fmt::Debug for DesktopFrame {
                 .field("reason", reason)
                 .finish(),
             Self::Tray { item } => formatter.debug_struct("Tray").field("item", item).finish(),
+            Self::Show { address } => formatter
+                .debug_struct("Show")
+                .field("address", address)
+                .finish(),
+            Self::Notice { title, body } => formatter
+                .debug_struct("Notice")
+                .field("title", title)
+                .field("body", body)
+                .finish(),
+            Self::Act { id, act } => formatter
+                .debug_struct("Act")
+                .field("id", id)
+                .field("act", act)
+                .finish(),
+            Self::ActResult { id, outcome } => formatter
+                .debug_struct("ActResult")
+                .field("id", id)
+                .field("outcome", outcome)
+                .finish(),
             Self::Unknown => formatter.write_str("Unknown"),
         }
     }
@@ -261,14 +350,20 @@ pub fn open_link(home: &std::path::Path) -> Result<(Link, Workbench), LinkError>
 }
 
 impl Link {
-    /// Reads frames on a thread of its own and calls `on_end` once, when the service says goodbye
-    /// (whatever the reason) or the stream ends or fails. Every other frame is skipped.
-    pub fn spawn_reader(&self, on_end: impl FnOnce() + Send + 'static) -> Result<(), LinkError> {
+    /// Reads frames on a thread of its own. It hands `on_frame` each frame the service sends that
+    /// the shell acts on, and calls `on_end` once, when the service says goodbye (whatever the
+    /// reason) or the stream ends or fails. A frame this build does not know, and one it cannot
+    /// read, is skipped.
+    pub fn spawn_reader(
+        &self,
+        on_frame: impl FnMut(DesktopFrame) + Send + 'static,
+        on_end: impl FnOnce() + Send + 'static,
+    ) -> Result<(), LinkError> {
         let mut reader = self.connection.try_clone()?;
         thread::Builder::new()
             .name(READER_THREAD_NAME.to_owned())
             .spawn(move || {
-                read_until_end(&mut reader);
+                read_until_end(&mut reader, on_frame);
                 on_end();
             })?;
         Ok(())
@@ -276,20 +371,40 @@ impl Link {
 
     /// Tells the service the person chose `item` in the tray.
     pub fn send_tray(&self, item: TrayItemId) -> Result<(), LinkError> {
+        self.send(&DesktopFrame::Tray { item })
+    }
+
+    /// Tells the service how the act with this `id` ended.
+    pub fn send_act_result(&self, id: u64, outcome: ActOutcome) -> Result<(), LinkError> {
+        self.send(&DesktopFrame::ActResult { id, outcome })
+    }
+
+    fn send(&self, frame: &DesktopFrame) -> Result<(), LinkError> {
         let mut writer = self.connection.try_clone()?;
-        frame::write_frame(&mut writer, &DesktopFrame::Tray { item }).map_err(|error| match error {
+        frame::write_frame(&mut writer, frame).map_err(|error| match error {
             FrameError::Io(error) => LinkError::Io(error),
             other => LinkError::Io(io::Error::other(other)),
         })
     }
 }
 
-/// Reads frames until a goodbye, the end of the stream or a failure.
-fn read_until_end(reader: &mut impl Read) {
+/// Reads frames until a goodbye, the end of the stream or a failure of the stream itself, and
+/// hands each frame the shell acts on to `on_frame`.
+///
+/// A frame of a kind this build does not know, and one whose JSON this build cannot decode, are
+/// skipped. A frame the service sends in the wrong direction (a tray click, an act result, a
+/// workbench) is skipped as well.
+fn read_until_end(reader: &mut impl Read, mut on_frame: impl FnMut(DesktopFrame)) {
     loop {
         match frame::read_frame::<DesktopFrame>(reader) {
-            Ok(Some(DesktopFrame::Goodbye { .. }) | None) | Err(_) => return,
-            Ok(Some(_)) => {}
+            Ok(Some(DesktopFrame::Goodbye { .. }) | None) => return,
+            Ok(Some(
+                request @ (DesktopFrame::Show { .. }
+                | DesktopFrame::Notice { .. }
+                | DesktopFrame::Act { .. }),
+            )) => on_frame(request),
+            Ok(Some(_)) | Err(FrameError::Json(_)) => {}
+            Err(_) => return,
         }
     }
 }
@@ -311,12 +426,15 @@ mod tests {
     /// A bearer of the right shape.
     const BEARER: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO-_";
 
-    fn golden(name: &str) -> DesktopFrame {
+    fn golden_text(name: &str) -> String {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/golden/desktop")
             .join(name);
-        let text = std::fs::read_to_string(&path).expect("the golden is readable");
-        serde_json::from_str(&text).expect("the golden decodes")
+        std::fs::read_to_string(&path).expect("the golden is readable")
+    }
+
+    fn golden(name: &str) -> DesktopFrame {
+        serde_json::from_str(&golden_text(name)).expect("the golden decodes")
     }
 
     #[test]
@@ -348,6 +466,79 @@ mod tests {
                 item: TrayItemId::Hold
             }
         );
+    }
+
+    #[test]
+    fn each_request_golden_decodes_to_its_frame() {
+        assert_eq!(
+            golden("show.json"),
+            DesktopFrame::Show {
+                address: Some("settings/diagnostics".to_owned())
+            }
+        );
+        assert_eq!(
+            golden("show-no-address.json"),
+            DesktopFrame::Show { address: None }
+        );
+        assert_eq!(
+            golden("notice.json"),
+            DesktopFrame::Notice {
+                title: "Ghostlight checkup".to_owned(),
+                body: "Notifications are ready.".to_owned(),
+            }
+        );
+        assert_eq!(
+            golden("act-open-url.json"),
+            DesktopFrame::Act {
+                id: 1,
+                act: NativeAct::OpenUrl {
+                    url: "https://example.com/docs".to_owned()
+                }
+            }
+        );
+        assert_eq!(
+            golden("act-open-folder.json"),
+            DesktopFrame::Act {
+                id: 2,
+                act: NativeAct::OpenFolder {
+                    path: "/home/person/.ghostlight/logs".to_owned()
+                }
+            }
+        );
+        assert_eq!(
+            golden("act-pick-file.json"),
+            DesktopFrame::Act {
+                id: 3,
+                act: NativeAct::PickFile {
+                    title: "Locate the harness application or settings file".to_owned()
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn the_shell_writes_the_bytes_of_the_act_result_goldens() {
+        let results = [
+            (
+                "act-result.json",
+                3,
+                ActOutcome::Picked {
+                    path: "/home/person/Apps/client.json".to_owned(),
+                },
+            ),
+            ("act-result-done.json", 1, ActOutcome::Done),
+            ("act-result-cancelled.json", 3, ActOutcome::Cancelled),
+            ("act-result-failed.json", 2, ActOutcome::Failed),
+        ];
+        for (name, id, outcome) in results {
+            let result = DesktopFrame::ActResult { id, outcome };
+            assert_eq!(golden(name), result, "{name} decodes to the result");
+            assert_eq!(
+                serde_json::to_value(&result).unwrap(),
+                serde_json::from_str::<serde_json::Value>(&golden_text(name)).unwrap(),
+                "{name} is the bytes the shell writes"
+            );
+        }
     }
 
     #[test]
@@ -471,12 +662,88 @@ mod tests {
                 frame::write_frame(&mut bytes, &frame).unwrap();
             }
             let mut cursor = Cursor::new(bytes);
-            read_until_end(&mut cursor);
+            read_until_end(&mut cursor, |_| {
+                panic!("nothing before the goodbye is a request")
+            });
             let rest = frame::read_frame::<DesktopFrame>(&mut cursor).unwrap();
             assert!(rest.is_some(), "the frame after the goodbye is left unread");
         }
-        read_until_end(&mut Cursor::new(Vec::new()));
-        read_until_end(&mut Cursor::new(vec![9, 0, 0, 0, 1]));
+        read_until_end(&mut Cursor::new(Vec::new()), |_| panic!("an empty stream"));
+        read_until_end(&mut Cursor::new(vec![9, 0, 0, 0, 1]), |_| {
+            panic!("a truncated frame")
+        });
+    }
+
+    /// Reads `bytes` to the end and gives back the requests the reader handed on.
+    fn requests_in(bytes: Vec<u8>) -> Vec<DesktopFrame> {
+        let mut handed = Vec::new();
+        read_until_end(&mut Cursor::new(bytes), |frame| handed.push(frame));
+        handed
+    }
+
+    #[test]
+    fn the_reader_hands_on_shows_notices_and_acts_in_order() {
+        let frames = [
+            DesktopFrame::Show {
+                address: Some("settings/sharing".to_owned()),
+            },
+            DesktopFrame::Notice {
+                title: "T".to_owned(),
+                body: "B".to_owned(),
+            },
+            DesktopFrame::Act {
+                id: 4,
+                act: NativeAct::PickFile {
+                    title: "Choose".to_owned(),
+                },
+            },
+        ];
+        let mut bytes = Vec::new();
+        for frame in &frames {
+            frame::write_frame(&mut bytes, frame).unwrap();
+        }
+        assert_eq!(requests_in(bytes), frames);
+    }
+
+    #[test]
+    fn the_reader_skips_frames_it_does_not_know_or_cannot_read_or_that_go_the_other_way() {
+        let show = DesktopFrame::Show { address: None };
+        let mut bytes = Vec::new();
+        frame::write_frame(&mut bytes, &serde_json::json!({"kind": "ping"})).unwrap();
+        frame::write_frame(
+            &mut bytes,
+            &serde_json::json!({"kind": "act", "id": "seven", "act": {"kind": "pick_file"}}),
+        )
+        .unwrap();
+        frame::write_frame(&mut bytes, &serde_json::json!(["not", "a", "frame"])).unwrap();
+        for frame in [
+            DesktopFrame::Tray {
+                item: TrayItemId::Quit,
+            },
+            DesktopFrame::ActResult {
+                id: 1,
+                outcome: ActOutcome::Done,
+            },
+            workbench_frame(URL),
+            DesktopFrame::Unknown,
+            show.clone(),
+        ] {
+            frame::write_frame(&mut bytes, &frame).unwrap();
+        }
+        assert_eq!(requests_in(bytes), [show]);
+    }
+
+    #[test]
+    fn an_act_this_build_does_not_know_arrives_as_unknown_so_it_can_be_answered() {
+        let frame: DesktopFrame =
+            serde_json::from_str(r#"{"kind":"act","id":9,"act":{"kind":"print"}}"#).unwrap();
+        assert_eq!(
+            frame,
+            DesktopFrame::Act {
+                id: 9,
+                act: NativeAct::Unknown
+            }
+        );
     }
 
     static HOMES: AtomicUsize = AtomicUsize::new(0);
@@ -555,7 +822,8 @@ mod tests {
         assert_eq!(opening.edge.program, Program::Desktop);
         assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
         let (ended, rx) = mpsc::channel();
-        link.spawn_reader(move || ended.send(()).unwrap()).unwrap();
+        link.spawn_reader(|_| {}, move || ended.send(()).unwrap())
+            .unwrap();
         rx.recv_timeout(Duration::from_secs(5))
             .expect("the goodbye ends the link");
         assert!(
@@ -589,13 +857,56 @@ mod tests {
     }
 
     #[test]
+    fn an_act_result_reaches_the_service_and_a_request_reaches_the_shell() {
+        let home = Home::new();
+        let listener = Listener::bind_first(&home.0).unwrap();
+        let (heard, rx) = mpsc::channel();
+        let service = thread::spawn(move || {
+            let mut shell = listener.accept().unwrap();
+            let _: Opening = frame::read_frame(&mut shell).unwrap().unwrap();
+            frame::write_frame(&mut shell, &accepted()).unwrap();
+            frame::write_frame(&mut shell, &workbench_frame(URL)).unwrap();
+            frame::write_frame(
+                &mut shell,
+                &DesktopFrame::Act {
+                    id: 8,
+                    act: NativeAct::OpenFolder {
+                        path: "logs".to_owned(),
+                    },
+                },
+            )
+            .unwrap();
+            let answer: DesktopFrame = frame::read_frame(&mut shell).unwrap().unwrap();
+            heard.send(answer).unwrap();
+        });
+        let (link, _) = open_link(&home.0).unwrap();
+        let (asked, requests) = mpsc::channel();
+        link.spawn_reader(move |request| asked.send(request).unwrap(), || {})
+            .unwrap();
+        let request = requests.recv_timeout(Duration::from_secs(5)).unwrap();
+        let DesktopFrame::Act { id, .. } = request else {
+            panic!("the act reaches the shell: {request:?}");
+        };
+        link.send_act_result(id, ActOutcome::Done).unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            DesktopFrame::ActResult {
+                id: 8,
+                outcome: ActOutcome::Done
+            }
+        );
+        service.join().unwrap();
+    }
+
+    #[test]
     fn the_stream_ending_ends_the_link() {
         let home = Home::new();
         let service = fake_service(&home.0, accepted(), vec![workbench_frame(URL)]);
         let (link, _) = open_link(&home.0).unwrap();
         drop(service.join().unwrap());
         let (ended, rx) = mpsc::channel();
-        link.spawn_reader(move || ended.send(()).unwrap()).unwrap();
+        link.spawn_reader(|_| {}, move || ended.send(()).unwrap())
+            .unwrap();
         rx.recv_timeout(Duration::from_secs(5))
             .expect("the closed stream ends the link");
     }

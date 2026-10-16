@@ -28,7 +28,7 @@
 const {
   CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
   WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, DEFAULT_VIEW,
-  parseAddress, screenState, byteSize
+  parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
 
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
@@ -101,7 +101,7 @@ function personalStorage() {
 
 const settings = globalThis.GhostlightSettings.create({
   document,
-  words: { ...SETTINGS, screenState, byteSize },
+  words: { ...SETTINGS, screenState, byteSize, addressOf },
   storage: personalStorage(),
   applyIntent,
   setWatching,
@@ -413,10 +413,13 @@ async function applyIntent(intent) {
   }
 }
 
-/** Bring the Ghostlight application forward, where the change this page cannot make is made. */
-async function continueInWindow() {
+/**
+ * Bring the Ghostlight application forward, where the change this page cannot make is made, at
+ * `address` when the caller knows the place, and otherwise at the screen this page is showing.
+ */
+async function continueInWindow(address = addressOf(view.showing(), view.showingSection())) {
   try {
-    await transport.continueInWindow();
+    await transport.continueInWindow(address);
   } catch (error) {
     view.toast(String(error), true);
   }
@@ -656,7 +659,7 @@ function wire() {
     const harness = event.target.closest("[data-harness-operation]");
     if (harness) handleHarnessAction(harness);
     const carryOn = event.target.closest("[data-continue]");
-    if (carryOn) continueInWindow();
+    if (carryOn) continueInWindow(carryOn.dataset.address || undefined);
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
     const hit = event.target.closest("[data-search-view]");

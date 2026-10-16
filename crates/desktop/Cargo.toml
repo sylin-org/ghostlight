@@ -14,6 +14,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 png = "0.18.1"
+notify-rust = { version = "=4.18.0", default-features = false, features = ["d"] }
+open = { version = "=5.4.1", features = ["shellexecute-on-windows"] }
 tao = "=0.35.3"
 tray-icon = { version = "=0.24.2", default-features = false, features = ["gtk"] }
 wry = "=0.55.1"
@@ -22,6 +24,10 @@ wry = "=0.55.1"
 gtk = "=0.18.2"
 webkit2gtk = "=2.0.2"
 libc = "0.2"
+rfd = { version = "=0.16.0", default-features = false, features = ["gtk3"] }
+
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "=0.16.0", default-features = false, features = ["common-controls-v6"] }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0.11"

@@ -1108,9 +1108,28 @@ const watchBeforeAbout = watchRequests().length;
 watching.clickOn("[data-destination]", { dataset: { destination: "home" } });
 await watching.settle();
 const watchAbout = { requests: watchRequests().length - watchBeforeAbout, opened: watching.opened.map((call) => [...call]) };
+const watchShowing = vm.runInContext("view.showing()", watching.page);
 watching.clickOn("[data-continue]", { dataset: {} });
 await watching.settle();
 const continueRequest = watchRequests().find((request) => request.path === "/api/window");
+// A Continue line inside a Settings section continues at that section.
+const windowRequests = () => watchRequests().filter((request) => request.path === "/api/window");
+const sectionContinue = (section) => {
+  const button = { disabled: false, dataset: {}, closest: (asked) => (asked === ".settings-section" ? { dataset: { section } } : null) };
+  watching.click({
+    closest: (asked) => (asked === "[data-settings-continue]" ? button
+      : asked === "#view-settings" ? watching.text("view-settings") : null)
+  });
+};
+sectionContinue("diagnostics");
+await watching.settle();
+sectionContinue("sharing");
+await watching.settle();
+const sectionContinues = windowRequests().slice(1).map((request) => request.body);
+// A Continue line inside the roster continues at Integrations.
+watching.clickOn("[data-continue]", { dataset: { address: "integrations" } });
+await watching.settle();
+const rosterContinue = windowRequests()[3]?.body;
 watching.clickOn("[data-view]", { dataset: { view: "integrations" } });
 await watching.settle();
 const rescanRequests = watchRequests().filter((request) => request.path === "/api/integrations/rescan").length;
@@ -1404,9 +1423,16 @@ const httpChecks = [
       && watchAbout.opened[0][2] === "noopener,noreferrer",
     JSON.stringify(watchAbout)],
   ["a window focus sends nothing", watchFocusSent === 0, `sent=${watchFocusSent}`],
-  ["Continue in the Ghostlight window is one POST asking for the workbench",
-    continueRequest?.method === "POST" && continueRequest.body === '{"view":"workbench"}',
+  ["Continue in the Ghostlight window is one POST asking for the workbench at the screen shown",
+    continueRequest?.method === "POST"
+      && continueRequest.body === JSON.stringify({ view: "workbench", address: watchShowing }),
     JSON.stringify(continueRequest)],
+  ["Continue in a Settings section asks for the window at that section's address",
+    JSON.stringify(sectionContinues)
+      === JSON.stringify(['{"view":"workbench","address":"settings/diagnostics"}', '{"view":"workbench","address":"settings/sharing"}']),
+    JSON.stringify(sectionContinues)],
+  ["Continue in the roster asks for the window at Integrations",
+    rosterContinue === '{"view":"workbench","address":"integrations"}', String(rosterContinue)],
   ["opening Integrations looks for the clients once", rescanRequests === 1, `rescans=${rescanRequests}`],
   ["a page with the key draws every control the native shell draws and no Continue line",
     controlOpening.chip === "Full control" && controlOpening.setup === false && controlOpening.endSession === false

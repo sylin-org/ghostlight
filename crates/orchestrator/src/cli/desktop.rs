@@ -200,7 +200,7 @@ mod tests {
 
     use super::*;
     use crate::workbench::{
-        WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
+        PageAddress, WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
     };
 
     #[test]
@@ -224,7 +224,7 @@ mod tests {
     struct Reveals(AtomicUsize);
 
     impl WorkbenchPresentationPort for Reveals {
-        fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+        fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
@@ -327,7 +327,10 @@ mod tests {
         struct DelayedPresentation(AtomicUsize);
 
         impl WorkbenchPresentationPort for DelayedPresentation {
-            fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+            fn reveal(
+                &self,
+                _address: Option<PageAddress>,
+            ) -> Result<(), WorkbenchPresentationError> {
                 self.0.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }

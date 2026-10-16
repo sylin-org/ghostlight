@@ -18,6 +18,7 @@ mod admission;
 pub mod latch;
 pub mod lifetime;
 pub mod lock;
+pub mod shell;
 #[cfg(test)]
 pub(crate) mod test_home;
 
@@ -65,9 +66,11 @@ use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{
-    RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection, WorkbenchQuitPort,
+    RuntimeSource, Watching, WorkbenchFacade, WorkbenchNativeActs, WorkbenchPresentationPort,
+    WorkbenchProjection, WorkbenchQuitPort,
 };
 use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
+use shell::{ShellRoute, Shells};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
 const QUEUED_METADATA_BYTES: usize = 512;
@@ -145,6 +148,8 @@ pub struct ServiceHost {
     intake: Arc<Intake>,
     bound: Mutex<Option<Bound>>,
     quit: Quit,
+    /// What the workbench facade is given for its window, notices and native acts.
+    route: Arc<ShellRoute>,
     ready: Arc<ReadyWatch>,
     lock_taken: Instant,
     _lock: ServiceLock,
@@ -300,6 +305,9 @@ impl ServiceHost {
             layout.quit_latch(),
             Arc::clone(&browser),
         );
+        let route = Arc::new(ShellRoute::new(quit.shells()));
+        workbench.attach_presentation(route.clone());
+        workbench.attach_native_acts(route.clone());
         let refresher = spawn_refresher(governance.clone(), workbench.clone(), Arc::clone(&stop))?;
         let refresher_thread = refresher.thread().clone();
         let audit_stop = stop.clone();
@@ -340,6 +348,7 @@ impl ServiceHost {
             intake,
             bound: Mutex::new(None),
             quit,
+            route,
             ready: Arc::default(),
             lock_taken,
             _lock: lock,
@@ -408,6 +417,16 @@ impl ServiceHost {
         let address = server.address().clone();
         let _ = self.intake.workbench_server.set(server);
         Some(address)
+    }
+
+    /// Install what shows the window, shows notices and carries out native acts while no shell is
+    /// attached. While Tauri is in this process, it is the window's fallback.
+    pub fn install_native_fallback(
+        &self,
+        presentation: Arc<dyn WorkbenchPresentationPort>,
+        acts: Arc<dyn WorkbenchNativeActs>,
+    ) {
+        self.route.install_fallback(presentation, acts);
     }
 
     /// Record that the desktop has a tray of its own, so a shell is not handed a second one.
@@ -541,6 +560,7 @@ impl Quit {
         if !self.drain.begin_quit() {
             return;
         }
+        self.farewell.shells.close();
         if reason == QuitReason::Quit {
             if let Err(error) = latch::set(&self.latch) {
                 self.diagnostics.sink().emit(
@@ -591,6 +611,7 @@ impl Quit {
     /// already armed the fallback exit that bounds this stop.
     pub fn session_end(&self) {
         self.drain.begin_quit();
+        self.farewell.shells.close();
         let signal = Arc::clone(&self.signal);
         let farewell = Arc::clone(&self.farewell);
         let spawned = thread::Builder::new()
@@ -617,6 +638,12 @@ impl Quit {
     fn enroll(&self, writer: Arc<SocketWriter>) -> Enrolled {
         self.farewell.enroll(writer)
     }
+
+    /// The Ghostlight shells attached to this service, which a quit says goodbye to and whose
+    /// waiting acts it releases.
+    fn shells(&self) -> Arc<Shells> {
+        Arc::clone(&self.farewell.shells)
+    }
 }
 
 impl WorkbenchQuitPort for Quit {
@@ -640,6 +667,7 @@ struct Farewell {
     mcp: Mutex<BTreeMap<u64, Arc<SocketWriter>>>,
     next: AtomicU64,
     browser: Arc<RelayBrowserPort>,
+    shells: Arc<Shells>,
 }
 
 impl Farewell {
@@ -648,6 +676,7 @@ impl Farewell {
             mcp: Mutex::new(BTreeMap::new()),
             next: AtomicU64::new(0),
             browser,
+            shells: Arc::default(),
         }
     }
 
@@ -661,12 +690,13 @@ impl Farewell {
         }
     }
 
-    /// Say goodbye with `reason` on every MCP stream and every browser stream.
+    /// Say goodbye with `reason` on every MCP stream, every shell and every browser stream.
     fn say(&self, reason: GoodbyeReason) {
         let writers: Vec<Arc<SocketWriter>> = lock(&self.mcp).values().cloned().collect();
         for writer in writers {
             let _ = writer.native(&McpFrame::Goodbye { reason });
         }
+        self.shells.say_goodbye(reason);
         self.browser.say_goodbye(reason);
     }
 }
@@ -795,9 +825,11 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
 /// Serve one shell of this build on an accepted `desktop` stream.
 ///
 /// The shell is handed the workbench address and its secret, and the tray when the service has
-/// none of its own. The stream is enrolled for the goodbye like an `mcp` stream. What the shell
-/// sends is a click on a tray entry; the shell opens its own window, so an `open` click and a
-/// frame kind this build does not know are skipped. A frame that does not decode ends the stream.
+/// none of its own. It is then attached, so the window, notices and native acts of the workbench
+/// go to it, and a quit says goodbye to it. What the shell sends is a click on a tray entry and
+/// the result of each act it was asked for; the shell opens its own window, so an `open` click and
+/// a frame kind this build does not know are skipped. A frame that does not decode ends the
+/// stream, and the shell is detached.
 fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let Some(server) = intake.workbench_server.get() else {
         listener::refuse(&connection, OpeningRefusal::Unsupported);
@@ -811,15 +843,20 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
-    let _enrolled = intake.quit.enroll(Arc::clone(&writer));
     writer.native(&DesktopFrame::workbench(
         server.address().url(),
         server.bearer(),
         intake.native_tray.load(Ordering::SeqCst),
     ))?;
+    let attached = intake.quit.shells().attach(writer);
     while let Some(frame) = reader.native::<DesktopFrame>(None)? {
-        let DesktopFrame::Tray { item } = frame else {
-            continue;
+        let item = match frame {
+            DesktopFrame::Tray { item } => item,
+            DesktopFrame::ActResult { id, outcome } => {
+                attached.answer(id, outcome);
+                continue;
+            }
+            _ => continue,
         };
         match item {
             TrayItemId::Hold => {
@@ -869,7 +906,7 @@ fn serve_control(connection: Connection, operation: Option<Control>, intake: &In
             serde_json::to_value(control_status(intake)).unwrap_or(Value::Null)
         }
         Some(Control::Show) => serde_json::to_value(control::Shown {
-            shown: intake.workbench.reveal().is_ok(),
+            shown: intake.workbench.reveal(None).is_ok(),
         })
         .unwrap_or(Value::Null),
         Some(Control::Quit { reason }) => {
@@ -1698,18 +1735,20 @@ mod tests {
     use crate::browser::adapter::RuntimeControlState;
     use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
     use crate::cli::client as cli_client;
-    use crate::intake::desktop::{DesktopFrame, TrayItemId, TrayModel};
+    use crate::intake::desktop::{ActOutcome, DesktopFrame, NativeAct, TrayItemId, TrayModel};
     use crate::intake::listener::{self, control};
     use crate::intake::mcp::failure_templates;
     use crate::intake::mcp::ResumeState;
     use crate::language::intake::OpeningRefusal;
     use crate::workbench::{
-        WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
+        PageAddress, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
+        WorkbenchPresentationPort,
     };
     use crate::workspace::ReleasedTabs;
 
     use super::{
         cleanup_released_tabs, AuthorityAlreadyRunning, QuitLatched, ServiceHost, StartTerms,
+        QUIT_GRACE,
     };
 
     /// The terms of an agent start, which asks for the lock once.
@@ -3194,7 +3233,7 @@ mod tests {
     struct RevealCounter(AtomicUsize);
 
     impl WorkbenchPresentationPort for RevealCounter {
-        fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+        fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
@@ -3875,6 +3914,401 @@ mod tests {
                 reason: GoodbyeReason::SessionEnd
             })
         ));
+        drop(host);
+    }
+
+    /// Open a `desktop` stream and wait until the service has attached it, so a request made
+    /// next goes to it.
+    fn attached_shell(host: &ServiceHost) -> Connection {
+        let before = host.quit.shells().attached();
+        let (stream, _) = open_desktop();
+        eventually(|| host.quit.shells().attached() > before);
+        stream
+    }
+
+    /// The next frame the service wrote to the shell.
+    fn next_frame(stream: &mut Connection) -> DesktopFrame {
+        frame::read_frame::<DesktopFrame>(stream)
+            .unwrap()
+            .expect("the service wrote a frame")
+    }
+
+    /// The id of the act the service asked the shell for, and the act.
+    fn next_act(stream: &mut Connection) -> (u64, NativeAct) {
+        match next_frame(stream) {
+            DesktopFrame::Act { id, act } => (id, act),
+            other => panic!("expected an act, got {other:?}"),
+        }
+    }
+
+    /// What a shell answers.
+    fn answer(stream: &mut Connection, id: u64, outcome: ActOutcome) {
+        frame::write_frame(stream, &DesktopFrame::ActResult { id, outcome }).unwrap();
+    }
+
+    /// Run `request` on a thread of its own and give back what it answers.
+    fn in_background<T: Send + 'static>(
+        request: impl FnOnce() -> T + Send + 'static,
+    ) -> std::sync::mpsc::Receiver<T> {
+        let (answered, answers) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = answered.send(request());
+        });
+        answers
+    }
+
+    #[test]
+    fn showing_the_window_writes_a_show_frame_with_the_address_to_the_shell() {
+        let home = TestHome::new("shell-show");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+
+        host.workbench
+            .reveal(Some(PageAddress::SettingsDiagnostics))
+            .unwrap();
+        host.workbench.reveal(None).unwrap();
+
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Show {
+                address: Some(PageAddress::SettingsDiagnostics)
+            }
+        );
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Show { address: None }
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn a_notice_is_written_to_the_shell_as_the_service_worded_it() {
+        let home = TestHome::new("shell-notice");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+
+        host.workbench.test_notification().unwrap();
+
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Notice {
+                title: crate::language::workbench::NOTICE_CHECKUP_TITLE.to_owned(),
+                body: crate::language::workbench::NOTICE_CHECKUP_BODY.to_owned(),
+            }
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn picking_a_file_waits_for_the_shell_and_returns_what_the_person_chose() {
+        let home = TestHome::new("shell-pick");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+        let route = Arc::clone(&host.route);
+
+        let picked = in_background(move || route.pick_file("Choose a file"));
+        let (id, act) = next_act(&mut stream);
+        assert_eq!(
+            act,
+            NativeAct::PickFile {
+                title: "Choose a file".to_owned()
+            }
+        );
+        assert!(
+            picked.recv_timeout(Duration::from_millis(200)).is_err(),
+            "the pick waits for the person"
+        );
+        answer(
+            &mut stream,
+            id,
+            ActOutcome::Picked {
+                path: "chosen.json".to_owned(),
+            },
+        );
+        assert_eq!(
+            picked.recv_timeout(PATIENCE).unwrap().unwrap(),
+            Some(std::path::PathBuf::from("chosen.json"))
+        );
+
+        let route = Arc::clone(&host.route);
+        let closed = in_background(move || route.pick_file("Again"));
+        let (id, _) = next_act(&mut stream);
+        answer(&mut stream, id, ActOutcome::Cancelled);
+        assert_eq!(closed.recv_timeout(PATIENCE).unwrap().unwrap(), None);
+
+        let route = Arc::clone(&host.route);
+        let refused = in_background(move || route.pick_file("Once more"));
+        let (id, _) = next_act(&mut stream);
+        answer(&mut stream, id, ActOutcome::Failed);
+        assert!(matches!(
+            refused.recv_timeout(PATIENCE).unwrap(),
+            Err(WorkbenchPresentationError::ActFailed(_))
+        ));
+        drop(host);
+    }
+
+    #[test]
+    fn a_link_and_a_folder_are_opened_by_the_shell_and_their_failure_is_told() {
+        let home = TestHome::new("shell-open");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+
+        for (outcome, opened) in [(ActOutcome::Done, true), (ActOutcome::Failed, false)] {
+            let route = Arc::clone(&host.route);
+            let link = in_background(move || route.open_url("https://example.com/docs"));
+            let (id, act) = next_act(&mut stream);
+            assert_eq!(
+                act,
+                NativeAct::OpenUrl {
+                    url: "https://example.com/docs".to_owned()
+                }
+            );
+            answer(&mut stream, id, outcome.clone());
+            assert_eq!(link.recv_timeout(PATIENCE).unwrap().is_ok(), opened);
+
+            let route = Arc::clone(&host.route);
+            let folder = in_background(move || route.open_folder(std::path::Path::new("logs")));
+            let (id, act) = next_act(&mut stream);
+            assert_eq!(
+                act,
+                NativeAct::OpenFolder {
+                    path: "logs".to_owned()
+                }
+            );
+            answer(&mut stream, id, outcome);
+            assert_eq!(folder.recv_timeout(PATIENCE).unwrap().is_ok(), opened);
+        }
+        drop(host);
+    }
+
+    #[test]
+    fn an_answer_for_an_act_nobody_asked_is_ignored() {
+        let home = TestHome::new("shell-stray-result");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+
+        answer(&mut stream, 99, ActOutcome::Done);
+        host.workbench.reveal(None).unwrap();
+
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Show { address: None },
+            "the stream goes on"
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn a_pick_is_released_when_the_shells_stream_ends() {
+        let home = TestHome::new("shell-pick-ends");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+        let route = Arc::clone(&host.route);
+
+        let picked = in_background(move || route.pick_file("Choose"));
+        next_act(&mut stream);
+        drop(stream);
+
+        assert!(matches!(
+            picked.recv_timeout(PATIENCE).unwrap(),
+            Err(WorkbenchPresentationError::Unavailable)
+        ));
+        eventually(|| host.quit.shells().attached() == 0);
+        drop(host);
+    }
+
+    #[test]
+    fn a_pick_is_released_by_a_goodbye() {
+        let home = TestHome::new("shell-pick-goodbye");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+        let route = Arc::clone(&host.route);
+
+        let picked = in_background(move || route.pick_file("Choose"));
+        next_act(&mut stream);
+        host.quit.shells().say_goodbye(GoodbyeReason::Replace);
+
+        assert!(matches!(
+            picked.recv_timeout(PATIENCE).unwrap(),
+            Err(WorkbenchPresentationError::Unavailable)
+        ));
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Goodbye {
+                reason: GoodbyeReason::Replace
+            }
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn a_quit_releases_a_pick_at_once_and_does_not_wait_for_it() {
+        let (_home, host, quit_requested) = quittable_host("shell-pick-quit");
+        let mut stream = attached_shell(&host);
+        let route = Arc::clone(&host.route);
+
+        let picked = in_background(move || route.pick_file("Choose"));
+        next_act(&mut stream);
+        let began = Instant::now();
+        host.quit_handle().begin(QuitReason::Quit, QUIT_GRACE);
+
+        assert!(matches!(
+            picked.recv_timeout(PATIENCE).unwrap(),
+            Err(WorkbenchPresentationError::Unavailable)
+        ));
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the desktop is asked to exit");
+        assert!(
+            began.elapsed() < QUIT_GRACE,
+            "a person's open dialog does not hold the quit"
+        );
+        assert!(
+            matches!(
+                host.route.pick_file("Too late"),
+                Err(WorkbenchPresentationError::Unavailable)
+            ),
+            "no act starts once a quit has begun"
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn a_session_end_releases_a_pick() {
+        let (_home, host, _quit_requested) = quittable_host("shell-pick-session-end");
+        let mut stream = attached_shell(&host);
+        let route = Arc::clone(&host.route);
+
+        let picked = in_background(move || route.pick_file("Choose"));
+        next_act(&mut stream);
+        host.quit_handle().session_end();
+
+        assert!(matches!(
+            picked.recv_timeout(PATIENCE).unwrap(),
+            Err(WorkbenchPresentationError::Unavailable)
+        ));
+        drop(host);
+    }
+
+    #[test]
+    fn the_newest_of_two_shells_gets_the_request() {
+        let home = TestHome::new("shell-newest");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut first = attached_shell(&host);
+        let mut second = attached_shell(&host);
+
+        host.workbench.reveal(Some(PageAddress::About)).unwrap();
+        assert_eq!(
+            next_frame(&mut second),
+            DesktopFrame::Show {
+                address: Some(PageAddress::About)
+            }
+        );
+
+        drop(second);
+        eventually(|| host.quit.shells().attached() == 1);
+        host.workbench.reveal(Some(PageAddress::Policy)).unwrap();
+        assert_eq!(
+            next_frame(&mut first),
+            DesktopFrame::Show {
+                address: Some(PageAddress::Policy)
+            },
+            "the older shell serves once the newer one is gone"
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn with_no_shell_the_fallback_serves_and_without_one_the_request_is_unavailable() {
+        #[derive(Default)]
+        struct Fallback(std::sync::Mutex<Vec<String>>);
+
+        impl WorkbenchPresentationPort for Fallback {
+            fn reveal(
+                &self,
+                address: Option<PageAddress>,
+            ) -> Result<(), WorkbenchPresentationError> {
+                self.0.lock().unwrap().push(format!("reveal {address:?}"));
+                Ok(())
+            }
+
+            fn notify(
+                &self,
+                _notification: WorkbenchNotification,
+            ) -> Result<(), WorkbenchPresentationError> {
+                self.0.lock().unwrap().push("notify".to_owned());
+                Ok(())
+            }
+        }
+
+        impl WorkbenchNativeActs for Fallback {
+            fn open_url(&self, url: &str) -> Result<(), WorkbenchPresentationError> {
+                self.0.lock().unwrap().push(format!("open {url}"));
+                Ok(())
+            }
+
+            fn open_folder(
+                &self,
+                _path: &std::path::Path,
+            ) -> Result<(), WorkbenchPresentationError> {
+                Ok(())
+            }
+
+            fn pick_file(
+                &self,
+                _title: &str,
+            ) -> Result<Option<std::path::PathBuf>, WorkbenchPresentationError> {
+                Ok(None)
+            }
+        }
+
+        let home = TestHome::new("shell-fallback");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        assert!(matches!(
+            host.workbench.reveal(None),
+            Err(crate::workbench::WorkbenchError::PresentationUnavailable)
+        ));
+
+        let fallback = Arc::new(Fallback::default());
+        host.install_native_fallback(fallback.clone(), fallback.clone());
+        host.workbench.reveal(Some(PageAddress::Status)).unwrap();
+        host.workbench.test_notification().unwrap();
+        host.workbench
+            .open_destination(crate::workbench::WorkbenchDestination::Home)
+            .unwrap();
+        assert_eq!(fallback.0.lock().unwrap().len(), 3);
+
+        let mut stream = attached_shell(&host);
+        host.workbench.reveal(Some(PageAddress::Policy)).unwrap();
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Show {
+                address: Some(PageAddress::Policy)
+            }
+        );
+        assert_eq!(
+            fallback.0.lock().unwrap().len(),
+            3,
+            "an attached shell takes the request"
+        );
+
+        drop(stream);
+        eventually(|| host.quit.shells().attached() == 0);
+        host.workbench.reveal(None).unwrap();
+        assert_eq!(
+            fallback.0.lock().unwrap().len(),
+            4,
+            "the fallback serves again"
+        );
         drop(host);
     }
 

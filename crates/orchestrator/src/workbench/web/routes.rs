@@ -22,8 +22,8 @@ use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{add_download_url, Audience, Part, Projection};
 use crate::workbench::{
-    validate_policy_document, validate_search_query, HarnessActError, PolicyWriteError,
-    RuntimeSource, WorkbenchDestination, WorkbenchRuntimeIntent,
+    validate_policy_document, validate_search_query, HarnessActError, PageAddress,
+    PolicyWriteError, RuntimeSource, WorkbenchDestination, WorkbenchRuntimeIntent,
 };
 
 /// The prefix of every route that carries data or takes a change.
@@ -710,10 +710,13 @@ enum WindowView {
     Workbench,
 }
 
+/// The body of a request to bring the window forward: the view, and where in the page to open.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WindowArguments {
     view: WindowView,
+    /// A place in the page. An unknown one makes the request a bad request.
+    address: Option<PageAddress>,
 }
 
 #[derive(Deserialize)]
@@ -935,11 +938,12 @@ fn rescan(shared: &Shared, projection: &Projection, watching: bool, body: &[u8])
 fn window(shared: &Shared, body: &[u8]) -> Response {
     let WindowArguments {
         view: WindowView::Workbench,
+        address,
     } = match decode(body) {
         Ok(arguments) => arguments,
         Err(response) => return response,
     };
-    match shared.facade.reveal() {
+    match shared.facade.reveal(address) {
         Ok(()) => json_response(Status::Ok, &json!({})),
         Err(error) => refused(&error.to_string()),
     }

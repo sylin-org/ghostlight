@@ -1,5 +1,6 @@
 //! Orchestrator-owned desktop read model, user intents, and operating-system presentation port.
 
+mod address;
 pub mod context;
 mod history;
 mod input;
@@ -10,6 +11,7 @@ mod surface_tests;
 mod watching;
 pub mod web;
 
+pub use address::PageAddress;
 pub use history::{HistoryStep, StepHistoryState};
 pub use input::{
     validate_policy_document, validate_search_query, POLICY_DOCUMENT_LIMIT, SEARCH_QUERY_LIMIT,
@@ -314,8 +316,8 @@ impl WorkbenchProjection {
                         .insert((invocation.clone(), NotificationKind::Blocked))
                         .then(|| WorkbenchNotification {
                             kind: NotificationKind::Blocked,
-                            title: "Ghostlight blocked an action".into(),
-                            body: "A configured guardrail prevented browser work.".into(),
+                            title: words::NOTICE_BLOCKED_TITLE.into(),
+                            body: words::NOTICE_BLOCKED_BODY.into(),
                         });
                     (notification, change)
                 }
@@ -1220,26 +1222,27 @@ impl WorkbenchFacade {
             .ok_or(WorkbenchError::PresentationUnavailable)?;
         port.notify(WorkbenchNotification {
             kind: NotificationKind::Checkup,
-            title: "Ghostlight checkup".into(),
-            body: "Notifications are ready.".into(),
+            title: words::NOTICE_CHECKUP_TITLE.into(),
+            body: words::NOTICE_CHECKUP_BODY.into(),
         })?;
         Ok(())
     }
 
-    /// Ask the attached native presentation adapter to reveal the existing workbench.
-    pub fn reveal(&self) -> Result<(), WorkbenchError> {
+    /// Ask the attached native presentation adapter to reveal the existing workbench, at
+    /// `address` when one is given and where the window last was when it is not.
+    pub fn reveal(&self, address: Option<PageAddress>) -> Result<(), WorkbenchError> {
         let port = lock(&self.projection.presentation)
             .clone()
             .ok_or(WorkbenchError::PresentationUnavailable)?;
-        port.reveal()?;
+        port.reveal(address)?;
         Ok(())
     }
 }
 
 /// Best-effort operating-system presentation port.
 pub trait WorkbenchPresentationPort: Send + Sync {
-    /// Reveal and focus the existing native workbench surface.
-    fn reveal(&self) -> Result<(), WorkbenchPresentationError>;
+    /// Reveal and focus the existing native workbench surface, at `address` when one is given.
+    fn reveal(&self, address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError>;
 
     /// Deliver one high-signal, content-free notification.
     fn notify(&self, notification: WorkbenchNotification)
@@ -1458,6 +1461,9 @@ pub enum WorkbenchPresentationError {
     /// The computer refused an open or a dialog. The text is the computer's own.
     #[error("{0}")]
     ActFailed(String),
+    /// There is no window program to carry the request out, or it went away before it answered.
+    #[error("native presentation is unavailable")]
+    Unavailable,
 }
 
 /// Failure at the typed workbench application boundary.
@@ -1468,10 +1474,21 @@ pub enum WorkbenchError {
     PresentationUnavailable,
     /// Native presentation rejected the request.
     #[error(transparent)]
-    Presentation(#[from] WorkbenchPresentationError),
+    Presentation(WorkbenchPresentationError),
     /// No service is attached to end.
     #[error("{}", words::QUIT_UNAVAILABLE)]
     QuitUnavailable,
+}
+
+impl From<WorkbenchPresentationError> for WorkbenchError {
+    /// A presentation adapter with nothing to talk to is the facade's own unavailable failure, so
+    /// a person reads one failure however the adapter came to be missing.
+    fn from(error: WorkbenchPresentationError) -> Self {
+        match error {
+            WorkbenchPresentationError::Unavailable => Self::PresentationUnavailable,
+            other => Self::Presentation(other),
+        }
+    }
 }
 
 /// Complete immutable workbench read model.

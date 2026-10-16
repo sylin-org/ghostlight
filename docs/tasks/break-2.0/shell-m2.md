@@ -67,20 +67,22 @@ Rules:
 
 ## RESUME HERE
 
-m2-01-settings-tab has landed (see Landed). Settings is a tab before About with a rail of five
-sections, the Controls button and sheet are gone, every tab has an address, Status carries the
-connection sentence, the page can quit in Control, and the Policy page's ceilings end with the
-line about Ghostlight's own control page. Next: the coordinator deploys it and runs the m2-01 live
-checks with the owner, then m2-02-shell-carries-the-desktop starts. Its first job is to add the
-section address to the body of `POST /api/window`, so a watcher's Continue opens the window at the
-same section. The Rust mirror of the closed address list (`ADDRESSES` in `ui/lib/words.js`)
-arrives in m2-02 with its first Rust consumer.
+m2-01-settings-tab and m2-02-shell-carries-the-desktop have landed (see Landed). The service now
+asks an attached shell to show the window (at a section of the page), show a notice, open a link
+or a folder and pick a file, over the `desktop` stream, and the shell carries each out. While
+Tauri is still in the service, one route (`ShellRoute`) sends a request to the newest attached
+shell and otherwise to the Tauri window. Next: the coordinator deploys m2-02 and runs its live
+checks with the owner (the shell is started by hand beside the Tauri window; the toast check waits
+for m2-04), then m2-03-shell-lifecycle starts. m2-04 deletes the Tauri branch of the route
+(`ShellRoute::install_fallback`, `ServiceHost::install_native_fallback` and its one call in
+`desktop/mod.rs`) and gives the Start-menu shortcut the AUMID `Sylin.Ghostlight`.
 
 ## Landed
 
 | Slice | What | Commit |
 |---|---|---|
 | m2-01-settings-tab | Settings, a tab with a left rail before About, replaces the Controls button and sheet. The rail has This screen, Sharing, Browser work, Notifications and Diagnostics, each with its state word, and `kit/controls.js` became `kit/settings.js`. Every tab has an address from the closed list `ADDRESSES` (`#settings/sharing`, and so on), written in place with `history.replaceState`. In Control the page can quit Ghostlight: `WebAct::Quit`, `POST /api/quit` (202), a quit port the service attaches to the facade, and `quit_ghostlight` on both transports. Watch shows the Continue line in each section and Closed shows the watching-off line. The connection sentence moved to Status. The UI-surface guard tests moved out of `desktop/mod.rs` into `workbench/surface_tests.rs`. The Policy page's ceilings end with the line "Ghostlight's own control page on this computer is never automated.", authored once. Forced-colors rules cover the band, the tabs, the rail and the state words. | see `git log` |
+| m2-02-shell-carries-the-desktop | The service asks the shell, over the `desktop` stream, to show the window at a section, show a notice, open a link or a folder and pick a file. New frames `show`, `notice`, `act` (service to shell) and `act_result` (shell to service) with goldens in `tests/golden/desktop/`. `PageAddress` (`workbench/address.rs`) is the Rust copy of the page's address list, `POST /api/window` takes `{view, address?}` (unknown address: 400) and a Watch Continue sends its section or screen. `service/shell.rs` holds the attached shells and `ShellRoute`, the one adapter the facade gets for presentation and native acts. The shell (`crates/desktop/src/native.rs`) carries them out with `notify-rust`, `open` and `rfd`, names itself `Sylin.Ghostlight`, and skips any frame it cannot read. The blocked and checkup notice words moved to `language/workbench.rs`. | see `git log` |
 
 ## Owner questions
 
@@ -119,6 +121,31 @@ Each has a default the work uses until the owner answers.
   starts.
 
 ## Owed live checks
+
+After the coordinator deploys m2-02, with the owner (the coordinator starts `bin/ghostlight-desktop`
+by hand beside the Tauri window):
+
+- m2-02, Continue (Windows): from a Chrome watch tab (the URL `ghostlight status` prints) on
+  Settings > Diagnostics, Continue brings the shell's window forward on that section. Continue from
+  the band and from the Integrations roster line brings the shell's window forward on the screen
+  the tab shows. With the shell's window closed (its tray icon or not), Continue opens it again on
+  the same section.
+- m2-02, Locate (Windows): Locate in Integrations, in the shell's window, opens a file dialog owned
+  by the shell's window (it sits over it and the window does not take clicks until it closes).
+  Choosing a file locates the client; closing the dialog changes nothing.
+- m2-02, links and folders (Windows): a link in About and Open log folder (Settings > Diagnostics,
+  diagnostics on) open from the shell's window with no PowerShell or console window flashing.
+- m2-02, no shell (Windows): with `ghostlight-desktop` not running, the same acts still work
+  through the Tauri window (Continue from a watch tab, Locate, a link, Open log folder, Send test).
+- m2-02, two shells: start a second `ghostlight-desktop` while the first runs. Continue and Locate
+  go to the newer one. Close it, and they go to the older one.
+- m2-02, Linux: the Linux build compiles with `libdbus-1-dev` present (notify-rust with only its
+  `d` feature uses the `dbus` crate). Continue, a link, a folder and Locate work from the shell on
+  GNOME and KDE. The file dialog is the GTK one and is not parented to the window.
+- m2-02, toast: waits for m2-04. An unpackaged program's toast shows only when a Start-menu
+  shortcut carries the AUMID `Sylin.Ghostlight`, and the shortcut gets it with its new target.
+  Until then, Send test in the shell's window shows no toast and prints one line on the shell's
+  standard error, or shows nothing.
 
 After the coordinator deploys m2-01, with the owner:
 
@@ -212,3 +239,60 @@ After the coordinator deploys m2-01, with the owner:
 - m2-01: `tests/workbench-surface.mjs` and `tests/workbench-preview-server.mjs` gained the quit act,
   the address bar, and the new ceiling line; the preview server's window fixture answers
   `quit_ghostlight`.
+- m2-02: the address type is `PageAddress` (`workbench/address.rs`, re-exported from `workbench`),
+  not `WorkbenchAddress` as the spec says, because `workbench::web::WorkbenchAddress` already names
+  the server's loopback address and two types of one name in one module tree would read as one.
+  A test reads `ui/lib/words.js` with `include_str!` and proves the two lists are equal.
+- m2-02: the spec says the service ends the stream on an unknown kind. The tree skips it:
+  `DesktopFrame::Unknown` (`#[serde(other)]`) is decoded and ignored, and only a frame of a known
+  kind that does not decode ends the stream. The shell now skips both an unknown kind and a frame
+  it cannot decode, and ends only on a goodbye, the end of the stream or a stream failure. A nested
+  act kind the shell does not know decodes as `NativeAct::Unknown` and is answered `failed`, so the
+  service never waits on a frame the shell dropped. The frame fields are `show {address}`,
+  `notice {title, body}`, `act {id, act}` with `act` tagged by `kind` (`open_url {url}`,
+  `open_folder {path}`, `pick_file {title}`), and `act_result {id, outcome}` with `outcome` tagged
+  by `kind` (`done`, `picked {path}`, `cancelled`, `failed`). Extra goldens beyond the spec:
+  `show-no-address.json` and one `act-result-*.json` per outcome. The relay is unchanged.
+- m2-02: all three acts wait for `act_result`, not only `pick_file`. A link or a folder waits at
+  most 10 s and then fails with `NATIVE_ACT_FAILED` ("This computer would not do that."), so the
+  page can say that Open log folder did not open. A file dialog waits for the person with no limit.
+  The stream ending, a goodbye (`Shells::say_goodbye`, called by the quit's farewell) and a quit
+  that begins or a session end (`Shells::close`, called first in `Quit::begin` and
+  `Quit::session_end`) each release every waiting act, which answers
+  `WorkbenchPresentationError::Unavailable`; the facade maps that to its own
+  `WorkbenchError::PresentationUnavailable`. A waiting act is not an invocation, so the quit's
+  drain never counts it. After a quit begins no act starts.
+- m2-02: the router is attached when the service host starts, not at the Tauri `Ready` event. The
+  Tauri adapters are installed into it as the fallback at `Ready`
+  (`ServiceHost::install_native_fallback`), and a request with no shell and no fallback is
+  unavailable, as before. With a shell attached the shell wins, even when Tauri is up. m2-04 deletes
+  `ShellRoute::fallback`, `install_fallback`, the host method and its one call in `desktop/mod.rs`.
+  Tauri's `NativePresentation::reveal` takes the address and ignores it. The desktop stream is no
+  longer enrolled in the farewell's `mcp` map; `Shells` says goodbye to it.
+- m2-02: the shell checks the link scheme as well (`https://` only) before it asks the opener, as a
+  second line behind the facade's own rule; an address that fails answers `failed`. The shell opens
+  the window at a section by loading the workbench address with the hash after it when it has to
+  make the window, and by setting `location.hash` when the window is open (Windows). On Linux an
+  Open request rebuilds the window, and the requested address waits in `Shell.requested` for the
+  rebuild. The address check (`a-z`, `/`, `-`, at most 48 characters, non-empty) runs when the
+  request arrives and again where the address is used.
+- m2-02: a notice is shown on a short-lived thread, so a slow notification service never holds the
+  window. A failure is one line on the shell's standard error. Clicking a toast does nothing: an
+  unpackaged program has no activator. The file dialog is parented to the shell window through
+  `raw-window-handle`; the GTK backend of `rfd` ignores the parent.
+- m2-02: the Linux build of the shell now needs `libdbus-1-dev` (the `dbus` crate, through
+  notify-rust's `d` feature) and `rfd` with `gtk3`. `.github/workflows/ci.yml` and `release.yml`
+  install `libwebkit2gtk-4.1-dev` and friends, which normally pull `libdbus-1-dev`, but this was
+  not run. It is an owed Linux check above; the workflows are not in this slice's files.
+- m2-02: `Cargo.lock` gained `notify-rust`, `open` and `rfd` as dependencies of
+  `ghostlight-desktop` and `dbus` as a dependency of `notify-rust`. No package was added. The
+  desktop network guard now also bans `zbus`, `ashpd` and `async-std`, and passes on both targets.
+- m2-02: the page. `transport.continueInWindow(address)` sends `{view, address}` over HTTP and
+  `{address}` to the Tauri command, which ignores it. A Continue line in a Settings section sends
+  `settings/<section>` (the kit gets `addressOf` through its words), the roster line sends
+  `integrations`, and the band's line sends the address of the screen the page shows when it is
+  pressed, since the band is on every screen. Apply on the Policy page, when this screen cannot apply, continues
+  at the screen shown as well.
+- m2-02: `src/work/tests/control.rs` needed the new `reveal` signature. Another lane's commit
+  (`b7f9de10`) staged that file whole and carried those two lines in, so this slice's commit does
+  not touch it.

@@ -342,7 +342,10 @@
       const notify = target.closest("#test-notification");
       if (notify) return press(notify, () => testNotification());
       const carryOn = target.closest("[data-settings-continue]");
-      if (carryOn) return press(carryOn, () => continueInWindow());
+      if (carryOn) {
+        const section = carryOn.closest(".settings-section")?.dataset.section;
+        return press(carryOn, () => continueInWindow(words.addressOf("settings", section)));
+      }
       const leaving = target.closest("[data-quit]");
       if (leaving) onQuit(leaving);
     }

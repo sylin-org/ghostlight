@@ -65,10 +65,15 @@
     const whyNot = (act) => access?.acts?.[act]?.why_not ?? "";
     const opensLinks = () => access !== null && access.opener !== OPENER_SERVICE;
 
-    /** The one line a panel shows for the acts it cannot offer: the reason, and the way on. */
-    function continueMarkup(why) {
+    /**
+     * The one line a panel shows for the acts it cannot offer: the reason, and the way on. A line
+     * that belongs to one screen names its address; the band's line carries none and the page
+     * continues at the screen it is showing.
+     */
+    function continueMarkup(why, address) {
+      const place = address ? ` data-address="${escapeHtml(address)}"` : "";
       return `<span>${escapeHtml(why)}</span>`
-        + `<button class="link-button" type="button" data-continue>${escapeHtml(CONTINUE_LABEL)}</button>`;
+        + `<button class="link-button" type="button" data-continue${place}>${escapeHtml(CONTINUE_LABEL)}</button>`;
     }
 
     /**
@@ -688,7 +693,7 @@
       // One line for the whole roster, naming the first change this screen cannot make.
       const withheld = [ACT.harnessAct, ACT.locate, ACT.setupAll].find((act) => !can(act));
       el["integrations-continue"].hidden = !withheld;
-      el["integrations-continue"].innerHTML = withheld ? continueMarkup(whyNot(withheld)) : "";
+      el["integrations-continue"].innerHTML = withheld ? continueMarkup(whyNot(withheld), addressOf("integrations")) : "";
       if (!snapshot.harnesses.length) {
         el["integration-grid"].innerHTML =
           '<div class="empty">No supported MCP client was found for this user.</div>';

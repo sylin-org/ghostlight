@@ -1,0 +1,8 @@
+{
+  "kind": "act",
+  "id": 3,
+  "act": {
+    "kind": "pick_file",
+    "title": "Locate the harness application or settings file"
+  }
+}

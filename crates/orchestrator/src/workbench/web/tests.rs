@@ -20,6 +20,7 @@ use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Part, USER_HOME_VARIABLE};
 use crate::workbench::tests::RecordingActs;
+use crate::workbench::PageAddress;
 use crate::workbench::WorkbenchDestination;
 use crate::workbench::WorkbenchPresentationPort;
 use crate::workbench::WorkbenchQuitPort;
@@ -166,13 +167,19 @@ impl Call {
     }
 }
 
-/// A presentation port that counts how often the window was asked to come forward.
+/// A presentation port that records each time the window was asked to come forward, and where.
 #[derive(Default)]
-struct CountingWindow(std::sync::atomic::AtomicUsize);
+struct CountingWindow(std::sync::Mutex<Vec<Option<PageAddress>>>);
+
+impl CountingWindow {
+    fn asked(&self) -> Vec<Option<PageAddress>> {
+        self.0.lock().unwrap().clone()
+    }
+}
 
 impl WorkbenchPresentationPort for CountingWindow {
-    fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    fn reveal(&self, address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
+        self.0.lock().unwrap().push(address);
         Ok(())
     }
 
@@ -766,9 +773,59 @@ fn the_window_asks_for_the_window_once_per_five_seconds_when_it_is_a_watcher() {
             200
         );
     }
-    assert_eq!(window.0.load(std::sync::atomic::Ordering::SeqCst), 4);
+    assert_eq!(window.asked().len(), 4);
     let unknown = fixture.control(post("/api/window", r#"{"view":"setup"}"#));
     assert_eq!(unknown.status, 400);
+}
+
+#[test]
+fn the_window_comes_forward_at_every_address_of_the_page() {
+    let fixture = Fixture::start();
+    let window = Arc::new(CountingWindow::default());
+    fixture.facade.attach_presentation(window.clone());
+    for address in PageAddress::ALL {
+        let body = json!({ "view": "workbench", "address": address.as_str() }).to_string();
+        assert_eq!(fixture.control(post("/api/window", &body)).status, 200);
+    }
+    assert_eq!(
+        fixture
+            .control(post("/api/window", r#"{"view":"workbench"}"#))
+            .status,
+        200,
+        "no address leaves the window where it was"
+    );
+    assert_eq!(
+        fixture
+            .control(post(
+                "/api/window",
+                r#"{"view":"workbench","address":null}"#
+            ))
+            .status,
+        200
+    );
+    let mut wanted: Vec<Option<PageAddress>> = PageAddress::ALL.into_iter().map(Some).collect();
+    wanted.extend([None, None]);
+    assert_eq!(window.asked(), wanted);
+}
+
+#[test]
+fn an_address_the_page_does_not_have_is_a_bad_request_and_reaches_no_window() {
+    let fixture = Fixture::start();
+    let window = Arc::new(CountingWindow::default());
+    fixture.facade.attach_presentation(window.clone());
+    for address in [
+        json!("settings/nowhere"),
+        json!("#settings"),
+        json!(""),
+        json!("monitor\"; alert(1); \""),
+        json!(7),
+        json!(["monitor"]),
+    ] {
+        let body = json!({ "view": "workbench", "address": address }).to_string();
+        let reply = fixture.control(post("/api/window", &body));
+        assert_eq!(reply.status, 400, "{address}");
+    }
+    assert!(window.asked().is_empty());
 }
 
 #[test]

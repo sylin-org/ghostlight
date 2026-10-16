@@ -24,6 +24,7 @@ use tao::event_loop::EventLoopWindowTarget;
 use tao::window::{Icon, Window, WindowBuilder, WindowId};
 use wry::{WebContext, WebView, WebViewBuilder};
 
+use crate::native::move_script;
 use crate::tray::icon_image;
 use crate::webview::{access_script, harden};
 
@@ -258,13 +259,6 @@ pub struct ShellView {
 /// The shell's one window with its webview.
 pub struct ShellWindow {
     // The webview drops before the window it is attached to, and both before the context.
-    #[cfg_attr(
-        not(target_os = "linux"),
-        expect(
-            dead_code,
-            reason = "only the Linux renderer-lost hook reads it; elsewhere it is held alive"
-        )
-    )]
     webview: WebView,
     window: Window,
     _context: WebContext,
@@ -332,6 +326,22 @@ impl ShellWindow {
         present_when_idle(&self.window);
         #[cfg(not(target_os = "linux"))]
         self.window.set_focus();
+    }
+
+    /// Moves the open page to `address`, a place the service named. An address that is not safe
+    /// to put in a script changes nothing.
+    pub fn go_to(&self, address: &str) {
+        let Some(script) = move_script(address) else {
+            return;
+        };
+        if let Err(error) = self.webview.evaluate_script(&script) {
+            eprintln!("ghostlight-desktop: {}", native(error));
+        }
+    }
+
+    /// The native window, which a dialog is parented to.
+    pub fn native_window(&self) -> &Window {
+        &self.window
     }
 
     /// The window's id in the event loop.

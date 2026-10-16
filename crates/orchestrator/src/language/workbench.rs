@@ -116,6 +116,21 @@ pub const LINK_NOT_SECURE: &str = "Ghostlight opens only secure links.";
 /// The title of the dialog where a person points at a client's application or settings file.
 pub const LOCATE_DIALOG_TITLE: &str = "Locate the harness application or settings file";
 
+/// The title of the notice that says Ghostlight blocked an action.
+pub const NOTICE_BLOCKED_TITLE: &str = "Ghostlight blocked an action";
+
+/// The body of the notice that says Ghostlight blocked an action. It names no site and no action.
+pub const NOTICE_BLOCKED_BODY: &str = "A configured guardrail prevented browser work.";
+
+/// The title of the notice a person asks for to check that notices arrive.
+pub const NOTICE_CHECKUP_TITLE: &str = "Ghostlight checkup";
+
+/// The body of the checkup notice.
+pub const NOTICE_CHECKUP_BODY: &str = "Notifications are ready.";
+
+/// Why a link, a folder or a file dialog did not happen on this computer.
+pub const NATIVE_ACT_FAILED: &str = "This computer would not do that.";
+
 /// The label of the Controls row for agents' browser work.
 pub const CONTROLS_RUNTIME_LABEL: &str = "Browser work";
 
@@ -345,6 +360,9 @@ mod tests {
             POLICY_EMPTY,
             DIAGNOSTICS_OFF,
             LINK_NOT_SECURE,
+            NATIVE_ACT_FAILED,
+            NOTICE_BLOCKED_BODY,
+            NOTICE_CHECKUP_BODY,
             CONTROLS_NOTIFICATIONS_WORD,
             WATCHING_NOT_SERVED,
             WATCHING_NOT_SAVED,

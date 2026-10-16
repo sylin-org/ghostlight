@@ -6,6 +6,11 @@
 // allowed, with its reason: `http`, which wry's own API types bring. The shell registers no custom
 // scheme and no IPC handler, and it does no I/O and opens no socket. Each exception must still
 // appear in the tree, so a stale exception fails and is deleted.
+//
+// The shell also carries the service's native acts (notices, links and folders, a file dialog).
+// Those crates are built so that no async runtime and no pure-Rust D-Bus stack comes with them:
+// zbus, ashpd and async-std stay out of the tree (notify-rust with only its "d" feature, rfd with
+// default features off).
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -19,9 +24,9 @@ const CRATE = "ghostlight-desktop";
 const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
 
 /** Crates the window must never link: any network stack would break the never-phone-home promise (ADR-0028). */
-const NETWORK_CRATES = /^(hyper|reqwest|ureq|h2|http|rustls|native-tls|openssl|curl|isahc|tokio|socket2|mio)$/;
+const NETWORK_CRATES = /^(hyper|reqwest|ureq|h2|http|rustls|native-tls|openssl|curl|isahc|tokio|socket2|mio|zbus|ashpd|async-std)$/;
 
-/** Banned names that may stay in the tree, each with the reason it holds. */
+/** Banned names that may stay in the tree, each with the reason it holds. zbus, ashpd and async-std have none. */
 const EXCEPTIONS = new Map([
   ["http", "request and response types that wry's own API brings; the shell registers no custom scheme and no IPC handler, does no I/O and opens no socket"],
 ]);
@@ -84,6 +89,15 @@ test("every exception names a crate on the ban list", () => {
   for (const name of EXCEPTIONS.keys()) {
     assert.ok(NETWORK_CRATES.test(name), `${name} is not on the ban list, so it needs no exception`);
   }
+});
+
+test("the ban list names the crates the native acts could pull in", () => {
+  for (const name of ["zbus", "ashpd", "async-std", "tokio", "hyper", "reqwest"]) {
+    assert.ok(NETWORK_CRATES.test(name), `${name} is not on the ban list`);
+  }
+  assert.ok(!NETWORK_CRATES.test("notify-rust"));
+  assert.ok(!NETWORK_CRATES.test("rfd"));
+  assert.ok(!NETWORK_CRATES.test("open"));
 });
 
 test("the tree reduction keeps names only", () => {

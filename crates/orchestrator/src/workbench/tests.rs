@@ -9,8 +9,9 @@ use crate::governance::{AuditSink, Capability, CapabilitySet, Decision, Governan
 use crate::language::outcome::Observed;
 
 use super::{
-    HistoryItem, NotificationKind, WorkbenchChange, WorkbenchEvent, WorkbenchEventSink,
-    WorkbenchFacade, WorkbenchPresentationError, WorkbenchPresentationPort, WorkbenchProjection,
+    HistoryItem, NotificationKind, PageAddress, WorkbenchChange, WorkbenchEvent,
+    WorkbenchEventSink, WorkbenchFacade, WorkbenchPresentationError, WorkbenchPresentationPort,
+    WorkbenchProjection,
 };
 
 #[derive(Default)]
@@ -36,7 +37,7 @@ impl AuditSink for MemoryAudit {
 struct Notifications(Mutex<Vec<super::WorkbenchNotification>>);
 
 impl WorkbenchPresentationPort for Notifications {
-    fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+    fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
         Ok(())
     }
 
@@ -289,7 +290,7 @@ fn blocked_notifications_are_content_free_and_deduplicated() {
 fn presentation_failure_does_not_change_projection() {
     struct Failing;
     impl WorkbenchPresentationPort for Failing {
-        fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+        fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
             Err(WorkbenchPresentationError::Native("injected".into()))
         }
 

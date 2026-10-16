@@ -161,6 +161,7 @@ test("the other acts go where the table sends them", async () => {
   await transport.testNotification();
   await transport.revealDiagnostics();
   await transport.continueInWindow();
+  await transport.continueInWindow("settings/diagnostics");
   await transport.policy();
   await transport.quit();
   const seen = send.calls.map((call) => `${call.method} ${call.path} ${call.body ?? ""}`.trim());
@@ -174,6 +175,7 @@ test("the other acts go where the table sends them", async () => {
     "POST /api/notifications/test {}",
     "POST /api/diagnostics/reveal {}",
     'POST /api/window {"view":"workbench"}',
+    'POST /api/window {"view":"workbench","address":"settings/diagnostics"}',
     "GET /api/policy",
     "POST /api/quit {}"
   ]);
@@ -469,6 +471,7 @@ test("the native shell path still invokes today's commands with today's argument
   await transport.testNotification();
   await transport.openDestination("home");
   await transport.continueInWindow();
+  await transport.continueInWindow("integrations");
   await transport.quit();
   assert.deepEqual(invoked, [
     ["workbench_snapshot"],
@@ -490,7 +493,8 @@ test("the native shell path still invokes today's commands with today's argument
     ["open_harness_download", { productId: "codex" }],
     ["test_notification"],
     ["open_destination", { destination: "home" }],
-    ["continue_in_window"],
+    ["continue_in_window", { address: undefined }],
+    ["continue_in_window", { address: "integrations" }],
     ["quit_ghostlight"]
   ]);
 });

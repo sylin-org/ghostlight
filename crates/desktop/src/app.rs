@@ -4,7 +4,10 @@
 //! The shell opens the `desktop` stream to the running service, which hands it the workbench
 //! address, the bearer for the workbench page and, when the service has no tray of its own, the
 //! tray to draw. The window is a webview on that address. The shell decides nothing: a tray choice
-//! is reported to the service, and a goodbye or a lost stream ends the shell.
+//! is reported to the service, and a goodbye or a lost stream ends the shell. What the service asks
+//! afterwards is carried out here and on the event-loop thread: show the window (at a section of
+//! the page), show a notice, open a link or a folder, pick a file. Each act is answered with its
+//! result.
 //!
 //! With a tray, closing the window keeps the process and the tray opens it again. Without one,
 //! losing the window ends the shell, whether the person closed it or the renderer failed, so no
@@ -21,7 +24,8 @@ use ghostlight_relay::home;
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
 
-use crate::link::{open_link, Link, TrayItemId, Workbench};
+use crate::link::{open_link, DesktopFrame, Link, TrayItemId, Workbench};
+use crate::native::{self, ThisComputer};
 use crate::session::{self, SessionSignal, SessionState, FALLBACK_EXIT};
 use crate::tray::{Tray, TrayEvent};
 use crate::webview::{prepare_profile, profile_directory};
@@ -68,6 +72,8 @@ fn goes_on(has_tray: bool, window: WindowState) -> bool {
 enum ShellEvent {
     /// The user used the tray.
     Tray(TrayEvent),
+    /// The service asked for something: to show the window, a notice, or an act.
+    Service(DesktopFrame),
     /// The service said goodbye or the stream ended.
     LinkEnded,
     /// The webview's renderer process ended.
@@ -100,6 +106,8 @@ struct Shell {
     workbench: Workbench,
     profile: PathBuf,
     link: Link,
+    /// The section the service asked the window to open at, until a window shows it.
+    requested: Option<String>,
     #[cfg(target_os = "linux")]
     proxy: EventLoopProxy<ShellEvent>,
     session: SessionState,
@@ -137,6 +145,9 @@ impl Shell {
             Some(WindowAct::Focus) => {
                 if let Some(window) = &self.window {
                     window.focus();
+                    if let Some(address) = self.requested.take() {
+                        window.go_to(&address);
+                    }
                 }
             }
             Some(WindowAct::Destroy) => self.window = None,
@@ -146,7 +157,7 @@ impl Shell {
 
     fn create_window(&mut self, target: &EventLoopWindowTarget<ShellEvent>) {
         let view = ShellView {
-            start_url: self.workbench.url.clone(),
+            start_url: native::start_url(&self.workbench.url, self.requested.take().as_deref()),
             origin: self.workbench.origin().to_owned(),
             bearer: self.workbench.bearer.clone(),
             profile: self.profile.clone(),
@@ -165,6 +176,33 @@ impl Shell {
                 eprintln!("ghostlight-desktop: {error}");
                 self.apply(LifecycleEvent::Destroyed, target);
             }
+        }
+    }
+
+    /// Brings the window forward, opening it first when it is not open, at `address` when the
+    /// service gave a safe one.
+    fn show(&mut self, address: Option<String>, target: &EventLoopWindowTarget<ShellEvent>) {
+        if let Some(address) = address.filter(|address| native::is_safe_address(address)) {
+            self.requested = Some(address);
+        }
+        self.apply(LifecycleEvent::OpenRequested, target);
+    }
+
+    /// Carries out what the service asked for.
+    fn serve(&mut self, request: DesktopFrame, target: &EventLoopWindowTarget<ShellEvent>) {
+        match request {
+            DesktopFrame::Show { address } => self.show(address, target),
+            DesktopFrame::Notice { title, body } => native::show_notice(title, body),
+            DesktopFrame::Act { id, act } => {
+                let computer = ThisComputer {
+                    parent: self.window.as_ref().map(ShellWindow::native_window),
+                };
+                let outcome = native::carry_out(&act, &self.session, &computer);
+                if let Err(error) = self.link.send_act_result(id, outcome) {
+                    eprintln!("ghostlight-desktop: {error}");
+                }
+            }
+            _ => {}
         }
     }
 
@@ -209,6 +247,7 @@ impl Shell {
                 Some(TrayAction::Report(item)) => self.report(item),
                 None => {}
             },
+            Event::UserEvent(ShellEvent::Service(request)) => self.serve(request, target),
             Event::UserEvent(ShellEvent::LinkEnded) => *flow = ControlFlow::Exit,
             #[cfg(target_os = "linux")]
             Event::UserEvent(ShellEvent::RendererLost) => {
@@ -241,6 +280,7 @@ impl Shell {
 pub fn run() -> ExitCode {
     window::apply_renderer_policy();
     window::prepare_identity();
+    native::prepare_identity();
     if let Err(error) = window::init_display() {
         eprintln!("ghostlight-desktop: {error}");
         return ExitCode::from(exit_code_of(&error));
@@ -280,7 +320,11 @@ fn run_loop(link: Link, workbench: Workbench, profile: PathBuf) -> ExitCode {
     let event_loop = EventLoopBuilder::<ShellEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let ended = proxy.clone();
-    if let Err(error) = link.spawn_reader(move || post(&ended, ShellEvent::LinkEnded)) {
+    let asked = proxy.clone();
+    if let Err(error) = link.spawn_reader(
+        move |request| post(&asked, ShellEvent::Service(request)),
+        move || post(&ended, ShellEvent::LinkEnded),
+    ) {
         eprintln!("ghostlight-desktop: {error}");
         return ExitCode::from(EXIT_FAILURE);
     }
@@ -297,6 +341,7 @@ fn run_loop(link: Link, workbench: Workbench, profile: PathBuf) -> ExitCode {
         workbench,
         profile,
         link,
+        requested: None,
         #[cfg(target_os = "linux")]
         proxy,
         session: SessionState::new(),

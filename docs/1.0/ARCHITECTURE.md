@@ -506,8 +506,18 @@ over loopback. Both paths use the same command names, through one transport.
 
 `ghostlight-desktop` is the webview over the loopback workbench. It gets the workbench address and
 the bearer over the relay's `desktop` role and gives the bearer to the page of that origin only,
-which is therefore in the Control context. It registers no custom scheme and no page bridge. Tauri
-stays the service's own window until the shell track removes it.
+which is therefore in the Control context. It registers no custom scheme and no page bridge.
+
+The same stream carries what the service asks of the shell afterwards, all of it frames of the
+same-build contract in `intake/desktop.rs` (goldens in `tests/golden/desktop/`). `show` brings the
+window forward, opening it first, at a section of the page when it names one (the closed list of
+page addresses, which the service checks and the shell only keeps script-safe). `notice` is one
+operating-system notification with Ghostlight-authored words, best effort. `act` asks the shell to
+open a link or a folder or to pick a file, and the shell answers each with `act_result`. A
+notice, a link, a folder and a file dialog are therefore carried out by the shell, in its own
+process and under its own application id, not by the service. A reader skips a frame kind it does
+not know. While Tauri is still in the service, one route sends each request to the newest attached
+shell and, when none is attached, to the Tauri window; it goes when Tauri leaves the service.
 
 ## Chokepoints and unit of work
 

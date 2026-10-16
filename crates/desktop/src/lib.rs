@@ -1,8 +1,9 @@
 //! The Ghostlight window process (ADR-0199 Decisions 1 and 7, and its amendment of 2026-10-15).
 //!
 //! `ghostlight-desktop` is the third executable of one build, next to the service and the
-//! connectors. It owns the window and the tray, and nothing else. It decides nothing and opens no
-//! network port: the window renders the service's loopback workbench, and every fact it shows or
+//! connectors. It owns the window, the tray, and the acts only this computer can do for the service
+//! (a notice, a link or a folder opened, a file picked), and nothing else. It decides nothing and
+//! opens no network port: the window renders the service's loopback workbench, and every fact it shows or
 //! acts on comes from the service. The shell learns the workbench address and the bearer that
 //! makes the page the window's over the relay's `desktop` stream, and hands the bearer to that
 //! origin's page only.
@@ -17,16 +18,24 @@
 //! Tauri and are already locked at these exact versions in this tree, so the shell adds no
 //! package to `Cargo.lock` except itself.
 //!
+//! The service's native acts use `notify-rust` (notices; D-Bus on Linux, a toast on Windows),
+//! `open` (the system opener, through `ShellExecute` on Windows so no console window opens) and
+//! `rfd` (the file dialog; GTK on Linux, the common dialog on Windows). Each is already locked at
+//! an exact version, and each is built without the features that bring an async runtime, D-Bus in
+//! pure Rust, or the desktop portal.
+//!
 //! The dependency tree holds exactly one name on the network-crate ban list of ADR-0028 and
 //! ADR-0197: `http`, which `wry`'s own API types bring. The shell registers no custom scheme and
 //! no IPC handler, does no I/O of its own over it and opens no socket.
-//! `crates/desktop/guards/network.test.mjs` names it as the one exception and fails if it ever
-//! leaves the tree.
+//! `crates/desktop/guards/network.test.mjs` names it as the one exception, fails if it ever
+//! leaves the tree, and fails if `zbus`, `ashpd`, `async-std` or any other network or async
+//! runtime crate enters it.
 
 use std::ffi::OsString;
 
 pub mod app;
 pub mod link;
+pub mod native;
 pub mod session;
 pub mod tray;
 pub mod webview;

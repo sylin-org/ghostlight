@@ -194,7 +194,7 @@ function kit(options = {}) {
   };
   const settings = Settings.create({
     document: shown.document,
-    words: { ...Words.SETTINGS, screenState: Words.screenState, byteSize: Words.byteSize },
+    words: { ...Words.SETTINGS, screenState: Words.screenState, byteSize: Words.byteSize, addressOf: Words.addressOf },
     applyIntent: record("applyIntent"),
     setWatching: record("setWatching"),
     setDiagnostics: record("setDiagnostics"),
@@ -558,7 +558,21 @@ test("in Watch each other section says where the change is made, with one Contin
 
   shown.click(shown.el("settings-sharing-continue-button"));
   await settle();
-  assert.deepEqual(shown.calls, [["continueInWindow"]]);
+  assert.deepEqual(shown.calls, [["continueInWindow", "settings/sharing"]]);
+});
+
+test("each section's Continue asks for the window at that section's address", async () => {
+  const shown = kit();
+  shown.settings.render(part({ context: "watch" }));
+  for (const section of SECTIONS.slice(1)) {
+    shown.click(shown.el(`settings-${section}-continue-button`));
+    await settle();
+  }
+  assert.deepEqual(
+    shown.calls,
+    SECTIONS.slice(1).map((section) => ["continueInWindow", `settings/${section}`])
+  );
+  for (const [, address] of shown.calls) assert.ok(Words.parseAddress(address), address);
 });
 
 test("while held, a watching screen shows the state, no button for the runtime, and the Continue line", () => {

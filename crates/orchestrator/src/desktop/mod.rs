@@ -29,8 +29,8 @@ use crate::service::lifetime::QUIT_GRACE;
 use crate::service::{Quit, ServiceHost};
 use crate::workbench::context::WebContext;
 use crate::workbench::{
-    validate_policy_document, validate_search_query, PolicyPreview, RuntimeSource, SearchHit,
-    WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade,
+    validate_policy_document, validate_search_query, PageAddress, PolicyPreview, RuntimeSource,
+    SearchHit, WorkbenchDestination, WorkbenchEvent, WorkbenchEventSink, WorkbenchFacade,
     WorkbenchIntentResult, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
     WorkbenchPresentationPort, WorkbenchRuntimeIntent, WorkbenchSnapshot,
 };
@@ -60,7 +60,7 @@ struct NativePresentation {
 }
 
 impl WorkbenchPresentationPort for NativePresentation {
-    fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+    fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
         show_workbench(&self.app)
     }
 
@@ -263,12 +263,10 @@ pub fn run(reason: StartReason) -> Result<()> {
                 // its window. Otherwise a service-thread Open can build a second native window
                 // before Tauri registers the first under MAIN_WINDOW. Early callers already retry
                 // unavailable presentation; a recoverable construction failure still permits Open.
-                app.state::<DesktopState>()
-                    .workbench
-                    .attach_presentation(Arc::new(NativePresentation { app: app.clone() }));
-                app.state::<DesktopState>()
-                    .workbench
-                    .attach_native_acts(Arc::new(NativeActs { app: app.clone() }));
+                ready_host.install_native_fallback(
+                    Arc::new(NativePresentation { app: app.clone() }),
+                    Arc::new(NativeActs { app: app.clone() }),
+                );
                 if let Err(error) = ready_host.publish_ready() {
                     record_desktop_failure(&ready_host, "desktop-ready runtime publication failed");
                     eprintln!("Ghostlight could not publish desktop readiness: {error}");
@@ -785,7 +783,10 @@ fn open_destination(destination: WorkbenchDestination, app: AppHandle) -> Result
 /// Bring the Ghostlight window forward. This window already is the one, so it only shows it.
 #[tauri::command]
 fn continue_in_window(state: State<'_, DesktopState>) -> Result<(), String> {
-    state.workbench.reveal().map_err(|error| error.to_string())
+    state
+        .workbench
+        .reveal(None)
+        .map_err(|error| error.to_string())
 }
 
 /// A person's Quit: the service sets the latch, finishes what is in flight, says goodbye on every

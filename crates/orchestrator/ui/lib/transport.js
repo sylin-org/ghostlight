@@ -103,7 +103,11 @@
     reveal_diagnostics: { method: POST, path: "/api/diagnostics/reveal", body: () => ({}) },
     open_destination: { method: POST, path: "/api/open", body: ({ destination }) => ({ destination }) },
     open_harness_download: { method: POST, path: "/api/open", body: ({ productId }) => ({ product: productId }) },
-    continue_in_window: { method: POST, path: "/api/window", body: () => ({ view: WORKBENCH_VIEW }) },
+    continue_in_window: {
+      method: POST,
+      path: "/api/window",
+      body: ({ address }) => (address ? { view: WORKBENCH_VIEW, address } : { view: WORKBENCH_VIEW })
+    },
     quit_ghostlight: { method: POST, path: "/api/quit", body: () => ({}) }
   });
 
@@ -474,8 +478,11 @@
        */
       openDestination: (destination) => call("open_destination", { destination }),
 
-      /** Bring the Ghostlight application forward, where changes are made. */
-      continueInWindow: () => call("continue_in_window"),
+      /**
+       * Bring the Ghostlight application forward, where changes are made, at `address` (one of the
+       * page's addresses) when one is given. The service checks the address.
+       */
+      continueInWindow: (address) => call("continue_in_window", { address }),
 
       /** Quit Ghostlight, as the tray does. Answers the sentence the page then shows. */
       quit: () => call("quit_ghostlight")

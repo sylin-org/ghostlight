@@ -4,8 +4,14 @@
 //! The relay opening and the goodbye frame this stream rides on are frozen. The frames below are
 //! not: the service serves the `desktop` role only to a shell of its own build, so the contract
 //! may change with any build. The service sends the workbench address with the secret that lets
-//! the window make changes, and optionally the tray the shell should draw. The shell reports a
-//! click on a tray entry. The shell opens its own window, so an `open` click is only heard.
+//! the window make changes, and optionally the tray the shell should draw. It then asks the shell
+//! to show the window (at a section of the page), to show a notice, and to carry out an act only
+//! this computer can do: open a link, open a folder, pick a file. The shell reports a click on a
+//! tray entry and the result of each act. The shell opens its own window, so an `open` click is
+//! only heard.
+//!
+//! A reader skips a frame kind it does not know. The service ends a stream only for a frame that
+//! does not decode.
 //!
 //! The secret never leaves this stream: [`DesktopFrame`] prints it as redacted, and nothing on the
 //! service side logs a desktop frame.
@@ -16,6 +22,7 @@ use ghostlight_relay::protocol::GoodbyeReason;
 use serde::{Deserialize, Serialize};
 
 use crate::language::workbench as words;
+use crate::workbench::PageAddress;
 
 /// One frame on a `desktop` stream, in either direction.
 ///
@@ -43,6 +50,33 @@ pub enum DesktopFrame {
     Tray {
         /// The entry.
         item: TrayItemId,
+    },
+    /// From the service: bring the window forward, opening it first when it is not open.
+    Show {
+        /// Where in the page to open it. `None` leaves the window where it was.
+        address: Option<PageAddress>,
+    },
+    /// From the service: show one notice. Delivery is best effort and no answer comes back.
+    Notice {
+        /// The notice's title, authored by Ghostlight.
+        title: String,
+        /// The notice's body, authored by Ghostlight. It names no site and no action.
+        body: String,
+    },
+    /// From the service: carry out one act on this computer, then answer with an
+    /// [`DesktopFrame::ActResult`] of the same `id`.
+    Act {
+        /// Names this act in its result.
+        id: u64,
+        /// What to do.
+        act: NativeAct,
+    },
+    /// From the shell: how the act with this `id` ended.
+    ActResult {
+        /// The act it answers.
+        id: u64,
+        /// How it ended.
+        outcome: ActOutcome,
     },
     /// A frame kind this build does not know. Readers skip it.
     #[serde(other)]
@@ -77,9 +111,69 @@ impl fmt::Debug for DesktopFrame {
                 .field("reason", reason)
                 .finish(),
             Self::Tray { item } => formatter.debug_struct("Tray").field("item", item).finish(),
+            Self::Show { address } => formatter
+                .debug_struct("Show")
+                .field("address", address)
+                .finish(),
+            Self::Notice { title, body } => formatter
+                .debug_struct("Notice")
+                .field("title", title)
+                .field("body", body)
+                .finish(),
+            Self::Act { id, act } => formatter
+                .debug_struct("Act")
+                .field("id", id)
+                .field("act", act)
+                .finish(),
+            Self::ActResult { id, outcome } => formatter
+                .debug_struct("ActResult")
+                .field("id", id)
+                .field("outcome", outcome)
+                .finish(),
             Self::Unknown => formatter.write_str("Unknown"),
         }
     }
+}
+
+/// What only this computer can do for the page, as the service asks the shell for it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NativeAct {
+    /// Open a secure address in the person's browser.
+    OpenUrl {
+        /// The address. The service passes only `https://` addresses of its own choosing.
+        url: String,
+    },
+    /// Show a folder in the file manager.
+    OpenFolder {
+        /// The folder.
+        path: String,
+    },
+    /// Ask the person to choose a file.
+    PickFile {
+        /// The dialog's title.
+        title: String,
+    },
+    /// An act this build does not know. A shell answers it as failed.
+    #[serde(other)]
+    Unknown,
+}
+
+/// How the shell's attempt at an act ended.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActOutcome {
+    /// The link or the folder was opened.
+    Done,
+    /// The person chose a file.
+    Picked {
+        /// The file.
+        path: String,
+    },
+    /// The person closed the dialog without choosing.
+    Cancelled,
+    /// This computer would not do it, or the session is ending.
+    Failed,
 }
 
 /// The entries of the tray, a closed set. The service decides what they say and whether they can
@@ -188,6 +282,15 @@ mod tests {
     /// The secret the goldens carry.
     const GOLDEN_BEARER: &str = "BEARER";
 
+    /// The link the goldens carry.
+    const GOLDEN_LINK: &str = "https://example.com/docs";
+
+    /// The folder the goldens carry.
+    const GOLDEN_FOLDER: &str = "/home/person/.ghostlight/logs";
+
+    /// The file the goldens carry.
+    const GOLDEN_FILE: &str = "/home/person/Apps/client.json";
+
     fn golden(name: &str, frame: &DesktopFrame) {
         check_golden_with(
             &format!("tests/golden/desktop/{name}"),
@@ -233,6 +336,106 @@ mod tests {
                 item: TrayItemId::Hold,
             },
         );
+    }
+
+    #[test]
+    fn the_shows_notices_acts_and_results_match_their_goldens() {
+        golden(
+            "show.json",
+            &DesktopFrame::Show {
+                address: Some(PageAddress::SettingsDiagnostics),
+            },
+        );
+        golden(
+            "show-no-address.json",
+            &DesktopFrame::Show { address: None },
+        );
+        golden(
+            "notice.json",
+            &DesktopFrame::Notice {
+                title: words::NOTICE_CHECKUP_TITLE.to_owned(),
+                body: words::NOTICE_CHECKUP_BODY.to_owned(),
+            },
+        );
+        golden(
+            "act-open-url.json",
+            &DesktopFrame::Act {
+                id: 1,
+                act: NativeAct::OpenUrl {
+                    url: GOLDEN_LINK.to_owned(),
+                },
+            },
+        );
+        golden(
+            "act-open-folder.json",
+            &DesktopFrame::Act {
+                id: 2,
+                act: NativeAct::OpenFolder {
+                    path: GOLDEN_FOLDER.to_owned(),
+                },
+            },
+        );
+        golden(
+            "act-pick-file.json",
+            &DesktopFrame::Act {
+                id: 3,
+                act: NativeAct::PickFile {
+                    title: words::LOCATE_DIALOG_TITLE.to_owned(),
+                },
+            },
+        );
+        golden(
+            "act-result.json",
+            &DesktopFrame::ActResult {
+                id: 3,
+                outcome: ActOutcome::Picked {
+                    path: GOLDEN_FILE.to_owned(),
+                },
+            },
+        );
+        golden(
+            "act-result-done.json",
+            &DesktopFrame::ActResult {
+                id: 1,
+                outcome: ActOutcome::Done,
+            },
+        );
+        golden(
+            "act-result-cancelled.json",
+            &DesktopFrame::ActResult {
+                id: 3,
+                outcome: ActOutcome::Cancelled,
+            },
+        );
+        golden(
+            "act-result-failed.json",
+            &DesktopFrame::ActResult {
+                id: 2,
+                outcome: ActOutcome::Failed,
+            },
+        );
+    }
+
+    #[test]
+    fn an_act_this_build_does_not_know_decodes_as_unknown() {
+        let frame: DesktopFrame =
+            serde_json::from_value(json!({"kind": "act", "id": 9, "act": {"kind": "print"}}))
+                .unwrap();
+        assert_eq!(
+            frame,
+            DesktopFrame::Act {
+                id: 9,
+                act: NativeAct::Unknown
+            }
+        );
+    }
+
+    #[test]
+    fn a_show_for_a_section_that_is_not_one_does_not_decode() {
+        let frame = serde_json::from_value::<DesktopFrame>(
+            json!({"kind": "show", "address": "settings/nowhere"}),
+        );
+        assert!(frame.is_err());
     }
 
     #[test]

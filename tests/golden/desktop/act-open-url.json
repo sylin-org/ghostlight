@@ -1,0 +1,8 @@
+{
+  "kind": "act",
+  "id": 1,
+  "act": {
+    "kind": "open_url",
+    "url": "https://example.com/docs"
+  }
+}
