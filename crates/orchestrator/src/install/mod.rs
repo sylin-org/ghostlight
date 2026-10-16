@@ -1145,7 +1145,7 @@ enum RegistrationState {
     Missing,
     Current,
     Updatable,
-    /// An owned entry starts the retired `ghostlight-mcp-connector`, which no longer exists.
+    /// An owned entry starts `ghostlight-mcp-connector`, a program this release does not install.
     Retired,
     /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload names
     /// the program found there, when one could be read (ADR-0135); never its arguments.
@@ -2283,9 +2283,7 @@ mod tests {
 
         replace_with_backup(&link, br#"{"new":true}"#).unwrap();
 
-        // The link itself is untouched: still a symlink, still pointing at the same real file.
-        // Before this fix, the rename in replace_with_backup unlinked it and left a plain file
-        // in its place, silently orphaning whatever the link pointed to.
+        // replace_with_backup writes through a symlink: the link stays a link to the same file.
         let metadata = fs::symlink_metadata(&link).unwrap();
         assert!(metadata.file_type().is_symlink());
         assert_eq!(fs::read_link(&link).unwrap(), real);
@@ -2979,8 +2977,7 @@ mod tests {
         );
         // Pinned against Zed's own current source (crates/settings_content/src/project.rs,
         // ContextServerCommand): the stdio variant has no `source` field at all, only command,
-        // args, and env. ADR-0071's amendment records the verification; this is where that
-        // verification stops being re-litigable.
+        // args, and env. ADR-0071's amendment records the verification.
         let written: Value = parse_to_serde_value(&installed, &jsonc_options())
             .unwrap()
             .unwrap();
@@ -3056,10 +3053,9 @@ mod tests {
 
     #[test]
     fn a_hand_registered_orchestrator_command_stays_foreign() {
-        // Pinned against the live 2026-08-27 incident (ADR-0141): ZCode was registered by hand
-        // with the orchestrator binary, which has no MCP stdio mode. Ghostlight must report the
-        // entry as foreign evidence. Ordinary install and remove must never overwrite it; only
-        // the separately confirmed Fix action may do that.
+        // A hand-written entry that runs the service image, which has no MCP stdio mode, is
+        // foreign evidence (ADR-0141): install and remove never overwrite it; only the
+        // confirmed Fix may.
         let directory = temporary("zcode-foreign-orchestrator");
         let path = directory.join("config.json");
         let edge = edge(&directory);

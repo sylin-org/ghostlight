@@ -197,16 +197,13 @@ impl ManagedAuthority {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if self.configured {
-                    // Every other failure path here calls reject(), which keeps `configured =
-                    // true` and the last verified policy active -- fail closed, not open. This
-                    // branch alone used to replace `self` with a fresh, never-configured
-                    // instance, flipping `configured` back to false so `valid()` (`!configured
-                    // || active.is_some()`) returned true and the whole managed layer silently
-                    // vanished from every snapshot. A deployment tool that updates the bootstrap
-                    // descriptor by delete-then-recreate, rather than an atomic rename, hits
-                    // exactly this window: an already-managed machine must not become
-                    // indistinguishable from one that was never managed at all just because the
-                    // file was briefly absent.
+                    // Like every other failure path, a missing descriptor on a configured
+                    // machine calls reject(): `configured` stays true and the last verified
+                    // policy stays active -- fail closed, not open. A deployment tool that
+                    // updates the bootstrap descriptor by delete-then-recreate, rather than an
+                    // atomic rename, hits exactly this window: an already-managed machine must
+                    // not become indistinguishable from one that was never managed at all just
+                    // because the file was briefly absent.
                     self.reject(
                         format!("managed bootstrap could not be read: {error}"),
                         "bootstrap_error",

@@ -167,9 +167,8 @@ mod tests {
 
     #[test]
     fn ed25519_leg_is_bound_to_its_context_not_just_the_message() {
-        // Before this bound the context into what gets signed, a signature made for any context
-        // verified successfully under every other context too, as long as the message bytes
-        // matched -- silently discarding the one thing `context` exists to guarantee.
+        // The Ed25519 leg signs the context with the message, so a signature made for one
+        // context fails under every other, even when the message bytes match.
         let seed = [11_u8; 32];
         let message = b"signed policy claims";
         let key = verification_key(&signing::ed25519_public(&seed), None).unwrap();

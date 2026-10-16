@@ -1,5 +1,5 @@
 //! The sentences `ghostlight policy migrate` and the automatic user-policy upgrade say about the
-//! settings schema 4 no longer has.
+//! settings schema 4 does not define.
 
 use std::path::Path;
 

@@ -3,8 +3,8 @@
 //! Install and `doctor` both have to tell a person where the product now lives and how it starts.
 //! Those sentences differ by platform and by desktop shell: GNOME shows no tray, KDE does, Windows
 //! has a notification area, and a harness running under WSL is looking at a browser that lives on
-//! the other side of a boundary it cannot cross. Before this module each call site would have had
-//! to compose that itself, and the two would have drifted.
+//! the other side of a boundary it cannot cross. One table composes them, so install and `doctor`
+//! say the same thing.
 //!
 //! The vocabulary is one closed table with a row per environment, so adding a platform later is a
 //! variant plus its phrases rather than a new branch at every call site. A guard test proves every

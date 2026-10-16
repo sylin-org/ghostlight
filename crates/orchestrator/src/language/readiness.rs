@@ -1,8 +1,7 @@
 //! The one answer to "is Ghostlight working right now", and the words for it.
 //!
 //! Two surfaces ask this question: the workbench, which shows it as its front door, and `doctor`,
-//! which prints it in a terminal. Before this module the window computed the word in JavaScript and
-//! `doctor` did not answer the question at all, so there was no shared vocabulary to disagree with.
+//! which prints it in a terminal. Both read this one answer, so they share one vocabulary.
 //!
 //! The states are ordered by what a person needs to hear first. Being disconnected outranks being
 //! paused, because a paused product that cannot reach a browser has a bigger problem than the

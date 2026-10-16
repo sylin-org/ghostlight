@@ -770,7 +770,7 @@ fn authoring_validates_before_it_replaces_and_never_leaves_the_product_failing_c
             .allowed
     );
 
-    // A switch schema 4 no longer has is an unregistered setting, not something to ignore.
+    // A switch schema 4 does not define is an unregistered setting, not something to ignore.
     let retired = r#"{"schema":4,"name":"mine","version":"2","grants":[],"config":[{"key":"policy.user.enabled","value":true,"level":"mandatory"}]}"#;
     assert!(matches!(
         facade.apply_user_policy(retired).unwrap_err(),

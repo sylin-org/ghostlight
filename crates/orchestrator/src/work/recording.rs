@@ -50,10 +50,9 @@ impl ApplicationExecutor {
                 value,
             ),
             "status" => {
-                // Needs no capability, but every path to the browser still crosses the runtime
-                // gate -- status/stop/discard used to dispatch straight through, the one family
-                // of operations in this executor that ignored a pause. See stop_recording and
-                // discard_recording for the same fix and the same reasoning.
+                // Needs no capability, but crosses the runtime gate like every path to the
+                // browser, so a pause also holds status, stop and discard. See stop_recording
+                // and discard_recording for the same gate.
                 let decision = self.authorize(context, CapabilitySet::EMPTY, None);
                 if !decision.allowed {
                     return self.blocked(

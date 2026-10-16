@@ -1891,11 +1891,9 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
 
 #[test]
 fn a_paused_runtime_refuses_recording_status_stop_and_discard() {
-    // Every other operation in this executor -- even ones needing no capability at all, like
+    // Every operation in this executor -- even ones needing no capability at all, like
     // activating a tab -- crosses the runtime gate before it can reach the browser. Recording
-    // status, stop, and discard used to be the one family that dispatched straight through,
-    // so pausing Ghostlight did not actually stop a recording from being stopped or discarded
-    // out from under the person who paused it.
+    // status, stop and discard cross it like every other operation, so a pause holds them too.
     let governance = GovernanceFacade::new(None, None);
     assert_eq!(
         governance.apply_runtime_intent(RuntimeControlIntent::Hold),

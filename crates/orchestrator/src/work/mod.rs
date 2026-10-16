@@ -1190,11 +1190,9 @@ impl ApplicationExecutor {
     /// string is empty** because the tab's first landing has not been governed yet. An empty
     /// or otherwise unparseable
     /// string falls straight through to `authorize_landing`, which denies it as `HostDenied` --
-    /// there is no third option here that falls back to a host-blind capability check. That
-    /// fallback used to exist and was the bug: a tab whose destination genuinely is not yet
-    /// known must be treated as though its destination is denied, never as though no destination
-    /// applies, or the operator's host allowlist is bypassed for exactly the tabs it exists to
-    /// cover.
+    /// there is no host-blind fallback. A tab whose destination is not yet known is treated as
+    /// denied, never as having no destination; otherwise the operator's host allowlist would be
+    /// bypassed for exactly the tabs it exists to cover.
     fn authorize(
         &self,
         context: &InvocationContext<'_>,
@@ -1797,8 +1795,8 @@ impl ApplicationExecutor {
         }
         if error.effect_unknown() {
             // Every after-dispatch class is an honest unknown: name its phase so the caller
-            // can tell a silent adapter from a spent deadline, and give deadlines their own
-            // sentence instead of the disconnection costume they used to wear.
+            // can tell a silent adapter from a spent deadline, and give a spent deadline its own
+            // sentence, distinct from a disconnection.
             let (refusal, facts) = match &error {
                 BrowserError::EffectUnknown(detail) => (
                     Refusal::EffectUnknown,

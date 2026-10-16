@@ -778,8 +778,8 @@ mod tests {
         let list = [4, 0, 1, 2, 0, 0];
         let shell = shortcut_bytes(&list, Path::new("C:\\h\\bin\\ghostlight-desktop.exe"), home);
         let service = shortcut_bytes(&list, Path::new("C:\\h\\bin\\ghostlight-service.exe"), home);
-        assert_ne!(shell, service, "an old shortcut is rewritten");
-        // A shortcut made before this block existed ends its strings with the terminal block.
+        assert_ne!(shell, service, "another target is rewritten");
+        // A shortcut without the AppUserModelID block ends its strings with the terminal block.
         let end = shell.len() - app_user_model_id_block(APP_USER_MODEL_ID).len() - 4;
         let mut without = shell[..end].to_vec();
         without.extend(0u32.to_le_bytes());
@@ -805,7 +805,7 @@ mod tests {
         assert_eq!(shortcut_target(&layout), layout.desktop_executable());
     }
 
-    /// A shortcut to `target` as an older install wrote it, without the AppUserModelID block.
+    /// A shortcut to `target` without the AppUserModelID block.
     fn shortcut_without_id(target: &Path, home: &Path) -> Vec<u8> {
         let full = shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, home);
         let end = full.len() - app_user_model_id_block(APP_USER_MODEL_ID).len() - 4;

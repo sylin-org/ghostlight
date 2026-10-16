@@ -21,13 +21,13 @@ pub struct ConnectionEvidence {
 
 /// Bounded connection evidence retained beside an action, never an admission decision.
 ///
-/// Lines written by earlier versions carry fields that are no longer kept; reading ignores them.
+/// Reading ignores fields it does not know.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Attribution {
-    /// Service-issued opaque connection identity, absent from older receipts.
+    /// Service-issued opaque connection identity, absent when the receipt has none.
     #[serde(deserialize_with = "deserialize_connection_id")]
     pub connection_id: Option<String>,
-    /// Time the connection was accepted, absent from older receipts.
+    /// Time the connection was accepted, absent when the receipt has none.
     pub observed_at_ms: Option<u64>,
     /// Declared intake, never authority.
     pub channel: IntakeChannel,
