@@ -25,6 +25,7 @@ onboarding document is [AGENTS.md](../AGENTS.md) at the root.
 | Folder | What it is |
 | --- | --- |
 | [1.0/](1.0/) | The current implementation contract: intent, model-facing language, architecture, acceptance. These four govern implementation work. |
+| [history/](history/) | Retired material kept as evidence: the dated STATUS sections through 2026-10-16 and the 0.8 configuration key reference. |
 | [adr/](adr/README.md) | Every design decision, one per file, immutable. A new decision supersedes an old one; it never rewrites it. Read a subsystem's ADR before changing it. |
 | [guides/](guides/README.md) | Task-oriented guides for people: installing, configuring governance, collecting audit, the licensing boundary. |
 | [trust/](trust/README.md) | The open trust center: security overview, data flows, control mappings, and procurement material. Every claim here is red-teamed against the tree, so change the code before softening a claim. |
