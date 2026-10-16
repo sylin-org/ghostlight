@@ -137,6 +137,8 @@ const managedHarnesses = [];
 let pushChange = null;
 /** Push a change down the stream and let the page read it, as the service's own would arrive. */
 const pushed = async (change) => {
+  // One sequence numbers changes and snapshots, so a snapshot read after a change is later than it.
+  snapshots = Math.max(snapshots, change.seq);
   pushChange(change);
   for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 };

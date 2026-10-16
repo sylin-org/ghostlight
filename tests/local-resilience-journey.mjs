@@ -14,6 +14,7 @@ const BURST = 12;
 const STALL_LIMIT_MS = 30_000;
 const HELD_MS = 10_000;
 const ANSWER_MS = 10_000;
+const NO_CHANGE_MS = 500;
 const QUEUED = 31;
 const EXPIRING = 1;
 const EXPIRY_MS = 100;
@@ -118,7 +119,12 @@ try {
   await control("end_session", "ended");
   const stopped = await refused("stopped");
   assert.equal(stopped.status, STATUS_BLOCKED);
-  await control("resume", "ended");
+  // Resume after Stop is not a change, so the service publishes no new state.
+  const statesBeforeResume = browser.controlStates().length;
+  browser.requestControl("resume");
+  await delay(NO_CHANGE_MS);
+  assert.equal(browser.controlStates().length, statesBeforeResume, "Resume after Stop publishes no state change");
+  assert.equal(browser.controlStates().at(-1), "ended");
   await refused("resumed after Stop");
   assert.equal((await a.facts("policy_explain")).status, "succeeded", "diagnostics stay available after Stop");
   await control("start_session", "active");

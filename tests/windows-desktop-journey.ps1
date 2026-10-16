@@ -310,9 +310,21 @@ function Assert-EdgeShutdown([string[]] $Arguments, [string] $Label) {
 }
 
 try {
-    Assert-EdgeShutdown @('mcp') 'mcp'
     Assert-EdgeShutdown @('chrome-extension://abcdefghijklmnopabcdefghijklmnop/') 'browser'
-    if (@(Get-ImageProcesses $serviceImage).Count) { throw 'An idle edge started a service.' }
+    # A browser relay starts the service only after the extension's hello.
+    if (@(Get-ImageProcesses $serviceImage).Count) { throw 'A browser edge with no hello started a service.' }
+    Assert-EdgeShutdown @('mcp') 'mcp'
+    # The MCP relay starts the service at its own start, an agent start (ADR-0199 Decision 10).
+    $null = Wait-ServiceRunning
+    $agentService = Wait-SingleService
+    # End that session so round 1 races a cold start; the service says goodbye to any shell.
+    [GhostlightNativeJourney]::EndSession($agentService.Id)
+    if (-not $agentService.WaitForExit(6000)) { throw "Service $($agentService.Id) ignored WM_ENDSESSION." }
+    $deadline = [DateTime]::UtcNow.AddSeconds(6)
+    while ((@(Get-ImageProcesses $shellImage).Count -or @(Get-ImageProcesses $serviceImage).Count) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
+    if (@(Get-ImageProcesses $serviceImage).Count -or @(Get-ImageProcesses $shellImage).Count) { throw 'The agent-started service or its shell outlived the end of the session.' }
+    $observations.Add(@{ round=0; state='mcp-edge-agent-start'; pid=$agentService.Id; windows=@() })
+    Write-Output 'PASS process=mcp agent-start-at-own-start'
 
     for ($round = 1; $round -le $StartupRounds; $round++) {
         # A person's start: the openers race to start the service, one wins, and the shell brings up
