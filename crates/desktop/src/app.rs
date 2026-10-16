@@ -491,7 +491,13 @@ impl Shell {
     }
 
     fn apply(&mut self, event: LifecycleEvent, target: &EventLoopWindowTarget<ShellEvent>) {
-        match self.lifecycle.on(event) {
+        let act = self.lifecycle.on(event);
+        self.carry_out(act, target);
+    }
+
+    /// Does what the lifecycle decided about the window.
+    fn carry_out(&mut self, act: Option<WindowAct>, target: &EventLoopWindowTarget<ShellEvent>) {
+        match act {
             Some(WindowAct::Create) => self.create_window(target),
             Some(WindowAct::Focus) => {
                 if let Some(window) = &self.window {
@@ -550,11 +556,26 @@ impl Shell {
 
     /// Brings the window forward, opening it first when it is not open, at `address` when the
     /// service gave a safe one.
+    ///
+    /// A show that answers a tray Open which already built the window (or is replacing it) opens
+    /// nothing again: the page was built for this click and, while setup is incomplete, shows
+    /// setup by itself. A replacement still pending takes the address.
     fn show(&mut self, address: Option<String>, target: &EventLoopWindowTarget<ShellEvent>) {
+        let answers = self.lifecycle.answers_tray_open(Instant::now());
         if let Some(address) = address.filter(|address| native::is_safe_address(address)) {
-            self.requested = Some(address);
+            if !answers || !self.lifecycle.is_open() {
+                self.requested = Some(address);
+            }
         }
-        self.apply(LifecycleEvent::OpenRequested, target);
+        if !answers {
+            self.apply(LifecycleEvent::OpenRequested, target);
+        }
+    }
+
+    /// Carries out a tray Open.
+    fn open_from_tray(&mut self, target: &EventLoopWindowTarget<ShellEvent>) {
+        let act = self.lifecycle.open_from_tray(Instant::now());
+        self.carry_out(act, target);
     }
 
     /// Carries out what the service asked for.
@@ -657,7 +678,7 @@ impl Shell {
                     // Told first, so a window that cannot be built answers `unavailable` after it.
                     self.report(action.reported());
                     if action == TrayAction::OpenWindow {
-                        self.apply(LifecycleEvent::OpenRequested, target);
+                        self.open_from_tray(target);
                     }
                 }
             }

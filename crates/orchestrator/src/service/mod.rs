@@ -985,6 +985,8 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     ))?;
     let attached = claim.attach(writer, tray);
     let _present = ShellPresent::begin(&intake.presence);
+    // Whether a reveal for the tray's Open is in flight: clicks that arrive meanwhile join it.
+    let revealing = Arc::new(AtomicBool::new(false));
     if let Some(wanted) = intake.presence.attached() {
         attached.show(wanted.address);
     }
@@ -1028,7 +1030,7 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
                 // The shell shows its own window, where it last was. While setup is incomplete
                 // the person is brought back to it, as a window opened fresh would be.
                 if let Some(address) = intake.workbench.show_address() {
-                    let _ = reveal_off_thread(intake.workbench.clone(), Some(address), || {});
+                    reveal_once(&intake.workbench, Some(address), &revealing);
                 }
             }
         }
@@ -1957,17 +1959,31 @@ impl ServiceBrowserEvents {
     /// read: with nothing to show, or nothing to show it, the person is no worse off. While setup
     /// is incomplete the window opens at the setup view.
     fn request_show(&self) {
-        if self.showing.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        let showing = Arc::clone(&self.showing);
-        let address = self.workbench.show_address();
-        let spawned = reveal_off_thread(self.workbench.clone(), address, move || {
-            showing.store(false, Ordering::SeqCst);
-        });
-        if spawned.is_err() {
-            self.showing.store(false, Ordering::SeqCst);
-        }
+        reveal_once(
+            &self.workbench,
+            self.workbench.show_address(),
+            &self.showing,
+        );
+    }
+}
+
+/// Reveal the workbench at `address` off the calling thread, unless a reveal guarded by
+/// `in_flight` is already under way. One reveal in flight absorbs the requests that arrive
+/// meanwhile, so repeated presses do not stack threads or windows.
+fn reveal_once(
+    workbench: &WorkbenchFacade,
+    address: Option<PageAddress>,
+    in_flight: &Arc<AtomicBool>,
+) {
+    if in_flight.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let done = Arc::clone(in_flight);
+    let spawned = reveal_off_thread(workbench.clone(), address, move || {
+        done.store(false, Ordering::SeqCst);
+    });
+    if spawned.is_err() {
+        in_flight.store(false, Ordering::SeqCst);
     }
 }
 
