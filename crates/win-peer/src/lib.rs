@@ -14,8 +14,10 @@
 //! elevated in `elevation` (the service refuses to run elevated), owner-private runtime-file
 //! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
 //! `item_id_list` (named by the installer's Start-menu shortcut), joining the parent
-//! process's console in `console`, and announcing a change of the user's environment variables to
-//! running programs in `settings_change`. Starting the service, process identity and the session
+//! process's console in `console`, whether the process sits in the visible window station in
+//! `window_station` (the service starts the shell only where a person could see it), and
+//! announcing a change of the user's environment variables to running programs in
+//! `settings_change`. Starting the service, process identity and the session
 //! listener live in the relay's audited `os` module (ADR-0199 Decisions
 //! 3 and 14). Non-Windows targets compile the portable surface returning an empty answer.
 
@@ -31,6 +33,8 @@ mod private_file;
 mod process;
 #[cfg(target_os = "windows")]
 mod settings_change;
+#[cfg(target_os = "windows")]
+mod window_station;
 
 /// Executable paths of this process's ancestors, nearest parent first, walking at most `limit`
 /// parents. Empty where the platform cannot answer.
@@ -89,4 +93,36 @@ pub fn attach_parent_console() {
 #[cfg(target_os = "windows")]
 pub fn broadcast_environment_change() {
     settings_change::environment_changed();
+}
+
+/// Whether a window this process opens could be seen by a person: the process is in the visible,
+/// interactive window station. False in session 0 and over an OpenSSH session, where a window
+/// would be invisible. Always true where the platform has no such notion; Linux asks its
+/// display variables instead.
+#[must_use]
+pub fn interactive_window_station() -> bool {
+    #[cfg(target_os = "windows")]
+    return window_station::is_visible();
+    #[cfg(not(target_os = "windows"))]
+    true
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    /// An ordinary test run happens in a person's desktop session, whose station is visible.
+    ///
+    /// A run with no desktop (a build service in session 0) reports false. The test then skips
+    /// with a note when the `CI` variable is set, which the project's CI sets, and fails
+    /// otherwise, so a developer's machine that reports false is looked at.
+    #[test]
+    fn a_desktop_session_has_the_visible_window_station() {
+        if super::interactive_window_station() {
+            return;
+        }
+        assert!(
+            std::env::var_os("CI").is_some(),
+            "this run has no visible window station and is not CI"
+        );
+        eprintln!("skipped: CI runs this test without a desktop session");
+    }
 }
