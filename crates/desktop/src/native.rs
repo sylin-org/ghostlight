@@ -8,13 +8,22 @@
 //! act into its result. [`ThisComputer`] is the thin glue to the operating system (the opener, the
 //! file dialog) and [`show_notice`] is the notification call; both are checked live.
 //!
+//! An act is answered through a callback, because a file dialog is not always finished when it is
+//! asked for. On Linux the dialog is a GTK one that belongs to the event-loop thread, which must
+//! stay free to run GTK: the dialog is shown, the call returns, and the answer comes from the
+//! dialog's own response. Windows shows its dialog modally and answers before it returns.
+//!
 //! The shell starts a process only while the session is not ending
 //! ([`SessionState::may_start_process`]), and a link or a folder is opened without a console
 //! window: the shell is a graphical program and the opener asks the shell of the system, never a
 //! command interpreter.
 
+#[cfg(target_os = "linux")]
+use std::cell::RefCell;
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::rc::Rc;
 
 use tao::window::Window;
 
@@ -74,6 +83,14 @@ pub fn move_script(address: &str) -> Option<String> {
     is_safe_address(address).then(|| format!("window.location.hash = \"{address}\";"))
 }
 
+/// Where the result of one act goes. It is called exactly once, on the thread that carried the
+/// act out, possibly after the call that started the act has returned.
+pub type Answer = Box<dyn FnOnce(ActOutcome)>;
+
+/// Where the file the person chose goes, or `None` when they closed the dialog. Called exactly
+/// once, on the thread that asked, possibly after [`Computer::pick_file`] has returned.
+pub type Chosen = Box<dyn FnOnce(Option<PathBuf>)>;
+
 /// What only this computer can do, as [`carry_out`] asks for it.
 pub trait Computer {
     /// Open an address in the person's browser.
@@ -82,15 +99,18 @@ pub trait Computer {
     /// Show a folder in the file manager.
     fn open_folder(&self, path: &Path) -> io::Result<()>;
 
-    /// Ask the person for a file, or `None` when they close the dialog. It waits for them.
-    fn pick_file(&self, title: &str) -> Option<PathBuf>;
+    /// Ask the person for a file and hand the choice to `chosen`.
+    ///
+    /// It must not run a nested event loop or block the thread that runs the window: that thread
+    /// owns the toolkit, and a dialog that waits on it can never be answered.
+    fn pick_file(&self, title: &str, chosen: Chosen);
 }
 
-/// Carry out `act` on `computer` and say how it ended.
+/// Carry out `act` on `computer` and say how it ended through `answer`.
 ///
 /// A link or a folder is opened only while the session is not ending, because opening one starts a
 /// process. A link that is not a secure address and an act this build does not know fail.
-pub fn carry_out(act: &NativeAct, session: &SessionState, computer: &dyn Computer) -> ActOutcome {
+pub fn carry_out(act: &NativeAct, session: &SessionState, computer: &dyn Computer, answer: Answer) {
     let opened = |result: io::Result<()>| match result {
         Ok(()) => ActOutcome::Done,
         Err(error) => {
@@ -99,28 +119,34 @@ pub fn carry_out(act: &NativeAct, session: &SessionState, computer: &dyn Compute
         }
     };
     match act {
-        NativeAct::OpenUrl { url } => {
+        NativeAct::OpenUrl { url } => answer(
             if url.starts_with(SECURE_SCHEME) && session.may_start_process() {
                 opened(computer.open_url(url))
             } else {
                 ActOutcome::Failed
-            }
-        }
-        NativeAct::OpenFolder { path } => {
-            if session.may_start_process() {
-                opened(computer.open_folder(Path::new(path)))
-            } else {
-                ActOutcome::Failed
-            }
-        }
-        NativeAct::PickFile { title } => match computer.pick_file(title) {
-            Some(path) => match path.into_os_string().into_string() {
-                Ok(path) => ActOutcome::Picked { path },
-                Err(_) => ActOutcome::Failed,
             },
-            None => ActOutcome::Cancelled,
+        ),
+        NativeAct::OpenFolder { path } => answer(if session.may_start_process() {
+            opened(computer.open_folder(Path::new(path)))
+        } else {
+            ActOutcome::Failed
+        }),
+        NativeAct::PickFile { title } => computer.pick_file(
+            title,
+            Box::new(move |chosen| answer(picked_outcome(chosen))),
+        ),
+        NativeAct::Unknown => answer(ActOutcome::Failed),
+    }
+}
+
+/// How a file dialog ended: the path chosen, or cancelled when none was.
+fn picked_outcome(chosen: Option<PathBuf>) -> ActOutcome {
+    match chosen {
+        Some(path) => match path.into_os_string().into_string() {
+            Ok(path) => ActOutcome::Picked { path },
+            Err(_) => ActOutcome::Failed,
         },
-        NativeAct::Unknown => ActOutcome::Failed,
+        None => ActOutcome::Cancelled,
     }
 }
 
@@ -140,12 +166,43 @@ impl Computer for ThisComputer<'_> {
         open::that_detached(path)
     }
 
-    fn pick_file(&self, title: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    fn pick_file(&self, title: &str, chosen: Chosen) {
         let dialog = rfd::FileDialog::new().set_title(title);
-        match self.parent {
+        chosen(match self.parent {
             Some(parent) => dialog.set_parent(parent).pick_file(),
             None => dialog.pick_file(),
-        }
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    fn pick_file(&self, title: &str, chosen: Chosen) {
+        use gtk::prelude::{FileChooserExt, NativeDialogExt};
+        use tao::platform::unix::WindowExtUnix;
+
+        let parent = self.parent.map(WindowExtUnix::gtk_window);
+        let dialog = gtk::FileChooserNative::new(
+            Some(title),
+            parent,
+            gtk::FileChooserAction::Open,
+            None,
+            None,
+        );
+        dialog.set_modal(parent.is_some());
+        // The toolkit keeps a native dialog only while something holds it. The response handler
+        // holds it and, when it answers, lets go of it together with the callback.
+        let held = Rc::new(RefCell::new(Some((dialog.clone(), chosen))));
+        dialog.connect_response(move |dialog, response| {
+            let Some((_, chosen)) = held.borrow_mut().take() else {
+                return;
+            };
+            chosen(
+                (response == gtk::ResponseType::Accept)
+                    .then(|| dialog.filename())
+                    .flatten(),
+            );
+        });
+        dialog.show();
     }
 }
 
@@ -179,16 +236,20 @@ fn notify(title: &str, body: &str) -> Result<(), notify_rust::error::Error> {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::rc::Rc;
 
     use super::*;
     use crate::session::SessionSignal;
 
-    /// A computer that records what it was asked and answers as told.
+    /// A computer that records what it was asked and answers as told. A computer that `defers`
+    /// keeps the dialog's callback until the test finishes the dialog.
     #[derive(Default)]
     struct Recording {
         asked: RefCell<Vec<String>>,
         refuses: bool,
         chooses: Option<PathBuf>,
+        defers: bool,
+        pending: RefCell<Option<Chosen>>,
     }
 
     impl Computer for Recording {
@@ -204,9 +265,13 @@ mod tests {
             self.answer()
         }
 
-        fn pick_file(&self, title: &str) -> Option<PathBuf> {
+        fn pick_file(&self, title: &str, chosen: Chosen) {
             self.asked.borrow_mut().push(format!("pick {title}"));
-            self.chooses.clone()
+            if self.defers {
+                *self.pending.borrow_mut() = Some(chosen);
+            } else {
+                chosen(self.chooses.clone());
+            }
         }
     }
 
@@ -218,6 +283,31 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    /// Carry out `act`, and return every outcome it was answered with so far.
+    fn answered(
+        act: &NativeAct,
+        session: &SessionState,
+        computer: &dyn Computer,
+    ) -> Rc<RefCell<Vec<ActOutcome>>> {
+        let outcomes = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&outcomes);
+        carry_out(
+            act,
+            session,
+            computer,
+            Box::new(move |outcome| sink.borrow_mut().push(outcome)),
+        );
+        outcomes
+    }
+
+    /// The one outcome `act` is answered with straight away.
+    fn outcome_of(act: &NativeAct, session: &SessionState, computer: &dyn Computer) -> ActOutcome {
+        let outcomes = answered(act, session, computer);
+        let outcomes = outcomes.borrow();
+        assert_eq!(outcomes.len(), 1, "answered exactly once");
+        outcomes[0].clone()
     }
 
     fn ending() -> SessionState {
@@ -296,8 +386,8 @@ mod tests {
         let folder = NativeAct::OpenFolder {
             path: "logs".to_owned(),
         };
-        assert_eq!(carry_out(&link, &session, &computer), ActOutcome::Done);
-        assert_eq!(carry_out(&folder, &session, &computer), ActOutcome::Done);
+        assert_eq!(outcome_of(&link, &session, &computer), ActOutcome::Done);
+        assert_eq!(outcome_of(&folder, &session, &computer), ActOutcome::Done);
         assert_eq!(
             *computer.asked.borrow(),
             ["url https://example.com/a", "folder logs"]
@@ -319,7 +409,7 @@ mod tests {
                 path: "logs".to_owned(),
             },
         ] {
-            assert_eq!(carry_out(&act, &session, &computer), ActOutcome::Failed);
+            assert_eq!(outcome_of(&act, &session, &computer), ActOutcome::Failed);
         }
     }
 
@@ -335,7 +425,7 @@ mod tests {
                 path: "logs".to_owned(),
             },
         ] {
-            assert_eq!(carry_out(&act, &session, &computer), ActOutcome::Failed);
+            assert_eq!(outcome_of(&act, &session, &computer), ActOutcome::Failed);
         }
         assert!(computer.asked.borrow().is_empty(), "nothing was started");
     }
@@ -354,7 +444,7 @@ mod tests {
             let act = NativeAct::OpenUrl {
                 url: url.to_owned(),
             };
-            assert_eq!(carry_out(&act, &session, &computer), ActOutcome::Failed);
+            assert_eq!(outcome_of(&act, &session, &computer), ActOutcome::Failed);
         }
         assert!(computer.asked.borrow().is_empty());
     }
@@ -370,22 +460,51 @@ mod tests {
             ..Recording::default()
         };
         assert_eq!(
-            carry_out(&act, &session, &picks),
+            outcome_of(&act, &session, &picks),
             ActOutcome::Picked {
                 path: "chosen.json".to_owned()
             }
         );
         assert_eq!(*picks.asked.borrow(), ["pick Choose"]);
         assert_eq!(
-            carry_out(&act, &session, &Recording::default()),
+            outcome_of(&act, &session, &Recording::default()),
             ActOutcome::Cancelled
+        );
+    }
+
+    #[test]
+    fn a_dialog_that_is_still_open_leaves_the_act_unanswered_until_the_person_decides() {
+        let session = SessionState::new();
+        let act = NativeAct::PickFile {
+            title: "Choose".to_owned(),
+        };
+        let computer = Recording {
+            defers: true,
+            ..Recording::default()
+        };
+        let outcomes = answered(&act, &session, &computer);
+        assert!(
+            outcomes.borrow().is_empty(),
+            "the call returned with the dialog still open"
+        );
+        let chosen = computer
+            .pending
+            .borrow_mut()
+            .take()
+            .expect("dialog is open");
+        chosen(Some(PathBuf::from("later.json")));
+        assert_eq!(
+            *outcomes.borrow(),
+            [ActOutcome::Picked {
+                path: "later.json".to_owned()
+            }]
         );
     }
 
     #[test]
     fn an_act_this_build_does_not_know_fails() {
         assert_eq!(
-            carry_out(
+            outcome_of(
                 &NativeAct::Unknown,
                 &SessionState::new(),
                 &Recording::default()

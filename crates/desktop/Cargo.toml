@@ -24,7 +24,6 @@ wry = "=0.55.1"
 gtk = "=0.18.2"
 webkit2gtk = "=2.0.2"
 libc = "0.2"
-rfd = { version = "=0.16.0", default-features = false, features = ["gtk3"] }
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "=0.16.0", default-features = false, features = ["common-controls-v6"] }

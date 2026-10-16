@@ -82,7 +82,7 @@ for m2-04), then m2-03-shell-lifecycle starts. m2-04 deletes the Tauri branch of
 | Slice | What | Commit |
 |---|---|---|
 | m2-01-settings-tab | Settings, a tab with a left rail before About, replaces the Controls button and sheet. The rail has This screen, Sharing, Browser work, Notifications and Diagnostics, each with its state word, and `kit/controls.js` became `kit/settings.js`. Every tab has an address from the closed list `ADDRESSES` (`#settings/sharing`, and so on), written in place with `history.replaceState`. In Control the page can quit Ghostlight: `WebAct::Quit`, `POST /api/quit` (202), a quit port the service attaches to the facade, and `quit_ghostlight` on both transports. Watch shows the Continue line in each section and Closed shows the watching-off line. The connection sentence moved to Status. The UI-surface guard tests moved out of `desktop/mod.rs` into `workbench/surface_tests.rs`. The Policy page's ceilings end with the line "Ghostlight's own control page on this computer is never automated.", authored once. Forced-colors rules cover the band, the tabs, the rail and the state words. | see `git log` |
-| m2-02-shell-carries-the-desktop | The service asks the shell, over the `desktop` stream, to show the window at a section, show a notice, open a link or a folder and pick a file. New frames `show`, `notice`, `act` (service to shell) and `act_result` (shell to service) with goldens in `tests/golden/desktop/`. `PageAddress` (`workbench/address.rs`) is the Rust copy of the page's address list, `POST /api/window` takes `{view, address?}` (unknown address: 400) and a Watch Continue sends its section or screen. `service/shell.rs` holds the attached shells and `ShellRoute`, the one adapter the facade gets for presentation and native acts. The shell (`crates/desktop/src/native.rs`) carries them out with `notify-rust`, `open` and `rfd`, names itself `Sylin.Ghostlight`, and skips any frame it cannot read. The blocked and checkup notice words moved to `language/workbench.rs`. | see `git log` |
+| m2-02-shell-carries-the-desktop | The service asks the shell, over the `desktop` stream, to show the window at a section, show a notice, open a link or a folder and pick a file. New frames `show`, `notice`, `act` (service to shell) and `act_result` (shell to service) with goldens in `tests/golden/desktop/`. `PageAddress` (`workbench/address.rs`) is the Rust copy of the page's address list, `POST /api/window` takes `{view, address?}` (unknown address: 400) and a Watch Continue sends its section or screen. `service/shell.rs` holds the attached shells and `ShellRoute`, the one adapter the facade gets for presentation and native acts. The shell (`crates/desktop/src/native.rs`) carries them out with `notify-rust`, `open` and a file dialog (`rfd` on Windows, GTK on Linux), names itself `Sylin.Ghostlight`, and skips any frame it cannot read. The blocked and checkup notice words moved to `language/workbench.rs`. | see `git log` |
 
 ## Owner questions
 
@@ -141,7 +141,9 @@ by hand beside the Tauri window):
   go to the newer one. Close it, and they go to the older one.
 - m2-02, Linux: the Linux build compiles with `libdbus-1-dev` present (notify-rust with only its
   `d` feature uses the `dbus` crate). Continue, a link, a folder and Locate work from the shell on
-  GNOME and KDE. The file dialog is the GTK one and is not parented to the window.
+  GNOME and KDE. Locate opens the GTK file chooser over the shell's window (modal to it), the
+  window and the tray stay responsive while it is open, choosing a file locates the client and
+  closing the chooser changes nothing.
 - m2-02, toast: waits for m2-04. An unpackaged program's toast shows only when a Start-menu
   shortcut carries the AUMID `Sylin.Ghostlight`, and the shortcut gets it with its new target.
   Until then, Send test in the shell's window shows no toast and prints one line on the shell's
@@ -278,10 +280,20 @@ After the coordinator deploys m2-01, with the owner:
   request arrives and again where the address is used.
 - m2-02: a notice is shown on a short-lived thread, so a slow notification service never holds the
   window. A failure is one line on the shell's standard error. Clicking a toast does nothing: an
-  unpackaged program has no activator. The file dialog is parented to the shell window through
-  `raw-window-handle`; the GTK backend of `rfd` ignores the parent.
+  unpackaged program has no activator. On Windows the file dialog is `rfd`, parented to the
+  shell window through `raw-window-handle`. On Linux it is a `gtk::FileChooserNative` made on the
+  event-loop thread, modal to the shell window and answered from its response signal (see the
+  next note).
+- m2-02: a file dialog is answered by a callback, not a return value (`Computer::pick_file` takes
+  a `Chosen`, `carry_out` takes an `Answer`), and the answer returns to the event loop as
+  `ShellEvent::ActDone`, which sends the `act_result`. Deviation from the spec, which said `rfd`
+  with `gtk3` on Linux: `rfd`'s gtk3 backend does not run GTK on the calling thread. It queues
+  the dialog on the default GLib main context and waits on a condvar, and tao's Linux loop owns
+  that context for its whole life, so Locate would freeze the window and the tray for good (and
+  would drive GTK from two threads). `rfd` is now a Windows dependency only. On Linux the shell
+  uses the `gtk` crate it already has, on the main thread, and nothing blocks the loop.
 - m2-02: the Linux build of the shell now needs `libdbus-1-dev` (the `dbus` crate, through
-  notify-rust's `d` feature) and `rfd` with `gtk3`. `.github/workflows/ci.yml` and `release.yml`
+  notify-rust's `d` feature). `.github/workflows/ci.yml` and `release.yml`
   install `libwebkit2gtk-4.1-dev` and friends, which normally pull `libdbus-1-dev`, but this was
   not run. It is an owed Linux check above; the workflows are not in this slice's files.
 - m2-02: `Cargo.lock` gained `notify-rust`, `open` and `rfd` as dependencies of
