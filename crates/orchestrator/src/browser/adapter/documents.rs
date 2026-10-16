@@ -1,13 +1,10 @@
 //! Browser-observed document identity and closed physical execution constraints.
 
-use serde::{Deserialize, Serialize};
-
 /// Maximum document metadata retained or admitted in one physical tab observation.
 pub const DOCUMENT_LIMIT: usize = 256;
 
 /// One browser-observed document, independent of reusable frame routing ids.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhysicalDocument {
     /// Browser-issued identity that changes when the document is replaced.
     pub id: String,
@@ -20,8 +17,7 @@ pub struct PhysicalDocument {
 }
 
 /// Content-free document inventory and the subjects of an exact physical request.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DocumentInventory {
     /// Stable ordered current documents, bounded by `DOCUMENT_LIMIT`.
     pub documents: Vec<PhysicalDocument>,
@@ -34,8 +30,7 @@ pub struct DocumentInventory {
 }
 
 /// Application-supplied physical scope, with no policy rule or capability classification.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentScope {
     /// Inventory against which this execution was admitted.
     pub documents: Vec<PhysicalDocument>,
@@ -43,33 +38,19 @@ pub struct DocumentScope {
     pub allowed: Vec<String>,
     /// Exact routed subjects, when the primitive names particular documents.
     pub subjects: Vec<String>,
-    /// Retired mask request, kept for wire decoding. Current services always send None.
-    pub mask: Option<String>,
     /// Stop retained recording when this admitted document set changes.
     pub watch_changes: bool,
     /// Require the complete admitted tree to stay fixed for a broad restricted operation.
-    #[serde(default = "strict_tree_default")]
     pub strict_tree: bool,
     /// Remaining shared preparation budget for local collectors in milliseconds. A spent budget
     /// is zero; it does not say the agent declined settling.
-    #[serde(default)]
     pub settle_ms: u64,
     /// The agent's intent: false only when the call turned settling off.
-    #[serde(default = "settle_requested_default")]
     pub settle_requested: bool,
 }
 
-fn strict_tree_default() -> bool {
-    true
-}
-
-fn settle_requested_default() -> bool {
-    true
-}
-
 /// Physical coverage facts; no model-facing interpretation or excluded host disclosure.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DocumentObservation {
     /// Documents actually reached by the content mechanism.
     pub visited: Vec<String>,

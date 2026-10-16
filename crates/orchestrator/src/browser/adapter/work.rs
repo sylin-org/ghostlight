@@ -1264,7 +1264,6 @@ mod tests {
                 documents: vec![],
                 allowed: vec![],
                 subjects: vec![],
-                mask: None,
                 watch_changes: false,
                 strict_tree: false,
                 settle_ms: 0,

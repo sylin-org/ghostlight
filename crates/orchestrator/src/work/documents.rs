@@ -421,7 +421,6 @@ impl ApplicationExecutor {
                 documents: inventory.documents,
                 allowed,
                 subjects: inventory.subjects,
-                mask: None,
                 watch_changes: !unrestricted_documents,
                 strict_tree: requested.unbounded && !unrestricted_documents,
                 settle_ms: Duration::from_millis(settle_ms)

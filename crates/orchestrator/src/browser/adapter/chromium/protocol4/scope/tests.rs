@@ -44,7 +44,6 @@ fn scope_of(documents: Vec<PhysicalDocument>, allowed: &[&str]) -> DocumentScope
         documents,
         allowed: allowed.iter().map(|id| (*id).into()).collect(),
         subjects: vec![],
-        mask: None,
         watch_changes: true,
         strict_tree: true,
         settle_ms: 0,

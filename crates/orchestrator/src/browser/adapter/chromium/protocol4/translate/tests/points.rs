@@ -119,7 +119,6 @@ fn nested_scope(allowed: &[&str]) -> DocumentScope {
         documents: nested_documents(),
         allowed: allowed.iter().map(|id| (*id).into()).collect(),
         subjects: vec![],
-        mask: None,
         watch_changes: false,
         strict_tree: false,
         settle_ms: 0,
