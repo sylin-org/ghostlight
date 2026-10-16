@@ -10,7 +10,8 @@ latest published release is the one the [README](../../README.md) names under "W
 today". Every route installs into `~/.ghostlight/bin`. The extension connects by the fixed
 native-host name, and the service gives it the page code it runs when it connects, so a service
 update needs no extension update. A 1.x extension speaks protocol 3 and must be updated once to the
-2.0 extension; its popup says Update needed.
+2.0 extension; until then its popup says Ghostlight version mismatch. A 2.0 extension that meets
+an older service says Update needed.
 
 ## Installation journey
 
