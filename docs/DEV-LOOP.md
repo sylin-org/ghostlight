@@ -74,8 +74,9 @@ moved keeps its directory, and `--plan` lists each directory and each move.
 Agents that run inside Claude desktop or Codex: Windows runs every process those apps start in
 the app's container, where registry and `%APPDATA%` writes reach only that app and no browser
 sees them. Run `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal. It
-puts `ghostlight` on the user PATH and writes the browser registrations, whose `HKCU` values
-name the manifest in `~/.ghostlight/manifests`. Later dev loops then work from inside the
+puts `ghostlight` on the user PATH, writes the browser registrations, whose `HKCU` values
+name the manifest in `~/.ghostlight/manifests`, and writes the Start-menu shortcut and the
+installed-apps entry, saying each one it changed (`--dry-run` says which it would). Later dev loops then work from inside the
 container: they rewrite only that manifest and report any registration they had to leave for a
 regular terminal.
 `doctor` inside a container cannot see what other apps see, and says so.

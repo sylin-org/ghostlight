@@ -209,6 +209,12 @@ pub fn platform_entry_updated(entry: &str) -> String {
     format!("Updated the {entry}.")
 }
 
+/// A platform entry a dry run would write.
+#[must_use]
+pub fn platform_entry_would_update(entry: &str) -> String {
+    format!("Would update the {entry}.")
+}
+
 /// A registration could not be reconciled.
 #[must_use]
 pub fn registration_failed(failure: &str) -> String {

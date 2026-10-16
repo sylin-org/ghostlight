@@ -13,6 +13,7 @@
 //! that would need a redirected write, naming each one in [`ReconcileReport::kept_private`].
 
 use std::env;
+use std::io;
 
 use ghostlight_relay::home::TEST_HOME_VARIABLE;
 use serde::Serialize;
@@ -175,10 +176,41 @@ impl Registrations {
         if self.platform_entries {
             reconcile_platform(layout, version, &self.residence, &mut report);
         }
+        self.name_container(&mut report);
+        report
+    }
+
+    /// Point only the Windows entries (the Start-menu shortcut and the Uninstall key) at the
+    /// installation in `layout`, whose service is `version`: the part of [`Self::reconcile`] the
+    /// `install` command does not otherwise reach. Inside an app container the entries are named
+    /// in [`ReconcileReport::kept_private`] and not written. Other platforms have none.
+    pub fn reconcile_windows_entries(&self, layout: &Layout, version: &str) -> ReconcileReport {
+        let mut report = ReconcileReport::default();
+        if self.platform_entries {
+            reconcile_windows(layout, version, &self.residence, &mut report);
+        }
+        self.name_container(&mut report);
+        report
+    }
+
+    /// The Windows entries [`Self::reconcile_windows_entries`] would write now, in the words the
+    /// reconcile reports them. Nothing is changed.
+    pub fn pending_windows_entries(
+        &self,
+        layout: &Layout,
+        version: &str,
+    ) -> io::Result<Vec<String>> {
+        if !self.platform_entries {
+            return Ok(Vec::new());
+        }
+        pending_windows(layout, version)
+    }
+
+    /// Record the container a reconcile ran in when it had to leave registrations unwritten.
+    fn name_container(&self, report: &mut ReconcileReport) {
         if !report.kept_private.is_empty() {
             report.container = self.residence.container().cloned();
         }
-        report
     }
 }
 
@@ -342,21 +374,37 @@ fn reconcile_entries(
         return;
     }
     match apply() {
-        Ok(change) => {
-            if change.shortcut {
-                report.platform.push(START_MENU_SHORTCUT.to_owned());
-            }
-            if change.nsis_removed {
-                report
-                    .platform
-                    .push("installed-apps entry of an earlier installer removed".to_owned());
-            }
-            if change.uninstall_key {
-                report.platform.push(INSTALLED_APPS_ENTRY.to_owned());
-            }
-        }
+        Ok(change) => report.platform.extend(entry_names(&change)),
         Err(error) => report.failures.push(format!("Start menu: {error}")),
     }
+}
+
+/// How the reports name what `change` wrote.
+#[cfg(windows)]
+fn entry_names(change: &WindowsEntryChange) -> Vec<String> {
+    let mut names = Vec::new();
+    if change.shortcut {
+        names.push(START_MENU_SHORTCUT.to_owned());
+    }
+    if change.nsis_removed {
+        names.push("installed-apps entry of an earlier installer removed".to_owned());
+    }
+    if change.uninstall_key {
+        names.push(INSTALLED_APPS_ENTRY.to_owned());
+    }
+    names
+}
+
+/// The Windows entries a reconcile would write now.
+#[cfg(windows)]
+fn pending_windows(layout: &Layout, version: &str) -> io::Result<Vec<String>> {
+    super::windows_entry::plan(layout, version).map(|change| entry_names(&change))
+}
+
+/// Other platforms have no Start menu or Uninstall key to write.
+#[cfg(not(windows))]
+fn pending_windows(_layout: &Layout, _version: &str) -> io::Result<Vec<String>> {
+    Ok(Vec::new())
 }
 
 /// Other platforms have no Start menu or Uninstall key.
@@ -631,6 +679,33 @@ mod tests {
                 || panic!("a container must not write its private view"),
             );
             assert_eq!(report.failures, ["Start menu: no registry"]);
+        }
+
+        #[test]
+        fn outside_a_container_current_entries_write_and_report_nothing() {
+            let mut report = ReconcileReport::default();
+            reconcile_entries(
+                &Residence::Regular,
+                &mut report,
+                || panic!("a regular install writes without planning"),
+                || Ok(WindowsEntryChange::default()),
+            );
+            assert!(report.platform.is_empty(), "{report:?}");
+            assert!(report.kept_private.is_empty(), "{report:?}");
+        }
+
+        #[test]
+        fn a_pending_change_names_each_entry_in_the_words_of_the_report() {
+            let change = WindowsEntryChange {
+                shortcut: true,
+                uninstall_key: true,
+                nsis_removed: false,
+            };
+            assert_eq!(
+                entry_names(&change),
+                ["Start-menu shortcut", "installed-apps entry"]
+            );
+            assert!(entry_names(&WindowsEntryChange::default()).is_empty());
         }
 
         #[test]

@@ -12,6 +12,8 @@ use crate::cli::parse::{NativeHostCommand, SetupOptions};
 use crate::install::container::{self, AppContainer};
 use crate::install::deployment::{stop_found_strays, StrayStop, SystemProcessControl};
 use crate::install::layout::Layout;
+use crate::install::reconcile::Registrations;
+use crate::install::record::InstallRecord;
 use crate::install::version_directories;
 use crate::language::deployment as deployment_words;
 use crate::language::workbench as stray_words;
@@ -162,6 +164,10 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         }
     }
 
+    if install {
+        reconcile_windows_entries(options, &mut kept_private)?;
+    }
+
     if install && !options.dry_run && !install_usable {
         return conclude(install, options, install_usable, &kept_private);
     }
@@ -230,6 +236,61 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         );
     }
     Ok(())
+}
+
+/// Write the Windows Start-menu shortcut and Uninstall key the way a deploy does, saying each one
+/// changed, or, with `--dry-run`, each one that would change. Inside an app container they would
+/// land in that app's private view, so each out-of-date one is added to `kept_private` instead.
+///
+/// The version is the installed one from `bin/install.json`, or the running service's when no
+/// record exists. A failure is reported and does not stop the rest of the install, as in a deploy.
+fn reconcile_windows_entries(
+    options: &SetupOptions,
+    kept_private: &mut KeptPrivate,
+) -> anyhow::Result<()> {
+    let layout = Layout::current()?;
+    let version = installed_version(&layout);
+    let registrations = Registrations::discover();
+    if options.dry_run {
+        match registrations.pending_windows_entries(&layout, &version) {
+            Ok(entries) => {
+                for entry in entries {
+                    println!("{}", deployment_words::platform_entry_would_update(&entry));
+                }
+            }
+            Err(error) => eprintln!(
+                "{}",
+                deployment_words::registration_failed(&format!("Start menu: {error}"))
+            ),
+        }
+        return Ok(());
+    }
+    let report = registrations.reconcile_windows_entries(&layout, &version);
+    for entry in &report.platform {
+        println!("{}", deployment_words::platform_entry_updated(entry));
+    }
+    for failure in &report.failures {
+        eprintln!("{}", deployment_words::registration_failed(failure));
+    }
+    if !report.kept_private.is_empty() {
+        if kept_private.container.is_none() {
+            kept_private.container = report.container;
+        }
+        kept_private.registrations.extend(report.kept_private);
+    }
+    Ok(())
+}
+
+/// The version the Windows entries record: the installed service's, from the install record, or
+/// this running service's when `bin` holds no record.
+fn installed_version(layout: &Layout) -> String {
+    InstallRecord::read(&layout.install_record())
+        .ok()
+        .flatten()
+        .map_or_else(
+            || env!("CARGO_PKG_VERSION").to_owned(),
+            |record| record.service_version,
+        )
 }
 
 /// Stop what an older Ghostlight installation left running, so one install leaves nothing behind
