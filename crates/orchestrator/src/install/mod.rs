@@ -3611,11 +3611,12 @@ mod tests {
         let directory = temporary("codex-desktop");
         let path = directory.join("config.toml");
         let edge = edge(&directory);
-        // The edge command with no arguments is an updatable registration on purpose: the edit
-        // rewrites the arguments and adds the desktop forwarding together.
+        // The current registration lacking the Linux desktop forwarding: updatable for that
+        // alone, so the edit adds the forwarding and keeps every custom field.
         let source = format!(
-            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
-            edge.to_string_lossy()
+            "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
+            edge.to_string_lossy(),
+            super::MCP_ARGUMENTS
         );
         fs::write(&path, &source).unwrap();
         assert_eq!(
