@@ -5,16 +5,17 @@ access to your own authenticated Chromium session, keeps the work visible, and a
 boundaries when you want them. All-open is a first-class default.
 
 This npm package is a thin launcher. Every command except `doctor`, `status`, `help` and
-`--version` runs the installed set under `~/.ghostlight/bin/` when its `install.json` records the
+`--version` runs the installed `ghostlight` under `~/.ghostlight/bin/` when its `install.json` records the
 same or a newer service version than this package. Otherwise the launcher downloads the
-version-matched Ghostlight binaries from the GitHub release into temporary storage, verifies all
-three against the checksums carried by the package, and runs `ghostlight deployment install` from
-there. The four never-install commands run the installed service, or with nothing installed a
-verified temporary copy that installs nothing.
-`npx ghostlight deployment install` always runs this package's own verified copy, and with
+version-matched images from the GitHub release into temporary storage (the edge `ghostlight`, the
+service `ghostlight-service` and the window `ghostlight-desktop`), verifies all three against the
+checksums carried by the package, and runs the service's `deployment install` from there. The
+never-install commands run the installed edge, or with nothing installed a verified temporary
+edge and service that install nothing.
+`npx ghostlight deployment install` always runs this package's own verified service, and with
 `--restore` it replaces a development installation (a build the development loop installed) with
 this release; a release package never installs over one by itself.
-A bare `npx ghostlight` starts `ghostlight-mcp-connector`, the stdio server your client talks to;
+A bare `npx ghostlight` runs `ghostlight mcp`, the stdio server your client talks to;
 `npx ghostlight install` connects the browser side. On Linux the service runs without
 WebKitGTK; only the Ghostlight window (`ghostlight-desktop`) needs `libwebkit2gtk-4.1`, and
 without it `ghostlight status` names the window reason.

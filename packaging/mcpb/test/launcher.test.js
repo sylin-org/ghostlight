@@ -15,12 +15,14 @@ test("the bundle maps the supported Claude Desktop platform", () => {
   assert.throws(() => targetFor("linux", "x64"), /does not support/);
 });
 
-test("binary paths keep the three sibling executables in one target directory", () => {
+test("binary paths keep the sibling executables in one target directory", () => {
   const serverDirectory = path.join("fixture", "server");
-  assert.equal(
-    binaryPath("ghostlight", { platform: "win32", architecture: "x64", serverDirectory }),
-    path.join(serverDirectory, "bin", "x86_64-pc-windows-msvc", "ghostlight.exe"),
-  );
+  for (const name of ["ghostlight", "ghostlight-service", "ghostlight-desktop"]) {
+    assert.equal(
+      binaryPath(name, { platform: "win32", architecture: "x64", serverDirectory }),
+      path.join(serverDirectory, "bin", "x86_64-pc-windows-msvc", `${name}.exe`),
+    );
+  }
 });
 
 test("versions order numerically and a pre-release sorts below its release", () => {
@@ -32,15 +34,17 @@ test("versions order numerically and a pre-release sorts below its release", () 
 });
 
 /**
- * A temporary Ghostlight home, optionally holding an install record and the installed connector
- * a finished install leaves beside it.
+ * A temporary Ghostlight home, optionally holding an install record and the edge and service a
+ * finished install leaves beside it. `missing` names an installed image to leave out.
  */
-function homeWithRecord(record, { connector = true } = {}) {
+function homeWithRecord(record, { missing } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ghostlight-mcpb-"));
   if (record !== undefined) {
     fs.mkdirSync(path.join(home, "bin"));
     fs.writeFileSync(path.join(home, "bin", "install.json"), record);
-    if (connector) fs.writeFileSync(path.join(home, "bin", "ghostlight-mcp-connector.exe"), "");
+    for (const name of ["ghostlight", "ghostlight-service"]) {
+      if (name !== missing) fs.writeFileSync(path.join(home, "bin", `${name}.exe`), "");
+    }
   }
   return home;
 }
@@ -69,16 +73,16 @@ function launch(record, overrides = {}) {
   }
 }
 
-test("an absent install record installs from the bundle off MCP stdout, then starts the installed stdio edge", () => {
+test("an absent install record installs from the bundle off MCP stdout, then starts the installed MCP relay", () => {
   const { status, calls, errors, home } = launch(undefined);
   assert.equal(status, 0);
   assert.deepEqual(errors, []);
   assert.equal(calls.length, 2);
-  assert.match(calls[0].command, /ghostlight\.exe$/);
+  assert.equal(path.basename(calls[0].command), "ghostlight-service.exe");
   assert.deepEqual(calls[0].args, ["deployment", "install"]);
   assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
-  assert.equal(calls[1].command, path.join(home, "bin", "ghostlight-mcp-connector.exe"));
-  assert.deepEqual(calls[1].args, []);
+  assert.equal(calls[1].command, path.join(home, "bin", "ghostlight.exe"));
+  assert.deepEqual(calls[1].args, ["mcp"]);
   assert.equal(calls[1].options.stdio, "inherit");
 });
 
@@ -91,25 +95,28 @@ test("an older or unreadable install record installs first", () => {
   ]) {
     const { status, calls } = launch(record);
     assert.equal(status, 0, record);
-    assert.deepEqual(calls.map((call) => call.args), [["deployment", "install"], []], record);
+    assert.deepEqual(calls.map((call) => call.args), [["deployment", "install"], ["mcp"]], record);
   }
 });
 
-test("the same or a newer install record starts the installed stdio edge without installing", () => {
+test("the same or a newer install record starts the installed MCP relay without installing", () => {
   for (const version of ["2.0.0", "2.0.1", "2.1.0", "10.0.0"]) {
     const { status, calls, home } = launch(JSON.stringify({ service_version: version }));
     assert.equal(status, 0, version);
     assert.equal(calls.length, 1, version);
-    assert.equal(calls[0].command, path.join(home, "bin", "ghostlight-mcp-connector.exe"), version);
+    assert.equal(calls[0].command, path.join(home, "bin", "ghostlight.exe"), version);
+    assert.deepEqual(calls[0].args, ["mcp"], version);
     assert.equal(calls[0].options.stdio, "inherit");
   }
 });
 
-test("a current record whose installed connector is missing installs first", () => {
-  const { status, calls, home } = launch(JSON.stringify({ service_version: "2.0.0" }), { connector: false });
-  assert.equal(status, 0);
-  assert.deepEqual(calls.map((call) => call.args), [["deployment", "install"], []]);
-  assert.equal(calls[1].command, path.join(home, "bin", "ghostlight-mcp-connector.exe"));
+test("a current record whose installed edge or service is missing installs first", () => {
+  for (const missing of ["ghostlight", "ghostlight-service"]) {
+    const { status, calls, home } = launch(JSON.stringify({ service_version: "2.0.0" }), { missing });
+    assert.equal(status, 0, missing);
+    assert.deepEqual(calls.map((call) => call.args), [["deployment", "install"], ["mcp"]], missing);
+    assert.equal(calls[1].command, path.join(home, "bin", "ghostlight.exe"), missing);
+  }
 });
 
 test("the install record is read from the bin directory of the Ghostlight home", () => {
@@ -122,7 +129,7 @@ test("the install record is read from the bin directory of the Ghostlight home",
   }
 });
 
-test("an install failure is returned and the MCP connector never starts", () => {
+test("an install failure is returned and the MCP relay never starts", () => {
   const { status, calls, errors } = launch(undefined, {
     spawn: () => ({ status: 7, stdout: "", stderr: "registration refused" }),
   });

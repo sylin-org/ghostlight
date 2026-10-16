@@ -16,11 +16,17 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "release-assets.githubusercontent.com",
   "github-releases.githubusercontent.com",
 ]);
+/** The images of one release, in the order the launcher stages them: the edge, the service, the shell. */
 const EXECUTABLES = [
   "ghostlight",
-  "ghostlight-mcp-connector",
-  "ghostlight-browser-connector",
+  "ghostlight-service",
+  "ghostlight-desktop",
 ];
+/** Positions in `EXECUTABLES` of the two images every launch needs. */
+const EDGE = 0;
+const SERVICE = 1;
+/** The edge command that starts the MCP stdio relay; a launch with no arguments means it. */
+const MCP_COMMAND = "mcp";
 
 /** Environment variable that moves the Ghostlight home. It exists for journeys only. */
 const TEST_HOME_VARIABLE = "GHOSTLIGHT_TEST_HOME";
@@ -28,7 +34,7 @@ const TEST_HOME_VARIABLE = "GHOSTLIGHT_TEST_HOME";
 const INSTALL_RECORD_NAME = "install.json";
 /** The channel `install.json` records for a build the development loop installed. */
 const DEVELOPMENT_CHANNEL = "development";
-/** First argument of the installer command, which always runs this package's own service image. */
+/** First argument of the installer command, which always runs this package's own verified service. */
 const DEPLOYMENT_COMMAND = "deployment";
 /** First arguments of the commands that never install (ADR-0197 Decision 13). */
 const NEVER_INSTALL_COMMANDS = new Set(["doctor", "status", "help", "--help", "-h", "--version", "-V"]);
@@ -69,15 +75,15 @@ export function publishedAssetNames() {
   ];
 }
 
-export function selectedExecutable(arguments_, platform = process.platform, architecture = process.arch) {
-  const [orchestrator, mcpConnector] = executableNames(platform, architecture);
-  return arguments_.length === 0 ? mcpConnector : orchestrator;
+/** The arguments the edge receives: a launch with none is the MCP relay, and every other launch passes through. */
+export function edgeArguments(arguments_) {
+  return arguments_.length === 0 ? [MCP_COMMAND] : arguments_;
 }
 
 /**
  * True for the commands that never install: `doctor`, `status`, `help`, `--version`, and the
  * help of `install` and `uninstall` (`install --help`). Every other command, including no
- * arguments (the MCP connector), needs the installed set.
+ * arguments (the MCP relay), needs the installed set.
  */
 export function neverInstalls(arguments_) {
   if (arguments_.length === 2 && HELP_COMMANDS.has(arguments_[0]) && HELP_FLAGS.has(arguments_[1])) {
@@ -258,12 +264,13 @@ async function stageDownloads({ indexes, packageJson, manifest, platform, archit
 
 /**
  * Decides what to run and makes it ready. `deployment` (`deployment install`, also with
- * `--restore`) runs this package's own verified service image from a staged copy, never the
- * installed one, because the installer installs the image it belongs to. Every other command
- * except the never-install ones (see `neverInstalls`) runs the installed set when `install.json`
- * is the same as or newer than this package, or records the development channel; otherwise the
- * verified download installs itself first. The never-install commands run the installed service,
- * or a verified staged copy that installs nothing.
+ * `--restore`) runs this package's own verified service from a staged copy, never the installed
+ * one, because the installer installs the images it belongs to. Every other command except the
+ * never-install ones (see `neverInstalls`) runs the installed edge when `install.json` is the
+ * same as or newer than this package, or records the development channel; otherwise the verified
+ * download installs itself first. The edge hands every command but `mcp` to the service beside
+ * it, and a launch with no arguments is `mcp`. The never-install commands run the installed edge,
+ * or a verified staged edge and service that install nothing.
  *
  * Resolves to the executable, its arguments, and `cleanup` for any staged files.
  */
@@ -279,7 +286,8 @@ export async function prepareLaunch({
   const home = resolve(cacheRoot);
   const directory = join(home, "bin");
   const executables = executableNames(platform, architecture);
-  const installed = join(directory, selectedExecutable(arguments_, platform, architecture));
+  const installedEdge = join(directory, executables[EDGE]);
+  const installedService = join(directory, executables[SERVICE]);
   const launch = !neverInstalls(arguments_);
   const nothingToClean = async () => {};
   const readPackage = async () => {
@@ -289,12 +297,13 @@ export async function prepareLaunch({
     return { packageJson, manifest };
   };
   const stageOptions = { platform, architecture, cacheRoot: home, fetchImpl, reporter };
+  const wholeSet = executables.map((_, index) => index);
 
   if (arguments_[0] === DEPLOYMENT_COMMAND) {
     const { packageJson, manifest } = await readPackage();
-    const stage = await stageDownloads({ ...stageOptions, indexes: executables.map((_, index) => index), packageJson, manifest });
+    const stage = await stageDownloads({ ...stageOptions, indexes: wholeSet, packageJson, manifest });
     return {
-      executable: join(stage, executables[0]),
+      executable: join(stage, executables[SERVICE]),
       arguments_,
       cleanup: () => rm(stage, { recursive: true, force: true }),
     };
@@ -303,32 +312,33 @@ export async function prepareLaunch({
   if (launch) {
     const packageVersion = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
     const development = (await readInstallRecord(directory))?.channel === DEVELOPMENT_CHANNEL;
-    if (development || (existsSync(installed) && await installedSetIsCurrent(directory, packageVersion))) {
-      return { executable: installed, arguments_, cleanup: nothingToClean };
+    const present = existsSync(installedEdge) && existsSync(installedService);
+    if (development || (present && await installedSetIsCurrent(directory, packageVersion))) {
+      return { executable: installedEdge, arguments_: edgeArguments(arguments_), cleanup: nothingToClean };
     }
     const { packageJson, manifest } = await readPackage();
-    const stage = await stageDownloads({ ...stageOptions, indexes: executables.map((_, index) => index), packageJson, manifest });
+    const stage = await stageDownloads({ ...stageOptions, indexes: wholeSet, packageJson, manifest });
     try {
-      await installImpl(join(stage, executables[0]), directory);
+      await installImpl(join(stage, executables[SERVICE]), directory);
     } finally {
       await rm(stage, { recursive: true, force: true });
     }
-    return { executable: installed, arguments_, cleanup: nothingToClean };
+    return { executable: installedEdge, arguments_: edgeArguments(arguments_), cleanup: nothingToClean };
   }
 
-  const service = join(directory, executables[0]);
-  if (existsSync(service)) {
-    return { executable: service, arguments_, cleanup: nothingToClean };
+  if (existsSync(installedEdge) && existsSync(installedService)) {
+    return { executable: installedEdge, arguments_, cleanup: nothingToClean };
   }
   const { packageJson, manifest } = await readPackage();
-  const stage = await stageDownloads({ ...stageOptions, indexes: [0], packageJson, manifest });
+  const stage = await stageDownloads({ ...stageOptions, indexes: [EDGE, SERVICE], packageJson, manifest });
   return {
-    executable: join(stage, executables[0]),
+    executable: join(stage, executables[EDGE]),
     arguments_,
     cleanup: () => rm(stage, { recursive: true, force: true }),
   };
 }
 
+/** Runs the staged service's `deployment install`, which installs every staged image into `bin`. */
 function installDownload(executable) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(executable, ["deployment", "install"], {

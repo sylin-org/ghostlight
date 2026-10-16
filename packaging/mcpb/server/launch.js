@@ -11,6 +11,13 @@ const TEST_HOME_VARIABLE = "GHOSTLIGHT_TEST_HOME";
 /** Record the installer writes next to the installed executables once a service is running. */
 const INSTALL_RECORD_PATH = path.join("bin", "install.json");
 
+/** The edge: its `mcp` command is the stdio server this launcher runs. */
+const EDGE_IMAGE = "ghostlight";
+/** The service: the bundled copy installs the set, and the installed copy serves the edge. */
+const SERVICE_IMAGE = "ghostlight-service";
+/** The edge command that starts the MCP stdio relay. */
+const MCP_COMMAND = "mcp";
+
 const TARGETS = Object.freeze({
   "win32/x64": "x86_64-pc-windows-msvc",
 });
@@ -62,9 +69,9 @@ function bundleVersion(serverDirectory) {
   return JSON.parse(fs.readFileSync(manifest, "utf8")).version;
 }
 
-/** The connector the install put under the Ghostlight home: the one executable this launcher runs. */
-function installedConnector(home, platform) {
-  return path.join(home, "bin", `ghostlight-mcp-connector${platform === "win32" ? ".exe" : ""}`);
+/** The image named `name` that the install put under the Ghostlight home. */
+function installedImage(home, platform, name) {
+  return path.join(home, "bin", `${name}${platform === "win32" ? ".exe" : ""}`);
 }
 
 /**
@@ -97,10 +104,11 @@ function run(options = {}) {
   const spawnProcess = options.spawnSyncImpl ?? spawnSync;
   const standardError = options.stderr ?? process.stderr;
   const home = ghostlightHome(options);
-  const mcpConnector = installedConnector(home, platform);
-  let orchestrator;
+  const edge = installedImage(home, platform, EDGE_IMAGE);
+  const installedService = installedImage(home, platform, SERVICE_IMAGE);
+  let bundledService;
   try {
-    orchestrator = binaryPath("ghostlight", { platform, architecture, serverDirectory });
+    bundledService = binaryPath(SERVICE_IMAGE, { platform, architecture, serverDirectory });
   } catch (error) {
     standardError.write(`Ghostlight MCPB setup failed: ${error.message}\n`);
     return 1;
@@ -108,14 +116,14 @@ function run(options = {}) {
 
   let current;
   try {
-    current = fs.existsSync(mcpConnector)
+    current = fs.existsSync(edge) && fs.existsSync(installedService)
       && installIsCurrent(home, options.version ?? bundleVersion(serverDirectory));
   } catch (error) {
     standardError.write(`Ghostlight MCPB setup failed: ${error.message}\n`);
     return 1;
   }
   if (!current) {
-    const setup = spawnProcess(orchestrator, ["deployment", "install"], {
+    const setup = spawnProcess(bundledService, ["deployment", "install"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -125,9 +133,9 @@ function run(options = {}) {
       return Number.isInteger(setup.status) ? setup.status : 1;
     }
   }
-  const session = spawnProcess(mcpConnector, [], { stdio: "inherit", windowsHide: true });
+  const session = spawnProcess(edge, [MCP_COMMAND], { stdio: "inherit", windowsHide: true });
   if (session.error) {
-    standardError.write(detail("Ghostlight MCP connector could not start.", session));
+    standardError.write(detail("Ghostlight could not start its MCP relay.", session));
     return 1;
   }
   return Number.isInteger(session.status) ? session.status : 1;

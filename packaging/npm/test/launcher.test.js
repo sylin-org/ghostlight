@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -11,12 +11,12 @@ import {
   assertAllowedDownload,
   assetNames,
   compareVersions,
+  edgeArguments,
   ensureBinary,
   executableNames,
   neverInstalls,
   publishedAssetNames,
   releaseTarget,
-  selectedExecutable,
   validateChecksums,
 } from "../bin/ghostlight.js";
 
@@ -70,11 +70,11 @@ test("the published platforms resolve to exact release targets", () => {
   assert.throws(() => releaseTarget("linux", "arm64"), /does not publish/);
 });
 
-test("every platform downloads the complete three-process unit", () => {
+test("every platform downloads the complete unit of edge, service and shell", () => {
   assert.deepEqual(assetNames("linux", "x64"), [
     "ghostlight-x86_64-unknown-linux-gnu",
-    "ghostlight-mcp-connector-x86_64-unknown-linux-gnu",
-    "ghostlight-browser-connector-x86_64-unknown-linux-gnu",
+    "ghostlight-service-x86_64-unknown-linux-gnu",
+    "ghostlight-desktop-x86_64-unknown-linux-gnu",
   ]);
   assert.ok(assetNames("win32", "x64").every((name) => name.endsWith(".exe")));
 });
@@ -82,22 +82,20 @@ test("every platform downloads the complete three-process unit", () => {
 test("verified assets are cached under exact trusted sibling names", () => {
   assert.deepEqual(executableNames("linux", "x64"), [
     "ghostlight",
-    "ghostlight-mcp-connector",
-    "ghostlight-browser-connector",
+    "ghostlight-service",
+    "ghostlight-desktop",
   ]);
   assert.deepEqual(executableNames("win32", "x64"), [
     "ghostlight.exe",
-    "ghostlight-mcp-connector.exe",
-    "ghostlight-browser-connector.exe",
+    "ghostlight-service.exe",
+    "ghostlight-desktop.exe",
   ]);
 });
 
-test("a bare launch is MCP stdio and every CLI request reaches the orchestrator", () => {
-  assert.match(selectedExecutable([], "linux", "x64"), /mcp-connector/);
-  assert.equal(
-    selectedExecutable(["install"], "linux", "x64"),
-    "ghostlight",
-  );
+test("a bare launch is the MCP relay and every other request reaches the edge unchanged", () => {
+  assert.deepEqual(edgeArguments([]), ["mcp"]);
+  assert.deepEqual(edgeArguments(["install"]), ["install"]);
+  assert.deepEqual(edgeArguments(["mcp"]), ["mcp"]);
 });
 
 test("the checksum manifest must bind the exact version and file set", () => {
@@ -267,18 +265,27 @@ async function launcherFixture() {
 
 const NO_DOWNLOAD = async () => { throw new Error("unexpected download"); };
 
-test("a launch with nothing installed downloads, verifies, installs from the stage, then runs the installed binary", async () => {
+/** What a command that installs nothing downloads: the edge, then the service it hands the command to. */
+const STAGED_EDGE_AND_SERVICE = [
+  "ghostlight-x86_64-unknown-linux-gnu",
+  "ghostlight-service-x86_64-unknown-linux-gnu",
+];
+
+test("a launch with nothing installed downloads, verifies, installs from the stage, then runs the installed edge", async () => {
   const f = await launcherFixture();
   try {
     const launch = await f.prepareLaunch({ ...f.options, arguments_: [] });
-    assert.equal(launch.executable, join(f.bin, "ghostlight-mcp-connector"));
+    assert.equal(launch.executable, join(f.bin, "ghostlight"));
+    assert.deepEqual(launch.arguments_, ["mcp"], "no arguments is the MCP relay");
     assert.equal(f.activity.downloads.length, 3);
     assert.equal(f.activity.installs.length, 1);
     assert.equal(f.activity.installs[0].destination, f.bin);
     assert.notEqual(dirname(f.activity.installs[0].candidate), f.bin);
+    assert.equal(basename(f.activity.installs[0].candidate), "ghostlight-service", "the staged service installs");
     assert.deepEqual((await readdir(f.home)).sort(), ["bin"], "the stage is removed");
     const open = await f.prepareLaunch({ ...f.options, arguments_: ["open"], fetchImpl: NO_DOWNLOAD });
     assert.equal(open.executable, join(f.bin, "ghostlight"));
+    assert.deepEqual(open.arguments_, ["open"]);
     assert.equal(f.activity.installs.length, 1, "the second launch finds the install current");
   } finally {
     await f.cleanup();
@@ -320,7 +327,8 @@ test("a launch runs the installed set untouched when it is the same or newer", a
     try {
       await f.install(record);
       const launch = await f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD });
-      assert.equal(launch.executable, join(f.bin, "ghostlight-mcp-connector"));
+      assert.equal(launch.executable, join(f.bin, "ghostlight"));
+      assert.deepEqual(launch.arguments_, ["mcp"]);
       assert.equal(f.activity.installs.length, 0, record);
       assert.match(await readFile(join(f.bin, "ghostlight"), "utf8"), /^installed:/,
         "installed files are not hashed or replaced");
@@ -330,15 +338,17 @@ test("a launch runs the installed set untouched when it is the same or newer", a
   }
 });
 
-test("a launch installs when the executable it would run is missing", async () => {
-  const f = await launcherFixture();
-  try {
-    await f.install("2.0.0");
-    await rm(join(f.bin, "ghostlight-mcp-connector"));
-    await f.prepareLaunch({ ...f.options, arguments_: [] });
-    assert.equal(f.activity.installs.length, 1);
-  } finally {
-    await f.cleanup();
+test("a launch installs when the edge or the service it would run is missing", async () => {
+  for (const missing of ["ghostlight", "ghostlight-service"]) {
+    const f = await launcherFixture();
+    try {
+      await f.install("2.0.0");
+      await rm(join(f.bin, missing));
+      await f.prepareLaunch({ ...f.options, arguments_: [] });
+      assert.equal(f.activity.installs.length, 1, missing);
+    } finally {
+      await f.cleanup();
+    }
   }
 });
 
@@ -347,7 +357,7 @@ test("the development channel keeps the installed set whatever its version", asy
   try {
     await f.install("1.0.0", "installed", "development");
     const launch = await f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD });
-    assert.equal(launch.executable, join(f.bin, "ghostlight-mcp-connector"));
+    assert.equal(launch.executable, join(f.bin, "ghostlight"));
     assert.equal(f.activity.installs.length, 0);
   } finally {
     await f.cleanup();
@@ -373,11 +383,12 @@ test("deployment runs the package's own verified service image, whatever is inst
       const arguments_ = ["deployment", "install", "--restore"];
       const launch = await f.prepareLaunch({ ...f.options, arguments_ });
       assert.notEqual(dirname(launch.executable), f.bin, "the installed image is never the one that installs");
+      assert.equal(basename(launch.executable), "ghostlight-service");
       assert.equal(dirname(launch.executable).startsWith(f.home), true);
       assert.deepEqual(launch.arguments_, arguments_);
       assert.match(await readFile(launch.executable, "utf8"), /^2\.0\.0:/, "the package's verified download");
       assert.equal(f.activity.installs.length, 0, "the launcher installs nothing itself");
-      assert.equal(f.activity.downloads.length, 3, "the whole set is staged beside the image that installs it");
+      assert.equal(f.activity.downloads.length, 3, "the whole set is staged beside the service that installs it");
       if (version) {
         assert.match(await readFile(join(f.bin, "ghostlight"), "utf8"), /^installed:/, "the installed set is untouched");
       }
@@ -394,7 +405,7 @@ test("a bad download never touches the installed service", async () => {
   try {
     await f.install("1.3.15");
     await assert.rejects(f.prepareLaunch({ ...f.options, arguments_: [],
-      fetchImpl: async url => new Response(url.endsWith("ghostlight-browser-connector-x86_64-unknown-linux-gnu")
+      fetchImpl: async url => new Response(url.endsWith("ghostlight-desktop-x86_64-unknown-linux-gnu")
         ? "wrong" : "right") }), /failed checksum/);
     assert.equal(f.activity.installs.length, 0);
     assert.match(await readFile(join(f.bin, "ghostlight"), "utf8"), /^installed:/);
@@ -404,7 +415,7 @@ test("a bad download never touches the installed service", async () => {
   }
 });
 
-test("never-install commands run the installed service whatever its version and never install", async () => {
+test("never-install commands run the installed edge whatever its version and never install", async () => {
   for (const arguments_ of [["doctor"], ["status", "--json"], ["help"], ["--help"], ["-h"], ["--version"], ["-V"],
     ["install", "--help"], ["install", "-h"], ["uninstall", "--help"], ["uninstall", "-h"]]) {
     const f = await launcherFixture();
@@ -420,13 +431,13 @@ test("never-install commands run the installed service whatever its version and 
   }
 });
 
-test("subcommand help with nothing installed stages the service and installs nothing", async () => {
+test("subcommand help with nothing installed stages the edge and service and installs nothing", async () => {
   for (const arguments_ of [["install", "--help"], ["uninstall", "-h"]]) {
     const f = await launcherFixture();
     try {
       const launch = await f.prepareLaunch({ ...f.options, arguments_ });
       assert.equal(f.activity.installs.length, 0, arguments_.join(" "));
-      assert.deepEqual(f.activity.downloads, ["ghostlight-x86_64-unknown-linux-gnu"]);
+      assert.deepEqual(f.activity.downloads, STAGED_EDGE_AND_SERVICE);
       await launch.cleanup();
       assert.deepEqual(await readdir(f.home), [], "nothing is installed");
     } finally {
@@ -451,12 +462,13 @@ test("every other command with nothing installed installs the complete set first
   }
 });
 
-test("a never-install command with nothing installed runs a verified staged service and installs nothing", async () => {
+test("a never-install command with nothing installed runs a verified staged edge and installs nothing", async () => {
   const f = await launcherFixture();
   try {
     const launch = await f.prepareLaunch({ ...f.options, arguments_: ["--version"] });
     assert.equal(f.activity.installs.length, 0);
-    assert.deepEqual(f.activity.downloads, ["ghostlight-x86_64-unknown-linux-gnu"]);
+    assert.deepEqual(f.activity.downloads, STAGED_EDGE_AND_SERVICE);
+    assert.equal(basename(launch.executable), "ghostlight");
     assert.equal(dirname(launch.executable).startsWith(f.home), true);
     assert.match(await readFile(launch.executable, "utf8"), /^2\.0\.0:/);
     await launch.cleanup();

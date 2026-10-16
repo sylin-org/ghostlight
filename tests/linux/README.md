@@ -75,8 +75,8 @@ by the runner.
 | `acceptance/no-tray/desktop-check.py` | KWin lifecycle, exact descendant renderer failure, and Applications launch using the private-bus context. |
 | `acceptance/no-tray/desktop_atspi_driver.py` | Diagnostic accessibility tree probe; lack of a usable tree is not a passing accessibility result. |
 | `acceptance/portable-lifecycle.py` | Ownership-safe install/remove/reinstall using the no-tray context and disposable home. |
-| `acceptance/npm/native.mjs` | The npm launcher and the registered native browser journey. First install `ghostlight@$VERSION` (the published package, or a tarball from `npm pack`) with npm prefix `$AREA/npm/prefix`; the launcher downloads the two images into `$AREA/npm/cache/bin`. The journey runs `ghostlight install`, then starts the launcher with no arguments, which is the MCP edge. |
-| `acceptance/cleanup.py` | Quit authorities inside `$AREA` through their tray; exact no-tray fallback only. Close dedicated browsers first; unrelated authority/connector identities must remain unchanged. |
+| `acceptance/npm/native.mjs` | The npm launcher and the registered native browser journey. First install `ghostlight@$VERSION` (the published package, or a tarball from `npm pack`) with npm prefix `$AREA/npm/prefix`; the launcher downloads the three images into `$AREA/npm/cache/bin`. The journey runs `ghostlight install`, then starts the launcher with no arguments, which is the MCP edge. |
+| `acceptance/cleanup.py` | Quit authorities inside `$AREA` through their tray; exact no-tray fallback only. Close dedicated browsers first; unrelated edge and service identities must remain unchanged. |
 | `acceptance/guest/get-rootfs.py` | Download and digest-check official `debian` or `ubuntu` image layers; arguments are image and tag. Writes only under `$GUEST_AREA`. |
 | `acceptance/guest/enter.sh` | Enter a prepared build root at `$GUEST_AREA/root`; mount the prepared source/build tree at `$GUEST_AREA/build` and configured build tools. Remaining arguments are the guest command. |
 
