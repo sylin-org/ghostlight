@@ -156,9 +156,11 @@ order, `serve` refuses an image other than `bin/ghostlight-service`,
 refuses an elevated Windows token, applies the quit latch, takes the operating-system lock on
 `run/service.lock`, and only then opens state. The lock is held until exit and admits the single
 local authority; the endpoint's first-instance flag is a second refusal. A start that finds the
-lock held exits 0 at once and touches nothing, because the service that holds it answers the
-starter's own connection; only an `update` start waits, up to 30 s, so the service it replaces
-can finish leaving. A service that is not accepting openings within 30 s of taking the lock exits
+lock held touches nothing and waits for it: an `update` start up to 30 s, so the service it
+replaces can finish leaving, and any other start up to 5 s, so it outlasts a service that is
+leaving on idle, which keeps the lock and the endpoint until its teardown ends and tells no one.
+When the wait runs out the start exits 0, because the service that holds the lock answers the
+starter's own connection. A service that is not accepting openings within 30 s of taking the lock exits
 with a nonzero status and a diagnostics event, so a stalled start never blocks the next one. The
 service binds the endpoint as soon as it has started, with the session listener and the quit signal
 already installed (ADR-0199 Decision 5). The timed discovery of ADR-0166, which waited for a
@@ -166,8 +168,9 @@ desktop to be ready before the endpoint existed, is gone with the desktop.
 
 A person's Quit (the tray, the workbench, or control `quit` with reason `quit`) writes the latch
 `state/quit` before the service finishes in-flight work and exits. While it exists a `browser` or
-`recover` start exits 0 with a diagnostics event before it takes the lock, and any other start
-deletes it after taking the lock and serves. So after Quit a browser restart does not bring
+`recover` start exits 0 with a diagnostics event before it takes the lock, and again if the
+latch was set while it waited for the lock; any other start deletes it after taking the lock and
+serves. So after Quit a browser restart does not bring
 Ghostlight back; the next agent request, a command that needs it, or a person does. Before it
 closes its streams the service sends a goodbye on each: `quit`, `replace` (the installer's quit)
 or `uninstall`. The MCP relay answers its outstanding requests as cut off on every goodbye.
@@ -226,8 +229,8 @@ idle exit is not refused. If the executor still holds work, the limit is armed a
 `idle_exit` process-diagnostics event. Presence launches nothing for it, because a quit has begun.
 With presence a shell is attached on every desktop that can show one, so the idle exit fires only
 on a headless service, such as one an agent started over SSH or in CI. Pause and Stop are service
-state the shell shows; they do not affect it. Explicit Quit alone ends a service that has streams,
-and it holds (see above).
+state the shell shows; they do not affect it. A service that has streams ends only by a person's
+Quit (which holds, see above), the end of the session, a replacement or an uninstall.
 Every Ghostlight process honors the end of the session: the service, the edge in every role, and
 every one-shot command. The listener is one module, `ghostlight_relay::os::session`. On Windows it is a
 hidden top-level window on its own thread, never a message-only window, plus the console handler;

@@ -66,7 +66,8 @@ pub struct Streams {
 
 impl Streams {
     /// A count with no stream open, armed from now: the service leaves `limit` after `clock`
-    /// says so unless a stream opens first.
+    /// says so unless a stream opens first. [`Streams::published`] arms it again from the moment
+    /// the service accepts openings.
     #[must_use]
     pub fn new(clock: Arc<dyn Clock>, limit: Duration) -> Arc<Self> {
         let since = Some(clock.now());
@@ -100,6 +101,15 @@ impl Streams {
         state.open += 1;
         state.since = None;
         true
+    }
+
+    /// The service accepts openings from now. A service with no stream starts its span here,
+    /// not at construction, so the time spent starting never counts as idleness.
+    pub fn published(&self) {
+        let mut state = lock(&self.state);
+        if state.open == 0 && !state.leaving {
+            state.since = Some(self.clock.now());
+        }
     }
 
     /// One counted stream ended; the last one arms the limit.
@@ -262,6 +272,24 @@ mod tests {
         assert_eq!(idle(&streams), Verdict::Wait(Duration::from_secs(1)));
         clock.advance(Duration::from_secs(1));
         assert_eq!(idle(&streams), Verdict::Leave);
+    }
+
+    #[test]
+    fn the_span_of_a_service_that_was_not_yet_serving_starts_when_it_publishes() {
+        let (clock, streams) = streams();
+        clock.advance(IDLE_EXIT - Duration::from_secs(1));
+        streams.published();
+        assert_eq!(idle(&streams), Verdict::Wait(IDLE_EXIT));
+
+        let stream = streams.admit().expect("the service is staying");
+        clock.advance(IDLE_EXIT * 2);
+        streams.published();
+        assert_eq!(
+            idle(&streams),
+            Verdict::Streams,
+            "an open stream stays armed off"
+        );
+        drop(stream);
     }
 
     #[test]

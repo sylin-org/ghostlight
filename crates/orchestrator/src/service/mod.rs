@@ -145,6 +145,16 @@ impl StartTerms {
             idle_exit: idle::IDLE_EXIT,
         }
     }
+
+    /// The terms of a start for `reason` that asks for the lock once, so a test that expects a
+    /// held lock learns it at once.
+    #[cfg(test)]
+    fn asking_once(reason: StartReason) -> Self {
+        Self {
+            lock_wait: Duration::ZERO,
+            ..Self::for_reason(reason)
+        }
+    }
 }
 
 /// A running local service host. Dropping it stops the listener and releases the service lock.
@@ -188,7 +198,7 @@ impl ServiceHost {
     /// binding the endpoint and without the elevation check a production start makes.
     #[cfg(test)]
     pub(crate) fn start(home: &Path) -> Result<Self> {
-        Self::start_with_token(home, StartTerms::for_reason(StartReason::Agent), || {
+        Self::start_with_token(home, StartTerms::asking_once(StartReason::Agent), || {
             Ok(false)
         })
     }
@@ -201,7 +211,7 @@ impl ServiceHost {
     ) -> Result<Self> {
         Self::start_with_world(
             home,
-            StartTerms::for_reason(StartReason::Agent),
+            StartTerms::asking_once(StartReason::Agent),
             || Ok(false),
             world,
         )
@@ -221,9 +231,11 @@ impl ServiceHost {
     ///
     /// In order: a process whose token is elevated is refused; a browser or recover start is
     /// refused while the quit latch is set ([`QuitLatched`]); the lock is taken, and a start that
-    /// finds it held gives way ([`AuthorityAlreadyRunning`]) except an update, which asks again
-    /// for [`lifetime::UPDATE_LOCK_WAIT`] so the service it replaces can finish leaving; and only
-    /// then does any other start clear the latch and open state.
+    /// finds it held asks again, an update for [`lifetime::UPDATE_LOCK_WAIT`] so the service it
+    /// replaces can finish leaving and any other start for [`lifetime::LEAVING_LOCK_WAIT`] so it
+    /// outlasts a service leaving on idle, and gives way ([`AuthorityAlreadyRunning`]) when the
+    /// wait ends; a browser or recover start that waited looks at the latch again once it holds
+    /// the lock; and only then does any other start clear the latch and open state.
     pub fn start_waiting(home: &Path, reason: StartReason) -> Result<Self> {
         Self::start_with_token(
             home,
@@ -288,6 +300,11 @@ impl ServiceHost {
         }
         let lock = acquire_lock(&layout.service_lock(), terms.lock_wait)?;
         let lock_taken = Instant::now();
+        // A Quit that began while this start waited for the lock is the old service's own, and
+        // this start must not bring back what the person just quit.
+        if lifetime::refused_by_quit_latch(terms.reason) && latch::is_set(&layout.quit_latch()) {
+            return Err(QuitLatched.into());
+        }
         if !lifetime::refused_by_quit_latch(terms.reason) {
             latch::clear(&layout.quit_latch()).context("clear the quit latch")?;
         }
@@ -447,6 +464,7 @@ impl ServiceHost {
         let thread = spawn_listener(Arc::clone(&listener), Arc::clone(&self.intake));
         *bound = Some(Bound { listener, thread });
         self.ready.settle();
+        self.intake.streams.published();
         self.intake.presence.published();
         let endpoint = Endpoint::for_home(&self.home).map(|endpoint| endpoint.to_string());
         self.diagnostics.sink().emit(
@@ -1964,7 +1982,7 @@ mod tests {
 
     /// The terms of an agent start, which asks for the lock once.
     fn agent() -> StartTerms {
-        StartTerms::for_reason(StartReason::Agent)
+        StartTerms::asking_once(StartReason::Agent)
     }
 
     /// A fresh directory to serve from, which the test removes.
@@ -3286,7 +3304,7 @@ mod tests {
     }
 
     #[test]
-    fn a_start_that_finds_the_lock_held_gives_way_at_once_and_touches_no_state() {
+    fn a_start_that_waits_no_time_for_a_held_lock_gives_way_at_once_and_touches_no_state() {
         let directory = temp_home("lock-held-gives-way");
         let layout = crate::install::layout::Layout::new(&directory);
         let holder = start_for(&directory, agent()).unwrap();
@@ -3300,11 +3318,7 @@ mod tests {
             StartReason::Update,
         ] {
             let started = Instant::now();
-            let terms = StartTerms {
-                lock_wait: Duration::ZERO,
-                ..StartTerms::for_reason(reason)
-            };
-            let error = start_for(&directory, terms)
+            let error = start_for(&directory, StartTerms::asking_once(reason))
                 .err()
                 .expect("the lock is held");
             assert!(error.is::<AuthorityAlreadyRunning>(), "{reason:?}");
@@ -3352,6 +3366,35 @@ mod tests {
         assert!(error.is::<AuthorityAlreadyRunning>());
         assert!(started.elapsed() >= Duration::from_millis(200));
         drop(holder);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_browser_start_that_waited_for_the_lock_is_refused_when_a_quit_began_meanwhile() {
+        let directory = temp_home("latch-set-while-waiting");
+        let layout = crate::install::layout::Layout::new(&directory);
+        let holder = start_for(&directory, agent()).unwrap();
+        let quitting = {
+            let latch = layout.quit_latch();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(150));
+                super::latch::set(&latch).unwrap();
+                drop(holder);
+            })
+        };
+        let error = start_for(&directory, waiting(StartReason::Browser, PATIENCE))
+            .err()
+            .expect("Quit holds this start back");
+        assert!(error.is::<QuitLatched>());
+        assert!(
+            super::latch::is_set(&layout.quit_latch()),
+            "the latch stays"
+        );
+        quitting.join().unwrap();
+        assert!(
+            super::ServiceLock::is_free(&layout.service_lock()),
+            "the refused start released the lock"
+        );
         std::fs::remove_dir_all(directory).unwrap();
     }
 
@@ -4771,6 +4814,13 @@ mod tests {
         drop(host);
     }
 
+    /// The idle limit of the tests that hold a service open or closed across several looks. It is
+    /// wide enough that a loaded machine does not let it pass before a test's first move.
+    const IDLE_LIMIT: Duration = Duration::from_secs(1);
+
+    /// How long a test watches a service that must not leave: past two idle limits.
+    const HOLD_WINDOW: Duration = Duration::from_millis(2200);
+
     /// Terms of an agent start whose service idles out after `idle`.
     fn idling(idle: Duration) -> StartTerms {
         StartTerms {
@@ -4852,14 +4902,11 @@ mod tests {
 
     #[test]
     fn an_open_stream_keeps_the_service_and_the_last_close_arms_the_limit_again() {
-        let (_home, host, quit_requested) =
-            idling_host("idle-stream", Duration::from_millis(500), &Arc::default());
+        let (_home, host, quit_requested) = idling_host("idle-stream", IDLE_LIMIT, &Arc::default());
         let socket = open_mcp(None);
         assert!(
-            quit_requested
-                .recv_timeout(Duration::from_millis(1500))
-                .is_err(),
-            "an open stream holds the service past three limits"
+            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
+            "an open stream holds the service past two limits"
         );
         drop(socket);
         quit_requested
@@ -4871,9 +4918,9 @@ mod tests {
     #[test]
     fn a_control_call_restarts_the_span() {
         let (_home, host, quit_requested) =
-            idling_host("idle-control", Duration::from_millis(800), &Arc::default());
+            idling_host("idle-control", IDLE_LIMIT * 3 / 2, &Arc::default());
         for _ in 0..4 {
-            thread::sleep(Duration::from_millis(400));
+            thread::sleep(IDLE_LIMIT / 2);
             cli_client::status().expect("the service answers a status call");
         }
         assert!(
@@ -4888,14 +4935,11 @@ mod tests {
 
     #[test]
     fn an_attached_shell_is_a_stream_and_keeps_the_service() {
-        let (_home, host, quit_requested) =
-            idling_host("idle-shell", Duration::from_millis(500), &Arc::default());
+        let (_home, host, quit_requested) = idling_host("idle-shell", IDLE_LIMIT, &Arc::default());
         let (shell, _handed) = open_desktop();
         assert!(
-            quit_requested
-                .recv_timeout(Duration::from_millis(1500))
-                .is_err(),
-            "an attached shell holds the service past three limits"
+            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
+            "an attached shell holds the service past two limits"
         );
         drop(shell);
         quit_requested
@@ -4906,14 +4950,11 @@ mod tests {
 
     #[test]
     fn work_the_executor_still_holds_re_arms_the_limit() {
-        let (_home, host, quit_requested) =
-            idling_host("idle-work", Duration::from_millis(300), &Arc::default());
+        let (_home, host, quit_requested) = idling_host("idle-work", IDLE_LIMIT, &Arc::default());
         let running = host.quit.drain.admit().unwrap();
         assert!(
-            quit_requested
-                .recv_timeout(Duration::from_millis(1200))
-                .is_err(),
-            "held work keeps the service past four limits"
+            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
+            "held work keeps the service past two limits"
         );
         drop(running);
         quit_requested
@@ -4923,20 +4964,93 @@ mod tests {
     }
 
     #[test]
-    fn the_end_of_the_session_leaves_once_and_the_idle_path_adds_nothing() {
-        let (_home, host, quit_requested) = idling_host(
-            "idle-session-end",
+    fn a_browser_stream_opened_through_the_intake_keeps_the_service_until_it_ends() {
+        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
+        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
+
+        let (_home, host, quit_requested) =
+            idling_host("idle-browser", IDLE_LIMIT, &Arc::default());
+        // Stand in for the browser edge: carry the extension's bytes over a browser stream.
+        let (native, extension) = pair().unwrap();
+        let carrier = thread::spawn(move || {
+            let (service, reply) = dial(&opening(Role::Browser));
+            assert!(reply.accepted, "{reply:?}");
+            service.set_read_timeout(None).unwrap();
+            let mut to_service = (native.try_clone().unwrap(), service.try_clone().unwrap());
+            let mut to_extension = (service, native);
+            thread::spawn(move || {
+                let _ = std::io::copy(&mut to_extension.0, &mut to_extension.1);
+            });
+            let _ = std::io::copy(&mut to_service.0, &mut to_service.1);
+            // The extension is gone: end the stream the service holds as the edge would.
+            to_service.1.shutdown();
+        });
+        let fake = FakeExtension::connect(
+            extension,
+            &FakeExtension::hello("browser_idle"),
+            Box::new(|correlation, _| {
+                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
+            }),
+        );
+        drop(fake.wait(|seen| !seen.frames.is_empty()));
+        eventually(|| {
+            host.browser
+                .connected_browsers()
+                .iter()
+                .any(|browser| browser.id == "browser_idle")
+        });
+        assert!(
+            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
+            "an attached browser holds the service past two limits"
+        );
+        fake.close();
+        drop(fake);
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the service leaves once the browser has gone");
+        let _ = carrier.join();
+        drop(host);
+    }
+
+    #[test]
+    fn a_start_that_arrives_while_the_service_is_leaving_on_idle_waits_for_it_and_serves() {
+        let (home, host, quit_requested) = idling_host(
+            "idle-exit-race",
             Duration::from_millis(300),
             &Arc::default(),
         );
+        quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the idle service asks the process to exit");
+        // The old service still holds the lock and the endpoint while it tears down.
+        let directory = home.path().to_path_buf();
+        let starter = thread::spawn(move || {
+            let started = Instant::now();
+            let served =
+                start_for(&directory, StartTerms::for_reason(StartReason::Browser)).map(drop);
+            (served, started.elapsed())
+        });
+        thread::sleep(Duration::from_millis(250));
+        assert!(
+            !starter.is_finished(),
+            "the start waits for the leaving service instead of giving way"
+        );
+        drop(host);
+        let (served, waited) = starter.join().unwrap();
+        served.expect("the start takes the lock the old service released");
+        assert!(waited < super::lifetime::LEAVING_LOCK_WAIT);
+    }
+
+    #[test]
+    fn the_end_of_the_session_leaves_once_and_the_idle_path_adds_nothing() {
+        let (_home, host, quit_requested) =
+            idling_host("idle-session-end", IDLE_LIMIT, &Arc::default());
         host.quit_handle().session_end();
         quit_requested
             .recv_timeout(PATIENCE)
             .expect("the session end asks the process to exit");
         assert!(
-            quit_requested
-                .recv_timeout(Duration::from_millis(900))
-                .is_err(),
+            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
             "the idle limit passing during the exit makes no second request"
         );
         drop(host);

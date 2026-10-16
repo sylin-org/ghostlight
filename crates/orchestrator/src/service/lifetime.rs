@@ -1,8 +1,9 @@
 //! How a service's life begins and ends: what a start reason allows, the quit drain and the
 //! readiness limit.
 //!
-//! A start for an update waits for the previous service to leave; every other start gives way to
-//! a service that is already there. A quit refuses new work, lets what is in flight finish within
+//! A start for an update waits a long time for the previous service to leave; every other start
+//! waits a few seconds, so it also outlasts a service that is leaving, and gives way to a service
+//! that stays. A quit refuses new work, lets what is in flight finish within
 //! a bound, and then asks the desktop to exit. A start that never becomes ready stops by itself.
 //! Each is a small state machine with no knowledge of the executor, the sockets or the desktop,
 //! so each is tested alone.
@@ -20,6 +21,15 @@ pub const QUIT_GRACE: Duration = Duration::from_secs(10);
 /// installer's quit lets the old service drain first.
 pub const UPDATE_LOCK_WAIT: Duration = Duration::from_secs(30);
 
+/// How long any other start waits for a held `run/service.lock`.
+///
+/// A service that decided to leave on idle keeps the lock and the endpoint until its teardown
+/// ends, and says nothing to a start that arrives meanwhile. A start that gave way at once would
+/// leave the caller with no service when the old one finished. Waiting outlasts that teardown and
+/// serves in its place. Against a service that stays, the wait only delays a start that nobody
+/// awaits, because the caller reaches the running service by its endpoint.
+pub const LEAVING_LOCK_WAIT: Duration = Duration::from_secs(5);
+
 /// How long a service may take, from the moment it holds the lock, to accept openings before it
 /// stops by itself.
 pub const READY_LIMIT: Duration = Duration::from_secs(30);
@@ -29,13 +39,14 @@ const READY_POLL: Duration = Duration::from_millis(250);
 
 /// How long a start with `reason` asks for a held service lock before it gives way.
 ///
-/// Only an update waits. Any other start finds another service already serving, and that
-/// service is the answer to the starter's own connection.
+/// An update waits for the service it replaces, [`UPDATE_LOCK_WAIT`]. Any other start waits
+/// [`LEAVING_LOCK_WAIT`], long enough for a leaving service to release the lock, and gives way
+/// to one that stays: that service is the answer to the starter's own connection.
 #[must_use]
 pub fn lock_wait(reason: StartReason) -> Duration {
     match reason {
         StartReason::Update => UPDATE_LOCK_WAIT,
-        _ => Duration::ZERO,
+        _ => LEAVING_LOCK_WAIT,
     }
 }
 
@@ -333,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn only_an_update_start_waits_for_a_held_lock() {
+    fn an_update_start_waits_longest_for_a_held_lock_and_every_other_start_a_few_seconds() {
         assert_eq!(lock_wait(StartReason::Update), UPDATE_LOCK_WAIT);
         for reason in [
             StartReason::Agent,
@@ -342,7 +353,7 @@ mod tests {
             StartReason::Person,
             StartReason::Recover,
         ] {
-            assert_eq!(lock_wait(reason), Duration::ZERO, "{reason:?}");
+            assert_eq!(lock_wait(reason), LEAVING_LOCK_WAIT, "{reason:?}");
         }
     }
 
