@@ -162,7 +162,9 @@ Before committing, run the checks for what you changed. CI runs the full set on 
   and `cargo clippy --workspace --all-targets -- -D warnings` (always workspace-wide: a manifest
   change can break clippy in untouched code), then `cargo test` for the touched crates, or
   `cargo test --workspace` if bridge, relay, win-peer or a manifest changed.
-- Extension: `npm test` in `extension/`.
+- Extension: `npm test` in `extension/`. Any packaged extension file is frozen by
+  `tests/guards/extension-freeze.test.mjs`; change one only with a recorded owner decision to
+  withdraw the store submission and resubmit (ADR-0200 Decision 16).
 - Page assets: `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"`,
   plus `cargo test -p ghostlight-service` and `npm test` in `extension/`, which also read the
   expanded bundle.

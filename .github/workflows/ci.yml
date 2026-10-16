@@ -97,6 +97,8 @@ jobs:
       - name: Build the store extension artifact
         shell: pwsh
         run: ./scripts/package-extension.ps1 -OutputPath dist/ghostlight-extension.zip
+      - name: Check the frozen extension package
+        run: node --test tests/guards/extension-freeze.test.mjs
 
   process-journeys:
     strategy:

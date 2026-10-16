@@ -1,9 +1,9 @@
 # Ghostlight in Browser: Extension (Manifest V3)
 
 The thin, **policy-free** Chromium extension: a CDP executor + native-messaging endpoint. It holds
-mechanism only; all governance lives in the persistent `ghostlight` service. The browser-only
-`ghostlight-browser-connector` carries its native-messaging frames; MCP JSON-RPC ends separately in
-`ghostlight-mcp-connector`. Not a port: a clean
+mechanism only; all governance lives in the persistent `ghostlight-service`. The `ghostlight`
+program is the native messaging host: it carries the extension's frames to the service, and the
+same program speaks MCP to agents as `ghostlight mcp`. Not a port: a clean
 re-implementation that harvests proven mechanics (MV3 keepalive, live-state tab-group recovery, the
 DPR-probe + downscale + coordinate-rescale screenshot model, JPEG 55->30 fallback, shadow-DOM
 `form_input` traversal, the phantom-cursor UI) reimplemented from the observed technique, not
@@ -47,16 +47,16 @@ not belong in the extension source or Chrome Web Store package.
 
 The binary self-registers everything:
 
-1. **Build:** `cargo build --release`. This produces `ghostlight-mcp-connector`, `ghostlight`, and
-   `ghostlight-browser-connector` side by side.
+1. **Build:** `cargo build --release`. This produces `ghostlight`, `ghostlight-service` and
+   `ghostlight-desktop` side by side.
 2. **Load the extension:** open `chrome://extensions` (or `brave://`, `edge://`), enable Developer
    mode, click **Load unpacked**, and select this `extension/` directory. The extension ID is
    pinned by a committed manifest `key`, so it is deterministic across machines.
 3. **Register + wire clients:** run `ghostlight install`; it registers the native-messaging host
    and configures detected MCP clients via an idempotent value-level JSON merge (see
    [../docs/adr/0015-idempotent-merge-installer.md](../docs/adr/0015-idempotent-merge-installer.md)).
-   `ghostlight doctor` verifies the setup; `ghostlight uninstall` reverses it.
-4. **Restart the browser** (native-messaging host configs are read at startup).
+   `ghostlight doctor` verifies the setup; `ghostlight uninstall` reverses it. The browser needs no
+   restart.
 
 See the public [installation guide](../docs/guides/installation.md) for packaged installation and
 troubleshooting. Platform-specific registration details remain in the installer source and ADRs.

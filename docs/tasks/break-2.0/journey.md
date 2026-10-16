@@ -98,7 +98,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-c02-get-scripts has landed. Next: x01-store-submission, which waits for the owed live checks of c02 and for both sylin.org redirects to answer.
+x01-store-submission has landed (it prepares only; nothing was submitted). Next: j09-first-request. Rule 8 now binds: a packaged extension file changes only with a recorded owner decision to withdraw and resubmit, and the freeze golden is regenerated in the same commit.
 
 ## Landed
 
@@ -112,6 +112,7 @@ c02-get-scripts has landed. Next: x01-store-submission, which waits for the owed
 | j07-options | `extension/options.html` is a kit page (`<html class="gl-page">`, `<body class="gl-stage options-page">`) linking `kit.css` then the new `extension/options.css`, which holds the cards, rows, switches and footer on kit tokens. The connection card's pill and line come from `GhostlightPopupView.connection()`: `gl-pill--ok` when connected, else `gl-pill--warn`; the setup button shows whenever `needsSetup` is true, is labelled `setupLabel` and opens the bundled `setup.html`. The words pass is done (strings under Owed to the owner). `extension/ui.css` is deleted and the packager ships `options.css` instead. The options source-text pins in `onboarding.test.js` and `shared.test.js` are deleted; `popup-view.test.js` gains two connection cases. | see `git log` |
 | c01-carriers | The carriers ship and run the three 2.0 images (`ghostlight`, `ghostlight-service`, `ghostlight-desktop`). Most of the slice had landed in earlier carrier fixes (see Notes); this commit finishes it. The npm never-install commands (`doctor`, `status`, `help`, `--version`, `install --help`) with nothing installed now stage and run `ghostlight-service` itself instead of a staged edge beside a staged service, so they download one image, not two. The WinGet template lists `ghostlight-service.exe` and `ghostlight-desktop.exe` as nested installer files with no alias, beside `ghostlight.exe` with the alias `ghostlight`; `winget validate` accepts it. The npm README says `npx -y ghostlight` is the MCP server and `npx -y ghostlight install` installs. | see `git log` |
 | c02-get-scripts | `scripts/get.ps1` and `scripts/get.sh` download the three 2.0 images and verify them as before (checksums, and `gh attestation` when `gh` is present). They print one line after verification, `Ghostlight <version> downloaded. Checksums verified.`, or `... Checksums and build provenance verified.` when every file passed attestation. The service's `deployment install` runs with stdout discarded and errors shown, then the installed `ghostlight install` runs in the same console so its summary prints and its exit code is checked. `get.ps1` uses the call operator and `$LASTEXITCODE` for both, with no `Start-Process`. The trailing doctor line is gone; the doctor hint stays inside the two failure messages. `GHOSTLIGHT_NO_REGISTER=1` prints `Ghostlight <version> is installed in <dir>. Run 'ghostlight install' to connect your browsers and agents.` Each header carries the frozen-URL sentence and the short sylin.org one-liner. The WinGet `InstallationNotes` say to run `ghostlight install` once and again after `winget upgrade`. | see `git log` |
+| x01-store-submission | The store copy is true to the tree and the package is frozen. `PERMISSION_JUSTIFICATIONS.md` says page code is part of the application installed on this computer, supplied over native messaging and checked by hash, and that `browser_execute` text is written by the person's agent; the debugger, downloads, nativeMessaging, offscreen, storage and host-permission blocks follow the code (no content scripts, no scripting API, the options page's diagnostics download, the setup flag and the session keys). `PRIVACY.md`, `STORE_LISTING.md` (setup-page sentence, assets, submission gate), `trust/faq.md`, `trust/questionnaire.md`, `LICENSING.md`, the `gifenc.js` comment, `extension/README.md` and `ACCEPTANCE.md` extension gates 3, 4 and 7 are corrected. `docs/release/store-disclosure-2.0.md` (new) holds the dashboard answers (remote code: No, per the owner ruling), the dated Chrome and Edge policy reading, JQ2's answer, the staged release order and the assets to recapture. The freeze: `tests/golden/extension-2.0.0.files.sha256` (47 packaged paths and the zip's hash) and `tests/guards/extension-freeze.test.mjs` (with `tests/guards/lib/extension-package.mjs`), run by the extension CI job. The packager now stages text files with LF line endings, so one commit packages to the same bytes on every machine. | see `git log` |
 
 ## Owed live checks
 
@@ -124,6 +125,8 @@ c02-get-scripts has landed. Next: x01-store-submission, which waits for the owed
 - j04: the coordinator's check that the JQ4 one-liners run in Windows PowerShell 5.1, PowerShell 7 and `curl | sh` is not recorded in this ledger yet.
 - j07: the options page on Chrome and Edge, on Windows and Linux: it scrolls (the stage no longer clips), every switch still saves and survives a reload, the captions switch dims while effects are off, Save developer diagnostics still downloads, the connection card reads right in each state (Connected, Not connected with and without the setup button, Update needed), and the setup button opens the bundled setup page. The kit look is right at 390 px and with reduced motion.
 - c02: the exact JQ4 one-liners, `irm https://sylin.org/ghostlight/get.ps1 | iex` in Windows PowerShell 5.1 and in PowerShell 7, and `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` in a Linux shell, against a 2.0 test release made as JQ4 says (a fork, or a non-prerelease test tag: `releases/latest` skips prereleases and drafts; the fork test uses the fork URLs directly). Each shows one verify line, then the install summary. A failure (a development install present) shows its reason and the failing command's own output. The install summary prints in the console on Windows now that nothing is hidden. A cold-run time on test-01 for j04's fallback constants (`FALLBACK_AFTER_COPY_MS`, `FALLBACK_AFTER_OPEN_MS`). All of these are needed before x01.
+- x01: an install of `.tmp/lane-journey/extension-2.0.0.zip` as an unpacked folder on Chrome and Edge. After the owner submits (staged), the staged package itself through trusted testers; a packed Chrome clamps `chrome.alarms` to 30 seconds, so measure the time to connect after an install.
+- x01 (JQ3): the unpacked extension with `host_permissions` removed, on an http and an https page, covering attach, `webNavigation` events, capture, navigate, read, click, screenshot, execute and recording. No result is recorded, so the package keeps the host permissions. If nothing needs them, remove the block, the host-permission justification and its listing line, regenerate the golden, and run the check again on the final zip.
 - c01: `npx -y ghostlight install` on test-01 (Windows) and on a Linux machine; then an MCP client with `npx -y ghostlight` connects. `npx -y ghostlight --version` on a machine with nothing installed downloads and runs only the service. The WinGet alias `ghostlight` finds `ghostlight-service` beside its target (the portable zip extracts all three to one folder). The Claude Desktop MCPB on Windows. The window and tray appear after each.
 
 ## Owed to the owner
@@ -131,6 +134,7 @@ c02-get-scripts has landed. Next: x01-store-submission, which waits for the owed
 - Publish the sylin.org redirects `/ghostlight/get.ps1` and `/ghostlight/get.sh` to the latest
   GitHub release assets (separate repository). x01 waits until both answer.
 - The Edge listing is not requested; Edge installs from the Chrome Web Store (JQ9).
+- x01: the dashboard submission (staged, never published before the release order in `docs/release/store-disclosure-2.0.md` holds), the remote-code answer (No), the recaptured popup, options and setup assets, the public privacy URL carrying the new text before publication, and the decision on an Edge Add-ons listing.
 
 - j07 words pass for the options page, for approval at Demo 1, before x01 (no setting key, default
   or behaviour changed). Before -> after:
@@ -339,3 +343,52 @@ c02-get-scripts has landed. Next: x01-store-submission, which waits for the owed
   header says the console output of `ghostlight install` is an owed live check. The fixtures do not
   assert the new verify line, the `GHOSTLIGHT_NO_REGISTER` sentence, the provenance variant or the
   failure messages; add them.
+
+- x01: ran the gate checks the files require: (3) `npm test` in `extension/` (492 pass), (5) the
+  packager to `.tmp/lane-journey/extension-2.0.0.zip` (twice, same hash), (8) `node --test
+  tests/guards/*.test.mjs`, (9) `node --check` on the two new modules and a PowerShell parse of the
+  packager, (10) the repository integrity script, `cargo test -p ghostlight-service --test
+  store_listing_copy` (the paste blocks fit 1000 characters; no other Rust changed, so fmt, clippy
+  and the full service tests did not run), and `scripts/check-public-surfaces.ps1` offline (it
+  passes; its warning about a missing compatibility row for service 1.3.15 is older). The freeze
+  guard was proven once: a space appended to `extension/kit.css` failed it naming `kit.css` and
+  ADR-0200 Decision 16; the file was restored and the probe never committed.
+  The freeze. `git tag --list 'v2*'` was empty. The recording fix (c33bf24f, ledger row
+  ci-recording-source-evidence in seams.md) had landed. The zip: 47 files, 199979 bytes, version
+  2.0.0, `key` stripped, SHA-256 5bd88867bcb2640a8101e518f3ab7c7f3842b794dd566c694631fa51617c053e
+  (built with PowerShell 7.6.5; the manifest's JSON layout comes from `ConvertTo-Json`, so
+  Windows PowerShell 5.1 would produce a different manifest and zip hash). After this slice a
+  packaged file changes only with a recorded owner decision to withdraw and resubmit, and the
+  golden is regenerated with `node tests/guards/lib/extension-package.mjs <zip>` in the same
+  commit.
+  The tree and the spec differed in these places.
+  (1) Preconditions. The ledger recorded none of these: the c02 live check of the exact
+  one-liners, the tuned fallback constants (`FALLBACK_AFTER_COPY_MS` and `FALLBACK_AFTER_OPEN_MS`
+  are still 90000 and 120000), the approval of j07's strings, the sylin.org redirects answering,
+  or the JQ3 live check. The coordinator's task for this slice carried the binding decisions of
+  2026-10-16 and the policy reading, and asked for the slice, so it ran. It prepares only. The
+  constants and the strings are in the frozen package: tuning either later is a packaged-file
+  change.
+  (2) The spec's remote-code answer ("Yes", with the two sentences) is superseded by the owner
+  ruling: the answer is No. The two sentences are in the justifications and the disclosure draft
+  as the plain statement of what the page code is and where `browser_execute` text comes from.
+  (3) JQ3: host permissions stay, because no live-check result is recorded. The justification
+  block no longer speaks of content scripts; it says the extension has none, uses no scripting
+  API, and works through the Debugger API in controlled tabs.
+  (4) The `downloads` block gained the options page's "Save developer diagnostics" download. The
+  recording save is an agent request under local policy, not a person's click, and the block now
+  says so. The `offscreen` claim checked out against `offscreen.html` (it loads only packaged
+  scripts and makes no request).
+  (5) The golden hashes text files with LF line endings and the manifest after the `key` strip in
+  the packager's serialization (CRLF lines, one trailing LF). Working copies on this machine hold
+  CRLF in some files that git stores as LF, so the packager was changed to stage text files with
+  LF; without that the zip hash depended on the checkout. The guard reads the packaged lists from
+  the packager script and takes `lib/` and `vendor/` whole, so a new root file or a new `lib` file
+  fails it.
+  (6) The guard runs in CI in the extension job after the store artifact step; `AGENTS.md` names
+  it in the building section. `docs/public-status.json` already says the injector loads the
+  installed service runtime, which agrees with the new wording; it was not changed.
+  (7) `ACCEPTANCE.md` gate 3 also carries the setup-page sentence (the first connection that finds
+  the service absent opens the bundled page once), and gate 4 drops the "returns revision and hash
+  through a correlated receipt" and "retires the connection" claims, which the protocol-4 code and
+  README do not state.

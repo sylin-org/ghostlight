@@ -305,9 +305,13 @@ Evidence: supply-chain.md (releases, SBOM, dependencies); .github/workflows/rele
 
 Every extension permission is justified individually in a published permission-justification
 document, so your security team can review the exact access before approving it. The extension is
-Manifest V3, and all extension logic ships in the reviewed package. Its advertised
-`browser_execute` accepts explicit page JavaScript from the local MCP client and evaluates it only
-in the attached page; it does not fetch or install extension logic. Release archives use the
+Manifest V3. Its page code is part of the open-source Ghostlight application installed on the
+computer; the application supplies it over native messaging, never from a network server, and the
+extension checks it against a hash before installing it through the Debugger API. It changes only
+when the application is updated. Its advertised `browser_execute` runs a script written by the
+person's AI agent, which may run on a remote model service. The script reaches the extension only
+through the local application, under local policy, and is evaluated only in the attached page; no
+code runs in the extension's own origin. Release archives use the
 stable unpacked id pinned by the committed manifest key. The Chrome Web Store item has its own
 stable store-assigned id. Fleet policy can force-install either the Web Store item or a reviewed,
 self-hosted package by its corresponding id. Store-installed extensions follow Chrome's
@@ -316,7 +320,7 @@ auto-update; fleets that require version control over the extension can keep sel
 See [docs/legal/PERMISSION_JUSTIFICATIONS.md](../legal/PERMISSION_JUSTIFICATIONS.md) and
 [extension/manifest.json](../../extension/manifest.json).
 
-Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission and page-JavaScript rationale); extension/manifest.json (Manifest V3 and packaged extension logic); crates/orchestrator/src/install/native_host.rs (both official ids).
+Evidence: docs/legal/PERMISSION_JUSTIFICATIONS.md (per-permission and page-JavaScript rationale); extension/manifest.json (Manifest V3); extension/lib/world.js (hash check and isolated-world install); crates/orchestrator/src/install/native_host.rs (both official ids).
 
 ## Legal and support
 
@@ -347,4 +351,4 @@ split), and [ADR-0028](../adr/0028-tripwire-licensing-and-continuity-promise.md)
 
 Evidence: docs/guides/licensing.md; ADR-0140 (whole-product Apache-2.0 OR MIT); ADR-0028 (license state never gates behavior).
 
-Last reviewed: 2026-08-25 against the 1.0 source candidate | Contact: hello@sylin.org
+Last reviewed: 2026-10-16 against the current source | Contact: hello@sylin.org

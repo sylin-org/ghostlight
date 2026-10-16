@@ -85,6 +85,20 @@ try {
     Copy-Item -LiteralPath (Join-Path $repo "docs/licenses/MIT.txt") `
         -Destination (Join-Path $licenseDirectory "MIT.txt")
 
+    # Text files are staged with LF line endings whatever the checkout wrote, so the archive of
+    # one commit is the same bytes on every machine. The repository stores them as LF
+    # (.gitattributes); a working copy with CRLF would otherwise change the archive hash.
+    $textExtensions = @(".css", ".html", ".js", ".json", ".md", ".txt")
+    foreach ($staged in @(Get-ChildItem -LiteralPath $stage -File -Recurse)) {
+        if ($textExtensions -notcontains $staged.Extension.ToLowerInvariant()) {
+            continue
+        }
+        $bytes = [System.IO.File]::ReadAllBytes($staged.FullName)
+        $latin1 = [System.Text.Encoding]::Latin1
+        $normalized = $latin1.GetString($bytes) -replace "\r\n", "`n"
+        [System.IO.File]::WriteAllBytes($staged.FullName, $latin1.GetBytes($normalized))
+    }
+
     if (-not $KeepDevelopmentKey) {
         $stagedManifestPath = Join-Path $stage "manifest.json"
         $stagedManifest = Get-Content -LiteralPath $stagedManifestPath -Raw | ConvertFrom-Json

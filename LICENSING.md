@@ -31,7 +31,8 @@ traffic. An installed copy keeps working offline indefinitely. This is the Conti
 
 ## Vendored third-party code
 
-These dependencies ship inside the browser extension because it never loads remote code:
+These dependencies ship inside the browser extension as pinned, reviewed copies, not fetched at
+runtime:
 
 | File | Component | License |
 |---|---|---|

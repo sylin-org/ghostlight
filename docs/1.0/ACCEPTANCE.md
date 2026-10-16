@@ -375,26 +375,32 @@ workbench shows waiting becoming running once.
    description, and only permissions used by tested responsibilities.
 2. The same opaque adapter installation id is sent after service-worker suspension, browser
    restart, extension reload, and native reconnect.
-3. The adapter hello advertises versioned physical capabilities and a restart-local epoch. Service
-   behavior is gated by those capabilities rather than the extension version string.
-   An adapter that advertises attention reports it when a browser window gains focus and reports
-   truthfully at hello whether it already holds one. Connecting alone never claims attention.
-   Advertised revisions are derived from the adapter's executable handler table. Every command in
-   an advertised revision has a production handler and conformance coverage.
-4. A runtime-capable adapter verifies the service-owned page-runtime SHA-256 and returns its exact
-   revision and hash through a correlated receipt. It is not discoverable and no attached event is
-   published before that receipt. Every already-loaded and future permitted frame, including an
-   out-of-process cross-origin iframe, has the exact runtime before work reaches it. A mismatch,
-   timeout, child-install failure, or disconnect retires the connection.
+3. The adapter's first frame is the protocol-4 hello. It carries the persistent browser id, the
+   browser's product name, platform and engine version, the adapter version, and whether the
+   browser already holds a focused window. The service answers with `hello_accepted`: its epoch,
+   version, control state and the page assets with an id. Service behavior is gated by the
+   protocol, not by the extension version string, and a service that cannot answer a protocol-4
+   hello is called outdated. An adapter reports attention when a browser window gains focus and
+   reports truthfully at hello whether it already holds one. Connecting alone never claims
+   attention. Every primitive the adapter answers has a production handler and golden coverage, and
+   an unknown primitive is answered `unsupported`. When the first connection finds the service
+   absent, the extension opens its own bundled setup page once; the page loads nothing from the
+   network.
+4. The page assets arrive from the service in `hello_accepted` and are installed only after the
+   adapter has checked them against their SHA-256 id. They run in the isolated world `ghostlight`
+   of every controlled page session, the root page and each out-of-process child, and assets that
+   fail the check are refused. Every already-loaded and future permitted frame, including an
+   out-of-process cross-origin iframe, has the exact assets before work reaches it. No file in the
+   extension package holds page code.
 5. The popup distinguishes disconnected, connected-active, held, and ended
    states without reading page content.
 6. Popup pause, resume, end-session, and start-new-session actions become authoritative service
    runtime state before the next physical effect. Ordinary resume cannot revive an ended session.
    The keyboard command uses the same intent path.
-7. Options preserve the established dark sky-blue UI and persist effects-on, captions-off,
-   diagnostics-off, and preserve-tabs-on defaults under local keys. Preserve tabs is a final
-   physical interlock: it can refuse model-driven close but cannot edit, import, expand, or
-   override authority. Human browser closure remains available.
+7. Options use the Ghostlight kit, the sylin.org night ground and the #5eead4 accent, and persist
+   effects-on, captions-off, diagnostics-off, and preserve-tabs-on defaults under local keys.
+   Preserve tabs is a final physical interlock: it can refuse model-driven close but cannot edit,
+   import, expand, or override authority. Human browser closure remains available.
 8. Each exact `Ghostlight - <client label>` title has one canonical blue group across normal
    browser windows. A new tab is created directly in that group's window. With no Ghostlight group,
    the first URL opens in a dedicated normal window; no tab is inserted into the user's active

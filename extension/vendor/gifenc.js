@@ -1,6 +1,6 @@
 // gifenc 1.0.3 -- a pure-JavaScript animated GIF encoder by Matt DesLauriers, MIT licensed.
-// See extension/vendor/gifenc.LICENSE.md. Vendored rather than fetched: this extension never
-// loads remote code, and a pinned reviewed copy is the supply-chain contract ADR-0109 asks for.
+// See extension/vendor/gifenc.LICENSE.md. Vendored rather than fetched: a pinned reviewed copy
+// ships in the package, which is the supply-chain contract ADR-0109 asks for.
 //
 // The published dist/gifenc.js is a CommonJS bundle. It is reproduced below verbatim, minus its
 // source-map comment, inside the module preamble this extension uses everywhere else, because

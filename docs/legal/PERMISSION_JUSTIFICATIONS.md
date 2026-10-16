@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Permission Justifications
 
-Last updated: 2026-09-30
+Last updated: 2026-10-16
 
 These blocks correspond exactly to `extension/manifest.json`. Recheck store field names and length
 limits at submission time.
@@ -14,31 +14,31 @@ The alarms permission schedules local reconnection and lifecycle checks for the 
 ## debugger
 
 ```text
-The debugger permission attaches Chrome DevTools Protocol only to Ghostlight-controlled tabs. It captures requested screenshots, dispatches pointer and keyboard input, scrolls, drags, changes zoom, handles page navigation state, and evaluates an explicitly requested bounded page script. Credential input requires the local application to acknowledge the user's explicit instruction for that request. Chrome displays its normal debugging indicator. Ghostlight detaches when the controlled relationship ends.
+The debugger permission attaches the Chrome DevTools Protocol only to Ghostlight-controlled tabs. It captures requested screenshots, dispatches pointer and keyboard input, scrolls, drags, changes zoom, follows navigation state, evaluates a script the person's agent asks for, and installs Ghostlight's page code in an isolated world of those tabs (see Page-context JavaScript). Credential input requires the local application to acknowledge the person's explicit instruction for that request. Chrome displays its normal debugging indicator. Ghostlight detaches when the controlled relationship ends.
 ```
 
 ## downloads
 
 ```text
-The downloads permission is used only when the user explicitly asks to save a completed Ghostlight recording through the browser's normal download mechanism. The extension creates the finished GIF locally, gives Chrome a temporary object URL, observes only that download until it settles, and then revokes the URL. It does not browse existing downloads, choose an arbitrary filesystem path, or fetch a recording from a remote server.
+The downloads permission is used for two saves, both into the browser's normal download mechanism. When the person's agent asks to save a finished Ghostlight recording to a file, the extension builds the GIF locally, gives Chrome a temporary object URL, watches only that download until it settles, and revokes the URL. When the person presses Save developer diagnostics on the options page, the extension saves a small JSON file of bounded connection details. It does not browse existing downloads, choose an arbitrary filesystem path, or fetch anything from a remote server.
 ```
 
 ## nativeMessaging
 
 ```text
-The nativeMessaging permission connects the extension to the separately installed local Ghostlight browser connector. This on-device channel carries typed browser instructions and results. Without it the extension cannot receive work. The channel does not send browser data to Sylin.
+The nativeMessaging permission connects the extension to the Ghostlight application installed on this computer; its ghostlight program is the native messaging host. This on-device channel carries typed browser instructions and results, and the application's page code, which the extension checks against a hash before installing. Without it the extension cannot receive work. The channel does not send browser data to Sylin.
 ```
 
 ## offscreen
 
 ```text
-The offscreen permission creates a local extension document only while encoding an explicitly requested browser recording as an animated GIF. Manifest V3 service workers may be suspended during encoding, so the document provides the browser media environment needed to complete the operation reliably. It loads only code bundled in the reviewed extension, makes no network request, has no visible UI, and closes after encoding.
+The offscreen permission creates a local extension document only while encoding a requested browser recording as an animated GIF. Manifest V3 service workers may be suspended during encoding, so the document provides the browser media environment needed to complete the operation reliably. It loads only scripts packaged in the extension (a vendored GIF encoder and the extension's own modules), makes no network request, has no visible UI, and closes after encoding.
 ```
 
 ## storage
 
 ```text
-The storage permission retains the opaque local adapter installation identity and user-controlled presentation settings, including effects, captions, diagnostics, and preserve-tabs. Restart-local connection and notice state is also kept locally. Ghostlight does not use Chrome sync storage and does not store URLs, titles, page content, selectors, values, scripts, file paths, screenshots, or policy.
+The storage permission keeps, in this browser profile, an opaque installation identity, the presentation settings (effects, captions, diagnostics, preserve-tabs), a flag that the setup page has played its welcome, and, only while diagnostics are on, a bounded log of connection events. Session storage, which the browser clears when it closes, holds the ids of controlled tabs, queued unseen denial notices, and Ghostlight tab-group names. Ghostlight does not use Chrome sync storage and does not store URLs, titles, page content, selectors, values, scripts, file paths, screenshots, or policy.
 ```
 
 ## tabGroups
@@ -68,11 +68,13 @@ The windows permission locates the user-placed window containing an existing sam
 ## Host permissions: `http://*/*` and `https://*/*`
 
 ```text
-HTTP and HTTPS host permissions are required because a user may ask Ghostlight to operate a site not known at publication time. Packaged content scripts read and interact only in Ghostlight-controlled tabs and render local action feedback. Host and capability authority is enforced by the native orchestrator; the extension contains no policy logic.
+HTTP and HTTPS host permissions are required because a person may ask an agent to work on a site not known at publication time. The extension has no content scripts and does not use the scripting API; it reads and acts in a page through the Debugger API, in tabs Ghostlight controls. Which hosts an agent may touch is decided by the local Ghostlight application under the person's policy; the extension contains no policy logic.
 ```
 
 ## Page-context JavaScript
 
 ```text
-All extension logic ships in the reviewed package. When the MCP client explicitly requests browser_execute, bounded script text arrives from the local Ghostlight application and is evaluated through the documented Debugger API only in the attached web page. It is not retained, installed, or executed in the extension origin.
+Ghostlight's page code is part of the open-source Ghostlight application installed on this computer. The application supplies it over native messaging, never from a network server; the extension checks each script against the hash the application sends and installs it only through the documented Debugger API, in an isolated world of tabs Ghostlight controls. It changes only when the person updates the application.
+
+When the person's AI agent asks for browser_execute, the script text is written by that agent, which may run on a remote model service. It reaches the extension only through the local application, under the person's local policy, and is evaluated through the Debugger API only in the attached page. No code runs in the extension origin.
 ```

@@ -1,6 +1,6 @@
 # Ghostlight in Browser: candidate store listing
 
-Last updated: 2026-09-30
+Last updated: 2026-10-16
 
 This is repository-local candidate copy. Do not change the public listing or submit a package until
 the owner approves the provenance-verified release artifacts and compatibility evidence. Recheck the
@@ -40,16 +40,20 @@ Browser work stays together in a clearly named blue tab group. You can watch pag
 navigation, clicks, typing, form work, file upload, screenshots, dialogs, and other requested
 actions; pause or end the session at any time; and preserve controlled tabs as visible evidence.
 Page messages and animations are passive, with no buttons or interference with your input.
-Use the local workbench and extension popup for human controls.
+Use the Ghostlight window and the extension popup for human controls.
 
 Credential input requires your explicit instruction, acknowledged by the agent for each request.
 Without that acknowledgement, the call returns guidance without pausing the session. Configured
 policy and your Pause/Stop controls still apply.
 
-The extension is a thin adapter for the separately installed Ghostlight application. Policy,
-terminal results, history, and model-facing tools stay in the local native orchestrator. The
-extension owns only Chromium mechanisms, page-local access, observation, and content-free visual
-feedback.
+The extension is a thin adapter for the separately installed Ghostlight application. It works
+with the Ghostlight application installed on this computer, which supplies the page code the
+extension runs. Policy, terminal results, history, and model-facing tools stay in the local native
+orchestrator. The extension owns only Chromium mechanisms, page-local access, observation, and
+content-free visual feedback.
+
+If Ghostlight is not on this computer yet, the extension opens its own setup page with the one
+command to run.
 
 Ghostlight is local-first. There is no developer-operated runtime service, account, telemetry,
 advertising, tracking, activation, or data sale.
@@ -113,8 +117,12 @@ does not maintain a browsing-history database. It does not read the browser's sa
   submitted extension.
 - If an asset does need replacement, capture it externally so the extension's intentional
   screenshot suppression does not hide its visible cursor, highlights, receipts, and ribbons.
-  Show the real browser chrome, named Ghostlight group, current popup/options visual identity, a
-  safe browser action, and a blocked action with its visible explanation.
+  Show the real browser chrome, named Ghostlight group, a safe browser action, and a blocked
+  action with its visible explanation.
+- The popup, options page and setup page now use the Ghostlight kit: the sylin.org night ground
+  and the #5eead4 accent. Recapture every popup and options screenshot in the store listing, and
+  add the setup page (the one command, then the meeting) if the dashboard takes a third image.
+  A store asset that still shows the old sky-blue popup misrepresents the submitted extension.
 - Use only safe demo content. Remove accounts, notifications, personal tabs, paths, ids, and other
   private material. Do not invent a demo CLI; record the real packaged product through a supported
   MCP harness and the public safe demo forms.
@@ -125,16 +133,23 @@ Before owner submission:
 
 1. Produce the store zip from the approved release commit without the pinned development key or
    repository-only test material.
-2. Compare the zip's manifest, icons, popup, options, permissions, and scripts with the approved
-   source and exact candidate adapter version.
+2. Compare the zip's manifest, icons, popup, options, setup page, permissions, and scripts with
+   the approved source and exact candidate adapter version. The packaged file set is frozen by
+   `tests/golden/extension-2.0.0.files.sha256`.
 3. Complete the extension product and visible-browser gates in `docs/1.0/ACCEPTANCE.md`.
 4. Verify the privacy policy public URL already discloses the candidate's authorized credential
    handling and passive page feedback. A source-file edit alone does not update that public URL.
 5. Review the existing assets and listing fields, change only what the submitted extension makes
    inaccurate, review every disclosure in the live dashboard, then submit with the owner's
    explicit approval.
-6. Use deferred publication where available. Publish the service and adapter in the compatibility
-   order recorded by the final release plan.
+6. Answer the remote-code question as [`store-disclosure-2.0.md`](../release/store-disclosure-2.0.md)
+   records it: No, because the page code ships with the application installed on this computer
+   and reaches the extension over native messaging. Say plainly, in the listing and the
+   permission justifications, that the extension works with that application and that
+   `browser_execute` runs a script the person's agent wrote.
+7. Submit for staged publication and publish in the order recorded in
+   [`store-disclosure-2.0.md`](../release/store-disclosure-2.0.md), after the service release is
+   public and the public privacy URL carries this text.
 
 After approval, independently download the public package and compare it with the submitted zip,
 allowing only store-injected metadata. Update `docs/public-status.json` from observed public state.
