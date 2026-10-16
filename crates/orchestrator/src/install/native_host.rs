@@ -132,6 +132,17 @@ pub struct NativeHostActionResult {
     pub private: Vec<String>,
 }
 
+/// How a person knows one supported browser family.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct BrowserIdentity {
+    /// Stable browser identifier.
+    pub id: &'static str,
+    /// Full product name, for example `Google Chrome`.
+    pub name: &'static str,
+    /// Short name for running text, for example `Chrome`.
+    pub short: &'static str,
+}
+
 /// Product-owned native-host lifecycle service.
 #[derive(Clone, Debug)]
 pub struct NativeHostRegistry {
@@ -172,6 +183,27 @@ impl NativeHostRegistry {
     pub fn browser_executable(&self, browser_id: &str) -> Option<PathBuf> {
         let browser = BROWSERS.iter().find(|browser| browser.id == browser_id)?;
         browser_executable(&self.context, browser)
+    }
+
+    /// Where one supported browser keeps its profiles (its user data directory), or `None` for an
+    /// id Ghostlight does not support. The directory may not exist. Nothing is read or changed.
+    #[must_use]
+    pub fn user_data_directory(&self, browser_id: &str) -> Option<PathBuf> {
+        let browser = BROWSERS.iter().find(|browser| browser.id == browser_id)?;
+        Some(user_data_directory(&self.context, browser))
+    }
+
+    /// Every supported browser family, in the table's order.
+    #[must_use]
+    pub fn browser_identities(&self) -> Vec<BrowserIdentity> {
+        BROWSERS
+            .iter()
+            .map(|browser| BrowserIdentity {
+                id: browser.id,
+                name: browser.name,
+                short: browser.short,
+            })
+            .collect()
     }
 
     /// Install or update every safe per-user registration.
@@ -388,6 +420,9 @@ fn native_host_roots(
 struct BrowserSpec {
     id: &'static str,
     name: &'static str,
+    /// The name a sentence uses when the family is clear from context: `Chrome`, not
+    /// `Google Chrome`.
+    short: &'static str,
     windows_vendor: &'static [&'static str],
     windows_directory: &'static [&'static str],
     windows_executable: &'static str,
@@ -399,6 +434,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "chrome",
         name: "Google Chrome",
+        short: "Chrome",
         windows_vendor: &["Google", "Chrome"],
         windows_directory: &["Google", "Chrome", "Application"],
         windows_executable: "chrome.exe",
@@ -412,6 +448,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "edge",
         name: "Microsoft Edge",
+        short: "Edge",
         windows_vendor: &["Microsoft", "Edge"],
         windows_directory: &["Microsoft", "Edge", "Application"],
         windows_executable: "msedge.exe",
@@ -425,6 +462,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "brave",
         name: "Brave",
+        short: "Brave",
         windows_vendor: &["BraveSoftware", "Brave-Browser"],
         windows_directory: &["BraveSoftware", "Brave-Browser", "Application"],
         windows_executable: "brave.exe",
@@ -438,6 +476,7 @@ const BROWSERS: &[BrowserSpec] = &[
     BrowserSpec {
         id: "chromium",
         name: "Chromium",
+        short: "Chromium",
         windows_vendor: &["Chromium"],
         windows_directory: &["Chromium", "Application"],
         windows_executable: "chrome.exe",
@@ -449,6 +488,34 @@ const BROWSERS: &[BrowserSpec] = &[
         },
     },
 ];
+
+/// Name of the directory under a Windows vendor path that holds the profiles.
+const WINDOWS_USER_DATA_DIRECTORY: &str = "User Data";
+/// Last component of a Linux native-messaging directory; its parent holds the profiles.
+const LINUX_NATIVE_MESSAGING_COMPONENT: &str = "NativeMessagingHosts";
+
+/// The directory that holds one browser's profiles, derived from the same table as its
+/// registration: the vendor path under `LOCALAPPDATA` on Windows, and the native-messaging
+/// directory's parent under the XDG configuration home on Linux.
+fn user_data_directory(context: &NativeHostContext, browser: &BrowserSpec) -> PathBuf {
+    match context.platform {
+        NativeHostPlatform::Windows => browser
+            .windows_vendor
+            .iter()
+            .fold(context.local.clone(), |path, component| {
+                path.join(component)
+            })
+            .join(WINDOWS_USER_DATA_DIRECTORY),
+        NativeHostPlatform::Linux => {
+            let directory = browser
+                .linux_directory
+                .strip_suffix(LINUX_NATIVE_MESSAGING_COMPONENT)
+                .unwrap_or(browser.linux_directory)
+                .trim_end_matches('/');
+            context.config.join(directory)
+        }
+    }
+}
 
 fn windows_browser_roots(local: &Path) -> Vec<PathBuf> {
     let mut roots = vec![local.to_path_buf()];
@@ -1720,6 +1787,59 @@ mod tests {
             browser_manifest_path(&windows, &BROWSERS[0]),
             windows_manifest_path(&windows)
         );
+    }
+
+    #[test]
+    fn user_data_directories_follow_the_table_on_both_platforms() {
+        let windows = context(NativeHostPlatform::Windows);
+        let linux = context(NativeHostPlatform::Linux);
+        let windows_tails = [
+            "Google/Chrome/User Data",
+            "Microsoft/Edge/User Data",
+            "BraveSoftware/Brave-Browser/User Data",
+            "Chromium/User Data",
+        ];
+        let linux_tails = [
+            "google-chrome",
+            "microsoft-edge",
+            "BraveSoftware/Brave-Browser",
+            "chromium",
+        ];
+        for (index, browser) in BROWSERS.iter().enumerate() {
+            let on_windows = user_data_directory(&windows, browser);
+            assert!(on_windows.starts_with(&windows.local), "{}", browser.id);
+            assert!(on_windows.ends_with(windows_tails[index]), "{}", browser.id);
+            let on_linux = user_data_directory(&linux, browser);
+            assert!(on_linux.starts_with(&linux.config), "{}", browser.id);
+            assert!(on_linux.ends_with(linux_tails[index]), "{}", browser.id);
+        }
+    }
+
+    #[test]
+    fn the_registry_answers_user_data_and_identities_in_table_order() {
+        let root = env::temp_dir().join("ghostlight-user-data-registry");
+        let registry = NativeHostRegistry::isolated(&root, &root.join("ghostlight"));
+
+        assert_eq!(
+            registry.user_data_directory("brave"),
+            Some(root.join(".config/BraveSoftware/Brave-Browser"))
+        );
+        assert_eq!(registry.user_data_directory("firefox"), None);
+        let identities: Vec<(&str, &str)> = registry
+            .browser_identities()
+            .iter()
+            .map(|browser| (browser.id, browser.short))
+            .collect();
+        assert_eq!(
+            identities,
+            [
+                ("chrome", "Chrome"),
+                ("edge", "Edge"),
+                ("brave", "Brave"),
+                ("chromium", "Chromium")
+            ]
+        );
+        assert_eq!(registry.browser_identities()[0].name, "Google Chrome");
     }
 
     #[test]
