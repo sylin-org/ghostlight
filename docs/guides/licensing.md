@@ -7,7 +7,7 @@ product. This page explains what that covers; the exact terms remain in the lice
 ## The whole tree
 
 Everything -- the typed bridge, orchestrator application, browser engine, governance module,
-MCP connector, browser connector, policy-free extension, desktop adapter, and bundled workbench
+the `ghostlight` edge, policy-free extension, desktop adapter, and bundled workbench
 UI -- is offered under Apache-2.0 OR MIT. There is no separately licensed module.
 
 You may use either permissive license. Preserve notices and follow the chosen license's terms

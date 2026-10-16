@@ -97,7 +97,7 @@ Line references such as `service-worker.js:1472` point at dev `95a7e646`.
 
 All frames use today's framing: 4-byte little-endian length, then UTF-8 JSON, carried by native messaging and
 the relay. A service-to-extension frame must stay under 768 KiB (Chromium caps host-to-extension messages at
-1 MiB). Larger requests use `command_chunk`, unchanged from level 3. Every frame is an object with a `kind`.
+1 MiB). Larger requests use `command_chunk`; protocol 4 has one chunk shape. Every frame is an object with a `kind`.
 
 ### 1.1 Frame kinds
 
@@ -106,7 +106,7 @@ the relay. A service-to-extension frame must stay under 768 KiB (Chromium caps h
 | ext to svc | `hello` | `protocol:4, browser_id, browser_name?, platform, engine_version?, adapter_version, attended` | Always the first frame on a port |
 | svc to ext | `hello_accepted` | `service_epoch, service_version?, control_state, assets{id, source}` | `service_version` is display-only (popup) |
 | svc to ext | `request` | `correlation, primitive{name, args}` | One receipt answers it |
-| svc to ext | `command_chunk` | as level 3 | Reassembled by `chunks.js` into a `request` |
+| svc to ext | `command_chunk` | one chunk shape | Reassembled by `chunks.js` into a `request` |
 | ext to svc | `receipt` | `correlation, ok? or failure?, message?, dispatched, committed_urls, tab?` | Section 1.3 |
 | svc to ext | `cancel` | `correlation` | One-way. The interrupted primitive answers with `failure:"cancelled"` |
 | svc to ext | `notice` | `tab_id, frame?, signal, defer_until_visible` | One-way presentation |
@@ -115,7 +115,7 @@ the relay. A service-to-extension frame must stay under 768 KiB (Chromium caps h
 | ext to svc | `heartbeat_ack` | `sequence` | |
 | ext to svc | `event` | `event{event, ...}` | Only for controlled tabs (section 2.2) |
 | svc to ext | `error` | `code, message` | Uncorrelated, for example `adapter_incompatible` |
-| relay to ext | `backend_unavailable` | `service?` | Written by the connector, not the service. `service: "absent"` says no service is there at all |
+| relay to ext | `backend_unavailable` | `service?` | Written by the edge, not the service. `service: "absent"` says no service is there at all |
 
 Events (extension to service):
 
@@ -142,7 +142,6 @@ extension                        relay                       service
 connectNative  ---------------->  hold first frame
 hello{protocol:4,...} ---------->  open relay stream  ----->  read first frame as serde_json::Value
                                                              protocol == 4: level-4 attach
-                                                             major == 3:    level-3 attach (today's path)
                                                              else: error{adapter_incompatible}, close
                 <---------------------------------------  hello_accepted{service_epoch, assets, control_state}
 connection is ready at once; no install round trip
@@ -154,11 +153,9 @@ connection is ready at once; no install round trip
    - Validate it with today's rules: the `browser_` id grammar (`browser/mod.rs:475-483`) and the browser
      name bound.
    - `engine_version` is informational. The manifest's `minimum_chrome_version: 125` enforces the floor.
-3. If `major` is 3, decode the same `Value` as `crate::browser::adapter::BrowserFrame` and continue in
-   today's `attach_reader` body unchanged.
-4. Anything else gets `{kind:"error", code:"adapter_incompatible", message}` and the socket closes. Today the
-   socket closes silently.
-5. At level 4, after validation:
+3. Anything else, including a hello from an adapter that speaks an older protocol, gets
+   `{kind:"error", code:"adapter_incompatible", message}` and the socket closes. Level 3 is deleted.
+4. After validation:
    - write `hello_accepted`, remembering the control state it carried;
    - register the connection as `ready` and publish `adapter_attached`;
    - read the control state again and, if it changed since `hello_accepted`, write `control_state` with
@@ -181,9 +178,9 @@ connection is ready at once; no install round trip
   3. if `service_epoch` changed, settles the service boundary state: interrupts recordings, clears
      diagnostics, cancels in-flight primitives, clears chunk transfers;
   4. applies `control_state`.
-- A second `hello_accepted` on the same port is legal and idempotent. Today's connector replays the cached
-  hello to a restarted service, so the extension must accept a new epoch and new assets on an open port.
-  Under D7 the port recycles instead. Both connectors therefore work.
+- A second `hello_accepted` on the same port is legal and idempotent: the extension accepts a new epoch and
+  new assets on an open port. The edge never replays the hello (D7): when the service is lost the edge says
+  so, and when a service returns it exits, so the extension reconnects on a new port with a fresh hello.
 - With no `hello_accepted` within 10 s of the hello, the extension shows "Update Ghostlight on this computer."
   This is the case of a 1.3.x service, which closes the socket on a protocol-4 hello.
 
@@ -243,7 +240,7 @@ created `adapter/`, commit C2 creates the module shells. Level-3 types stay wher
 them.
 
 No type here uses `deny_unknown_fields`. Each tolerant mirror converts into the `BrowserOutcome` types with
-`From` impls. The browser connector never sees these types (D7).
+`From` impls. The edge never sees these types (D7).
 
 ```rust
 //! Adapter protocol 4: the frozen browser primitive vocabulary. Mechanism only; no product semantics.
@@ -461,7 +458,7 @@ pub struct AxQuery { #[serde(default)] pub role: Option<String>, #[serde(default
 #[derive(Serialize, Deserialize)]
 pub struct Notice { pub tab_id: u64, #[serde(default)] pub frame: Option<FrameRef>,
                     pub signal: NoticeSignal, pub defer_until_visible: bool }
-/// Same fields as bridge PresentationSignal minus tab_id; `locator` is frame-local.
+/// Same fields as PresentationSignal (browser/adapter/work.rs) minus tab_id; `locator` is frame-local.
 #[derive(Serialize, Deserialize)]
 pub struct NoticeSignal { pub invocation: String, pub signal: PresentationKind, pub activity: PresentationActivity,
                           pub phase: String, #[serde(default)] pub label: Option<String>, #[serde(default)] pub detail: Option<String>,
@@ -644,20 +641,20 @@ tolerance/             frames with extra fields, unknown kinds, unknown events, 
 
 ### 1.8 The relay
 
-Protocol 4 needs nothing from the browser connector.
+Protocol 4 needs nothing from the browser relay beyond carrying frames. The edge (`ghostlight` run with a
+`chrome-extension://` argument, `crates/edge/src/port.rs`) is that relay, built on the `relay` crate:
+1. it holds the first frame and drops later Chrome frames until a service has accepted the stream;
+2. before the first connection it starts the service once and keeps connecting with backoff, without
+   starting it again, then forwards the held frame first;
+3. it pumps frames both ways without parsing them;
+4. when no service accepts within five seconds of its own start (`ABSENT_AFTER`), or after the service is
+   lost, it writes `{kind:"backend_unavailable", service:"absent"}`, drops what Chrome sends, and does not
+   start the service again;
+5. it probes with a read-only opening and exits (`Ended::ServiceReturned`) when a service answers.
 
-Under D7 the connector, rebuilt on the `relay` crate at M4a:
-1. holds the first frame and drops later Chrome frames until it has a service connection;
-2. spawns with backoff until connected, then forwards the held frame;
-3. pumps frames both ways without parsing them;
-4. when no service is there (lost, or none accepted within five seconds of its start), writes
-   `{kind:"backend_unavailable", service:"absent"}`, reads and drops Chrome frames, and never spawns again;
-5. exits 0 when a service accepts an opening again.
-
-The extension's existing 3 s reconnect then opens a fresh port and sends a fresh hello.
-
-Today's connector replays the cached hello instead. The protocol-4 extension also works with it, because a
-repeated `hello_accepted` on one port is idempotent (section 1.2). This spec therefore does not depend on M4a.
+The extension's 3 s reconnect then opens a fresh port and sends a fresh hello. A service that ends the
+stream on purpose says goodbye first, and the edge acts on the reason (`uninstall` and `session_end` exit
+at once). The edge never replays a hello.
 
 ---
 
@@ -672,7 +669,7 @@ largest remaining parts are the diagnostics ring (720 lines), recording and chun
 |---|---|---|---|
 | `worker.js` (manifest `background.service_worker`) | Bootstrap, native port, hello-first, frame router, controlled-tab set, chrome event listeners, ambient triggers, runtime control, UI messages | 520 | new; replaces `service-worker.js` (2,527) |
 | `lib/protocol.js` | Closed vocabulary: frame kinds, primitive names, failure codes, limits, `WORLD_NAME` | 70 | new |
-| `lib/debugger.js` | Attach leases, focus emulation, dialogs (with message and session), domains, child-session registry, registration identifiers, pluggable installer, release hook, CDP allowlist `cdp()` | 440 | extended (345 today) |
+| `lib/sessions.js` | Attach leases, focus emulation, dialogs (with message and session), domains, child-session registry, registration identifiers, required installer, release hook, CDP allowlist `cdp()` | 440 | extended (345 as `debugger.js`) |
 | `lib/world.js` | Fixed shims, asset registration, lazy install, world handles, `callOne`, Sequence/Parallel/Race, cancel tokens, ambient, present, dispose, DPR | 300 | new |
 | `lib/inventory.js` | CDP frame snapshot across root and child sessions, unseen frames, `checkGuard`, `currentLoader` | 140 | new; replaces `frames.js` and `documents.js` (432) |
 | `lib/input.js` | Input batch: precondition, dialog race, mouse, key, insertText, pause, drag with interception | 210 | new |
@@ -680,12 +677,16 @@ largest remaining parts are the diagnostics ring (720 lines), recording and chun
 | `lib/capture.js` | `view` and `capture`: metrics, clip, budget scale, quality ladder, image dimensions, hide in `finally` | 170 | new; absorbs `screenshot.js` (67) |
 | `lib/notice.js` | `notice` delivery, quiet completion, deferral via `presentation-queue.js`, flush triggers, activity list | 130 | new |
 | `lib/buffers.js` | Diagnostics read and clear (binding, guard), recording ops (watch, seed and final frames, encoder, downloads, page export) | 300 | new; moved out of the worker |
+| `lib/arguments.js` | The argument checks the primitives share | | new |
+| `lib/evaluate.js` | Main-world script evaluation for `evaluate_main` | | new |
 | `lib/primitives.js` | Handler table, argument validation, prelude, effect watch, receipt building, failure mapping, cancel, `evaluate_main`, `dialog`, `accessibility_snapshot` | 300 | new |
 | `lib/script-evaluator.js` + `vendor/acorn.js` | REPL wrap selection (unchanged) plus a deadline and `Runtime.terminateExecution` | 135 | additive |
 | `lib/presentation-queue.js` | Deferral queue (16 entries, 10 min TTL); used with a constant namespace | 82 | unchanged |
 | `lib/shared.js` | `bounded`, readiness, `browserName`, `linkState` (gains `service_outdated`), heartbeat ack | 110 | trimmed (key and drag helpers move to Rust) |
 | `lib/state.js`, `lib/chunks.js`, `lib/connection-log.js`, `lib/diagnostics.js`, `lib/recording.js`, `lib/gif.js` | as today | 1,668 | unchanged |
-| `popup.*`, `options.*`, `offscreen.*`, `setup.html` | UI; popup diagnostics row and options form-diagnostics export removed | ~560 | small edits |
+| `popup.*`, `options.*`, `offscreen.*`, `setup.*` | UI pages and their scripts; popup diagnostics row and options form-diagnostics export removed | ~560 | small edits |
+| `lib/popup-view.js`, `lib/setup-view.js` | The words and actions of the popup and the setup page: pure functions of the connection snapshot, with no DOM and no `chrome.*`. The page scripts only place them | | new |
+| `kit.css`, `options.css` | The extension pages' shared visual tokens, and the options page layout on them | | new |
 
 Deleted in the final commit:
 - `service-worker.js`;
@@ -711,9 +712,9 @@ That check is not part of this plan.
 
 ```js
 importScripts("lib/protocol.js", "lib/shared.js", "lib/state.js", "lib/connection-log.js", "lib/chunks.js",
-  "lib/debugger.js", "lib/inventory.js", "lib/world.js", "lib/input.js", "lib/tabs.js", "lib/capture.js",
-  "lib/presentation-queue.js", "lib/notice.js", "lib/diagnostics.js", "lib/recording.js", "lib/buffers.js",
-  "vendor/acorn.js", "lib/script-evaluator.js", "lib/primitives.js");
+  "lib/sessions.js", "lib/arguments.js", "lib/inventory.js", "lib/world.js", "lib/input.js", "lib/tabs.js",
+  "lib/capture.js", "lib/presentation-queue.js", "lib/notice.js", "lib/diagnostics.js", "lib/recording.js",
+  "lib/buffers.js", "vendor/acorn.js", "lib/script-evaluator.js", "lib/evaluate.js", "lib/primitives.js");
 
 const HELLO_TIMEOUT_MS = 10_000;
 
@@ -791,7 +792,7 @@ It replaces `topology.js`'s workspace mirror (`topology.js:16`).
 | `tabs.onUpdated(status)` | Readiness event; on `complete`, AMBIENT and notice flush for managed tabs |
 | `tabs.onActivated`, `windows.onFocusChanged` | Notice flush; `attended` event |
 | `tabs.onRemoved` | Cleanup and `tab_closed` |
-| `debugger.onEvent` | Dialog open and close, recording each dialog's `message` and `sessionId`; `Input.dragIntercepted`; `Page.screencastFrame`; Runtime and Network diagnostics; the `beforeunload` auto-accept for `navigate{discard_beforeunload}`. Target attach and detach are handled inside `debugger.js` |
+| `debugger.onEvent` | Dialog open and close, recording each dialog's `message` and `sessionId`; `Input.dragIntercepted`; `Page.screencastFrame`; Runtime and Network diagnostics; the `beforeunload` auto-accept for `navigate{discard_beforeunload}`. Target attach and detach are handled inside `sessions.js` |
 | `debugger.onDetach` | Drop handles, interrupt recordings, forget diagnostics |
 
 **AMBIENT** (section 2.4) is sent to the top world of every managed, attached tab on:
@@ -803,7 +804,7 @@ It replaces `topology.js`'s workspace mirror (`topology.js:16`).
 
 It replaces `syncPresentationState` and `broadcastRuntimeState` (`service-worker.js:1428-1439`).
 
-### 2.3 Debugger sessions, registrations and the CDP allowlist (`lib/debugger.js`)
+### 2.3 Debugger sessions, registrations and the CDP allowlist (`lib/sessions.js`)
 
 ```js
 const CDP_ALLOW = new Set([
@@ -856,9 +857,8 @@ debuggerApi.onEvent.addListener(async (source, method, params) => {
 // openDialog(tabId, { type, message, sessionId }); currentDialog(tabId) returns all three.
 ```
 
-The default `installer` is today's MAIN-world `installRuntimeInSession` (`debugger.js:96-103`). It keeps the
-legacy worker byte-for-byte behaved until the final commit, which deletes the default and
-`installPageRuntime`.
+The `installer` is required: the worker supplies the function that registers the page assets in each
+session (`world.js` `register`).
 
 ### 2.4 World handles and calls (`lib/world.js`, extension side)
 
@@ -894,7 +894,7 @@ async function setAssets(next) {
   return true;
 }
 
-async function register(session) {                         // the debugger.js installer hook
+async function register(session) {                         // the sessions.js installer hook
   if (!assets) return;
   for (const identifier of session.identifiers.splice(0))  // superseded registrations
     await cdp(session.target, "Page.removeScriptToEvaluateOnNewDocument", { identifier }).catch(() => {});
@@ -1507,7 +1507,8 @@ Nothing calls `Accessibility.enable`. The primitive exists so that a future tool
 
 ```js
 async function deliver({ tab_id, frame, signal, defer_until_visible }) {
-  activity.update(signal, await groupTitleOf(tab_id));      // popup activity label = the tab's group title
+  activity.update(signal, await groupTitleOf(tab_id));      // line name = the frame's label (activityName), else the shared table;
+                                                            // the tab's group title labels the line as client_label
   if (defer_until_visible && !(await tabIsVisible(tab_id))) {
     // The notice waits for its page, but the invocation is over: retire its decoration now (service-worker.js:946-955).
     await world.present(tab_id, frame, { ...signal, signal: "completion", activity: "quiet", phase: "", detail: null, locator: null, click: null });

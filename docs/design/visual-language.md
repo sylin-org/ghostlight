@@ -102,7 +102,7 @@ than merely pretty.
    its own reflection.
 2. **Always passive on the page.** Every effect and notice uses `pointer-events:none`. No page
    treatment contains buttons or focusable controls, intercepts keyboard input, or disables the
-   page, even when CSS fails. Interactive runtime control belongs in the Tauri workbench (ADR-0185).
+   page, even when CSS fails. Interactive runtime control belongs in the Ghostlight window, the desktop shell's webview (ADR-0185).
 3. **Ephemeral by default.** Spatial action effects are fire-and-fade confirmations (`addEphemeral`:
    removed on `animationend` with a timeout fallback). An active signature begins before its action,
    finishes through that action's `finally` path, and has a stale fallback. A confirmation signature

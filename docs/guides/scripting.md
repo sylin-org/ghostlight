@@ -138,7 +138,7 @@ and an agent working at the same time stay visually distinct.
 
 One caveat worth stating plainly: on a machine where a person can already run programs, the command
 line grants nothing they did not already have. Anyone who can run `ghostlight call` could also start
-the MCP connector by hand. The channel is recorded so that you can *see* what happened; it is not a
+the MCP relay by hand (`ghostlight mcp`). The channel is recorded so that you can *see* what happened; it is not a
 security boundary, and Ghostlight does not pretend it is.
 
 ## Worked examples

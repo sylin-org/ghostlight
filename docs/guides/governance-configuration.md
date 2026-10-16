@@ -5,8 +5,10 @@ work is open, including localhost, loopback, and link-local destinations. Runtim
 explicit credential-input acknowledgement, stale-handle checks, browser-local interlocks, and the
 HTTP(S)-only boundary still apply. Host restrictions belong to policy.
 
-A policy can only narrow that baseline. Managed policy, local policy, and per-request restrictions
-intersect. No lower layer can restore authority removed above it.
+A policy can only narrow that baseline. Managed policy and local policy intersect. No lower layer
+can restore authority removed above it. A request cannot narrow its own authority:
+`restrict_hosts` and `restrict_capabilities` are refused before dispatch, and a decision records no
+caller restriction.
 
 ## Write a schema-4 policy
 
@@ -142,10 +144,10 @@ There is exactly one user layer. Its document comes from one of two places, in t
 1. `GHOSTLIGHT_POLICY_FILE`, when set to the absolute path of a schema-4 JSON file before starting
    Ghostlight. Ghostlight reads that file and never writes to it. The workbench shows it read-only
    and says why.
-2. Otherwise the file Ghostlight owns, beside the managed cache in the per-user state directory:
-   `%LOCALAPPDATA%\Ghostlight\user-policy.json` on Windows,
-   `$XDG_STATE_HOME/ghostlight/user-policy.json` on Linux. This is the file the workbench writes,
-   and it is optional: a machine that has never authored one is all-open, not failing closed.
+2. Otherwise the file Ghostlight owns, beside the managed cache in the policy directory of the
+   Ghostlight home: `~/.ghostlight/policy/user-policy.json` on both systems. This is the file the
+   workbench writes, and it is optional: a machine that has never authored one is all-open, not
+   failing closed.
 
 Valid replacements apply atomically to future invocations. A malformed replacement keeps the last
 valid policy; a malformed cold start fails closed.
@@ -257,7 +259,7 @@ input-intercepting overlays; interactive runtime control belongs in the workbenc
 ## Audit collection
 
 Ghostlight appends one content-minimized JSONL record per terminal invocation. Set
-`GHOSTLIGHT_AUDIT_FILE` to choose its absolute path; otherwise it sits beside runtime discovery.
+`GHOSTLIGHT_AUDIT_FILE` to choose its absolute path; otherwise it is `~/.ghostlight/state/audit.jsonl`.
 Use the endpoint's existing file collector for SIEM delivery. Ghostlight does not upload audit or
 open a direct syslog or HTTP delivery channel. See [`siem-integration.md`](siem-integration.md).
 

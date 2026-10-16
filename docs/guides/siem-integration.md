@@ -7,7 +7,7 @@ the endpoint's existing file-collection agent.
 ## Select the file
 
 Set `GHOSTLIGHT_AUDIT_FILE` to an absolute local path before starting Ghostlight. Without it,
-`audit.jsonl` sits beside runtime discovery. Ghostlight creates the parent directory when possible,
+the file is `~/.ghostlight/state/audit.jsonl`. Ghostlight creates the parent directory when possible,
 opens the file append-only, writes one LF-terminated record, and flushes it. The workbench rebuilds
 its bounded History view from the same file.
 

@@ -203,7 +203,7 @@ as the script returned it. The edge adds no field and changes no value.
 
 The ordinary text block carries the authored summary and safe next steps. A session negotiated at
 an MCP revision before 2025-06-18 cannot read `structuredContent`, so its text block also carries
-the same lean JSON after them (ADR-0198 Decision 24). Bounded rich content crosses the bridge in
+the same lean JSON after them (ADR-0198 Decision 24). Bounded rich content crosses the relay in
 a separate generic content vocabulary. `browser_screenshot` returns an image block.
 `browser_record` save returns a GIF image block only when the caller asked for the replay itself;
 a save that stays inside the browser returns none. Image bytes are not copied into structured
@@ -290,7 +290,7 @@ never arrived, under the same condition. Stale Ghostlight-owned
 registrations among several installed browsers are repaired silently first, so the named browsers can actually connect; when
 no installed browser has a usable registration, the refusal names the browsers found and one
 choice-free remedy instead. No browser refusal ever says that Ghostlight declined to choose.
-When the registration names a connector belonging to a different Ghostlight installation,
+When the registration names the edge of a different Ghostlight installation,
 recovery changes nothing and answers `Another Ghostlight installation owns the browser
 registration.` with the `native_host_owned_elsewhere` fact and one next step: the user runs
 `ghostlight install` from the installation that should own the browsers. Silent repair applies

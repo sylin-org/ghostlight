@@ -15,8 +15,8 @@ guarantees**. A report that arrives during a quiet maintenance period may take l
 
 ## Scope
 
-The `ghostlight-mcp-connector` protocol edge, the `ghostlight` orchestrator and desktop workbench,
-the browser-only `ghostlight-browser-connector`, the bundled Chromium extension, explicit harness
+The three images `ghostlight` (the edge: the MCP relay and the browser relay),
+`ghostlight-service` and `ghostlight-desktop`, the bundled Chromium extension, explicit harness
 configuration management, and release packaging in this repository. Historical, research, and
 quarantined reference material is out of scope.
 
@@ -47,7 +47,7 @@ those the grant permits.
 Controls that reduce this risk:
 
 - **Least privilege.** Grant the narrowest hosts and capabilities a task requires. Use explicit
-  deny hosts for sensitive applications and request restrictions for a narrower unit of work.
+  deny hosts for sensitive applications.
 - **Visibility and interruption.** Every action is rendered in the browser as it happens; an
   operator can pause the session (take-the-wheel) or trigger the kill switch at any point.
 - **Audit.** Every terminal invocation produces a payload-free local record of the decision,
@@ -78,6 +78,5 @@ posture is documented in docs/trust/security-overview.md.
 
 ## Supported versions
 
-The latest tagged release is supported. The unreleased 1.0 source candidate is for development and
-release validation; security fixes land on its active branch until 1.0 is tagged. There are no
-promised backport branches.
+The latest tagged release is supported. Builds from the dev branch are for development and release
+validation. There are no promised backport branches.

@@ -92,7 +92,7 @@ https://sylin.org/ghostlight/privacy/
 
 | Permission | Purpose and justification |
 |---|---|
-| `nativeMessaging` | Required to exchange typed 32-bit framed JSON commands with the local Ghostlight service (`ghostlight-browser-connector`). This is the sole communication channel. |
+| `nativeMessaging` | Required to exchange typed 32-bit framed JSON commands with the local Ghostlight service (the `ghostlight` edge). This is the sole communication channel. |
 | `tabs` | Required to enumerate, focus, navigate, reload, traverse history, zoom, and close tabs explicitly controlled by the AI agent. The adapter does not read page content or capture screenshots. |
 | `webNavigation` | Required to observe document commitment and URL changes in controlled tabs to ensure governance preflights land on authorized origins. |
 | `storage` | Required to persist the opaque local extension-minted browser ID and the preserve-tabs preference across restarts. It does not store URLs, titles, page content, or history. |
