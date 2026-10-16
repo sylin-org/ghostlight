@@ -12,7 +12,9 @@ use crate::cli::parse::{NativeHostCommand, SetupOptions};
 use crate::install::container::{self, AppContainer};
 use crate::install::deployment::{stop_found_strays, StrayStop, SystemProcessControl};
 use crate::install::layout::Layout;
-use crate::install::reconcile::Registrations;
+use crate::install::reconcile::{
+    windows_entries_failure, PendingWindowsEntries, ReconcileReport, Registrations, WindowsRemoval,
+};
 use crate::install::record::InstallRecord;
 use crate::install::version_directories;
 use crate::language::deployment as deployment_words;
@@ -166,6 +168,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
 
     if install {
         reconcile_windows_entries(options, &mut kept_private)?;
+    } else {
+        remove_windows_entries(options)?;
     }
 
     if install && !options.dry_run && !install_usable {
@@ -253,19 +257,48 @@ fn reconcile_windows_entries(
     let registrations = Registrations::discover();
     if options.dry_run {
         match registrations.pending_windows_entries(&layout, &version) {
-            Ok(entries) => {
-                for entry in entries {
-                    println!("{}", deployment_words::platform_entry_would_update(&entry));
+            Ok(pending) => {
+                for line in pending_entry_lines(&pending, &layout) {
+                    println!("{line}");
                 }
             }
             Err(error) => eprintln!(
                 "{}",
-                deployment_words::registration_failed(&format!("Start menu: {error}"))
+                deployment_words::registration_failed(&windows_entries_failure(&error))
             ),
         }
         return Ok(());
     }
-    let report = registrations.reconcile_windows_entries(&layout, &version);
+    carry_windows_report(
+        registrations.reconcile_windows_entries(&layout, &version),
+        kept_private,
+    );
+    Ok(())
+}
+
+/// What a dry run says of the Windows entries: each one it would update, or, inside an app
+/// container, each one it would leave unwritten and the command that finishes them.
+fn pending_entry_lines(pending: &PendingWindowsEntries, layout: &Layout) -> Vec<String> {
+    let mut lines: Vec<String> = pending
+        .would_update
+        .iter()
+        .map(|entry| deployment_words::platform_entry_would_update(entry))
+        .collect();
+    if let Some(container) = &pending.container {
+        if !pending.kept_private.is_empty() {
+            lines.extend(container::kept_private_lines(
+                container,
+                &pending.kept_private,
+                layout,
+            ));
+        }
+    }
+    lines
+}
+
+/// Say what a reconcile of the Windows entries wrote and what failed, and carry the registrations
+/// it left to an app container into `kept_private` for the closing lines.
+fn carry_windows_report(report: ReconcileReport, kept_private: &mut KeptPrivate) {
     for entry in &report.platform {
         println!("{}", deployment_words::platform_entry_updated(entry));
     }
@@ -278,7 +311,49 @@ fn reconcile_windows_entries(
         }
         kept_private.registrations.extend(report.kept_private);
     }
+}
+
+/// Remove the Windows Start-menu shortcut and Uninstall key that are this installation's, saying
+/// each one removed, or, with `--dry-run`, each one that would be, and each one left because it
+/// names something else. A failure is reported and does not stop the rest of the uninstall.
+///
+/// Inside an app container `uninstall` has already been refused by the browser connection step,
+/// which comes first, so this is not reached there.
+fn remove_windows_entries(options: &SetupOptions) -> anyhow::Result<()> {
+    let layout = Layout::current()?;
+    let registrations = Registrations::discover();
+    let removal = if options.dry_run {
+        registrations.pending_windows_removals(&layout)
+    } else {
+        registrations.remove_windows_entries(&layout)
+    };
+    for line in removal_lines(&removal, options.dry_run) {
+        println!("{line}");
+    }
+    for failure in &removal.failures {
+        eprintln!("{}", deployment_words::removal_failed(failure));
+    }
     Ok(())
+}
+
+/// One line for each Windows entry removed, or with `dry_run` each that would be, and each kept.
+fn removal_lines(removal: &WindowsRemoval, dry_run: bool) -> Vec<String> {
+    let removed = if dry_run {
+        deployment_words::platform_entry_would_remove
+    } else {
+        deployment_words::platform_entry_removed
+    };
+    removal
+        .removed
+        .iter()
+        .map(|entry| removed(entry))
+        .chain(
+            removal
+                .kept
+                .iter()
+                .map(|entry| deployment_words::platform_entry_kept(entry)),
+        )
+        .collect()
 }
 
 /// The version the Windows entries record: the installed service's, from the install record, or
@@ -744,6 +819,110 @@ mod tests {
             private_browser_registrations(&["Google Chrome".to_owned()]),
             ["Google Chrome browser connection"]
         );
+    }
+
+    #[test]
+    fn setup_carries_the_entries_a_container_keeps_private_into_the_closing_lines() {
+        use super::{carry_windows_report, KeptPrivate};
+        use crate::install::container::AppContainer;
+        use crate::install::reconcile::ReconcileReport;
+
+        let container = AppContainer {
+            app: "Claude".into(),
+        };
+        let mut kept = KeptPrivate::default();
+        kept.registrations.push("PATH entry".to_owned());
+        carry_windows_report(ReconcileReport::default(), &mut kept);
+        assert_eq!(kept.registrations, ["PATH entry"]);
+        assert_eq!(kept.container, None);
+
+        carry_windows_report(
+            ReconcileReport {
+                kept_private: vec![
+                    "Start-menu shortcut".to_owned(),
+                    "installed-apps entry".to_owned(),
+                ],
+                container: Some(container.clone()),
+                ..ReconcileReport::default()
+            },
+            &mut kept,
+        );
+        assert_eq!(
+            kept.registrations,
+            ["PATH entry", "Start-menu shortcut", "installed-apps entry"]
+        );
+        assert_eq!(kept.container, Some(container));
+
+        let other = AppContainer {
+            app: "Codex".into(),
+        };
+        carry_windows_report(
+            ReconcileReport {
+                kept_private: vec!["browser".to_owned()],
+                container: Some(other),
+                ..ReconcileReport::default()
+            },
+            &mut kept,
+        );
+        assert_eq!(
+            kept.container.map(|container| container.app),
+            Some("Claude".to_owned()),
+            "the container already named stays"
+        );
+    }
+
+    #[test]
+    fn a_dry_run_inside_a_container_says_what_it_would_leave_private_not_what_it_would_update() {
+        use super::pending_entry_lines;
+        use crate::install::container::AppContainer;
+        use crate::install::layout::Layout;
+        use crate::install::reconcile::PendingWindowsEntries;
+
+        let layout = Layout::new("/home/.ghostlight");
+        let outside = PendingWindowsEntries {
+            would_update: vec!["Start-menu shortcut".to_owned()],
+            ..PendingWindowsEntries::default()
+        };
+        assert_eq!(
+            pending_entry_lines(&outside, &layout),
+            ["Would update the Start-menu shortcut."]
+        );
+        let inside = PendingWindowsEntries {
+            kept_private: vec!["Start-menu shortcut".to_owned()],
+            container: Some(AppContainer {
+                app: "Claude".into(),
+            }),
+            ..PendingWindowsEntries::default()
+        };
+        let lines = pending_entry_lines(&inside, &layout);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].contains("private to Claude") && lines[0].contains("Start-menu shortcut"));
+        assert!(!lines.iter().any(|line| line.contains("Would update")));
+        assert!(pending_entry_lines(&PendingWindowsEntries::default(), &layout).is_empty());
+    }
+
+    #[test]
+    fn an_uninstall_says_each_entry_it_removed_and_each_it_kept() {
+        use super::removal_lines;
+        use crate::install::reconcile::WindowsRemoval;
+
+        let removal = WindowsRemoval {
+            removed: vec!["Start-menu shortcut".to_owned()],
+            kept: vec!["installed-apps entry".to_owned()],
+            failures: Vec::new(),
+        };
+        assert_eq!(
+            removal_lines(&removal, false),
+            [
+                "Removed the Start-menu shortcut.",
+                "Kept the installed-apps entry; it does not name this Ghostlight installation."
+            ]
+        );
+        assert_eq!(
+            removal_lines(&removal, true)[0],
+            "Would remove the Start-menu shortcut."
+        );
+        assert!(removal_lines(&WindowsRemoval::default(), false).is_empty());
     }
 
     #[test]

@@ -215,6 +215,30 @@ pub fn platform_entry_would_update(entry: &str) -> String {
     format!("Would update the {entry}.")
 }
 
+/// A platform entry of this installation was removed.
+#[must_use]
+pub fn platform_entry_removed(entry: &str) -> String {
+    format!("Removed the {entry}.")
+}
+
+/// A platform entry a dry run would remove.
+#[must_use]
+pub fn platform_entry_would_remove(entry: &str) -> String {
+    format!("Would remove the {entry}.")
+}
+
+/// A platform entry that does not name this installation was left as it is.
+#[must_use]
+pub fn platform_entry_kept(entry: &str) -> String {
+    format!("Kept the {entry}; it does not name this Ghostlight installation.")
+}
+
+/// A registration could not be removed.
+#[must_use]
+pub fn removal_failed(failure: &str) -> String {
+    format!("Could not remove a registration: {failure}")
+}
+
 /// A registration could not be reconciled.
 #[must_use]
 pub fn registration_failed(failure: &str) -> String {
@@ -318,6 +342,10 @@ mod tests {
             removed_version_directory("d"),
             archived_version_audit("a"),
             kept_entry("m"),
+            platform_entry_removed("e"),
+            platform_entry_would_remove("e"),
+            platform_entry_kept("e"),
+            removal_failed("f"),
         ];
         assert!(sentences.iter().all(|sentence| sentence.is_ascii()));
     }

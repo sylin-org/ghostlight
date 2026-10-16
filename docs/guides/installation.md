@@ -173,7 +173,11 @@ package update, use Ghostlight's Quit action, then open Ghostlight from Applicat
 on disk and can differ until the old process has exited.
 
 On Windows an install writes the Start-menu shortcut and the installed-apps entry, as every
-deploy does, and says each one it changed. An install also adds
+deploy does, and says each one it changed. `ghostlight uninstall` removes both again, and says each one it
+removed. It removes the shortcut only when it starts a program in `~/.ghostlight/bin` or carries the
+Ghostlight application id, and the installed-apps entry only when its command or location points into
+`~/.ghostlight`; an entry that names anything else, such as one an older installer wrote, is left and
+named. An install also adds
 `~/.ghostlight/bin` to your user PATH and removes it again on uninstall. `ghostlight` works in terminals opened after the install; one that was already open
 needs to be reopened. The machine PATH is never changed.
 

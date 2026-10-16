@@ -504,6 +504,10 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     invokes the exact installed executable with `open`; repeat install is a no-op, upgrade changes
     an owned version path, foreign state is preserved, and repeat uninstall is a no-op. A Debian
     package owns the system entry and creates no per-user shadow.
+    On Windows, uninstall removes the Start-menu shortcut and the per-user Uninstall key, each only
+    when it is this home's (the shortcut starts a program in `bin` or carries the AppUserModelID, the
+    key's command or location points into the home), leaves and names any other, and a repeat
+    uninstall is a no-op.
 16. Install and doctor distinguish native, Snap, Flatpak, multiple-sandbox, missing, and unchecked
     browser package forms from native-host registration. Default Linux setup selects only detected
     native browsers, while `--all-browsers` remains explicit pre-registration.
