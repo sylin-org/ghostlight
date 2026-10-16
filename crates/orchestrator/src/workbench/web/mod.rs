@@ -20,7 +20,9 @@ use std::fmt;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -179,6 +181,7 @@ impl PendingWorkbench {
             watching,
             port: self.address.port,
             limits: limits::Limits::default(),
+            #[cfg(test)]
             wrong_keys: AtomicU64::new(0),
         });
         let stop = Arc::new(AtomicBool::new(false));
@@ -201,6 +204,8 @@ struct Shared {
     watching: Arc<Watching>,
     port: u16,
     limits: limits::Limits,
+    /// Requests that carried a bearer that was not this start's, counted for tests.
+    #[cfg(test)]
     wrong_keys: AtomicU64,
 }
 
@@ -257,12 +262,14 @@ impl WorkbenchServer {
 
     /// How many requests carried a bearer that was not this start's.
     #[must_use]
+    #[cfg(test)]
     pub fn wrong_key_count(&self) -> u64 {
         self.shared.wrong_keys.load(Ordering::Acquire)
     }
 
     /// How many client scans requests have started.
     #[must_use]
+    #[cfg(test)]
     pub fn scan_count(&self) -> u64 {
         self.shared.limits.scans()
     }

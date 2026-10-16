@@ -537,6 +537,7 @@ impl WorkbenchFacade {
 
     /// The address the workbench is served at, once a server is up.
     #[must_use]
+    #[cfg(test)]
     pub fn web_address(&self) -> Option<web::WorkbenchAddress> {
         self.web.get().map(|facts| facts.address.clone())
     }

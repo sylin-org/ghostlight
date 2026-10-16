@@ -536,6 +536,7 @@ fn context_of(shared: &Shared, head: &Head) -> Result<WebContext, Response> {
             {
                 Ok(WebContext::Control)
             } else {
+                #[cfg(test)]
                 shared
                     .wrong_keys
                     .fetch_add(1, std::sync::atomic::Ordering::AcqRel);

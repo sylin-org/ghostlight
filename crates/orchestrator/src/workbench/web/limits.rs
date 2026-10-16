@@ -4,7 +4,9 @@
 //! applies to the window, which carries the key (ADR-0199, amendment of 2026-10-15).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -79,6 +81,8 @@ pub struct Limits {
     window: Mutex<Rate>,
     hold: Mutex<Rate>,
     rescan: Mutex<Option<Instant>>,
+    /// Scans started, counted for tests.
+    #[cfg(test)]
     scans: AtomicU64,
 }
 
@@ -105,6 +109,7 @@ impl Default for Limits {
             window: Mutex::new(Rate::new(1, WINDOW_SPAN)),
             hold: Mutex::new(Rate::new(HOLDS_PER_MINUTE, MINUTE)),
             rescan: Mutex::new(None),
+            #[cfg(test)]
             scans: AtomicU64::new(0),
         }
     }
@@ -168,12 +173,14 @@ impl Limits {
     }
 
     fn scan<R>(&self, scan: impl FnOnce() -> R) -> R {
+        #[cfg(test)]
         self.scans.fetch_add(1, Ordering::AcqRel);
         scan()
     }
 
     /// How many scans the server has started.
     #[must_use]
+    #[cfg(test)]
     pub fn scans(&self) -> u64 {
         self.scans.load(Ordering::Acquire)
     }

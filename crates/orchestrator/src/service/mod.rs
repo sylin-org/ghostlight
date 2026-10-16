@@ -512,6 +512,7 @@ impl ServiceHost {
 
     /// Where the workbench is served, once `publish_ready` has started its server.
     #[must_use]
+    #[cfg(test)]
     pub fn workbench_address(&self) -> Option<WorkbenchAddress> {
         self.intake
             .workbench_server
