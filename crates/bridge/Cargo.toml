@@ -11,8 +11,5 @@ ghostlight-relay = { path = "../relay" }
 notify = "8.2.0"
 serde_json.workspace = true
 
-[dev-dependencies]
-uuid.workspace = true
-
 [lints]
 workspace = true
