@@ -35,6 +35,10 @@ service, and idle exit (a service with no stream of any role for 10 minutes exit
 follow their control through a proven re-render, and a stale handle says why (ADR-0198 amendment
 of 2026-10-15). Next: the install journey track and the rest of the seams track.
 
+The week of daily use in the release bar started on 2026-10-16, once the shell was complete. Only
+a change to the service or shell lifecycle (start, stop, presence, session end, update) restarts
+it; install-time work does not (the owner delegated this call to the coordinator, 2026-10-16).
+
 Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
 journey offers an Add step for Chrome only.
 
