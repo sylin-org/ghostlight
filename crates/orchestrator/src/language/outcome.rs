@@ -1569,7 +1569,7 @@ impl Refusal {
                     "Ghostlight could not start the selected browser."
                 }
                 BrowserRecoveryReason::SandboxedPackage => {
-                    "The installed browser is sandboxed and cannot start Ghostlight's native connector."
+                    "The installed browser is sandboxed and cannot start Ghostlight."
                 }
                 BrowserRecoveryReason::ExtensionAbsent => {
                     "The selected browser does not have the Ghostlight extension installed."

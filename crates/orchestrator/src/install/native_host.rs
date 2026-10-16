@@ -37,7 +37,7 @@ pub const DEVELOPMENT_EXTENSION_ID: &str = "cjcmhepmagomefjggkcohdbfemacojoa";
 /// Environment variable that roots every manifest and registry key below one directory.
 pub const NATIVE_HOST_DIR_VARIABLE: &str = "GHOSTLIGHT_NATIVE_HOST_DIR";
 
-const HOST_DESCRIPTION: &str = "Ghostlight browser connector";
+const HOST_DESCRIPTION: &str = "Ghostlight";
 
 /// Operating-system registration layout.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1236,7 +1236,7 @@ fn remove_retired_firefox_registration(
 fn state_detail(state: NativeHostState) -> &'static str {
     match state {
         NativeHostState::Missing => "Ghostlight is not registered with this browser.",
-        NativeHostState::Current => "The browser points at this installation's connector.",
+        NativeHostState::Current => "The browser starts this installation of Ghostlight.",
         NativeHostState::Updatable => "A Ghostlight-owned registration points at older details.",
         NativeHostState::OwnedElsewhere => {
             "A Ghostlight-owned registration belongs to another installation."
@@ -1438,7 +1438,7 @@ pub enum NativeHostError {
     #[error("unknown browser '{0}'; expected chrome, edge, brave, or chromium")]
     UnknownBrowser(String),
     /// The packaged sibling Ghostlight edge is unavailable.
-    #[error("the sibling Ghostlight browser connector is missing: {0}")]
+    #[error("the Ghostlight program is missing: {0}")]
     ConnectorMissing(PathBuf),
     /// A registration file could not be read.
     #[error("could not read native-host state at {path}: {source}")]

@@ -118,16 +118,16 @@ pub(crate) fn inspect(context: &BrowserPackageContext, spec: BrowserPackageSpec)
 pub(crate) fn detail(name: &str, package: BrowserPackage) -> String {
     match package {
         BrowserPackage::Native => {
-            format!("A native {name} package can start Ghostlight's browser connector.")
+            format!("A native {name} package can start Ghostlight.")
         }
         BrowserPackage::Snap => format!(
-            "{name} is installed as a Snap. Its sandbox cannot start Ghostlight's browser connector; install a supported native browser package."
+            "{name} is installed as a Snap. Its sandbox cannot start Ghostlight; install a supported native browser package."
         ),
         BrowserPackage::Flatpak => format!(
-            "{name} is installed as a Flatpak. Its sandbox cannot start Ghostlight's browser connector; install a supported native browser package."
+            "{name} is installed as a Flatpak. Its sandbox cannot start Ghostlight; install a supported native browser package."
         ),
         BrowserPackage::MultipleSandboxes => format!(
-            "{name} is installed as Snap and Flatpak packages. Neither sandbox can start Ghostlight's browser connector; install a supported native browser package."
+            "{name} is installed as Snap and Flatpak packages. Neither sandbox can start Ghostlight; install a supported native browser package."
         ),
         BrowserPackage::NotDetected => format!("No supported {name} installation was detected."),
         BrowserPackage::NotChecked => {

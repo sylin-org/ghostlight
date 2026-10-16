@@ -240,7 +240,7 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
                 "ready": ready,
             }))
             .collect::<Vec<_>>(),
-        "browser_connector": observation.native_host.connector.display().to_string(),
+        "browser_program": observation.native_host.connector.display().to_string(),
         "browsers": observation.native_host.browsers,
         "private_view": observation.native_host.private_view,
         "command": observation.command_path,
