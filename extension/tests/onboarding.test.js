@@ -97,16 +97,6 @@ test("the bundled setup page needs no network and contains no product state", ()
   assert.doesNotMatch(markup, /<link[^>]+href="https?:/);
 });
 
-test("the bundled setup page is packaged for the store build", () => {
-  // The offline fallback only exists if the packaging allowlist ships it. A page that works
-  // unpacked and is missing from the store ZIP is the worst version of this feature.
-  const packaging = readFileSync(
-    join(__dirname, "..", "..", "scripts", "package-extension.ps1"),
-    "utf8"
-  );
-  assert.match(packaging, /"setup\.html"/);
-});
-
 test("an outdated service outranks every disconnect reason, and a connected link is never reclassified", () => {
   assert.equal(
     shared.linkState({ connected: false, compatible: false, outdated: true, lastError: "Specified native messaging host not found." }),

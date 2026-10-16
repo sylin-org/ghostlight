@@ -39,6 +39,7 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 
 try {
     $rootFiles = @(
+        "kit.css",
         "manifest.json",
         "offscreen.html",
         "offscreen.js",
@@ -54,7 +55,8 @@ try {
         "icon16.png",
         "icon32.png",
         "icon48.png",
-        "icon128.png"
+        "icon128.png",
+        "ghostlight-mascot.png"
     )
     foreach ($file in $rootFiles) {
         $from = Join-Path $source $file
@@ -96,6 +98,25 @@ try {
             $json + "`n",
             [System.Text.UTF8Encoding]::new($false)
         )
+    }
+
+    # A page that names a file the package does not include works unpacked and breaks in
+    # the store build. Every local href and src in a staged page must name a staged file.
+    foreach ($page in @(Get-ChildItem -LiteralPath $stage -Filter "*.html" -File -Recurse)) {
+        $markup = Get-Content -LiteralPath $page.FullName -Raw
+        $pageName = [System.IO.Path]::GetRelativePath($stage, $page.FullName).Replace("\", "/")
+        foreach ($reference in [regex]::Matches($markup, '(?:href|src)\s*=\s*"([^"]*)"')) {
+            $target = $reference.Groups[1].Value
+            if ($target -eq "" -or $target -match '^(?:[A-Za-z][A-Za-z0-9+.-]*:|//|#|data:)') {
+                continue
+            }
+            $path = ($target -split '[?#]')[0]
+            $base = if ($path.StartsWith("/")) { $stage } else { $page.DirectoryName }
+            $resolved = [System.IO.Path]::GetFullPath((Join-Path $base $path.TrimStart("/")))
+            if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+                throw "Packaged page $pageName references $path, which the package does not include."
+            }
+        }
     }
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem

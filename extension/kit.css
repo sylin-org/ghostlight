@@ -1,0 +1,511 @@
+/* ==========================================================================
+   Ghostlight extension kit -- the sylin.org night-garden language for the
+   extension's pages: the setup page, the toolbar popup and the options page.
+
+   The extension pages link this file. The service serves the same bytes to the
+   Ghostlight window's setup view, so the browser and the window show one look.
+   It is frozen with the 2.0 extension: a change here is a change to a packaged
+   extension file. It is not ui/kit/kit.css, which is the Settings kit of the
+   service's own web apps.
+
+   Scope. Every token and base rule sits under .gl-page, never :root. Each
+   extension page puts class gl-page on <html>; the window's setup root carries
+   it too, so the workbench's own tokens (--bg, --a, --ink-2, --line-2, --sans)
+   never depend on stylesheet order.
+
+   ASCII only. System fonts only. No webfonts, no network. Every class is gl-*.
+   Icons are inline SVG (stroke="currentColor"); never unicode glyphs.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   1. TOKENS
+   Contrast is WCAG 2.x on --bg. Dark text on the accent button is 12.94:1.
+   --muted and --faint fail AA as text: icons and borders (--muted) and
+   decoration (--faint) only.
+   --------------------------------------------------------------------------- */
+.gl-page {
+  color-scheme: dark;
+
+  /* Ground. */
+  --bg: #0f0e12;
+  --bg-2: #0d0c10;
+  --panel: #0e0e11;
+  --code: #0a090c;
+
+  /* Ink ramp. */
+  --ink: #f4f4f5;         /* 17.50  headings */
+  --ink-2: #c9c9d1;       /* 11.69  lead, body on dark */
+  --ink-3: #a1a1aa;       /*  7.50  secondary body */
+  --ink-4: #8a8a93;       /*  5.62  smallest AA-safe text */
+  --muted: #71717a;       /*  3.98  icons and borders only */
+  --faint: #52525b;       /*  2.49  decoration only */
+
+  /* Hairlines. --line-4 is the field border (3.81:1). */
+  --line: rgba(255, 255, 255, .06);
+  --line-2: rgba(255, 255, 255, .10);
+  --line-3: rgba(255, 255, 255, .18);
+  --line-4: rgba(255, 255, 255, .40);
+
+  /* Accent. */
+  --a: #5eead4;           /* 13.00 */
+  --al: #5eead4;
+  --argb: 94, 234, 212;
+  --a-hover: #99f6e4;     /* 15.18 with --on-a */
+  --on-a: #08110f;        /* 12.94 */
+
+  /* Status. Each is at least 6.9:1. */
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --warn-rgb: 251, 191, 36;
+  --danger: #f87171;
+  --danger-soft: #fca5a5;
+  --ok-rgb: 74, 222, 128;
+  --danger-rgb: 248, 113, 113;
+
+  /* Type. */
+  --sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'Cascadia Code', 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  --fs-micro: 11.5px;
+  --fs-small: 13px;
+  --fs-body: 14.5px;
+  --fs-text: 16px;
+  --fs-lead: 18px;
+  --fs-title: 22px;
+  --fs-h1: clamp(36px, 6vw, 52px);
+  --lh-tight: 1.06;
+  --lh-body: 1.7;
+  --lh-lead: 1.65;
+  --tr-eyebrow: .18em;
+  --tr-h1: -.02em;
+  --tr-title: -.01em;
+
+  /* Spacing. */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-5: 22px;
+  --sp-6: 32px; --sp-7: 44px; --sp-8: 64px;
+  --gutter: 32px;
+  --col: 720px;
+
+  /* Radii. */
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --r-pill: 999px;
+
+  /* Shadows. */
+  --sh-card: 0 20px 46px -22px rgba(0, 0, 0, .9);
+  --sh-glow: 0 0 34px -10px rgba(var(--argb), .4), 0 26px 52px -22px rgba(0, 0, 0, .95);
+  --sh-disc: 0 0 14px rgba(var(--argb), .4);
+  --sh-pop: 0 24px 80px rgba(0, 0, 0, .55);
+
+  /* Motion. */
+  --spring: cubic-bezier(.22, 1, .36, 1);
+  --calm: cubic-bezier(.4, 0, .2, 1);
+  --beat-glance: 150ms;
+  --beat-quick: 250ms;
+  --beat-arrive: 320ms;
+  --beat-settle: 420ms;
+  --beat-wait: 1050ms;
+  --beat-wheel: 2400ms;
+  --beat-breathe: 5000ms;
+  --beat-glow: 4500ms;
+}
+
+/* ---------------------------------------------------------------------------
+   2. BASE
+   --------------------------------------------------------------------------- */
+.gl-page, .gl-page body { margin: 0; background: var(--bg); }
+.gl-page { color: var(--ink-2); font: 400 var(--fs-body)/var(--lh-body) var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.gl-page *, .gl-page *::before, .gl-page *::after { box-sizing: border-box; }
+.gl-page [hidden] { display: none !important; }
+.gl-page :where(h1, h2, h3, p) { margin: 0; }
+.gl-page :where(ul, ol) { margin: 0; padding: 0; list-style: none; }
+.gl-page svg { display: block; flex: none; }
+.gl-page img.gl-px { image-rendering: pixelated; image-rendering: crisp-edges; }
+.gl-page .gl-sr { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.gl-page .gl-mono { font-family: var(--mono); }
+
+/* Links. :where keeps these at class weight, so a link that is also a button keeps the
+   button's colours. */
+.gl-page :where(a) { color: var(--ink-3); text-decoration: none; transition: color var(--beat-quick) var(--calm); }
+.gl-page :where(a):hover { color: var(--a); }
+
+/* Focus ring: accent, 2px, offset 3px (13.0:1). Keyboard focus only; never removed. */
+.gl-page :focus-visible { outline: 2px solid var(--a); outline-offset: 3px; border-radius: var(--r-1); }
+
+/* ---------------------------------------------------------------------------
+   3. LAYOUT
+   --------------------------------------------------------------------------- */
+/* Night stage: the site's hero backdrop, a radial dusk over the ground. */
+.gl-stage { position: relative; min-height: 100vh; overflow: hidden;
+  background: radial-gradient(ellipse 80% 70% at 50% -5%, #201b2c 0%, #131218 55%, #0f0e12 100%); }
+.gl-wrap { width: 100%; max-width: var(--col); margin: 0 auto; padding: var(--sp-8) var(--gutter); }
+.gl-wrap--narrow { --col: 560px; }
+.gl-stack > * + * { margin-top: var(--sp-5); }
+.gl-stack--tight > * + * { margin-top: var(--sp-3); }
+.gl-hr { height: 0; margin: var(--sp-6) 0; border: 0; border-top: 1px solid var(--line-2); }
+@media (max-width: 480px) { .gl-page { --gutter: 20px; } .gl-wrap { padding-top: var(--sp-7); } }
+
+/* ---------------------------------------------------------------------------
+   4. TYPE
+   --------------------------------------------------------------------------- */
+.gl-eyebrow { display: block; font: 500 var(--fs-micro)/1.4 var(--sans); letter-spacing: var(--tr-eyebrow); text-transform: uppercase; color: var(--a); }
+.gl-eyebrow--quiet { color: var(--ink-4); }
+
+.gl-h1 { font: 300 var(--fs-h1)/var(--lh-tight) var(--sans); letter-spacing: var(--tr-h1); color: var(--ink); }
+.gl-h1 em, .gl-lead em { font-style: italic; color: var(--a); }
+.gl-h2 { font: 400 var(--fs-title)/1.3 var(--sans); letter-spacing: var(--tr-title); color: var(--ink); }
+.gl-h3 { font: 600 16px/1.35 var(--sans); color: var(--ink); }
+.gl-lead { font-size: var(--fs-lead); line-height: var(--lh-lead); color: var(--ink-2); max-width: 600px; }
+.gl-text { font-size: var(--fs-text); line-height: var(--lh-body); color: var(--ink-3); max-width: 700px; }
+.gl-note { font-size: var(--fs-small); line-height: 1.6; color: var(--ink-4); max-width: 640px; }
+.gl-head > .gl-eyebrow + .gl-h1, .gl-head > .gl-eyebrow + .gl-h2 { margin-top: var(--sp-3); }
+.gl-head > .gl-h1 + .gl-lead, .gl-head > .gl-h2 + .gl-text { margin-top: var(--sp-4); }
+
+/* Tagline: italic, warm accent at .85 (9.5:1). */
+.gl-tagline { font-size: 16.5px; font-style: italic; line-height: 1.5; color: rgba(var(--argb), .85); }
+
+/* ---------------------------------------------------------------------------
+   5. BUTTONS
+   --------------------------------------------------------------------------- */
+.gl-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 12px 22px; border: 1px solid transparent; border-radius: var(--r-2);
+  font: 500 14px/1.2 var(--sans); color: var(--ink); background: none; cursor: pointer; text-decoration: none;
+  transition: background var(--beat-quick), border-color var(--beat-quick), color var(--beat-quick), transform var(--beat-quick), opacity var(--beat-quick); }
+.gl-btn svg { width: 15px; height: 15px; }
+.gl-btn--primary { background: var(--a); border-color: var(--a); color: var(--on-a); }
+.gl-btn--primary:hover { background: var(--a-hover); border-color: var(--a-hover); color: var(--on-a); transform: translateY(-2px); }
+.gl-btn--ghost { border-color: var(--line-3); color: var(--ink); }
+.gl-btn--ghost:hover { border-color: var(--line-4); color: var(--ink); }
+.gl-btn--sm { min-height: 32px; padding: 6px 14px; font-size: 13px; }
+.gl-btn[disabled], .gl-btn[aria-disabled="true"] { opacity: .5; cursor: default; transform: none; pointer-events: none; }
+.gl-btn-row { display: flex; flex-wrap: wrap; gap: 14px; }
+.gl-link { color: var(--a); text-decoration: underline; text-decoration-color: rgba(var(--argb), .4); text-underline-offset: 3px; }
+.gl-link:hover { text-decoration-color: var(--a); color: var(--a); }
+
+/* ---------------------------------------------------------------------------
+   6. CODE PANEL AND COPY
+   Markup:
+     <div class="gl-code">
+       <span class="gl-code__label">Paste into PowerShell</span>
+       <code class="gl-code__text"><span class="gl-code__p" aria-hidden="true">$ </span>the command</code>
+       <button class="gl-copy" type="button">
+         <svg class="gl-copy__idle" ...></svg><svg class="gl-copy__done" ...></svg>
+         <span class="gl-copy__lbl">Copy</span></button>
+     </div>
+   --------------------------------------------------------------------------- */
+.gl-code { position: relative; display: block; padding: 12px 96px 13px 14px; background: var(--code);
+  border: 1px solid rgba(255, 255, 255, .09); border-radius: var(--r-3); }
+.gl-code__label { display: block; margin-bottom: 6px; font: 500 10px/1.4 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-4); }
+.gl-code__text { display: block; font: 500 13.5px/1.6 var(--mono); color: var(--al); white-space: pre-wrap; word-break: break-word; }
+.gl-code__p { color: var(--ink-4); user-select: none; }
+.gl-copy { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 5px;
+  min-height: 30px; padding: 5px 10px; font: 500 12px/1 var(--sans); color: var(--ink-3);
+  background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .14); border-radius: var(--r-2); cursor: pointer;
+  transition: color var(--beat-glance), background var(--beat-glance), border-color var(--beat-glance); }
+.gl-copy:hover { color: var(--ink); background: rgba(255, 255, 255, .09); }
+.gl-copy svg { width: 13px; height: 13px; }
+.gl-copy .gl-copy__done { display: none; }
+.gl-copy.is-copied { color: var(--ok); border-color: rgba(var(--ok-rgb), .45); }
+.gl-copy.is-copied .gl-copy__idle { display: none; }
+.gl-copy.is-copied .gl-copy__done { display: block; }
+@media (max-width: 480px) { .gl-code { padding-right: 14px; padding-bottom: 52px; } .gl-copy { top: auto; right: 8px; bottom: 8px; transform: none; } }
+
+/* ---------------------------------------------------------------------------
+   7. PILL
+   --------------------------------------------------------------------------- */
+.gl-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: var(--r-pill);
+  font: 500 11px/1.2 var(--mono); color: var(--a); background: rgba(var(--argb), .10); border: 1px solid rgba(var(--argb), .28); }
+.gl-pill--quiet { color: var(--ink-3); background: rgba(255, 255, 255, .03); border-color: var(--line-2); }
+.gl-pill--warn { color: var(--warn); background: rgba(var(--warn-rgb), .08); border-color: rgba(var(--warn-rgb), .28); }
+.gl-pill--ok { color: var(--ok); background: rgba(var(--ok-rgb), .08); border-color: rgba(var(--ok-rgb), .28); }
+
+/* ---------------------------------------------------------------------------
+   8. CARD AND CALLOUT
+   --------------------------------------------------------------------------- */
+.gl-card { padding: 20px 22px; background: rgba(255, 255, 255, .02); border: 1px solid var(--line-2); border-radius: var(--r-4); }
+.gl-card--accent { background: rgba(var(--argb), .06); border-color: rgba(var(--argb), .24); }
+.gl-card--warn { background: rgba(var(--warn-rgb), .05); border-color: rgba(var(--warn-rgb), .26); }
+.gl-card--pop { background: #17161b; box-shadow: var(--sh-pop); }
+
+/* Callout: a left rule, no box. --warn marks the awkward case that needs an action. */
+.gl-callout { padding: 6px 0 6px 20px; border-left: 2px solid rgba(var(--argb), .5); color: var(--ink-2); max-width: 720px; }
+.gl-callout--warn { border-left-color: rgba(var(--warn-rgb), .6); }
+
+/* ---------------------------------------------------------------------------
+   9. MASCOT
+   The source art is 100x100 (icons/ghostlight-mascot.png). It draws only at 200px and 100px,
+   so every source pixel lands on whole screen pixels. The companion (section 15) sets the
+   size, the lantern and the light.
+   Markup: <span class="gl-mascot"><span class="gl-mascot__halo"></span>
+             <img class="gl-px gl-mascot__img" src="icons/ghostlight-mascot.png" alt="" width="100" height="100"></span>
+   --------------------------------------------------------------------------- */
+.gl-mascot { position: relative; display: inline-grid; place-items: center; width: 200px; height: 200px; }
+.gl-mascot__halo { position: absolute; inset: -34px; border-radius: 50%; background: radial-gradient(circle, rgba(var(--argb), .30), transparent 64%); animation: gl-halo var(--beat-breathe) ease-in-out infinite; }
+.gl-mascot__img { position: relative; width: 100%; height: 100%; animation: gl-glow var(--beat-glow) ease-in-out infinite; }
+
+/* ---------------------------------------------------------------------------
+   10. STATUS ROW   icon + name + one line + optional action
+   Markup:
+     <li class="gl-row is-todo|is-working|is-done|is-attention|is-failed|is-off">
+       <span class="gl-row__icon">...svg...</span>
+       <span class="gl-row__body"><span class="gl-row__name">Google Chrome</span><span class="gl-row__detail">Connected</span></span>
+       <span class="gl-row__action"><button class="gl-btn gl-btn--ghost gl-btn--sm">Add</button></span>
+     </li>
+   The state is always in words too; colour is never the only signal. Put aria-live="polite" on
+   the .gl-rows list.
+   --------------------------------------------------------------------------- */
+.gl-rows { display: grid; gap: 10px; }
+.gl-row { --tone: var(--ink-4); display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 14px;
+  padding: 14px 16px; background: rgba(255, 255, 255, .012); border: 1px solid var(--line); border-left: 2px solid var(--tone); border-radius: 11px;
+  transition: border-color var(--beat-quick) var(--calm), background var(--beat-quick) var(--calm); }
+.gl-row__icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%;
+  border: 1.5px solid var(--tone); color: var(--tone); }
+.gl-row__icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gl-row__name { display: block; font-size: 15px; font-weight: 500; color: var(--ink); }
+.gl-row__detail { display: block; margin-top: 1px; font-size: var(--fs-small); line-height: 1.5; color: var(--ink-3); }
+.gl-row__action { display: flex; align-items: center; gap: 8px; }
+.gl-row.is-working { --tone: var(--a); background: rgba(var(--argb), .035); }
+.gl-row.is-done { --tone: var(--ok); }
+.gl-row.is-attention { --tone: var(--warn); }
+.gl-row.is-failed { --tone: var(--danger); }
+.gl-row.is-off { --tone: var(--ink-4); }
+.gl-row.is-off .gl-row__name { color: var(--ink-3); }
+.gl-row.is-done .gl-row__icon { background: rgba(var(--ok-rgb), .10); }
+.gl-row.is-working .gl-row__icon { box-shadow: 0 0 14px rgba(var(--argb), .4); }
+.gl-row.is-landing { animation: gl-arrive var(--beat-settle) var(--spring) both; }
+.gl-row.is-flip .gl-row__icon { animation: gl-pop var(--beat-settle) var(--spring) both; }
+@media (max-width: 480px) { .gl-row { grid-template-columns: 28px minmax(0, 1fr); } .gl-row__action { grid-column: 2; flex-wrap: wrap; } }
+
+/* Spinner, inside a row icon or a live line:
+   <svg viewBox="0 0 24 24" class="gl-spin"><circle cx="12" cy="12" r="8" stroke-dasharray="26 50"/></svg> */
+.gl-spin { animation: gl-turn var(--beat-wheel) linear infinite; transform-origin: 50% 50%; }
+/* A check mark that draws itself: <svg viewBox="0 0 24 24"><path class="gl-draw" d="M5 12.5l4.5 4.5L19 7.5"/></svg> */
+.gl-draw { stroke-dasharray: 24; stroke-dashoffset: 24; animation: gl-draw var(--beat-settle) var(--spring) forwards; }
+.gl-row:not(.is-flip):not(.is-landing) .gl-draw { stroke-dashoffset: 0; animation: none; }
+
+/* ---------------------------------------------------------------------------
+   11. KBD AND INLINE CODE
+   --------------------------------------------------------------------------- */
+code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
+.gl-kbd { padding: 2px 6px; border: 1px solid var(--line-3); border-radius: var(--r-1); color: var(--ink-3); background: rgba(255, 255, 255, .03); font: 11px/1.3 var(--mono); }
+
+/* ---------------------------------------------------------------------------
+   12. MOTION   keyframes shared by the components
+   Entrances settle on --spring; only genuinely ongoing state breathes.
+   --------------------------------------------------------------------------- */
+@keyframes gl-halo { 0%, 100% { opacity: .45; transform: scale(.9); } 50% { opacity: .95; transform: scale(1.08); } }
+@keyframes gl-glow { 0%, 100% { filter: drop-shadow(0 0 5px rgba(var(--argb), .45)); } 50% { filter: drop-shadow(0 0 16px rgba(var(--argb), .8)); } }
+@keyframes gl-arrive { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+@keyframes gl-pop { 0% { transform: scale(.7); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@keyframes gl-turn { to { transform: rotate(360deg); } }
+@keyframes gl-draw { to { stroke-dashoffset: 0; } }
+@keyframes gl-bloom { 0% { opacity: .2; transform: scale(.7); } 45% { opacity: 1; transform: scale(1.5); } 100% { opacity: .6; transform: scale(1); } }
+@keyframes gl-lift { 0% { transform: translateY(0); filter: drop-shadow(0 0 5px rgba(var(--argb), .45)); } 40% { transform: translateY(-10px); filter: drop-shadow(0 0 34px rgba(var(--argb), 1)); } 100% { transform: translateY(0); filter: drop-shadow(0 0 16px rgba(var(--argb), .8)); } }
+@keyframes gl-pilot { 0%, 100% { opacity: .4; transform: scale(.72); } 50% { opacity: .7; transform: scale(.9); } }
+@keyframes gl-lamp { 0%, 100% { opacity: .6; transform: scale(2.1); } 50% { opacity: .86; transform: scale(2.5); } }
+@keyframes gl-flare { 0% { opacity: .4; transform: scale(.75); } 40% { opacity: 1; transform: scale(5.2); } 100% { opacity: .6; transform: scale(2.1); } }
+@keyframes gl-ring { 0% { opacity: .9; transform: scale(.4); } 100% { opacity: 0; transform: scale(7); } }
+@keyframes gl-mote { 0% { opacity: 0; transform: translate(0, 0); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(var(--dx) * var(--m)), calc(var(--dy) * var(--m))); } }
+@keyframes gl-swap { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* A line of text or a block that was just replaced: add the class, force a reflow, and it plays. */
+.gl-swap { animation: gl-swap var(--beat-arrive) var(--spring) both; }
+.gl-arrived { animation: gl-arrive var(--beat-settle) var(--spring) both; }
+
+/* ---------------------------------------------------------------------------
+   13. SETUP LAYOUT   the setup page and the window's setup view
+   Markup:
+     <div class="gl-setup gl-stage">
+       <header class="gl-setup__top"><span class="gl-wordmark">Ghostlight</span></header>
+       <main class="gl-setup__main">          (gl-setup__main--window in the window)
+         <section class="gl-companion" data-light="waiting|lit|off"> ...section 14... </section>
+         <div class="gl-setup__col">
+           <div class="gl-setup__part"> eyebrow, heading, the instruction, the one action </div>
+           <p class="gl-live" role="status" aria-live="polite"></p>
+           <div class="gl-setup__part"> extras, only when needed </div>
+         </div>
+       </main>
+     </div>
+   --------------------------------------------------------------------------- */
+.gl-setup { position: relative; display: flex; flex-direction: column; min-height: 100%; }
+.gl-setup.gl-stage { min-height: 100vh; overflow: visible; }
+.gl-setup__top { display: flex; align-items: center; padding: 18px 32px; border-bottom: 1px solid var(--line); }
+.gl-wordmark { font: 500 15px/1 var(--sans); letter-spacing: .01em; color: var(--ink); }
+.gl-setup__main { flex: 1; display: grid; grid-template-columns: 352px minmax(0, 1fr); gap: 64px; align-items: center;
+  width: 100%; max-width: 1080px; margin: 0 auto; padding: 32px 48px 40px; }
+.gl-setup__main--window { grid-template-columns: 296px minmax(0, 1fr); gap: 44px; max-width: none; padding: 28px 40px 32px; }
+.gl-setup__col { min-width: 0; }
+.gl-setup__col > * + *, .gl-setup__part > * + * { margin-top: var(--sp-5); }
+.gl-setup__part:empty { display: none; }
+.gl-setup__part > .gl-code + .gl-note { margin-top: 10px; }
+.gl-setup__h1 { font-size: 46px; }
+.gl-setup__text { margin-top: 10px; }
+.gl-setup__text + .gl-setup__text { margin-top: 6px; }
+.gl-setup__main--window .gl-setup__h1 { font-size: 34px; line-height: 1.12; }
+.gl-setup__main--window .gl-row { padding: 11px 14px; }
+.gl-setup__main--window .gl-setup__col > * + *, .gl-setup__main--window .gl-setup__part > * + * { margin-top: 18px; }
+/* The label above the list of agents. */
+.gl-setup__sub { margin-bottom: 10px; }
+
+/* The live line: what the page is waiting for, with a turning arc. */
+.gl-live { display: flex; align-items: center; gap: 10px; min-height: 22px; font-size: 14.5px; line-height: 1.5; color: var(--ink-3); }
+.gl-live:empty { display: none; }
+.gl-live__icon { display: inline-flex; width: 18px; height: 18px; color: var(--a); }
+.gl-live__icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.gl-live.is-ok { color: var(--ink-2); }
+
+/* The fallback when the page cannot do the step itself: a warn callout with a command to copy. */
+.gl-fallback > * + * { margin-top: 6px; }
+.gl-fallback .gl-code { margin-top: 12px; }
+
+/* One column on a narrow screen: the instruction leads and the companion follows. */
+@media (max-width: 760px) {
+  .gl-setup__top { padding: 14px 16px; }
+  .gl-setup__main, .gl-setup__main--window { grid-template-columns: minmax(0, 1fr); gap: 32px; align-items: start; align-content: start; padding: 20px 16px 32px; }
+  .gl-setup__col { order: -1; }
+  .gl-companion { width: 100%; max-width: 400px; margin: 0 auto; }
+  .gl-setup__h1, .gl-setup__main--window .gl-setup__h1 { font-size: 32px; line-height: 1.12; }
+}
+
+/* ---------------------------------------------------------------------------
+   14. COMPANION   the ghost, its lantern and the three steps under it
+   The ghost stands alone: no border, radius, panel, shadow or art box. Its glow is a
+   closest-side radial wash that fades to nothing inside its own bounds, so no edge shows.
+   The lantern is the state. data-light is waiting, lit or off, on the companion or on the
+   popup (.gl-pop). Add is-celebrating to the companion once, when the halves first meet.
+   Markup:
+     <section class="gl-companion" data-light="waiting" aria-label="Setup progress">
+       <div class="gl-companion__art">
+         <span class="gl-mascot gl-companion__mascot"><span class="gl-mascot__halo"></span>
+           <img class="gl-px gl-mascot__img" src="icons/ghostlight-mascot.png" alt="" width="100" height="100">
+           <span class="gl-lantern" aria-hidden="true"><span class="gl-lantern__ember"></span>
+             <span class="gl-lantern__ring"></span>(six <i class="gl-lantern__mote"></i>)</span></span>
+       </div>
+       <div class="gl-stepper" aria-hidden="true">
+         <span class="gl-stepper__seg gl-stepper__seg--1"><i></i></span><span class="gl-stepper__seg gl-stepper__seg--2"><i></i></span>
+         <span class="gl-stepper__disc gl-stepper__disc--0"></span>(--1, --2)</div>
+       <ol class="gl-stepper__names"><li><span class="gl-stepper__t">This computer</span><span class="gl-stepper__w"></span></li>(three)</ol>
+       <p class="gl-tagline gl-companion__tagline" hidden></p>
+     </section>
+   Segment N joins disc N-1 and disc N. A segment lights (is-lit) only between two finished
+   discs. A disc is is-current, is-done or is-off; add is-pop once when it turns done.
+   --------------------------------------------------------------------------- */
+.gl-companion, .gl-pop { --wash: 1; }
+.gl-companion { --d: 44px; }
+.gl-setup__main--window .gl-companion { --d: 40px; }
+.gl-page [data-light="waiting"] { --wash: .22; }
+.gl-page [data-light="off"] { --wash: 0; }
+
+.gl-companion__art { position: relative; display: flex; align-items: center; justify-content: center; min-height: 236px; }
+.gl-companion__art::before { content: ''; position: absolute; inset: -12% -8%; opacity: var(--wash);
+  background: radial-gradient(closest-side at 50% 46%, rgba(var(--argb), .24) 0%, rgba(var(--argb), .07) 55%, rgba(var(--argb), 0) 100%);
+  transition: opacity var(--beat-wait) var(--calm); }
+
+/* The stepper: discs at 16.667%, 50% and 83.333%, joined by its two inner segments. It
+   straddles the bottom edge of the art. */
+.gl-stepper { position: relative; z-index: 3; height: var(--d); margin: calc(var(--d) / -2) 0; }
+.gl-stepper__seg { position: absolute; top: 50%; height: 4px; margin-top: -2px; overflow: hidden; background: var(--line-2); }
+.gl-stepper__seg--1 { left: 16.667%; width: 33.333%; }
+.gl-stepper__seg--2 { left: 50%; width: 33.333%; }
+.gl-stepper__seg > i { display: block; height: 100%; background: var(--a); transform: scaleX(0); transform-origin: left center;
+  transition: transform var(--beat-settle) var(--spring) var(--delay, 150ms); }
+.gl-stepper__seg.is-lit > i { transform: scaleX(1); }
+.gl-stepper__disc { position: absolute; top: 50%; z-index: 2; display: flex; align-items: center; justify-content: center;
+  width: var(--d); height: var(--d); margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2); border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--muted); color: var(--ink-4); font: 600 14px/1 var(--mono);
+  transition: background var(--beat-settle) var(--calm), border-color var(--beat-settle) var(--calm), color var(--beat-settle) var(--calm), box-shadow var(--beat-settle) var(--calm); }
+.gl-stepper__disc--0 { left: 16.667%; }
+.gl-stepper__disc--1 { left: 50%; }
+.gl-stepper__disc--2 { left: 83.333%; }
+.gl-stepper__disc svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.gl-stepper__disc.is-current { border-color: var(--a); color: var(--al); box-shadow: var(--sh-disc); }
+.gl-stepper__disc.is-current::after { content: ''; position: absolute; inset: -7px; border-radius: 50%; border: 1px solid rgba(var(--argb), .55);
+  animation: gl-halo var(--beat-breathe) ease-in-out infinite; }
+.gl-stepper__disc.is-done { background: var(--a); border-color: var(--a); color: var(--on-a); box-shadow: var(--sh-disc); }
+.gl-stepper__disc.is-off { border-style: dashed; color: var(--ink-4); }
+.gl-stepper__disc.is-pop { animation: gl-pop var(--beat-settle) var(--spring) both; }
+
+/* Step names under the discs, one column each, centred under their disc. */
+.gl-stepper__names { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding-top: calc(var(--d) / 2 + 14px); text-align: center; }
+.gl-stepper__names > li { min-width: 0; }
+.gl-stepper__t { display: block; font: 600 13px/1.35 var(--sans); color: var(--ink-3); }
+.gl-stepper__w { display: block; margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--ink-4); }
+.gl-stepper__names > li.is-current .gl-stepper__t { color: var(--ink); }
+.gl-stepper__names > li.is-done .gl-stepper__t { color: var(--ink-2); }
+.gl-stepper__names > li.is-off .gl-stepper__w { color: var(--ink-3); }
+.gl-stepper__w.is-new { animation: gl-arrive var(--beat-arrive) var(--spring) both; }
+.gl-companion__tagline { margin-top: 22px; padding: 0 8px; text-align: center; }
+.gl-companion__tagline.is-new { animation: gl-arrive var(--beat-settle) var(--spring) var(--beat-wait) both; }
+
+/* The ghost. --m scales the lantern to the mascot: 1 at 200px, .5 at 100px. */
+.gl-companion__mascot { --m: 1; z-index: 1; }
+.gl-companion__mascot--sm { --m: .5; width: 100px; height: 100px; }
+.gl-companion__mascot--sm .gl-mascot__halo { inset: -18px; }
+.gl-companion__mascot .gl-mascot__img { transition: filter var(--beat-settle) var(--calm); }
+.gl-page [data-light="waiting"] .gl-companion__mascot .gl-mascot__img { filter: saturate(.55) brightness(.74); animation: none; }
+.gl-page [data-light="waiting"] .gl-companion__mascot .gl-mascot__halo { opacity: .14; animation: none; }
+.gl-page [data-light="off"] .gl-companion__mascot .gl-mascot__img { filter: grayscale(.9) brightness(.5); animation: none; }
+.gl-page [data-light="off"] .gl-companion__mascot .gl-mascot__halo { opacity: 0; animation: none; }
+.gl-companion.is-celebrating .gl-mascot__halo { animation: gl-bloom 1400ms var(--spring) 1 both, gl-halo var(--beat-breathe) ease-in-out 1400ms infinite; }
+.gl-companion.is-celebrating .gl-mascot__img { animation: gl-lift 900ms var(--spring) 1 both, gl-glow var(--beat-glow) ease-in-out 900ms infinite; }
+
+/* The lantern: anchored on the flame of the 100x100 art, at (75%, 69%). */
+.gl-lantern { position: absolute; left: 75%; top: 69%; width: 0; height: 0; z-index: 2; pointer-events: none; }
+.gl-lantern__ember { position: absolute; width: calc(26px * var(--m)); height: calc(26px * var(--m)); left: calc(-13px * var(--m)); top: calc(-13px * var(--m));
+  border-radius: 50%; mix-blend-mode: screen;
+  background: radial-gradient(circle, rgba(220, 255, 248, .95) 0%, rgba(var(--argb), .85) 30%, rgba(var(--argb), 0) 70%);
+  opacity: var(--eo, .4); transform: scale(var(--es, 1));
+  transition: opacity var(--beat-settle) var(--calm), transform var(--beat-settle) var(--spring); }
+.gl-page [data-light="waiting"] .gl-lantern__ember { --es: .8; --eo: .55; animation: gl-pilot var(--beat-wheel) ease-in-out infinite; }
+.gl-page [data-light="lit"] .gl-lantern__ember { --es: 2.3; --eo: .72; animation: gl-lamp var(--beat-glow) ease-in-out infinite; }
+.gl-page [data-light="off"] .gl-lantern__ember { --eo: 0; }
+.gl-companion.is-celebrating .gl-lantern__ember { animation: gl-flare 1400ms var(--spring) both, gl-lamp var(--beat-glow) ease-in-out 1400ms infinite; }
+.gl-lantern__ring { position: absolute; width: calc(24px * var(--m)); height: calc(24px * var(--m)); left: calc(-12px * var(--m)); top: calc(-12px * var(--m));
+  border-radius: 50%; border: 2px solid rgba(var(--argb), .9); opacity: 0; }
+.gl-companion.is-celebrating .gl-lantern__ring { animation: gl-ring var(--beat-wait) var(--calm) 120ms both; }
+.gl-lantern__mote { position: absolute; width: 3px; height: 3px; left: -1.5px; top: -1.5px; background: #ccfbf1; box-shadow: 0 0 6px rgba(var(--argb), .9); opacity: 0; }
+.gl-lantern__mote:nth-child(3) { --i: 0; --dx: -26px; --dy: -36px; }
+.gl-lantern__mote:nth-child(4) { --i: 1; --dx: 10px;  --dy: -50px; }
+.gl-lantern__mote:nth-child(5) { --i: 2; --dx: 30px;  --dy: -22px; }
+.gl-lantern__mote:nth-child(6) { --i: 3; --dx: -38px; --dy: -10px; }
+.gl-lantern__mote:nth-child(7) { --i: 4; --dx: 22px;  --dy: -58px; }
+.gl-lantern__mote:nth-child(8) { --i: 5; --dx: -10px; --dy: -62px; }
+.gl-companion.is-celebrating .gl-lantern__mote { animation: gl-mote var(--beat-wait) var(--calm) calc(200ms + var(--i) * var(--beat-glance)) both; }
+
+/* ---------------------------------------------------------------------------
+   15. TOOLBAR POPUP   284px wide
+   Markup:
+     <div class="gl-pop" data-light="lit|waiting|off">
+       <div class="gl-pop__head">
+         <div class="gl-pop__art"><span class="gl-mascot gl-companion__mascot gl-companion__mascot--sm">...</span></div>
+         <div role="status" aria-live="polite"><span class="gl-eyebrow">Ghostlight</span>
+           <p class="gl-pop__title">Ready</p><p class="gl-pop__line">No agent is browsing.</p></div>
+       </div>
+       <button class="gl-btn gl-btn--ghost gl-pop__pause" type="button"><svg ...></svg>
+         <span class="gl-pop__pause-label">Pause agents</span><span class="gl-kbd">Alt+Shift+P</span></button>
+       <p class="gl-pop__foot"><a class="gl-link" href="options.html">Settings</a></p>
+     </div>
+   --------------------------------------------------------------------------- */
+.gl-pop { width: 284px; padding: 16px; background: radial-gradient(ellipse 120% 80% at 20% 0%, #1d1a27 0%, #131218 60%, #0f0e12 100%); }
+.gl-pop__head { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 14px; align-items: center; }
+.gl-pop__art { position: relative; display: grid; place-items: center; width: 100px; height: 100px; }
+.gl-pop__art::before { content: ''; position: absolute; inset: 0; opacity: var(--wash);
+  background: radial-gradient(closest-side at 50% 45%, rgba(var(--argb), .24), rgba(var(--argb), .05) 60%, rgba(var(--argb), 0) 100%); }
+.gl-pop__title { margin-top: 4px; font: 400 20px/1.2 var(--sans); letter-spacing: var(--tr-title); color: var(--ink); }
+.gl-pop__line { margin-top: 4px; font-size: var(--fs-small); line-height: 1.5; color: var(--ink-3); }
+.gl-pop .gl-btn { width: 100%; margin-top: 16px; }
+.gl-pop__pause { justify-content: flex-start; }
+.gl-pop__pause-label { flex: 1; text-align: left; }
+.gl-pop__foot { margin-top: 12px; }
+
+/* ---------------------------------------------------------------------------
+   16. REDUCED MOTION
+   Nothing moves; state still changes. The spinner is a static partial arc (pair it with the
+   word). The halo rests at .7 unless a light state dims it.
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .gl-page *, .gl-page *::before, .gl-page *::after { animation: none !important; transition: none !important; }
+  .gl-page .gl-draw { stroke-dashoffset: 0; }
+  .gl-page .gl-mascot__halo { opacity: .7; }
+}

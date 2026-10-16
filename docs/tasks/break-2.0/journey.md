@@ -98,17 +98,19 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j01-adr has landed. Next: j02-kit.
+j02-kit has landed. Next: j03-show-event.
 
 ## Landed
 
 | Slice | What | Commit |
 |---|---|---|
 | j01-adr | ADR-0200 is filed and indexed with Decisions 1 to 16 and the owner answers above. The ADR index marks ADR-0070, 0091, 0095, 0126 and 0177 as amended by it. The adapter-protocol-4 note gains a marked amendment superseding the section 7 rows on publishing after services spread and the unchanged level-3 path. This ledger starts; `docs/tasks/README.md` and the seams ledger point here. | see `git log` |
+| j02-kit | `extension/kit.css` is the one stylesheet for the extension pages: the sylin.org night tokens and base rules under `.gl-page`, the kit components, the setup layout, the companion with its two-segment stepper, and the popup. `scripts/package-extension.ps1` ships `kit.css` and `icons/ghostlight-mascot.png` and throws when a staged page names a local file the package lacks. The source-grep test for `setup.html` is deleted. | see `git log` |
 
 ## Owed live checks
 
 - j01: none. Docs only.
+- j02: none. The page markup that links the kit lands in j04, j06 and j07; the live look is checked there.
 
 ## Owed to the owner
 
@@ -137,6 +139,31 @@ j01-adr has landed. Next: j02-kit.
   spec describes.
   (5) `docs/design/adapter-protocol-4.md` also gets one sentence on its store-fallback row,
   answered by JQ2.
+- j02: ran the gate checks the files require: (3) `npm test` in `extension/` (464 pass), (5) the
+  packager to `.tmp/lane-journey/extension.zip`, (8) `node --test tests/guards/*.test.mjs`, (9) a
+  PowerShell parse of the packager, (10) the repository integrity script. The packager check was
+  proven once by pointing `setup.html` at `missing.css`: it threw "Packaged page setup.html
+  references missing.css, which the package does not include." The page was restored and the
+  probe never committed.
+  The tree and the spec differed in these places.
+  (1) Links use `.gl-page :where(a)` and `.gl-page :where(a):hover`, not `.gl-page a`. A plain
+  prefix would out-rank `.gl-btn--primary` and turn a link-button's text the accent colour. The
+  focus ring is `.gl-page :focus-visible`, as specified.
+  (2) The companion has no body wrapper. The step names (`gl-stepper__names`) follow the stepper as
+  a sibling and carry the old body padding as `padding-top`. The names use flat element classes,
+  `gl-stepper__t` and `gl-stepper__w`. Segments are `gl-stepper__seg--1` and `--2`; segment N joins
+  disc N-1 and disc N, and the discs are `--0`, `--1`, `--2`.
+  (3) `is-celebrating` goes on `.gl-companion` (as the mockup did on its card). The kit's
+  `.gl-mascot.is-celebrating`, `.is-asleep` and `.gl-mascot--sm` are not carried over: the companion
+  and `data-light` replace them.
+  (4) `.gl-pop` carries `width: 284px` (the mockup got it from viewer chrome). Popup, window and
+  page share one `--wash` rule: `[data-light]` waiting .22, off 0.
+  (5) The reduced-motion block drops the ember and notch resting rules. With animation off the
+  ember already rests on its `--es` and `--eo` values, and the notch no longer exists. The halo
+  resting look (.7) stays, and the waiting and off states still dim it.
+  (6) `.gl-hr`, `.gl-wrap`, `.gl-stack` and the typography classes are kept as written; no
+  extension page uses them yet, and j04 to j07 may drop what they leave unused.
+  (7) The kit has no `--r-5` radius token: only the hero card used it.
 - Release clock (coordinator, 2026-10-16): the owner's week of daily use starts 2026-10-16, now
   that the shell is complete. Only a change to the service or shell lifecycle (start, stop,
   presence, session end, update) restarts it. Install-time work does not.
