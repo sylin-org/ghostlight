@@ -67,7 +67,7 @@ tray still gets a service, and `status` and `doctor` say why there is no window.
 There is one Ghostlight home per OS user, `~/.ghostlight`, and every path derives from it
 (ADR-0197 Decision 10): the installed executables `ghostlight` and `ghostlight-service` in `bin`, `run` (the service lock and, on Linux,
 the relay socket), the state
-directory `state` (audit log, MCP client locations, the extension handoff marker), the policy
+directory `state` (audit log, MCP client locations, the setup record `setup.json`), the policy
 directory `policy`, the Windows native-host manifest in `manifests`, and diagnostics in
 `diagnostics` with the `diagnostics.on` marker.
 `GHOSTLIGHT_TEST_HOME` names another home and exists only for tests and journeys. Every route
@@ -246,7 +246,7 @@ cancels the end. On Windows the state also asks the system (`GetSystemMetrics` w
 `SM_SHUTTINGDOWN`), so a process born after the broadcast, such as a browser relay the
 extension relaunches during a sign-out, refuses too. Linux has no equally cheap question: only a
 process that received the signal refuses. While it holds, `start_service` and `spawn_detached`
-refuse and nothing is spawned; browser recovery launches no browser and the install handoff opens no page.
+refuse and nothing is spawned; browser recovery launches no browser and an install shows no window.
 
 On the final signal a process arms a 2 s fallback exit first. The service then says
 `goodbye{session_end}` on every stream and leaves through the desktop's exit, without waiting for
@@ -536,6 +536,34 @@ orchestrator with `open`; update and uninstall touch only explicitly owned files
 owns the equivalent system entry and does not create a per-user shadow. Browser package provenance
 is read-only and typed separately from native-host registration, so a current manifest cannot make
 a sandboxed or absent browser look usable.
+
+Setup is a part of the workbench, `setup`, projected for the window only: a watcher's snapshot
+omits it and shows the ordinary workbench. The words of the setup view, of the actions it offers
+and of the install summary are `language/setup.rs`'s; `workbench/setup.rs` gathers the facts and
+words nothing. The facts are the browsers connected now, the live sessions, the cached client
+roster and, only while setup is incomplete, the native-host report and a read of each installed
+Chromium browser's `Local State` and `Extensions` folder (`install/browser_profiles.rs`), which
+tells an added extension in a closed browser from a missing one. Nothing that read finds is
+stored, logged or sent. Setup is complete when a model client's first top-level request ran in a
+browser and succeeded: the audit projection writes `state/setup.json` once at that moment, and
+the break migration writes it for a home already in use. A `ghostlight call` never completes
+setup. A complete setup reads nothing from the machine.
+
+The setup view's browser steps are service acts. `POST /api/setup/act` (window only) carries out
+`add_in_browser`, which starts the named browser at the store listing, and `open_browser`, which
+starts it in the profile that holds the extension, after checking the step against what the
+computer shows now. Any other step is refused. The Get Google Chrome link, the Connect act of
+the integrations tab and the Review link need no setup route. The window serves the extension's
+own `extension/kit.css` and mascot at `/extension/kit.css` and `/extension/ghostlight-mascot.png`
+from the closed asset table in `workbench/web/assets.rs`, so the setup view and the extension's
+pages share one stylesheet with no copy.
+
+A window that opens while setup is incomplete opens on the `setup` address. That covers the
+interactive install, which asks the running service to show the window through the control
+operation `show`, and the tray's Open. The browser can ask for the same through the protocol-4
+event `show_requested`, which has no fields and which the service answers by revealing the window
+at the address it would choose anyway. An install run with `--dry-run`, `--no-open`, in CI or in
+an app container shows nothing.
 
 The loopback server in `workbench/web` is the typed inbound adapter over `WorkbenchFacade`. It
 decides access per route in three contexts (Control with the per-start bearer, Watch, Closed) and
@@ -857,6 +885,16 @@ The extension has four small responsibilities with explicit boundaries:
 4. The options page owns adapter-local feedback, caption, diagnostic, and physical tab-preservation
    preferences only. A physical preference may refuse a primitive but can never grant authority.
 
+The extension also ships a bundled setup page, `setup.html`, and one stylesheet for its pages,
+`extension/kit.css`, whose tokens and rules apply only under the `.gl-page` class. The page opens
+once when the first connection finds the service absent, and from the setup buttons of the popup
+and the options page. It loads nothing from the network, holds the setup command and the words
+for this computer's step, and offers Open Ghostlight, which sends `show_requested`. The words of
+the extension's pages live in the extension and are frozen with it: the packaged set is hashed in
+`tests/golden/extension-2.0.0.files.sha256` and `tests/guards/extension-freeze.test.mjs` fails
+when a packaged file is added, removed or changed. A packaged file changes only with a recorded
+owner decision to withdraw the store submission and resubmit.
+
 Workspace tab grouping is browser mechanism. `OpenTab` carries the governed URL, the owning
 workspace already present on every browser request, and the presentation-only exact title
 `Ghostlight - <client label>`. The adapter resolves placement before opening: it reuses one
@@ -871,9 +909,9 @@ newly opened tab is not adopted through its opener: that relationship cannot dis
 agent popup from a human opening a link. Explicit executor work establishes ownership. Moving a
 group or tab between windows does not change ownership or trigger automatic regrouping.
 
-The adapter never chooses a tab to reuse. The executor sends every `OpenTab` with `reuse` set to
-`never`, so an adapter that still carries its own same-host reuse ladder never runs it, and a
-reused tab arrives as an ordinary `Navigate` naming the exact tab the service chose. A reused tab
+The adapter never chooses a tab to reuse. The executor's `OpenTab` carries no reuse request and
+the adapter's open is never sent `adopt_tab_id`, so the adapter always creates. A reused tab
+arrives as an ordinary `Navigate` naming the exact tab the service chose. A reused tab
 is not regrouped, and it does not need to be: only a session of the client that released it can
 reuse it, so it already sits in that client's `Ghostlight - <client label>` group, or wherever the
 person moved it.
