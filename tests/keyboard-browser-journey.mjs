@@ -61,10 +61,30 @@ async function presentation(page) {
   return host ? { host, shadow: host.shadowRoots?.[0] ?? null } : { host: null, shadow: null };
 }
 
-async function pointerEventsOf(page, node) {
-  const { object } = await page.send("DOM.resolveNode", { nodeId: node.nodeId });
-  const { result } = await page.send("Runtime.callFunctionOn",
-    { objectId: object.objectId, functionDeclaration: "function() { return getComputedStyle(this).pointerEvents; }", returnByValue: true });
+const ribbonsOf = (shadow) => descendants(shadow ?? {}).filter((node) => attributesOf(node).get("class") === "denial-ribbon");
+
+// Polls until a ribbon whose backend node id is not in `seen` is present. A denial replaces its
+// ribbon and a later one removes it, so the journey waits for the render it asked for and never
+// accepts an earlier one.
+async function freshRibbons(page, seen) {
+  for (let tries = 0; tries < 80; tries++) {
+    const current = await presentation(page);
+    const ribbons = ribbonsOf(current.shadow);
+    if (ribbons.some((node) => !seen.has(node.backendNodeId))) return { ...current, ribbons };
+    await new Promise((done) => setTimeout(done, 50));
+  }
+  return { host: null, shadow: null, ribbons: [] };
+}
+
+// Computed pointer-events of the host and every element in its shadow root, read in one round trip
+// so no step holds a node id across a re-render.
+async function pointerEventsInside(page, shadow) {
+  const { object } = await page.send("DOM.resolveNode", { backendNodeId: shadow.backendNodeId });
+  const { result } = await page.send("Runtime.callFunctionOn", {
+    objectId: object.objectId,
+    functionDeclaration: "function() { return [this.host, ...this.querySelectorAll('*')].map((node) => [node.nodeName, getComputedStyle(node).pointerEvents]); }",
+    returnByValue: true
+  });
   return result.value;
 }
 
@@ -159,29 +179,41 @@ try {
     if (!shadow) await new Promise((done) => setTimeout(done, 50));
   }
   assert.ok(shadow, "the presentation mounted a shadow root");
-  const style = (shadow.children ?? []).find((node) => node.nodeName === "STYLE");
+  const firstRibbons = new Set();
+  for (let tries = 0; tries < 80 && firstRibbons.size === 0; tries++) {
+    for (const node of ribbonsOf((await presentation(page)).shadow)) firstRibbons.add(node.backendNodeId);
+    if (firstRibbons.size === 0) await new Promise((done) => setTimeout(done, 50));
+  }
+  assert.ok(firstRibbons.size > 0, "the first denial rendered");
+  const { root: fresh } = await page.send("DOM.getDocument", { depth: -1, pierce: true });
+  const freshHost = descendants(fresh).find((node) => attributesOf(node).get("id") === PRESENTATION_ROOT);
+  const style = (freshHost?.shadowRoots?.[0]?.children ?? []).find((node) => node.nodeName === "STYLE");
   assert.ok(style, "the presentation carries a stylesheet");
   await page.send("DOM.removeNode", { nodeId: style.nodeId });
   await page.evaluate("credential.focus(); true");
   const second = await call("browser_click", { tab, target: credential.target });
   assert.equal(second.status, "blocked", JSON.stringify(second));
-  let ribbons = [];
+  // Each attempt takes one snapshot of the second denial and checks it in place. A denial that
+  // expires between snapshot and check is the only failure a second attempt can cure.
   let inspectedRoot;
-  for (let tries = 0; tries < 80 && ribbons.length === 0; tries++) {
-    inspectedRoot = await presentation(page);
-    ribbons = descendants(inspectedRoot.shadow ?? {}).filter((node) => attributesOf(node).get("class") === "denial-ribbon");
-    if (ribbons.length === 0) await new Promise((done) => setTimeout(done, 50));
+  let pointerEvents;
+  for (let attempt = 0; attempt < 2 && !pointerEvents; attempt++) {
+    inspectedRoot = await freshRibbons(page, firstRibbons);
+    assert.ok(inspectedRoot.ribbons.length > 0, "the second denial rendered");
+    try {
+      pointerEvents = await pointerEventsInside(page, inspectedRoot.shadow);
+    } catch (error) {
+      if (attempt > 0) throw error;
+    }
   }
-  assert.ok(ribbons.length > 0, "the denial rendered");
   const inside = descendants(inspectedRoot.shadow);
   const elements = inside.filter((node) => node.nodeType === 1);
   const controls = elements.filter((node) => CONTROL_ELEMENTS.has(node.nodeName)
     || CONTROL_ATTRIBUTES.some((name) => attributesOf(node).has(name)) || attributesOf(node).get("role") === "button");
   assert.equal(inside.some((node) => node.nodeName === "STYLE"), false, "the stylesheet stayed missing");
   assert.equal(controls.length, 0, "denial feedback has no controls");
-  for (const node of [inspectedRoot.host, ...elements]) {
-    assert.equal(await pointerEventsOf(page, node), "none", `${node.nodeName} takes no pointer input`);
-  }
+  assert.ok(pointerEvents.length > 1, "pointer input was read for the host and its elements");
+  for (const [name, value] of pointerEvents) assert.equal(value, "none", `${name} takes no pointer input`);
   assert.ok(inside.filter((node) => node.nodeType === 3).some((node) => node.nodeValue.trim() !== ""), "the denial says why");
   assert.equal(await page.evaluate("document.activeElement === credential"), true, "the page keeps its focus");
   assert.equal(await page.evaluate(`(() => {
