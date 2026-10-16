@@ -576,6 +576,12 @@ mod tests {
                 item: TrayItemId::Hold
             }
         );
+        assert_eq!(
+            golden("tray-open.json"),
+            DesktopFrame::Tray {
+                item: TrayItemId::Open
+            }
+        );
     }
 
     #[test]
@@ -689,19 +695,15 @@ mod tests {
     }
 
     #[test]
-    fn the_shell_writes_the_bytes_of_the_tray_golden() {
-        let written = serde_json::to_value(DesktopFrame::Tray {
-            item: TrayItemId::Hold,
-        })
-        .unwrap();
-        let golden: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/desktop/tray.json"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(written, golden);
+    fn the_shell_writes_the_bytes_of_the_tray_goldens() {
+        for (name, item) in [
+            ("tray.json", TrayItemId::Hold),
+            ("tray-open.json", TrayItemId::Open),
+        ] {
+            let written = serde_json::to_value(DesktopFrame::Tray { item }).unwrap();
+            let golden: serde_json::Value = serde_json::from_str(&golden_text(name)).unwrap();
+            assert_eq!(written, golden, "{name}");
+        }
     }
 
     #[test]

@@ -386,6 +386,9 @@ impl WorkbenchPresentationPort for ShellRoute {
         loop {
             match self.shells.current() {
                 Current::Shell(stream) => {
+                    // Both callers are a person. A reason the shell gave for a window it could
+                    // not build is over: it gives one again if this window fails too.
+                    self.presence.person_acted();
                     stream.tell(&DesktopFrame::Show { address })?;
                     self.presence.window_shown();
                     return Ok(());

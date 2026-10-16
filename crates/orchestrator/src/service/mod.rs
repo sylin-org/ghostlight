@@ -4592,6 +4592,35 @@ mod tests {
     }
 
     #[test]
+    fn a_later_show_the_shell_builds_clears_the_reason_it_gave_before() {
+        use crate::intake::desktop::UnavailableReason;
+        use crate::language::workbench::WindowReason;
+
+        let home = TestHome::new("status-show-recovers");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let window = || cli_client::status_at(home.path()).unwrap().window;
+        let (mut stream, _) = open_desktop();
+        eventually(|| window() == Some(WindowReason::Shown));
+
+        host.workbench.reveal(Some(PageAddress::About)).unwrap();
+        assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Unavailable {
+                reason: UnavailableReason::NoWebview,
+            },
+        )
+        .unwrap();
+        eventually(|| window() == Some(WindowReason::NoWebview));
+
+        host.workbench.reveal(None).unwrap();
+        assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
+        eventually(|| window() == Some(WindowReason::Shown));
+        drop(host);
+    }
+
+    #[test]
     fn the_first_close_that_stays_is_explained_once_and_never_again() {
         let home = TestHome::new("tray-hint");
         let host = ServiceHost::start(home.path()).unwrap();

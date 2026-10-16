@@ -169,6 +169,19 @@ pub enum TrayAction {
     Report(TrayItemId),
 }
 
+impl TrayAction {
+    /// The entry the service is told the person chose. A person who opens the window from the
+    /// tray is told to the service as the `open` entry, however the shell got the request: the
+    /// service cannot see a window the shell builds for itself.
+    #[must_use]
+    pub fn reported(self) -> TrayItemId {
+        match self {
+            Self::OpenWindow => TrayItemId::Open,
+            Self::Report(item) => item,
+        }
+    }
+}
+
 /// What a tray event asks for, if anything. A left click on the icon opens the window.
 pub fn tray_action(event: &TrayEvent) -> Option<TrayAction> {
     match event {
@@ -639,11 +652,15 @@ impl Shell {
                 event: WindowEvent::Destroyed,
                 ..
             } => self.apply(LifecycleEvent::Destroyed, target),
-            Event::UserEvent(ShellEvent::Tray(event)) => match tray_action(&event) {
-                Some(TrayAction::OpenWindow) => self.apply(LifecycleEvent::OpenRequested, target),
-                Some(TrayAction::Report(item)) => self.report(item),
-                None => {}
-            },
+            Event::UserEvent(ShellEvent::Tray(event)) => {
+                if let Some(action) = tray_action(&event) {
+                    // Told first, so a window that cannot be built answers `unavailable` after it.
+                    self.report(action.reported());
+                    if action == TrayAction::OpenWindow {
+                        self.apply(LifecycleEvent::OpenRequested, target);
+                    }
+                }
+            }
             Event::UserEvent(ShellEvent::Opened(opened)) => match opened {
                 Ok((link, workbench)) => self.attach(link, workbench, target),
                 Err(error) => self.feed(machine::Event::Opened(Answer::from(&error)), target),
@@ -795,6 +812,19 @@ mod tests {
         assert_eq!(
             tray_action(&TrayEvent::Activate),
             Some(TrayAction::OpenWindow)
+        );
+    }
+
+    #[test]
+    fn a_person_opening_the_window_from_the_tray_is_reported_as_the_open_entry() {
+        for event in [item("open"), TrayEvent::Activate] {
+            let action = tray_action(&event).expect("the tray event asks for something");
+            assert_eq!(action, TrayAction::OpenWindow);
+            assert_eq!(action.reported(), TrayItemId::Open);
+        }
+        assert_eq!(
+            TrayAction::Report(TrayItemId::Hold).reported(),
+            TrayItemId::Hold
         );
     }
 

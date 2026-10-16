@@ -763,6 +763,7 @@ mod tests {
         presence.window_shown();
         presence.unavailable(WindowReason::NoWebview);
         assert_eq!(presence.window_reason(), Some(WindowReason::NoWebview));
+        // A show the shell is asked for is a person's act, then the window is shown.
         presence.person_acted();
         presence.window_shown();
         assert_eq!(presence.window_reason(), Some(WindowReason::Shown));

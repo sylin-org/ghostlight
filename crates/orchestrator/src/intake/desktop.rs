@@ -463,6 +463,12 @@ mod tests {
                 item: TrayItemId::Hold,
             },
         );
+        golden(
+            "tray-open.json",
+            &DesktopFrame::Tray {
+                item: TrayItemId::Open,
+            },
+        );
     }
 
     #[test]
