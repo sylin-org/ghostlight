@@ -1,4 +1,9 @@
 //! Ownership-checked XDG application entry for Linux per-user installations.
+//!
+//! The entry runs the shell, `bin/ghostlight-desktop` (ADR-0199 Decision 4), which starts the
+//! service when none runs, and names the window class the shell sets so the desktop groups the
+//! window under the entry. An entry that ran the service image is Ghostlight's own and is
+//! rewritten.
 
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -110,7 +115,7 @@ impl DesktopIntegrationContext {
         Self {
             linux: cfg!(target_os = "linux"),
             executable: super::layout::Layout::current()
-                .map(|layout| layout.service_executable())
+                .map(|layout| layout.desktop_executable())
                 .unwrap_or_default(),
             data_home: env::var_os("XDG_DATA_HOME")
                 .map(PathBuf::from)
@@ -240,6 +245,7 @@ fn render_desktop_entry(executable: &Path) -> String {
     DESKTOP_TEMPLATE
         .replace("{{exec}}", &quote_exec(executable))
         .replace("{{icon}}", APPLICATION_ID)
+        .replace("{{wm_class}}", APPLICATION_ID)
         .replace("{{name}}", "Ghostlight")
 }
 
@@ -279,7 +285,7 @@ fn state_detail(state: DesktopIntegrationState) -> &'static str {
         }
         DesktopIntegrationState::Missing => "Ghostlight is not present in Applications.",
         DesktopIntegrationState::Current => {
-            "Applications opens this installation's workbench explicitly."
+            "Applications opens this installation's Ghostlight window."
         }
         DesktopIntegrationState::Updatable => {
             "The owned Applications entry points at an older installation."
@@ -511,6 +517,37 @@ mod tests {
     #[test]
     fn desktop_exec_quotes_shell_characters_and_escapes_field_codes() {
         let rendered = render_desktop_entry(Path::new("/home/Ghost %Light/$bin/ghostlight"));
-        assert!(rendered.contains("Exec=\"/home/Ghost %%Light/\\$bin/ghostlight\" open"));
+        assert!(rendered.contains("Exec=\"/home/Ghost %%Light/\\$bin/ghostlight\"\n"));
+    }
+
+    #[test]
+    fn the_entry_runs_the_shell_and_names_its_window_class() {
+        let rendered =
+            render_desktop_entry(Path::new("/home/p/.ghostlight/bin/ghostlight-desktop"));
+        assert!(rendered.contains("Exec=\"/home/p/.ghostlight/bin/ghostlight-desktop\"\n"));
+        assert!(rendered.contains("StartupWMClass=org.sylin.ghostlight\n"));
+        assert!(!rendered.contains(" open"));
+    }
+
+    #[test]
+    fn an_entry_that_ran_the_service_image_is_owned_and_rewritten() {
+        let context = context("older-entry");
+        let entry = context.desktop_entry();
+        let icon = context.icon();
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::create_dir_all(icon.parent().unwrap()).unwrap();
+        let older = "[Desktop Entry]\nExec=\"/h/bin/ghostlight-service\" open\nName=Ghostlight\n\
+                     Type=Application\nX-Ghostlight-Owned=true\n";
+        fs::write(&entry, older).unwrap();
+        fs::write(&icon, ICON).unwrap();
+        assert_eq!(
+            inspect(&context).unwrap().state,
+            DesktopIntegrationState::Updatable
+        );
+        assert!(apply_install(&context).unwrap().changed);
+        let rewritten = fs::read_to_string(&entry).unwrap();
+        assert!(rewritten.contains("StartupWMClass=org.sylin.ghostlight"));
+        assert!(!rewritten.contains("ghostlight-service"));
+        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 }

@@ -51,6 +51,10 @@ pub const QUIT_LATCH_NAME: &str = "quit";
 /// The marker under the state directory that exists exactly while "Others can watch" is off.
 pub const WATCH_OFF_MARKER_NAME: &str = "watch.off";
 
+/// The marker under the state directory that exists once the first close of the window has been
+/// explained. It is service-private.
+pub const TRAY_HINT_NAME: &str = "tray-hint";
+
 /// Directory of the user's policy.
 pub const POLICY_DIRECTORY_NAME: &str = "policy";
 
@@ -130,6 +134,12 @@ impl Layout {
         self.bin().join(EDGE_EXECUTABLE_NAME)
     }
 
+    /// The installed shell: `home/bin/ghostlight-desktop`.
+    #[must_use]
+    pub fn desktop_executable(&self) -> PathBuf {
+        self.bin().join(DESKTOP_EXECUTABLE_NAME)
+    }
+
     /// The install record: `home/bin/install.json`.
     #[must_use]
     pub fn install_record(&self) -> PathBuf {
@@ -170,6 +180,13 @@ impl Layout {
     #[must_use]
     pub fn watch_off_marker(&self) -> PathBuf {
         self.state().join(WATCH_OFF_MARKER_NAME)
+    }
+
+    /// The marker that records the first close of the window was explained:
+    /// `home/state/tray-hint`.
+    #[must_use]
+    pub fn tray_hint(&self) -> PathBuf {
+        self.state().join(TRAY_HINT_NAME)
     }
 
     /// The user policy directory: `home/policy`.
@@ -223,6 +240,7 @@ mod tests {
             layout.watch_off_marker(),
             home.join("state").join("watch.off")
         );
+        assert_eq!(layout.tray_hint(), home.join("state").join("tray-hint"));
         assert_eq!(layout.policy(), home.join("policy"));
         assert_eq!(layout.manifests(), home.join("manifests"));
     }
@@ -236,6 +254,10 @@ mod tests {
             bin.join(format!("ghostlight-service{EXE}"))
         );
         assert_eq!(layout.edge(), bin.join(format!("ghostlight{EXE}")));
+        assert_eq!(
+            layout.desktop_executable(),
+            bin.join(format!("ghostlight-desktop{EXE}"))
+        );
     }
 
     #[test]

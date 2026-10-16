@@ -1,11 +1,14 @@
 //! The Windows Start-menu shortcut and the installed-apps entry for the installation in `bin`.
 //!
-//! Every route installs into `home/bin`, so the shortcut and the per-user Uninstall key name
-//! `bin/ghostlight-service.exe`: a person's launch is the service image run with no arguments, the
-//! same as `open`, and it is a GUI image, so neither entry flashes a console. Both take the names
-//! an NSIS install used, so writing them also replaces what an NSIS install left behind; an NSIS
-//! Uninstall key is removed whole first, so none of its values survive (ADR-0197 Decisions 14 and
-//! 16).
+//! Every route installs into `home/bin`. The shortcut names the shell, `bin/ghostlight-desktop.exe`
+//! (ADR-0199 Decision 4): a person's launch is the window, it is a GUI image so nothing flashes a
+//! console, and it starts the service when none runs. The shortcut carries the AppUserModelID
+//! `Sylin.Ghostlight` in a property store block, which is what groups the window with a pin and
+//! lets an unpackaged program show a toast. A payload that has no shell leaves the shortcut on the
+//! service image, which does the same through `open`. The per-user Uninstall key keeps the service
+//! image for its icon and its command. Both take the names an NSIS install used, so writing them
+//! also replaces what an NSIS install left behind; an NSIS Uninstall key is removed whole first,
+//! so none of its values survive (ADR-0197 Decisions 14 and 16).
 
 use std::env;
 use std::fs;
@@ -20,6 +23,10 @@ use super::record::atomic_replace;
 
 /// The name the shortcut and the installed-apps entry carry.
 const PRODUCT_NAME: &str = "Ghostlight";
+
+/// The AppUserModelID of the shortcut. It is the shell's own id (`SHELL_APP_ID` in the shell
+/// crate), written again here because the service depends on no UI crate; a test keeps them equal.
+pub const APP_USER_MODEL_ID: &str = "Sylin.Ghostlight";
 
 /// The per-user Uninstall key, below `HKEY_CURRENT_USER`.
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Ghostlight";
@@ -66,8 +73,9 @@ pub fn plan(layout: &Layout, version: &str) -> io::Result<WindowsEntryChange> {
     let executable = layout.service_executable();
     let mut change = WindowsEntryChange::default();
     if let Some(shortcut) = shortcut_path() {
-        let target = ghostlight_win_peer::item_id_list(&executable)?;
-        let bytes = shortcut_bytes(&target, &executable, layout.home());
+        let target = shortcut_target(layout);
+        let list = ghostlight_win_peer::item_id_list(&target)?;
+        let bytes = shortcut_bytes(&list, &target, layout.home());
         change.shortcut = fs::read(&shortcut).ok().as_deref() != Some(bytes.as_slice());
     }
     let uninstall = uninstall_command(&executable);
@@ -87,19 +95,19 @@ pub fn plan(layout: &Layout, version: &str) -> io::Result<WindowsEntryChange> {
     Ok(change)
 }
 
-/// Point the Start-menu shortcut and the Uninstall key at the service in `layout`'s `bin`.
+/// Point the Start-menu shortcut at the shell and the Uninstall key at the service in `layout`'s
+/// `bin`.
 ///
-/// Entries that already name it are left alone.
+/// Entries that already name them are left alone. A shortcut that names the service, or carries
+/// no AppUserModelID, differs from the one written here and is rewritten.
 pub fn reconcile(layout: &Layout, version: &str) -> io::Result<WindowsEntryChange> {
     let change = plan(layout, version)?;
     let executable = layout.service_executable();
     if change.shortcut {
         if let Some(shortcut) = shortcut_path() {
-            let target = ghostlight_win_peer::item_id_list(&executable)?;
-            atomic_replace(
-                &shortcut,
-                &shortcut_bytes(&target, &executable, layout.home()),
-            )?;
+            let target = shortcut_target(layout);
+            let list = ghostlight_win_peer::item_id_list(&target)?;
+            atomic_replace(&shortcut, &shortcut_bytes(&list, &target, layout.home()))?;
         }
     }
     if change.nsis_removed {
@@ -145,6 +153,16 @@ fn uninstall_command(executable: &Path) -> String {
     format!("\"{}\" {UNINSTALL_ARGUMENT}", executable.display())
 }
 
+/// What the Start-menu shortcut names: the shell, or the service image when `bin` holds no shell.
+fn shortcut_target(layout: &Layout) -> PathBuf {
+    let shell = layout.desktop_executable();
+    if shell.is_file() {
+        shell
+    } else {
+        layout.service_executable()
+    }
+}
+
 /// The Start-menu shortcut path, when this user has a roaming profile.
 fn shortcut_path() -> Option<PathBuf> {
     let app_data = env::var_os("APPDATA").map(PathBuf::from)?;
@@ -183,6 +201,20 @@ mod link {
     pub const DRIVE_FIXED: u32 = 3;
     /// Offset of the empty volume label inside the VolumeID structure.
     pub const VOLUME_LABEL_OFFSET: u32 = 0x10;
+    /// Signature of the property store block of the extra data.
+    pub const PROPERTY_STORE_SIGNATURE: u32 = 0xA000_0009;
+    /// Version of a serialized property storage, "1SPS".
+    pub const PROPERTY_STORAGE_VERSION: u32 = 0x5350_5331;
+    /// The format id of the shell's application properties,
+    /// 9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3, as stored.
+    pub const APPLICATION_FORMAT_ID: [u8; 16] = [
+        0x55, 0x28, 0x4C, 0x9F, 0x79, 0x9F, 0x39, 0x4B, 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5,
+        0xF3,
+    ];
+    /// The property id of `System.AppUserModel.ID` in that format.
+    pub const APP_USER_MODEL_ID_PROPERTY: u32 = 5;
+    /// The property type of a Unicode string, `VT_LPWSTR`.
+    pub const VT_LPWSTR: u16 = 0x001F;
 }
 
 /// A shell link to `target` that starts in `working_directory`. `id_list` is the shell's item
@@ -261,8 +293,46 @@ fn shortcut_bytes(id_list: &[u8], target: &Path, working_directory: &Path) -> Ve
     let characters = u16::try_from(directory.encode_utf16().count()).unwrap_or(u16::MAX);
     bytes.extend(characters.to_le_bytes());
     bytes.extend(utf16(&directory).take(usize::from(characters) * 2));
-    bytes.extend(0u32.to_le_bytes()); // no extra data
+    bytes.extend(app_user_model_id_block(APP_USER_MODEL_ID));
+    bytes.extend(0u32.to_le_bytes()); // the terminal block
     bytes
+}
+
+/// The property store block of the extra data that holds `System.AppUserModel.ID` = `id`, as one
+/// serialized property storage (MS-SHLLINK 2.5.7, MS-PROPSTORE 2.2).
+fn app_user_model_id_block(id: &str) -> Vec<u8> {
+    let mut text: Vec<u8> = utf16(id).chain([0, 0]).collect();
+    let characters = u32::try_from(text.len() / 2).expect("an id shorter than 4 GiB");
+    while !text.len().is_multiple_of(4) {
+        text.push(0);
+    }
+    let mut value = Vec::new();
+    value.extend(0u32.to_le_bytes()); // size, filled below
+    value.extend(link::APP_USER_MODEL_ID_PROPERTY.to_le_bytes());
+    value.push(0); // reserved
+    value.extend(link::VT_LPWSTR.to_le_bytes());
+    value.extend(0u16.to_le_bytes()); // padding
+    value.extend(characters.to_le_bytes());
+    value.extend(text);
+    let value_size = u32::try_from(value.len()).expect("a short property");
+    value[..4].copy_from_slice(&value_size.to_le_bytes());
+
+    let mut storage = Vec::new();
+    storage.extend(0u32.to_le_bytes()); // size, filled below
+    storage.extend(link::PROPERTY_STORAGE_VERSION.to_le_bytes());
+    storage.extend(link::APPLICATION_FORMAT_ID);
+    storage.extend(value);
+    storage.extend(0u32.to_le_bytes()); // the end of this storage's properties
+    let storage_size = u32::try_from(storage.len()).expect("a short storage");
+    storage[..4].copy_from_slice(&storage_size.to_le_bytes());
+
+    let mut block = Vec::new();
+    let block_size = u32::try_from(8 + storage.len() + 4).expect("a short block");
+    block.extend(block_size.to_le_bytes());
+    block.extend(link::PROPERTY_STORE_SIGNATURE.to_le_bytes());
+    block.extend(storage);
+    block.extend(0u32.to_le_bytes()); // the end of the property store
+    block
 }
 
 /// The UTF-16LE bytes of `text`, without a terminator.
@@ -318,7 +388,106 @@ mod tests {
             String::from_utf16(&directory).unwrap(),
             home.to_string_lossy()
         );
-        assert_eq!(&strings[2 + characters * 2..], &[0, 0, 0, 0]);
+        // What follows the strings is the property store block and then the terminal block.
+        let extra = &strings[2 + characters * 2..];
+        assert_eq!(&extra[extra.len() - 4..], &[0, 0, 0, 0]);
+        assert_eq!(
+            read_u32(extra, 0),
+            extra.len() - 4,
+            "the block fills the extra data"
+        );
+    }
+
+    /// The AppUserModelID a shortcut's property store block holds, read back from its bytes.
+    fn app_user_model_id_of(shortcut: &[u8]) -> Option<String> {
+        let signature = link::PROPERTY_STORE_SIGNATURE.to_le_bytes();
+        let block = shortcut
+            .windows(4)
+            .rposition(|window| window == signature)?
+            - 4;
+        let size = read_u32(shortcut, block);
+        let storage = block + 8;
+        assert_eq!(
+            read_u32(shortcut, storage + 4),
+            link::PROPERTY_STORAGE_VERSION as usize
+        );
+        assert_eq!(
+            &shortcut[storage + 8..storage + 24],
+            &link::APPLICATION_FORMAT_ID
+        );
+        let value = storage + 24;
+        assert_eq!(
+            read_u32(shortcut, value + 4),
+            link::APP_USER_MODEL_ID_PROPERTY as usize
+        );
+        assert_eq!(shortcut[value + 8], 0, "reserved");
+        assert_eq!(
+            u16::from_le_bytes([shortcut[value + 9], shortcut[value + 10]]),
+            link::VT_LPWSTR
+        );
+        let characters = read_u32(shortcut, value + 13);
+        let text: Vec<u16> = shortcut[value + 17..value + 17 + characters * 2]
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|unit| *unit != 0)
+            .collect();
+        // The storage ends where its one value ends, and the block where the storage list does.
+        let value_size = read_u32(shortcut, value);
+        assert_eq!(read_u32(shortcut, value + value_size), 0);
+        assert_eq!(read_u32(shortcut, storage), value_size + 24 + 4);
+        assert_eq!(block + size, shortcut.len() - 4);
+        String::from_utf16(&text).ok()
+    }
+
+    #[test]
+    fn a_shortcut_carries_the_app_user_model_id_and_it_reads_back() {
+        let target = Path::new("C:\\h\\bin\\ghostlight-desktop.exe");
+        let bytes = shortcut_bytes(&[4, 0, 1, 2, 0, 0], target, Path::new("C:\\h"));
+        assert_eq!(
+            app_user_model_id_of(&bytes).as_deref(),
+            Some(APP_USER_MODEL_ID)
+        );
+    }
+
+    #[test]
+    fn a_shortcut_with_the_old_target_or_without_the_id_differs_from_the_one_written() {
+        let home = Path::new("C:\\h");
+        let list = [4, 0, 1, 2, 0, 0];
+        let shell = shortcut_bytes(&list, Path::new("C:\\h\\bin\\ghostlight-desktop.exe"), home);
+        let service = shortcut_bytes(&list, Path::new("C:\\h\\bin\\ghostlight-service.exe"), home);
+        assert_ne!(shell, service, "an old shortcut is rewritten");
+        // A shortcut made before this block existed ends its strings with the terminal block.
+        let end = shell.len() - app_user_model_id_block(APP_USER_MODEL_ID).len() - 4;
+        let mut without = shell[..end].to_vec();
+        without.extend(0u32.to_le_bytes());
+        assert_ne!(shell, without, "a shortcut without the id is rewritten");
+        assert_eq!(
+            app_user_model_id_of(&shell).as_deref(),
+            Some(APP_USER_MODEL_ID)
+        );
+    }
+
+    #[test]
+    fn the_id_is_the_one_the_shell_names_itself() {
+        let native = include_str!("../../../desktop/src/native.rs");
+        let declared = native
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("pub const SHELL_APP_ID: &str = \"")
+                    .and_then(|rest| rest.strip_suffix("\";"))
+            })
+            .expect("the shell declares its AppUserModelID");
+        assert_eq!(APP_USER_MODEL_ID, declared);
+    }
+
+    #[test]
+    fn the_shortcut_names_the_shell_when_bin_holds_one_and_the_service_when_it_does_not() {
+        let scratch = crate::install::scratch::Scratch::new();
+        let layout = Layout::new(scratch.path());
+        assert_eq!(shortcut_target(&layout), layout.service_executable());
+        std::fs::create_dir_all(layout.bin()).unwrap();
+        std::fs::write(layout.desktop_executable(), b"shell").unwrap();
+        assert_eq!(shortcut_target(&layout), layout.desktop_executable());
     }
 
     #[test]
