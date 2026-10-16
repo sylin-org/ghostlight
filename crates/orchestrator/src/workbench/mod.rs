@@ -2008,11 +2008,32 @@ pub enum WorkbenchDestination {
     GetChrome,
 }
 
+/// The branch of the source repository that holds the documentation of the published product.
+/// A person running a release reads the documents of the product they run, and `main` is that
+/// branch from the cutover on.
+macro_rules! documentation_branch {
+    () => {
+        "main"
+    };
+}
+
+/// One document of the source repository, on the documentation branch.
+macro_rules! repository_document {
+    ($path:literal) => {
+        concat!(
+            "https://github.com/sylin-org/ghostlight/blob/",
+            documentation_branch!(),
+            "/",
+            $path
+        )
+    };
+}
+
 impl WorkbenchDestination {
     /// Resolve the exact address. Every one of these was checked to resolve when it was added.
     ///
-    /// Documentation points at `dev` rather than `main` deliberately: `main` still carries the 0.8
-    /// line, so a `main` link would answer questions about a product this window is not running.
+    /// Documentation links name the branch of `documentation_branch!`, so a release shows the
+    /// documents of the product it is.
     #[must_use]
     pub const fn url(self) -> &'static str {
         match self {
@@ -2021,25 +2042,25 @@ impl WorkbenchDestination {
             Self::DecisionAid => "https://sylin.org/ghostlight/decision-aid/",
             Self::Source => "https://github.com/sylin-org/ghostlight",
             Self::InstallGuide => {
-                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/installation.md"
+                repository_document!("docs/guides/installation.md")
             }
             Self::GovernanceGuide => {
-                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/governance-configuration.md"
+                repository_document!("docs/guides/governance-configuration.md")
             }
             Self::ScriptingGuide => {
-                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/scripting.md"
+                repository_document!("docs/guides/scripting.md")
             }
             Self::AuditGuide => {
-                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/siem-integration.md"
+                repository_document!("docs/guides/siem-integration.md")
             }
             Self::TrustCenter => {
-                "https://github.com/sylin-org/ghostlight/blob/dev/docs/trust/README.md"
+                repository_document!("docs/trust/README.md")
             }
             Self::DecisionRecords => {
-                "https://github.com/sylin-org/ghostlight/blob/dev/docs/adr/README.md"
+                repository_document!("docs/adr/README.md")
             }
             Self::LicensingGuide => {
-                "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/licensing.md"
+                repository_document!("docs/guides/licensing.md")
             }
             Self::SylinTools => "https://sylin.org/tools/",
             Self::GetChrome => "https://www.google.com/chrome/",

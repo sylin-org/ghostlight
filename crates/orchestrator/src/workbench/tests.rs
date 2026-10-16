@@ -1047,9 +1047,9 @@ fn every_destination_has_its_name_and_points_at_the_products_own_surfaces() {
         })
         .collect();
     assert_eq!(
-        branches.len(),
-        1,
-        "Documentation links point at the branch named by the destination table: {branches:?}"
+        branches,
+        std::collections::BTreeSet::from([documentation_branch!()]),
+        "Documentation links name the published branch and never dev"
     );
 }
 
