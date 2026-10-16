@@ -1,8 +1,10 @@
 # Ghostlight ${VERSION}
 
 Ghostlight gives an AI agent governed access to the Chromium session where you are already signed
-in. The 1.0 release is a native desktop product: one persistent Rust authority, a stable MCP stdio
-connector, a browser-only native connector, a thin Chromium adapter, and a local tray workbench.
+in. A release is three executables that ship as one tested set: `ghostlight`, the edge that MCP
+clients and browsers start; `ghostlight-service`, the one persistent service that owns every
+product decision; and `ghostlight-desktop`, the window and the tray. The Chromium extension,
+`Ghostlight in Browser`, is delivered separately through the Chrome Web Store.
 
 ## What changed
 
@@ -10,31 +12,38 @@ ${CHANGELOG}
 
 ## Install
 
-The shortest path is the npm launcher:
+Install takes three steps: install Ghostlight, add Ghostlight in Browser, then ask your agent to
+do something. The shortest route is the npm launcher:
 
 ```sh
 npx -y ghostlight@${VERSION} install
 ```
 
-Then install `Ghostlight in Browser` ${ADAPTER_VERSION} from the Chrome Web Store and reconnect
-your MCP client. The installer connects detected clients directly to the cached native connector;
-Node is not a resident service.
+The one-line installers need no Node.js. On Windows, in PowerShell:
+
+```powershell
+irm https://sylin.org/ghostlight/get.ps1 | iex
+```
+
+On Linux:
+
+```sh
+curl -fsSL https://sylin.org/ghostlight/get.sh | sh
+```
+
+Every route installs into `~/.ghostlight/bin`, connects detected MCP clients and opens the
+Ghostlight window on the setup steps. The window's Browser step adds `Ghostlight in Browser`
+${ADAPTER_VERSION} from the Chrome Web Store.
 
 If anything does not connect, run `npx -y ghostlight@${VERSION} doctor` for an ownership-safe
 checkup.
 
-The provenance-attested Windows setup and Debian package below are equivalent native-package
-routes. Start Ghostlight, open **MCP integrations** to connect a client, and use **Status** to check
-the whole chain.
+WinGet is a carrier for the same install: run `ghostlight install` once through the WinGet alias.
+The raw binaries below are the images the launchers and installers download and verify; most
+people do not need them.
 
-Use the Windows setup executable or install the Debian package with
-`sudo apt install ./ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.deb`. The package owns the three
-Ghostlight executables, native-messaging registration, and exact license texts. It does not install
-a resident supervisor or phone home; either connector demand-starts the one local authority.
-
-If you are upgrading from 0.8, rerun `npx -y ghostlight@${VERSION} install` or install the native
-package. Ghostlight recognizes owned old registrations and preserves unrelated client
-configuration. The removed `ghostlight-relay --role agent` command is not a compatibility fallback.
+If you are upgrading from 1.x, run the install again and update the extension once. The service
+and the extension are updated together; Ghostlight says which side to update.
 
 ## Platform evidence
 
@@ -55,27 +64,34 @@ gh attestation verify <downloaded-file> \
   --signer-workflow sylin-org/ghostlight/.github/workflows/release.yml
 ```
 
-Ghostlight does not Authenticode-sign the Windows executable. As in 0.8, `SHA256SUMS` and GitHub's
-keyless build-provenance attestations are the artifact-integrity controls.
+Ghostlight does not Authenticode-sign the Windows executables. `SHA256SUMS` and GitHub's keyless
+build-provenance attestations are the artifact-integrity controls.
 
 ## Downloads
 
 | Platform or evidence | Architecture | Asset |
 | --- | --- | --- |
-| Windows setup | x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc-setup.exe` |
-| Debian package | x86_64 | `ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.deb` |
-| Portable archive | Windows x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc.zip` |
-| Portable archive | Linux x86_64 | `ghostlight-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz` |
-| Claude Desktop MCPB | Windows | `ghostlight-v${VERSION}.mcpb` |
-| npm launcher source tarball | Supported desktops | `ghostlight-${VERSION}.tgz` |
-| Raw launcher binaries | Two target triples | `ghostlight*-<target>[.exe]` |
-| Chromium adapter | Any supported desktop | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
+| Raw image: edge `ghostlight` | Windows x86_64 | `ghostlight-x86_64-pc-windows-msvc.exe` |
+| Raw image: edge `ghostlight` | Linux x86_64 | `ghostlight-x86_64-unknown-linux-gnu` |
+| Raw image: `ghostlight-service` | Windows x86_64 | `ghostlight-service-x86_64-pc-windows-msvc.exe` |
+| Raw image: `ghostlight-service` | Linux x86_64 | `ghostlight-service-x86_64-unknown-linux-gnu` |
+| Raw image: `ghostlight-desktop` | Windows x86_64 | `ghostlight-desktop-x86_64-pc-windows-msvc.exe` |
+| Raw image: `ghostlight-desktop` | Linux x86_64 | `ghostlight-desktop-x86_64-unknown-linux-gnu` |
+| WinGet archive | Windows x86_64 | `ghostlight-v${VERSION}-x86_64-pc-windows-msvc.zip` |
+| Chromium extension (store ZIP) | Any supported desktop | `ghostlight-extension-v${ADAPTER_VERSION}.zip` |
+| npm launcher tarball | Supported desktops | `ghostlight-${VERSION}.tgz` |
+| Claude Desktop MCPB (final release) | Windows | `ghostlight-v${VERSION}.mcpb` |
 | Component SBOMs | All | `ghostlight-v${VERSION}-sbom-*.cyclonedx.json` |
 | Checksums | All | `SHA256SUMS` |
 
+The service and the window are version ${VERSION}. The edge and the relay carry the relay
+revision, 4.0.0, and change only with their protocol.
+
+The MCPB is the last one: this release retires it as a channel. After it, install with the npm
+launcher or the one-line installers.
+
 GitHub also provides source archives for the exact release tag. Ghostlight is Apache-2.0 OR MIT;
-see `LICENSING.md` in the source archive and the exact license texts installed with each native
-package.
+see `LICENSING.md` in the source archive.
 
 ## Checksums
 

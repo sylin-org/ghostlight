@@ -179,10 +179,20 @@ Until step 6, the latest release, `main` and every 1.x user are untouched.
    1. Publish `v2.0.0` as GitHub's latest release: push the tag `v2.0.0` on that commit, then
       run the same three commands as in step 2 without `-Prerelease`.
    2. Fast-forward `main` to that commit (the short commands fetch the scripts on `main`).
-   3. Run the exact frozen strings, `irm https://sylin.org/ghostlight/get.ps1 | iex` and
-      `curl -fsSL https://sylin.org/ghostlight/get.sh | sh`, and the launcher restore commands.
-   4. Publish the staged item only when all of these hold: `v2.0.0` is GitHub's latest release,
-      the frozen strings ran clean, and the privacy page carries the new text.
+   3. Publish the npm launcher with `scripts/publish-npm.ps1` (a `-Mode Plan` run first, then
+      `-Mode Publish -ExpectedSha256 <hash> -Execute` with the tarball
+      `ghostlight-2.0.0.tgz` from the candidate). The script refuses unless the GitHub release
+      `v2.0.0` exists, so this step cannot come before step 1. Until it runs, npm's latest stays
+      1.3.14, and `npx ghostlight deployment install --restore` resolves 1.3.14, which has no
+      2.0 `--restore`. The final MCPB is already an asset of the `v2.0.0` release and has no
+      publish step of its own; whether to point Claude Desktop users at it is the owner's call
+      after this step.
+   4. Run the exact frozen strings, `irm https://sylin.org/ghostlight/get.ps1 | iex` and
+      `curl -fsSL https://sylin.org/ghostlight/get.sh | sh`, and the launcher restore commands
+      (`npx ghostlight deployment install --restore` now resolves 2.0.0).
+   5. Publish the staged item only when all of these hold: `v2.0.0` is GitHub's latest release,
+      the npm launcher is published, the frozen strings and the restore commands ran clean, and
+      the privacy page carries the new text.
 
    Keep the minutes between the release and the store publish short. 1.x users see "update" on
    one side until both sides update, as Decision 16 says.

@@ -37,24 +37,30 @@ branches.
 
 ## Release unit
 
-One Ghostlight version comprises:
+One Ghostlight version comprises three executable images and what delivers them:
 
-- `ghostlight-service`, the service with its bundled workbench;
-- `ghostlight`, the edge: the MCP relay, the browser relay and the front door to the service;
-- `ghostlight-desktop`, the shell that draws the window, the tray and the notices;
+- `ghostlight-service`, the service with its bundled workbench pages. It is at the product
+  version.
+- `ghostlight-desktop`, the shell that draws the window, the tray and the notices. It is built
+  with the service and is at the product version.
+- `ghostlight`, the edge: the MCP relay, the browser relay and the front door to the service. It
+  and the `relay` crate it links are at the relay revision, `4.0.0` for relay protocol 4. They
+  change only with their protocol, so a service release keeps the edge's version (ADR-0199
+  Decision 8).
 - the mandatory checksum-bound `ghostlight` npm launcher, whose bare command remains an MCP stdio
-  edge and whose subcommands reach the native orchestrator;
-- one Windows WinGet archive, one-line installers, a self-contained Windows Claude Desktop MCPB,
-  and candidate-derived WinGet manifests (WinGet is a carrier for `ghostlight install`, which
-  installs into `~/.ghostlight/bin` and never replaces a newer copy with an older one);
+  edge and whose subcommands reach the native service;
+- one Windows WinGet archive, the one-line installers (`get.ps1` and `get.sh`, served from
+  `main`), and candidate-derived WinGet manifests (WinGet is a carrier for `ghostlight install`,
+  which installs into `~/.ghostlight/bin` and never replaces a newer copy with an older one);
+- the self-contained Windows Claude Desktop MCPB, of which 2.0.0 is the final release, because
+  MCPB runs its bundled installer on every Claude Desktop start (ADR-0197 Decision 16);
 - the independently delivered but contract-matched `Ghostlight in Browser` Chromium adapter from
-  the Chrome Web Store; and
-- checksums, GitHub build-provenance attestations, SBOM, license notices, source archive, and
-  release notes.
+  the Chrome Web Store, at its own version (the store ZIP is in the candidate); and
+- checksums, GitHub build-provenance attestations, one SBOM per workspace crate, license notices,
+  source archive, and release notes.
 
-The service, the edge and the shell are three executables, and a package ships a tested set of
-all three. The extension keeps its established name, store identity, artwork, settings, and
-permissions.
+A package ships a tested set of the three images, and the images are raw binaries in the release.
+The extension keeps its established name, store identity, artwork, settings, and permissions.
 
 ## Candidate gates
 
@@ -210,6 +216,25 @@ at a time:
 
 Never claim a platform, store, package manager, or compatibility combination before the public
 artifact is independently observable.
+
+### The 2.0 cutover
+
+2.0 is a hard cutover (ADR-0200 Decision 16 and its amendments). The release candidate
+`v2.0.0-rc.1` is published as a prerelease and never as latest, the staged extension waits for
+approval, and the cutover is then one sitting from the same commit as the candidate, in this
+order. The detailed commands are in [store-disclosure-2.0.md](release/store-disclosure-2.0.md).
+
+1. Publish `v2.0.0` as GitHub's latest release.
+2. Fast-forward `main` to that commit, because the short commands fetch their scripts from `main`.
+3. Publish the npm launcher with `scripts/publish-npm.ps1`. It refuses unless the GitHub release
+   `v2.0.0` exists. Until it runs, npm's latest stays 1.3.14, so
+   `npx ghostlight deployment install --restore` resolves a launcher with no 2.0 `--restore`. The
+   final MCPB is a `v2.0.0` release asset with no publish step of its own.
+4. Prove the frozen one-line strings and the launcher restore commands.
+5. Publish the staged extension only when steps 1 to 4 hold and the public privacy page carries
+   the 2.0 text.
+
+The MCP Registry follows the observable npm coordinate as before and never holds this order.
 
 Chrome upload and submission are separate explicit operations. `scripts/publish-extension.ps1`
 defaults to `Plan` and makes no request. `Upload` and `Submit` each require both the named action
