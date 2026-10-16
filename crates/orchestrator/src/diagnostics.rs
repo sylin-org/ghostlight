@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ghostlight_bridge::diagnostics::{
-    self, event, resolve, set_marker, Activation, Component, Level, Sink,
+    event, resolve, set_marker, Activation, Component, Level, Sink,
 };
 
 use crate::browser::AdapterLifecycleObserver;
@@ -81,13 +81,14 @@ impl DiagnosticsHub {
     }
 
     /// A hub whose sink is off and silent, for test fixtures.
+    #[cfg(test)]
     pub fn for_tests() -> Arc<Self> {
         let sink = Sink::birth_with(
             Component::Orchestrator,
             env!("CARGO_PKG_VERSION"),
             Path::new("/ghostlight-test"),
             None,
-            &diagnostics::OsMarkerWatcher,
+            &ghostlight_bridge::diagnostics::OsMarkerWatcher,
             None,
         );
         Arc::new(Self {

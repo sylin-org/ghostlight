@@ -186,6 +186,7 @@ impl AuditRecord {
     }
 
     /// Attach the intake the work arrived on.
+    #[cfg(test)]
     #[must_use]
     pub fn from_channel(mut self, channel: Option<IntakeChannel>) -> Self {
         self.channel = channel;

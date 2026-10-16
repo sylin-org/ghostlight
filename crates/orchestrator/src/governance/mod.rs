@@ -486,6 +486,7 @@ impl AuthoritySnapshot {
     }
 
     /// Decide a capability at its final boundary.
+    #[cfg(test)]
     #[must_use]
     pub fn authorize_capability(&self, capability: Capability) -> Decision {
         self.authorize_requirements(capability.into())

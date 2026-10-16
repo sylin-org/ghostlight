@@ -210,6 +210,7 @@ impl Scope {
     /// # Errors
     ///
     /// Returns the plain failure for a malformed locator.
+    #[cfg(test)]
     pub fn doc_or_top(&self, locator: Option<&str>) -> Result<FrameRef, BrowserError> {
         locator.map_or_else(|| Ok(self.top()), |locator| self.doc_of(Some(locator)))
     }

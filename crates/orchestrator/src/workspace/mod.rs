@@ -1200,6 +1200,7 @@ impl WorkspaceStore {
     /// A physical tab id is unique inside one browser and nowhere else, so the browser that
     /// reported the event is part of the key. Without it, Chrome's tab 5 and Edge's tab 5 are the
     /// same lookup, and one browser's state could change the other's cached references.
+    #[cfg(test)]
     #[must_use]
     pub fn owner_of_physical(&self, browser: &str, physical_id: u64) -> Option<WorkspaceId> {
         let state = self.lock();
