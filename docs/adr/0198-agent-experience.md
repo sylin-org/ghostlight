@@ -278,3 +278,141 @@ lands on, not plan numbers.
   asset id is computed.
 
 The paused slices (a20 to a43 and the widgets lane) follow these dispositions.
+
+## Amendment 2026-10-15: handles follow their control
+
+Where this section and the text above differ, this section wins. It replaces the dispositions
+amendment's lines for Decisions 17 (tombstones), 27 and 28, and leaves the rest of it in force.
+
+### Evidence
+
+On 2026-10-15 an agent session made sound effects on suno.com through Ghostlight. It reported that
+results, handles by name and error recovery worked well, and that the one real friction was handles
+going stale after Suno re-rendered its list, and that this happened often. On Suno's Create page each
+generation re-renders its row as the clip goes from queued to streaming to complete. A reproduction
+on the Suno Library (18 song rows; Suno makes two takes per prompt, so titles come in pairs) found:
+
+- Idle for 17 seconds, hovering and opening a row menu re-render no row.
+- Switching the in-app tab to Playlists and back to Songs, in the same document, replaced 17 of the
+  18 "More options" buttons with new nodes. The rows came back in the same order with the same
+  `/song/<id>` links. An old handle then failed with "The browser refused this job: stale browser
+  locator."
+- browser_find "More options" returned 18 matches that differ only by handle, so the agent needed
+  another call to learn which row each one belonged to.
+
+Two facts in the tree explain it. The service checks a handle only against the document generation,
+which a same-document re-render never changes. The page is the one that finds the node gone, and its
+`stale_locator` code is lost on the way back, so the refusal is generic and offers nothing. And
+nothing records where a control sits, so neither the refusal nor find can say which row a control
+belongs to.
+
+This is the session evidence the dispositions asked for before Decision 28. Decisions 17
+(tombstones), 27 and 28 land now, ahead of the order the dispositions gave.
+
+### What a handle names
+
+A target handle names one control, not one DOM node. For every locator it hands out, the page keeps
+an identity record inside its own world, and the record never leaves the page: the control's role,
+exact name and credential class; the item that holds it (a row, list item, article, tree item or
+named group); that item's declared name; the item's own link, when it has one; the control's
+position among same-named controls in the item; and the view (the URL without its fragment, the
+document title and the nearest named region).
+
+A handle follows its control through a re-render only when the page proves the new node is the
+same control. Proof needs all of these:
+
+1. The same document and world. A new document never inherits a handle.
+2. The same view: the URL without its fragment, the document title and the nearest named region
+   are unchanged.
+3. The item's own link: a same-origin link that appeared in exactly one item and nowhere else on
+   the page when the handle was minted, and does so again now.
+4. The item's declared name (aria-label, aria-labelledby, a legend or a heading, never link text
+   alone) was recorded and is unchanged.
+5. Inside that item, exactly one control has the same role, exact name and position among
+   same-named controls, and the item holds the same number of them.
+6. The control is not credential-class and does not sit in a dialog.
+7. No other handle already names the new node.
+
+The page checks this lazily, when the handle is used or when a read meets the new node. It watches
+nothing in between. Position alone, a page id, a data attribute or a name alone is never proof.
+
+### Decision 17, amended
+
+Reading the same control again in the same document returns the same handle, also after a
+re-render the page proves. An action that used a followed handle says so in one structural fact,
+`rebound: true`. Tombstones land: a handle whose tab closed, whose document the tab left, or whose
+control the page reported removed refuses at once with its reason, before anything is sent. A
+control that comes back and passes the proof again revives its handle at the next read. Re-renders
+no longer mint a fresh handle each time, and the records of one generation are bounded.
+
+### Decision 27, landed
+
+A stale handle says why in one of four words, `removed`, `navigated`, `tab_closed` or `unknown`,
+whether the service or the page noticed. The page sends its word in the optional detail of the
+existing `stale_locator` answer. A page-side stale handle now gets the same typed refusal as a
+generation change, never "The browser refused this job". No word says "replaced", and a handle that
+followed is not reported as replaced: it is the same control.
+
+### Decision 28, landed with two readings
+
+1. "Exactly one control matches role, exact name and credential class, and its context equals the
+   context recorded" is read as one conjunction: exactly one live control matches all of them.
+   Context is the item's declared name, else the control's group, else the nearest named landmark,
+   plus the item's own link when one was recorded, compared inside the page. When no link was
+   recorded, the item name counts only if it was unique among items when the handle was minted. The
+   view must be unchanged. Position is never part of the test.
+2. "The lookup saw every document" is read as the handle's own document. A locator binds one frame
+   document and a handle never crosses documents, so a control in another frame is never the same
+   control. The lookup rides the failing call's own page answer: page-local, bounded to 50 ms,
+   nothing painted, no effect. The service surfaces its candidates only after a read authorization
+   on the tab's URL, and their names and contexts only under `preserve_target_names`.
+
+The repeat step is offered only for a tool that takes one target, only when nothing was dispatched,
+and only when the reason is `removed`. After a navigation there is still no repeat step; candidates
+go in facts and the step is browser_inspect. Candidates now carry handles.
+
+### Rule 5, read
+
+"Ghostlight never acts on a candidate on its own" stands. A node that passes the proof above is not
+a candidate. It is the control the handle named, rendered again, and acting on it is acting on what
+the agent chose. Everything short of proof stays a candidate: Ghostlight names it in a refusal with
+its row, and the agent decides.
+
+### What agents see
+
+- browser_find and browser_inspect: when a role and name repeat among the results, each carries
+  `context` (its row or group label) and, when that repeats too, `nth` (its position among those, in
+  document order). A unique control carries neither, and a credential-class control never does.
+- A followed handle: the action's usual sentence, plus `rebound: true` in facts.
+- A stale handle: `stale` in facts with the reason word, one sentence per word, candidates with
+  handles and rows, and the step "Repeat <tool> with target <handle>." only when trusted.
+- browser_execute awaits a script that is one expression, so a promise it evaluates to resolves. A
+  result of `{}` carries a step that says what else reads as `{}`.
+
+Example, the Suno Library. browser_find "More options" returns, in part:
+
+    {"target":"target_K3QX9TBA","role":"button","name":"More options","context":"Neon Rain","nth":1,"state":["collapsed"]}
+    {"target":"target_7MPD2WQE","role":"button","name":"More options","context":"Neon Rain","nth":2,"state":["collapsed"]}
+    {"target":"target_R8VN4CJL","role":"button","name":"More options","context":"Paper Moon","nth":1,"state":["collapsed"]}
+
+The agent switches the in-app tab to Playlists and back, then clicks target_7MPD2WQE. The second
+take's row link is still unique, its title is unchanged, and the view is the same, so the click
+lands on that row's new button with the usual sentence and `rebound: true`. Had that take been
+deleted, the refusal would read "That target is no longer on the page.", with `stale: "removed"`
+and the remaining "Neon Rain" take among the candidates, and no repeat step, because the other take
+has a different link.
+
+### What stays refused
+
+- Acting on anything short of proof: a node matched by position, by a page id or data attribute,
+  by an item name alone, by a link that also appears elsewhere on the page, or after the view
+  changed.
+- Following a credential-class control or a control in a dialog. These take the refusal path.
+- Following across documents. A navigation is `navigated`, with candidates in facts and the step
+  browser_inspect.
+- A repeat step after an effect started, after a navigation, when the lookup was cut short, or for
+  a call with several targets.
+- A connected node whose row lost its recorded link or name, such as a recycled list row, refuses
+  as `removed` instead of acting on another row.
+- Contexts, links, handles and candidates in audit or history. Audit gains only the reason word and
+  the rebound flag.
