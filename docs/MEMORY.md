@@ -155,6 +155,10 @@ the owner wants, and what this project learned the hard way.
   A choice that changes how something works (a transport, a seam, a security trade) goes to the
   owner as an explicit choice with its trade-off, never folded into a description (owner,
   2026-10-15, after a shell spike showed test content instead of the existing workbench).
+- **Test locally before anything leaves the machine.** No push, tag, release, publication or
+  other outward-facing step until the build has been deployed in place on the owner's machine
+  and tested there live. CI then confirms what local testing already showed; it does not replace
+  it (owner, 2026-10-16).
 - **Delight is the purpose; dependable boundaries support it.** Ghostlight makes integrated
   tooling useful and natural for end users. Governance lets individuals and organizations choose
   reliable boundaries that work consistently whenever work passes through Ghostlight. Ordinary
