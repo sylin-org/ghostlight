@@ -22,7 +22,7 @@ the owner wants, and what this project learned the hard way.
   `browser_workspace` tool (since removed by ADR-0196) raised the catalog to 24 while active
   language documents still said 23. Public surfaces must match docs/public-status.json exactly
   (scripts/check-public-surfaces.ps1); LANGUAGE.md headings and the README count derive from
-  EXPECTED_TOOL_NAMES (scripts/check-repository-integrity.ps1).
+  the catalog golden docs/1.0/catalog.json (scripts/check-repository-integrity.ps1).
 
 ## Standing owner directives
 

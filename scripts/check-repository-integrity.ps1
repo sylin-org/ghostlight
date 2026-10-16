@@ -128,25 +128,15 @@ if ($brokenLinks.Count -gt 0) {
     throw "Broken local documentation links:`n$($brokenLinks -join "`n")"
 }
 
-# The canonical source catalog and active language surfaces must agree exactly.
-$catalogSource = Get-Content -LiteralPath (
-    Join-Path $repo "crates/orchestrator/src/language/catalog.rs"
-) -Raw
-$catalogMatch = [regex]::Match(
-    $catalogSource,
-    '(?s)pub const EXPECTED_TOOL_NAMES:\s*\[&str;\s*(?<count>\d+)\]\s*=\s*\[(?<body>.*?)\];'
+# The frozen catalog golden and the active language surfaces must agree exactly.
+$catalog = @(
+    Get-Content -LiteralPath (Join-Path $repo "docs/1.0/catalog.json") -Raw | ConvertFrom-Json
 )
-if (-not $catalogMatch.Success) {
-    throw "Could not read EXPECTED_TOOL_NAMES from the source catalog"
+$catalogNames = @($catalog | ForEach-Object { $_.name })
+if ($catalogNames.Count -eq 0 -or @($catalogNames | Where-Object { -not $_ }).Count -gt 0) {
+    throw "docs/1.0/catalog.json must list tools, each with a name"
 }
-$catalogCount = [int]$catalogMatch.Groups["count"].Value
-$catalogNames = @(
-    [regex]::Matches($catalogMatch.Groups["body"].Value, '"(?<name>[a-z_]+)"') |
-        ForEach-Object { $_.Groups["name"].Value }
-)
-if ($catalogNames.Count -ne $catalogCount) {
-    throw "Source catalog declares $catalogCount tools but names $($catalogNames.Count)"
-}
+$catalogCount = $catalogNames.Count
 $language = Get-Content -LiteralPath (Join-Path $repo "docs/1.0/LANGUAGE.md") -Raw
 $languageNames = @(
     [regex]::Matches(
@@ -155,20 +145,20 @@ $languageNames = @(
     ) | ForEach-Object { $_.Groups["name"].Value }
 )
 if (($catalogNames -join "`n") -ne ($languageNames -join "`n")) {
-    throw "Source catalog and LANGUAGE.md tool headings differ or are out of order"
+    throw "Catalog golden and LANGUAGE.md tool headings differ or are out of order"
 }
 $readme = Get-Content -LiteralPath (Join-Path $repo "README.md") -Raw
 $acceptance = Get-Content -LiteralPath (Join-Path $repo "docs/1.0/ACCEPTANCE.md") -Raw
 $browserToolCount = @($catalogNames | Where-Object { $_ -match '^browser_' }).Count
 if (-not $readme.Contains("$catalogCount catalog tools") -or
     -not $readme.Contains("$browserToolCount browser tools")) {
-    throw "README catalog counts do not match the source catalog"
+    throw "README catalog counts do not match the catalog golden"
 }
 if (-not $language.Contains("The $catalogCount tools below")) {
-    throw "LANGUAGE.md catalog count does not match the source catalog"
+    throw "LANGUAGE.md catalog count does not match the catalog golden"
 }
 if (-not $acceptance.Contains("exactly the $catalogCount tools")) {
-    throw "ACCEPTANCE.md catalog count does not match the source catalog"
+    throw "ACCEPTANCE.md catalog count does not match the catalog golden"
 }
 
 # The plugin distribution member: twin manifests and both catalogs must agree (ADR-0144).
