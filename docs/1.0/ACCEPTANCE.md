@@ -20,54 +20,58 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    the advertised input schema, match no `oneOf` more than once, and decode. Every next step that
    names a tool names only fields that tool advertises, and only values a closed field accepts.
    The serialized catalog stays under its size budget.
-3. The MCP edge retrieves the catalog and generically forwards every tool without per-tool code.
-4. The browser connector relays every primitive without model-facing names or product defaults.
-5. Incompatible service or browser bridge majors fail before work is accepted.
+3. The service's MCP engine serves `tools/list` and `tools/call`, and the MCP edge forwards every
+   line unchanged, with no per-tool code.
+4. The browser relay carries every adapter frame as opaque bytes, without model-facing names or
+   product defaults.
+5. An opening that names an earlier relay revision is refused, and a first adapter frame that is
+   not a protocol-4 hello hears `adapter_incompatible`, both before work is accepted.
 6. MCP and native-message framing survive split reads, coalesced reads, and disconnects.
 7. Adding a product feature composed from advertised browser capabilities changes only the
-   orchestrator. The MCP connector, browser connector, adapter protocol, and extension stay byte
-   unchanged.
-8. The browser connector does not deserialize adapter commands, receipts, events, workspace ids,
+   orchestrator. The edge (the MCP relay and the browser relay), the relay revision, the adapter
+   protocol, and the extension stay byte unchanged.
+8. The browser relay does not deserialize adapter commands, receipts, events, workspace ids,
    or presentation signals. Unknown bounded adapter payloads round-trip unchanged.
-9. MCP revision, service bridge, browser relay, and adapter protocol compatibility are independent.
-   A change to one does not bump or reject an unrelated boundary.
-10. The MCP and browser relays keep their consumer-facing streams alive across a service restart,
-   reauthenticate to the new runtime endpoint, and never replay an uncertain application effect.
+9. The relay protocol, the adapter protocol, and the MCP revision, which only the service
+   negotiates, are independent axes. A change to one does not bump or reject an unrelated boundary.
+10. The MCP edge process survives a service restart: a call cut off by the restart is answered as
+   cut off with the service's own words, and the next request resumes the session by token.
+   The browser edge exits when a service accepts again, and the extension reconnects with a fresh
+   hello. Lines held while the service was away are delivered once, and a cut-off call is answered,
+   never resent (`tests/process-journey.mjs`; the rules are in `crates/edge/src/hold.rs` and
+   `forward.rs`).
 11. The browser engine suppresses duplicate operation ids, retains a content-free disposition
      across service-worker suspension, and reports uncertainty rather than repeating an effect when
      its prior dispatch cannot be disproved.
-12. A real process test starts both relays without the service, interrupts an in-flight browser
-     effect by stopping the service, restarts it, and proves the same MCP stdio and native-message
-     processes renegotiate and complete new work without replaying the interrupted effect.
-13. After either connector fails to find the service, it uses the one shared lifecycle seam to
-     start only the exact sibling `ghostlight` executable as `serve --reason <word>` (`agent` for
-     the MCP connector, `browser` for the browser connector) and continues its existing reconnect
-     loop. The MCP connector starts it again for each held request; the browser connector starts
-     it once, at its own start, and never while waiting. `serve` without a reason is a usage
+12. A real process test starts an MCP edge and a synthetic browser edge, kills the service under a
+     held call, and proves the same MCP edge process answers that call as cut off and completes
+     new work on a restarted service, while the browser edge exits and a new one connects with a
+     fresh hello and a new service epoch (`tests/process-journey.mjs`, its reborn phase).
+13. After an edge fails to find the service, it runs `bin/ghostlight-service serve --reason <word>`
+     through `relay::spawn::start_service` (`agent` for the MCP relay, `browser` for the browser
+     relay) and keeps connecting on its backoff schedule. The MCP relay starts it again for each
+     held request; the browser relay starts it once, after the extension's hello, and never while
+     waiting. `serve` without a reason is a usage
      error, and a start that finds the lock held waits for it (an `update` start up to 30 s, any
      other start up to 5 s) and then exits 0. Quit holds until an agent request, a command that needs Ghostlight, or a person starts
      it; a browser restart does not bring it back. Before it closes its streams the service says
-     goodbye (`quit`, `replace` or `uninstall`), and each connector acts on the reason.
-14. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
-     indefinitely.
-    Package downloads use one permanent bin directory across releases. Verify all three
-    siblings before replacement; a failed download preserves installed bytes. A service-only
-    replacement keeps unchanged connector streams alive and installs the current runtime
-    through the existing injector. Migration redirects owned registrations, preserves
-    history and development custody, and removes only obsolete package binaries (ADR-0193).
-15. Concurrent demand-start requests converge on one lifetime-leased service authority before
-     runtime publication or desktop initialization.
-    Concurrent failed desktop starts share one bounded launch exchange and a short retry
-    cooldown. Failed children are reaped, discovery remains unpublished, and corrected
-    desktop context recovers automatically. Only lease contention waits for
-    another authority's workbench (ADR-0166).
+     goodbye (`quit`, `replace`, `uninstall` or `session_end`), and each edge acts on the reason.
+14. Package downloads use one permanent bin directory across releases. `ghostlight deployment
+    install` is the only writer of `bin`: it refuses an older payload, leaves the same intact
+    version alone, and replaces the service image while asking the running service to quit with
+    the `replace` goodbye. Migration redirects owned registrations, preserves history and
+    development custody, and removes only obsolete package binaries (ADR-0193).
+15. Concurrent demand-start requests converge on one service. Racing `serve` starts leave exactly
+    one, the holder of `run/service.lock` (`crates/relay/src/home.rs`, `SERVICE_LOCK_NAME`), and
+    presence starts the shell once that service is ready (desktop workbench gate 1). The process
+    journey proves the race with ten starts.
 16. An explicit `ghostlight open`, and a launch with no arguments, reveal the existing
     authenticated authority's workbench without a new listener or workspace. When absent, they ask
     the shared lifecycle seam to start the sibling as `serve --reason person`, wait for an accepted
     opening, and send control `show`. Nothing serves in the foreground. No supported launch creates
     an authority that refuses presentation by design.
 17. An adapter that advertises end-to-end liveness acknowledges content-free heartbeats through the
-    unchanged opaque browser connector. A relay socket that stays attached without acknowledgements
+    browser relay, which passes frames on unopened. A relay socket that stays attached without acknowledgements
     becomes unavailable, while a silent browser operation stays available when its independent
     heartbeat is acknowledged. An unanswered post-dispatch probe leaves that call unknown. It
     makes new calls stop before dispatch only when it went unanswered for at least five seconds:
@@ -166,7 +170,7 @@ workbench shows waiting becoming running once.
 8. A screenshot view handle resolves image coordinates only while its tab, document generation,
    viewport, and zoom still match; stale views fail before pointer or region-capture dispatch. A
    bounded region returns a magnified image and fresh view, and a second region chains from it.
-9. File paths are validated and bounded before reading, and no file bytes cross the browser bridge
+9. File paths are validated and bounded before reading, and no file bytes cross the adapter protocol
    until governance and file-target preflight succeed.
 10. The extension alone owns recording identity, frame acceptance, deadlines, memory bounds, stop,
     retention, and erase. The orchestrator checks source authority before start and disclosure.
@@ -207,7 +211,7 @@ workbench shows waiting becoming running once.
    visible in permitted client results where applicable and absent from serialized audit.
    Historical records remain readable without re-emitting their arbitrary failure-facts payloads;
    the original files remain unchanged.
-11. Audit carries the complete RAWX set, authority, mode, tier, grant, rule, deterministic denial
+11. Audit carries the complete RAWX set, authority, tier, grant, rule, deterministic denial
     id, and managed sequence without policy payloads.
 12. Hold, end-session, and cancellation stop later effects at the runtime boundary.
 13. Repeated enforced denials never create an automatic session hold. A later permitted request
@@ -448,8 +452,8 @@ workbench shows waiting becoming running once.
    windows; a single service PID or a mocked activation result is insufficient evidence.
    Open tolerates delayed native startup within its bounded wait; an expired wait permits retry
    without telling the person to stop a healthy authority. Ghostlight never delays a sign-out or
-   shutdown, and starts nothing once the session is ending. Every process (the service, both
-   connectors and every one-shot command) owns the session listener: on Windows a hidden
+   shutdown, and starts nothing once the session is ending. Every process (the service, the edge
+   in every role and every one-shot command) owns the session listener: on Windows a hidden
    top-level window, on Linux SIGTERM and SIGHUP. `WM_QUERYENDSESSION` never vetoes the end, and
    the final signal ends the exact process within two seconds even when Tao has already destroyed
    its event target. A console-control fallback never suppresses the default process exit. The
@@ -477,7 +481,7 @@ workbench shows waiting becoming running once.
    Cursor, Visual Studio Code, historical Windsurf, current Devin, Zed, OpenCode, and Crush
    registrations. Mutations are
    serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
-   command identifies Ghostlight's connector. One `Set up everything` action adds missing
+   command is Ghostlight's edge (`ghostlight mcp`). One `Set up everything` action adds missing
    registrations and updates Ghostlight-owned registrations for every detected target while
    skipping current and not-detected targets. One target's environmental failure does not prevent
    independent targets from being attempted, and foreign or malformed entries remain untouched by
@@ -506,15 +510,14 @@ workbench shows waiting becoming running once.
 13. A broken window never stops agent work. A shell that cannot start, a window that cannot be
     built, a missing display, web view runtime or tray, and a shell that vanishes leave the service
     serving; `status` and `doctor` say why there is no window, and presence relaunches a vanished
-    shell at most three times in two minutes. The MCP connector, browser connector, shared
-    bridge, and extension have empty diffs for the complete workbench feature.
+    shell at most three times in two minutes. The edge, the relay, and the frozen extension have
+    empty diffs for the complete workbench feature.
 14. Clear view removes completed actions from the current At a glance surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
 15. A Linux user install owns one XDG Applications entry and one byte-identical icon. The entry
-    invokes the exact installed executable with `open`; repeat install is a no-op, upgrade changes
-    an owned version path, foreign state is preserved, and repeat uninstall is a no-op. A Debian
-    package owns the system entry and creates no per-user shadow.
+    runs `bin/ghostlight-desktop` from the one fixed `bin` directory, which has no version path;
+    repeat install is a no-op, foreign state is preserved, and repeat uninstall is a no-op.
     On Windows, uninstall removes the Start-menu shortcut and the per-user Uninstall key, each only
     when it is this home's (the shortcut starts a program in `bin`, or carries the AppUserModelID
     when no target can be read from it; the key's command or location points into the home),
@@ -589,18 +592,14 @@ workbench shows waiting becoming running once.
    journeys lacking implementation.
 10. The bundled workbench HTML, CSS, and JavaScript render against a representative plural-state
     fixture, every destination is keyboard reachable, and frontend scripts pass syntax checks.
-11. Release Linux binaries are built on Ubuntu 22.04. The exact Debian candidate installs,
-    version-checks, removes, reinstalls, and purges in Debian 12 and Ubuntu 24.04 containers before
-    candidate assembly. Those virtual-display package smokes do not replace the Ubuntu GNOME
-    Wayland L1-L9 lifecycle.
+11. Release Linux binaries are built on Ubuntu 22.04.
 
 ## Grouped history evidence (ADR-0156)
 
 1. Equivalent direct and composed work retains equivalent decisions, requirements, effects,
    measurements, and safe summaries. Caller labels, results, and arbitrary errors stay out.
 2. Actual policy evaluation records all evaluated layers and distinguishes all-open, granted,
-   and refused work. Legacy request restriction receipts remain explainable
-   without blaming human policy. Permission traces are bounded and disclose omission.
+   and refused work. Permission traces are bounded and disclose omission.
 3. The workbench keeps the parent active as child receipts arrive; restored incomplete groups
    state that completion was not recorded. Missing evidence never becomes a no-effect claim.
 4. Groups start collapsed. Opening brings the first problem into view; updates preserve expansion,
@@ -616,8 +615,8 @@ workbench shows waiting becoming running once.
 
 ## Explicit control and credential-input evidence (ADR-0185)
 
-1. Obsolete request restrictions fail before dispatch under every policy mode. Configured enforcing
-   policy still denies direct and composed work. Policy denials never create an automatic
+1. A call that sends `restrict_hosts` or `restrict_capabilities` fails before dispatch under every
+   policy. Configured enforcing policy still denies direct and composed work. Policy denials never create an automatic
    hold.
 2. After any number of matching or mixed denials, the same session can perform permitted work
    without a human review or resume. Other sessions remain independent. Flow stop/continue applies
@@ -687,14 +686,14 @@ workbench shows waiting becoming running once.
 
 ## Connection reporting (ADR-0161)
 
-- Two different connections sharing one workspace, and the actual MCP connector, each receive their
+- Two different connections sharing one workspace, and the actual MCP edge, each receive their
   own service-issued connection identity and channel. No executable or signature is observed.
 - Active, queued, composed, preparation-failed, cancelled, capacity-refused, and invalid work keep
   their original connection evidence. A later connection or released workspace cannot rewrite it.
 - Each reconnect gets new evidence. Session details retain plural active connections and remove
   only the closed one. Action details remain associated with their original connection.
 - Raw reported application names remain in bounded live human details only. Serialized audit and
-  enabled service/connector diagnostics exclude unique claim sentinels. Durable history retains
+  enabled service and edge diagnostics exclude unique claim sentinels. Durable history retains
   bounded evidence after restart; history written before connection identities existed says so.
 - Human details show the reported application, the connection and its channel, with one sentence
   that says what the connection does and does not establish. Details are quiet by default, escape
@@ -726,5 +725,6 @@ exact routing trigger. Older adapter compatibility is verified independently.
    work receives no invented tab argument. Plural controlled tabs remain supported.
 4. Capability matrices use real configured grants. Draft writes, credentials, frames, screenshots,
    scripts, recordings, controls, history, and all-open browser work retain their existing coverage.
-5. Old sequence receipts and request denials remain readable; request denials do not claim to come
-   from the person's rules. Cached clients receive catalog-refresh guidance without automatic replay.
+5. An audit line written before audit v2, carrying the retired fields, still reads and shows in
+   history, and the retired fields are never written back (`audit/record_tests.rs`). Cached
+   clients receive catalog-refresh guidance without automatic replay.
