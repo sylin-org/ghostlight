@@ -390,14 +390,49 @@ test("a watched recording also ends when a frame is added, removed or cannot be 
   assert.equal(summaryOf(blind, blindId).stop_reason, "document_boundary");
 });
 
-test("a recording with no watch keeps every frame and checks nothing", async () => {
+test("a recording with no watch keeps every frame and notes every document it sees", async () => {
   const rig = await managed();
   const id = await startRecording(rig);
-  rig.chrome.calls.length = 0;
+  rig.chrome.trees[ROOT].childFrames.push({ frame: { id: "EXTRA", loaderId: "L-extra", url: "https://example.com/ad?q=1", parentId: TOP }, childFrames: [] });
   rig.advance(200);
   await rig.buffers.screencastFrame(TAB, { sessionId: 1, data: "BQ==" });
-  assert.equal(summaryOf(rig, id).frame_count, 2);
-  assert.equal(methods(rig.chrome, "Page.getFrameTree").length, 0);
+  const summary = summaryOf(rig, id);
+  assert.equal(summary.state, "recording", "an unwatched recording is never scoped");
+  assert.equal(summary.frame_count, 2);
+  assert.ok(summary.source_urls.includes(EMBED));
+  assert.ok(summary.source_urls.includes("https://example.com/ad"), "a document added after the start is listed without its query");
+  assert.equal(summary.source_urls_complete, true);
+});
+
+test("a recording with no watch is incomplete evidence when a document has no http url", async () => {
+  const rig = await managed();
+  const id = await startRecording(rig);
+  assert.equal(summaryOf(rig, id).source_urls_complete, true);
+  rig.chrome.trees[ROOT].childFrames.push({ frame: { id: "BLANK", loaderId: "L-blank", url: "about:blank", parentId: TOP }, childFrames: [] });
+  rig.advance(200);
+  await rig.buffers.screencastFrame(TAB, { sessionId: 1, data: "BQ==" });
+  const summary = summaryOf(rig, id);
+  assert.equal(summary.state, "recording");
+  assert.equal(summary.source_urls_complete, false);
+});
+
+test("a recording with no watch is incomplete evidence when documents cannot be seen, and keeps recording", async () => {
+  const unseen = await managed();
+  const unseenId = await startRecording(unseen);
+  unseen.chrome.frames.push({ frameId: 9, documentLifecycle: "active", url: "https://other.example/frame" });
+  unseen.advance(200);
+  await unseen.buffers.screencastFrame(TAB, { sessionId: 1, data: "BQ==" });
+  assert.equal(summaryOf(unseen, unseenId).state, "recording");
+  assert.equal(summaryOf(unseen, unseenId).source_urls_complete, false);
+
+  const blind = await managed();
+  const blindId = await startRecording(blind);
+  blind.chrome.handlers["Page.getFrameTree"] = async () => { throw new Error("Debugger is not attached"); };
+  blind.advance(200);
+  await blind.buffers.screencastFrame(TAB, { sessionId: 1, data: "BQ==" });
+  assert.equal(summaryOf(blind, blindId).state, "recording");
+  assert.equal(summaryOf(blind, blindId).source_urls_complete, false);
+  assert.equal(summaryOf(blind, blindId).frame_count, 2);
 });
 
 test("a screencast frame for a tab with no recording is acknowledged and dropped", async () => {
@@ -418,7 +453,7 @@ test("a commit in any frame interrupts a watched recording; a top commit notes t
   open.buffers.committed({ tabId: TAB, frameId: 4, url: "https://example.com/inner" });
   assert.equal(summaryOf(open, openId).state, "recording", "no watch, no boundary");
   open.buffers.committed({ tabId: TAB, frameId: 0, url: "https://example.com/next?q=1#x" });
-  assert.deepEqual(summaryOf(open, openId).source_urls, [URL, "https://example.com/next"]);
+  assert.deepEqual(summaryOf(open, openId).source_urls, [URL, EMBED, "https://example.com/next"]);
   open.buffers.committed({ tabId: 77, frameId: 0, url: "https://example.com/other-tab" });
 });
 
@@ -444,7 +479,7 @@ test("stop takes a final frame, stops the screencast and freezes the recording; 
   assert.equal(stopped.ok.summary.frame_count, 2, "seed and final");
   assert.equal(stopped.dispatched, false);
   assert.deepEqual(methods(rig.chrome).filter((method) => method.startsWith("Page.") && method !== "Page.getLayoutMetrics"),
-    ["Page.captureScreenshot", "Page.stopScreencast"], "stopped once, by the stop itself");
+    ["Page.getFrameTree", "Page.captureScreenshot", "Page.getFrameTree", "Page.stopScreencast"], "stopped once, by the stop itself");
   const again = await execute(rig.buffers.recording, { op: "stop", recording_id: id });
   assert.equal(again.ok.changed, false);
   assert.equal(again.ok.summary.state, "frozen");

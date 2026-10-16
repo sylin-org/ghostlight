@@ -234,21 +234,39 @@
       });
     }
 
+    // Every document the tab holds goes into the recording's source evidence, watched or not, so a
+    // later export can recheck what the frames showed. A snapshot that is incomplete, has unseen
+    // documents or cannot be taken leaves that evidence marked incomplete.
+    function noteDocuments(tabId, snap) {
+      if (!snap) { recording.noteUrl(tabId, null); return; }
+      for (const entry of snap.owner.values()) recording.noteUrl(tabId, entry.fact.url);
+      if (!snap.complete || snap.unseen.length > 0) recording.noteUrl(tabId, null);
+    }
+
+    async function snapshotOrNull(tabId) {
+      try {
+        return await inventory.snapshot(tabId);
+      } catch (_error) {
+        return null;
+      }
+    }
+
     // True while the tab's recording may keep taking frames. A recording with no watch is never
-    // scoped. With one, the tab's documents must still be exactly the watched set, completely
-    // seen; anything else, including not being able to tell, ends the recording at the last
-    // verified frame.
+    // scoped, but it still collects the url of every document it sees. With a watch, the tab's
+    // documents must still be exactly the watched set, completely seen; anything else, including
+    // not being able to tell, ends the recording at the last verified frame.
     async function scopeCurrent(tabId) {
       if (!recording.activeForTab(tabId)) return false;
       const admitted = watches.get(tabId);
-      if (!admitted) return true;
-      try {
-        const snap = await inventory.snapshot(tabId);
-        if (snap.complete && snap.unseen.length === 0 && sameDocuments(admitted, snap)) {
-          for (const entry of snap.owner.values()) recording.noteUrl(tabId, entry.fact.url);
-          return true;
-        }
-      } catch (_error) { /* uncertainty ends the recording at the last verified document set */ }
+      const snap = await snapshotOrNull(tabId);
+      if (!admitted) {
+        noteDocuments(tabId, snap);
+        return true;
+      }
+      if (snap && snap.complete && snap.unseen.length === 0 && sameDocuments(admitted, snap)) {
+        noteDocuments(tabId, snap);
+        return true;
+      }
       recording.interruptTab(tabId, STOP_REASON.DOCUMENT_BOUNDARY);
       return false;
     }
