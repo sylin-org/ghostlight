@@ -40,11 +40,12 @@ Rules:
 
 ## RESUME HERE
 
-Milestone 1 is complete and deployed in place on the owner's machine (a537043b, channel
-development). The coordinator ran demo parts 0 to 2 (see Live demo results); the owner runs the
-steps that change live state: Controls in the window, a Chrome bookmark, watching off and on, Quit
-and come back. Next: the follow-up tidy-03 (agent-refusal-own-origin has landed), then the shell
-track is planned again. Owner answer Q5 is closed: `ghostlight install` stops strays, and doctor's stray
+Milestone 1 is complete. Its follow-ups agent-refusal-own-origin and tidy-03 have landed, and
+9b8f59c7 is deployed in place on the owner's machine (channel development); the new refusal reads
+as specified live. The coordinator ran demo parts 0 to 2 (see Live demo results); the owner runs
+the steps that change live state: Controls in the window, a Chrome bookmark, watching off and on,
+Quit and come back. Next: the shell track is planned again (Tauri out of the service, the
+service named "Ghostlight service", presence). Owner answer Q5 is closed: `ghostlight install` stops strays, and doctor's stray
 sentence names it (polish-02-strays).
 
 ## Landed

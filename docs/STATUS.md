@@ -20,6 +20,14 @@ low-value process rules, and the design of one installation journey in the sylin
 language (Chrome first). Still to do from ADR-0197: the switch slices for removals, governance,
 typed next steps, guards and the 2.0.0 version, the pristine pass and the docs.
 
+Shell milestone 1 is complete and deployed on the owner's machine (ledger
+[shell-m1.md](tasks/break-2.0/shell-m1.md)): the service serves the existing workbench on
+127.0.0.1 in the Control, Watch and Closed contexts, and `ghostlight-desktop` is a webview on it.
+Development deploys now install into `bin` as a channel; `~/.ghostlight/dev` and its marker are
+gone (ADR-0199 amendment of 2026-10-15). Typed `ghostlight` commands print in a Windows console,
+and `ghostlight` is on the user PATH. Next in the shell track: Tauri out of the service, presence,
+and the rest of ADR-0199.
+
 Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
 journey offers an Add step for Chrome only.
 
