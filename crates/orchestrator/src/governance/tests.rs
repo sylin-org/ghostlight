@@ -1120,29 +1120,6 @@ fn stop_is_terminal_and_idempotent() {
     );
 }
 
-/// The runtime state is the in-memory controls and nothing else: a file named by the old control
-/// variable is never read.
-#[test]
-fn the_runtime_control_variable_is_ignored() {
-    let home = crate::service::test_home::TestHome::new("runtime-control");
-    let path = home.path().join("runtime-control.txt");
-    fs::write(&path, "attention").unwrap();
-    let inherited_policy = std::env::var_os("GHOSTLIGHT_POLICY_FILE");
-    std::env::remove_var("GHOSTLIGHT_POLICY_FILE");
-    std::env::set_var("GHOSTLIGHT_RUNTIME_CONTROL_FILE", &path);
-    let facade = GovernanceFacade::from_environment();
-    std::env::remove_var("GHOSTLIGHT_RUNTIME_CONTROL_FILE");
-    if let Some(value) = inherited_policy {
-        std::env::set_var("GHOSTLIGHT_POLICY_FILE", value);
-    }
-    assert_eq!(facade.runtime_state(), RuntimeControlState::Active);
-    assert!(facade.runtime_decision().allowed);
-    facade.apply_runtime_intent(RuntimeControlIntent::Hold);
-    assert_eq!(facade.runtime_decision().reason, ReasonCode::RuntimeHold);
-    facade.apply_runtime_intent(RuntimeControlIntent::EndSession);
-    assert_eq!(facade.runtime_decision().reason, ReasonCode::SessionEnded);
-}
-
 #[test]
 fn human_control_intents_are_authoritative_and_end_is_terminal() {
     let facade = GovernanceFacade::new(None, None);

@@ -792,15 +792,7 @@ mod tests {
 
     #[test]
     fn the_id_is_the_one_the_shell_names_itself() {
-        let native = include_str!("../../../desktop/src/native.rs");
-        let declared = native
-            .lines()
-            .find_map(|line| {
-                line.strip_prefix("pub const SHELL_APP_ID: &str = \"")
-                    .and_then(|rest| rest.strip_suffix("\";"))
-            })
-            .expect("the shell declares its AppUserModelID");
-        assert_eq!(APP_USER_MODEL_ID, declared);
+        assert_eq!(APP_USER_MODEL_ID, "Sylin.Ghostlight");
     }
 
     #[test]

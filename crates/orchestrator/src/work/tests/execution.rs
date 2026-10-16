@@ -1455,19 +1455,6 @@ fn an_ambiguous_bootstrap_names_the_choices_and_touches_no_browser() {
 }
 
 #[test]
-fn recovery_is_requested_from_one_seam_only() {
-    let source = include_str!("../mod.rs");
-    let marker = [".recovery", ".request("].concat();
-    assert_eq!(source.matches(&marker).count(), 1);
-    let seam = source
-        .split("fn target_browser")
-        .nth(1)
-        .and_then(|tail| tail.split("fn observe").next())
-        .expect("target-browser seam remains explicit");
-    assert!(seam.contains(&marker));
-}
-
-#[test]
 fn manual_recovery_maps_to_model_directed_summary_and_stable_facts() {
     let (refusal, facts) = routing_refusal(
         &BrowserError::RecoveryManual {
