@@ -519,15 +519,7 @@ impl ApplicationExecutor {
                 value.mode,
                 value.max_chars,
             ),
-            Operation::InspectPage(value) => self.inspect_page(
-                context,
-                lease,
-                value.tab.as_deref(),
-                &value.scope,
-                value.root.as_deref(),
-                value.max_depth,
-                value.max_items,
-            ),
+            Operation::InspectPage(value) => self.inspect_page(context, lease, value),
             Operation::Find(value) => self.find(
                 context,
                 lease,
@@ -611,7 +603,10 @@ impl ApplicationExecutor {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the landing check needs the lease, the tab, its commits and their requirements, and the success needs the outcome and facts"
+    )]
     fn action_success(
         &self,
         context: &InvocationContext<'_>,
@@ -901,7 +896,10 @@ impl ApplicationExecutor {
     /// A check that does not confirm the expectation never erases the acknowledged action. The
     /// result stays applied and never repeat-safe, and one typed refusal names both the action
     /// and why the check fell short, for the caller and the audit alike.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the landing check needs the lease, the tab, its commits and their requirements, the success needs the outcome and facts, and the check needs the postcondition"
+    )]
     fn finish_with_expectation(
         &self,
         context: &InvocationContext<'_>,
@@ -1102,7 +1100,10 @@ impl ApplicationExecutor {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a location is a target handle or a view point, and each form keeps its own optional arguments"
+    )]
     fn resolve_location(
         &self,
         context: &InvocationContext<'_>,
@@ -1498,7 +1499,10 @@ impl ApplicationExecutor {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per field the success result states, plus the tab whose dialog state it checks"
+    )]
     fn succeeded(
         &self,
         context: &InvocationContext<'_>,
@@ -1551,7 +1555,10 @@ impl ApplicationExecutor {
     /// `blocked_url` is the address the refused work asked for or landed on. Only its host is
     /// kept for the audit; its origin is kept for the one refusal whose sentence names it, and
     /// that sentence reaches the caller only: the audit names the refusal without the address.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per field the denial result states, plus the address the refusal names"
+    )]
     fn blocked_at(
         &self,
         context: &InvocationContext<'_>,

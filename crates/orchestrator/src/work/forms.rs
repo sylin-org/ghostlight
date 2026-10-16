@@ -277,7 +277,10 @@ impl ApplicationExecutor {
     /// The result of a fill the page partly undid: some fields hold their values and the named
     /// ones went back after the page reacted. The effect is partial and repeating is not safe,
     /// because the fields that held would be filled again.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "naming each reverted field needs the values sent, the problems the page reported and the targets described, beside the call scope and decision"
+    )]
     fn fields_reverted(
         &self,
         context: &InvocationContext<'_>,

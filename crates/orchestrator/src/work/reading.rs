@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::governance::Capability;
 use crate::language::outcome::{CaptureKind, Outcome, Refusal, TargetNoun};
-use crate::language::{ReadMode, DEFAULT_DOCUMENT_DEPTH};
+use crate::language::{InspectPage, ReadMode, DEFAULT_DOCUMENT_DEPTH};
 use crate::workspace::{SnapshotScope, WorkspaceLease};
 
 use super::item::control_item;
@@ -90,24 +90,21 @@ impl ApplicationExecutor {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn inspect_page(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
-        requested_tab: Option<&str>,
-        kind: &str,
-        root: Option<&str>,
-        max_depth: Option<usize>,
-        max_items: usize,
+        request: &InspectPage,
     ) -> Terminal {
+        let requested_tab = request.tab.as_deref();
+        let kind = request.scope.as_str();
         if kind == "document" {
             return self.inspect_document(
                 context,
                 lease,
                 requested_tab,
-                root,
-                max_depth.unwrap_or(DEFAULT_DOCUMENT_DEPTH),
+                request.root.as_deref(),
+                request.max_depth.unwrap_or(DEFAULT_DOCUMENT_DEPTH),
             );
         }
         self.targets_operation(
@@ -118,7 +115,7 @@ impl ApplicationExecutor {
             BrowserCommand::Inspect {
                 tab_id: 0,
                 kind: kind.into(),
-                max_items,
+                max_items: request.max_items,
             },
             if kind == "controls" {
                 TargetNoun::Control
@@ -236,7 +233,6 @@ impl ApplicationExecutor {
     /// One governed target retrieval.
     ///
     /// The closed noun chooses both the product sentence and the structured fact key.
-    #[allow(clippy::too_many_arguments)]
     fn targets_operation(
         &self,
         context: &InvocationContext<'_>,

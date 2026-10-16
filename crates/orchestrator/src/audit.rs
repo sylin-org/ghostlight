@@ -132,7 +132,10 @@ fn is_zero(value: &u32) -> bool {
 
 impl AuditRecord {
     /// Construct a content-minimized audit record at the current time.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per field every audit line must state; the optional fields are set after construction"
+    )]
     #[must_use]
     pub fn now(
         invocation: &str,

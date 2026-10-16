@@ -94,7 +94,10 @@ pub struct InvocationResult {
 
 impl InvocationResult {
     /// Construct a bounded result and enforce the contextual next-step limit.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per field the result contract requires; rich content is attached after construction"
+    )]
     #[must_use]
     pub fn new(
         invocation: &str,

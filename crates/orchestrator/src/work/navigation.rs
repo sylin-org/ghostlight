@@ -583,7 +583,10 @@ impl ApplicationExecutor {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the landing check needs the lease and the tab, and the result needs the browser answer, the outcome builder and the facts"
+    )]
     fn complete_navigation<F>(
         &self,
         context: &InvocationContext<'_>,

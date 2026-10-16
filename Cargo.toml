@@ -38,6 +38,8 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
 
 [patch.crates-io]
 # The shell's window library, Tao 0.35.3, has a custom Wayland titlebar that swallows its own

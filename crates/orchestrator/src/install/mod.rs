@@ -995,7 +995,10 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
     rows
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per fixed field of a harness row, so each row of the table reads as one call"
+)]
 fn row(
     id: &'static str,
     product_id: &'static str,

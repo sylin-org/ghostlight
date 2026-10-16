@@ -24,3 +24,5 @@ unsafe_code = "deny"
 
 [lints.clippy]
 all = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
