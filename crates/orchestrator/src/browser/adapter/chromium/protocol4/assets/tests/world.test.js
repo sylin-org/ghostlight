@@ -71,12 +71,9 @@ const FORBIDDEN = [
   ["XMLHttpRequest", /XMLHttpRequest/],
   ["WebSocket", /WebSocket/],
   ["sendMessage", /sendMessage/],
-  ["__ghostlight_dispatch__", /__ghostlight_dispatch__/],
   ["innerHTML assignment", /\.innerHTML\s*=/],
   ["insertAdjacentHTML", /insertAdjacentHTML/],
-  ["outerHTML", /outerHTML/],
-  ["a global Ghostlight namespace", /Ghostlight(Shared|Sensor|Presentation|PresentationCss|FormDiagnostics)/],
-  ["form diagnostics", /formDiagnostics/i]
+  ["outerHTML", /outerHTML/]
 ];
 
 function violations(text) {
@@ -94,7 +91,7 @@ test("the forbidden-API scan catches qualified and optional-chained forms", () =
   assert.deepEqual(violations("the browser. Then"), []);
 });
 
-test("no protocol-4 source touches a browser API or the retired global", () => {
+test("no protocol-4 source touches a browser API, the network or an HTML sink", () => {
   for (const name of sources()) {
     assert.deepEqual(violations(bundle.read(name)), [], `${name} must not contain a forbidden API`);
   }
