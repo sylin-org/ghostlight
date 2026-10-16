@@ -91,9 +91,9 @@ Internal browser commands are combined when a person experiences them as one job
   bundled setup page once; an install that started with the service shows the window instead and
   opens no browser page. The first agent request that reaches a browser and succeeds completes
   setup: the view shows Ready, then At a glance, and the next start opens on the workbench. Until
-  then, an agent's browser call that finds no browser connected says in its own answer where the
-  extension comes from, and opens no window. Reduced motion shows every state with the same words at the same
-  moments and no animation.
+  then, while no browser profile holds the extension, an agent's browser call that finds no browser
+  connected says in its own answer where the extension comes from, and opens no window. Reduced
+  motion shows every state with the same words at the same moments and no animation.
 - Every Linux install has an Applications entry. It runs the shell, which starts the service when
   none runs and shows the window. A tray is never the only route to the workbench.
 - Six destinations and one global search reach every workbench surface and user-visible record:

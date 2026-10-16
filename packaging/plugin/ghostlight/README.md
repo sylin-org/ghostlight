@@ -29,8 +29,9 @@ protocol stream.
 The plugin installs the agent side only. To finish setup, add
 [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
 from the Chrome Web Store, or open Ghostlight from the tray, the Start menu or Applications to see
-the setup steps. Until the first request that reaches a browser succeeds, an agent's browser call
-that finds no browser connected says in its answer where the extension comes from. Ghostlight
+the setup steps. Until the first request that reaches a browser succeeds, and while no browser profile holds the
+extension, an agent's browser call that finds no browser connected says in its answer where the
+extension comes from. Ghostlight
 started by an agent shows only its tray icon and opens no window. Ghostlight is local by
 construction: no telemetry, no activation service, no hidden network dependency; the only network
 traffic is the explicit binary download from the release channel.

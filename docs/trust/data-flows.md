@@ -43,9 +43,9 @@ When the extension is installed on a computer where the Ghostlight service is ab
 own bundled setup page once. That page loads nothing from the network. No vendor page opens, and
 nothing Ghostlight does contacts the vendor.
 
-The same holds for the rest of setup. No page opens without a click: the window opens a store
-listing or google.com only when a person presses Add, Open or Get Google Chrome, and the browser
-makes that request, not Ghostlight. The two sylin.org addresses in the table are used by the
+The same holds for the rest of setup. No web page opens without a click: the window opens the
+store listing only when a person presses Add, and google.com only on Get Google Chrome. Open starts
+the browser in its profile. The browser makes those requests, not Ghostlight. The two sylin.org addresses in the table are used by the
 person's own act: the terminal that runs the setup command, and the browser that opens the demo
 page when the person asks their agent to. The Ghostlight programs send the vendor nothing in
 either case.

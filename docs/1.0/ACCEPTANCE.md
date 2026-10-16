@@ -564,8 +564,9 @@ workbench shows waiting becoming running once.
 24. The first MCP request that ran in a browser and succeeded completes setup: the view shows
     Ready and goes to At a glance, `state/setup.json` exists, the next start opens on the
     workbench and the setup view retires. A `ghostlight call` does not complete it, and a home
-    upgraded from 1.x opens on the workbench. Until then, an agent's browser call that finds no
-    browser connected says in its answer where the extension comes from, and opens no window.
+    upgraded from 1.x opens on the workbench. Until then, while no browser profile holds the extension, an agent's
+    browser call that finds no browser connected says in its answer where the extension comes from,
+    and opens no window.
 25. With reduced motion, the setup page, the popup and the window's setup view show every state
     with the same words at the same moments and play no animation, and each resting look reads
     without it.

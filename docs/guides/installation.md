@@ -8,8 +8,9 @@ resident launcher service, no admin rights.
 This guide describes the 2.0 install and the source-development path. Until 2.0 is published, the
 latest published release is the one the [README](../../README.md) names under "Where it stands
 today". Every route installs into `~/.ghostlight/bin`. The extension connects by the fixed
-native-host name, and the service gives it the page code it runs when it connects, so a 2.0
-service and a 2.0 extension are updated together.
+native-host name, and the service gives it the page code it runs when it connects, so a service
+update needs no extension update. A 1.x extension speaks protocol 3 and must be updated once to the
+2.0 extension; its popup says Update needed.
 
 ## Installation journey
 
