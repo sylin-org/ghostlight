@@ -7,7 +7,7 @@
 use serde_json::{json, Value};
 
 use crate::governance::{CapabilitySet, Decision};
-use crate::language::outcome::{Outcome, OWN_CONTROL_PAGE_CEILING};
+use crate::language::outcome::Outcome;
 
 use super::{ApplicationExecutor, Effect, InvocationContext, Readiness, Terminal};
 
@@ -31,7 +31,6 @@ impl ApplicationExecutor {
             layer.path = None;
             layer.document = None;
         }
-        authority.ceilings.push(OWN_CONTROL_PAGE_CEILING.to_owned());
         let capabilities = authority.capabilities.len();
         let layers = authority.layers.len();
         let facts = json!({

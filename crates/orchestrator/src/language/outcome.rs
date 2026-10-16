@@ -34,7 +34,10 @@ pub const HUMAN_STOP_DIRECTIVE: &str =
 const OWN_CONTROL_PAGE_REFUSED: &str =
     "Ghostlight's own control page and is never automated. Other ports on this computer are not affected.";
 
-/// The line `policy_explain` adds to the boundaries no policy can lift.
+/// The boundary line for Ghostlight's own control page, authored once.
+///
+/// The compiled authority ends its ceilings with it, so the person's Policy page, the watch view
+/// and `policy_explain` say the same thing.
 pub const OWN_CONTROL_PAGE_CEILING: &str =
     "Ghostlight's own control page on this computer is never automated.";
 

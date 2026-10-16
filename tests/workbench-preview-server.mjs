@@ -206,7 +206,8 @@ const policyView = {
     }
   ],
   ceilings: [
-    "Anything that is not an ordinary http or https address."
+    "Anything that is not an ordinary http or https address.",
+    "Ghostlight's own control page on this computer is never automated."
   ],
   user_layer: {
     source: "workbench",

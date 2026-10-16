@@ -14,6 +14,7 @@
 use serde::Serialize;
 
 use super::{manifest, Capability, CapabilitySet, ManagedPolicyPassport};
+use crate::language::outcome::OWN_CONTROL_PAGE_CEILING;
 
 /// Which layers are in force right now.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -708,6 +709,7 @@ fn ceilings(sacred: &[String]) -> Vec<String> {
     for host in sacred {
         lines.push(format!("{host}, marked never-touch by policy."));
     }
+    lines.push(OWN_CONTROL_PAGE_CEILING.to_owned());
     lines
 }
 
@@ -737,7 +739,7 @@ fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
 mod tests {
     use super::{
         compile, pattern_covers, CapabilityState, Inputs, LayerKind, RuleNote, Situation,
-        UserLayerSource,
+        UserLayerSource, OWN_CONTROL_PAGE_CEILING,
     };
     use crate::governance::{manifest, ManagedPolicyPassport};
 
@@ -796,7 +798,10 @@ mod tests {
             .all(|line| line.state == CapabilityState::Available && line.decided_by.is_empty()));
         assert_eq!(
             view.ceilings,
-            ["Anything that is not an ordinary http or https address."]
+            [
+                "Anything that is not an ordinary http or https address.",
+                OWN_CONTROL_PAGE_CEILING
+            ]
         );
         assert!(view.layers.is_empty());
         assert!(view.user_layer.editable);
@@ -807,7 +812,8 @@ mod tests {
             compile(&restricted).ceilings,
             [
                 "Anything that is not an ordinary http or https address.",
-                "localhost, marked never-touch by policy."
+                "localhost, marked never-touch by policy.",
+                OWN_CONTROL_PAGE_CEILING
             ]
         );
     }

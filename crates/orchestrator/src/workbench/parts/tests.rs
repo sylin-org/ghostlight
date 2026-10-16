@@ -766,7 +766,7 @@ fn a_watcher_is_told_how_many_sites_are_never_touched_and_gets_no_policy_text() 
         watcher["ceilings"].as_array().unwrap().last().unwrap(),
         &json!(words::never_touch_count(1))
     );
-    assert_eq!(watcher["ceilings"].as_array().unwrap().len(), 2);
+    assert_eq!(watcher["ceilings"].as_array().unwrap().len(), 3);
 
     let window = projection(Audience::Control).policy(&authority);
     assert!(window["layers"][0]["document"]

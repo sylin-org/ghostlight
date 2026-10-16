@@ -382,7 +382,10 @@ const compiled = (editable) => ({
       settings: [{ key: "browser.tabs.allow_close", value: "false", level: "mandatory" }],
       path: "state/user-policy.json", document: '{"schema": 4}' }
   ],
-  ceilings: ["Anything that is not an ordinary http or https address."],
+  ceilings: [
+    "Anything that is not an ordinary http or https address.",
+    "Ghostlight's own control page on this computer is never automated."
+  ],
   user_layer: {
     source: "workbench",
     editable,
@@ -1549,7 +1552,7 @@ const checks = [
       && board.includes("Allowed")
       && board.includes("Example Org does not allow it anywhere"),
     `board: ${JSON.stringify(board)}`],
-  ["the permanent boundaries are shown",
+  ["the permanent boundaries are shown, Ghostlight's own control page among them",
     nodes.get("policy-ceilings").innerHTML.includes("not an ordinary http or https address")
       && !nodes.get("policy-ceilings").innerHTML.includes("localhost")],
   ["the organization is named in its own words, with somewhere to ask",
@@ -1637,3 +1640,4 @@ for (const [name, pass, detail] of checks) {
 if (!ok) process.exit(1);
 console.log("");
 console.log("workbench surface ok: a broken panel costs its own panel and nothing else");
+      && nodes.get("policy-ceilings").innerHTML.includes("own control page on this computer is never automated")
