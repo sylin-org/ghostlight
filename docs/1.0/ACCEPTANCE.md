@@ -117,10 +117,14 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 ## Executor and truth gates
 
 H8 adds the isolated `tests/local-resilience-journey.mjs` lane, which runs the real service in a test
-home on relay 4: the endpoint is private to its owner, silent, torn, malformed, oversized and
-newer-revision peers are retired while healthy clients stay served, an ordinary burst completes,
-human Pause and Stop from the browser stop dispatch with no effect and Resume and a new session
-restore it without replay, and a client that stops reading is retired alone. The actual bundled
+home on relay 4: the endpoint is private to its owner; silent, torn, malformed, oversized and
+older-revision peers are retired while healthy clients stay served, and a later revision is
+accepted; an ordinary burst completes; a repeated request id is refused and the original stays
+cancellable, and work that may have acted ends uncertain and is not replayed; a full queue refuses
+with no effect while controls and another workspace stay usable; queued cancellation and expiry
+have no effect; human Pause and Stop from the browser stop dispatch with no effect, Stop ends
+queued work with no effect and leaves the call in flight uncertain, and Resume and a new session
+restore work without replay; and a client that stops reading is retired alone. The actual bundled
 workbench shows waiting becoming running once.
 
 1. Direct operations and composition steps use the same operation executor. The parent completes

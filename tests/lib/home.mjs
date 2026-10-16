@@ -33,6 +33,9 @@ export const BIN_DIRECTORY = "bin";
 /** The quit latch under the home: it is written when a person quits and read by browser starts. */
 export const QUIT_LATCH = ["state", "quit"];
 
+/** The signal that ends a process with no chance to say goodbye. Windows ends it the same way. */
+const HARD_KILL = "SIGKILL";
+
 /** Time a journey gives a service to come up from nothing. */
 export const SERVICE_START_MS = 30_000;
 
@@ -482,7 +485,12 @@ export class JourneyHome {
     return status;
   }
 
-  /** Kill the running service, only when its image is this home's own service. */
+  /**
+   * Kill the running service as a crash would, only when its image is this home's own service.
+   * The kill is hard (`SIGKILL`, and `TerminateProcess` on Windows): a gentler signal is the
+   * session-end signal on Linux, which makes the service say goodbye to every stream, and a
+   * crash says none.
+   */
   async killService() {
     const status = await this.status();
     if (!status) throw new Error("No service is running to kill");
@@ -490,7 +498,7 @@ export class JourneyHome {
     if (!image || ![...this.serviceImages].some((own) => samePath(own, image))) {
       throw new Error(`Refusing to kill process ${status.pid}: its image is ${image}, not this home's service`);
     }
-    process.kill(status.pid);
+    process.kill(status.pid, HARD_KILL);
     await waitGone(status.pid, "the killed service is gone");
     return status;
   }
@@ -513,7 +521,7 @@ export class JourneyHome {
           await waitGone(status.pid, "the service exits at cleanup", 10_000);
         } catch {
           const image = imagePath(status.pid);
-          if (image && [...this.serviceImages].some((own) => samePath(own, image))) process.kill(status.pid);
+          if (image && [...this.serviceImages].some((own) => samePath(own, image))) process.kill(status.pid, HARD_KILL);
           await waitGone(status.pid, "the service exits after a kill", 10_000);
         }
       }

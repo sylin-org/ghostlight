@@ -120,20 +120,34 @@ export class RelayMcp {
     return new RelayMcp(stream, reply);
   }
 
+  /** Send a request now and return its id; `response` takes its answer. `id` defaults to the next one. */
+  begin(method, params = {}, id = this.nextId++) {
+    this.stream.send({ kind: mcpKind.message, line: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
+    return id;
+  }
+
+  /** The next response to the request with `id`; a second request with that id gets a second one. */
+  async response(id, timeoutMs = COLD_REQUEST_MS) {
+    const frame = await this.stream.next(
+      (candidate) => candidate.kind === mcpKind.message && JSON.parse(candidate.line).id === id, timeoutMs, `the MCP response to request ${id}`);
+    return JSON.parse(frame.line);
+  }
+
   /** Send a request and wait for its response. */
   async request(method, params = {}, timeoutMs = COLD_REQUEST_MS) {
-    const id = this.nextId++;
-    this.stream.send({ kind: mcpKind.message, line: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
-    const frame = await this.stream.next(
-      (candidate) => candidate.kind === mcpKind.message && JSON.parse(candidate.line).id === id, timeoutMs, `the MCP ${method} response`);
-    return JSON.parse(frame.line);
+    return this.response(this.begin(method, params), timeoutMs);
+  }
+
+  /** Send a notification. */
+  notify(method, params = {}) {
+    this.stream.send({ kind: mcpKind.message, line: JSON.stringify({ jsonrpc: "2.0", method, params }) });
   }
 
   /** Initialize the session and announce it. */
   async initialize(name = "journey") {
     const response = await this.request("initialize", initializeParams(name));
     assert.equal(response.error, undefined, JSON.stringify(response.error));
-    this.stream.send({ kind: mcpKind.message, line: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
+    this.notify("notifications/initialized");
     return response.result;
   }
 
