@@ -168,6 +168,12 @@ w01-windows-user-path has landed. polish-01-deployment-report has landed. tidy-0
 
 ## Owed live checks
 
+- Result, 2026-10-16: CI run 38936325057 on dev ec0f61f4 is green in all 11 jobs. The browser lane passed
+  frame-browser on Linux and Windows with the recaptured fixture (iframe-fixture-composed), so the shadow-root
+  stage, the "Verify composed frame" find and click and the label change ran for the first time. The
+  coordinator recaptured the live pages to a scratch file the same day: they match the fixture byte for byte
+  apart from Cloudflare's per-request e-mail obfuscation key in the page footer. Still owed below: the live
+  mode and the installed journey checks.
 - Result, 2026-10-16: CI run 38931431333 on dev b88f3d3c is the first fully green run of the 2.0 tree: all
   11 jobs on Linux and Windows. The process lane passed every journey on both systems, including the
   owed checks below for ci-resume-binds-on-call (process), ci-continuity-no-replay (continuity) and
