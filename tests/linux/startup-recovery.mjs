@@ -7,7 +7,7 @@
 // registration or a browser profile.
 import assert from "node:assert/strict";
 import { readdirSync, readlinkSync } from "node:fs";
-import { createHome, delay, samePath, startReason } from "../lib/home.mjs";
+import { createHome, delay, samePath, startReason, until } from "../lib/home.mjs";
 import { McpEdge } from "../lib/peers.mjs";
 
 assert.equal(process.platform, "linux", "This process-observation lane requires Linux");
@@ -15,6 +15,8 @@ assert.equal(process.platform, "linux", "This process-observation lane requires 
 /** The variables that tell a program a desktop session exists. */
 const DESKTOP_VARIABLES = ["DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY"];
 const CALLERS = 4;
+/** A start that loses the race waits this long for the held lock (LEAVING_LOCK_WAIT, 5 s), plus a margin. */
+const CONVERGENCE_MS = 15_000;
 
 const home = createHome({ label: "startup" });
 for (const name of DESKTOP_VARIABLES) delete home.environment[name];
@@ -38,11 +40,13 @@ try {
   for (const result of initialized) assert.equal(result.serverInfo.name, "ghostlight");
   const status = await home.serviceUp();
   assert.equal(status.started_by, startReason.agent);
-  assert.equal(services().length, 1, "concurrent clients converge on one service");
+  await until(() => services().length === 1, "concurrent clients converge on one service", CONVERGENCE_MS);
+  const [survivor] = services();
+  assert.equal(Number(survivor), status.pid, "the survivor is the service that answers status");
   await delay(500);
   const later = await home.status();
   assert.equal(later.instance, status.instance, "the ready service survives startup");
-  assert.equal(services().length, 1);
+  assert.deepEqual(services(), [survivor], "no second service appears after convergence");
   for (const client of clients) client.child.stdin.end();
   console.log(JSON.stringify({ passed: true, callers: CALLERS, recovery_ms: Date.now() - started, service_pid: status.pid }, null, 2));
 } finally {

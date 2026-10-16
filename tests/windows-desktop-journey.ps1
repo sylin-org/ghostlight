@@ -118,6 +118,11 @@ $children = [Collections.Generic.List[Diagnostics.Process]]::new()
 $edgeChildren = [Collections.Generic.List[Diagnostics.Process]]::new()
 $observations = [Collections.Generic.List[object]]::new()
 $script:launch = 0
+# The service starts with the serve verb. Starters that lose the race for the service lock stay
+# alive for the lock wait of the service (LEAVING_LOCK_WAIT in service/lifetime.rs).
+$servePattern = '\sserve(\s|$)'
+$LeavingLockWaitSeconds = 5
+$LeavingLockMarginSeconds = 10
 $failure = $null
 
 function Start-OwnedProcess([string] $FilePath, [string[]] $Arguments = @()) {
@@ -139,16 +144,37 @@ function Get-ImageProcesses([string] $Image) {
         Where-Object { $_.Path -ieq $Image })
 }
 
+# The services of this home are the processes of its service image started with the serve verb.
+# The service image also runs short callers such as open, which are not services.
+function Get-ServeProcesses {
+    $name = [IO.Path]::GetFileName($serviceImage)
+    @(Get-CimInstance -ClassName Win32_Process -Filter "Name = '$name'" |
+        Where-Object { $_.ExecutablePath -ieq $serviceImage -and $_.CommandLine -match $servePattern })
+}
+
+# The one service of this home. Every caller that finds none starts its own serve process and the
+# starters that lose the race wait out the lock wait before they leave, so more than one serve
+# process is expected until they have. Call it once the callers have exited, so no further starter
+# can appear, and it waits for exactly one serve process to remain.
+function Wait-SingleService {
+    $deadline = [DateTime]::UtcNow.AddSeconds($LeavingLockWaitSeconds + $LeavingLockMarginSeconds)
+    do {
+        $serving = @(Get-ServeProcesses)
+        if ($serving.Count -eq 1) { return (Get-Process -Id $serving[0].ProcessId) }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Expected one service of this home after the starters left, found $(@(Get-ServeProcesses).Count)."
+}
+
 function Get-OwnedService {
-    $services = @(Get-ImageProcesses $serviceImage)
+    $services = @(Get-ServeProcesses)
     if ($services.Count -ne 1) { throw "Expected one service of this home, found $($services.Count)." }
-    return $services[0]
+    return (Get-Process -Id $services[0].ProcessId)
 }
 
 # The window belongs to the shell. A second shell exits at once, so at most one window exists in
-# any process of this home at any time.
+# any process of this home at any time, however many starters are still racing for the service.
 function Get-OwnedWindows {
-    $null = Get-OwnedService
     $windows = @()
     foreach ($shell in @(Get-ImageProcesses $shellImage)) {
         $windows += @([GhostlightNativeJourney]::Inspect($shell.Id))
@@ -198,8 +224,8 @@ function Wait-OpenBurst([object[]] $Openers) {
             if (-not $opener.HasExited) { $pending++; continue }
             if ($opener.ExitCode -ne 0) { throw "Open process $($opener.Id) failed: $($opener.ExitCode)." }
         }
-        # Count windows only once the service exists; the first openers race to start it.
-        if (@(Get-ImageProcesses $serviceImage).Count -eq 1) { $null = @(Get-OwnedWindows) }
+        # Windows are counted on every pass: the first openers race to start the service.
+        $null = @(Get-OwnedWindows)
         if ($pending -eq 0) { return }
         Start-Sleep -Milliseconds 25
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -294,7 +320,7 @@ try {
         $openers = @(for ($index = 0; $index -lt $OpenBurst; $index++) { Start-OwnedProcess $serviceImage @('open') })
         Wait-OpenBurst $openers
         $null = Wait-ServiceRunning
-        $service = Get-OwnedService
+        $service = Wait-SingleService
         $window = @(Wait-WindowState 'restored')[0]
         for ($sample = 0; $sample -lt 10; $sample++) {
             $null = @(Get-OwnedWindows)

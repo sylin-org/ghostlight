@@ -40,7 +40,7 @@ writeFileSync(join(shims, "curl"), `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2), url = args.at(-1);
 const fixture = JSON.parse(fs.readFileSync(process.env.INSTALLER_FIXTURE));
-fs.appendFileSync(process.env.INSTALLER_REQUESTS, url + '\n');
+fs.appendFileSync(process.env.INSTALLER_REQUESTS, url + '\\n');
 let body = '', effective = url;
 if (url.endsWith('/releases/latest')) {
   effective = fixture.latest;
@@ -56,6 +56,9 @@ if (url.endsWith('/releases/latest')) {
 if (args.includes('-o')) fs.writeFileSync(args[args.indexOf('-o') + 1], body);
 if (args.includes('-w')) process.stdout.write(effective);
 `, { mode: 0o755 });
+// A shim that does not parse would fail every request and hide what the cases mean to prove.
+const shimCheck = spawnSync(process.execPath, ["--check", join(shims, "curl")], { encoding: "utf8" });
+assert.equal(shimCheck.status, 0, `curl shim does not parse: ${shimCheck.stderr}`);
 // Provenance verification is optional. Keep this fixture offline even on machines with gh.
 writeFileSync(join(shims, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 function run(label, changes = {}, version, arguments_ = []) {
