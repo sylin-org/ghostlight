@@ -2812,6 +2812,14 @@ If nothing effectful has been dispatched in this command, the failures are `Canc
 | **The worker is killed mid-primitive** | The port closes, and the service maps that to `DisconnectedAfterDispatch` (effect unknown). Correlations are never resent, so no ledger is needed |
 | **The relay replays hellos until M4a** | A repeated `hello_accepted` on one port is idempotent and re-registers new assets. C14 test |
 
+> **Amendment (2026-10-16, ADR-0200 Decision 16): a hard cutover.** The first two rows of this table are
+> superseded. The store item does not wait for services to spread: the extension is submitted early
+> as a staged publish, and its public publication, the `v2.0.0` release and the get scripts go live
+> together. A new service meets an old extension without a fallback, because the switch commit deleted
+> level 3 (see the note at the top of this document); a 2.0 service refuses a 1.x extension and a 2.0
+> extension refuses a 1.x service. The store-fallback row is answered too: no embedded page-asset set
+> ships in the package (ADR-0200 Decision 15).
+
 ## 8. Owner checks
 
 1. **OD14.** `hello_accepted` carries no diagnostics state, so the popup diagnostics toggle is gone at
