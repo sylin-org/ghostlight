@@ -52,7 +52,6 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
             let policy = TestPolicy::new();
             let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
             browser.push(Ok(BrowserOutcome::TabOpened {
-                reused: false,
                 tab: tab(7, "https://example.com/"),
                 committed_urls: vec!["https://example.com/".into()],
             }));
@@ -207,7 +206,6 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
             let policy = TestPolicy::new();
             let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
             browser.push(Ok(BrowserOutcome::TabOpened {
-                reused: false,
                 tab: tab(7, "https://example.com/"),
                 committed_urls: vec!["https://example.com/".into()],
             }));
@@ -312,7 +310,6 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
             let (executor, browser, _, workspace, audit) =
                 fixture_with_governance(governance.clone());
             browser.push(Ok(BrowserOutcome::TabOpened {
-                reused: false,
                 tab: tab(7, "https://example.com/"),
                 committed_urls: vec!["https://example.com/".into()],
             }));
@@ -437,7 +434,6 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
             let (executor, browser, _, workspace, audit) =
                 fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
             browser.push(Ok(BrowserOutcome::TabOpened {
-                reused: false,
                 tab: tab(7, "https://example.com/"),
                 committed_urls: vec!["https://example.com/".into()],
             }));
@@ -585,7 +581,6 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
         let policy = TestPolicy::new();
         let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));

@@ -19,7 +19,6 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
         for composed in [false, true] {
             let (executor, browser, _, workspace, audit) = fixture();
             browser.push(Ok(BrowserOutcome::TabOpened {
-                reused: false,
                 tab: tab(7, "https://example.com/"),
                 committed_urls: vec![],
             }));
@@ -139,7 +138,6 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
 fn credential_guidance_obeys_flow_continue_without_pausing_later_work() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],
     }));
@@ -186,7 +184,6 @@ fn credential_acknowledgement_cannot_override_configured_policy_or_human_control
         let policy = TestPolicy::new();
         let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec![],
         }));
@@ -232,7 +229,6 @@ fn credential_acknowledgement_cannot_override_configured_policy_or_human_control
 fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forward() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],
     }));

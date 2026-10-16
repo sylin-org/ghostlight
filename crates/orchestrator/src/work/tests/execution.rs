@@ -105,7 +105,6 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
 fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],
     }));
@@ -167,7 +166,6 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
 
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -259,7 +257,6 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -368,7 +365,6 @@ fn every_tool_gets_deadline_advice_it_can_follow() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -431,7 +427,6 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -575,7 +570,6 @@ fn navigating_to_a_dead_tab_recreates_it_under_the_same_handle() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(9, "https://example.com/again"),
         committed_urls: vec!["https://example.com/again".into()],
     }));
@@ -651,7 +645,6 @@ fn effect_unknown_receipts_render_as_unknown_with_the_browser_reason() {
 fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(
             7,
             "https://example.com/PRIVATE_PATH?PRIVATE_QUERY#PRIVATE_FRAGMENT",
@@ -726,7 +719,6 @@ fn audit_excludes_primitive_exception_text_and_unknown_tool_names() {
 fn audit_excludes_script_results_and_invalid_input_context() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -815,7 +807,6 @@ fn an_empty_object_result_says_what_else_reads_as_empty() {
     ] {
         let (executor, browser, _, workspace, audit) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -881,7 +872,6 @@ fn audit_records_carry_refusal_facts_for_failures_and_omit_them_for_successes() 
     );
 
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -991,7 +981,6 @@ fn flow_stops_after_a_refused_child_without_reverting_prior_effects() {
     let (executor, browser, _workspaces, workspace, _) = fixture_with_governance(policy.facade());
     for id in [7, 8] {
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(id, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -1039,7 +1028,6 @@ fn flow_error_policy_controls_runtime_argument_failures() {
             let (executor, browser, _workspaces, workspace, _) = fixture();
             for id in [7, 8] {
                 browser.push(Ok(BrowserOutcome::TabOpened {
-                    reused: false,
                     tab: tab(id, "https://example.com/"),
                     committed_urls: vec!["https://example.com/".into()],
                 }));
@@ -1098,7 +1086,6 @@ fn continue_reports_policy_denial_after_later_independent_success() {
     let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
     for id in [7, 8] {
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(id, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -1135,7 +1122,6 @@ fn continue_reports_policy_denial_after_later_independent_success() {
 fn flow_result_budget_preserves_step_metadata_and_reference_values() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -1186,7 +1172,6 @@ fn short_flow_uses_its_default_tab_with_multiple_controlled_pages() {
     let mut handles = Vec::new();
     for id in [7, 8] {
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(id, "https://example.com/"),
             committed_urls: vec![],
         }));
@@ -1240,7 +1225,6 @@ fn short_flow_uses_its_default_tab_with_multiple_controlled_pages() {
 fn read_only_compositions_are_repeat_safe_only_when_fully_successful() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -1341,7 +1325,6 @@ fn continue_honors_human_attention_and_invocation_limits() {
 fn focused_typing_names_the_control_it_described_and_settles() {
     let (executor, browser, _workspaces, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -1403,7 +1386,6 @@ fn work_follows_the_attended_browser_and_then_stays_where_it_started() {
         summary("browser_edge", true),
     ]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -1537,7 +1519,6 @@ fn a_named_browser_opens_there_and_a_named_stranger_is_refused() {
         summary("browser_edge", true),
     ]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -1630,7 +1611,6 @@ fn listing_tabs_reports_live_titles_and_drops_bindings_that_are_gone() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -1689,7 +1669,6 @@ fn listing_tabs_reports_live_titles_and_drops_bindings_that_are_gone() {
 fn direct_and_composed_reads_keep_equivalent_safe_receipts() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -1849,7 +1828,6 @@ fn adapter_budget_preserves_time_for_the_physical_receipt() {
 fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2094,7 +2072,6 @@ fn client_save_authorizes_source_before_recording_bytes_cross() {
 fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2146,7 +2123,6 @@ fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
 fn open_read_close_is_one_truthful_result_per_call() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2247,7 +2223,6 @@ fn browser_seam_observes_landing_facts_but_not_outcome_measurements() {
 fn outcome_language_and_the_seam_observe_without_carrying_page_detail() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://Example.com/patients/48219?ssn=1#note"),
         committed_urls: vec!["https://example.com/patients/48219?ssn=1#note".into()],
     }));
@@ -2302,7 +2277,6 @@ fn outcome_language_and_the_seam_observe_without_carrying_page_detail() {
 fn an_observation_never_outlives_the_invocation_it_describes() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2331,7 +2305,6 @@ fn an_observation_never_outlives_the_invocation_it_describes() {
 fn a_capture_reports_its_size_and_a_wait_reports_how_long_it_waited() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2412,7 +2385,6 @@ fn tab_close_policy_blocks_before_browser_dispatch() {
     let (executor, browser, _, workspace, _) =
         fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2543,7 +2515,6 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
 
     // An ordinary, fully governed opener tab, admitted under the narrow policy.
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://approved.example/"),
         committed_urls: vec!["https://approved.example/".into()],
     }));
@@ -2590,7 +2561,6 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
 fn physical_action_receipt_names_the_target_without_trusting_its_role() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2666,7 +2636,6 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
     let (executor, browser, _, workspace, audit) =
         fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2727,7 +2696,6 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
 fn local_preserve_tabs_refusal_is_blocked_without_an_effect() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2783,7 +2751,6 @@ fn uncertain_effect_guides_recovery_without_replay() {
 fn direct_and_flow_actions_use_the_same_physical_executor_path() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -2925,7 +2892,6 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
 fn credential_target_returns_guidance_without_holding_the_session() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3010,7 +2976,6 @@ fn denied_redirect_is_compensated_without_replay_risk() {
     fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
     let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "http://127.0.0.1/private"),
         committed_urls: vec![
             "https://example.com/".into(),
@@ -3048,7 +3013,6 @@ fn denied_redirect_remains_visibly_open_when_close_policy_refuses_compensation()
     let (executor, browser, _, workspace, _) =
         fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "http://127.0.0.1/private"),
         committed_urls: vec![
             "https://example.com/".into(),
@@ -3080,7 +3044,6 @@ fn denied_redirect_remains_visibly_open_when_local_preservation_refuses_compensa
     fs::write(&policy.0, serde_json::to_vec(&document).unwrap()).unwrap();
     let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "http://127.0.0.1/private"),
         committed_urls: vec![
             "https://example.com/".into(),
@@ -3109,7 +3072,6 @@ fn denied_redirect_remains_visibly_open_when_local_preservation_refuses_compensa
 fn stale_target_fails_before_browser_dispatch() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3193,7 +3155,6 @@ fn stale_target_fails_before_browser_dispatch() {
 fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3367,7 +3328,6 @@ fn cross_workspace_tab_discovery_names_owning_workspace_and_guidance() {
 
     // Open a tab in Workspace B
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(42, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3408,7 +3368,6 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
         .workspaces
         .admit("Workspace B".into(), IntakeChannel::Mcp);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(42, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3510,7 +3469,6 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
         browser.connect(vec![summary(FAKE_BROWSER, true)]);
         let workspace_b = executor.workspaces.admit(label.into(), IntakeChannel::Mcp);
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(42, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -3586,7 +3544,6 @@ fn wait_condition_visual_settle_observes_view_settlement() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3640,7 +3597,6 @@ fn wait_composite_visual_settle_chains_after_primary_condition() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3713,7 +3669,6 @@ fn cross_workspace_tab_discovery_stress_permutations() {
             .admit((*name).into(), IntakeChannel::Mcp);
         let pid = u64::try_from(100 + index).unwrap();
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(pid, &format!("https://{}.internal/", name.to_lowercase())),
             committed_urls: vec![format!("https://{}.internal/", name.to_lowercase())],
         }));
@@ -3781,7 +3736,6 @@ fn composite_wait_keeps_its_met_condition_when_optional_settlement_expires() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3835,7 +3789,6 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -3905,7 +3858,6 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
 fn document_inspection_returns_the_tree_it_describes() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -4013,7 +3965,6 @@ fn typed_with_expectation(
 ) -> (crate::work::result::InvocationResult, Arc<MemoryAudit>) {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],
     }));
@@ -4143,7 +4094,6 @@ pub(super) fn workspace_with_a_target() -> (
     let (executor, browser, workspaces, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -4635,7 +4585,6 @@ fn a_stale_refusal_audits_the_word_only() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));

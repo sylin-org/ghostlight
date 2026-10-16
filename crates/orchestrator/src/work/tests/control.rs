@@ -181,7 +181,6 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
     // The existing policy permits navigation. No policy change or resume is needed after refusals.
     for workspace in [&one, &two] {
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(
                 if workspace == &one { 7 } else { 8 },
                 "https://example.com/",
@@ -356,7 +355,6 @@ fn human_controls_after_preparation_prevent_the_effect_in_direct_and_composed_wo
             for composed in [false, true] {
                 let (mut executor, browser, _, workspace, _) = fixture();
                 browser.push(Ok(BrowserOutcome::TabOpened {
-                    reused: false,
                     tab: tab(7, "https://example.com/"),
                     committed_urls: vec![],
                 }));
@@ -430,7 +428,6 @@ fn human_controls_after_preparation_prevent_the_effect_in_direct_and_composed_wo
 fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() {
     let (mut executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],
     }));
@@ -527,7 +524,6 @@ fn control_after_dispatch_preserves_applied_and_uncertain_receipts() {
     for uncertain in [false, true] {
         let (mut executor, browser, _, workspace, audit) = fixture();
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec![],
         }));
@@ -611,7 +607,6 @@ fn an_authorization_publishes_no_control_state_and_a_hold_publishes_exactly_one(
     let (executor, browser, _, workspace, _) = fixture();
     executor.governance.relay_runtime_state(browser.clone());
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));

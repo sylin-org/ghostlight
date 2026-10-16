@@ -74,7 +74,6 @@ pub fn open_tab(
     Ok(BrowserOutcome::TabOpened {
         tab: opened.tab.into(),
         committed_urls: l.committed(),
-        reused: opened.adopted,
     })
 }
 

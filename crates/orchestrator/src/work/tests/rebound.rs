@@ -16,7 +16,6 @@ fn found_target() -> (
     let (executor, browser, _, workspace, audit) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));

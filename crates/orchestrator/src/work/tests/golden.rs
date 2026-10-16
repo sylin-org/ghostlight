@@ -18,7 +18,6 @@ use crate::workspace::StaleReason;
 fn successes_match_their_golden() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -81,7 +80,6 @@ fn successes_match_their_golden() {
 fn a_find_of_repeated_controls_matches_its_golden() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -151,7 +149,6 @@ fn a_call_that_does_not_decode_matches_the_refusal_golden() {
 fn a_navigate_receipt_matches_the_audit_success_golden() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));

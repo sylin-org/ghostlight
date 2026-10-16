@@ -338,18 +338,6 @@ pub enum ReusePolicy {
     Never,
 }
 
-impl ReusePolicy {
-    /// The wire token for the adapter's `reuse` field. The service always sends `never`, because
-    /// the adapter never chooses a tab to reuse.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Domain => "domain",
-            Self::Never => "never",
-        }
-    }
-}
-
 /// Input for opening a page.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct OpenPage {

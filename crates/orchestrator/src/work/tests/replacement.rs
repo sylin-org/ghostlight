@@ -471,7 +471,6 @@ fn workspace_without_target_names(
     let (executor, browser, _, workspace, _) =
         fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -586,7 +585,6 @@ fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
     let (executor, browser, workspaces, workspace, _) =
         fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -638,7 +636,6 @@ fn the_audit_and_the_history_hold_no_handle_context_or_candidate() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));

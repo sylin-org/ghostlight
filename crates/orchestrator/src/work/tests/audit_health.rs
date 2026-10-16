@@ -19,7 +19,6 @@ fn audit_failure_preserves_success_unknown_effects_and_default_continuation() {
         executor.workbench.clone(),
     ));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com"),
         committed_urls: vec!["https://example.com".into()],
     }));
@@ -72,7 +71,6 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
         executor.workbench.clone(),
     ));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com"),
         committed_urls: vec!["https://example.com".into()],
     }));

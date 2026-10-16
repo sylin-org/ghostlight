@@ -192,23 +192,20 @@ impl ApplicationExecutor {
                 return terminal;
             }
         }
-        let (tab, commits, reused) = match self.dispatch(
+        let (tab, commits) = match self.dispatch(
             context,
+            // The service alone chooses which tab to reuse (ADR-0196 Decision 9), so the
+            // adapter always creates.
             BrowserCommand::OpenTab {
                 url: url.into(),
                 group_title: group_title(&client_label),
-                // The service alone chooses which tab to reuse (ADR-0196 Decision 9). An adapter
-                // told `never` runs no reuse ladder of its own, so even an adapter that still has
-                // one can never adopt a tab the person opened.
-                reuse: ReusePolicy::Never.as_str().into(),
                 focus_window: holds_no_tab(lease),
             },
         ) {
             Ok(BrowserOutcome::TabOpened {
                 tab,
                 committed_urls,
-                reused,
-            }) => (tab, committed_urls, reused),
+            }) => (tab, committed_urls),
             Ok(_) => return self.protocol_failure(context, decision, None),
             Err(error) => return self.browser_failure(context, decision, error, None),
         };
@@ -223,11 +220,7 @@ impl ApplicationExecutor {
             tab,
             controlled,
             commits,
-            if reused {
-                OpenedTabKind::Adopted
-            } else {
-                OpenedTabKind::Created
-            },
+            OpenedTabKind::Created,
         )
     }
 
@@ -429,9 +422,6 @@ impl ApplicationExecutor {
                     BrowserCommand::OpenTab {
                         url: url.into(),
                         group_title: group_title(&client_label),
-                        // A recovered stale handle must be a fresh tab under that handle, not
-                        // an adoption of an unrelated same-host tab.
-                        reuse: ReusePolicy::Never.as_str().into(),
                         focus_window: holds_no_tab(lease),
                     },
                 ) {

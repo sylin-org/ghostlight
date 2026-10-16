@@ -145,7 +145,6 @@ fn rows() -> Vec<Row> {
             command: BrowserCommand::OpenTab {
                 url: example.into(),
                 group_title: GROUP_TITLE.into(),
-                reuse: "never".into(),
                 focus_window: true,
             },
             primitive: json!({"name": "open_tab", "args": {"url": example,
@@ -155,7 +154,6 @@ fn rows() -> Vec<Row> {
             outcome: BrowserOutcome::TabOpened {
                 tab: physical_tab(example),
                 committed_urls: vec![example.into()],
-                reused: false,
             },
         },
         Row {

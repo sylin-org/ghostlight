@@ -20,7 +20,6 @@ fn credential_guidance_finishes_visuals_without_a_denial_notice() {
         let signals = Arc::new(PageSignals::default());
         executor.presentation = PresentationReactor::new(signals.clone());
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(7, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));
@@ -78,7 +77,6 @@ fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
     let mut handles = Vec::new();
     for id in [7, 11] {
         browser.push(Ok(BrowserOutcome::TabOpened {
-            reused: false,
             tab: tab(id, "https://example.com/"),
             committed_urls: vec!["https://example.com/".into()],
         }));

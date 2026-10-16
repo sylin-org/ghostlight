@@ -533,7 +533,6 @@ fn established(
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, PAGE),
         committed_urls: vec![PAGE.into()],
-        reused: false,
     }));
     let opened = executor.execute(
         workspace,

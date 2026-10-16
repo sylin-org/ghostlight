@@ -667,13 +667,11 @@ pub enum BrowserCommand {
     FocusTab { tab_id: u64 },
     /// Open and group one URL as a single physical browser effect.
     ///
-    /// `reuse` is `domain` when the edge may adopt an existing unbound same-host tab instead of
-    /// creating one, and `never` when a fresh tab is required. `focus_window` is true when the
-    /// workspace holds no tab yet, so its first tab comes into view.
+    /// `focus_window` is true when the workspace holds no tab yet, so its first tab comes into
+    /// view.
     OpenTab {
         url: String,
         group_title: String,
-        reuse: String,
         focus_window: bool,
     },
     /// Navigate a physical tab.
@@ -995,13 +993,9 @@ pub enum BrowserOutcome {
         window_focused: bool,
     },
     /// A new physical tab reached its observed landing.
-    ///
-    /// `reused` is true when the adapter satisfied the open by adopting an existing unbound
-    /// same-host tab instead of creating one (ADR-0137).
     TabOpened {
         tab: PhysicalTab,
         committed_urls: Vec<String>,
-        reused: bool,
     },
     /// Navigation completed or reached useful readiness.
     Navigated {

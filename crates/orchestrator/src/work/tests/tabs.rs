@@ -15,7 +15,6 @@ fn open_at(
     url: &str,
 ) -> String {
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(tab_id, url),
         committed_urls: vec![url.into()],
     }));
@@ -131,7 +130,6 @@ fn a_released_tab_whose_cleanup_has_not_answered_is_not_reused() {
 
     let before = browser.calls().len();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(12, "https://example.com/b"),
         committed_urls: vec!["https://example.com/b".into()],
     }));
@@ -142,7 +140,7 @@ fn a_released_tab_whose_cleanup_has_not_answered_is_not_reused() {
     let calls = browser.calls()[before..].to_vec();
     assert_eq!(calls.len(), 1, "{calls:?}");
     assert!(
-        matches!(&calls[0], BrowserCommand::OpenTab { reuse, .. } if reuse == "never"),
+        matches!(&calls[0], BrowserCommand::OpenTab { .. }),
         "{calls:?}"
     );
 }
@@ -157,7 +155,6 @@ fn a_tab_the_person_opened_on_the_same_host_is_never_reused() {
 
     let before = browser.calls().len();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(11, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -168,11 +165,11 @@ fn a_tab_the_person_opened_on_the_same_host_is_never_reused() {
     assert_eq!(opened.facts["created"], true);
     assert_eq!(opened.facts["reused"], false);
     // The person's own example.com tab is never looked for: the browser is only asked to open a
-    // fresh tab, and told not to pick one of its own.
+    // fresh tab.
     let calls = browser.calls()[before..].to_vec();
     assert_eq!(calls.len(), 1, "{calls:?}");
     assert!(
-        matches!(&calls[0], BrowserCommand::OpenTab { reuse, .. } if reuse == "never"),
+        matches!(&calls[0], BrowserCommand::OpenTab { .. }),
         "{calls:?}"
     );
 }
@@ -197,7 +194,6 @@ fn a_released_tab_the_person_took_back_or_closed_is_not_reused() {
         ],
     }));
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(12, "https://example.com/b"),
         committed_urls: vec!["https://example.com/b".into()],
     }));
@@ -209,7 +205,7 @@ fn a_released_tab_the_person_took_back_or_closed_is_not_reused() {
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert!(matches!(calls[0], BrowserCommand::ListTabs));
     assert!(
-        matches!(&calls[1], BrowserCommand::OpenTab { reuse, .. } if reuse == "never"),
+        matches!(&calls[1], BrowserCommand::OpenTab { .. }),
         "{calls:?}"
     );
     assert!(!calls
@@ -238,7 +234,6 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
     let agent = workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
     let before = browser.calls().len();
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(12, "https://example.com/b"),
         committed_urls: vec!["https://example.com/b".into()],
     }));
@@ -253,8 +248,8 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
     assert!(
         matches!(
             &calls[0],
-            BrowserCommand::OpenTab { reuse, group_title, .. }
-                if reuse == "never" && group_title == "Ghostlight - Claude Code"
+            BrowserCommand::OpenTab { group_title, .. }
+                if group_title == "Ghostlight - Claude Code"
         ),
         "{calls:?}"
     );
@@ -293,7 +288,6 @@ fn chrome_and_edge_tabs_with_the_same_id_are_different_tabs() {
         summary("browser_edge", true),
     ]);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(5, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));
@@ -308,7 +302,6 @@ fn chrome_and_edge_tabs_with_the_same_id_are_different_tabs() {
 
     let edge = workspaces.admit("edge".into(), IntakeChannel::Mcp);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(5, "https://example.org/"),
         committed_urls: vec!["https://example.org/".into()],
     }));
@@ -337,7 +330,6 @@ fn a_tab_refused_after_the_browser_opened_it_reports_the_effect() {
     // An adapter hands back a tab another session in the same browser already controls.
     let other = workspaces.admit("other".into(), IntakeChannel::Mcp);
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(5, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
     }));

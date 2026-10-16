@@ -26,7 +26,6 @@ fn open_page(
     workspace: &crate::workspace::WorkspaceId,
 ) {
     browser.push(Ok(BrowserOutcome::TabOpened {
-        reused: false,
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],
     }));
