@@ -36,6 +36,11 @@ const LISTENER_READY_MS = 10_000;
 // How long nothing of the home may start after the last process left: longer than the 2 s fallback
 // exit and the 2 s presence launch delay, so a restart would show.
 const RESTART_SETTLE_MS = 3_000;
+// A starter that loses the race for the service lock polls it for the service's lock wait
+// (LEAVING_LOCK_WAIT in crates/orchestrator/src/service/lifetime.rs) before it leaves, and one
+// still waiting when the service leaves can take the lock and serve in its place.
+const LEAVING_LOCK_WAIT_MS = 5_000;
+const LEAVING_LOCK_MARGIN_MS = 10_000;
 
 async function racingStarts() {
   const race = createHome({ label: "race" });
@@ -228,6 +233,12 @@ async function sessionEnd() {
     // The MCP relay starts the service at its own start; its end leaves that service as it was.
     const mcp = home.start(home.edge, ["mcp"]);
     const status = await home.serviceUp();
+    // The MCP edge retries its connection and starts the service on each failed attempt, so a
+    // slow first start leaves losing starters behind; they must be gone before the signal.
+    await until(() => {
+      const running = homeProcesses(home).filter((pid) => pid !== mcp.pid);
+      return running.length === 1 && running[0] === status.pid;
+    }, "the losing starters leave", LEAVING_LOCK_WAIT_MS + LEAVING_LOCK_MARGIN_MS);
     await edgeLeaves(mcp, "the MCP edge");
     await delay(RESTART_SETTLE_MS);
     assert.deepEqual(homeProcesses(home), [status.pid], "the MCP edge restarts nothing once the session ends");
