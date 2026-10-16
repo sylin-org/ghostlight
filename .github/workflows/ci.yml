@@ -90,6 +90,8 @@ jobs:
           foreach ($f in $files) { node --check $f; if ($LASTEXITCODE) { exit 1 } }
       - name: Check the workbench preview server syntax
         run: node --check tests/workbench-preview-server.mjs
+      - name: Run the workbench unit tests
+        run: node --test tests/workbench-store.test.mjs tests/workbench-transport.test.mjs tests/workbench-settings.test.mjs
       - name: Check the policy grammar readback
         run: node tests/policy-grammar.mjs
       - name: Build the store extension artifact

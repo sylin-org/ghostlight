@@ -195,7 +195,7 @@ async function resync({ rebuildFeed = false, quiet = true } = {}) {
   // A surface that failed to draw is not a surface that lost its connection. One catch around
   // both said "Not connected" for either, which sends the reader looking at the wrong thing.
   attempt("rendering the snapshot", () =>
-    store.applySnapshot(snapshot, rebuildFeed || snapshot.seq !== store.snapshot()?.seq || !store.snapshot()));
+    store.applySnapshot(snapshot, rebuildFeed || store.needsRebuild(snapshot)));
   caughtUp();
 }
 

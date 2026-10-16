@@ -274,7 +274,15 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
   let counter = 0;
   let step = 0;
 
+  // The service's snapshot holds a settled or composed record once; a later snapshot must too.
+  const foldHistory = record => {
+    const index = preview.history.findIndex(item => item.invocation === record.invocation);
+    if (index >= 0) preview.history[index] = record;
+    else preview.history.unshift(record);
+  };
+
   const publish = change => {
+    if (change.kind === "operation_settled" || change.kind === "composition_changed") foldHistory(change.record);
     preview.seq += 1;
     const event = { seq: preview.seq, change };
     for (const handler of listeners) handler({ payload: event });
@@ -333,7 +341,6 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
         // Alternate the intake so both read side by side in the queue.
         channel: counter % 3 === 0 ? "cli" : "mcp"
       };
-      preview.history.unshift(record);
       publish({ kind: "operation_settled", record });
       setTimeout(runOne, blocked ? 3000 : 700 + Math.random() * 1300);
     }, spec.ms);

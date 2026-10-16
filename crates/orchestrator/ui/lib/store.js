@@ -237,6 +237,16 @@
         emit(CHANGE.Band);
       },
 
+      /**
+       * Whether a fetched snapshot differs from this cache.
+       *
+       * A snapshot at the cache's own sequence holds what the cache already holds, so keeping the
+       * feed is right: rebuilding it would only discard entries streamed changes have folded in.
+       */
+      needsRebuild(snapshot) {
+        return !state.snapshot || snapshot.seq !== state.seq;
+      },
+
       applySnapshot(snapshot, rebuild) {
         state.snapshot = snapshot;
         state.seq = snapshot.seq;
