@@ -52,15 +52,25 @@ if [ -n "${GHOSTLIGHT_VERSION:-}" ]; then
   fi
   tag="v${version}"
   release_page="$temporary/release.json"
+  # No -f: curl would answer exit 22 to every HTTP error, and a rate limit (403) or a server error
+  # (5xx) is not an absent release. Only the status code says which it is.
   status=0
-  curl -fsSL --proto '=https' --tlsv1.2 -o "$release_page" "https://api.github.com/repos/${repository}/releases/tags/${tag}" || status=$?
-  if [ "$status" -eq 22 ]; then
-    echo "ghostlight: release ${tag} does not exist" >&2
-    exit 1
-  elif [ "$status" -ne 0 ]; then
+  code=$(curl -sSL --proto '=https' --tlsv1.2 -o "$release_page" -w '%{http_code}' "https://api.github.com/repos/${repository}/releases/tags/${tag}") || status=$?
+  if [ "$status" -ne 0 ]; then
     echo "ghostlight: could not look up release ${tag}" >&2
     exit 1
   fi
+  case "$code" in
+    200) ;;
+    404)
+      echo "ghostlight: release ${tag} does not exist" >&2
+      exit 1
+      ;;
+    *)
+      echo "ghostlight: could not look up release ${tag} (HTTP ${code})" >&2
+      exit 1
+      ;;
+  esac
   found=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$release_page" | head -n 1)
   if [ "$found" != "$tag" ]; then
     echo "ghostlight: release ${tag} does not exist" >&2

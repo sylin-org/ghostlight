@@ -267,7 +267,10 @@ differ:
    `scripts/get.ps1` and `scripts/get.sh` find the release by its tag (`v<version>`) through the
    GitHub releases API and install it, a prerelease included. Everything after the release is
    chosen is unchanged: the same assets, the checksum and attestation checks, the install summary
-   and the exit codes. A version with no release is refused in one sentence and exits non-zero. When
+   and the exit codes. A version with no release (HTTP 404) is refused in one sentence and exits
+   non-zero. Any other failed lookup, such as GitHub's rate limit (403) or a server error, is not
+   an absent release: the shell script reads the HTTP status itself rather than curl's exit code,
+   and neither script says the release does not exist for it. When
    the variable is not set, the scripts resolve `releases/latest` as before, which skips
    prereleases and drafts.
 2. **Reviewers and the owner install a pinned prerelease before the cutover.** The release candidate
@@ -276,7 +279,12 @@ differ:
    the pinned commands (the script read from the tag, `GHOSTLIGHT_VERSION=2.0.0-rc.1`) on Windows
    PowerShell 5.1, PowerShell 7 and a Linux shell. The same commands go in "Notes for certification"
    in both stores, with the statement that the public one-line command serves 2.0 only after
-   release.
+   release. The rc is published with the release tooling, which keeps its custody checks:
+   `scripts/publish-github-release.ps1` takes `-Prerelease <suffix>`, which makes the tag
+   `v<version>-<suffix>`, creates the release with `--prerelease`, refuses a draft whose
+   prerelease flag differs from the request, and runs the same tag-revision, attestation and
+   asset-hash checks. The rc carries the 2.0.0 build, the files `v2.0.0` will carry, so its
+   binaries report 2.0.0 although the pinned install prints the rc tag it fetched.
 3. **The cutover waits for approval.** The cutover is not run until the staged item shows ready to
    publish and the public privacy page carries the 2.0 text. Then, in one sitting, from the same
    commit as the rc: publish `v2.0.0` as latest, fast-forward `main` to it, run the exact frozen

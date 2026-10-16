@@ -224,7 +224,10 @@ GitHub release creation and publication are also separate. `scripts/publish-gith
 defaults to `Plan`; `CreateDraft` and `PublishDraft` each require `-Execute`. It requires an existing
 remote `v<version>` tag at the candidate source revision, verifies every GitHub provenance
 attestation against this repository and the release workflow, and re-downloads every draft asset
-for an exact hash comparison before publication. It never creates a tag.
+for an exact hash comparison before publication. It never creates a tag. `-Prerelease <suffix>`
+publishes the same candidate as a GitHub prerelease tagged `v<version>-<suffix>` (for example
+`v2.0.0-rc.1`): the release is created with `--prerelease`, is never latest, and carries the
+candidate's version in its binaries.
 
 `scripts/publish-npm.ps1` defaults to `Plan`. Publication requires `Publish -Execute`, the exact
 tarball SHA-256, a candidate that contains that same npm asset, an observable matching GitHub

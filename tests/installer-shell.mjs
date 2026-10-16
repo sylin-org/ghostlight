@@ -45,14 +45,20 @@ const fs = require('node:fs');
 const args = process.argv.slice(2), url = args.at(-1);
 const fixture = JSON.parse(fs.readFileSync(process.env.INSTALLER_FIXTURE));
 fs.appendFileSync(process.env.INSTALLER_REQUESTS, url + '\\n');
-let body = '', effective = url;
+let body = '', effective = url, status = 200;
 if (url.endsWith('/releases/latest')) {
   effective = fixture.latest;
 } else if (url.includes('/releases/tags/')) {
-  // The releases API answers a tag it has with the release and any other tag with 404 (curl -f: 22).
+  // The releases API answers a tag it has with the release, any other tag with 404, and may answer
+  // anything else (a rate limit, a server error). Without -f curl exits 0 and reports the status.
   const tag = url.split('/').at(-1);
-  if (!fixture.tags.includes(tag)) process.exit(22);
-  body = JSON.stringify({ tag_name: fixture.wrongTag ?? tag, prerelease: tag.includes('-') });
+  if (fixture.transportFailure) {
+    process.stderr.write('curl: (7) Failed to connect to api.github.com port 443\\n');
+    process.exit(7);
+  }
+  status = fixture.tagStatus ?? (fixture.tags.includes(tag) ? 200 : 404);
+  if (status === 200) body = JSON.stringify({ tag_name: fixture.wrongTag ?? tag, prerelease: tag.includes('-') });
+  else body = JSON.stringify({ message: 'fixture refusal' });
   effective = url;
 } else if (url.endsWith('/SHA256SUMS')) {
   body = fixture.sums;
@@ -64,7 +70,10 @@ if (url.endsWith('/releases/latest')) {
   effective = 'https://release-assets.githubusercontent.com/fixture/' + name;
 }
 if (args.includes('-o')) fs.writeFileSync(args[args.indexOf('-o') + 1], body);
-if (args.includes('-w')) process.stdout.write(effective);
+if (args.includes('-w')) {
+  const format = args[args.indexOf('-w') + 1];
+  process.stdout.write(format.includes('http_code') ? String(status) : effective);
+}
 `, { mode: 0o755 });
 // A shim that does not parse would fail every request and hide what the cases mean to prove.
 const shimCheck = spawnSync(process.execPath, ["--check", join(shims, "curl")], { encoding: "utf8" });
@@ -133,6 +142,20 @@ for (const [label, version, changes] of [["absent", "9.9.9", {}], ["absent-prere
   assert.equal(missing.requests.length, 1);
   assert.equal(existsSync(join(missing.userDirectory, ".ghostlight")), false);
 }
+// Any other answer is a failed lookup, never an absent release: a rate limit or a server error for
+// a release that exists must not tell the person it does not.
+for (const [label, changes, said] of [
+  ["rate-limited", { tagStatus: 403 }, "ghostlight: could not look up release v1.2.3 (HTTP 403)"],
+  ["server-error", { tagStatus: 503 }, "ghostlight: could not look up release v1.2.3 (HTTP 503)"],
+  ["transport-failure", { transportFailure: true }, "ghostlight: could not look up release v1.2.3"]
+]) {
+  const failed = run(`requested-${label}`, changes, "1.2.3");
+  assert.notEqual(failed.status, 0);
+  assert.equal(failed.stderr.includes("does not exist"), false, failed.stderr);
+  assert.ok(failed.stderr.trim().endsWith(said), failed.stderr);
+  assert.equal(failed.requests.length, 1);
+  assert.equal(existsSync(join(failed.userDirectory, ".ghostlight")), false);
+}
 const malformed = run("requested-malformed", {}, "latest");
 assert.notEqual(malformed.status, 0);
 assert.equal(malformed.requests.length, 0);
@@ -142,4 +165,4 @@ for (const damaged of names) {
   assert.equal(existsSync(join(corrupt.userDirectory, ".ghostlight/bin")), false, `a corrupt ${damaged} installs nothing`);
   assert.deepEqual(corrupt.commands, [], "a corrupt download runs nothing");
 }
-console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, restore, invalid release, absent or malformed requested version, checksum refusal\nEvidence: ${area}`);
+console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, restore, invalid release, absent, unreachable or malformed requested version, checksum refusal\nEvidence: ${area}`);

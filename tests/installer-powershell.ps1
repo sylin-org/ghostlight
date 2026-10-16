@@ -43,7 +43,7 @@ function New-FixtureRelease {
     ) }
 }
 # The releases API: latest is the stable v1.3.12; a tag it has answers with that release, prerelease
-# or not, and any other tag answers 404.
+# or not, any other tag answers 404, and v8.8.8 answers 403 (a rate limit).
 function Invoke-RestMethod {
     param([string]$Uri)
     $global:fixtureRequests.Add($Uri)
@@ -51,7 +51,7 @@ function Invoke-RestMethod {
     $tag = $Uri.Split('/')[-1]
     if ($Uri -like '*/releases/tags/*' -and $global:fixtureTags -contains $tag) { return New-FixtureRelease $tag }
     $failure = [FixtureHttpError]::new()
-    $failure.Response = [pscustomobject]@{ StatusCode = 404 }
+    $failure.Response = [pscustomobject]@{ StatusCode = $(if ($tag -eq 'v8.8.8') { 403 } else { 404 }) }
     throw $failure
 }
 function Invoke-WebRequest {
@@ -87,6 +87,11 @@ if ($absent -ne 'Ghostlight release v9.9.9 does not exist.') { throw "Absent req
 if ($global:fixtureRequests.Count -ne 1 -or $global:fixtureRequests[0] -ne 'https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v9.9.9') {
     throw "Absent requested version asked for: $($global:fixtureRequests -join ', ')"
 }
+# Any other answer is a failed lookup and must not claim the release is absent.
+$env:GHOSTLIGHT_VERSION = '8.8.8'
+$limited = $null
+try { & $installer } catch { $limited = $_.Exception.Message }
+if ($null -eq $limited -or $limited -match 'does not exist') { throw "Rate-limited requested version: $limited" }
 $env:GHOSTLIGHT_VERSION = 'latest'
 $malformed = $null
 try { & $installer } catch { $malformed = $_.Exception.Message }

@@ -1,5 +1,11 @@
 #Requires -Version 7
 # SPDX-License-Identifier: Apache-2.0 OR MIT
+#
+# Plans, drafts and publishes the GitHub release of a verified candidate. With -Prerelease <suffix>
+# the release is a GitHub prerelease tagged v<version>-<suffix> (for example v2.0.0-rc.1) on the
+# same source revision and with the same files: GitHub never marks a prerelease latest, so
+# releases/latest and everything that follows it are untouched. The binaries are the candidate's
+# and report the candidate's version, not the suffix.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -7,6 +13,8 @@ param(
     [ValidateSet("Plan", "CreateDraft", "PublishDraft")]
     [string]$Action = "Plan",
     [string]$Repository = "sylin-org/ghostlight",
+    [ValidatePattern('^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$')]
+    [string]$Prerelease,
     [string]$NotesFile,
     [switch]$Execute
 )
@@ -29,7 +37,11 @@ if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
 $candidate = Get-Content -LiteralPath $candidatePath -Raw | ConvertFrom-Json
 & (Join-Path $PSScriptRoot "check-release-candidate.ps1") -CandidateDirectory $CandidateDirectory
 
+$isPrerelease = -not [string]::IsNullOrWhiteSpace($Prerelease)
 $tag = "v$($candidate.version)"
+if ($isPrerelease) {
+    $tag = "$tag-$Prerelease"
+}
 $releaseFiles = @(
     Get-ChildItem -LiteralPath (Join-Path $CandidateDirectory "assets") -File |
         Sort-Object Name |
@@ -43,6 +55,8 @@ $releaseFiles += @(
 Write-Output "GitHub release action: $Action"
 Write-Output "Repository: $Repository"
 Write-Output "Tag: $tag"
+Write-Output "Release kind: $(if ($isPrerelease) { 'prerelease (never latest)' } else { 'stable (latest)' })"
+Write-Output "Binaries report: $($candidate.version)"
 Write-Output "Source revision: $($candidate.sourceRevision)"
 Write-Output "Candidate status: $($candidate.status)"
 Write-Output "Release files: $($releaseFiles.Count)"
@@ -82,11 +96,15 @@ if ($Action -eq "CreateDraft") {
     $arguments = @(
         "release", "create", $tag,
         "--repo", $Repository,
-        "--title", "Ghostlight $($candidate.version)",
+        "--title", "Ghostlight $($tag.Substring(1))",
         "--notes-file", $NotesFile,
         "--verify-tag",
         "--draft"
-    ) + $releaseFiles
+    )
+    if ($isPrerelease) {
+        $arguments += "--prerelease"
+    }
+    $arguments += $releaseFiles
     & gh @arguments
     if ($LASTEXITCODE -ne 0) {
         throw "GitHub draft release creation failed"
@@ -95,9 +113,12 @@ if ($Action -eq "CreateDraft") {
     return
 }
 
-$release = & gh release view $tag --repo $Repository --json isDraft,tagName | ConvertFrom-Json
+$release = & gh release view $tag --repo $Repository --json isDraft,isPrerelease,tagName | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $release.isDraft -or $release.tagName -ne $tag) {
     throw "GitHub release is missing or is not a draft: $tag"
+}
+if ([bool]$release.isPrerelease -ne $isPrerelease) {
+    throw "GitHub draft $tag is $(if ($release.isPrerelease) { 'a prerelease' } else { 'not a prerelease' }), which does not match this request"
 }
 
 $downloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ghostlight-release-" + [guid]::NewGuid())
@@ -128,7 +149,11 @@ finally {
     }
 }
 
-& gh release edit $tag --repo $Repository --draft=false
+$publishArguments = @("release", "edit", $tag, "--repo", $Repository, "--draft=false")
+if ($isPrerelease) {
+    $publishArguments += "--prerelease"
+}
+& gh @publishArguments
 if ($LASTEXITCODE -ne 0) {
     throw "GitHub draft publication failed"
 }
