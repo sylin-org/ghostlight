@@ -11,7 +11,9 @@ the installed service is absent or older than the bundle, or the installed edge 
 missing, does it run the bundled `ghostlight-service deployment install`, which puts the three
 images under `~/.ghostlight/bin` and registers the local browser native host. It then runs the
 installed `~/.ghostlight/bin/ghostlight mcp`, never the copy in the bundle, so a newer service
-installed by npm always meets an edge of its own revision.
+installed by npm always meets an edge of its own revision. When `install.json` records the
+development channel, the launcher never installs: it runs the installed edge, and if that edge is
+gone it names the way back to a release and exits.
 Claude Desktop remains the sole owner of its MCP configuration. Users must separately install
 Ghostlight in Browser from the Chrome Web Store.
 
