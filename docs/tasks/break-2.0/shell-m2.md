@@ -589,7 +589,12 @@ frame as a contract failure and exits.
   `tests/history-compatibility.mjs` line 1, the three workbench doc comments and
   `governance/manifest.rs` named in the spec no longer named Tauri when this slice started
   (m2-04 changed them); nothing was left to do there. ACCEPTANCE desktop gate 11 did not name
-  Tauri either; the new gate 20 holds this slice's claims instead.
+  Tauri but still described its bundled assets; review fixed it. Gate 11 now says the WebView loads
+  only the service's loopback workbench and the shell's state screens, and gate 12 lost "bundle"
+  (it meant the Tauri bundle; the shell is a plain executable). Review also narrowed gate 20 and
+  ARCHITECTURE to starts Ghostlight itself makes, naming the pre-24H2 Uninstall console and the
+  Windows 10 flash as accepted, and `packaging/npm/README.md` now says only the window needs
+  WebKitGTK.
 - m2-05: Linux. The npm launcher dropped `webkitLibraryPresent`, `requireLinuxLibraries` and the
   `libraryProbe` parameter, and the two tests that pinned them. In `ci.yml` the `process-journeys`
   job no longer wraps its steps in `dbus-run-session -- xvfb-run`, nor installs `xvfb`: none of

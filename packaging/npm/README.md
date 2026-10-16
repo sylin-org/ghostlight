@@ -15,8 +15,9 @@ verified temporary copy that installs nothing.
 `--restore` it replaces a development installation (a build the development loop installed) with
 this release; a release package never installs over one by itself.
 A bare `npx ghostlight` starts `ghostlight-mcp-connector`, the stdio server your client talks to;
-`npx ghostlight install` connects the browser side. On Linux the service needs
-`libwebkit2gtk-4.1`; the launcher names the package to install when it is missing.
+`npx ghostlight install` connects the browser side. On Linux the service runs without
+WebKitGTK; only the Ghostlight window (`ghostlight-desktop`) needs `libwebkit2gtk-4.1`, and
+without it `ghostlight status` names the window reason.
 
 ## Quick start
 

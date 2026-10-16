@@ -468,10 +468,13 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    before its home-directory fallback. An exact pre-1.0 `ghostlight-relay --role agent` entry in
    the owned legacy install root is updatable; a different command, role, or root remains
    foreign and is reported rather than silently skipped.
-11. The WebView loads bundled assets under a restrictive CSP and has no shell, arbitrary file,
-   remote-navigation, or network capability. File mutation terminates in the explicit harness
-   application service, outside the UI event loop.
-12. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
+11. The WebView loads only the service's loopback workbench, exactly `http://127.0.0.1:<port>/`
+   carrying the window's bearer, under the service's restrictive CSP, and the shell's own state
+   screens, which are handed nothing. Any other navigation is refused, and a link the page wants
+   opened goes to the system opener through the service. The WebView has no shell or arbitrary
+   file capability. File mutation terminates in the explicit harness application service, outside
+   the UI event loop.
+12. The desktop executable, tray, and workbench use the original Ghostlight icon bytes,
     established palette and spring curve, and a static readable reduced-motion treatment. The
     tray's state dot is drawn at run time over the original icon bytes, in the band's colours;
     the ready icon is the original bytes.
@@ -509,7 +512,11 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     `libappindicator`, `tray-icon`, `muda` or `webview2-com`, and none of `tokio`, `reqwest`,
     `hyper` or `socket2` (`tests/guards/connectors.test.mjs`). On Windows Task Manager reads
     "Ghostlight service" for the service, "Ghostlight" for the window and "Ghostlight connection"
-    for each edge, and no console window appears on any start no person typed. On Linux with
+    for each edge. Every start Ghostlight itself makes (the edge, Chrome, agents, presence, the
+    shell and open) shows no console window. On Windows 11 24H2 and later no direct start of the
+    service image shows one either. Before 24H2 two starts may: the Uninstall entry in Settings >
+    Apps prints its outcome in a console, and ADR-0199 Decision 4 accepts a brief console flash
+    on Windows 10. On Linux with
     `DISPLAY` and `WAYLAND_DISPLAY` both unset the service starts, publishes readiness and
     `status` says `no_display`.
 

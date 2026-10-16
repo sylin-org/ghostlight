@@ -42,8 +42,11 @@ local human
   console on Windows 11 24H2 and later. The service image is a console-subsystem program too,
   with the same manifest (the build script reads the edge's file by path), so a typed command
   writes to the terminal it runs in and receives Ctrl-C itself, and a start with no console to
-  join shows none. Every start that no person typed goes through the relay's `start_service`,
-  which creates the process with no window and detached from any console.
+  join shows none. Every start Ghostlight itself makes (edge, Chrome, agents, presence, the
+  shell, open) goes through the relay's `start_service`, which creates the process with no window
+  and detached from any console. On Windows 11 24H2 and later no direct start of the image shows a
+  console either. Before 24H2 the Uninstall entry, which runs the image directly, prints its
+  outcome in a console, and ADR-0199 Decision 4 accepts a brief flash on Windows 10.
   On Windows each executable names itself in Task Manager through its own version resource:
   "Ghostlight service" for the service, "Ghostlight" for the window and "Ghostlight connection"
   for the edge (one per MCP client or browser).
