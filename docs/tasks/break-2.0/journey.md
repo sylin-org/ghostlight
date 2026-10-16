@@ -240,3 +240,8 @@ j06-popup has landed. Next: j07-options.
   fake gains `setBadgeTextColor`, and the unseen-notice test checks the text colour.
   (8) `onboarding.test.js` keeps its linkState tests and the options pins that j07 deletes; its outdated
   test now pins only the options card.
+  (9) Review fix: the popup buttons carry `data-intent` (the request each sends). The governance
+  acceptance journey (`tests/linux/acceptance/governance.mjs`) now drives hold, resume, end_session and
+  start_session by that hook and waits on `#pop[data-light=lit]` and `#title` (Ready, Paused, Session
+  ended). `popupText()` in `tests/installed-journey.mjs` waits for the lit light, not a sentence. Both
+  are `node --check` only; the coordinator's live runs are the proof.

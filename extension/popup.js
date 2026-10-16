@@ -102,6 +102,8 @@
   function actionButton(action, className) {
     const button = element("button", className);
     button.type = "button";
+    // The intent names the request the button sends, so a test finds the button by what it does.
+    if (action.intent) button.dataset.intent = action.intent;
     if (action.key) {
       const markup = ICON_FOR_INTENT[action.intent];
       if (markup) button.append(icon(markup));

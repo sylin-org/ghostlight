@@ -553,16 +553,15 @@ class Context {
     return this.fixtures.events.filter((event) => event.kind === kind && event.at >= since);
   }
 
-  /** The extension popup's text, read through the scratch browser. */
+  /** The extension popup's text once it shows a connected state (lit light), read through the scratch browser. */
   async popupText() {
     const { targetId } = await this.pipe.send("Target.createTarget", { url: `chrome-extension://${EXTENSION_ID}/popup.html` });
     try {
       const { sessionId } = await this.pipe.send("Target.attachToTarget", { targetId, flatten: true });
       return await until(async () => {
-        const result = await this.pipe.send("Runtime.evaluate", { expression: "document.body ? document.body.innerText : ''", returnByValue: true }, sessionId, 10000).catch(() => null);
-        const text = result?.result?.value ?? "";
-        return /Connected to Ghostlight/.test(text) ? text : null;
-      }, "the popup to say Connected to Ghostlight", 45000, 500);
+        const result = await this.pipe.send("Runtime.evaluate", { expression: "document.getElementById('pop')?.dataset.light === 'lit' ? document.body.innerText : ''", returnByValue: true }, sessionId, 10000).catch(() => null);
+        return result?.result?.value || null;
+      }, "the popup light to be lit", 45000, 500);
     } finally {
       await this.pipe.send("Target.closeTarget", { targetId }).catch(() => {});
     }
