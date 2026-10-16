@@ -549,6 +549,26 @@ workbench shows waiting becoming running once.
     on Windows 10. On Linux with
     `DISPLAY` and `WAYLAND_DISPLAY` both unset the service starts, publishes readiness and
     `status` says `no_display`.
+21. A service-first install on a computer with a supported browser and no extension prints the
+    version, the location, the agents and one Next line, and shows the Ghostlight window on the
+    browser step of its setup view. `--dry-run`, `--no-open`, CI and an app container show no
+    window, and an install after setup is complete prints no Next line and shows nothing.
+22. An extension-first install opens the bundled setup page once, and only when Ghostlight is
+    absent at the extension's first connection. The page loads nothing from the network. Where
+    Ghostlight is present the extension opens no page, and its Open Ghostlight shows the window.
+23. The browser step lists the installed browsers and acts on them: Add starts that browser at
+    the store listing, Open starts it in the profile that holds the extension, and Get Google
+    Chrome appears only when no supported browser is installed. While setup is incomplete the
+    service reads each browser's `Local State` and `Extensions` folder; the read writes, logs and
+    sends nothing. A watcher in a browser tab sees the ordinary workbench.
+24. The first MCP request that ran in a browser and succeeded completes setup: the view shows
+    Ready and goes to At a glance, `state/setup.json` exists, the next start opens on the
+    workbench and the setup view retires. A `ghostlight call` does not complete it, and a home
+    upgraded from 1.x opens on the workbench. Until then, an agent's browser call that finds no
+    browser connected says in its answer where the extension comes from, and opens no window.
+25. With reduced motion, the setup page, the popup and the window's setup view show every state
+    with the same words at the same moments and play no animation, and each resting look reads
+    without it.
 
 ## Integration and release-readiness gates
 

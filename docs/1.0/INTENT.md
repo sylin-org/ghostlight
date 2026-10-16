@@ -67,7 +67,7 @@ Internal browser commands are combined when a person experiences them as one job
 - The tray opens a calm workbench that answers what is running, what happened, whether Ghostlight
   is healthy, which controls apply, and where it is connected, without turning setup into a CLI
   archaeology exercise.
-- Once its connector registration and browser extension are installed, Ghostlight needs no
+- Once its registration and browser extension are installed, Ghostlight needs no
   separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
   when it is absent, except that a person's Quit holds: a browser restart does not bring
   Ghostlight back, and the next agent request, a command that needs it, or a person does.
@@ -78,6 +78,22 @@ Internal browser commands are combined when a person experiences them as one job
   window leaves the icon, and the first time one notice says so. Windows restores its existing
   view; Linux reconstructs its disposable view because Wayland cannot report or unset
   minimization.
+- Install is one journey in three steps, This computer, Your browser and Your agent, and every
+  surface that shows it shows the same three. An interactive install prints the version, where
+  Ghostlight lives, which agents have it and one Next line, and opens the Ghostlight window on its
+  setup view. While setup is incomplete the window opens on that view, whether the install, the
+  tray's Open or the extension's Open Ghostlight asked for it. The view lists the browsers
+  installed on this computer and acts on them: Add opens the store listing in that browser, Open
+  finishes a browser that already holds the extension, and a computer with no supported browser is
+  offered Get Google Chrome. A watcher in a browser tab sees the ordinary workbench. Skip for now
+  goes to At a glance, and the tray brings setup back until it is done.
+- The extension finds Ghostlight absent only at its first connection, and then opens its own
+  bundled setup page once; an install that started with the service shows the window instead and
+  opens no browser page. The first agent request that reaches a browser and succeeds completes
+  setup: the view shows Ready, then At a glance, and the next start opens on the workbench. Until
+  then, an agent's browser call that finds no browser connected says in its own answer where the
+  extension comes from, and opens no window. Reduced motion shows every state with the same words at the same
+  moments and no animation.
 - Every Linux install has an Applications entry. It runs the shell, which starts the service when
   none runs and shows the window. A tray is never the only route to the workbench.
 - Six destinations and one global search reach every workbench surface and user-visible record:
@@ -163,13 +179,15 @@ The unpacked extension is a complete local product surface, not an invisible rel
   to mechanisms used by 1.0.
 - Its installation identity persists across service-worker suspension, browser restart, and
   extension reload. The pinned development key preserves the established unpacked extension id.
-- The toolbar popup preserves the established take-the-wheel control, separate panic control,
-  connection indicator, local-only note, caption toggle, and wording. The page has no controls.
-- The options page preserves the established dark sky-blue presentation, effects-on and
-  captions-off defaults, connection status, diagnostic toggle, governance explanation, and a
-  default-on local choice to preserve controlled tabs. It owns only adapter-local presentation,
-  diagnostics, and physical safety preferences. Authority and policy never move into the
-  extension.
+- The toolbar popup says in one word whether Ghostlight is Ready, Paused, Session ended, Not
+  connected or Update needed, who is browsing, and offers Pause agents with the take-the-wheel key
+  cap, End session, and a path to Settings. When Ghostlight does not answer it says to open
+  Ghostlight on this computer and where it is, or offers the setup page.
+- The options page uses the Ghostlight kit, keeps the effects-on and captions-off defaults, shows
+  the connection in the popup's words with a setup button when Ghostlight does not answer, holds
+  the diagnostic toggle, and keeps a default-on local choice to preserve controlled tabs. It
+  owns only adapter-local presentation, diagnostics, and physical safety preferences. Authority
+  and policy never move into the extension.
 - Controlled tabs use one browser-wide blue exact-title group named
   `Ghostlight - <client label>`. New work reuses that group wherever the user placed it. When no
   Ghostlight group exists, the adapter creates a dedicated normal browser window instead of

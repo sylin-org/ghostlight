@@ -50,6 +50,21 @@ history, and does not read the browser's saved-password store. The privacy polic
 permissions are kept in this package. JQ3 said to drop them if a live check showed nothing needs
 them, and no result of that check is recorded yet (see "Owed" below).
 
+## The service half of the journey
+
+The extension is one third of the install journey ([ADR-0200](../adr/0200-the-install-journey.md)).
+The Ghostlight application on the person's computer does the rest, and the owner should see it
+whole when answering the dashboard. After an interactive install the application opens its own
+window on the setup steps. While setup is incomplete it reads each installed Chromium browser's
+`Local State` file for profile names and checks whether the extension's folder exists in each
+profile, so it can tell "added, browser closed" from "missing". The read is local, and nothing it
+finds is stored, logged or sent. A click on Add makes the application start that browser at the
+store listing, and a click on Open starts it in the profile that holds the extension. Get Google
+Chrome opens google.com in the default browser. The extension's own bundled setup page and its
+Open Ghostlight button, which asks the application to show its window, are the only parts of this
+journey that live in the package. [PRIVACY.md](../legal/PRIVACY.md) carries a bullet for the
+profile check, and the public privacy page must carry it before publication.
+
 ## Policy reading (coordinator, 2026-10-16)
 
 Read on 2026-10-16.

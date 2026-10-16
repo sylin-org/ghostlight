@@ -1,44 +1,71 @@
 # Installing Ghostlight
 
-Ghostlight installs as one local product: three sibling executables, a tray workbench, and a
-compatible Chromium extension. No account, no resident launcher service, no admin rights.
+Ghostlight installs as one local product: three executables in `~/.ghostlight/bin`
+(`ghostlight`, the edge that MCP clients and browsers start; `ghostlight-service`, the service; and
+`ghostlight-desktop`, the window and the tray) and a compatible Chromium extension. No account, no
+resident launcher service, no admin rights.
 
-This guide covers the published package and the source-development path you can follow today.
+This guide describes the 2.0 install and the source-development path. Until 2.0 is published, the
+latest published release is the one the [README](../../README.md) names under "Where it stands
+today". Every route installs into `~/.ghostlight/bin`. The extension connects by the fixed
+native-host name, and the service gives it the page code it runs when it connects, so a 2.0
+service and a 2.0 extension are updated together.
 
-Version 1.3.14 uses fixed `~/.ghostlight/bin` paths for npm and download installs
-(ADR-0193). The packaged extension connects by the fixed native-host name; its injector
-receives the current page runtime when the service reconnects. Ordinary service updates
-do not require an extension update or reload.
+## Installation journey
 
-## Release installation journey
+Install is three steps: This computer, Your browser, Your agent. The Ghostlight window shows them
+and what to do next.
 
-1. Run `npx -y ghostlight@1.3.14 install`. The checksum-bound launcher downloads one exact sibling
-   set, registers detected native browsers for the current user, creates the Linux Applications
-   entry, and connects detected MCP clients.
-   WinGet (`winget install Sylin.Ghostlight`), the one-line installer, or the Claude Desktop
-   MCPB may provide the same binaries instead. With WinGet, run `ghostlight install` once
-   through the WinGet alias: it installs into `~/.ghostlight/bin` and registers browsers and
-   clients. After `winget upgrade`, running `ghostlight install` again (or any launch through
-   the alias) carries the newer version into `~/.ghostlight/bin`. An older copy never replaces
-   a newer one.
-2. Install the compatible `Ghostlight in Browser` 1.3.12 extension from its store listing.
-3. Restart or reconnect the MCP harness, then run the bounded first proof from the README. Launch
-   Open Ghostlight from Applications whenever you want the workbench.
+1. Install Ghostlight with `npx -y ghostlight install`, or with the one-line installer for your
+   system and no Node.js. On Windows, in PowerShell:
 
-Version 1.3.14 retains adapter protocol 3 and works with the current 1.3.12 store adapter.
-WinGet 1.3.14 is submitted in PR #445987; until it is accepted, use one of the 1.3.14 routes above.
+   ```powershell
+   irm https://sylin.org/ghostlight/get.ps1 | iex
+   ```
 
-That is the normal installation path. `npx -y ghostlight@1.3.14 doctor` is recovery when something
-does not connect; it is not another required setup step.
+   On Linux:
 
-Setup is now complete. Launching the registered MCP client or Chromium demand-starts Ghostlight if
-it is absent. The complete desktop authority starts with its tray available and its workbench
-backgrounded. Applications uses `ghostlight open`: it demand-starts that same authority when absent,
-then focuses the workbench instead of creating another one.
+   ```sh
+   curl -fsSL https://sylin.org/ghostlight/get.sh | sh
+   ```
+
+   The checksum-bound launcher downloads one exact set of executables, registers detected native
+   browsers for the current user, creates the Linux Applications entry, and connects detected MCP
+   clients. When it finishes it prints the version, where Ghostlight lives, which agents have it
+   and one Next line, and opens the Ghostlight window on its setup steps. It opens no window with
+   `--dry-run`, `--no-open`, in CI or inside an app container.
+
+   WinGet (`winget install Sylin.Ghostlight`) or the Claude Desktop MCPB may deliver the same
+   executables instead. With WinGet, run `ghostlight install` once through the WinGet alias: it
+   installs into `~/.ghostlight/bin` and registers browsers and clients. After `winget upgrade`,
+   running `ghostlight install` again (or any launch through the alias) carries the newer version
+   into `~/.ghostlight/bin`. An older copy never replaces a newer one.
+2. Add Ghostlight in Browser from the step the window shows. It lists the browsers installed on
+   your computer. Add opens the Chrome Web Store listing in that browser (Edge installs the
+   extension from the same listing). If a browser already holds the extension but is closed, the
+   row reads Open, and Open starts that browser in the right profile. A computer with no supported
+   browser is offered Get Google Chrome. The window moves to the next step on its own once the
+   extension connects. If the extension is added before Ghostlight is installed, it opens its own
+   setup page, which holds the one command to run.
+3. Ask your agent: "Open sylin.org/ghostlight/demo/desk and ring the bell." The first request that
+   reaches a browser and succeeds completes setup, and the window shows Ready.
+
+If the install named an agent to restart, restart it before you ask; the install says so. There
+is no other restart step. "Skip for now" in the window's setup view goes to the workbench, and the
+tray's Open brings the setup steps back until setup is done. A browser tab that watches Ghostlight
+shows the ordinary workbench.
+
+`npx -y ghostlight doctor` is recovery when something does not connect. It is not another
+required setup step, and `ghostlight doctor --fix` opens no window.
+
+After setup there is no startup ritual. Launching the registered MCP client or Chromium
+demand-starts Ghostlight if it is absent. The service starts the window's tray whenever the desktop
+can show it; an agent that starts Ghostlight shows only the icon, and a Start-menu launch,
+Applications or `ghostlight open` shows the window.
 
 Linux packages support x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
-package. Snap and Flatpak browsers cannot start Ghostlight's host native-messaging connector.
-Install and doctor identify those package forms and name the native-package remedy. Use
+package. Snap and Flatpak browsers cannot start Ghostlight's browser relay through native
+messaging. Install and doctor identify those package forms and name the native-package remedy. Use
 `--all-browsers` only when deliberately preparing registrations before browser installation.
 
 Only checksum-bound, provenance-verified packages and a compatible published extension satisfy
@@ -46,8 +73,8 @@ this journey. Provenance verification, clean-machine install, upgrade, and unins
 gates, not claims made by this source tree.
 
 The npm process is a download and launch edge, not the product authority. Supported-client
-registrations point directly at the cached native `ghostlight` edge with the argument `mcp`. A bare `npx -y ghostlight@1.3.14`
-remains the stdio command for another compatible MCP client.
+registrations point directly at the installed native `ghostlight` edge with the argument `mcp`. A
+bare `npx -y ghostlight` remains the stdio command for another compatible MCP client.
 
 ## Workbench installation behavior
 
@@ -88,27 +115,25 @@ cd ghostlight
 cargo build --workspace
 ```
 
-Start the workbench:
+A build directory never serves on its own. Deploy the build into `~/.ghostlight/bin` as the
+development channel, then work from the installed copy:
 
-```sh
-target/debug/ghostlight open
+```powershell
+pwsh scripts/dev-loop.ps1
 ```
 
-Or start the complete desktop authority directly:
-
-```sh
-target/debug/ghostlight
-```
-
-There is no service-only or presentation-free launch. MCP, browser, and CLI demand-start invoke
-this same no-argument desktop authority.
+The script builds in its own target directory, installs the three executables the way a release
+install does, and starts the service. [`../DEV-LOOP.md`](../DEV-LOOP.md) covers it in full,
+including `-Plan` to see what a deploy would do. A deploy replaces the Ghostlight installed for
+your user, so run it only on a machine whose Ghostlight is yours, and do not run another product
+instance to check a change.
 
 For browser development, load `extension/` unpacked in Chromium 125 or newer. Its pinned key
 preserves the established development identity. The platform native-messaging host must point at
 the sibling source-built `ghostlight`; use the isolated procedure in
 [`../DEV-LOOP.md`](../DEV-LOOP.md) and never replace an installed stack you do not own.
 
-The repository process journey exercises the real two-executable topology without modifying a
+The repository process journey runs the real executables in a fresh test home without modifying a
 user installation:
 
 ```sh
@@ -163,14 +188,11 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 
 ## Update and uninstall
 
-A 1.0 updater replaces the three version-matched sibling executables and desktop assets as one
-package. It does not silently edit harness registrations or extension settings.
-
-On Linux, replacing a Debian package does not replace an already-running authority. After the
-package update, use Ghostlight's Quit action, then open Ghostlight from Applications or run
-`ghostlight open`. Reconnect MCP clients to load the updated edge. Check
-`ghostlight doctor` for the running service version; `ghostlight --version` reports the executable
-on disk and can differ until the old process has exited.
+An update replaces the three version-matched executables as one set. It does not silently edit
+harness registrations or extension settings. The installer asks the running service to quit,
+starts the new one, and the window reopens on the new build; MCP clients reconnect on their own.
+Check `ghostlight doctor` for the running service version; `ghostlight --version` reports the
+executable on disk and can differ until the old process has exited.
 
 On Windows an install writes the Start-menu shortcut and the installed-apps entry, as every
 deploy does, and says each one it changed. `ghostlight uninstall` removes both again, and says each one it

@@ -91,6 +91,11 @@ frames or GIFs, dialog text, console text, or network payloads.
   server, and changes only when you update that application.
 - The extension's setup page is bundled with it, loads nothing from the network, and opens its
   documentation link only when you click it.
+- While setup is incomplete, the Ghostlight application on this computer reads each installed
+  Chromium browser's profile list (the `Local State` file) and checks whether the Ghostlight
+  extension's folder is in each profile, so its window can tell you whether to add the extension
+  or open the browser. The read is local. Profile names appear only in the Ghostlight window on
+  this computer and are never stored, logged or sent.
 - No Chrome sync storage; adapter identity and user settings remain local to the browser profile.
 - No browsing-history database or background collection unrelated to a requested operation.
 

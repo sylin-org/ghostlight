@@ -7,14 +7,20 @@ audit run on the endpoint.
 
 | Flow | Transport | Destination |
 | --- | --- | --- |
-| MCP client to MCP connector | stdio | Same endpoint. |
-| MCP connector to service | A per-user named pipe (Windows) or Unix socket (Linux) that only the same user can open; each end checks the other's user before anything is sent. Typed framing | Same endpoint. |
-| Service to browser connector | The same per-user named pipe or Unix socket, with the same checks. Typed framing | Same endpoint. |
+| MCP client to MCP relay | stdio | Same endpoint. |
+| MCP relay to service | A per-user named pipe (Windows) or Unix socket (Linux) that only the same user can open; each end checks the other's user before anything is sent. Typed framing | Same endpoint. |
+| Service to browser relay | The same per-user named pipe or Unix socket, with the same checks. Typed framing | Same endpoint. |
 | Ghostlight window to service | The same per-user named pipe or Unix socket, with the same checks. It carries the workbench address and the secret that lets the window make changes, requests to show the window at a section, notice titles and bodies, links and folders the person asked to open, and file paths the person picked. All of it stays on this computer, and nothing new leaves it | Same endpoint. |
-| Browser connector to extension | Chromium native messaging | Same endpoint. |
+| Browser relay to extension | Chromium native messaging | Same endpoint. |
 | Extension to the controlled page | Chrome DevTools Protocol | The user's existing browser profile. |
 | Browser page traffic | Browser networking | Sites the user or MCP client directs the browser to. |
 | Audit records | Append-only JSON Lines file | Local path selected by the endpoint owner. |
+| Setup page | The extension's own bundled page, opened by the extension on its first connection when Ghostlight is absent, and by the setup buttons in the popup and the options page. It loads nothing from the network | Same endpoint. |
+| Setup profile check | Local file reads by the service, only while setup is incomplete. For each installed Chromium browser it reads the `Local State` file for the names of the profiles and checks whether the extension's folder exists in each. Nothing is stored, logged or sent, and the names are shown only in the Ghostlight window | Same endpoint. |
+| Add and Open in a browser | A click in the Ghostlight window makes the service start the named browser, which opens the Chrome Web Store listing for Add, or the profile that holds the extension for Open | The browser then loads the store listing itself. |
+| Get Google Chrome | A click in the Ghostlight window opens google.com in the default browser | Google, in the person's browser. |
+| Setup command | The command a person pastes in a terminal. Its address is on sylin.org, which answers with a redirect to the script on GitHub; the script downloads the release files from GitHub | The person's own terminal, when the person runs it. |
+| Suggested first request | The window shows a sentence for the person to give their agent. The agent's browser then opens a demo page on sylin.org, which the site states submits nothing elsewhere, calls out to nothing else and stores nothing | Browser page traffic the person asked for. |
 | Managed policy fetch | Local file read or conditional HTTPS GET | Customer-configured source, only when an administrator provisions `managed.json`. |
 | Workbench page | HTTP on 127.0.0.1 only, answered only when the Host header is that address and port. While "Others can watch" is on, anyone on this computer can see activity with hosts, client names and policy rules, and can pause agents; the person's never-touch list shows only as a count. Changes need a secret made at each service start, which the service hands out only on its per-user pipe, to the Ghostlight window. A person turns watching off in the Ghostlight window's Settings > Sharing; while it is off, a browser tab shows only the About page | Same endpoint. |
 
@@ -37,6 +43,13 @@ When the extension is installed on a computer where the Ghostlight service is ab
 own bundled setup page once. That page loads nothing from the network. No vendor page opens, and
 nothing Ghostlight does contacts the vendor.
 
+The same holds for the rest of setup. No page opens without a click: the window opens a store
+listing or google.com only when a person presses Add, Open or Get Google Chrome, and the browser
+makes that request, not Ghostlight. The two sylin.org addresses in the table are used by the
+person's own act: the terminal that runs the setup command, and the browser that opens the demo
+page when the person asks their agent to. The Ghostlight programs send the vendor nothing in
+either case.
+
 ## Local artifacts
 
 - `audit.jsonl`, or the path in `GHOSTLIGHT_AUDIT_FILE`, contains content-minimized terminal
@@ -47,6 +60,10 @@ nothing Ghostlight does contacts the vendor.
 - `state/tray-hint` in the home is an empty file. It exists once the window has been closed for
   the first time, so the notification that explains the tray icon is shown once and never again.
   It holds nothing and leaves the computer nowhere.
+- `state/setup.json` in the home records, once, the time of the first agent request that reached a
+  browser and succeeded, or the time of the upgrade for a 1.x home already in use. It holds that
+  time and nothing about the person, the agent or the page. While it is absent, setup is
+  incomplete and the Ghostlight window can show its setup steps.
 - `state/desktop-webview` in the home is the web-engine profile of the Ghostlight window
   (WebView2 on Windows, WebKitGTK on Linux). It holds the web storage of the workbench page,
   such as the Density and Motion choices, and the engine's own caches. On Linux it is closed to
@@ -75,4 +92,4 @@ See [security-overview.md](security-overview.md),
 [the SIEM guide](../guides/siem-integration.md), and
 [the governance guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-08-14 against the 1.0 source candidate | Contact: hello@sylin.org
+Last reviewed: 2026-10-16 against the current source | Contact: hello@sylin.org

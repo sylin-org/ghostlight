@@ -59,31 +59,49 @@ The published release is 1.3.14. It is available as the GitHub release
 
 ## Your first five minutes
 
-You need Chrome, Edge, Brave, or Chromium 125+, an MCP client, and Node.js for the installer. The
-service you run afterward is native Rust.
+You need Chrome, Edge, Brave, or Chromium 125+ and an MCP client. The `npx` installer needs
+Node.js; the one-line installers do not. The service you run afterward is native Rust.
 
-1. Install Ghostlight and register the MCP clients it finds:
+1. Install Ghostlight. It registers the MCP clients it finds and opens the Ghostlight window on
+   its setup steps:
 
    ```sh
    npx -y ghostlight install
    ```
 
-2. Add
-   [Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
-   from the Chrome Web Store.
+   Without Node.js, use the one-liner for your system. On Windows, in PowerShell:
 
-3. Restart an MCP client if it does not hot-reload tools.
+   ```powershell
+   irm https://sylin.org/ghostlight/get.ps1 | iex
+   ```
 
-4. Give it one small, read-only task:
+   On Linux:
 
-   > Open https://example.com/ in a new Ghostlight tab, summarize the page, and tell me which tab
-   > you used. Do not click, type, submit, or change the page.
+   ```sh
+   curl -fsSL https://sylin.org/ghostlight/get.sh | sh
+   ```
 
-A sky-blue Ghostlight group should appear in your browser. The agent opens the page, reads it, and
-names the exact tab it used. That one prompt proves the whole connection without authorizing a
-click or write. Next time, the same client reuses that group and a tab Ghostlight itself opened
-for it on that site and left open, so repeated work stops littering your tab strip. It never takes
-over a tab you opened, or a tab in another client's group.
+2. Add Ghostlight in Browser from the step the window shows. It lists the browsers on your
+   computer. Add opens the Chrome Web Store listing in that browser, which is also where Edge gets
+   the extension. If the browser already holds the extension, the row reads Open instead.
+
+3. Ask your agent:
+
+   > Open sylin.org/ghostlight/demo/desk and ring the bell.
+
+If the install named an agent to restart, restart it first; the install says so. There is no
+other restart step.
+
+A sky-blue Ghostlight group appears in your browser, the agent rings the bell on a demo page that
+submits and stores nothing, and the window shows Ready. That one prompt proves the whole
+connection. For a read-only first task instead, ask:
+
+> Open https://example.com/ in a new Ghostlight tab, summarize the page, and tell me which tab
+> you used. Do not click, type, submit, or change the page.
+
+Next time, the same client reuses that group and a tab Ghostlight itself opened for it on that
+site and left open, so repeated work stops littering your tab strip. It never takes over a tab you
+opened, or a tab in another client's group.
 
 If a step needs attention, run:
 
@@ -199,28 +217,19 @@ Three executables land side by side:
   needs the WebKitGTK 4.1, GTK 3 and AppIndicator development packages; running the service does
   not.
 
-```sh
-target/debug/ghostlight open
-```
+Deploy a build with `pwsh scripts/dev-loop.ps1`: it installs your build into `~/.ghostlight/bin`
+as the development channel, because a build directory never serves on its own.
+[`docs/DEV-LOOP.md`](docs/DEV-LOOP.md) covers the loop, browser registration and the full
+validation loop.
 
-That shows the workbench, or focuses the one already running. Then open **MCP integrations**,
-connect the client you want, and restart or reconnect it. [`docs/DEV-LOOP.md`](docs/DEV-LOOP.md)
-covers browser registration and the full validation loop.
+After setup there is no startup ritual: launching a connected MCP client or Chromium
+demand-starts Ghostlight when it is not already running.
 
-After that first setup there is no startup ritual: launching a connected MCP client or Chromium
-demand-starts Ghostlight when it is not already running. There is no service-only launch mode.
-
-The one-command install is the primary journey:
-
-```sh
-npx -y ghostlight install
-```
-
-On Windows, WinGet is an equivalent route: `winget install Sylin.Ghostlight`, then run
-`ghostlight install` once. The self-contained Claude Desktop MCPB is another. Every route uses the
-matching store adapter and the same three native executables. WinGet only delivers them;
-`ghostlight install` copies them into `~/.ghostlight/bin`, and after `winget upgrade` the next
-`ghostlight install` carries the newer version there. An older copy never replaces a newer one.
+On Windows, WinGet is another way to install: `winget install Sylin.Ghostlight`, then run
+`ghostlight install` once. The self-contained Claude Desktop MCPB is a third. Every route puts the
+three executables in `~/.ghostlight/bin`: WinGet only delivers them, and `ghostlight install`
+copies them there. After `winget upgrade`, the next `ghostlight install` carries the newer version
+there. An older copy never replaces a newer one.
 
 <details>
 <summary><strong>Current release and compatibility</strong></summary>

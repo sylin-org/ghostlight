@@ -1,25 +1,40 @@
-# Installing and using Ghostlight 1.0 for an AI client
+# Installing and using Ghostlight for an AI client
 
 Ghostlight works in the user's visible, signed-in Chromium browser. Do not install an extension,
 edit a harness configuration, or retry an uncertain browser effect without the user's knowledge.
 Policy denial and the extension's preserve-tabs refusal are boundaries to explain, not evade.
 
-Ghostlight 1.3.14 is the published service release, observable on GitHub, npm, and the official MCP
-Registry. The public Chrome adapter is 1.3.12, delivered through the Chrome Web Store. This
-release retains adapter protocol 3. The existing injector loads the installed service runtime;
-no extension update or reload is required for this service update.
+This guide describes Ghostlight 2.0. The release published today is named in the README under
+"Where it stands today".
 
 ## 1. Complete the user-visible installation
 
-1. Ask the user to run `npx -y ghostlight@1.3.14 install`, or install the matching native
-   package.
-2. Ask the user to install the `Ghostlight in Browser` 1.3.12 store adapter.
-3. Reconnect or restart the MCP client if it does not refresh its tool catalog. Ghostlight changes
-   only owned entries, creates a backup before client-config replacement, and preserves unrelated
-   JSONC or TOML.
+1. Ask the user to run `npx -y ghostlight install`, or the one-line installer for their system:
 
-Use `npx -y ghostlight@1.3.14 doctor` only if the connection needs recovery. It is not a required
-second installation command.
+   ```powershell
+   irm https://sylin.org/ghostlight/get.ps1 | iex
+   ```
+
+   ```sh
+   curl -fsSL https://sylin.org/ghostlight/get.sh | sh
+   ```
+
+   Ghostlight changes only owned MCP client entries, creates a backup before client-config
+   replacement, and preserves unrelated JSONC or TOML.
+2. Tell the user what happens next. The install prints a short summary with one Next line and
+   opens the Ghostlight window on its setup steps: This computer, Your browser, Your agent. The
+   browser step lists the user's browsers; the user presses Add to open the Chrome Web Store
+   listing for `Ghostlight in Browser` in that browser, or Open if the extension is already in a
+   closed browser. Do not add the extension for the user. When the extension connects, the window
+   moves to the agent step.
+3. If the install says an agent needs a restart, ask the user to restart it. There is no other
+   restart step. Then give the user this prompt to try: "Open sylin.org/ghostlight/demo/desk and
+   ring the bell." The first request that reaches a browser and succeeds finishes setup.
+
+If the user does not see the window (`--no-open`, a remote or automated install), they can open
+Ghostlight from the Start menu or Applications, or run `ghostlight open`, to see the setup steps.
+Use `npx -y ghostlight doctor` only if the connection needs recovery. It is not a required second
+installation command.
 
 Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
 Code, Windsurf, Zed, OpenCode, and Crush. Another compatible local stdio MCP client can point
@@ -83,6 +98,6 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
   authorization is sufficient; no resume step is needed.
 - **Unknown or partial effect:** do not replay the call automatically.
 
-Ghostlight 1.0 uses local stdio MCP at the client edge and typed local IPC behind it. It exposes no
+Ghostlight uses local stdio MCP at the client edge and typed local IPC behind it. It exposes no
 remote MCP endpoint. The npm launcher is a supported install and generic-stdio entry point; the
 service and the edge remain native Rust processes.

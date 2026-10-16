@@ -20,17 +20,20 @@ one-address marketplace in both ecosystems:
 ## What first run does
 
 The plugin's MCP server is `npx -y ghostlight` with no arguments. That is the npm launcher:
-it ensures the three checksum-verified Ghostlight images exist under
-`~/.ghostlight/bin/`, downloading them from the official GitHub release only, then
-hands its inherited stdio to `ghostlight mcp`. Requirements: Node.js 18 or newer.
-The launcher's download and verification progress goes to stderr and never enters the
+it ensures the three checksum-verified Ghostlight executables (`ghostlight`, `ghostlight-service`
+and `ghostlight-desktop`) exist under `~/.ghostlight/bin/`, downloading them from the official
+GitHub release only, then hands its inherited stdio to `ghostlight mcp`. Requirements: Node.js 18
+or newer. The launcher's download and verification progress goes to stderr and never enters the
 protocol stream.
 
-The first real browser call demand-starts the local Ghostlight authority, which walks you
-through connecting a browser adapter (the Chrome Web Store extension) if none is connected
-yet. Ghostlight is local by construction: no telemetry, no activation service, no hidden
-network dependency; the only network traffic is the explicit binary download from the release
-channel.
+The plugin installs the agent side only. To finish setup, add
+[Ghostlight in Browser](https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl)
+from the Chrome Web Store, or open Ghostlight from the tray, the Start menu or Applications to see
+the setup steps. Until the first request that reaches a browser succeeds, an agent's browser call
+that finds no browser connected says in its answer where the extension comes from. Ghostlight
+started by an agent shows only its tray icon and opens no window. Ghostlight is local by
+construction: no telemetry, no activation service, no hidden network dependency; the only network
+traffic is the explicit binary download from the release channel.
 
 ## Notes for specific clients
 

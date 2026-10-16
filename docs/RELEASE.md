@@ -39,9 +39,9 @@ branches.
 
 One Ghostlight version comprises:
 
-- `ghostlight`, including the orchestrator, tray, native shell, and bundled workbench;
-- sibling `ghostlight-mcp-connector`;
-- sibling `ghostlight-browser-connector`;
+- `ghostlight-service`, the service with its bundled workbench;
+- `ghostlight`, the edge: the MCP relay, the browser relay and the front door to the service;
+- `ghostlight-desktop`, the shell that draws the window, the tray and the notices;
 - the mandatory checksum-bound `ghostlight` npm launcher, whose bare command remains an MCP stdio
   edge and whose subcommands reach the native orchestrator;
 - one Windows WinGet archive, one-line installers, a self-contained Windows Claude Desktop MCPB,
@@ -52,9 +52,9 @@ One Ghostlight version comprises:
 - checksums, GitHub build-provenance attestations, SBOM, license notices, source archive, and
   release notes.
 
-The desktop and service are one executable. The connectors are deliberately stable independent
-process shores, but a package must ship a tested sibling set. The extension keeps its established
-name, store identity, artwork, settings, and permissions.
+The service, the edge and the shell are three executables, and a package ships a tested set of
+all three. The extension keeps its established name, store identity, artwork, settings, and
+permissions.
 
 ## Candidate gates
 

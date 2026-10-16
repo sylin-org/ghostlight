@@ -28,9 +28,12 @@ No. Ghostlight generates zero vendor-bound traffic: the binary never phones home
 telemetry, and initiates no network activity beyond your own tool calls and the optional signed
 policy fetch from an endpoint your own organization hosts. When the extension is installed on a
 computer where the Ghostlight service is absent, it opens its own bundled setup page once; that
-page loads nothing from the network and no vendor page opens. Page content, credentials, audit
-records, and policy all stay on your infrastructure or flow only to endpoints you choose. There is no vendor service to
-receive your data, so there is no vendor-side copy of it to secure, subpoena, or breach.
+page loads nothing from the network and no vendor page opens. While setup is incomplete, the
+service also reads each installed browser's profile names and looks for the extension's folder, a
+local read whose results appear only in the Ghostlight window and are never stored or sent. Page
+content, credentials, audit records, and policy all stay on your infrastructure or flow only to
+endpoints you choose. There is no vendor service to receive your data, so there is no vendor-side
+copy of it to secure, subpoena, or breach.
 
 See [data-flows.md](data-flows.md) and [docs/legal/PRIVACY.md](../legal/PRIVACY.md).
 
