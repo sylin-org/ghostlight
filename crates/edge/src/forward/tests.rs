@@ -18,6 +18,8 @@ use super::*;
 
 const TICK: Duration = Duration::from_millis(2);
 const PATIENCE: Duration = Duration::from_secs(5);
+/// How long `Harness::advance_until` lets the edge react to one step before taking the next.
+const STEP_GRACE: Duration = Duration::from_millis(20);
 
 /// The failure templates the golden accepted reply carries.
 fn golden_templates() -> Templates {
@@ -271,6 +273,29 @@ impl Harness {
         *self.clock.0.lock().unwrap() += by;
     }
 
+    /// Move the clock on by `by` a step at a time until `condition` holds.
+    ///
+    /// The edge schedules its next attempt from the clock at the moment it handles a failed
+    /// one, and a test cannot see when that is. A single jump made just before the handling
+    /// lands short of the new deadline, so the clock keeps moving, one step per round trip
+    /// through the edge. The steps stay inside half the hold limit so that no held line
+    /// expires on the way.
+    fn advance_until(&self, by: Duration, condition: impl Fn() -> bool) {
+        let steps = (HOLD_LIMIT / 2).as_millis() / by.as_millis().max(1);
+        for _ in 0..steps {
+            if condition() {
+                return;
+            }
+            self.advance(by);
+            self.settle();
+            let deadline = Instant::now() + STEP_GRACE;
+            while Instant::now() < deadline && !condition() {
+                thread::sleep(TICK);
+            }
+        }
+        self.wait(condition);
+    }
+
     fn lines(&self) -> Vec<String> {
         let bytes = self.output.0.lock().unwrap().clone();
         String::from_utf8(bytes)
@@ -457,8 +482,9 @@ fn held_lines_flush_in_order_after_an_opening_that_resumes() {
     }
     harness.settle();
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance(BACKOFF_FIRST);
-    harness.wait(|| harness.fake.received(1).len() == held.len());
+    harness.advance_until(BACKOFF_FIRST, || {
+        harness.fake.received(1).len() == held.len()
+    });
     assert_eq!(harness.fake.received(1), held);
 
     let openings = harness.fake.openings();
@@ -544,8 +570,7 @@ fn nothing_written_to_a_service_is_sent_again() {
     harness.send(&request(&json!(2), "tools/call"));
     harness.settle();
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance(BACKOFF_FIRST);
-    harness.wait(|| harness.fake.received(1).len() == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     harness.settle();
     assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
     assert_eq!(harness.fake.received(0).len(), 2);
@@ -556,8 +581,7 @@ fn nothing_written_to_a_service_is_sent_again() {
 fn the_service_is_started_at_start_and_for_a_held_request_never_while_idle() {
     let harness = Harness::start(false, true);
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance(BACKOFF_FIRST);
-    harness.wait(|| harness.fake.connections() == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.connections() == 1);
 
     harness.go_away(0);
     for _ in 0..5 {
@@ -573,8 +597,7 @@ fn the_service_is_started_at_start_and_for_a_held_request_never_while_idle() {
 
     harness.send(&request(&json!(3), "tools/call"));
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 2);
-    harness.advance(BACKOFF_FIRST);
-    harness.wait(|| harness.fake.received(1).len() == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     assert_eq!(harness.fake.received(1), [request(&json!(3), "tools/call")]);
     assert_eq!(
         *harness.fake.reasons.lock().unwrap(),
@@ -615,8 +638,7 @@ fn after_a_quit_goodbye_requests_are_answered_nothing_is_held_and_the_next_reque
     harness.send(&request(&json!(2), "tools/call"));
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
     assert_eq!(*harness.fake.reasons.lock().unwrap(), [StartReason::Agent]);
-    harness.advance(BACKOFF_FIRST);
-    harness.wait(|| harness.fake.received(1).len() == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
 }
 
@@ -629,8 +651,9 @@ fn after_a_replace_goodbye_lines_are_held_and_the_edge_reconnects_without_starti
     harness.settle();
     for _ in 0..3 {
         let before = harness.fake.attempts.load(Ordering::SeqCst);
-        harness.advance(BACKOFF_FIRST * 4);
-        harness.wait(|| harness.fake.attempts.load(Ordering::SeqCst) > before);
+        harness.advance_until(BACKOFF_FIRST * 4, || {
+            harness.fake.attempts.load(Ordering::SeqCst) > before
+        });
     }
     assert_eq!(
         harness.fake.starts.load(Ordering::SeqCst),
@@ -639,8 +662,7 @@ fn after_a_replace_goodbye_lines_are_held_and_the_edge_reconnects_without_starti
     );
 
     harness.fake.bring_up();
-    harness.advance(BACKOFF_FIRST * 10);
-    harness.wait(|| harness.fake.received(1).len() == 1);
+    harness.advance_until(BACKOFF_FIRST * 10, || harness.fake.received(1).len() == 1);
     assert_eq!(harness.fake.received(1), [request(&json!(7), "tools/call")]);
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0);
 }
@@ -656,7 +678,9 @@ fn a_replacement_that_does_not_come_back_within_the_hold_limit_is_a_lost_service
     assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "idle");
 
     harness.send(&request(&json!(3), "tools/call"));
-    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    harness.advance_until(BACKOFF_FIRST, || {
+        harness.fake.starts.load(Ordering::SeqCst) == 1
+    });
     assert_eq!(*harness.fake.reasons.lock().unwrap(), [StartReason::Agent]);
 }
 
@@ -725,7 +749,6 @@ fn a_held_request_left_by_a_service_that_died_mid_flush_still_starts_one() {
     }
     harness.settle();
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance(BACKOFF_FIRST);
 
     let ids: Vec<Value> = std::iter::once(json!("large")).chain(small).collect();
     let settled = |id: &Value| {
@@ -737,7 +760,7 @@ fn a_held_request_left_by_a_service_that_died_mid_flush_still_starts_one() {
         let answered = harness.values().iter().any(|value| value["id"] == *id);
         delivered || answered
     };
-    harness.wait(|| ids.iter().all(settled));
+    harness.advance_until(BACKOFF_FIRST, || ids.iter().all(settled));
     for answer in harness
         .values()
         .iter()
@@ -766,8 +789,7 @@ fn a_late_answer_to_a_service_that_went_away_never_reaches_the_next_one() {
     harness.send(&request(&json!(2), "tools/call"));
     harness.settle();
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance(BACKOFF_FIRST);
-    harness.wait(|| harness.fake.received(1).len() == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     harness.settle();
     assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
 }
@@ -803,8 +825,7 @@ fn a_reply_without_templates_keeps_the_ones_already_held() {
     harness.send(&request(&json!(5), "tools/call"));
     harness.settle();
     harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
-    harness.advance(BACKOFF_FIRST);
-    harness.wait(|| harness.fake.received(1).len() == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
     harness.fake.go_down();
     assert_eq!(
         harness.answer(&json!(5))["result"]["content"][0]["text"],
