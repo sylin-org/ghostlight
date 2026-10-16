@@ -7,13 +7,14 @@
  * current: every change arrives with a monotonic sequence, and a gap means the cache is thrown
  * away and rebuilt from a fresh snapshot. Nothing here is ever the source of truth.
  *
- * This file composes four parts and owns nothing itself:
+ * This file composes five parts and owns nothing itself:
  *
  *   Words      the fixed vocabulary and its number formatting  (pure)
  *   Entries    the shape one row of the monitor takes          (pure)
  *   Transport  the only thing that talks to the orchestrator   (no document, no state)
  *   Store      the cache, and the only thing that may change it (no document)
  *   View       everything that touches the document            (cannot fetch, cannot mutate)
+ *   SetupView  the setup view that stands in for the tabs      (cannot fetch, decides nothing)
  *
  * Data flows one way: transport brings a snapshot, the store folds it in and announces what
  * changed from a closed list of kinds, and the view draws what it is handed. A view that cannot
@@ -28,7 +29,7 @@
 const {
   FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
   WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, DEFAULT_VIEW,
-  parseAddress, addressOf, screenState, byteSize
+  SETUP_ADDRESS, SETUP, parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
 
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
@@ -75,6 +76,29 @@ const store = globalThis.GhostlightStore.create({ announce: (kind, detail) => dr
 const view = globalThis.GhostlightView.create({
   sessionFor: (workspace) => store.sessionFor(workspace),
   coverageFor: (invocation) => store.snapshot()?.document_coverage?.find((item) => item.invocation === invocation),
+  onFailure: reportFailure
+});
+
+/*
+ * The setup view.
+ *
+ * While setup is under way it stands in for the tabs. The service composes what it says; this file
+ * only decides whether it is on screen, carries out what a click on it asks for, and takes the
+ * person away from it when they skip it or it has finished.
+ */
+const setupScreen = globalThis.GhostlightSetupView.create({
+  document,
+  words: SETUP,
+  schedule: (work, ms) => setTimeout(work, ms),
+  cancel: (handle) => clearTimeout(handle),
+  now: () => Date.now(),
+  hasFocus: () => document.hasFocus(),
+  reducedMotion: motionIsReduced,
+  onAction: setupAction,
+  onSkip: () => go(DEFAULT_VIEW),
+  copyText: (text) => transport.copyText(text),
+  bringForward: () => continueInWindow(SETUP_ADDRESS),
+  onFinished: () => go(DEFAULT_VIEW),
   onFailure: reportFailure
 });
 
@@ -293,6 +317,10 @@ function discardPolicyDraft() {
 }
 
 function hinted({ part, etag }) {
+  if (part === SETUP_PART) {
+    refreshSetup();
+    return;
+  }
   if (!HINT_VIEWS[part]) return;
   if (etag !== undefined && hintTags.get(part) === etag) return;
   hintTags.set(part, etag);
@@ -586,13 +614,159 @@ async function withButton(event, work, done) {
   }
 }
 
+/* ------------------------------ the setup view -------------------------- */
+
+/** The part the service announces when what the setup view says may have changed. */
+const SETUP_PART = "setup";
+
+/** The destination the service opens for the Google Chrome download. */
+const GET_CHROME = "get_chrome";
+
+/** The act a connect button asks of the integrations roster. */
+const CONNECT_ACT = "install";
+
+/*
+ * The setup part last given: undefined before the first read, null when the service leaves it out
+ * (a watcher is shown the ordinary workbench), otherwise the part. `setupShown` is whether the view
+ * is on screen, `setupSkipped` whether this window was sent away from it, and `setupRequested`
+ * whether the address asked for it before the first read.
+ */
+let setupPart;
+let setupShown = false;
+let setupSkipped = false;
+let setupRequested = false;
+let setupRescanned = false;
+let setupComplete = false;
+let setupTurn = 0;
+
+/** Whether the person has turned motion off, in the system or in Settings. */
+function motionIsReduced() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true
+    || document.body?.classList?.contains?.("motion-reduced") === true;
+}
+
+/** Read the setup part, and take what the service says. Nothing is asked once setup is complete. */
+async function refreshSetup() {
+  if (!transport.available || !showsData() || setupComplete) return;
+  try {
+    await takeSetup(() => transport.setupPart());
+  } catch (error) {
+    reportFailure("reading setup", error);
+  }
+}
+
+/** Take the setup part `read` brings, unless a later read has been asked for since. */
+async function takeSetup(read) {
+  const turn = ++setupTurn;
+  const part = await read();
+  if (turn === setupTurn) attempt("drawing setup", () => receiveSetup(part));
+}
+
+/** Decide, from a new setup part, whether the window shows setup, keeps showing it, or stops. */
+function receiveSetup(part) {
+  const first = setupPart === undefined;
+  setupPart = part ?? null;
+  setupComplete = setupComplete || part?.stage === "retired" || part?.stage === "done";
+  if (first && setupRequested) {
+    setupRequested = false;
+    showSetup();
+    return;
+  }
+  const show = globalThis.GhostlightSetupView.visible(setupPart, { skipped: setupSkipped, shown: setupShown });
+  if (show && setupShown) setupScreen.update(setupPart);
+  else if (show) openSetup();
+  else if (setupShown) closeSetup();
+}
+
+/** Put the setup view on screen in place of the tabs. */
+function openSetup() {
+  setupShown = true;
+  document.getElementById("app-shell").hidden = true;
+  setupScreen.open(setupPart);
+  view.writeAddress(SETUP_ADDRESS);
+  // The agent rows are as fresh as the last look; look once more as the view opens.
+  if (!setupRescanned && allowed(ACT.rescan)) {
+    setupRescanned = true;
+    rescan().catch((error) => view.toast(String(error), true));
+  }
+}
+
+/** Take the setup view off the screen and give the tabs back. */
+function closeSetup() {
+  setupShown = false;
+  setupScreen.close();
+  document.getElementById("app-shell").hidden = false;
+}
+
+/**
+ * Show setup because the address names it. A reveal at #setup brings it back after a skip; an
+ * address asked for before the first read waits for it; when there is nothing to do, the window
+ * opens at its default place and the address says so.
+ */
+function showSetup() {
+  if (setupPart === undefined) {
+    setupRequested = true;
+    return;
+  }
+  setupSkipped = false;
+  if (globalThis.GhostlightSetupView.visible(setupPart, { skipped: false, shown: setupShown })) {
+    if (!setupShown) openSetup();
+    return;
+  }
+  go(DEFAULT_VIEW);
+}
+
+/** Carry out what a click on a row of the setup view asks for. */
+async function setupAction(action, row) {
+  const { ACTION } = globalThis.GhostlightSetupView;
+  try {
+    switch (action.kind) {
+      case ACTION.addInBrowser:
+      case ACTION.openBrowser:
+        await takeSetup(() => transport.setupAct(action));
+        break;
+      case ACTION.getChrome:
+        await openDestination(GET_CHROME);
+        break;
+      case ACTION.connectAgent:
+        await connectAgent(action.agent);
+        break;
+      case ACTION.reviewAgent:
+        go("integrations");
+        break;
+      default:
+        throw new Error(`unknown setup step ${action.kind}`);
+    }
+  } catch (error) {
+    setupScreen.clearPending(row.id);
+    view.toast(String(error), true);
+    await resync();
+  }
+}
+
+/** Write Ghostlight's entry into one agent, as the Integrations tab does; setup then announces itself. */
+async function connectAgent(id) {
+  const harness = store.snapshot()?.harnesses.find((each) => each.id === id);
+  const result = await transport.manageHarness(id, CONNECT_ACT, harness?.state);
+  view.toast(result.message);
+  await settled(result);
+}
+
 /* ------------------------------- navigating ----------------------------- */
 
 /**
  * Show a destination, and for Settings one of its sections, and bring up to date what the person
- * is about to see. A tab, a rail entry and an address all arrive here.
+ * is about to see. A tab, a rail entry and an address all arrive here. The setup address shows the
+ * setup view instead, and any other place sends this window away from it.
  */
 function go(name, section) {
+  if (name === SETUP_ADDRESS) {
+    showSetup();
+    return;
+  }
+  // Going anywhere else is a skip, for the life of this window.
+  setupSkipped = true;
+  if (setupShown) closeSetup();
   view.navigate(name, section);
   if (name === "policy" && showsData() && !view.draftIsDirty()) {
     outdated.delete("policy");
@@ -670,7 +844,7 @@ function wire() {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       if (view.paletteOpen()) view.closePalette();
-      else if (showsData()) view.openPalette();
+      else if (showsData() && !setupShown) view.openPalette();
       return;
     }
     if (event.key === "Escape" && view.paletteOpen()) view.closePalette();
@@ -773,11 +947,15 @@ const streamHandlers = {
     // the snapshot was taken before the stream opened and changes lie between the two.
     if (reconnected || (store.snapshot() && data.seq > store.seq())) {
       resync({ rebuildFeed: true });
+      refreshSetup();
       return;
     }
     helloSeq = data.seq;
   },
-  reset: () => resync({ rebuildFeed: true }),
+  reset: () => {
+    resync({ rebuildFeed: true });
+    refreshSetup();
+  },
   closed: (data) => becomeClosed(data?.sentence),
   reconnecting: (on) => view.reconnecting(on)
 };
@@ -814,6 +992,7 @@ async function start() {
     stopStream = transport.subscribe(streamHandlers);
   });
   attempt("first snapshot", () => resync({ rebuildFeed: true }));
+  refreshSetup();
 }
 
 function boot() {

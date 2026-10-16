@@ -1,9 +1,11 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
+import { setupStages as stagesOfSetup } from "./workbench-setup-fixtures.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
 const ui = join(repository, "crates", "orchestrator", "ui");
+const extensionFolder = join(repository, "extension");
 const port = Number(process.env.GHOSTLIGHT_PREVIEW_PORT || 41737);
 const connectorPath = "/opt/ghostlight/ghostlight";
 const connectorCommand = `${connectorPath} mcp`;
@@ -111,6 +113,8 @@ const setupFixture = {
   light: "lit", code: null, rows_label: null, rows: [], extra_code: null, live: null,
   connected_line: null, tagline: null
 };
+
+const setupStates = { retired: setupFixture, ...stagesOfSetup };
 
 // The controls part Settings is drawn from, as the window sees it: every act available, watching on.
 const controlsFixture = {
@@ -279,7 +283,9 @@ const retainConnection = (record) => {
 snapshot.operations.forEach(retainConnection);
 snapshot.history.forEach(retainConnection);
 
-const fixture = `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(snapshot)};
+const fixtureFor = (stage) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify({ ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] })};
+window.__GHOSTLIGHT_SETUP_STATES__ = ${JSON.stringify(setupStates)};
+window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(stage)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
 (() => {
   const preview = window.__GHOSTLIGHT_PREVIEW__;
@@ -315,6 +321,18 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     controls.diagnostics.word = controls.diagnostics.on ? "On (" + controls.diagnostics.layer + ")" : "Off";
     publish({ kind: "controls_changed", controls: JSON.parse(JSON.stringify(controls)) });
   };
+
+  // The setup view: show a stage, and tell the page as the service would. The preview plays the
+  // journey a person has: Add or Open starts a wait and the browser connects a few seconds later,
+  // and Connect turns an agent's row into the restart line.
+  const setupStates = window.__GHOSTLIGHT_SETUP_STATES__;
+  let setupTurn = 0;
+  const setSetup = stage => {
+    preview.setup = JSON.parse(JSON.stringify(setupStates[stage]));
+    publish({ kind: "part_changed", part: "setup", etag: stage + ":" + (setupTurn += 1) });
+  };
+  window.__GHOSTLIGHT_SETUP__ = setSetup;
+  if (window.__GHOSTLIGHT_SETUP_START__ === "done") setTimeout(() => setSetup("done"), 3000);
 
   const runOne = () => {
     if (preview.service.runtime_state !== "active") return;
@@ -421,7 +439,18 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     }
     if (command === "refresh_harnesses") return preview.harnesses;
     if (command === "test_notification") return null;
-    if (command === "manage_harness") return { changed: false, summary: {}, message: "Preview action completed." };
+    if (command === "manage_harness") {
+      const row = preview.setup.rows.find(each => each.id === args.id);
+      if (row) {
+        Object.assign(row, { detail: "Restart " + row.name + " to finish.", tone: "attention", action: null });
+        publish({ kind: "part_changed", part: "setup", etag: "connect:" + (setupTurn += 1) });
+      }
+      return { changed: false, summary: {}, message: "Preview action completed." };
+    }
+    if (command === "setup_act") {
+      if (args.kind === "add_in_browser" || args.kind === "open_browser") setTimeout(() => setSetup("agent"), 4000);
+      return preview.setup;
+    }
     throw new Error("Unknown preview command " + command);
   };
 
@@ -441,6 +470,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     "PUT /api/controls/viewing": "set_watching",
     "POST /api/integrations/rescan": "refresh_harnesses",
     "POST /api/integrations/act": "manage_harness",
+    "POST /api/setup/act": "setup_act",
     "POST /api/notifications/test": "test_notification",
     "POST /api/window": "continue_in_window",
     "POST /api/quit": "quit_ghostlight"
@@ -505,24 +535,33 @@ const types = {
 
 const server = createServer(async (request, response) => {
   try {
-    const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+    const address = new URL(request.url, `http://${request.headers.host}`);
+    const pathname = address.pathname;
+    const stage = address.searchParams.get("setup") ?? "retired";
+    if (!Object.hasOwn(setupStates, stage)) {
+      response.writeHead(400, { "content-type": "text/plain" }).end(`setup is one of ${Object.keys(setupStates).join(", ")}`);
+      return;
+    }
     if (pathname === "/fixture.js") {
       response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
-      response.end(fixture);
+      response.end(fixtureFor(stage));
       return;
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
+    // The setup view shares two of the extension's files, which the service serves under /extension/.
+    const shared = { "extension/kit.css": join(extensionFolder, "kit.css"),
+      "extension/ghostlight-mascot.png": join(extensionFolder, "icons", "ghostlight-mascot.png") };
     const served = new Set(["index.html", "styles.css", "app.js", "ghostlight.png"]);
-    if (!served.has(name) && !/^lib\/[a-z]+\.js$/.test(name) && !/^kit\/[a-z]+\.(js|css)$/.test(name)
-      && !/^integrations\/[a-z0-9-]+\.svg$/.test(name)) {
+    if (!served.has(name) && !Object.hasOwn(shared, name) && !/^lib\/[a-z-]+\.js$/.test(name)
+      && !/^kit\/[a-z]+\.(js|css)$/.test(name) && !/^integrations\/[a-z0-9-]+\.svg$/.test(name)) {
       response.writeHead(404).end();
       return;
     }
-    let body = await readFile(join(ui, name));
+    let body = await readFile(shared[name] ?? join(ui, name));
     if (name === "index.html") {
       body = Buffer.from(body.toString("utf8").replace(
         '<script src="app.js"></script>',
-        '<script src="fixture.js"></script><script src="app.js"></script>'
+        `<script src="fixture.js?setup=${stage}"></script><script src="app.js"></script>`
       ));
     }
     response.writeHead(200, { "content-type": types[extname(name)] || "text/html; charset=utf-8", "cache-control": "no-store" });

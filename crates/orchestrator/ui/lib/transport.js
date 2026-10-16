@@ -84,6 +84,7 @@
   const ROUTES = Object.freeze({
     workbench_context: { method: GET, path: "/api/context" },
     workbench_snapshot: { method: GET, path: `/api/snapshot?parts=${SNAPSHOT_PARTS.join(",")}`, read: flatten },
+    workbench_setup: { method: GET, path: "/api/snapshot?parts=setup", read: setupOf },
     workbench_search: { method: POST, path: "/api/search", body: ({ query }) => ({ query }) },
     workbench_policy: { method: GET, path: "/api/policy" },
     preview_user_policy: { method: POST, path: "/api/policy/preview", body: ({ document }) => ({ document }) },
@@ -92,6 +93,7 @@
     apply_runtime_intent: { method: POST, path: "/api/runtime", body: ({ intent }) => ({ intent }) },
     set_diagnostics: { method: PUT, path: "/api/controls/diagnostics", body: ({ on }) => ({ on }) },
     set_watching: { method: PUT, path: "/api/controls/viewing", body: ({ watch }) => ({ watch }) },
+    setup_act: { method: POST, path: "/api/setup/act", body: (action) => action },
     refresh_harnesses: { method: POST, path: "/api/integrations/rescan", body: () => ({}) },
     setup_detected_harnesses: { method: POST, path: "/api/integrations/setup-all", body: () => ({}) },
     manage_harness: {
@@ -155,6 +157,14 @@
     if (status.runtime_note !== undefined) flat.runtime_note = status.runtime_note;
     if (controls !== undefined) flat.controls = controls;
     return flat;
+  }
+
+  /**
+   * The setup part of a snapshot answer, or null when the service leaves it out: a screen that
+   * is shown the ordinary workbench while setup is under way is given no setup part.
+   */
+  function setupOf(answer) {
+    return answer.parts?.setup ?? null;
   }
 
   /**
@@ -389,6 +399,15 @@
 
       /** The whole current truth, which the store then decides what to do with. */
       snapshot: () => call("workbench_snapshot"),
+
+      /**
+       * The setup part alone. It is read on its own, not with the snapshot, because an unfinished
+       * setup reads this computer and a resync must not pay for that.
+       */
+      setupPart: () => call("workbench_setup"),
+
+      /** Start a browser on a step of the setup view; answers the setup part as it is then. */
+      setupAct: (action) => call("setup_act", action),
 
       /** Ranked matches for the palette. */
       search: (query) => call("workbench_search", { query }),

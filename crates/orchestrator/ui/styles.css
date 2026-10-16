@@ -803,3 +803,16 @@ a.ghost-button { text-decoration: none; }
   .tab.active { border-color: Highlight; background: Highlight; color: HighlightText; forced-color-adjust: none; }
   .wheel, .ghost-button, .danger-button { border-color: ButtonBorder; color: ButtonText; }
 }
+
+/* ------------------------------- setup view ----------------------------- */
+
+/*
+ * The setup view stands in for the whole shell while setup is under way. Its look is the
+ * extension's kit (extension/kit.css, tokens scoped to .gl-page); this file only places the root
+ * and styles the one control the kit has no class for. It sits above the shell and below the toast.
+ */
+#setup-root { position: fixed; inset: 0; z-index: 30; overflow: auto; }
+
+/* "Skip for now": quiet text, never a second primary action. */
+.setup-skip { display: block; padding: 0; border: 0; background: none; font: 400 var(--fs-small)/1.4 var(--sans); color: var(--ink-4); cursor: pointer; transition: color var(--beat-quick) var(--calm); }
+.setup-skip:hover { color: var(--ink); }

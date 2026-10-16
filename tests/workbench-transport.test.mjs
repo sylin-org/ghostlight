@@ -181,6 +181,38 @@ test("the other acts go where the table sends them", async () => {
   ]);
 });
 
+test("the setup part is read alone, and a screen the service leaves it out for reads null", async () => {
+  const setup = { stage: "browser", rows: [] };
+  const send = fakeFetch(() => answer(200, { seq: 3, instance: "i1", parts: { setup } }));
+  const transport = Transport.overHttp({ fetch: send, bearer: "k" });
+  assert.deepEqual(await transport.setupPart(), setup);
+  assert.equal(send.calls.length, 1);
+  assert.equal(send.calls[0].method, "GET");
+  assert.equal(send.calls[0].path, "/api/snapshot?parts=setup");
+  assert.equal(send.calls[0].body, undefined);
+  assert.equal(send.calls[0].headers.Authorization, "Bearer k");
+  // The window's snapshot does not ask for it: an unfinished setup reads this computer.
+  assert.ok(!Transport.SNAPSHOT_PARTS.includes("setup"));
+
+  const watcher = fakeFetch(() => answer(200, { seq: 3, instance: "i1", parts: {} }));
+  assert.equal(await Transport.overHttp({ fetch: watcher }).setupPart(), null);
+});
+
+test("a setup step is one POST of the step itself, and the answer is the setup part", async () => {
+  const step = { kind: "open_browser", browser: "edge", profile: "Profile 1" };
+  const send = fakeFetch(() => answer(200, { stage: "browser" }));
+  const transport = Transport.overHttp({ fetch: send, bearer: "k" });
+  assert.deepEqual(await transport.setupAct(step), { stage: "browser" });
+  assert.equal(send.calls[0].method, "POST");
+  assert.equal(send.calls[0].path, "/api/setup/act");
+  assert.deepEqual(JSON.parse(send.calls[0].body), step);
+  assert.equal(send.calls[0].headers["Content-Type"], "application/json");
+  assert.equal(Transport.ACT.setupAct, "setup_act");
+
+  const refused = Transport.overHttp({ fetch: fakeFetch(() => answer(422, { error: { code: "refused", message: "Edge is no longer offered." } })) });
+  await assert.rejects(refused.setupAct(step), (error) => error.message === "Edge is no longer offered." && error.status === 422);
+});
+
 test("quitting is one POST with an empty body, and the sentence the service answers is handed back", async () => {
   const send = fakeFetch(() => answer(202, { message: "Ghostlight is quitting." }));
   const transport = Transport.overHttp({ fetch: send, bearer: "k" });

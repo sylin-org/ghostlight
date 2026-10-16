@@ -285,14 +285,16 @@ test("the markup holds the ids and attributes the guards and the surface look fo
 
 /* ---------------------------------- addresses ---------------------------------- */
 
-test("the closed list of addresses names every destination and every section, once", () => {
+test("the closed list of addresses names every destination, every section and the setup view, once", () => {
   assert.deepEqual([...Words.ADDRESSES], [
     "monitor", "integrations", "status", "policy", "settings", "settings/screen", "settings/sharing",
-    "settings/browser-work", "settings/notifications", "settings/diagnostics", "about"
+    "settings/browser-work", "settings/notifications", "settings/diagnostics", "about", "setup"
   ]);
+  // The setup view is an address and not a destination: no tab opens it, and it stands in for them.
   const derived = Object.keys(Words.VIEWS).flatMap((name) => (name === "settings"
     ? ["settings", ...SECTIONS.map((section) => `settings/${section}`)] : [name]));
-  assert.deepEqual([...Words.ADDRESSES], derived);
+  assert.deepEqual([...Words.ADDRESSES], [...derived, Words.SETUP_ADDRESS]);
+  assert.deepEqual(Words.parseAddress("setup"), { view: "setup", section: null });
   assert.equal(new Set(Words.ADDRESSES).size, Words.ADDRESSES.length);
   // A search destination is the service's word for a hit, never an address.
   for (const destination of Object.keys(Words.SEARCH_VIEWS)) {

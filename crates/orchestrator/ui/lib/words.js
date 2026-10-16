@@ -119,12 +119,25 @@
    * Every address a tab, a rail entry or a typed hash can name, and no other.
    *
    * Search destinations are not addresses: they are the service's words for what a hit is about,
-   * and SEARCH_VIEWS turns them into a view.
+   * and SEARCH_VIEWS turns them into a view. The setup view is the one address that is not a
+   * destination.
    */
   const ADDRESSES = Object.freeze([
     "monitor", "integrations", "status", "policy", "settings", "settings/screen", "settings/sharing",
-    "settings/browser-work", "settings/notifications", "settings/diagnostics", "about"
+    "settings/browser-work", "settings/notifications", "settings/diagnostics", "about", "setup"
   ]);
+
+  /**
+   * The address of the setup view. It is an address but not a tab: while setup is under way the
+   * view stands in for the tabs, and the service opens the window at it.
+   */
+  const SETUP_ADDRESS = "setup";
+
+  /**
+   * The words of the setup view that belong to this page: its buttons that are not the service's
+   * rows. The service says everything else, in the setup part.
+   */
+  const SETUP = Object.freeze({ copy: "Copy", copied: "Copied", skip: "Skip for now" });
 
   /**
    * Read an address, with or without its leading `#`.
@@ -571,7 +584,7 @@
   ];
 
   return Object.freeze({ FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
-    DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, parseAddress, addressOf,
+    DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     screenState, byteSize,

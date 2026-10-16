@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { join, resolve } from "node:path";
+import { setupChecks } from "./workbench-setup-surface.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
 const ui = join(repository, "crates", "orchestrator", "ui");
@@ -1942,6 +1943,9 @@ const nativeQuit = {
 };
 checks.push(["Quit in the window is the service's quit route, and the band then says Ghostlight is quitting",
   nativeQuit.commands === 1 && nativeQuit.word === QUITTING_SENTENCE, JSON.stringify(nativeQuit)]);
+
+// The window's setup view runs against a document that can hold a tree, in its own module.
+checks.push(...await setupChecks());
 
 let ok = true;
 for (const [name, pass, detail] of checks) {

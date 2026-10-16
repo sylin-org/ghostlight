@@ -1,7 +1,7 @@
 //! The places the Ghostlight page can be opened at (ADR-0199, amendment of 2026-10-15).
 //!
-//! Every tab of the page, and every section of its Settings tab, has an address: the text after
-//! the `#` of the page's own address, such as `settings/diagnostics`. The page keeps the list in
+//! Every tab of the page, every section of its Settings tab, and its setup view has an address:
+//! the text after the `#` of the page's own address, such as `settings/diagnostics`. The page keeps the list in
 //! `ui/lib/words.js` (`ADDRESSES`); [`PageAddress`] is the same list for the service, so a request
 //! to show the window at a section is checked here before the shell is told, and the shell never
 //! decides what an address means. A test reads the page's list and proves the two are equal.
@@ -36,11 +36,13 @@ pub enum PageAddress {
     SettingsDiagnostics,
     /// The About tab.
     About,
+    /// The setup view, which stands in for the tabs while setup is under way.
+    Setup,
 }
 
 impl PageAddress {
     /// Every address, in the order the page lists them.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Monitor,
         Self::Integrations,
         Self::Status,
@@ -52,6 +54,7 @@ impl PageAddress {
         Self::SettingsNotifications,
         Self::SettingsDiagnostics,
         Self::About,
+        Self::Setup,
     ];
 
     /// The address as the page writes it after the `#`, and as the wire carries it.
@@ -69,6 +72,7 @@ impl PageAddress {
             Self::SettingsNotifications => "settings/notifications",
             Self::SettingsDiagnostics => "settings/diagnostics",
             Self::About => "about",
+            Self::Setup => "setup",
         }
     }
 

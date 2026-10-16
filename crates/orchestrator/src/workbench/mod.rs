@@ -622,6 +622,15 @@ impl WorkbenchFacade {
         self.projection.setup()
     }
 
+    /// Where a request to show Ghostlight opens the window: at the setup view while setup is
+    /// incomplete, and otherwise where the window last was.
+    #[must_use]
+    pub fn show_address(&self) -> Option<PageAddress> {
+        self.setup()
+            .filter(|progress| !progress.is_complete())
+            .map(|_| PageAddress::Setup)
+    }
+
     /// Attach the adapter that opens links and folders and asks for files on this computer.
     pub fn attach_native_acts(&self, acts: Arc<dyn WorkbenchNativeActs>) {
         *lock(&self.native_acts) = Some(acts);

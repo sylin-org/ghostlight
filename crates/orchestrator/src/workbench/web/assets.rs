@@ -1,7 +1,10 @@
 //! The workbench's own files, embedded in the service.
 //!
 //! The table is closed: a path that is not in it is not served. Types come from a closed table of
-//! five kinds, and each file's tag is a hash of its bytes.
+//! five kinds, and each file's tag is a hash of its bytes. Almost every file is under the `ui`
+//! folder. The two the setup view shares with the browser extension (its stylesheet and the
+//! mascot) are the extension's own files, embedded from where they live, so the window and the
+//! extension's pages draw from the same bytes.
 
 use std::sync::OnceLock;
 
@@ -47,6 +50,7 @@ pub struct Asset {
     pub bytes: &'static [u8],
 }
 
+/// Embeds a file of the `ui` folder, or with `extension` a file of the browser extension.
 macro_rules! asset {
     ($path:literal, $kind:ident, $file:literal) => {
         Asset {
@@ -55,9 +59,17 @@ macro_rules! asset {
             bytes: include_bytes!(concat!("../../../ui/", $file)),
         }
     };
+    ($path:literal, $kind:ident, extension $file:literal) => {
+        Asset {
+            path: $path,
+            kind: AssetType::$kind,
+            bytes: include_bytes!(concat!("../../../../../extension/", $file)),
+        }
+    };
 }
 
-/// Every file under the `ui` folder that the workbench serves.
+/// Every file the workbench serves: the `ui` folder, and the extension files the setup view
+/// shares.
 pub const ASSETS: &[Asset] = &[
     asset!("/", Html, "index.html"),
     asset!("/styles.css", Css, "styles.css"),
@@ -66,6 +78,7 @@ pub const ASSETS: &[Asset] = &[
     asset!("/kit/settings.js", Js, "kit/settings.js"),
     asset!("/kit/kit.css", Css, "kit/kit.css"),
     asset!("/lib/entries.js", Js, "lib/entries.js"),
+    asset!("/lib/setup-view.js", Js, "lib/setup-view.js"),
     asset!("/lib/store.js", Js, "lib/store.js"),
     asset!("/lib/transport.js", Js, "lib/transport.js"),
     asset!("/lib/view.js", Js, "lib/view.js"),
@@ -126,6 +139,12 @@ pub const ASSETS: &[Asset] = &[
     ),
     asset!("/integrations/zcode.svg", Svg, "integrations/zcode.svg"),
     asset!("/integrations/zed.svg", Svg, "integrations/zed.svg"),
+    asset!("/extension/kit.css", Css, extension "kit.css"),
+    asset!(
+        "/extension/ghostlight-mascot.png",
+        Png,
+        extension "icons/ghostlight-mascot.png"
+    ),
 ];
 
 /// The file served at `path`, if the table holds one.
@@ -171,6 +190,18 @@ mod tests {
         }
     }
 
+    /// The folder of served paths that holds the extension's shared files.
+    const EXTENSION_FOLDER: &str = "/extension/";
+
+    /// The extension files the setup view shares, as served and as they sit in the extension.
+    const SHARED: [(&str, &str); 2] = [
+        ("/extension/kit.css", "kit.css"),
+        (
+            "/extension/ghostlight-mascot.png",
+            "icons/ghostlight-mascot.png",
+        ),
+    ];
+
     #[test]
     fn every_file_the_page_ships_is_served_and_every_served_path_exists() {
         let ui = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
@@ -196,9 +227,28 @@ mod tests {
             })
             .collect();
         on_disk.sort();
-        let mut served: Vec<String> = ASSETS.iter().map(|asset| asset.path.to_owned()).collect();
+        let mut served: Vec<String> = ASSETS
+            .iter()
+            .filter(|asset| !asset.path.starts_with(EXTENSION_FOLDER))
+            .map(|asset| asset.path.to_owned())
+            .collect();
         served.sort();
         assert_eq!(served, on_disk);
+    }
+
+    #[test]
+    fn the_extension_files_are_served_with_the_extensions_own_bytes() {
+        let extension = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extension");
+        let served: Vec<&str> = ASSETS
+            .iter()
+            .map(|asset| asset.path)
+            .filter(|path| path.starts_with(EXTENSION_FOLDER))
+            .collect();
+        assert_eq!(served, SHARED.map(|(path, _)| path));
+        for (path, file) in SHARED {
+            let on_disk = std::fs::read(extension.join(file)).unwrap();
+            assert_eq!(lookup(path).unwrap().bytes, on_disk.as_slice(), "{path}");
+        }
     }
 
     #[test]

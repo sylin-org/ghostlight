@@ -1949,7 +1949,8 @@ impl ServiceBrowserEvents {
     ///
     /// Revealing can wait for a shell to start and attach, and the reader that delivered the
     /// request also delivers the receipts of work in flight on that browser. The answer is not
-    /// read: with nothing to show, or nothing to show it, the person is no worse off.
+    /// read: with nothing to show, or nothing to show it, the person is no worse off. While setup
+    /// is incomplete the window opens at the setup view.
     fn request_show(&self) {
         if self.showing.swap(true, Ordering::SeqCst) {
             return;
@@ -1959,7 +1960,7 @@ impl ServiceBrowserEvents {
         let spawned = thread::Builder::new()
             .name(SHOW_REQUEST_THREAD.into())
             .spawn(move || {
-                let _ = workbench.reveal(None);
+                let _ = workbench.reveal(workbench.show_address());
                 showing.store(false, Ordering::SeqCst);
             });
         if spawned.is_err() {
@@ -2509,6 +2510,35 @@ mod tests {
         workbench.attach_presentation(reveals.clone());
         sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
         eventually(|| reveals.0.load(Ordering::SeqCst) == 1);
+    }
+
+    #[test]
+    fn a_show_request_opens_the_window_at_setup_until_setup_is_complete() {
+        use crate::browser::adapter::BrowserEvent;
+        use crate::browser::BrowserEventSink;
+        use crate::install::setup_state::{self, SetupRecord};
+        use crate::workbench::setup::SetupProgress;
+
+        let home = TestHome::new("show-address");
+        let record = home.path().join("setup.json");
+        let workspaces = crate::workspace::WorkspaceStore::default();
+        let workbench = test_workbench(&workspaces);
+        workbench.attach_setup(SetupProgress::load(&record));
+        let revealed = Arc::new(RevealedAt::default());
+        workbench.attach_presentation(revealed.clone());
+        let sink = super::ServiceBrowserEvents::new(workbench.clone(), workspaces);
+
+        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+        eventually(|| revealed.addresses().len() == 1);
+        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup)]);
+
+        // A home whose setup is complete shows the window where it last was.
+        assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
+        workbench.attach_setup(SetupProgress::load(&record));
+        eventually(|| !sink.showing.load(Ordering::SeqCst));
+        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+        eventually(|| revealed.addresses().len() == 2);
+        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup), None]);
     }
 
     #[test]
@@ -3678,6 +3708,30 @@ mod tests {
             while !self.release.load(Ordering::SeqCst) && Instant::now() < until {
                 thread::sleep(Duration::from_millis(5));
             }
+            Ok(())
+        }
+
+        fn notify(
+            &self,
+            _notification: WorkbenchNotification,
+        ) -> Result<(), WorkbenchPresentationError> {
+            Ok(())
+        }
+    }
+
+    /// A presentation port that keeps the address of each reveal.
+    #[derive(Default)]
+    struct RevealedAt(std::sync::Mutex<Vec<Option<PageAddress>>>);
+
+    impl RevealedAt {
+        fn addresses(&self) -> Vec<Option<PageAddress>> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    impl WorkbenchPresentationPort for RevealedAt {
+        fn reveal(&self, address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
+            self.0.lock().unwrap().push(address);
             Ok(())
         }
 

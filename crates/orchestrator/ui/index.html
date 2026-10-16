@@ -6,9 +6,10 @@
   <title>Ghostlight</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="kit/kit.css">
+  <link rel="stylesheet" href="extension/kit.css">
 </head>
 <body class="runtime-quiet">
-  <div class="app-shell">
+  <div class="app-shell" id="app-shell">
     <header class="lampband">
       <div class="lamp" id="lamp">
         <span class="lamp-halo" aria-hidden="true"></span>
@@ -365,6 +366,54 @@
     </main>
   </div>
 
+  <!-- The setup view: it stands in for the tabs while setup is under way. Its words and its look
+       are the extension's (extension/kit.css); the service says what goes in each place. -->
+  <div class="gl-page" id="setup-root" hidden>
+    <div class="gl-setup gl-stage">
+      <main class="gl-setup__main gl-setup__main--window">
+        <section class="gl-companion" id="setup-companion" data-light="waiting" aria-label="Setup progress">
+          <div class="gl-companion__art">
+            <span class="gl-mascot gl-companion__mascot">
+              <span class="gl-mascot__halo"></span>
+              <img class="gl-px gl-mascot__img" src="/extension/ghostlight-mascot.png" alt="" width="200" height="200">
+              <span class="gl-lantern" aria-hidden="true"><span class="gl-lantern__ember"></span><span class="gl-lantern__ring"></span><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i></span>
+            </span>
+          </div>
+          <div class="gl-stepper" id="setup-discs" aria-hidden="true">
+            <span class="gl-stepper__seg gl-stepper__seg--1"><i></i></span><span class="gl-stepper__seg gl-stepper__seg--2"><i></i></span>
+            <span class="gl-stepper__disc gl-stepper__disc--0"></span><span class="gl-stepper__disc gl-stepper__disc--1"></span><span class="gl-stepper__disc gl-stepper__disc--2"></span>
+          </div>
+          <ol class="gl-stepper__names" id="setup-steps">
+            <li><span class="gl-stepper__t" aria-hidden="true"></span><span class="gl-sr"></span><span class="gl-stepper__w"></span></li>
+            <li><span class="gl-stepper__t" aria-hidden="true"></span><span class="gl-sr"></span><span class="gl-stepper__w"></span></li>
+            <li><span class="gl-stepper__t" aria-hidden="true"></span><span class="gl-sr"></span><span class="gl-stepper__w"></span></li>
+          </ol>
+          <p class="gl-tagline gl-companion__tagline" id="setup-tagline" hidden></p>
+        </section>
+        <div class="gl-setup__col">
+          <div class="gl-setup__part" id="setup-main">
+            <header class="gl-head" id="setup-head">
+              <span class="gl-eyebrow" id="setup-eyebrow"></span>
+              <h1 class="gl-h1 gl-setup__h1"><span id="setup-h1-lead"></span><em id="setup-h1-accent"></em><span id="setup-h1-trail"></span></h1>
+              <p class="gl-lead" id="setup-lead" hidden></p>
+            </header>
+            <div id="setup-code"></div>
+          </div>
+          <p class="gl-live" id="setup-live" role="status" aria-live="polite"></p>
+          <div class="gl-setup__part" id="setup-after">
+            <div id="setup-agents" hidden>
+              <span class="gl-eyebrow gl-eyebrow--quiet gl-setup__sub" id="setup-rows-label" hidden></span>
+              <ul class="gl-rows" id="setup-rows" aria-live="polite"></ul>
+            </div>
+            <div id="setup-extra-code"></div>
+          </div>
+          <button class="setup-skip" id="setup-skip" type="button" hidden></button>
+        </div>
+      </main>
+      <div class="gl-sr" id="setup-say" aria-live="polite" aria-atomic="true"></div>
+    </div>
+  </div>
+
   <div class="palette-backdrop" id="palette" hidden>
     <div class="palette-box" role="dialog" aria-modal="true" aria-label="Search Ghostlight">
       <div class="palette-input">
@@ -394,6 +443,7 @@
   <script src="lib/words.js"></script>
   <script src="lib/entries.js"></script>
   <script src="lib/transport.js"></script>
+  <script src="lib/setup-view.js"></script>
   <script src="lib/store.js"></script>
   <script src="lib/view.js"></script>
   <script src="kit/settings.js"></script>
