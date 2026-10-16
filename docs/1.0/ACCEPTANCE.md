@@ -11,11 +11,11 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 1. The catalog contains exactly the 23 tools in `LANGUAGE.md`, in documented order, with no
    simultaneously advertised legacy dialect or client-selected profile. Page JavaScript is
    `browser_execute`; the unreleased `browser_evaluate` name is neither advertised nor decoded.
-2. Catalog schemas are typo-closed at every object level and match every decoder requirement,
-   conditional branch, bound, and default in `LANGUAGE.md`. Every declaration has field guidance
-   (the field's own description, a self-describing name with its type, enum, bounds and default,
-   or shared guidance in the server instructions; ADR-0198 decision 26), a shortest valid
-   example, and standard MCP annotations. Under a strict JSON Schema
+2. Catalog schemas are typo-closed at every object level. They match every bound and default in
+   `docs/1.0/catalog.json` and every decoder requirement and conditional branch in `LANGUAGE.md`.
+   Every declaration has field guidance (the field's own description, a self-describing name with
+   its type, enum, bounds and default, or shared guidance in the server instructions; ADR-0198
+   decision 26), a shortest valid example, and standard MCP annotations. Under a strict JSON Schema
    check, every example and at least two ordinary calls for each tool that takes input satisfy
    the advertised input schema, match no `oneOf` more than once, and decode. Every next step that
    names a tool names only fields that tool advertises, and only values a closed field accepts.

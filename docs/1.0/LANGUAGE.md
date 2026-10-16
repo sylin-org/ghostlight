@@ -317,12 +317,10 @@ each with `tab`, bounded `title`, governed `url`, `active`, and `readiness`. Foc
 
 Navigate to a governed URL. Shortest call: `{"url":"https://example.com"}`.
 
-Inputs: required `url`; optional `tab`; optional `new_tab`, default `false`; optional `reuse` of
-`domain` or `never`, default `domain`; optional `beforeunload` whose only value is `discard`,
-accepting just that navigation's own unsaved-change prompt; optional `timeout_ms`. `tab` and
-`new_tab:true` cannot be combined. `new_tab:true` always creates a tab, so `reuse:"domain"` beside
-it is refused and `reuse:"never"` beside it changes nothing. Without `beforeunload`, a blocking
-prompt stops the navigation and is reported, never accepted.
+Rules: `tab` and `new_tab:true` cannot be combined. `new_tab:true` always creates a tab, so
+`reuse:"domain"` beside it is refused and `reuse:"never"` beside it changes nothing.
+`beforeunload:"discard"` accepts just that navigation's own unsaved-change prompt; without it, a
+blocking prompt stops the navigation and is reported, never accepted.
 
 With `new_tab:true`, Ghostlight creates and navigates a new controlled tab. With `tab`, it navigates
 that exact tab. With neither, it uses the unambiguous controlled tab, and when none exists it opens
@@ -343,8 +341,7 @@ Facts: `tab`, governed `url`, bounded `title`, `created`, `reused`, and `documen
 
 Move through history or reload. Shortest call: `{"action":"back"}`.
 
-Inputs: required `action` of `back`, `forward`, or `reload`; optional `tab`; optional
-`timeout_ms`; optional `bypass_cache`, default `false`, valid only for reload. Capability: `action`.
+Rules: `bypass_cache` is valid only for `reload`. Capability: `action`.
 
 Facts: `tab`, `action`, governed `url`, bounded `title`, and `document_generation`.
 
@@ -352,10 +349,9 @@ Facts: `tab`, `action`, governed `url`, bounded `title`, and `document_generatio
 
 Set tab zoom or resize the containing browser window.
 
-- Zoom: `{"action":"zoom","percent":100}`. `percent` is an integer from 25 to 500;
-  optional `tab`; capability `read`.
-- Resize: `{"action":"resize","width":1280,"height":800}`. Required integer `width` from
-  320 to 7680 and `height` from 240 to 4320; optional `tab`; no RAWX capability.
+- Zoom: `{"action":"zoom","percent":100}`. Requires `percent`; capability `read`.
+- Resize: `{"action":"resize","width":1280,"height":800}`. Requires `width` and `height`; no RAWX
+  capability.
 
 Resize affects every tab in the window and may rerender the page. Either action invalidates a
 current view handle when its bound geometry no longer matches. Facts include the selected tab,
@@ -374,10 +370,9 @@ separated by semicolons, bounded only by `max_chars`; a disabled option reads `(
 the way to see an option list that an item cut at 25. A credential-class select reads `[hidden]`
 and lists nothing. Shortest call: `{}`.
 
-Inputs: optional `tab`; optional `target`; optional `mode` of `visible` or `article` (`visible` is
-the default; explicit `article` prefers a useful article in the top document and falls back to the
-same full-page visible read; ignored with `target`); optional `max_chars` from 500 to 50000, default
-8000; optional `timeout_ms`. Capability: `read`.
+Rules: `mode` defaults to `visible`; explicit `article` prefers a useful
+article in the top document and falls back to the same full-page visible read, and is ignored with
+`target`. Capability: `read`.
 
 Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 `document_generation`.
@@ -387,9 +382,7 @@ Facts: `tab`, governed `url`, bounded `title`, `text`, `truncated`, and
 Inspect semantic controls or page structure. The `controls`, `structure`, and `all` scopes return
 fresh target handles; the `document` scope returns the page outline as a tree. Shortest call: `{}`.
 
-Inputs: optional `tab`; optional `scope` of `controls`, `structure`, `all`, or `document`, default
-`controls`; with `document`, an optional bounded subtree `root` handle and `max_depth` from 1 to 12,
-default 6; optional `max_items` from 1 to 200, default 80; optional `timeout_ms`. Capability: `read`.
+Rules: `root` and `max_depth` belong to the `document` scope. Capability: `read`.
 
 Facts: `tab`, `document_generation`, and `items`. Each item has a target handle, an accessibility
 role, bounded accessible name, state, and credential-class flag, and a control adds the keys in
@@ -480,9 +473,7 @@ prefers the deepest match over a container that only holds it. Names never inclu
 Option text finds its dropdown. A credential-class dropdown is never found by its options.
 Shortest call: `{"text":"Submit"}`.
 
-Inputs: required non-empty `text`; optional `tab`; optional `scope` of `any`, `control`, or `text`,
-default `any`; optional `max_results` from 1 to 50, default 20. Capability:
-`read`.
+Capability: `read`.
 
 Facts: `tab`, `document_generation`, and bounded `matches` in document order with target, role, name, and
 state, and the same optional control keys as `browser_inspect` items. When a role and name repeat among the results, each carries `context` (the label of its row or group) and, when that repeats too, `nth` (its position among those, in document order). A unique control carries neither. It answers once the page has been quiet for 300 ms, within the settle budget.
@@ -493,11 +484,10 @@ Capture the viewport, full page, one target, or a magnified region from a curren
 capture returns a view handle for later coordinate actions or another region capture. Shortest
 call: `{}`.
 
-The decoder accepts one of four branches: optional `tab` only for viewport capture; optional `tab`
-plus `full_page:true`; optional `tab` plus required `target`; or optional `tab` plus
-required `view`, `x`, `y`, `width`, and `height`. `full_page` is a boolean, default `false`. Region coordinates are image pixels and must form
-a positive rectangle wholly inside the current view. Optional `timeout_ms` apply
-to every branch. Target, full-page, and region capture cannot be combined. Capability: `read`.
+Rules: the decoder accepts one of four branches: viewport capture with no other capture field;
+`full_page:true`; `target`; or a region with `view`, `x`, `y`, `width`, and `height`. Region
+coordinates are image pixels and must form a positive rectangle wholly inside the current view.
+Target, full-page, and region capture cannot be combined. Capability: `read`.
 
 Facts: `tab`, `view`, `mime_type`, `width`, and `height`, plus one bounded MCP image content block.
 
@@ -506,12 +496,9 @@ Facts: `tab`, `view`, `mime_type`, `width`, and `height`, plus one bounded MCP i
 Click a current semantic target or a point in a current screenshot. Shortest call:
 `{"target":"target_..."}`.
 
-Inputs use exactly one location branch: required `target`, typed semantic `selector`, or required
-`view`, `x`, and `y`.
-Optional `tab`; optional `button` of `primary`, `middle`, or `secondary`, default `primary`;
-optional `click_count` from 1 to 3 for single, double, or triple, default 1; optional `timeout_ms`;
-optional `expect` postcondition. Capabilities: `action`, plus `read` when
-`selector` or `expect` is supplied.
+Rules: exactly one location branch: `target`, typed semantic `selector`, or `view` with `x` and
+`y`. `click_count` 1, 2 and 3 are a single, double and triple click. Capabilities: `action`, plus
+`read` when `selector` or `expect` is supplied.
 
 Facts: `tab`, optional `target`, optional `view`, `activated`, `rebound: true` when the target handle
 followed its control through a re-render, and any governed committed landing.
@@ -521,11 +508,9 @@ followed its control through a re-render, and any governed committed landing.
 Scroll in a direction or reveal a semantic target. Shortest call: `{}`, which scrolls down by a
 medium amount.
 
-Inputs use one of three branches: required `target` to reveal; or optional `tab`, optional
-`direction` of `up`, `down`, `left`, or `right` defaulting to `down`, and optional `amount` of
-`small`, `medium`, `large`, or `page` defaulting to `medium`; or coordinate wheel input with
-required `view`, `x`, `y`, and `ticks` from 1 to 10 plus a two-way `direction` of `up` or `down`.
-Optional `timeout_ms` apply to every branch. Capability: `read`.
+Rules: one of three branches: `target` to reveal; or a page scroll by `direction` and `amount`; or
+coordinate wheel input with `view`, `x`, `y`, and `ticks`, whose `direction` is `up` or `down`.
+Capability: `read`.
 
 Facts: `tab`, optional `target`, `scrolled`, and observed horizontal and vertical offsets.
 
@@ -534,8 +519,7 @@ Facts: `tab`, optional `target`, `scrolled`, and observed horizontal and vertica
 Hover a current semantic target or a point in a current screenshot. Shortest call:
 `{"target":"target_..."}`.
 
-Inputs use exactly one location branch: required `target`, or required `view`, `x`, and `y`;
-optional `tab`; optional `timeout_ms`. Capability: `read`.
+Rules: exactly one location branch: `target`, or `view` with `x` and `y`. Capability: `read`.
 
 Facts: `tab`, optional `target`, optional `view`, and `hovered`.
 
@@ -545,12 +529,7 @@ Fill one or more form controls. It does not submit unless `submit_target` is pre
 `browser_type_text` when per-character input events matter. Shortest call:
 `{"fields":[{"target":"target_...","value":"Ada"}]}`.
 
-Inputs: required `fields` array of 1 to 30 typo-closed objects, each with required `value` and
-exactly one location (`target` or typed semantic `selector`); a value is a bounded string, a boolean
-for checkboxes and radios, a finite number for numeric inputs, or a list of up to 100 bounded strings
-for a multiple select; optional `tab`; optional
-`submit_target`; optional `timeout_ms`; optional `expect` postcondition; optional
-`user_authorized_credentials`, default `false`.
+Rules: each field has exactly one location, `target` or typed semantic `selector`.
 Capabilities: `read + write` without submit and `read + write + action` with `submit_target`.
 
 Ordinary textual inputs, textareas, and rich-text controls use the browser's editing transaction
@@ -707,11 +686,8 @@ hold or resume requirement. Values never enter audit, diagnostics, or presentati
 Type text through browser input events. Shortest call:
 `{"target":"target_...","text":"Ada"}`.
 
-Inputs use one location: `target` with bounded `text`; or `selector` with `text`; or
-`focused:true` to type into the currently focused editable control. Optional `clear_first`, default
-`false`; optional `tab`; optional `timeout_ms`; optional `user_authorized_credentials`, default
-`false`. Empty text is valid only as an
-explicit clear together with `clear_first:true`. Optional `expect` adds a postcondition.
+Rules: one location: `target`, `selector`, or `focused:true` to type into the currently focused
+editable control. Empty `text` is valid only as an explicit clear together with `clear_first:true`.
 Capabilities: `action`, plus `read` when `selector` or `expect` is supplied. Targeted and focused
 typing without a postcondition require `action`.
 
@@ -725,21 +701,17 @@ Facts: `tab`, `target`, `typed`,
 
 Send one explicit keyboard action. Shortest call: `{"key":"Enter"}`.
 
-Inputs: exactly one of required `key` as one character or one named key from the closed list, or
-required `strokes`, an ordered sequence of 1 to 20 of the same items, with optional `repeat` from 1
-to 100 defaulting to 1; optional `tab`; optional `target`; optional unique `modifiers` from `Alt`,
-`Control`, `Meta`, and `Shift`; optional `expect` postcondition. Modifiers are held for every
-stroke, so a shortcut is a key with modifiers: `{"key":"a","modifiers":["Control"]}`, or
-`{"strokes":["a","c"],"modifiers":["Control"]}` to select all and copy. A modifier is never a
-stroke. Capabilities: `action`, plus `read` when `expect` is supplied.
+Rules: exactly one of `key` or `strokes`, whose items are one character or one named key from the
+closed list. Modifiers are held for every stroke, so a shortcut is a key with modifiers:
+`{"key":"a","modifiers":["Control"]}`, or `{"strokes":["a","c"],"modifiers":["Control"]}` to select
+all and copy. A modifier is never a stroke. Capabilities: `action`, plus `read` when `expect` is
+supplied.
 
 Facts: `tab`, `key`, `pressed`, and any governed committed landing.
 
-The optional `expect` on click, fill, type, and key calls uses one condition: `load_ready` with no
-value, or `url_contains`, `text_present`, or `text_absent` with a required non-empty `value` of at
-most 2,000 characters. Lookup and postcondition Read requirements are admitted with the complete
-request before an effect. The check runs after the action for at most 2 seconds. Text conditions
-match page text, not field values.
+The optional `expect` on click, fill, type, and key calls is checked after the action for at most
+2 seconds. Lookup and postcondition Read requirements are admitted with the complete request before
+an effect. Text conditions match page text, not field values.
 
 When the check does not confirm the expectation, the action still happened. The result keeps
 `effect: applied`, `repeat_safe: false`, and the action's own facts, and adds a `reason`. The
@@ -769,8 +741,8 @@ for any step.
 Drag one semantic target to another, or drag between two points in a current screenshot. Shortest
 call: `{"source_target":"target_...","destination_target":"target_..."}`.
 
-Inputs use exactly one schema branch: required `source_target` and `destination_target`; or
-required `view`, `start_x`, `start_y`, `end_x`, and `end_y`. Optional `tab`, `timeout_ms` apply to both. Capability: `action`.
+Rules: exactly one branch: `source_target` and `destination_target`; or `view`, `start_x`,
+`start_y`, `end_x`, and `end_y`. Capability: `action`.
 
 Facts: `tab`, `dragged`, and any governed committed landing.
 
@@ -778,17 +750,15 @@ Facts: `tab`, `dragged`, and any governed committed landing.
 
 Wait for one explicit observable condition. Shortest call: `{"condition":"load_ready"}`.
 
-Inputs use one condition-specific branch: `load_ready` accepts neither value nor target;
+Rules: each condition has its own branch. `load_ready` accepts neither `value` nor `target`;
 `url_contains`, `text_present`, and `text_absent` require `value`; `target_present` and
 `target_absent` require `target`; `selector_present` requires a typed `selector` and polls the
 live page until a control matching it exists; `duration` requires a decimal string `value`
-of whole milliseconds from 0 to 10000 (for example, `"1200"`) and waits executor-side;
-`visual_settle` is met when the page, or an optional `target`, stops moving and repainting;
-`layout_stable` was the same condition and is refused with a pointer to `visual_settle`. Every
-branch accepts optional `tab`, `timeout_ms`.
-Optional `visual_settle` adds a short layout settle after the condition holds. It is off by
-default for `url_contains`, `text_present`, `text_absent`, and `target_absent` and on for the
-other conditions, so the schema declares no single default for it. Capability: `read`.
+of whole milliseconds (for example, `"1200"`) and waits executor-side; `visual_settle` is met when
+the page, or an optional `target`, stops moving and repainting; `layout_stable` was the same
+condition and is refused with a pointer to `visual_settle`. The optional `visual_settle` field adds
+a short layout settle after the condition holds. Its default depends on the condition, so the
+schema declares none. Capability: `read`.
 
 Text conditions match composed visible text across the top document, open shadow roots, assigned
 slots, and http(s) embedded frames. Hidden content and closed roots remain absent. Text conditions
@@ -806,9 +776,8 @@ Inspect or resolve the current JavaScript dialog.
 - `{"action":"dismiss"}` dismisses it; capability `action`.
 - `{"action":"respond","text":"Ada"}` supplies non-secret prompt text; capability `action`.
 
-All branches accept optional `tab` and `timeout_ms`. `text` is required only for `respond` and is
-invalid for every other action. Facts: `tab`, `dialog_type`, `present`, `accepted`, and `handled`
-as applicable. Status also reports the dialog's message, one line of at most 500 characters, in its
+`text` is required only for `respond` and is invalid for every other action. Facts: `tab`,
+`dialog_type`, `present`, `accepted`, and `handled` as applicable. Status also reports the dialog's message, one line of at most 500 characters, in its
 summary. Dialog text is never audited. When status finds a dialog, its next step is `Call
 browser_dialog with action accept or dismiss (or respond with text for a prompt) before
 continuing.`
@@ -839,12 +808,10 @@ Attach explicitly supplied files or one captured image to one ordinary file inpu
 captured image at a point in a current view. Shortest call:
 `{"target":"target_...","paths":["C:\\path\\document.pdf"]}`.
 
-Inputs: exactly one source of required `paths`, an array of 1 to 5 unique absolute local paths;
-or `files`, 1 to 5 inline objects with `name` and base64 `data_base64`; or one `source_image`
-handle from an earlier capture, optionally with `view`, `x`, and `y` to drop it at a point instead
-of attaching. The destination is optional `target` or typed semantic `selector`. Optional `tab`,
-`timeout_ms`. Capabilities: `write`, plus `read` when `selector` is supplied.
-Target-handle attachment and current-view image drops require `write`.
+Rules: exactly one source: `paths`, or `files`, or one `source_image` handle from an earlier
+capture, optionally with `view`, `x`, and `y` to drop it at a point instead of attaching. The
+destination is `target` or typed semantic `selector`. Capabilities: `write`, plus `read` when
+`selector` is supplied. Target-handle attachment and current-view image drops require `write`.
 
 As with form fill, a semantic selector can address an ordinary file input outside an HTML `form`.
 
@@ -860,8 +827,6 @@ paths, names, and contents never enter audit or presentation. Facts: `tab`, `tar
 Execute explicit bounded JavaScript in the page. It may read, mutate, or navigate, so use a
 semantic tool when one fits. Shortest call: `{"script":"document.title"}`.
 
-Inputs: required non-empty `script` up to 20000 characters; optional `tab`; optional
-`max_result_chars` from 100 to 20000, default 8000; optional `timeout_ms`.
 Capability: `execute`.
 
 The service sends a script that its lexical scan proves to be one expression as `await (<script>)`,
@@ -892,12 +857,9 @@ never enter audit or presentation.
 Compose one to twenty ordinary tool calls. A short batch:
 `{"steps":[{"tool":"browser_click","arguments":{"target":"target_..."}},{"tool":"browser_wait","arguments":{"condition":"load_ready"}}]}`.
 
-Inputs: required `steps` array of 1 to 20 objects. Each step has a required `tool` naming a current
-advertised non-composite tool, optional bounded `id`, and optional `arguments` defaulting to `{}`.
-Omitted IDs become `step_1`, `step_2`, and so on; all IDs must be unique. Optional `on_error` is
-`stop` or `continue`, default `stop`. Optional `tab` supplies a default for tab-scoped children;
-explicit child tabs win, new-tab navigation and tab-independent work keep their ordinary meaning.
-Optional `timeout_ms` bounds the entire flow. There is no simulation mode.
+Rules: all step IDs must be unique. A step's `arguments` default to `{}`. `tab` supplies a default
+for tab-scoped children; explicit child tabs win, new-tab navigation and tab-independent work keep
+their ordinary meaning. `timeout_ms` bounds the entire flow. There is no simulation mode.
 
 The wrapper requires no RAWX capability. Every child classifies and admits independently under
 the same immutable configured authority snapshot. Each attempted child records a safe receipt
@@ -996,9 +958,7 @@ stop reason, exact `duration_ms`, dimensions, and the delivery disposition. A cl
 Read bounded console and network evidence for a controlled tab. Tracking is opt-in. Shortest call:
 `{}`, which selects both sources and returns problems only.
 
-Inputs: optional `tab`; optional `source` of `both`, `console`, or `network`, default `both`;
-optional `detail` of `problems` or `all`, default `problems`; optional case-insensitive literal
-`match`; optional opaque `after` cursor; optional `limit` from 1 to 200, default 50. Capability: `read`.
+Capability: `read`.
 
 Problems are console warnings, errors, exceptions, failed requests, and HTTP error responses.
 All detail also includes ordinary console events and successful requests. The first call enables
@@ -1019,7 +979,7 @@ permanent ceilings, browser startup posture, organization identity, and passport
 Available under every authority including all-open; use it to learn why another call was refused
 or what is allowed before acting.
 
-Inputs: none. Capability: empty requirement set (always available).
+Capability: empty requirement set (always available).
 Read-only, never dispatches a browser, holds no workspace lease, and writes nothing.
 It remains available during Pause or Stop and a required audit outage.
 It does not change controls. Cancellation, deadlines, bounded admission, and
