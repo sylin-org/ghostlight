@@ -36,8 +36,11 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   are listed in the ledger.
 - **Install journey** ([journey.md](tasks/break-2.0/journey.md)): the three-step install, the
   bundled setup page, the window's setup view, the popup and options words, the get scripts and the
-  packaged extension. Complete through j17-docs. Owed live checks (fresh homes on Windows and
-  Linux, the pinned release-candidate install) and the store submission are listed in the ledger.
+  packaged extension. Complete through j17-docs. The setup view offers Add in every found
+  Chromium-family browser (Chrome, Brave, Chromium and Edge), because all of them install the
+  extension from the Chrome Web Store; no Edge Add-ons listing is requested unless the owner asks
+  for one. Owed live checks (fresh homes on Windows and Linux, the pinned release-candidate
+  install) and the store submission are listed in the ledger.
 - **Desktop shell** ([shell-m1.md](tasks/break-2.0/shell-m1.md),
   [shell-m2.md](tasks/break-2.0/shell-m2.md)): the service serves the workbench on 127.0.0.1 and
   `ghostlight-desktop` is a webview on it. Milestones 1 and 2 are complete and deployed on the
@@ -87,8 +90,6 @@ pushes.
 - The dashboard submission for 2.0 (staged, never published ahead of the release order), the
   remote-code answer (No), the recaptured store assets, and the public privacy page carrying the
   setup profile text before publication.
-- Edge Add-ons and Brave listings are not requested. Until they exist, Edge installs from the
-  Chrome Web Store and the install journey offers an Add step for Chrome only.
 - The owner's checkpoint 2 on the desktop shell, and the live checks the ledgers list under
   "Owed live checks".
 - The release order above, in the owner's hands: tags, publication and store actions are the
