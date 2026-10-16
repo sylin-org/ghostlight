@@ -864,6 +864,21 @@ impl WorkbenchFacade {
         self.live.setup(&self.live.gather())
     }
 
+    /// Carry out one step of the setup view that starts a browser, and answer the setup part as it
+    /// is now.
+    ///
+    /// The step is checked against what this computer shows now, not against what the window drew:
+    /// the browser must be installed and a profile must be one the profile scan returns. Nothing is
+    /// started while the session is ending. The service keeps no pending state; the page words what
+    /// it is waiting for.
+    pub fn setup_act(
+        &self,
+        action: &crate::language::setup::SetupAction,
+    ) -> Result<crate::language::setup::SetupView, WorkbenchError> {
+        self.live.perform_setup_act(action)?;
+        Ok(self.setup_view())
+    }
+
     /// Search bounded user-visible workbench records.
     #[must_use]
     pub fn search(&self, query: &str) -> Vec<SearchHit> {
@@ -1530,6 +1545,16 @@ pub enum WorkbenchError {
     /// No service is attached to end.
     #[error("{}", words::QUIT_UNAVAILABLE)]
     QuitUnavailable,
+    /// A setup step names a browser or profile this computer no longer offers, or is not a step
+    /// the service performs.
+    #[error("{}", words::SETUP_STEP_NOT_OFFERED)]
+    SetupStepNotOffered,
+    /// A setup step would start a process while the session is ending.
+    #[error("{}", words::SETUP_SESSION_ENDING)]
+    SetupSessionEnding,
+    /// The computer would not start the browser a setup step names.
+    #[error("{}", words::SETUP_BROWSER_NOT_STARTED)]
+    SetupBrowserNotStarted,
 }
 
 impl From<WorkbenchPresentationError> for WorkbenchError {
@@ -1970,6 +1995,9 @@ pub enum WorkbenchDestination {
     LicensingGuide,
     /// The rest of the Sylin toolkit.
     SylinTools,
+    /// Google's download page for Chrome, which the setup view offers a person with no browser
+    /// Ghostlight supports.
+    GetChrome,
 }
 
 impl WorkbenchDestination {
@@ -2006,12 +2034,13 @@ impl WorkbenchDestination {
                 "https://github.com/sylin-org/ghostlight/blob/dev/docs/guides/licensing.md"
             }
             Self::SylinTools => "https://sylin.org/tools/",
+            Self::GetChrome => "https://www.google.com/chrome/",
         }
     }
 
     /// The full vocabulary, so a new destination cannot be added without the guards seeing it.
     #[must_use]
-    pub const fn all() -> [Self; 12] {
+    pub const fn all() -> [Self; 13] {
         [
             Self::Home,
             Self::Demo,
@@ -2025,6 +2054,7 @@ impl WorkbenchDestination {
             Self::DecisionRecords,
             Self::LicensingGuide,
             Self::SylinTools,
+            Self::GetChrome,
         ]
     }
 
@@ -2044,6 +2074,7 @@ impl WorkbenchDestination {
             Self::DecisionRecords => "decision_records",
             Self::LicensingGuide => "licensing_guide",
             Self::SylinTools => "sylin_tools",
+            Self::GetChrome => "get_chrome",
         }
     }
 }

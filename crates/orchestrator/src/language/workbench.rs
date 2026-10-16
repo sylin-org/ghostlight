@@ -271,6 +271,16 @@ pub const QUITTING: &str = "Ghostlight is quitting.";
 /// Why Quit did nothing: no service is attached to end.
 pub const QUIT_UNAVAILABLE: &str = "Ghostlight cannot quit from this view.";
 
+/// Why a setup step was not carried out: the browser or profile it names is not what this computer
+/// has now.
+pub const SETUP_STEP_NOT_OFFERED: &str = "That setup step is no longer offered.";
+
+/// Why a setup step started nothing: the person is signing out.
+pub const SETUP_SESSION_ENDING: &str = "Ghostlight starts nothing while you sign out.";
+
+/// Why a setup step did not start the browser.
+pub const SETUP_BROWSER_NOT_STARTED: &str = "Ghostlight could not start that browser.";
+
 /// Why watching cannot be changed: no watch view is being served.
 pub const WATCHING_NOT_SERVED: &str = "Ghostlight is not serving a watch view on this computer.";
 
@@ -531,6 +541,9 @@ mod tests {
             WATCHING_NOT_SAVED,
             QUITTING,
             QUIT_UNAVAILABLE,
+            SETUP_STEP_NOT_OFFERED,
+            SETUP_SESSION_ENDING,
+            SETUP_BROWSER_NOT_STARTED,
             SERVICE_UP,
             SERVICE_STARTS_ON_DEMAND,
         ] {

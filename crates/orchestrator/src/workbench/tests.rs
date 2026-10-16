@@ -1230,7 +1230,8 @@ impl crate::browser::BrowserPort for ComingAndGoing {
 }
 
 /// A workbench that tracks an unfinished setup over a fake computer and a browser that comes and
-/// goes. Its client roster is empty, so nothing on this machine is read.
+/// goes. Its client roster is empty unless a test asks for a client, and it never reads this
+/// machine's clients.
 struct SetupBench {
     facade: WorkbenchFacade,
     projection: WorkbenchProjection,
@@ -1243,7 +1244,21 @@ struct SetupBench {
 
 impl SetupBench {
     fn start() -> Self {
+        Self::over(crate::install::scratch::Scratch::new())
+    }
+
+    /// Like [`Self::start`], with the Ghostlight edge in place and one client found on the
+    /// computer that Ghostlight can write its entry into.
+    fn with_a_client_to_connect() -> Self {
         let scratch = crate::install::scratch::Scratch::new();
+        std::fs::write(scratch.path().join("ghostlight"), b"edge").unwrap();
+        let configuration = scratch.path().join("clients/home/.cursor/mcp.json");
+        std::fs::create_dir_all(configuration.parent().unwrap()).unwrap();
+        std::fs::write(&configuration, b"{}").unwrap();
+        Self::over(scratch)
+    }
+
+    fn over(scratch: crate::install::scratch::Scratch) -> Self {
         let projection = WorkbenchProjection::default();
         let workspaces = crate::workspace::WorkspaceStore::default();
         let browser = ComingAndGoing::new();
@@ -1484,4 +1499,34 @@ fn completing_setup_publishes_the_finished_part_once() {
         .projection
         .record(&again, crate::language::audit_health::Storage::Saved);
     assert_eq!(bench.setup_hints().len(), before + 1);
+}
+
+#[test]
+fn connecting_a_client_republishes_setup_with_the_row_waiting_for_a_restart() {
+    use crate::install::HarnessAction;
+    use crate::language::setup::{RowTone, SetupAction, Stage};
+
+    let bench = SetupBench::with_a_client_to_connect();
+    bench.browser.connect(true);
+    bench.facade.refresh_harnesses().unwrap();
+    let view = bench.facade.setup_view();
+    assert_eq!(view.stage, Stage::Agent);
+    let row = super::setup::test_support::row(&view, "cursor");
+    assert!(matches!(
+        row.action.as_ref().map(|action| &action.action),
+        Some(SetupAction::ConnectAgent { agent }) if agent == "cursor"
+    ));
+    let hints = bench.setup_hints().len();
+
+    bench
+        .facade
+        .manage_harness_expecting("cursor", HarnessAction::Install, "available")
+        .unwrap();
+    let hinted = bench.setup_hints();
+    assert_eq!(hinted.len(), hints + 1, "the install announced the part");
+    assert_eq!(hinted.last(), Some(&bench.setup_etag()));
+    let view = bench.facade.setup_view();
+    let row = super::setup::test_support::row(&view, "cursor");
+    assert_eq!(row.detail, "Restart Cursor to finish.");
+    assert_eq!(row.tone, RowTone::Attention);
 }

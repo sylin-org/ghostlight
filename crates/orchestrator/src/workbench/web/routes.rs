@@ -18,6 +18,7 @@ use super::http::{header, Head, Incoming, Method, Response, Status};
 use super::limits::retry_after_seconds;
 use super::{same_secret, Shared};
 use crate::install::{HarnessAction, HarnessActionResult};
+use crate::language::setup::SetupAction;
 use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{add_download_url, Audience, Part, Projection};
@@ -91,6 +92,7 @@ enum Api {
     Open,
     RevealDiagnostics,
     Locate,
+    SetupAct,
     Quit,
 }
 
@@ -128,7 +130,7 @@ const fn route(
 }
 
 /// The closed table. Anything not here is not served.
-static ROUTES: [Route; 20] = [
+static ROUTES: [Route; 21] = [
     route(
         Api::Context,
         Method::Get,
@@ -259,6 +261,13 @@ static ROUTES: [Route; 20] = [
         Api::Locate,
         Method::Post,
         "/api/integrations/locate",
+        WatchAccess::NeedsWindow,
+        SMALL_BODY,
+    ),
+    route(
+        Api::SetupAct,
+        Method::Post,
+        "/api/setup/act",
         WatchAccess::NeedsWindow,
         SMALL_BODY,
     ),
@@ -664,6 +673,7 @@ fn api(
         Api::Open => open(shared, &body),
         Api::RevealDiagnostics => reveal_diagnostics(shared, &body),
         Api::Locate => acted(shared, locate(shared, &projection, &body)),
+        Api::SetupAct => setup_act(shared, &body),
         Api::Quit => quit(shared, &body),
     };
     drop(preview_permit);
@@ -1147,6 +1157,22 @@ fn quit(shared: &Shared, body: &[u8]) -> Response {
     }
     match shared.facade.quit() {
         Ok(()) => json_response(Status::Accepted, &json!({ "message": words::QUITTING })),
+        Err(error) => refused(&error.to_string()),
+    }
+}
+
+/// Start a browser on a step of the setup view, then answer the setup part as it is now. A step
+/// the computer no longer offers, and one made while the session is ending, are refused.
+fn setup_act(shared: &Shared, body: &[u8]) -> Response {
+    let action: SetupAction = match decode(body) {
+        Ok(action) => action,
+        Err(response) => return response,
+    };
+    match shared.facade.setup_act(&action) {
+        Ok(view) => json_response(
+            Status::Ok,
+            &serde_json::to_value(view).expect("the setup view is plain data"),
+        ),
         Err(error) => refused(&error.to_string()),
     }
 }

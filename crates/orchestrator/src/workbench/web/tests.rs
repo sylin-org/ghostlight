@@ -450,6 +450,7 @@ fn the_route_table_is_closed_and_no_route_clears_history() {
         (Post, "/api/quit"),
         (Post, "/api/runtime"),
         (Post, "/api/search"),
+        (Post, "/api/setup/act"),
         (Post, "/api/window"),
         (Put, "/api/controls/diagnostics"),
         (Put, "/api/controls/viewing"),
@@ -576,7 +577,12 @@ fn a_watcher_reads_projected_state_and_may_only_hold() {
 
 #[test]
 fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
-    let fixture = Fixture::start();
+    let fixture = Fixture::setting_up();
+    let computer = fixture
+        .computer
+        .clone()
+        .expect("a fixture that tracks setup");
+    computer.install("chrome");
     let tag = "none";
     let calls = [
         Call::new("PUT", "/api/policy/user")
@@ -594,6 +600,10 @@ fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
         post("/api/open", r#"{"destination":"home"}"#),
         post("/api/diagnostics/reveal", "{}"),
         post("/api/integrations/locate", r#"{"id":"goose"}"#),
+        post(
+            "/api/setup/act",
+            r#"{"kind":"add_in_browser","browser":"chrome"}"#,
+        ),
         post("/api/quit", "{}"),
     ];
     let acts = Arc::new(RecordingActs::default());
@@ -608,6 +618,7 @@ fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
     }
     assert_eq!(acts.asked(), 0);
     assert_eq!(quit.asked(), 0);
+    assert_eq!(computer.started(), [], "a watcher starts no browser");
     assert!(fixture.facade.watching());
     assert!(!fixture.root.join("state").join("watch.off").exists());
     assert_eq!(fixture.facade.policy().layers.len(), 0);
@@ -2120,6 +2131,117 @@ fn the_window_opens_a_destination_or_a_clients_download_and_nothing_else() {
     }
     assert_eq!(acts.urls.lock().unwrap().len(), 2);
     assert_eq!(acts.asked(), 2);
+}
+
+#[test]
+fn the_window_starts_a_browser_for_a_setup_step_and_is_given_the_fresh_view() {
+    use crate::language::setup::STORE_LISTING_URL;
+
+    let fixture = Fixture::setting_up();
+    let computer = fixture
+        .computer
+        .clone()
+        .expect("a fixture that tracks setup");
+    computer.install("chrome");
+    computer.find_profiles(vec![crate::install::browser_profiles::BrowserProfiles {
+        browser: crate::install::native_host::BrowserIdentity {
+            id: "chrome",
+            name: "Google Chrome",
+            short: "Chrome",
+        },
+        scan: crate::install::browser_profiles::ProfileScan {
+            profiles: 2,
+            with_extension: vec![crate::install::browser_profiles::ExtensionProfile {
+                directory: "Profile 1".into(),
+                name: Some("Work".into()),
+            }],
+        },
+    }]);
+
+    let added = fixture.control(post(
+        "/api/setup/act",
+        r#"{"kind":"add_in_browser","browser":"chrome"}"#,
+    ));
+    assert_eq!(added.status, 200);
+    assert_eq!(
+        added.json()["stage"],
+        "browser",
+        "the answer is the setup view"
+    );
+    let opened = fixture.control(post(
+        "/api/setup/act",
+        r#"{"kind":"open_browser","browser":"chrome","profile":"Profile 1"}"#,
+    ));
+    assert_eq!(opened.status, 200);
+    let started = computer.started();
+    assert_eq!(started.len(), 2);
+    assert_eq!(started[0].arguments, [STORE_LISTING_URL]);
+    assert_eq!(started[1].arguments, ["--profile-directory=Profile 1"]);
+
+    // A step the computer does not offer is refused in words, and starts nothing.
+    for body in [
+        r#"{"kind":"open_browser","browser":"chrome","profile":"Profile 9"}"#,
+        r#"{"kind":"add_in_browser","browser":"edge"}"#,
+        r#"{"kind":"get_chrome"}"#,
+    ] {
+        let reply = fixture.control(post("/api/setup/act", body));
+        assert_eq!(reply.status, 422, "{body}");
+        assert_eq!(reply.code(), "refused", "{body}");
+        assert_eq!(
+            reply.json()["error"]["message"],
+            words::SETUP_STEP_NOT_OFFERED
+        );
+    }
+    for body in [
+        "",
+        "[]",
+        "{}",
+        r#"{"kind":"nothing"}"#,
+        r#"{"kind":"add_in_browser"}"#,
+    ] {
+        let reply = fixture.control(post("/api/setup/act", body));
+        assert_eq!(reply.status, 400, "{body}");
+        assert_eq!(reply.code(), "bad_request", "{body}");
+    }
+    assert_eq!(computer.started().len(), 2);
+
+    computer.end_the_session(true);
+    let ending = fixture.control(post(
+        "/api/setup/act",
+        r#"{"kind":"add_in_browser","browser":"chrome"}"#,
+    ));
+    assert_eq!(ending.status, 422);
+    assert_eq!(
+        ending.json()["error"]["message"],
+        words::SETUP_SESSION_ENDING
+    );
+    assert_eq!(computer.started().len(), 2, "nothing starts at sign-out");
+}
+
+#[test]
+fn a_closed_view_cannot_start_a_browser() {
+    let fixture = Fixture::closed();
+    let reply = fixture.watch(post(
+        "/api/setup/act",
+        r#"{"kind":"add_in_browser","browser":"chrome"}"#,
+    ));
+    assert_eq!(reply.status, 403);
+    assert_eq!(reply.code(), "watching_off");
+}
+
+#[test]
+fn get_chrome_is_in_the_table_of_links_the_page_opens_through_the_service() {
+    let fixture = Fixture::start();
+    let links = fixture.control(get("/api/context")).json()["links"].clone();
+    assert_eq!(links["get_chrome"], "https://www.google.com/chrome/");
+    let acts = Arc::new(RecordingActs::default());
+    fixture.facade.attach_native_acts(acts.clone());
+    let reply = fixture.control(post("/api/open", r#"{"destination":"get_chrome"}"#));
+    assert_eq!(reply.status, 200);
+    assert_eq!(
+        *acts.urls.lock().unwrap(),
+        ["https://www.google.com/chrome/"]
+    );
 }
 
 #[test]

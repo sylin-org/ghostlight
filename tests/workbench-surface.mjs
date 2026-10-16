@@ -128,7 +128,7 @@ const controlContext = {
   instance: "instance_1", opener: "service",
   acts: Object.fromEntries(["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
     "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
-    "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"]
+    "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "setup_act", "quit"]
     .map((act) => [act, { available: true, why_not: null }])),
   product: { version: "1.0.0", license: "Apache-2.0 OR MIT" },
   links: {}
@@ -889,7 +889,7 @@ const CLOSED_SENTENCE = "Watching is off on this computer. Turn it on in the Gho
 const LINKS = { home: "https://example.test/home", source: "https://example.test/source" };
 const ACT_KEYS = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
   "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching", "setup_all", "harness_act",
-  "test_notification", "open", "reveal_diagnostics", "locate", "quit"];
+  "test_notification", "open", "reveal_diagnostics", "locate", "setup_act", "quit"];
 const WATCHER_ACTS = new Set(["search", "check_policy", "rescan", "continue_in_window", "hold"]);
 
 const contextFor = (kind) => {

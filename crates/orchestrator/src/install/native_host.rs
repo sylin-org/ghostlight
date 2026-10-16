@@ -193,6 +193,13 @@ impl NativeHostRegistry {
         Some(user_data_directory(&self.context, browser))
     }
 
+    /// The current user's home directory, where a browser started for them is given its working
+    /// directory. It may be empty when the environment names none.
+    #[must_use]
+    pub fn user_home(&self) -> &Path {
+        &self.context.home
+    }
+
     /// Every supported browser family, in the table's order.
     #[must_use]
     pub fn browser_identities(&self) -> Vec<BrowserIdentity> {

@@ -48,6 +48,7 @@
     open: "open",
     revealDiagnostics: "reveal_diagnostics",
     locate: "locate",
+    setupAct: "setup_act",
     quit: "quit"
   });
   /** The context in which the service shows nothing of this computer. */

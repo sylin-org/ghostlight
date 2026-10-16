@@ -105,13 +105,15 @@ pub enum WebAct {
     RevealDiagnostics,
     /// Ask the person for a client's application or settings file.
     Locate,
+    /// Start a browser on a step of the setup view.
+    SetupAct,
     /// End Ghostlight, as the tray's Quit does.
     Quit,
 }
 
 impl WebAct {
     /// Every act, in the order the context document lists them.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Search,
         Self::CheckPolicy,
         Self::Rescan,
@@ -130,6 +132,7 @@ impl WebAct {
         Self::Open,
         Self::RevealDiagnostics,
         Self::Locate,
+        Self::SetupAct,
         Self::Quit,
     ];
 
@@ -155,6 +158,7 @@ impl WebAct {
             Self::Open => "open",
             Self::RevealDiagnostics => "reveal_diagnostics",
             Self::Locate => "locate",
+            Self::SetupAct => "setup_act",
             Self::Quit => "quit",
         }
     }
@@ -281,7 +285,7 @@ mod tests {
 
     #[test]
     fn quit_is_the_windows_alone() {
-        assert_eq!(WebAct::ALL.len(), 19);
+        assert_eq!(WebAct::ALL.len(), 20);
         assert_eq!(WebAct::ALL.last().map(|act| act.key()), Some("quit"));
         assert!(availability(WebAct::Quit, WebContext::Control).available);
         let watcher = availability(WebAct::Quit, WebContext::Watch);

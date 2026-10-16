@@ -24,7 +24,8 @@ use super::parts::{
 use super::setup::{self, SetupInputs, SetupMachine, ThisComputer};
 use super::{
     BrowserInstanceSummary, OperationSummary, ReadinessSummary, RuntimeSource, ServiceSummary,
-    SessionSummary, WebFacts, WorkbenchChange, WorkbenchProjection, WorkbenchTrayPort,
+    SessionSummary, WebFacts, WorkbenchChange, WorkbenchError, WorkbenchProjection,
+    WorkbenchTrayPort,
 };
 use crate::browser::adapter::RuntimeControlState;
 use crate::browser::BrowserPort;
@@ -36,7 +37,7 @@ use crate::intake::desktop::TrayModel;
 use crate::intake::session::IntakeChannel;
 use crate::language::audit_health::AuditHealth;
 use crate::language::readiness;
-use crate::language::setup::SetupView;
+use crate::language::setup::{SetupAction, SetupView};
 use crate::language::workbench::ConnectionCounts;
 use crate::provenance::ConnectionDetails;
 use crate::workspace::WorkspaceStore;
@@ -346,6 +347,12 @@ impl Live {
             machine: machine.as_ref(),
             agent_name: agent_name.as_deref(),
         })
+    }
+
+    /// Carry out one setup step that starts a browser, over this computer as it is now.
+    pub fn perform_setup_act(&self, action: &SetupAction) -> Result<(), WorkbenchError> {
+        let machine = Arc::clone(&lock(&self.sources).machine);
+        setup::perform(machine.as_ref(), action)
     }
 
     /// What decides whether the setup part is built again.

@@ -469,7 +469,7 @@ test("every act the page names is a key of the context a window is given", () =>
     acts: Object.fromEntries([
       "search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
       "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching", "setup_all",
-      "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"
+      "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "setup_act", "quit"
     ].map((act) => [act, { available: true, why_not: null }]))
   };
   const named = Object.values(Transport.ACT);

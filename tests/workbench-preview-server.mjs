@@ -365,7 +365,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
       // The window's own context: every act is available, so the page draws all of it.
       const acts = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
         "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
-        "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"];
+        "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "setup_act", "quit"];
       return {
         context: "control", word: "Full control",
         sentence: "Others on this computer can watch this view in a browser.",

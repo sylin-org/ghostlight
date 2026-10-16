@@ -10,13 +10,22 @@
 //! facts [`setup_view`] gathers from the connected browsers, the live sessions, the cached client
 //! roster and, while setup is incomplete, the native-host report and the profile scan. The words
 //! are [`crate::language::setup`]'s; nothing here words anything.
+//!
+//! It also carries out the two setup steps that start a browser ([`perform`]): add Ghostlight in
+//! it, or open it in the profile that holds the extension. The window asks, and the step is
+//! checked against what the computer shows now before anything starts.
 
+use std::ffi::OsStr;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use super::{BrowserInstanceSummary, SessionSummary};
+use ghostlight_relay::os;
+
+use super::{BrowserInstanceSummary, SessionSummary, WorkbenchError};
 use crate::audit::AuditRecord;
+use crate::browser::session::graphical_session_environment;
 use crate::install::browser_package::BrowserPackage;
 use crate::install::browser_profiles::{self, BrowserProfiles};
 use crate::install::native_host::{BrowserIdentity, NativeHostRegistry, NativeHostReport};
@@ -25,7 +34,8 @@ use crate::install::{HarnessState, HarnessSummary};
 use crate::intake::session::IntakeChannel;
 use crate::language::setup as words;
 use crate::language::setup::{
-    AgentFact, AgentState, BrowserFact, BrowserForm, Platform, ProfileFact, SetupFacts, SetupView,
+    AgentFact, AgentState, BrowserFact, BrowserForm, Platform, ProfileFact, SetupAction,
+    SetupFacts, SetupView, STORE_LISTING_URL,
 };
 use crate::work::result::Status;
 
@@ -33,6 +43,9 @@ use crate::work::result::Status;
 const OTHER_BROWSER_ID: &str = "other";
 /// The short name of a connected browser that is none of the supported families.
 const OTHER_BROWSER_SHORT: &str = "Chromium";
+/// The start of the one argument that opens a browser in a given profile. The profile directory
+/// follows it.
+const PROFILE_DIRECTORY_OPTION: &str = "--profile-directory=";
 
 /// What completed setup during this run of the service. It is not stored.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,17 +134,24 @@ fn qualifies(record: &AuditRecord) -> bool {
         && record.browser.is_some()
 }
 
-/// What the setup view reads from this computer. Only an incomplete setup asks for the report and
-/// the scan; a complete setup reads nothing. A test supplies a fake.
+/// What the setup view reads from this computer, and the one thing it starts there. Only an
+/// incomplete setup asks for the report and the scan; a complete setup reads nothing. A test
+/// supplies a fake that starts nothing.
 pub(crate) trait SetupMachine: Send + Sync {
     /// The native-host report, when it can be read.
     fn native_hosts(&self) -> Option<NativeHostReport>;
     /// Every supported browser family, in table order. This is a table and reads nothing.
     fn browsers(&self) -> Vec<BrowserIdentity>;
-    /// Whether an ordinary installation of the browser is found.
-    fn browser_found(&self, browser_id: &str) -> bool;
+    /// The ordinary installation of the browser, when one is found. An id that is not in the
+    /// table has none.
+    fn browser_executable(&self, browser_id: &str) -> Option<PathBuf>;
     /// The profiles that hold the Ghostlight extension, for every installed browser.
     fn extension_profiles(&self) -> Vec<BrowserProfiles>;
+    /// Whether the session is ending, so that nothing may be started.
+    fn session_ending(&self) -> bool;
+    /// Start `program` with `arguments`, detached from this process, and return once it has been
+    /// created. It does not wait for the program to do anything.
+    fn start(&self, program: &Path, arguments: &[String]) -> io::Result<()>;
 }
 
 /// The machine the service runs on.
@@ -153,12 +173,36 @@ impl SetupMachine for ThisComputer {
         self.0.browser_identities()
     }
 
-    fn browser_found(&self, browser_id: &str) -> bool {
-        self.0.browser_executable(browser_id).is_some()
+    fn browser_executable(&self, browser_id: &str) -> Option<PathBuf> {
+        self.0.browser_executable(browser_id)
     }
 
     fn extension_profiles(&self) -> Vec<BrowserProfiles> {
         browser_profiles::scan(&self.0)
+    }
+
+    fn session_ending(&self) -> bool {
+        os::session::session_ending()
+    }
+
+    /// The start is detached, so the browser holds nothing of the service: no handle, no pipe, no
+    /// socket. It needs a graphical session of this user, which is proved first; the browser
+    /// inherits this process's environment, which holds the display that proof found.
+    fn start(&self, program: &Path, arguments: &[String]) -> io::Result<()> {
+        graphical_session_environment()?.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "no verified graphical user session is available",
+            )
+        })?;
+        let arguments: Vec<&OsStr> = arguments.iter().map(OsStr::new).collect();
+        let home = self.0.user_home();
+        let directory = if home.as_os_str().is_empty() {
+            std::env::temp_dir()
+        } else {
+            home.to_owned()
+        };
+        os::spawn_detached(program, &arguments, &directory).map(drop)
     }
 }
 
@@ -225,7 +269,9 @@ pub(super) fn setup_view(inputs: &SetupInputs<'_>) -> SetupView {
                 .find(|registered| registered.id == identity.id)
                 .map(|registered| registered.package)
         });
-        let form = form_of(package, || inputs.machine.browser_found(identity.id));
+        let form = form_of(package, || {
+            inputs.machine.browser_executable(identity.id).is_some()
+        });
         let extension = profiles
             .iter()
             .find(|found| found.browser.id == identity.id)
@@ -253,6 +299,56 @@ pub(super) fn setup_view(inputs: &SetupInputs<'_>) -> SetupView {
         .map(|harness| harness.connector_command.clone())
         .unwrap_or_default();
     words::compose(&facts)
+}
+
+/// Carry out one setup step that starts a browser.
+///
+/// `AddInBrowser` starts the browser on the store listing. `OpenBrowser` starts it, in the profile
+/// when one is named. The browser must be one whose installation is found now, and a profile must
+/// be one the scan returns now, for that browser; anything else, and every kind of step that is
+/// not a browser start, is refused with nothing started. Nothing is started while the session is
+/// ending.
+pub(super) fn perform(
+    machine: &dyn SetupMachine,
+    action: &SetupAction,
+) -> Result<(), WorkbenchError> {
+    if machine.session_ending() {
+        return Err(WorkbenchError::SetupSessionEnding);
+    }
+    let (browser, profile, arguments) = match action {
+        SetupAction::AddInBrowser { browser } => {
+            (browser, None, vec![STORE_LISTING_URL.to_owned()])
+        }
+        SetupAction::OpenBrowser { browser, profile } => {
+            let arguments = profile
+                .iter()
+                .map(|directory| format!("{PROFILE_DIRECTORY_OPTION}{directory}"))
+                .collect();
+            (browser, profile.as_deref(), arguments)
+        }
+        SetupAction::GetChrome
+        | SetupAction::ConnectAgent { .. }
+        | SetupAction::ReviewAgent { .. } => return Err(WorkbenchError::SetupStepNotOffered),
+    };
+    let executable = machine
+        .browser_executable(browser)
+        .ok_or(WorkbenchError::SetupStepNotOffered)?;
+    if let Some(directory) = profile {
+        let scanned = machine.extension_profiles().into_iter().any(|found| {
+            found.browser.id == browser.as_str()
+                && found
+                    .scan
+                    .with_extension
+                    .iter()
+                    .any(|profile| profile.directory == directory)
+        });
+        if !scanned {
+            return Err(WorkbenchError::SetupStepNotOffered);
+        }
+    }
+    machine
+        .start(&executable, &arguments)
+        .map_err(|_| WorkbenchError::SetupBrowserNotStarted)
 }
 
 /// How a browser family is installed. `found` says whether an ordinary installation is found, and
@@ -379,8 +475,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// counts how often the report and the scan were read.
 #[cfg(test)]
 pub(super) mod test_support {
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::io;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Mutex, PoisonError};
 
     use super::{
@@ -398,6 +495,18 @@ pub(super) mod test_support {
         found: Mutex<Vec<&'static str>>,
         profiles: Mutex<Vec<BrowserProfiles>>,
         reads: AtomicUsize,
+        ending: AtomicBool,
+        refuses: AtomicBool,
+        started: Mutex<Vec<Started>>,
+    }
+
+    /// One browser start a test asked for.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct Started {
+        /// The program that was to be started.
+        pub program: PathBuf,
+        /// Its arguments, in order.
+        pub arguments: Vec<String>,
     }
 
     impl Computer {
@@ -429,6 +538,29 @@ pub(super) mod test_support {
         pub fn reads(&self) -> usize {
             self.reads.load(Ordering::SeqCst)
         }
+
+        /// The path the fake gives the installed browser with `id`.
+        pub fn executable_of(id: &str) -> PathBuf {
+            PathBuf::from(format!("/installed/{id}"))
+        }
+
+        /// Say whether the session is ending from now on.
+        pub fn end_the_session(&self, ending: bool) {
+            self.ending.store(ending, Ordering::SeqCst);
+        }
+
+        /// Make every start the computer is asked for fail from now on.
+        pub fn refuse_to_start(&self) {
+            self.refuses.store(true, Ordering::SeqCst);
+        }
+
+        /// Every start the computer was asked for, in order. It started nothing.
+        pub fn started(&self) -> Vec<Started> {
+            self.started
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
     }
 
     impl SetupMachine for Computer {
@@ -452,11 +584,12 @@ pub(super) mod test_support {
             .collect()
         }
 
-        fn browser_found(&self, browser_id: &str) -> bool {
+        fn browser_executable(&self, browser_id: &str) -> Option<PathBuf> {
             self.found
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .contains(&browser_id)
+                .then(|| Self::executable_of(browser_id))
         }
 
         fn extension_profiles(&self) -> Vec<BrowserProfiles> {
@@ -465,6 +598,24 @@ pub(super) mod test_support {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone()
+        }
+
+        fn session_ending(&self) -> bool {
+            self.ending.load(Ordering::SeqCst)
+        }
+
+        fn start(&self, program: &Path, arguments: &[String]) -> io::Result<()> {
+            if self.refuses.load(Ordering::SeqCst) {
+                return Err(io::Error::other("the fake computer starts nothing"));
+            }
+            self.started
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Started {
+                    program: program.to_owned(),
+                    arguments: arguments.to_vec(),
+                });
+            Ok(())
         }
     }
 
@@ -531,7 +682,7 @@ mod tests {
     use std::fs;
     use std::sync::atomic::AtomicUsize;
 
-    use super::test_support::{connected, harness, row, session, Computer};
+    use super::test_support::{connected, harness, row, session, Computer, Started};
     use super::*;
     use crate::governance::{CapabilitySet, Decision};
     use crate::install::browser_profiles::{ExtensionProfile, ProfileScan};
@@ -1028,5 +1179,156 @@ mod tests {
         assert_eq!(computer.reads(), 2);
         incomplete(&computer, &[], &[], &[]);
         assert_eq!(computer.reads(), 4);
+    }
+
+    // The steps that start a browser.
+
+    fn add(browser: &str) -> SetupAction {
+        SetupAction::AddInBrowser {
+            browser: browser.into(),
+        }
+    }
+
+    fn open(browser: &str, profile: Option<&str>) -> SetupAction {
+        SetupAction::OpenBrowser {
+            browser: browser.into(),
+            profile: profile.map(str::to_owned),
+        }
+    }
+
+    fn refused(result: Result<(), WorkbenchError>) {
+        assert_eq!(result, Err(WorkbenchError::SetupStepNotOffered));
+    }
+
+    #[test]
+    fn adding_in_chrome_starts_chrome_on_the_listing_and_nothing_else() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        perform(&computer, &add("chrome")).unwrap();
+        assert_eq!(
+            computer.started(),
+            [Started {
+                program: Computer::executable_of("chrome"),
+                arguments: vec![STORE_LISTING_URL.to_owned()],
+            }]
+        );
+    }
+
+    #[test]
+    fn adding_starts_the_browser_the_row_names() {
+        let computer = Computer::default();
+        for id in ["chrome", "edge", "brave"] {
+            computer.install(id);
+        }
+        perform(&computer, &add("brave")).unwrap();
+        perform(&computer, &add("edge")).unwrap();
+        let started = computer.started();
+        assert_eq!(started.len(), 2);
+        assert_eq!(started[0].program, Computer::executable_of("brave"));
+        assert_eq!(started[1].program, Computer::executable_of("edge"));
+        for launch in &started {
+            assert_eq!(launch.arguments, [STORE_LISTING_URL]);
+        }
+    }
+
+    #[test]
+    fn opening_names_the_scanned_profile_as_the_only_argument() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        computer.find_profiles(vec![chrome_with_the_extension(2)]);
+        perform(&computer, &open("chrome", Some("Profile 1"))).unwrap();
+        perform(&computer, &open("chrome", None)).unwrap();
+        let started = computer.started();
+        assert_eq!(started[0].program, Computer::executable_of("chrome"));
+        assert_eq!(started[0].arguments, ["--profile-directory=Profile 1"]);
+        assert!(started[1].arguments.is_empty());
+    }
+
+    #[test]
+    fn a_profile_the_scan_did_not_return_is_refused_and_nothing_starts() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        computer.install("edge");
+        computer.find_profiles(vec![chrome_with_the_extension(2)]);
+        for action in [
+            open("chrome", Some("Profile 2")),
+            open("chrome", Some("")),
+            open("chrome", Some("Profile 1 --incognito")),
+            open("chrome", Some("../Profile 1")),
+            // A profile of another browser is not one of this browser's.
+            open("edge", Some("Profile 1")),
+        ] {
+            refused(perform(&computer, &action));
+        }
+        assert_eq!(computer.started(), []);
+    }
+
+    #[test]
+    fn a_browser_that_is_unknown_or_not_installed_is_refused_and_nothing_starts() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        for action in [
+            add("netscape"),
+            add("other"),
+            add("edge"),
+            add(""),
+            open("brave", None),
+            open("../chrome", None),
+        ] {
+            refused(perform(&computer, &action));
+        }
+        assert_eq!(computer.started(), []);
+    }
+
+    #[test]
+    fn a_step_that_is_not_a_browser_start_is_refused() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        for action in [
+            SetupAction::GetChrome,
+            SetupAction::ConnectAgent {
+                agent: "cursor".into(),
+            },
+            SetupAction::ReviewAgent {
+                agent: "cursor".into(),
+            },
+        ] {
+            refused(perform(&computer, &action));
+        }
+        assert_eq!(computer.started(), []);
+    }
+
+    #[test]
+    fn nothing_starts_while_the_session_is_ending() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        computer.find_profiles(vec![chrome_with_the_extension(2)]);
+        computer.end_the_session(true);
+        for action in [
+            add("chrome"),
+            open("chrome", Some("Profile 1")),
+            open("chrome", None),
+            add("netscape"),
+        ] {
+            assert_eq!(
+                perform(&computer, &action),
+                Err(WorkbenchError::SetupSessionEnding)
+            );
+        }
+        assert_eq!(computer.started(), []);
+        computer.end_the_session(false);
+        perform(&computer, &add("chrome")).unwrap();
+        assert_eq!(computer.started().len(), 1);
+    }
+
+    #[test]
+    fn a_computer_that_will_not_start_the_browser_says_so() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        computer.refuse_to_start();
+        assert_eq!(
+            perform(&computer, &add("chrome")),
+            Err(WorkbenchError::SetupBrowserNotStarted)
+        );
     }
 }

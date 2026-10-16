@@ -371,8 +371,12 @@ fn the_about_page_can_reach_only_the_destinations_the_product_chose() {
     assert!(app.contains(r#"call("open_destination", { destination })"#));
 
     // Every destination the orchestrator will open is offered, and every name the surface
-    // offers is one the orchestrator knows. Either half alone lets the two drift.
-    for destination in WorkbenchDestination::all() {
+    // offers is one the orchestrator knows. Either half alone lets the two drift. The setup view
+    // reaches Get Chrome, which is Google's page and not one of the product's own.
+    for destination in WorkbenchDestination::all()
+        .into_iter()
+        .filter(|destination| *destination != WorkbenchDestination::GetChrome)
+    {
         let key = destination.key();
         assert!(
             app.contains(&format!("[\"{key}\", \""))
