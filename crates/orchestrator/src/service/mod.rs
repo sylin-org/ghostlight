@@ -1539,6 +1539,7 @@ impl LiveSession {
         independent: bool,
     ) -> Result<JoinHandle<()>> {
         let queue = Arc::clone(&self.queue);
+        let intake = Arc::clone(intake);
         let executor = Arc::clone(&intake.executor);
         let workspace = self.workspace.clone();
         let workspaces = intake.workspaces.clone();
@@ -1547,6 +1548,7 @@ impl LiveSession {
             .name("ghostlight-session-work".into())
             .spawn(move || {
                 while let Some(job) = queue.next(independent) {
+                    restore_returned_tabs(&intake, &wire, &workspace);
                     let result = executor.execute_prepared(
                         &workspace,
                         &job.prepared,
@@ -1598,6 +1600,7 @@ impl LiveSession {
                     }),
                     Err(Refused::Full) => match self.queue.begin_unqueued() {
                         Ok(_flight) => {
+                            restore_returned_tabs(intake, wire, &self.workspace);
                             let result = intake.executor.execute_prepared(
                                 &self.workspace,
                                 &job.prepared,
@@ -1718,17 +1721,25 @@ fn restore_tabs(
 
 /// Bind the resumed tabs of browsers that have returned since the session resumed, without
 /// waiting for any browser, and hand the client a token that reflects them.
+///
+/// A browser that is already available is asked once for its tabs; any other keeps its tabs
+/// pending. It runs before each call executes and on the watch tick, so a call admitted right
+/// after its browser returned finds its handle bound. The `unrestored` lock is held across the
+/// restore, which serializes the watch and the workers so none loses another's update.
 fn restore_returned_tabs(intake: &Intake, wire: &McpWire, workspace: &WorkspaceId) {
-    let pending = lock(&wire.unrestored).clone();
-    if pending.is_empty() {
-        return;
+    let changed = {
+        let mut pending = lock(&wire.unrestored);
+        if pending.is_empty() {
+            return;
+        }
+        let still = restore_tabs(intake, workspace, &pending, Instant::now());
+        let changed = still.len() != pending.len();
+        *pending = still;
+        changed
+    };
+    if changed {
+        wire.publish_resume(&intake.workspaces, workspace);
     }
-    let still = restore_tabs(intake, workspace, &pending, Instant::now());
-    if still.len() == pending.len() {
-        return;
-    }
-    *lock(&wire.unrestored) = still;
-    wire.publish_resume(&intake.workspaces, workspace);
 }
 
 /// Answer an invocation that arrived after a quit began.
@@ -2618,7 +2629,8 @@ mod tests {
     }
 
     /// Serve the relay listener with the relay port as the session's browser port, so sessions
-    /// meet browsers only as protocol-4 extensions attach.
+    /// meet browsers only as protocol-4 extensions attach, for their calls as well as their
+    /// resumed tabs.
     fn serve_relayed(home: &TestHome) -> Served {
         serve(home, true)
     }
@@ -2637,6 +2649,11 @@ mod tests {
             "service_test".into(),
             test_assets(),
         ));
+        let port: Arc<dyn crate::browser::BrowserPort> = if relayed {
+            relay.clone()
+        } else {
+            browser.clone()
+        };
         let workspaces = WorkspaceStore::default();
         let governance = GovernanceFacade::new(None, None);
         let diagnostics = crate::diagnostics::DiagnosticsHub::for_tests();
@@ -2648,9 +2665,9 @@ mod tests {
         let executor = Arc::new(ApplicationExecutor::new(
             governance.clone(),
             workspaces.clone(),
-            browser.clone(),
+            port.clone(),
             PresentationReactor::new(Arc::new(BrowserPresentation::new(
-                browser.clone(),
+                port.clone(),
                 workspaces.clone(),
             ))),
             projection.clone(),
@@ -2679,11 +2696,7 @@ mod tests {
             templates: failure_templates(),
             executor,
             workspaces,
-            browser_port: if relayed {
-                relay.clone()
-            } else {
-                browser.clone()
-            },
+            browser_port: port,
             browser: relay.clone(),
             workbench,
             governance,
@@ -3034,6 +3047,19 @@ mod tests {
     /// The tab the returning browser still holds.
     const RETURNING_TAB: u64 = 12;
 
+    /// The address of the returning browser's tab.
+    const RETURNING_URL: &str = "https://example.com/";
+
+    /// What the returning browser's page answers to one world message.
+    fn returning_world_value(message: &Value) -> Value {
+        if message["kind"] == "read_text" {
+            json!({"text": "Example Domain", "truncated": false, "title": "Example",
+                "url": RETURNING_URL})
+        } else {
+            Value::Null
+        }
+    }
+
     /// A resume token for a session that owned the returning browser's tab.
     fn returning_token() -> String {
         ResumeState {
@@ -3071,8 +3097,15 @@ mod tests {
             Box::new(|correlation, primitive| {
                 let outcome = match primitive {
                     Primitive::ListTabs(_) => json!({"tabs": [{"tab_id": RETURNING_TAB,
-                        "title": "Example", "url": "https://example.com/", "active": true,
+                        "title": "Example", "url": RETURNING_URL, "active": true,
                         "readiness": "complete"}]}),
+                    Primitive::Frames(_) => json!({"frames": [{"frame_id": "T",
+                        "loader_id": "t1", "parent_frame_id": null, "url": RETURNING_URL}],
+                        "complete": true, "unseen": []}),
+                    Primitive::Call(call) => json!({"answers": call.calls.iter().map(|world| {
+                        json!({"status": "returned", "envelope": {"ok": true,
+                            "value": returning_world_value(&world.message)}})
+                    }).collect::<Vec<_>>()}),
                     _ => Value::Null,
                 };
                 FakeReply::Now(FakeExtension::ok(correlation, outcome))
@@ -3137,6 +3170,39 @@ mod tests {
 
         let _browser = attach_returning_browser(&served);
         eventually(|| bound_tabs(&served) == vec![("tab_kept".to_owned(), RETURNING_TAB)]);
+    }
+
+    #[test]
+    fn a_call_right_after_its_browser_returns_finds_its_resumed_tab() {
+        let home = TestHome::new("resume-call");
+        let served = serve_relayed(&home);
+        let mut socket = open_mcp(Some(returning_token()));
+        let McpFrame::Resume { .. } = frame::read_frame::<McpFrame>(&mut socket).unwrap().unwrap()
+        else {
+            panic!("a resumed session hands back a fresh token first");
+        };
+        assert!(bound_tabs(&served).is_empty());
+
+        let _browser = attach_returning_browser(&served);
+        // No wait for the session to notice the browser: the call itself binds the tab.
+        send_line(
+            &mut socket,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "browser_read", "arguments": {"tab": "tab_kept"}}
+            }),
+        );
+        let (called, _) = response(&mut socket, 2);
+        assert_eq!(
+            called["result"]["structuredContent"]["status"], "succeeded",
+            "{called}"
+        );
+        assert_eq!(
+            bound_tabs(&served),
+            vec![("tab_kept".to_owned(), RETURNING_TAB)]
+        );
     }
 
     #[test]
