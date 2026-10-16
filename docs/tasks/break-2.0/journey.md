@@ -148,7 +148,8 @@ j02-kit has landed. Next: j03-show-event.
   The tree and the spec differed in these places.
   (1) Links use `.gl-page :where(a)` and `.gl-page :where(a):hover`, not `.gl-page a`. A plain
   prefix would out-rank `.gl-btn--primary` and turn a link-button's text the accent colour. The
-  focus ring is `.gl-page :focus-visible`, as specified.
+  focus ring is `.gl-page :where(:focus-visible)` for the same reason: at class weight, later
+  component rules such as `.gl-btn` and `.gl-copy` keep their own corner radius when focused.
   (2) The companion has no body wrapper. The step names (`gl-stepper__names`) follow the stepper as
   a sibling and carry the old body padding as `padding-top`. The names use flat element classes,
   `gl-stepper__t` and `gl-stepper__w`. Segments are `gl-stepper__seg--1` and `--2`; segment N joins

@@ -131,7 +131,7 @@
 .gl-page :where(a):hover { color: var(--a); }
 
 /* Focus ring: accent, 2px, offset 3px (13.0:1). Keyboard focus only; never removed. */
-.gl-page :focus-visible { outline: 2px solid var(--a); outline-offset: 3px; border-radius: var(--r-1); }
+.gl-page :where(:focus-visible) { outline: 2px solid var(--a); outline-offset: 3px; border-radius: var(--r-1); }
 
 /* ---------------------------------------------------------------------------
    3. LAYOUT
