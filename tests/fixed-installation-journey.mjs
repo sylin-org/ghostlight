@@ -51,9 +51,11 @@ try {
   const catalogBefore = (await mcp.request("tools/list")).result.tools.map((tool) => tool.name);
   assert.ok(catalogBefore.length > 0, "the all-open policy advertises a catalog");
   const edgePid = mcp.child.pid;
-  // PE and ELF allow trailing data: change only the service image, not the edge.
+  // PE and ELF allow trailing data: change only the service image, not the edge. A release
+  // install of the same intact version compares versions and the recorded hash, not the payload
+  // bytes, so it changes nothing; --development always swaps the service.
   appendFileSync(carrierService, Buffer.from("\nfixed-installation-service-update\n"));
-  const replaced = home.run(carrierService, ["deployment", "install"], { timeout: 120_000 });
+  const replaced = home.run(carrierService, ["deployment", "install", "--development"], { timeout: 120_000 });
   assert.equal(replaced.status, 0, replaced.stderr || replaced.stdout);
   assert.equal(digest(home.service), digest(carrierService), "the service image is replaced in bin");
   await until(async () => {
