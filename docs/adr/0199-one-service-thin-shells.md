@@ -186,6 +186,7 @@ Nothing that speaks relay protocol 3 has shipped, so this is the cheapest moment
    1  refuse unless this image is <home>/bin/ghostlight-service
         (or the marked development build, until Decision 18 lands)
    2  refuse when elevated on Windows
+        [A debug build can waive this in CI: the amendment of 2026-10-16, CI's elevated Windows runners]
    3  apply the quit latch and the ending state (Decisions 10 and 13)
    4  take run/service.lock, held until exit
         held by another: an update start waits up to 30 s; any other start exits
@@ -693,3 +694,22 @@ service that stays is the answer to the starter's own connection. A `browser` or
 that waited looks at the quit latch again once it holds the lock, so a Quit that arrived while it
 waited still holds. Decision 10's table and the frozen start reasons are unchanged; only the wait
 for a held lock changed, and it is not a relay contract.
+
+## Amendment (2026-10-16): CI's elevated Windows runners
+
+GitHub's `windows-latest` runs a job with an elevated administrator token. The runner image keeps
+UAC on and only sets `ConsentPromptBehaviorAdmin=0`, so refusing only the elevated half of a
+split token would not get a journey past Decision 9 step 2. Every Windows journey failed to start
+a service on the first CI run of the 2.0 tree.
+
+The refusal stands for every release build and every normal run. A debug build reads
+`GHOSTLIGHT_TEST_ALLOW_ELEVATED` and, when its value is exactly `1`, lets an elevated token
+through, so CI's elevated Windows runners can run the journeys. A token that cannot be read is
+refused either way. Release builds never read the variable. The CI process and browser journeys
+set it on Windows only; the rust job does not.
+
+`tests/elevation-journey.mjs` proves the promise on that runner. When the token is elevated it
+runs the service's `serve` and an edge command that would start a service with the variable
+cleared, asserts both refuse with the administrator-rights sentence and leave no service, and then
+asserts that the variable set to `1` lets `serve` start. An unelevated run prints `SKIP not
+elevated` and passes.

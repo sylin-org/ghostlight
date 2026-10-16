@@ -1754,10 +1754,28 @@ fn acquire_lock(path: &Path, wait: Duration) -> Result<ServiceLock> {
     }
 }
 
+/// The environment variable a debug build reads so a CI runner whose job token is elevated can
+/// run the journeys. The value must be exactly `1`. Release builds never read it.
+pub const ELEVATION_WAIVER_VARIABLE: &str = "GHOSTLIGHT_TEST_ALLOW_ELEVATED";
+
 /// Refuse to serve, or to start a service, from an elevated token. `elevated` reads the token of
-/// the calling process; a token that cannot be read is refused too.
+/// the calling process; a token that cannot be read is refused too. A debug build with
+/// [`ELEVATION_WAIVER_VARIABLE`] set to `1` lets an elevated token through.
 pub(crate) fn refuse_elevated_token(elevated: impl FnOnce() -> io::Result<bool>) -> Result<()> {
-    if elevated().context("read the process token")? {
+    decide_elevation(elevated(), elevation_waived())
+}
+
+/// Whether this process may run with an elevated token: true only in a debug build whose
+/// environment sets [`ELEVATION_WAIVER_VARIABLE`] to exactly `1`.
+fn elevation_waived() -> bool {
+    cfg!(debug_assertions)
+        && std::env::var(ELEVATION_WAIVER_VARIABLE).is_ok_and(|value| value == "1")
+}
+
+/// The refusal as a pure decision over the token answer and the waiver. Only an elevated answer
+/// can be waived; a token that cannot be read is refused either way.
+fn decide_elevation(token: io::Result<bool>, waived: bool) -> Result<()> {
+    if token.context("read the process token")? && !waived {
         anyhow::bail!(ELEVATED_SERVICE);
     }
     Ok(())
@@ -3537,6 +3555,21 @@ mod tests {
             StartReason::Person
         );
         drop(host);
+    }
+
+    #[test]
+    fn the_elevation_decision_waives_only_an_elevated_answer() {
+        use super::decide_elevation;
+        let refused = decide_elevation(Ok(true), false).unwrap_err();
+        assert_eq!(format!("{refused:#}"), super::ELEVATED_SERVICE);
+        assert!(decide_elevation(Ok(true), true).is_ok());
+        assert!(decide_elevation(Ok(false), false).is_ok());
+        assert!(decide_elevation(Ok(false), true).is_ok());
+        for waived in [false, true] {
+            let unreadable =
+                decide_elevation(Err(std::io::Error::other("no token")), waived).unwrap_err();
+            assert!(format!("{unreadable:#}").contains("no token"));
+        }
     }
 
     #[test]

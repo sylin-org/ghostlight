@@ -237,6 +237,10 @@ cargo build --workspace --target-dir .target-ghostlight-1.0
 node tests/script-browser-journey.mjs
 ```
 
+On an elevated Windows token (CI's runners), a debug build refuses to serve unless
+`GHOSTLIGHT_TEST_ALLOW_ELEVATED=1`; release builds never read it, and `tests/elevation-journey.mjs`
+proves the refusal there.
+
 `GHOSTLIGHT_TEST_BROWSER` can name the browser executable; `GHOSTLIGHT_BIN_DIR` can name a
 different fresh build directory. The lane opens a visible browser with its own temporary profile
 and HTTP fixture,

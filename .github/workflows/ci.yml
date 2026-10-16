@@ -105,6 +105,9 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.target-ci
       JOURNEY_WRAP: ${{ matrix.os == 'ubuntu-latest' && 'dbus-run-session -- xvfb-run -a ' || '' }}
+      # Windows runners run jobs with an elevated token. A debug build reads this to run the journeys;
+      # tests/elevation-journey.mjs proves the refusal still stands without it.
+      GHOSTLIGHT_TEST_ALLOW_ELEVATED: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux desktop build dependencies
@@ -143,6 +146,9 @@ jobs:
       # Only disposable test profiles use this flag. No installed browser is changed.
       GHOSTLIGHT_TEST_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
       JOURNEY_WRAP: ${{ matrix.os == 'ubuntu-latest' && 'dbus-run-session -- xvfb-run -a ' || '' }}
+      # Windows runners run jobs with an elevated token. A debug build reads this to run the journeys;
+      # tests/elevation-journey.mjs proves the refusal still stands without it.
+      GHOSTLIGHT_TEST_ALLOW_ELEVATED: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux desktop build dependencies

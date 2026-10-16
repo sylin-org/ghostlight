@@ -66,6 +66,7 @@ const PROCESS_JOURNEYS = [
   { name: "shell-installer", file: "installer-shell.mjs", platform: "linux" },
   { name: "edge-parent", file: "edge-parent-lifecycle.mjs" },
   { name: "fixed-installation", file: "fixed-installation-journey.mjs", platform: "linux" },
+  { name: "elevation", file: "elevation-journey.mjs", platform: "win32" },
   { name: "process", file: "process-journey.mjs" },
   { name: "continuity", file: "local-resilience-journey.mjs" },
   { name: "history-compatibility", file: "history-compatibility.mjs" },
