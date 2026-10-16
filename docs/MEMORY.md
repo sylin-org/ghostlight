@@ -271,7 +271,8 @@ the owner wants, and what this project learned the hard way.
 - **A held lease is not readiness.** Publish discovery only once the interaction route exists,
   reap every child that failed or lost the lease race, and bound concurrent starters' retries, or
   they take turns spawning failures (32 authorities in four seconds, ADR-0166; current mechanics
-  in ADR-0197 Decision 10).
+  in ADR-0197 Decision 10). Readiness never waits for a window: the service links no UI toolkit,
+  binds its endpoint at start and serves with no display (ADR-0199 Decisions 1 and 11).
 - **One process does not prove one workbench.** A startup/Open race created two responsive native
   windows inside one authority. The service now holds one desktop place and a second shell is sent
   `already_open`, but native lifecycle acceptance still counts actual windows, including hidden
@@ -565,10 +566,11 @@ Every one of these cost something to learn.
   packages unless the owner changes them (AGENTS.md, Authority and historical continuity). The npm
   launcher (`npx -y ghostlight install`, and a bare npm launch as MCP stdio) is a mandatory entry
   point.
-- **A Windows GUI-subsystem executable is not a normal PowerShell pipeline child.** Ghostlight keeps
-  its console-free desktop launch, but scripts that invoke the binary directly must use an explicit
-  waited process with redirected stdout and stderr. `$LASTEXITCODE` and `&` are not a reliable CLI
-  boundary for that executable shape.
+- **A Windows GUI-subsystem executable is not a normal PowerShell pipeline child.** Since the shell
+  milestone only `ghostlight-desktop` is GUI subsystem; the edge and the service are console
+  programs whose manifest asks for no console on a start with none to join. A script that must
+  drive `ghostlight-desktop` directly uses an explicit waited process with redirected stdout and
+  stderr, because `$LASTEXITCODE` and `&` are not a reliable boundary for that executable shape.
 - **Probe the intended native window, not a process-level main-window guess.** Tray helpers,
   event-loop helpers, and console hosts can make `MainWindowHandle` look healthy after the actual
   workbench window has died. Windows desktop acceptance identifies the exact `Ghostlight` /

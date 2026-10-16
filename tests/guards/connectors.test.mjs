@@ -1,11 +1,13 @@
 // Edge guards (ADR-0197 D25, ADR-0199 D21).
 //
-// Two facts about the edge crate and the relay crate it shares with the service:
+// Three facts about the edge crate, the relay crate it shares with the service, and the service:
 //   1. the crate names in the normal dependency tree of the edge on each supported
 //      target (tests/golden/cargo-tree/<crate>.<target>.txt), with no network crate among
 //      them (ADR-0028, never phone home);
 //   2. the edge and relay source equals the last published tag at the same
-//      relay revision, so a published revision never changes underneath users.
+//      relay revision, so a published revision never changes underneath users;
+//   3. the service links no UI toolkit and no async network stack (ADR-0199 D1 and D21): the
+//      window, the tray and the notices belong to ghostlight-desktop.
 //
 // Run `GHOSTLIGHT_GUARD_UPDATE=1 node --test tests/guards/connectors.test.mjs`
 // to rewrite the dependency-tree goldens after a real dependency add or remove, then commit
@@ -62,12 +64,22 @@ export function offlineSkipMessage(crate, target, result) {
   return `cargo cannot resolve ${crate} for ${target}: ${result.offline.split("\n")[0]}`;
 }
 
+/** The service package, whose tree holds no UI toolkit (ADR-0199 D21). */
+const SERVICE = "ghostlight-service";
+
+/** Crates that draw a window, a tray, a web view or a notice. The service never links one; the shell does. */
+const UI_TOOLKIT_CRATES =
+  /^(tauri.*|tao|wry|gtk.*|gdk.*|webkit2gtk.*|javascriptcore.*|soup3.*|libappindicator.*|tray-icon|muda|webview2-com.*)$/;
+
+/** Crates that left the service's tree with the UI toolkit and stay out (no async runtime, no HTTP stack). */
+const LEFT_THE_SERVICE_CRATES = /^(tokio|reqwest|hyper|socket2)$/;
+
 /** Runs `cargo tree`; returns `{ offline }` when the registry is unreachable outside CI and throws on any other failure. */
-function cargoTree(crate, target) {
+function cargoTree(crate, target, edges = "normal") {
   try {
     const out = execFileSync(
       "cargo",
-      ["tree", "-p", crate, "-e", "normal", "--target", target, "--prefix", "none", "--locked"],
+      ["tree", "-p", crate, "-e", edges, "--target", target, "--prefix", "none", "--locked"],
       { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     return normalizeTree(out);
@@ -130,6 +142,29 @@ for (const crate of EDGES) {
       );
     });
   }
+}
+
+for (const target of TARGETS) {
+  test(`the service links no UI toolkit on ${target}`, (t) => {
+    const tree = cargoTree(SERVICE, target, "normal,build");
+    if (typeof tree !== "string") {
+      t.skip(offlineSkipMessage(SERVICE, target, tree));
+      return;
+    }
+    const names = tree.split(/\r?\n/);
+    const toolkit = names.filter((name) => UI_TOOLKIT_CRATES.test(name));
+    assert.deepEqual(
+      toolkit,
+      [],
+      `${SERVICE} on ${target} links a UI toolkit (${toolkit.join(", ")}): the shell draws, the service serves (ADR-0199 D21)`,
+    );
+    const stack = names.filter((name) => LEFT_THE_SERVICE_CRATES.test(name));
+    assert.deepEqual(
+      stack,
+      [],
+      `${SERVICE} on ${target} links ${stack.join(", ")}, which left with the toolkit and must not come back`,
+    );
+  });
 }
 
 test("the offline skip message is built from the field cargoTree returns", () => {

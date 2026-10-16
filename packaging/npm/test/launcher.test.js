@@ -16,10 +16,8 @@ import {
   neverInstalls,
   publishedAssetNames,
   releaseTarget,
-  requireLinuxLibraries,
   selectedExecutable,
   validateChecksums,
-  webkitLibraryPresent,
 } from "../bin/ghostlight.js";
 
 test("a real offline npm install invokes the launcher through the platform bin entry", async () => {
@@ -244,7 +242,7 @@ async function launcherFixture() {
   const names = executableNames("linux", "x64");
   const activity = { downloads: [], installs: [] };
   const options = {
-    platform: "linux", architecture: "x64", cacheRoot: home, libraryProbe: () => true,
+    platform: "linux", architecture: "x64", cacheRoot: home,
     fetchImpl: async url => {
       activity.downloads.push(url.split("/").at(-1));
       return new Response(bytes[url.split("/").at(-1)]);
@@ -466,31 +464,4 @@ test("a never-install command with nothing installed runs a verified staged serv
   } finally {
     await f.cleanup();
   }
-});
-
-test("Linux without the WebKit library fails by name before any download or install", async () => {
-  const f = await launcherFixture();
-  try {
-    for (const arguments_ of [[], ["doctor"]]) {
-      await assert.rejects(f.prepareLaunch({ ...f.options, arguments_, libraryProbe: () => false }),
-        /libwebkit2gtk-4\.1\.so\.0.*libwebkit2gtk-4\.1-0/);
-    }
-    assert.deepEqual(f.activity.downloads, []);
-    assert.equal(f.activity.installs.length, 0);
-    assert.doesNotThrow(() => requireLinuxLibraries("win32", () => false));
-    assert.doesNotThrow(() => requireLinuxLibraries("linux", () => true));
-  } finally {
-    await f.cleanup();
-  }
-});
-
-test("the WebKit library is found through ldconfig or the known library directories", () => {
-  const listed = () => ({ status: 0, stdout: "\tlibwebkit2gtk-4.1.so.0 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0\n" });
-  const unrelated = () => ({ status: 0, stdout: "\tlibc.so.6 (libc6,x86-64) => /lib/x86_64-linux-gnu/libc.so.6\n" });
-  const absent = () => ({ error: new Error("ENOENT") });
-  assert.equal(webkitLibraryPresent({ run: listed, exists: () => false }), true);
-  assert.equal(webkitLibraryPresent({ run: unrelated, exists: () => false }), false);
-  assert.equal(webkitLibraryPresent({ run: absent, exists: () => false }), false);
-  assert.equal(webkitLibraryPresent({ run: absent,
-    exists: path => path === "/usr/lib64/libwebkit2gtk-4.1.so.0" }), true);
 });

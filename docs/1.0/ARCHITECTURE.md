@@ -39,12 +39,14 @@ local human
   exec. On Windows the edge is a console-subsystem process that runs the image as a child on its
   console, keeps running through Ctrl-C and Ctrl-Break and returns the child's exit code; its
   application manifest sets `consoleAllocationPolicy` to `detached`, so a double-click shows no
-  console on Windows 11 24H2 and later. The release service image is a GUI-subsystem program, so
-  a typed command attaches to its parent's console first and writes there and receives Ctrl-C
-  itself; `serve`, the bare launch and `open` never attach.
-  On Windows each executable names itself in Task Manager: "Ghostlight connection" for the edge
-  (one per MCP client or browser), "Ghostlight" for the window and, because Tauri takes its
-  description from the product name, "Ghostlight" for the service too.
+  console on Windows 11 24H2 and later. The service image is a console-subsystem program too,
+  with the same manifest (the build script reads the edge's file by path), so a typed command
+  writes to the terminal it runs in and receives Ctrl-C itself, and a start with no console to
+  join shows none. Every start that no person typed goes through the relay's `start_service`,
+  which creates the process with no window and detached from any console.
+  On Windows each executable names itself in Task Manager through its own version resource:
+  "Ghostlight service" for the service, "Ghostlight" for the window and "Ghostlight connection"
+  for the edge (one per MCP client or browser).
 - `extension` implements the full Chromium physical mechanism set, page-runtime installation,
   browser topology, content-free feedback, and the local toolbar/options experience.
 

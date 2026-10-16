@@ -50,7 +50,6 @@ function Assert-InstallPins {
 $publicStatus = Read-JsonFile -Path (Join-Path $repo "docs/public-status.json")
 $server = Read-JsonFile -Path (Join-Path $repo "server.json")
 $manifest = Read-JsonFile -Path (Join-Path $repo "extension/manifest.json")
-$tauri = Read-JsonFile -Path (Join-Path $repo "crates/orchestrator/tauri.conf.json")
 $npmSource = Read-JsonFile -Path (Join-Path $repo "packaging/npm/package.json")
 $mcpbSource = Read-JsonFile -Path (Join-Path $repo "packaging/mcpb/manifest.json")
 $cargoText = Get-Content -LiteralPath (Join-Path $repo "Cargo.toml") -Raw
@@ -74,7 +73,6 @@ if (-not $cargoMatch.Success) {
 }
 $sourceVersion = $cargoMatch.Groups["version"].Value
 
-Assert-Equal -Actual $tauri.version -Expected $sourceVersion -Label "desktop/source version"
 Assert-Equal -Actual $npmSource.version -Expected $sourceVersion -Label "npm launcher/source version"
 Assert-Equal -Actual $mcpbSource.version -Expected $sourceVersion -Label "MCPB/source version"
 Assert-Equal -Actual $server.version -Expected $publicStatus.release -Label "server.json/public release"

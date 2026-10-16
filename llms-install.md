@@ -77,7 +77,7 @@ The complete schemas, defaults, capabilities, and terminal result envelope are i
   whether any new action is safe. Never infer failure from a lost response.
 - **Blocked:** report the fixed reason and safe next steps. Do not reach for a lower-level tool to
   evade the same authority boundary.
-- **Explicit human Pause/Stop:** respect the runtime hold in the Tauri workbench.
+- **Explicit human Pause/Stop:** respect the runtime hold in the Ghostlight window.
 - **Credential guidance:** the session remains available. When the user explicitly authorized
   entry, set `user_authorized_credentials: true` on the fill or typing request. Earlier explicit
   authorization is sufficient; no resume step is needed.

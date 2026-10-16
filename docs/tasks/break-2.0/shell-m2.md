@@ -67,17 +67,14 @@ Rules:
 
 ## RESUME HERE
 
-m2-01 to m2-04 have landed (see Landed). The service links no UI toolkit in code: it serves with no
-display, binds its endpoint at start, and presence (`service/presence.rs`) starts
-`ghostlight-desktop --tray` 2 s after it is ready and whenever a shell vanishes without a goodbye.
-The shell draws the tray the service describes (state dot, connection-count tooltip, Open, Pause,
-Resume, Quit), reports `unavailable` and `closed`, and the first close that stays is explained once
-(`state/tray-hint`). The Start-menu shortcut targets the shell with the AUMID `Sylin.Ghostlight`,
-and the Linux entry runs the shell. Tauri no longer draws anything; its crates, `build.rs`,
-`tauri.conf.json` and `capabilities/` remain until m2-05. Next: the coordinator deploys m2-04 and
-runs its live checks with the owner (below), then m2-05-tauri-out starts: remove the Tauri crates
-and the version resource's dependence on `tauri-build`, give the service its own version resource
-("Ghostlight service"), make it a console program with no console window, and add the guard.
+m2-01 to m2-05 have landed (see Landed). The service links no UI toolkit: its dependency tree holds
+no Tauri, GTK, WebKit, tray or async network crate, and a guard in `tests/guards/connectors.test.mjs`
+keeps it so. It is a console-subsystem program with the edge's manifest (no console on a start with
+none to join) and a version resource of its own ("Ghostlight service"). It serves with no display,
+binds its endpoint at start, and presence (`service/presence.rs`) starts `ghostlight-desktop --tray`
+2 s after it is ready and whenever a shell vanishes without a goodbye. The shell draws the tray the
+service describes. Next: the coordinator deploys m2-05 and runs its live checks with the owner
+(below), then m2-06-idle-exit starts: a service with nothing connected for 10 minutes exits.
 
 ## Landed
 
@@ -87,6 +84,7 @@ and the version resource's dependence on `tauri-build`, give the service its own
 | m2-02-shell-carries-the-desktop | The service asks the shell, over the `desktop` stream, to show the window at a section, show a notice, open a link or a folder and pick a file. New frames `show`, `notice`, `act` (service to shell) and `act_result` (shell to service) with goldens in `tests/golden/desktop/`. `PageAddress` (`workbench/address.rs`) is the Rust copy of the page's address list, `POST /api/window` takes `{view, address?}` (unknown address: 400) and a Watch Continue sends its section or screen. `service/shell.rs` holds the attached shells and `ShellRoute`, the one adapter the facade gets for presentation and native acts. The shell (`crates/desktop/src/native.rs`) carries them out with `notify-rust`, `open` and a file dialog (`rfd` on Windows, GTK on Linux), names itself `Sylin.Ghostlight`, and skips any frame it cannot read. The blocked and checkup notice words moved to `language/workbench.rs`. | see `git log` |
 | m2-03-shell-lifecycle | One shell at a time: the service holds one desktop place, and a second shell is sent `already_open` (new frame, golden `already-open.json`) and exits 0 while the attached shell is sent `show`. The shell takes `--tray` and `--updating` (`Launch`). Its life is a pure state machine (`machine.rs`) with four screens in one built-in document (`states.rs`): a person's launch starts the service once and shows Starting, the update hand-over shows Updating or relaunches the shell on the new build, a loss without goodbye shows Restarting and starts the service up to three times, and Stopped offers Start and Diagnostics. A new workbench frame rebuilds the webview. The shell adopts the relay's session listener and drops its own signal sources. | see `git log` |
 | m2-04-the-switch | The service brings up the shell by itself and the shell draws the service's tray. `crates/orchestrator/src/desktop/` (Tauri's tray, window, 21 commands) is deleted and `serve` binds its endpoint at start. Presence (`service/presence.rs`) launches `ghostlight-desktop --tray` 2 s after ready and after a shell vanishes, launches a shell with no argument for a Show and shows the window when it attaches, and latches `did_not_stay` after three launches in two minutes. `TrayModel` gained a state and live items; `tray_model`, `unavailable` and `closed` frames; the state dot is drawn at run time. `status` and `doctor` carry `window`. The Start-menu shortcut names the shell with the AUMID; the Linux entry runs the shell. The page has one transport. The shell moves an open page by navigating to the section, not by a script that a loading page loses (the Continue finding; a live check is owed). | see `git log` |
+| m2-05-tauri-out | Tauri leaves the service. `crates/orchestrator/Cargo.toml` loses `tauri`, its four plugins, `glib`, `webkit2gtk` and `tauri-build`, and gains `embed-resource` as a Windows build dependency; `Cargo.lock` loses 201 package entries (the service tree is 129 crates on Windows). `build.rs` embeds the icon and a version resource ("Ghostlight service", "Ghostlight", "Sylin") and, on MSVC, the edge's manifest by path. The service is a console-subsystem program: the `windows_subsystem` line, `cli/console.rs` and win-peer's `console.rs` with `attach_parent_console` are deleted. `tauri.conf.json`, `capabilities/` and the orphan `hooks.nsh` are deleted. A guard test checks that `ghostlight-service` links no UI toolkit and none of `tokio`, `reqwest`, `hyper` or `socket2` on both targets. The npm launcher no longer refuses on Linux without `libwebkit2gtk-4.1.so.0`, and the service-only CI journeys run without `dbus-run-session` and `xvfb-run`. | see `git log` |
 
 ## Owner questions
 
@@ -125,6 +123,30 @@ Each has a default the work uses until the owner answers.
   starts.
 
 ## Owed live checks
+
+After the coordinator deploys m2-05, with the owner (Windows unless it says Linux):
+
+- m2-05, Task Manager (Details, with the Description column): one `ghostlight-service.exe`
+  described "Ghostlight service", one `ghostlight-desktop.exe` described "Ghostlight", and each
+  `ghostlight.exe` described "Ghostlight connection". Properties > Details of
+  `~/.ghostlight/bin/ghostlight-service.exe` read File description "Ghostlight service", Product
+  name "Ghostlight", Company "Sylin", and the icon is the ghost.
+- m2-05, no console window on any start: from the Start menu, with Chrome bringing Ghostlight up
+  (open a tab with the extension and Ghostlight stopped), with an MCP client starting it, with a
+  development deploy (`pwsh scripts/dev-loop.ps1`), and with `ghostlight open` typed in the Run
+  box. On Windows before 11 24H2 the edge may flash a console briefly (ADR-0199 Decision 4);
+  that is accepted. The service itself never adds one.
+- m2-05, typed commands: `ghostlight status`, `ghostlight doctor` and `ghostlight --version` in
+  Windows Terminal, PowerShell and cmd print to the terminal, return their exit code, and
+  Ctrl-C ends them; `ghostlight status > out.txt` writes the file.
+- m2-05, uninstall: Settings > Apps > Uninstall prints its outcome. On Windows before 11 24H2 it
+  shows a console window; on 24H2 and later it shows none. Both are accepted (Notes).
+- m2-05, sign out and restart: no "this app is preventing shutdown" and no stray process.
+- m2-05, Linux (later): with `DISPLAY` and `WAYLAND_DISPLAY` both unset in the service's
+  environment (an SSH session), the service starts, publishes readiness and `ghostlight status`
+  says `no_display`. A computer without `libwebkit2gtk-4.1.so.0` installs through npm and runs the
+  service; `status` names the window reason. No serve test harness exists in the tree, so this is
+  checked live only.
 
 After the coordinator deploys m2-04, with the owner (Windows unless it says Linux):
 
@@ -249,9 +271,8 @@ After the coordinator deploys m2-01, with the owner:
 
 ## Blockers
 
-- m1-12, carried over, answered by the owner on 2026-10-15: the service reads "Ghostlight
-  service" in Task Manager. It lands with m2-05, which removes Tauri from the service and gives it
-  a version resource of its own, like the edge and the window.
+- m1-12, closed by m2-05: the service reads "Ghostlight service" in Task Manager. It has a version
+  resource of its own, like the edge and the window. The live check is owed (below).
 - Owed before the 2.0 release bar, not in this milestone: the per-binary process test of ADR-0199
   Decision 21 that sends `WM_QUERYENDSESSION` and `WM_ENDSESSION` to each binary.
 - Owed beyond this milestone: the Linux shell honouring the GNOME or KDE session manager's end
@@ -527,3 +548,53 @@ Redeploying the m2-02 payload restores the old shell: no arguments, a stderr lin
 no service, an exit at any goodbye, and a service that admits two desktop streams. The
 `already_open` frame is only written by the m2-03 service; an older shell skips an unknown first
 frame as a contract failure and exits.
+
+- m2-05: packages. 201 lock entries left, none came in. Among them: `tauri`, `tauri-build`,
+  `tauri-codegen`, `tauri-macros`, `tauri-plugin*` (notification, opener, dialog,
+  clipboard-manager, fs), `tauri-runtime*`, `tauri-utils`, `tauri-winres`, `tokio`, `tokio-util`,
+  `reqwest`, `hyper`, `hyper-util`, `socket2`, `tower*`, `zbus*` and `zvariant*`, `arboard`,
+  `clipboard-win` and `error-code` (the BSL-1.0 exceptions in `deny.toml` went with them),
+  `wl-clipboard-rs`, `wayland-*`, `x11rb*`, `image` and its codecs, `schemars`, `serde_with`,
+  `regex`, `chrono`, `jiff*` and `async-*`. Stayed because the shell uses them: `wry`, `tao`,
+  `tray-icon`, `muda`, `rfd`, `notify-rust`, `tauri-winrt-notification` (notify-rust's Windows
+  toast backend, kept by name only), `open`, `dbus`, `glib`, `gtk`, `webkit2gtk`, `webview2-com`
+  and `http`. The `tao` git patch in the root `Cargo.toml` and its `allow-git` entry stay; only the
+  comment changed. `cargo audit` and `cargo deny` were not run in this lane; the accepted GTK-chain
+  advisories now belong to the shell alone.
+- m2-05: the manifest. `build.rs` reads `crates/edge/manifest.xml` by path. The service needs
+  exactly the edge's one setting (`consoleAllocationPolicy` detached), the edge is frozen so the
+  file cannot drift, and a copy would be a second file to keep equal. The icon and the version
+  resource are built as in the edge's and the shell's build scripts, with `embed-resource`
+  at the version the edge pins (3.0.11), for any Windows target; the manifest only on MSVC.
+- m2-05: audit of every way the service image starts, Windows. (a) The relay's `start_service`
+  (the edge, Chrome, an agent, presence, `open`, a development deploy's hand-over) creates it with
+  `CREATE_NO_WINDOW | DETACHED_PROCESS`: no console. (b) The edge's hand-over runs it as a child on
+  the edge's console: with a console it shares it, and with none (a double-click on 24H2 and later)
+  the service's own manifest keeps it from allocating one. Before 24H2 the edge flashes one
+  (Decision 4) and the child shares that. (c) `cli/start.rs` `ProcessLauncher` (a carrier copy
+  handing to the installed service) is the same case. (d) `scripts/dev-loop.ps1` starts it from
+  PowerShell through a redirected process, which shares the script's console; only a comment
+  changed. (e) `packaging/npm/bin/ghostlight.js` spawns the edge, never the service image, with
+  inherited streams, and its installer step with `windowsHide`. (f) `scripts/get.ps1` runs the
+  downloaded edge with `-WindowStyle Hidden`; `get.sh` is Linux. (g) The Start-menu shortcut names
+  the shell; `shortcut_target` falls back to the service image only when `bin` holds no shell,
+  which a complete install never lacks, and a test pins it. (h) The Uninstall key's
+  UninstallString is `"<ghostlight-service.exe>" uninstall`, started by Settings > Apps. It shows
+  a console before 11 24H2 and none on 24H2 and later. Accepted, because uninstall prints its
+  outcome. (i) Tests and journeys spawn the images with `windowsHide`. Nothing needed a fix.
+- m2-05: nothing links `tauri` in code now. The tree still says Tauri in `CHANGELOG.md`, ADRs,
+  dated test records, research, the older task ledgers and `docs/STATUS.md` (history, kept), in
+  `docs/design/visual-language.md` and `docs/RELEASE-CHECKLIST.md` (a design history and a release
+  record, kept), and in the shell's doc comment that says why it is not built on Tauri.
+  `tests/history-compatibility.mjs` line 1, the three workbench doc comments and
+  `governance/manifest.rs` named in the spec no longer named Tauri when this slice started
+  (m2-04 changed them); nothing was left to do there. ACCEPTANCE desktop gate 11 did not name
+  Tauri either; the new gate 20 holds this slice's claims instead.
+- m2-05: Linux. The npm launcher dropped `webkitLibraryPresent`, `requireLinuxLibraries` and the
+  `libraryProbe` parameter, and the two tests that pinned them. In `ci.yml` the `process-journeys`
+  job no longer wraps its steps in `dbus-run-session -- xvfb-run`, nor installs `xvfb`: none of
+  those journeys starts the shell (`ghostlight-desktop` is not named in any), and without a display
+  the service reports `no_display` and serves. `browser-journeys` keeps the wrapper because the
+  real Chrome it drives needs a display. The apt build packages stay in both jobs.
+- m2-05: no serve test harness exists in `crates/orchestrator/tests` (only the listing-copy test),
+  so "readiness without `DISPLAY`" is owed as a live check, not a test.

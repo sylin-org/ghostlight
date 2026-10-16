@@ -189,11 +189,15 @@ Rust 1.82 or newer, plus Chromium 125 or newer for browser validation.
 cargo build --workspace
 ```
 
-Two executables land side by side:
+Three executables land side by side:
 
-- `ghostlight-service` -- the orchestrator and the desktop workbench;
+- `ghostlight-service` -- the orchestrator and the workbench it serves on loopback. It links no
+  UI toolkit and runs with no display;
 - `ghostlight` -- the edge: the MCP stdio relay (`ghostlight mcp`), the Chromium
-  native-messaging relay, and the front door that hands every other command to the service.
+  native-messaging relay, and the front door that hands every other command to the service;
+- `ghostlight-desktop` -- the shell: the window, the tray and the notices. On Linux building it
+  needs the WebKitGTK 4.1, GTK 3 and AppIndicator development packages; running the service does
+  not.
 
 ```sh
 target/debug/ghostlight open
@@ -251,7 +255,7 @@ carries protocol and relay lifecycle, nothing more. The extension owns Chromium,
 page, and the drawing, and never policy. Adding a feature normally means changing the orchestrator
 alone; that is a contract the shores are held to, not a happy accident.
 
-The desktop is a presentation adapter inside the same process, not a second service. It has no GUI
+The desktop is a presentation adapter in a process of its own, not a second service. It has no GUI
 protocol, command runner, filesystem access, or browser primitives.
 [`ADR-0102`](docs/adr/0102-integrated-desktop-workbench.md) records why.
 [`docs/SPEC.md`](docs/SPEC.md) gives the deeper governance model.

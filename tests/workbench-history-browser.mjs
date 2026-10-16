@@ -1,5 +1,5 @@
 // H4: real bundled UI in isolated Chromium, with synthetic workbench projection events.
-// This proves rendering and interaction, not an installed Tauri/native-host deployment.
+// This proves rendering and interaction, not an installed deployment.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

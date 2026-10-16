@@ -1,7 +1,7 @@
 //! The Ghostlight window process (ADR-0199 Decisions 1 and 7, and its amendment of 2026-10-15).
 //!
-//! `ghostlight-desktop` is the third executable of one build, next to the service and the
-//! connectors. It owns the window, the tray, and the acts only this computer can do for the service
+//! `ghostlight-desktop` is the third executable of one build, next to the service and the edge.
+//! It owns the window, the tray, and the acts only this computer can do for the service
 //! (a notice, a link or a folder opened, a file picked), and nothing else. It decides nothing and
 //! opens no network port: the window renders the service's loopback workbench, and every fact it shows or
 //! acts on comes from the service. The shell learns the workbench address and the bearer that
@@ -14,9 +14,8 @@
 //! larger binary and more upgrade surface for a process that must decide nothing. It is not built
 //! on raw platform bindings either (WebView2 COM calls, Win32 windows and `Shell_NotifyIcon`,
 //! hand-driven WebKitGTK): that is hundreds of lines of unsafe code, which the workspace forbids
-//! outside its audited FFI crate. `wry`, `tao` and `tray-icon` come from the same upstream as
-//! Tauri and are already locked at these exact versions in this tree, so the shell adds no
-//! package to `Cargo.lock` except itself.
+//! outside its audited FFI crate. `wry`, `tao` and `tray-icon` are the pieces of Tauri's stack
+//! that draw a window and a tray, taken without the rest.
 //!
 //! The service's native acts use `notify-rust` (notices; D-Bus on Linux, a toast on Windows),
 //! `open` (the system opener, through `ShellExecute` on Windows so no console window opens) and

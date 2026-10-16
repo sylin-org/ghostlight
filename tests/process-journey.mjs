@@ -70,9 +70,9 @@ let createdDeployLock = false;
 const ONE_PIXEL_GIF = "R0lGODlhAQABAPAAAAwiOAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAAAQABAAAIBAABBAQAOw==";
 const ONE_PIXEL_JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
 const PROCESS_BROWSER = "browser_processjourney";
-// Desktop readiness is deliberately published after native presentation is available. Match the
-// product's bounded startup contract so a cold CI desktop can initialize without making the
-// process journey flaky; later protocol waits retain their tighter five-second default.
+// The service publishes readiness once its relay route exists, never after the window. A cold CI
+// machine can still be slow to start it, so the first wait is generous without making the process
+// journey flaky; later protocol waits retain their tighter five-second default.
 const SERVICE_STARTUP_TIMEOUT_MS = 30_000;
 const MCP_COLD_START_TIMEOUT_MS = SERVICE_STARTUP_TIMEOUT_MS + 10_000;
 

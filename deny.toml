@@ -24,19 +24,16 @@ allow = [
 ]
 # CDLA-Permissive-2.0 applies to the Mozilla certificate data shipped by webpki-roots.
 # Keep the reviewed data-license allowance scoped to that trust-root package.
-# BSL-1.0 applies only to the Windows clipboard implementation reached through Tauri's bounded
-# clipboard plugin. Both crates are permissively licensed; keep the review scoped to that seam.
 exceptions = [
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
-    { allow = ["BSL-1.0"], crate = "clipboard-win" },
-    { allow = ["BSL-1.0"], crate = "error-code" },
 ]
 confidence-threshold = 0.9
 private = { ignore = true }
 
 [bans]
-# Tauri's cross-platform graph deliberately carries parallel GTK, TOML, and platform-support
-# generations. Reporting the full graph on every run is noise rather than an actionable gate.
+# The shell's cross-platform graph (window, web view, tray and notifications) deliberately carries
+# parallel GTK, TOML, and platform-support generations. Reporting the full graph on every run is
+# noise rather than an actionable gate.
 multiple-versions = "allow"
 wildcards = "deny"
 allow-wildcard-paths = true

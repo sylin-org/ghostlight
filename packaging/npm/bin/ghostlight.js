@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -36,17 +36,6 @@ const NEVER_INSTALL_COMMANDS = new Set(["doctor", "status", "help", "--help", "-
 const HELP_COMMANDS = new Set(["install", "uninstall"]);
 /** The flags that ask a command for its help. */
 const HELP_FLAGS = new Set(["--help", "-h"]);
-
-/** The Linux shared library the desktop service links, and the packages that provide it. */
-const WEBKIT_LIBRARY = "libwebkit2gtk-4.1.so.0";
-const WEBKIT_PACKAGES = "libwebkit2gtk-4.1-0 (Debian, Ubuntu), webkit2gtk4.1 (Fedora), webkit2gtk-4.1 (Arch)";
-const LIBRARY_DIRECTORIES = [
-  "/usr/lib/x86_64-linux-gnu",
-  "/lib/x86_64-linux-gnu",
-  "/usr/lib64",
-  "/usr/lib",
-  "/usr/local/lib",
-];
 
 export function releaseTarget(platform = process.platform, architecture = process.arch) {
   const key = `${platform}/${architecture}`;
@@ -149,26 +138,6 @@ export async function installedSetIsCurrent(directory, packageVersion) {
   const record = await readInstallRecord(directory);
   const order = compareVersions(record?.service_version, packageVersion);
   return order !== null && order >= 0;
-}
-
-/** True when the dynamic loader lists, or a known library directory holds, the WebKit library. */
-export function webkitLibraryPresent({ run = spawnSync, exists = existsSync } = {}) {
-  for (const loader of ["ldconfig", "/sbin/ldconfig", "/usr/sbin/ldconfig"]) {
-    const result = run(loader, ["-p"], { encoding: "utf8", windowsHide: true });
-    if (!result.error && result.status === 0 && String(result.stdout).includes(WEBKIT_LIBRARY)) {
-      return true;
-    }
-  }
-  return LIBRARY_DIRECTORIES.some((directory) => exists(`${directory}/${WEBKIT_LIBRARY}`));
-}
-
-/** Throws a sentence naming the missing package when Linux lacks the library the service needs. */
-export function requireLinuxLibraries(platform, probe = webkitLibraryPresent) {
-  if (platform === "linux" && !probe()) {
-    throw new Error(
-      `Ghostlight needs ${WEBKIT_LIBRARY}, which is not installed. Install its package: ${WEBKIT_PACKAGES}.`,
-    );
-  }
 }
 
 export function validateChecksums(manifest, version, names) {
@@ -306,7 +275,6 @@ export async function prepareLaunch({
   fetchImpl = globalThis.fetch,
   reporter = () => {},
   installImpl = installDownload,
-  libraryProbe = webkitLibraryPresent,
 } = {}) {
   const home = resolve(cacheRoot);
   const directory = join(home, "bin");
@@ -324,7 +292,6 @@ export async function prepareLaunch({
 
   if (arguments_[0] === DEPLOYMENT_COMMAND) {
     const { packageJson, manifest } = await readPackage();
-    requireLinuxLibraries(platform, libraryProbe);
     const stage = await stageDownloads({ ...stageOptions, indexes: executables.map((_, index) => index), packageJson, manifest });
     return {
       executable: join(stage, executables[0]),
@@ -337,11 +304,9 @@ export async function prepareLaunch({
     const packageVersion = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
     const development = (await readInstallRecord(directory))?.channel === DEVELOPMENT_CHANNEL;
     if (development || (existsSync(installed) && await installedSetIsCurrent(directory, packageVersion))) {
-      requireLinuxLibraries(platform, libraryProbe);
       return { executable: installed, arguments_, cleanup: nothingToClean };
     }
     const { packageJson, manifest } = await readPackage();
-    requireLinuxLibraries(platform, libraryProbe);
     const stage = await stageDownloads({ ...stageOptions, indexes: executables.map((_, index) => index), packageJson, manifest });
     try {
       await installImpl(join(stage, executables[0]), directory);
@@ -353,11 +318,9 @@ export async function prepareLaunch({
 
   const service = join(directory, executables[0]);
   if (existsSync(service)) {
-    requireLinuxLibraries(platform, libraryProbe);
     return { executable: service, arguments_, cleanup: nothingToClean };
   }
   const { packageJson, manifest } = await readPackage();
-  requireLinuxLibraries(platform, libraryProbe);
   const stage = await stageDownloads({ ...stageOptions, indexes: [0], packageJson, manifest });
   return {
     executable: join(stage, executables[0]),

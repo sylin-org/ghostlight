@@ -13,9 +13,11 @@ and an agent-launched browser can share a redirected filesystem view and conceal
 
 ## Build
 
-`cargo build --workspace` builds the two executables: `ghostlight-service` (the service and its
-workbench) and `ghostlight` (the edge: the MCP relay, the browser relay and the front door that
-hands every other command to the service). Tests and gates run from any target directory. A build
+`cargo build --workspace` builds the three executables: `ghostlight-service` (the service and its
+workbench; it links no UI toolkit), `ghostlight` (the edge: the MCP relay, the browser relay and
+the front door that hands every other command to the service) and `ghostlight-desktop` (the shell:
+the window, the tray and the notices; on Linux its build needs the WebKitGTK 4.1 development
+packages). Tests and gates run from any target directory. A build
 directory never serves on its own: `serve` runs only from `~/.ghostlight/bin` (ADR-0197
 Decisions 10 and 13).
 

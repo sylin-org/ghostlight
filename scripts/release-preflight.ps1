@@ -303,8 +303,8 @@ try {
     }
 
     # The authoritative split from RELEASE.md: policy checks via deny's non-advisory tables, and
-    # advisories through cargo audit, whose configuration carries the accepted GTK/Tauri-chain
-    # allowances. A broad `cargo deny check` would fail on that accepted set (CachyOS finding 2,
+    # advisories through cargo audit, whose configuration carries the accepted GTK-chain
+    # allowances of the shell. A broad `cargo deny check` would fail on that accepted set (CachyOS finding 2,
     # 2026-08-25).
     $stages += @{
         Name   = "dependency gates (deny licenses/bans/sources + audit)"

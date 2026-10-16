@@ -6,7 +6,6 @@
 //! a model's call does.
 
 pub mod client;
-pub mod console;
 pub mod deployment;
 pub mod desktop;
 pub mod diagnostics;

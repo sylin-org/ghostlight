@@ -503,6 +503,15 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     control until it reaches the authority again, even though its last snapshot offered control.
     Each confirmation states only the resulting authority state, identically whether control
     publication to adapters succeeded, failed, or reached none.
+20. The service links no UI toolkit and starts with no display. `cargo tree` for
+    `ghostlight-service` on the Windows and Linux targets, normal and build edges, holds no
+    `tauri*`, `tao`, `wry`, `gtk`, `gdk`, `webkit2gtk`, `javascriptcore`, `soup3`,
+    `libappindicator`, `tray-icon`, `muda` or `webview2-com`, and none of `tokio`, `reqwest`,
+    `hyper` or `socket2` (`tests/guards/connectors.test.mjs`). On Windows Task Manager reads
+    "Ghostlight service" for the service, "Ghostlight" for the window and "Ghostlight connection"
+    for each edge, and no console window appears on any start no person typed. On Linux with
+    `DISPLAY` and `WAYLAND_DISPLAY` both unset the service starts, publishes readiness and
+    `status` says `no_display`.
 
 ## Integration and release-readiness gates
 

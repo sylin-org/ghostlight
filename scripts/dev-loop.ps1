@@ -21,8 +21,8 @@ Set-StrictMode -Version Latest
 $repo = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $exe = if ($IsWindows) { "ghostlight-service.exe" } else { "ghostlight-service" }
 
-# The service image is GUI-subsystem on Windows, so its output is captured through a
-# redirected process rather than the console.
+# The installer's output and exit code are captured through a redirected process, so a failure
+# reaches this script as an exit code on every host.
 function Invoke-Ghostlight {
     param([string]$Binary, [string[]]$Arguments)
 
