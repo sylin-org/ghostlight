@@ -28,6 +28,10 @@ pub(super) const CLICK_SETTLE_MS: u64 = 250;
 const DRAG_STEPS: usize = 12;
 /// The calls a drag makes to bring its two ends into view: the destination, then the source.
 const DRAG_PREPARATIONS: usize = 2;
+/// Where the destination's preparing hover sits among a drag's calls.
+const DRAG_DESTINATION_HOVER: usize = 0;
+/// Where the source's preparing hover sits among a drag's calls.
+const DRAG_SOURCE_HOVER: usize = 1;
 /// Where the source's measurement sits among a drag's calls.
 const DRAG_SOURCE_BOX: usize = 2;
 /// Where the destination's measurement sits among a drag's calls.
@@ -297,8 +301,12 @@ pub fn drag(
     for answer in &answers[..DRAG_PREPARATIONS] {
         value::<Value>(answer)?;
     }
-    let from: Prepared = value(&answers[DRAG_SOURCE_BOX])?;
-    let onto: Prepared = value(&answers[DRAG_DESTINATION_BOX])?;
+    let mut from: Prepared = value(&answers[DRAG_SOURCE_BOX])?;
+    let mut onto: Prepared = value(&answers[DRAG_DESTINATION_BOX])?;
+    // The hover that brings an end into view is the call that follows a re-rendered handle; the
+    // measurement after it finds the control live and cannot say so.
+    from.subject.rebound |= world::answer_rebound(&answers[DRAG_SOURCE_HOVER]);
+    onto.subject.rebound |= world::answer_rebound(&answers[DRAG_DESTINATION_HOVER]);
     let boxes = |range: Range<usize>| {
         answers[range]
             .iter()

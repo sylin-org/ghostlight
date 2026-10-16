@@ -867,6 +867,7 @@ fn outcome_samples() -> Vec<Outcome> {
         Outcome::RecordingSaved {
             duration_ms: 2_000,
             delivery: SavedTo::Client,
+            rebound: false,
         },
         Outcome::RecordingDiscarded,
     ];

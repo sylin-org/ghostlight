@@ -1612,7 +1612,9 @@ proved is its control (section 3.4, ADR-0198 Decision 17), and lists those locat
 subject (`{role, name}`) carries `rebound: true` when its own locator was followed in that call.
 The adapter also reads the list itself, as a fact and never as locators: a describe that followed
 a handle and a fill whose preparation followed one say so, because the action that comes next finds
-the control live and cannot. The service turns the subject flag and these facts into one structural
+the control live and cannot. A drag takes the fact from the hover that brought each end into view
+for the same reason, and a recording saved to a page target takes it from the describe before the
+attach. The service turns the subject flag and these facts into one structural
 `rebound` fact. A failure never carries it.
 
 `detail` is optional and says what the code and message do not. The extension relays an envelope

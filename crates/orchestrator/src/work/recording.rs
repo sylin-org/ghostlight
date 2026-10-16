@@ -21,6 +21,21 @@ use super::{
     RECORDING_FILE_NAME,
 };
 
+/// Where a governed save puts its replay, and what the save learned on the way there.
+struct SaveDestination {
+    /// Where the browser delivers the replay.
+    destination: RecordingDestination,
+    /// The decision that authorized the save.
+    decision: Decision,
+    /// The tab the save lands on or reads from.
+    tab_id: Option<u64>,
+    /// How many bytes the delivery may carry.
+    budget: usize,
+    /// Whether describing a page target followed its handle through a re-render (ADR-0198
+    /// Decision 17).
+    rebound: bool,
+}
+
 impl ApplicationExecutor {
     pub(super) fn perform_record(
         &self,
@@ -208,11 +223,16 @@ impl ApplicationExecutor {
             Err(terminal) => return *terminal,
         };
 
-        let (destination, decision, tab_id, budget) =
-            match self.recording_destination(context, lease, value, &stopped) {
-                Ok(resolved) => resolved,
-                Err(terminal) => return *terminal,
-            };
+        let SaveDestination {
+            destination,
+            decision,
+            tab_id,
+            budget,
+            rebound,
+        } = match self.recording_destination(context, lease, value, &stopped) {
+            Ok(resolved) => resolved,
+            Err(terminal) => return *terminal,
+        };
 
         let delivery_context = InvocationContext {
             requirements: if matches!(destination, RecordingDestination::Target { .. }) {
@@ -234,7 +254,7 @@ impl ApplicationExecutor {
                 encoded,
                 delivery,
             }) if summary.state != RecordingState::Recording => {
-                self.recording_delivered(context, decision, &summary, encoded, delivery)
+                self.recording_delivered(context, decision, &summary, encoded, delivery, rebound)
             }
             Ok(BrowserOutcome::RecordingExportFailed { reason }) => {
                 self.recording_export_failure(context, &reason)
@@ -248,14 +268,13 @@ impl ApplicationExecutor {
     }
 
     /// Authorize one save and name where the browser should put the result.
-    #[allow(clippy::type_complexity)]
     fn recording_destination(
         &self,
         context: &InvocationContext<'_>,
         lease: Option<&WorkspaceLease>,
         value: &Record,
         stopped: &PhysicalRecordingSummary,
-    ) -> Result<(RecordingDestination, Decision, Option<u64>, usize), Box<Terminal>> {
+    ) -> Result<SaveDestination, Box<Terminal>> {
         if !stopped.source_urls_complete
             && !context
                 .snapshot
@@ -330,7 +349,7 @@ impl ApplicationExecutor {
                     json!({"reason":decision.reason.as_str()}),
                 )));
             }
-            match self.dispatch(
+            let rebound = match self.dispatch(
                 &InvocationContext {
                     requirements: CapabilitySet::WRITE,
                     ..*context
@@ -341,8 +360,10 @@ impl ApplicationExecutor {
                 },
             ) {
                 Ok(BrowserOutcome::TargetsDescribed {
-                    tab_id, targets, ..
-                }) if tab_id == selected.physical_id && targets.len() == 1 => {}
+                    tab_id,
+                    targets,
+                    rebound,
+                }) if tab_id == selected.physical_id && targets.len() == 1 => rebound,
                 Ok(_) => {
                     return Err(Box::new(self.protocol_failure(
                         context,
@@ -358,35 +379,38 @@ impl ApplicationExecutor {
                         Some(selected.physical_id),
                     )))
                 }
-            }
-            return Ok((
-                RecordingDestination::Target {
+            };
+            return Ok(SaveDestination {
+                destination: RecordingDestination::Target {
                     tab_id: selected.physical_id,
                     locator: target.locator,
                     file_name: RECORDING_FILE_NAME.into(),
                 },
                 decision,
-                Some(selected.physical_id),
-                RECORDING_LOCAL_MAX_BYTES,
-            ));
+                tab_id: Some(selected.physical_id),
+                budget: RECORDING_LOCAL_MAX_BYTES,
+                rebound,
+            });
         }
 
         if value.download {
-            return Ok((
-                RecordingDestination::Download {
+            return Ok(SaveDestination {
+                destination: RecordingDestination::Download {
                     file_name: RECORDING_FILE_NAME.into(),
                 },
                 decision,
-                Some(stopped.tab_id),
-                RECORDING_LOCAL_MAX_BYTES,
-            ));
+                tab_id: Some(stopped.tab_id),
+                budget: RECORDING_LOCAL_MAX_BYTES,
+                rebound: false,
+            });
         }
-        Ok((
-            RecordingDestination::Client,
+        Ok(SaveDestination {
+            destination: RecordingDestination::Client,
             decision,
-            Some(stopped.tab_id),
-            RECORDING_TRANSFER_MAX_BYTES,
-        ))
+            tab_id: Some(stopped.tab_id),
+            budget: RECORDING_TRANSFER_MAX_BYTES,
+            rebound: false,
+        })
     }
 
     /// Report a delivered replay in the terms a reader cares about.
@@ -397,6 +421,7 @@ impl ApplicationExecutor {
         summary: &PhysicalRecordingSummary,
         encoded: EncodedRecording,
         delivery: RecordingDelivery,
+        rebound: bool,
     ) -> Terminal {
         let landing = match &delivery {
             RecordingDelivery::Attached { tab_id } => Some(*tab_id),
@@ -419,6 +444,7 @@ impl ApplicationExecutor {
                 RecordingDelivery::Downloaded => SavedTo::Download,
                 RecordingDelivery::Returned { .. } => SavedTo::Client,
             },
+            rebound,
         };
         // Encoding the same recording twice produces the same replay, but putting it on a page or
         // on disk again is a fresh effect on the world, so only a client return is repeat-safe.

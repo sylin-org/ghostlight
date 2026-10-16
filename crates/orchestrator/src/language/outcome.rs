@@ -539,6 +539,9 @@ pub enum Outcome {
         /// How long the replay plays.
         duration_ms: u64,
         delivery: SavedTo,
+        /// Whether describing the page target the replay was attached to followed its handle
+        /// through a re-render (ADR-0198 Decision 17). Only a page target has a handle.
+        rebound: bool,
     },
     /// Captured recording bytes were erased.
     RecordingDiscarded,
@@ -888,6 +891,7 @@ impl Outcome {
             Self::RecordingSaved {
                 duration_ms,
                 delivery,
+                ..
             } => {
                 let replay = format!("a replay of {} of page changes", spanned(*duration_ms));
                 match delivery {
@@ -1006,7 +1010,7 @@ impl Outcome {
             Self::TargetClicked { subject, .. }
             | Self::TargetRevealed { subject, .. }
             | Self::TextTyped { subject, .. } => subject.rebound,
-            Self::FormFilled { rebound, .. } => *rebound,
+            Self::FormFilled { rebound, .. } | Self::RecordingSaved { rebound, .. } => *rebound,
             Self::PointClicked { subject, .. }
             | Self::Hovered { subject, .. }
             | Self::KeyboardSent { subject, .. }
@@ -2620,6 +2624,7 @@ Changes are \"unsaved\".".into()),
                 Outcome::RecordingSaved {
                     duration_ms: 30_400,
                     delivery: SavedTo::Client,
+                    rebound: false,
                 },
                 "Saved a replay of 30 seconds of page changes.",
             ),
@@ -2627,6 +2632,7 @@ Changes are \"unsaved\".".into()),
                 Outcome::RecordingSaved {
                     duration_ms: 30_400,
                     delivery: SavedTo::PageTarget,
+                    rebound: false,
                 },
                 "Attached a replay of 30 seconds of page changes to the page.",
             ),
@@ -2634,6 +2640,7 @@ Changes are \"unsaved\".".into()),
                 Outcome::RecordingSaved {
                     duration_ms: 30_400,
                     delivery: SavedTo::Download,
+                    rebound: false,
                 },
                 "Downloaded a replay of 30 seconds of page changes.",
             ),
@@ -2758,6 +2765,13 @@ Changes are \"unsaved\".".into()),
             assert!(opened.observed().rebound, "a dialog keeps the fact");
         }
         assert!(!Outcome::TabsListed { count: 1 }.observed().rebound);
+        let saved = |rebound| Outcome::RecordingSaved {
+            duration_ms: 2_000,
+            delivery: SavedTo::PageTarget,
+            rebound,
+        };
+        assert_eq!(saved(true).summary(), saved(false).summary());
+        assert!(saved(true).observed().rebound && !saved(false).observed().rebound);
         let merged = Observed {
             rebound: true,
             ..Observed::default()

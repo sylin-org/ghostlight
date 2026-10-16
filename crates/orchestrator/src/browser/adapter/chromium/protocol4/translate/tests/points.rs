@@ -776,6 +776,83 @@ fn offsets_through_two_nested_frames_place_a_dragged_target() {
     assert_eq!(inputs[0].settle_ms, 0);
 }
 
+/// A port whose extension holds the scripted page, and whose hover of each locator in `followed`
+/// reports that the call followed that handle through a re-render.
+fn following_hovers(followed: &'static [&'static str]) -> (RelayBrowserPort, FakeExtension) {
+    port_with(Box::new(move |correlation, primitive| {
+        Reply::Now(match primitive {
+            wire::Primitive::Frames(_) => FakeExtension::ok(correlation, nested_inventory()),
+            wire::Primitive::ListTabs(_) => FakeExtension::ok(
+                correlation,
+                json!({"tabs": [{"tab_id": 12, "title": "Top", "url": TOP, "active": true,
+                    "readiness": "complete"}]}),
+            ),
+            wire::Primitive::View(_) => FakeExtension::ok(correlation, view()),
+            wire::Primitive::Call(call) => FakeExtension::ok(
+                correlation,
+                json!({"answers": call.calls.iter().map(|world| {
+                    let answered = answer(world, Owners::Exact);
+                    let locator = world.message["locator"].as_str().unwrap_or_default();
+                    if world.message["kind"] == "hover" && followed.contains(&locator) {
+                        let mut envelope = answered["envelope"].clone();
+                        envelope["rebound"] = json!([locator]);
+                        json!({"status": "returned", "envelope": envelope})
+                    } else {
+                        answered
+                    }
+                }).collect::<Vec<_>>()}),
+            ),
+            wire::Primitive::Input(input) => wire::Receipt {
+                dispatched: true,
+                ..FakeExtension::ok(
+                    correlation,
+                    json!({"completed_steps": input.steps.len(), "precondition": null}),
+                )
+            },
+            _ => FakeExtension::ok(correlation, Value::Null),
+        })
+    }))
+}
+
+/// The measurements that follow the preparing hovers find both ends live and say nothing of a
+/// follow, so a drag takes the fact from the hover that brought each end into view.
+#[test]
+fn a_drag_whose_preparing_hover_followed_a_handle_reports_it_at_that_end() {
+    let cases: [(&'static [&'static str], bool, bool); 4] = [
+        (&[], false, false),
+        (&["locator_a1_1"], true, false),
+        (&["locator_a1_2"], false, true),
+        (&["locator_a1_1", "locator_a1_2"], true, true),
+    ];
+    for (followed, from, onto) in cases {
+        let (port, _fake) = following_hovers(followed);
+        let result = unscoped(
+            call(
+                &port,
+                scoped(
+                    all_open(),
+                    BrowserCommand::Drag {
+                        tab_id: 12,
+                        source_locator: "G:g1:locator_a1_1".into(),
+                        destination_locator: "T:t1:locator_a1_2".into(),
+                    },
+                ),
+            )
+            .unwrap(),
+        );
+        let BrowserOutcome::Dragged {
+            source_subject,
+            destination_subject,
+            ..
+        } = result
+        else {
+            panic!("a drag");
+        };
+        assert_eq!(source_subject.unwrap().rebound, from, "{followed:?}");
+        assert_eq!(destination_subject.unwrap().rebound, onto, "{followed:?}");
+    }
+}
+
 #[test]
 fn a_dialog_while_the_pointer_is_down_leaves_a_drag_half_done() {
     let (port, _fake) = port_with(Box::new(|correlation, primitive| {

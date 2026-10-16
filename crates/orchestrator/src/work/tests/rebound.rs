@@ -281,3 +281,58 @@ fn a_fill_that_followed_a_handle_while_preparing_reports_rebound() {
     assert_eq!(result.facts["rebound"], true);
     assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
 }
+
+#[test]
+fn saving_a_recording_to_a_target_after_a_followed_describe_reports_rebound() {
+    let (followed, plain, audit) = after_saving_to_a_target();
+
+    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+    assert_eq!(followed.facts["rebound"], true);
+    assert_eq!(followed.summary, plain.summary);
+    assert_eq!(
+        followed.summary,
+        "Attached a replay of 1 second of page changes to the page."
+    );
+    assert!(plain.facts.get("rebound").is_none());
+    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
+}
+
+/// A page-target save run twice: once when describing the target followed its handle and once
+/// when it did not. Returns the followed run, the plain run and the followed run's audit.
+fn after_saving_to_a_target() -> (
+    crate::work::result::InvocationResult,
+    crate::work::result::InvocationResult,
+    Arc<MemoryAudit>,
+) {
+    let run = |rebound: bool| {
+        let (executor, browser, workspace, audit, _, target) = found_target();
+        browser.push(Ok(BrowserOutcome::RecordingStopped {
+            summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
+            changed: false,
+        }));
+        browser.push(Ok(described(rebound)));
+        browser.push(Ok(BrowserOutcome::RecordingExported {
+            summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
+            encoded: EncodedRecording {
+                frame_count: 2,
+                captured_frame_count: 2,
+                duration_ms: 1_000,
+                width: 800,
+                height: 600,
+                byte_count: 6,
+            },
+            delivery: RecordingDelivery::Attached { tab_id: 7 },
+        }));
+        let result = executor.execute(
+            &workspace,
+            "browser_record",
+            json!({"action":"save","target":target}),
+            None,
+            &CancellationToken::default(),
+        );
+        (result, audit)
+    };
+    let (followed, audit) = run(true);
+    let (plain, _) = run(false);
+    (followed, plain, audit)
+}

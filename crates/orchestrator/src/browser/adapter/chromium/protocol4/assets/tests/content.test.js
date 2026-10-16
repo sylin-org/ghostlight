@@ -4996,6 +4996,22 @@ test("the presentation anchor neither follows nor adopts, so the action still re
   assert.equal(reply.value.subject.rebound, true);
 });
 
+test("the call that follows a handle reports it and the measurement after it finds the control live", async () => {
+  const harness = contentHarness();
+  sunoLibrary(harness, sunoEntries(), { render: 1 });
+  const before = await optionHandles(harness);
+  detach(harness.document.body);
+  sunoLibrary(harness, sunoEntries(), { render: 2 });
+
+  const hovered = await harness.send({ kind: "hover", locator: before[3] });
+  assert.deepEqual(hovered.rebound, [before[3]]);
+  assert.equal(hovered.value.subject.rebound, true);
+  const boxed = await harness.send({ kind: "box", locator: before[3] });
+  assert.equal(boxed.ok, true, JSON.stringify(boxed));
+  assert.equal("rebound" in boxed, false, "a later call finds the control live and follows nothing");
+  assert.equal("rebound" in boxed.value.subject, false);
+});
+
 test("a fill step after the first call is never followed", async () => {
   const steps = (locator) => [
     { kind: "fill_local", field: { locator, value: "x" }, allow_credentials: false },
