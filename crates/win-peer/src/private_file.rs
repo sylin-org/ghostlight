@@ -1,4 +1,4 @@
-//! Atomic owner-private runtime-file creation through the existing audited Win32 FFI boundary.
+//! Atomic owner-private file creation through the existing audited Win32 FFI boundary.
 
 use std::ffi::c_void;
 use std::fs::File;

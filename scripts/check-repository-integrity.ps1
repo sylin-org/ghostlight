@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0 -or $tracked.Count -eq 0) {
 
 $textExtensions = @(
     ".bat", ".cjs", ".cmd", ".css", ".editorconfig", ".gitattributes", ".gitignore",
-    ".html", ".js", ".json", ".jsonc", ".lock", ".md", ".mjs", ".nsh", ".ps1",
+    ".html", ".js", ".json", ".jsonc", ".lock", ".md", ".mjs", ".ps1",
     ".rb", ".rs", ".sh", ".svg", ".toml", ".txt", ".xml", ".yaml", ".yml"
 )
 $textNames = @("CODEOWNERS", "LICENSE", "NOTICE", "SECURITY")

@@ -9,9 +9,8 @@
     evidence, attaches proof, completes the release packet, explains configured authority,
     and finally hands the page an animated replay of its own work and erases the bytes.
 
-    This shipped on the 0.8 line as the `ghostlight demo` subcommand. It does not need to be one:
-    the command line reaches the same catalog through the same governance, so a recording operator
-    retimes the story by editing a script rather than rebuilding a binary.
+    It drives the command line, which reaches the same catalog through the same governance, so a
+    recording operator retimes the story by editing this script.
 
     Every step is its own process. They share a session because they share this shell (ADR-0106),
     which is what lets the target handles inventoried in beat two still resolve in beat seven.

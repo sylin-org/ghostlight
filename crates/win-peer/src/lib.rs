@@ -11,7 +11,7 @@
 //!
 //! The crate holds the executable paths of a process's ancestors in `process` (from which the
 //! installer learns whether it runs inside an app's container), whether the process token is
-//! elevated in `elevation` (the service refuses to run elevated), owner-private runtime-file
+//! elevated in `elevation` (the service refuses to run elevated), owner-private file
 //! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
 //! `item_id_list` (named by the installer's Start-menu shortcut), whether the process sits in the
 //! visible window station in `window_station` (the service starts the shell only where a person

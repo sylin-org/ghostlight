@@ -5,10 +5,9 @@
 
 .DESCRIPTION
     This is the story specified in docs/design/demo-brief.md: read the page once, fill three fields
-    as separately paced writes, tick two boxes, submit, and hold the completion state. It was
-    shipped as the `ghostlight demo-brief` Rust subcommand on the 0.8 line. In 1.0 it does not need
-    to stay in the binary -- the command line reaches the same catalog through the same governance,
-    and a recording operator can retime the story by editing a script instead of rebuilding it.
+    as separately paced writes, tick two boxes, submit, and hold the completion state. It drives
+    the command line, which reaches the same catalog through the same governance, so a recording
+    operator retimes the story by editing this script.
 
     Every step is its own process. They share a session because they share this shell (ADR-0106),
     which is what lets the target handles inventoried in step three still resolve in step nine.

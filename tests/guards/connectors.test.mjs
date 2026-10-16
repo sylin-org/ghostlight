@@ -71,7 +71,7 @@ const SERVICE = "ghostlight-service";
 const UI_TOOLKIT_CRATES =
   /^(tauri.*|tao|wry|gtk.*|gdk.*|webkit2gtk.*|javascriptcore.*|soup3.*|libappindicator.*|tray-icon|muda|webview2-com.*)$/;
 
-/** Crates that left the service's tree with the UI toolkit and stay out (no async runtime, no HTTP stack). */
+/** Crates the service never links: no async runtime, no HTTP stack (ADR-0199 Decision 21). */
 const LEFT_THE_SERVICE_CRATES = /^(tokio|reqwest|hyper|socket2)$/;
 
 /** Runs `cargo tree`; returns `{ offline }` when the registry is unreachable outside CI and throws on any other failure. */

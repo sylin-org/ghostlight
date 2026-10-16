@@ -435,7 +435,7 @@ try {
   assert.ok(replyTarget); assert.ok(shadowTarget);
   assert.ok(result.facts.items.find((item) => item.name === "Hidden draft helper")?.state.includes("hidden"));
   assert.ok(!(result.facts.items.find((item) => item.name === "Reply").state ?? []).includes("hidden"));
-  // Prove this fixture catches the old DOM-assignment plus synthetic-event failure.
+  // Prove the editor fixture rejects a DOM assignment plus a synthetic input event.
   await rawPage("document.querySelector('#reply').textContent='UNACCEPTED'; document.querySelector('#reply').dispatchEvent(new Event('input',{bubbles:true})); true");
   await delay(50);
   assert.equal((await rawPage("editorEvidence()")).reply.rendered, "Initial draft");
