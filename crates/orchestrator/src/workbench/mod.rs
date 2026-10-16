@@ -759,7 +759,6 @@ impl WorkbenchFacade {
         let gathered = self.live.gather();
         let status = self.live.status(&gathered);
         let controls = self.live.controls(&gathered);
-        let setup = self.live.setup(&gathered);
         let live::Gathered {
             operations,
             sessions,
@@ -853,8 +852,16 @@ impl WorkbenchFacade {
             },
             service: status.service,
             controls,
-            setup,
         }
+    }
+
+    /// The setup part, as the window sees it.
+    ///
+    /// It is not part of a snapshot: an unfinished setup reads this computer (the native-host
+    /// report and the browser profiles), so only a request for this part pays for those reads.
+    #[must_use]
+    pub fn setup_view(&self) -> crate::language::setup::SetupView {
+        self.live.setup(&self.live.gather())
     }
 
     /// Search bounded user-visible workbench records.
@@ -1576,8 +1583,6 @@ pub struct WorkbenchSnapshot {
     pub configuration: ConfigurationSummary,
     /// The controls part Settings is drawn from, as the window sees it.
     pub controls: parts::ControlsPart,
-    /// The setup part, as the window sees it. A watcher is not shown it.
-    pub setup: crate::language::setup::SetupView,
 }
 
 /// Current service facts.

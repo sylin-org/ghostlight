@@ -209,22 +209,29 @@ struct Fixture {
     server: WorkbenchServer,
     facade: WorkbenchFacade,
     root: PathBuf,
+    /// The fake computer an unfinished setup is read from, when the fixture tracks setup.
+    computer: Option<Arc<crate::workbench::setup::test_support::Computer>>,
 }
 
 impl Fixture {
     fn start() -> Self {
-        Self::build(true, NO_POLICY)
+        Self::build(true, NO_POLICY, false)
+    }
+
+    /// A fixture whose setup is unfinished and read from a fake computer that counts its reads.
+    fn setting_up() -> Self {
+        Self::build(true, NO_POLICY, true)
     }
 
     fn closed() -> Self {
-        Self::build(false, NO_POLICY)
+        Self::build(false, NO_POLICY, false)
     }
 
     fn with_policy(policy: &str) -> Self {
-        Self::build(true, policy)
+        Self::build(true, policy, false)
     }
 
-    fn build(watching: bool, policy: &str) -> Self {
+    fn build(watching: bool, policy: &str, setting_up: bool) -> Self {
         let root =
             std::env::temp_dir().join(format!("ghostlight-web-{}", uuid::Uuid::new_v4().simple()));
         let state = root.join("state");
@@ -252,6 +259,17 @@ impl Fixture {
             &root.join("ghostlight"),
             &state,
         ));
+        let computer = setting_up
+            .then(|| Arc::new(crate::workbench::setup::test_support::Computer::default()));
+        let facade = match &computer {
+            Some(computer) => {
+                facade.attach_setup(crate::workbench::setup::SetupProgress::load(
+                    &state.join("setup.json"),
+                ));
+                facade.with_setup_machine(computer.clone())
+            }
+            None => facade,
+        };
         let server = WorkbenchServer::start(
             &root,
             &facade,
@@ -263,7 +281,15 @@ impl Fixture {
             server,
             facade,
             root,
+            computer,
         }
+    }
+
+    /// How many times the fake computer was read.
+    fn reads(&self) -> usize {
+        self.computer
+            .as_ref()
+            .map_or(0, |computer| computer.reads())
     }
 
     fn port(&self) -> u16 {
@@ -696,6 +722,36 @@ fn a_snapshot_holds_the_parts_it_is_asked_for() {
     );
     let setup = fixture.control(get("/api/snapshot?parts=setup")).json();
     assert_eq!(setup["parts"]["setup"]["stage"], "retired");
+}
+
+#[test]
+fn only_a_request_for_the_setup_part_reads_this_computer() {
+    let fixture = Fixture::setting_up();
+    let before = fixture.reads();
+    for call in [
+        "/api/snapshot?parts=status",
+        "/api/snapshot?parts=status,connections,activity,integrations,diagnostics,controls",
+    ] {
+        assert_eq!(fixture.control(get(call)).status, 200, "{call}");
+    }
+    assert_eq!(
+        fixture.watch(get("/api/snapshot")).status,
+        200,
+        "a watcher is shown no setup part"
+    );
+    assert_eq!(fixture.watch(get("/api/snapshot?parts=setup")).status, 200);
+    assert_eq!(
+        fixture.reads(),
+        before,
+        "no snapshot that leaves the setup part out, or hides it, reads the computer"
+    );
+
+    let asked = fixture.control(get("/api/snapshot?parts=setup")).json();
+    assert_eq!(asked["parts"]["setup"]["stage"], "browser");
+    assert!(
+        fixture.reads() > before,
+        "asking for the setup part reads it"
+    );
 }
 
 #[test]

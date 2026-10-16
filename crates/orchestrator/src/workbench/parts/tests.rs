@@ -257,7 +257,6 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             },
             policy: governance.policy_chip(),
         },
-        setup: setup_view(),
         controls: ControlsPart::of(&ControlsFacts {
             runtime_state: RuntimeControlState::Held,
             runtime_note: Some("Paused from the tray."),
@@ -685,7 +684,7 @@ fn each_part_holds_exactly_the_keys_classified_for_its_audience() {
     let (snapshot, _, path) = populated();
     for audience in [Audience::Control, Audience::Watch] {
         let projection = projection(audience);
-        let shown = |part| key_paths(&projection.part(part, &snapshot));
+        let shown = |part| key_paths(&projection.part(part, &snapshot, setup_view));
         assert_eq!(
             shown(Part::Status),
             expected(&[STATUS_KEYS]),
@@ -722,12 +721,15 @@ fn only_the_window_is_shown_the_setup_part() {
     let window = projection(Audience::Control);
     assert!(window.shows(Part::Setup));
     assert_eq!(
-        window.part(Part::Setup, &snapshot),
+        window.part(Part::Setup, &snapshot, setup_view),
         serde_json::to_value(setup_view()).unwrap()
     );
     let watcher = projection(Audience::Watch);
     assert!(!watcher.shows(Part::Setup));
-    assert_eq!(watcher.part(Part::Setup, &snapshot), Value::Null);
+    assert_eq!(
+        watcher.part(Part::Setup, &snapshot, setup_view),
+        Value::Null
+    );
     for part in Part::ALL {
         if part != Part::Setup {
             assert!(watcher.shows(part), "{part:?}");
@@ -775,7 +777,7 @@ fn nothing_nobody_reads_is_sent_to_anyone() {
         let projection = projection(audience);
         let mut text = String::new();
         for part in Part::ALL {
-            text.push_str(&projection.part(part, &snapshot).to_string());
+            text.push_str(&projection.part(part, &snapshot, setup_view).to_string());
         }
         for dropped in [
             "overview",
@@ -795,11 +797,11 @@ fn nothing_nobody_reads_is_sent_to_anyone() {
 #[test]
 fn a_watcher_is_told_how_many_sites_are_excluded_and_not_which() {
     let (snapshot, _, path) = populated();
-    let watcher = projection(Audience::Watch).part(Part::Activity, &snapshot);
+    let watcher = projection(Audience::Watch).part(Part::Activity, &snapshot, setup_view);
     assert!(!watcher.to_string().contains(EXCLUDED));
     assert!(!watcher.to_string().contains("second.invalid"));
     assert_eq!(watcher["document_coverage"][0]["excluded_host_count"], 2);
-    let window = projection(Audience::Control).part(Part::Activity, &snapshot);
+    let window = projection(Audience::Control).part(Part::Activity, &snapshot, setup_view);
     assert_eq!(
         window["document_coverage"][0]["excluded_hosts"],
         json!([EXCLUDED, "second.invalid"])
@@ -861,12 +863,12 @@ fn paths_are_home_relative_in_every_part_and_the_policy_for_both_audiences() {
     for audience in [Audience::Control, Audience::Watch] {
         let projection = Projection::with_home(audience, Some(home.clone()));
         let sep = std::path::MAIN_SEPARATOR;
-        let integrations = projection.part(Part::Integrations, &snapshot);
+        let integrations = projection.part(Part::Integrations, &snapshot, setup_view);
         assert_eq!(
             integrations["harnesses"][0]["config_path"],
             format!("~{sep}cursor.json")
         );
-        let controls = projection.part(Part::Controls, &snapshot);
+        let controls = projection.part(Part::Controls, &snapshot, setup_view);
         assert_eq!(controls["diagnostics"]["folder"], format!("~{sep}logs"));
         let policy = projection.policy(&authority);
         let file = path.file_name().unwrap().to_string_lossy();
@@ -978,13 +980,13 @@ fn available(controls: &Value) -> Vec<(String, bool)> {
 #[test]
 fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() {
     let (snapshot, _, path) = populated();
-    let window = projection(Audience::Control).part(Part::Controls, &snapshot);
+    let window = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert!(available(&window).iter().all(|(_, may)| *may), "{window}");
     assert_eq!(window["you"]["context"], "control");
     assert_eq!(window["you"]["word"], words::WORD_CONTROL);
     assert_eq!(window["you"]["sentence"], words::SENTENCE_CONTROL_WATCHED);
 
-    let watcher = projection(Audience::Watch).part(Part::Controls, &snapshot);
+    let watcher = projection(Audience::Watch).part(Part::Controls, &snapshot, setup_view);
     let allowed: Vec<_> = available(&watcher)
         .into_iter()
         .filter(|(_, may)| *may)
@@ -1003,7 +1005,7 @@ fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() 
 #[test]
 fn settings_say_what_they_are_told_in_the_service_words() {
     let (snapshot, _, path) = populated();
-    let controls = projection(Audience::Control).part(Part::Controls, &snapshot);
+    let controls = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert_eq!(controls["runtime"]["state"], "held");
     assert_eq!(controls["runtime"]["word"], words::CONTROLS_RUNTIME_HELD);
     assert_eq!(controls["runtime"]["note"], "Paused from the tray.");
@@ -1024,7 +1026,7 @@ fn watching_off_changes_the_word_and_the_sentence_the_window_is_told() {
     let (mut snapshot, _, path) = populated();
     snapshot.controls.viewing.watch = false;
     snapshot.controls.viewing.word = words::CONTROLS_VIEWING_OFF;
-    let window = projection(Audience::Control).part(Part::Controls, &snapshot);
+    let window = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert_eq!(window["viewing"]["word"], words::CONTROLS_VIEWING_OFF);
     assert_eq!(window["you"]["sentence"], words::SENTENCE_CONTROL_PRIVATE);
     let _ = std::fs::remove_file(path);
@@ -1034,7 +1036,7 @@ fn watching_off_changes_the_word_and_the_sentence_the_window_is_told() {
 fn the_log_folder_is_shown_relative_to_the_users_home() {
     let (snapshot, _, path) = populated();
     let sep = std::path::MAIN_SEPARATOR;
-    let controls = projection(Audience::Watch).part(Part::Controls, &snapshot);
+    let controls = projection(Audience::Watch).part(Part::Controls, &snapshot, setup_view);
     assert_eq!(
         controls["diagnostics"]["folder"],
         format!("~{sep}.ghostlight{sep}logs")

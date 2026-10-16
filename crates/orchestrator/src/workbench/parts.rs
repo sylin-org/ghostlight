@@ -27,6 +27,7 @@ use crate::governance::ManagedPolicyPassport;
 use crate::install::{HarnessActionResult, HarnessSummary};
 use crate::language::audit_health::AuditHealth;
 use crate::language::coverage::HumanCoverage;
+use crate::language::setup::SetupView;
 use crate::language::workbench::{self as words, ConnectionCounts};
 
 /// The environment variable that names the user's home directory.
@@ -602,8 +603,16 @@ impl Projection {
 
     /// One part of `snapshot`, as this audience sees it. A part the audience is not shown (see
     /// [`Self::shows`]) comes back null.
+    ///
+    /// The setup part is not in a snapshot: `setup` builds it, and is called only when this
+    /// audience is shown the part, because building it may read this computer.
     #[must_use]
-    pub fn part(&self, part: Part, snapshot: &WorkbenchSnapshot) -> Value {
+    pub fn part(
+        &self,
+        part: Part,
+        snapshot: &WorkbenchSnapshot,
+        setup: impl FnOnce() -> SetupView,
+    ) -> Value {
         match part {
             Part::Status => self.status(&StatusPart::of(snapshot)),
             Part::Connections => self.connections(&ConnectionsPart::of(snapshot)),
@@ -629,7 +638,7 @@ impl Projection {
             }
             Part::Controls => self.controls(&snapshot.controls),
             Part::Setup if !self.shows(part) => Value::Null,
-            Part::Setup => to_value(&snapshot.setup),
+            Part::Setup => to_value(&setup()),
             Part::Diagnostics => to_value(&DiagnosticsPart {
                 diagnostics: &snapshot.diagnostics,
             }),

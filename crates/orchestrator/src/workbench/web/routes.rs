@@ -823,7 +823,7 @@ fn snapshot(shared: &Shared, head: &Head, projection: &Projection) -> Response {
         .into_iter()
         .filter(|part| projection.shows(*part))
         .map(|part| {
-            let mut value = projection.part(part, &snapshot);
+            let mut value = projection.part(part, &snapshot, || shared.facade.setup_view());
             if part == Part::Integrations {
                 if let Some(harnesses) = value.get_mut("harnesses").and_then(Value::as_array_mut) {
                     harnesses

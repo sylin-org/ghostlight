@@ -1293,7 +1293,7 @@ impl SetupBench {
 
     /// The tag of the setup part as a snapshot reads it now.
     fn setup_etag(&self) -> String {
-        super::parts::json_etag(&self.facade.snapshot().setup)
+        super::parts::json_etag(&self.facade.setup_view())
     }
 }
 
@@ -1340,9 +1340,23 @@ fn a_service_that_tracks_no_setup_announces_none() {
         .count();
     assert_eq!(setup_hints, 0);
     assert_eq!(
-        facade.snapshot().setup.stage,
+        facade.setup_view().stage,
         crate::language::setup::Stage::Retired
     );
+}
+
+#[test]
+fn a_snapshot_does_not_read_this_computer_for_the_setup_part() {
+    let bench = SetupBench::start();
+    bench.computer.install("chrome");
+    let reads = bench.computer.reads();
+    let _ = bench.facade.snapshot();
+    assert_eq!(bench.computer.reads(), reads);
+    assert_eq!(
+        bench.facade.setup_view().stage,
+        crate::language::setup::Stage::Browser
+    );
+    assert!(bench.computer.reads() > reads, "the setup view reads it");
 }
 
 #[test]
@@ -1357,7 +1371,7 @@ fn a_browser_that_connects_or_leaves_publishes_the_setup_part() {
         [bench.setup_etag()],
         "the first look announces the part"
     );
-    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Browser);
+    assert_eq!(bench.facade.setup_view().stage, Stage::Browser);
     let reads = bench.computer.reads();
 
     bench.facade.refresh_live_parts();
@@ -1373,12 +1387,12 @@ fn a_browser_that_connects_or_leaves_publishes_the_setup_part() {
     let hints = bench.setup_hints();
     assert_eq!(hints.len(), 2);
     assert_eq!(hints[1], bench.setup_etag());
-    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Agent);
+    assert_eq!(bench.facade.setup_view().stage, Stage::Agent);
 
     bench.browser.connect(false);
     bench.facade.refresh_live_parts();
     assert_eq!(bench.setup_hints().len(), 3);
-    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Browser);
+    assert_eq!(bench.facade.setup_view().stage, Stage::Browser);
 }
 
 #[test]
@@ -1449,7 +1463,7 @@ fn completing_setup_publishes_the_finished_part_once() {
     );
     bench.facade.refresh_live_parts();
     let before = bench.setup_hints().len();
-    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Agent);
+    assert_eq!(bench.facade.setup_view().stage, Stage::Agent);
 
     let record = a_request_that_reached_a_browser(workspace.as_str());
     bench
@@ -1462,7 +1476,7 @@ fn completing_setup_publishes_the_finished_part_once() {
         "completion announces the part once"
     );
     assert_eq!(hints.last(), Some(&bench.setup_etag()));
-    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Done);
+    assert_eq!(bench.facade.setup_view().stage, Stage::Done);
 
     let mut again = a_request_that_reached_a_browser(workspace.as_str());
     again.invocation = "invocation_2".into();
