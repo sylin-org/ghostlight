@@ -1,16 +1,18 @@
-// Settings, exercised for real.
+// Settings, the view and the window, exercised for real.
 //
 // Settings is a tab of its own: a rail of sections, each showing its current state, and the
 // selected section beside it. The kit draws the service's controls part into the page's own
 // markup and calls back into the page when a button is pressed; the view keeps the address. These
 // tests run the real kit and the real view against the real markup from index.html, parsed into a
-// minimal fake document, with fake callbacks and a fake localStorage. No page, no transport and no
-// Ghostlight process is involved.
+// minimal fake document, with fake callbacks and a fake localStorage. The window's tests run every
+// script the page loads over the same markup against a fake service, and the stylesheet's tests
+// read the rules styles.css and kit.css declare. No browser and no Ghostlight process is involved.
 //
 // Run with: node --test tests/workbench-settings.test.mjs
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import vm from "node:vm";
 import { test } from "node:test";
 import { join, resolve } from "node:path";
 
@@ -73,9 +75,11 @@ class Element {
     this.children = [];
     this.attributes = {};
     this.dataset = {};
+    this.listeners = {};
+    this.style = { setProperty() {} };
     this.classes = new Set(String(attributes.class ?? "").split(/\s+/).filter(Boolean));
     for (const [name, value] of Object.entries(attributes)) {
-      if (name === "aria-current") this.attributes[name] = value;
+      if (name === "aria-current" || name === "src") this.attributes[name] = value;
       if (!name.startsWith("data-")) continue;
       this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
     }
@@ -84,8 +88,49 @@ class Element {
         if (on === undefined ? !this.classes.has(name) : on) this.classes.add(name);
         else this.classes.delete(name);
       },
-      contains: (name) => this.classes.has(name)
+      contains: (name) => this.classes.has(name),
+      add: (name) => this.classes.add(name),
+      remove: (name) => this.classes.delete(name)
     };
+  }
+
+  addEventListener(type, handler) {
+    (this.listeners[type] ??= []).push(handler);
+  }
+
+  removeEventListener() {}
+
+  querySelector() {
+    return null;
+  }
+
+  querySelectorAll() {
+    return [];
+  }
+
+  append(...nodes) {
+    for (const node of nodes) {
+      node.parent = this;
+      this.children.push(node);
+    }
+  }
+
+  replaceChildren(...nodes) {
+    this.children = [];
+    this.append(...nodes);
+  }
+
+  remove() {
+    if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this);
+  }
+
+  contains(node) {
+    for (let at = node; at; at = at.parent) if (at === this) return true;
+    return false;
+  }
+
+  getBoundingClientRect() {
+    return { left: 0, top: 0, width: 1, height: 1 };
   }
 
   setAttribute(name, value) {
@@ -104,6 +149,7 @@ class Element {
     if (selector === "[id]") return this.id !== "";
     if (selector.startsWith("#")) return this.id === selector.slice(1);
     if (selector.startsWith(".")) return this.classes.has(selector.slice(1));
+    if (/^[a-z]+$/.test(selector)) return this.tag === selector;
     const attribute = /^\[data-([a-z-]+)\]$/.exec(selector);
     if (attribute) return attribute[1].replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()) in this.dataset;
     throw new Error(`the fake document does not know the selector ${selector}`);
@@ -122,12 +168,18 @@ class Element {
   }
 }
 
-/** Parse the whole page's markup into fake elements. */
-function parsePage() {
+/**
+ * Parse markup into fake elements. With `text`, each element's textContent is the text it holds,
+ * its children's included, as a browser reads it.
+ */
+function parse(html, { text = false } = {}) {
   const root = new Element("root");
   const stack = [root];
-  const body = markup.slice(markup.indexOf("<body"));
-  for (const [, closing, tag, rest] of body.matchAll(/<(\/?)([a-z0-9]+)((?:[^>"]|"[^"]*")*)>/g)) {
+  let at = 0;
+  for (const found of html.matchAll(/<(\/?)([a-z0-9]+)((?:[^>"]|"[^"]*")*)>/g)) {
+    const [whole, closing, tag, rest] = found;
+    if (text) for (const open of stack.slice(1)) open.textContent += html.slice(at, found.index);
+    at = found.index + whole.length;
     if (closing) {
       stack.pop();
       continue;
@@ -142,6 +194,17 @@ function parsePage() {
   return root;
 }
 
+/** Parse the whole page's markup into fake elements. */
+function parsePage() {
+  return parse(markup.slice(markup.indexOf("<body")));
+}
+
+/** Markup a paint produced, parsed, with every element in it that wears `className`. */
+function drawn(html) {
+  const root = parse(html, { text: true });
+  return { root, wearing: (className) => [...root.descendants()].filter((node) => node.classes.has(className)) };
+}
+
 /** A page: the real markup as fake elements, a body, and the listeners the modules attach. */
 function page() {
   const root = parsePage();
@@ -151,7 +214,12 @@ function page() {
   const listeners = new Map();
   const document = {
     body,
+    activeElement: null,
+    hasFocus: () => true,
+    createElement: (tag) => new Element(tag),
+    createDocumentFragment: () => new Element("#fragment"),
     getElementById: (id) => byId.get(id) ?? null,
+    querySelector: () => null,
     querySelectorAll: (selector) => everything.filter((node) => node.matches(selector)),
     addEventListener: (type, handler) => {
       if (!listeners.has(type)) listeners.set(type, []);
@@ -799,4 +867,506 @@ test("a browser that keeps nothing, or keeps rubbish, still draws Settings with 
 
 test("the storage key of the personal settings is the one the reload test reads", () => {
   assert.equal(Settings.STORAGE_KEY, "ghostlight.screen");
+});
+
+/* ---------------------------------- the window ---------------------------------- */
+
+const Transport = require(join(ui, "lib", "transport.js"));
+
+/** The page's own scripts, in the order its markup loads them. */
+const SCRIPTS = [...markup.matchAll(/<script src="([^"]+)"><\/script>/g)]
+  .map(([, src]) => readFileSync(join(ui, src), "utf8"));
+
+/** What the service tells the Ghostlight window it may do: everything. */
+const WINDOW_CONTEXT = {
+  context: "control",
+  opener: Transport.OPENER_SERVICE,
+  word: "Full control",
+  sentence: PRIVATE,
+  product: { version: "2.0.0", license: "Apache-2.0 OR MIT" },
+  acts: Object.fromEntries(Object.values(Transport.ACT).map((act) => [act, { available: true, why_not: null }]))
+};
+
+/** One settled read, as the service records it. */
+function settledRead(overrides = {}) {
+  return {
+    invocation: "read-1", workspace: "w1", tool: "browser_read", capability: "read", requirements: ["read"],
+    allowed: true, reason: "permitted", status: "succeeded", effect: "none", complete: true, timestamp_ms: 1,
+    duration_ms: 1200, summary: "Read 1,240 words from example.com.", storage: "saved", storage_detail: "",
+    steps: [], permissions: { checks: [], truncated: false }, permission_explanations: [],
+    observed: { host: "example.com", readiness: "complete", count: 1240 }, channel: "mcp",
+    ...overrides
+  };
+}
+
+/** A snapshot answer from a service with one client, one browser and one settled read. */
+function snapshotAnswer({ history = [settledRead()], sessions, service = { version: "2.0.0", started_at_ms: 1, runtime_state: "active" } } = {}) {
+  return {
+    seq: 1,
+    instance: "i1",
+    parts: {
+      status: {
+        service,
+        readiness: { state: "ready", word: "Ready", detail: "A browser is connected.", tone: "ready", invites_control: true },
+        audit_health: { state: "saved" },
+        audit_notice: "",
+        configuration: {
+          policy: { tone: "applied", detail: "Your rules apply." },
+          managed_policy: { configured: false, contacts: [] }
+        }
+      },
+      connections: {
+        sessions: sessions ?? [{ id: "w1", client_label: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 }],
+        browsers: [{ id: "b1", family: "Chrome", adapter_version: "2.0.0" }]
+      },
+      activity: { operations: [], history, document_coverage: [] },
+      integrations: { harnesses: [] },
+      diagnostics: { diagnostics: [] },
+      controls: part()
+    }
+  };
+}
+
+/** A response the fake service gives. */
+function reply(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    text: async () => JSON.stringify(body)
+  };
+}
+
+/**
+ * The whole window: the page's scripts run over the real markup against a fake service.
+ *
+ * `answer` maps a path to the body the service gives, an Error to fail the fetch, or undefined
+ * for a request that never answers (the live stream). `before` may break the page before the
+ * scripts run. Timers never fire, so nothing outlives the test.
+ */
+async function windowOver({ answer = () => undefined, before = () => {} } = {}) {
+  const shown = page();
+  const requests = [];
+  const sent = [];
+  const opened = [];
+  const logged = [];
+  const windowListeners = {};
+  const fetch = async (path, init = {}) => {
+    requests.push(path);
+    sent.push({ path, body: init.body });
+    const body = answer(path, init);
+    if (body === undefined) return new Promise(() => {});
+    if (body instanceof Error) throw body;
+    return reply(body);
+  };
+  before(shown);
+  const sandbox = vm.createContext({
+    document: shown.document,
+    window: {
+      location: shown.address,
+      history: shown.window.history,
+      fetch,
+      open: (address) => {
+        opened.push(address);
+        return null;
+      },
+      matchMedia: () => ({ matches: false, addEventListener() {} }),
+      addEventListener: (type, handler) => (windowListeners[type] ??= []).push(handler)
+    },
+    navigator: { clipboard: { writeText: async () => {} } },
+    GhostlightAccess: Object.freeze({ bearer: "key-1" }),
+    console: { error: (detail) => logged.push(detail), warn() {}, log() {} },
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    clearInterval() {},
+    AbortController, TextDecoder, TextEncoder, URL
+  });
+  for (const source of SCRIPTS) vm.runInContext(source, sandbox);
+  for (let turn = 0; turn < 5; turn += 1) await settle();
+  return {
+    ...shown,
+    requests,
+    sent,
+    opened,
+    logged,
+    evaluate: (code) => vm.runInContext(code, sandbox),
+    fire: (type, event) => {
+      for (const handler of windowListeners[type] ?? []) handler(event);
+    }
+  };
+}
+
+/** The fake service of a healthy window. */
+const healthy = (snapshot = snapshotAnswer()) => (path) => {
+  if (path === "/api/context") return WINDOW_CONTEXT;
+  if (path.startsWith("/api/snapshot?parts=setup")) return { seq: 1, parts: {} };
+  if (path.startsWith("/api/snapshot")) return snapshot;
+  return undefined;
+};
+
+test("the window comes up over the real markup and reports nothing", async () => {
+  const shown = await windowOver({ answer: healthy() });
+  assert.deepEqual(shown.logged, [], "every element the window reaches for exists, and every paint ran");
+  assert.equal(shown.el("toast").hidden, true);
+  assert.ok(shown.requests.some((path) => path.startsWith("/api/snapshot?parts=status")));
+  assert.equal(said(shown, "state-word"), "Ready");
+  assert.equal(shown.evaluate("store.connected()"), true);
+});
+
+test("a snapshot the window cannot draw is reported as a drawing fault, not as a lost connection", async () => {
+  // The answer reads, but it names no service, which the cache cannot fold in.
+  const shown = await windowOver({ answer: healthy(snapshotAnswer({ service: null })) });
+  assert.match(said(shown, "toast"), /^rendering the snapshot: /);
+  assert.equal(shown.el("toast").hidden, false);
+  assert.equal(shown.evaluate("store.connected()"), true, "the service answered, so the window is connected");
+  assert.notEqual(said(shown, "state-word"), Words.RECONNECTING);
+});
+
+test("a snapshot the service never gives is a lost connection, and nothing else is said", async () => {
+  const answer = (path) => (path.startsWith("/api/snapshot?parts=status")
+    ? new Error("connection refused") : healthy()(path));
+  const shown = await windowOver({ answer });
+  assert.equal(shown.evaluate("store.connected()"), false);
+  assert.deepEqual(shown.logged, []);
+  assert.equal(shown.el("toast").hidden, true);
+});
+
+test("an error that escapes a listener or a promise reaches the person using the window", async () => {
+  const shown = await windowOver({ answer: healthy() });
+  shown.fire("error", { error: new Error("a listener broke") });
+  assert.equal(said(shown, "toast"), "surface: a listener broke");
+  assert.equal(shown.el("toast").hidden, false);
+  shown.fire("unhandledrejection", { reason: new Error("a promise broke") });
+  assert.equal(said(shown, "toast"), "surface: a promise broke");
+  assert.equal(shown.logged.length, 2, "the console hears each failure too");
+});
+
+test("a listener that cannot attach costs its own wiring, not the first snapshot", async () => {
+  const before = (shown) => {
+    shown.el("palette-query").addEventListener = () => {
+      throw new Error("no listener here");
+    };
+  };
+  const shown = await windowOver({ answer: healthy(), before });
+  assert.match(said(shown, "toast"), /^wiring the surface: no listener here/);
+  assert.ok(shown.requests.some((path) => path.startsWith("/api/snapshot?parts=status")), "the snapshot was still read");
+  assert.equal(said(shown, "state-word"), "Ready");
+});
+
+test("pressing a destination in the window asks the service to open it by name", async () => {
+  const shown = await windowOver({ answer: healthy() });
+  shown.click(shown.el("about-card"));
+  await settle();
+  assert.deepEqual(shown.sent.filter((request) => request.path === "/api/open"),
+    [{ path: "/api/open", body: '{"destination":"home"}' }]);
+  assert.deepEqual(shown.opened, []);
+});
+
+test("a browser tab opens the address the service listed for a destination, and sends nothing", async () => {
+  const tab = {
+    ...WINDOW_CONTEXT,
+    opener: "browser",
+    links: { home: "https://sylin.org/ghostlight/" }
+  };
+  const answer = (path) => (path === "/api/context" ? tab : healthy()(path));
+  const shown = await windowOver({ answer });
+  shown.click(shown.el("about-card"));
+  await settle();
+  assert.deepEqual(shown.opened, ["https://sylin.org/ghostlight/"]);
+  assert.equal(shown.sent.some((request) => request.path === "/api/open"), false);
+});
+
+/* ----------------------------------- the view ----------------------------------- */
+
+const Entries = globalThis.GhostlightEntries;
+
+/** The view over the page's markup, recording every paint that failed. */
+function drawing() {
+  const shown = page();
+  const failures = [];
+  globalThis.document = shown.document;
+  globalThis.window = shown.window;
+  const view = View.create({ onFailure: (what, error) => failures.push(`${what}: ${error?.message ?? error}`) });
+  return { ...shown, view, failures };
+}
+
+/** The rows of the queue below the hero, as the view built them. */
+function queueRows(shown) {
+  return shown.el("queue").children.flatMap((child) => (child.tag === "#fragment" ? child.children : [child]));
+}
+
+test("a paint that throws is tried again with the same facts, and one that drew is not redrawn", () => {
+  const shown = drawing();
+  let shownText = "";
+  let writes = 0;
+  let ready = false;
+  Object.defineProperty(shown.el("about-version"), "textContent", {
+    get: () => shownText,
+    set: (value) => {
+      writes += 1;
+      if (!ready) {
+        ready = true;
+        throw new Error("the disc is not ready");
+      }
+      shownText = value;
+    }
+  });
+  const snapshot = Transport.flatten(snapshotAnswer());
+  shown.view.collections(snapshot, new Set());
+  assert.deepEqual(shown.failures.filter((failure) => failure.startsWith("painting about")),
+    ["painting about: the disc is not ready"]);
+  shown.view.collections(snapshot, new Set());
+  assert.equal(shownText, "2.0", "the failed panel is drawn on the next pass");
+  shown.view.collections(snapshot, new Set());
+  assert.equal(writes, 2, "a panel that drew is not drawn again for the same facts");
+});
+
+test("the connections bar shows one chip per client, with a count when a client holds several", () => {
+  const shown = drawing();
+  const sessions = [
+    { id: "w1", client_label: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 },
+    { id: "w2", client_label: "Codex", channel: "cli", tab_count: 2, active_operations: 1 },
+    { id: "w3", client_label: "Zed", channel: "mcp", tab_count: 0, active_operations: 0 }
+  ];
+  shown.view.collections(Transport.flatten(snapshotAnswer({ sessions })), new Set());
+  const bar = drawn(shown.el("connections").innerHTML);
+  const clients = bar.wearing("chip").filter((chip) => chip.textContent.endsWith("tabs"));
+  assert.deepEqual(clients.map((chip) => chip.textContent), ["Codex 23 tabs", "Zed0 tabs"]);
+  assert.deepEqual(clients.map((chip) => chip.classes.has("busy")), [true, false]);
+  assert.deepEqual(bar.wearing("tally").map((tally) => tally.textContent), ["2"]);
+});
+
+test("a settled action says the service's sentence, the readiness note beside it, and the host once", () => {
+  const shown = drawing();
+  const loading = Entries.entryFromRecord(settledRead({
+    observed: { host: "example.com", readiness: "loading", count: 1240 }
+  }), null);
+  shown.view.hero(loading, false);
+  const hero = drawn(shown.el("hero-body").innerHTML);
+  assert.deepEqual(hero.wearing("hero-activity").map((line) => line.textContent), ["Read 1,240 words from example.com."]);
+  assert.ok(hero.wearing("hero-meta")[0].textContent.includes(Words.READINESS_NOTE.loading));
+  assert.equal(hero.root.children.map((node) => node.textContent).join("").split("example.com").length - 1, 1,
+    "the sentence names the host, so nothing else repeats it");
+});
+
+test("every readiness the service reports reads beside the row's sentence, and the doubtful ones mark its duration", () => {
+  // Readiness in work/result.rs, as it serializes, and the note a settled row carries for each.
+  const notes = { not_applicable: "", complete: "", interactive: "interactive", loading: "never settled", unknown: "readiness unknown" };
+  assert.deepEqual(Object.keys(Words.READINESS_NOTE).sort(), Object.keys(notes).sort());
+  const sentence = "Read 1,240 words from example.com.";
+  for (const [readiness, note] of Object.entries(notes)) {
+    const shown = drawing();
+    const entry = Entries.entryFromRecord(settledRead({
+      invocation: `read-${readiness}`, observed: { host: "example.com", readiness }
+    }), null);
+    const newest = Entries.entryFromRecord(settledRead({ invocation: "newest" }), null);
+    shown.view.rebuildFeed([newest, entry]);
+    const [row] = queueRows(shown);
+    const cells = drawn(row.innerHTML);
+    assert.equal(cells.wearing("row-activity")[0].textContent, note ? `${sentence} (${note})` : sentence, readiness);
+    assert.equal(cells.wearing("row-dur")[0].classes.has("unsettled"), readiness === "loading" || readiness === "unknown",
+      readiness);
+  }
+});
+
+test("a managed policy's passport shows every signed fact", () => {
+  const shown = drawing();
+  shown.view.policy({
+    headline: "Example Org sets the rules.",
+    organization: null,
+    capabilities: [],
+    ceilings: [],
+    layers: [],
+    user_layer: { source: "managed", editable: false, path: null, blocked_reason: null },
+    passport: {
+      configured: true,
+      organization: "Example Org",
+      rationale: "Support work only.",
+      contacts: [{ kind: "email", label: "Service desk", value: "desk@example.test" }],
+      sequence: 42,
+      freshness: "fresh",
+      source_class: "https",
+      last_success_ms: 1_700_000_000_000
+    }
+  });
+  assert.deepEqual(shown.failures, []);
+  const card = shown.el("policy-organization");
+  assert.equal(card.hidden, false);
+  const text = drawn(card.innerHTML).root.children.map((node) => node.textContent).join(" ");
+  for (const fact of ["Example Org", "Support work only.", "Service desk", "desk@example.test", "fresh",
+    "verified sequence 42", "from an HTTPS source", "last checked"]) {
+    assert.ok(text.includes(fact), `the passport does not show ${fact}: ${text}`);
+  }
+});
+
+// WorkbenchDestination in workbench/mod.rs, less get_chrome, which only the setup view offers. The
+// Rust table's own test pins the same names.
+const PRODUCT_DESTINATIONS = [
+  "home", "demo", "decision_aid", "source", "install_guide", "governance_guide", "scripting_guide",
+  "audit_guide", "trust_center", "decision_records", "licensing_guide", "sylin_tools"
+];
+
+test("About offers every destination the product chose, by name, and holds no address", () => {
+  const shown = drawing();
+  shown.view.armCard();
+  const links = shown.el("about-links").innerHTML;
+  const named = [
+    ...drawn(links).root.descendants(),
+    ...shown.document.querySelectorAll("[data-destination]")
+  ].map((node) => node.dataset.destination).filter(Boolean);
+  assert.deepEqual([...new Set(named)].sort(), [...PRODUCT_DESTINATIONS].sort());
+  assert.ok(!/href=|https?:/.test(links), "a destination is a name, never an address");
+});
+
+test("each catalog tool wears the medallion chosen for it", () => {
+  // The tools of docs/1.0/catalog.json and the medallion a person sees on each one's row.
+  const chosen = {
+    browser_tabs: "navigate", browser_navigate: "navigate", browser_history: "navigate", browser_window: "scan",
+    browser_read: "scan", browser_inspect: "scan", browser_find: "scan", browser_screenshot: "camera",
+    browser_click: "pointer", browser_scroll: "navigate", browser_hover: "pointer", browser_fill_form: "keyboard",
+    browser_type_text: "keyboard", browser_press_key: "keyboard", browser_drag: "pointer", browser_wait: "wait",
+    browser_dialog: "wait", browser_upload: "workwheel", browser_execute: "workwheel", browser_flow: "workwheel",
+    browser_record: "camera", browser_diagnose: "scan", policy_explain: "scan"
+  };
+  const catalog = JSON.parse(readFileSync(join(ui, "..", "..", "..", "docs", "1.0", "catalog.json"), "utf8"));
+  assert.deepEqual(catalog.map((tool) => tool.name).sort(), Object.keys(chosen).sort(),
+    "a new tool needs a medallion chosen for it");
+  for (const [tool, glyph] of Object.entries(chosen)) {
+    assert.ok(Words.GLYPHS[glyph], glyph);
+    assert.equal(Words.glyphFor({ tool }), Words.GLYPHS[glyph], tool);
+  }
+});
+
+/* -------------------------------- the stylesheets -------------------------------- */
+
+/**
+ * The rules of a stylesheet, each with the media condition it sits under (null at the top level),
+ * its selectors and its declarations by property. Comments are dropped.
+ */
+function rulesOf(sheet) {
+  const rules = [];
+  const walk = (text, media) => {
+    let at = 0;
+    while (at < text.length) {
+      const open = text.indexOf("{", at);
+      if (open < 0) return;
+      const prelude = text.slice(at, open).trim();
+      let depth = 1;
+      let close = open + 1;
+      for (; depth > 0; close += 1) {
+        if (text[close] === "{") depth += 1;
+        if (text[close] === "}") depth -= 1;
+      }
+      const body = text.slice(open + 1, close - 1);
+      if (prelude.startsWith("@media")) {
+        walk(body, prelude.slice("@media".length).trim());
+      } else if (!prelude.startsWith("@")) {
+        const declarations = {};
+        for (const line of body.split(";")) {
+          const colon = line.indexOf(":");
+          if (colon > 0) declarations[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+        }
+        rules.push({ media, selectors: prelude.split(",").map((selector) => selector.trim()), declarations });
+      }
+      at = close;
+    }
+  };
+  walk(sheet.replace(/\/\*[\s\S]*?\*\//g, ""), null);
+  return rules;
+}
+
+const RULES = rulesOf(styles);
+
+/** The rules that name `selector` exactly. */
+const naming = (selector, rules = RULES) => rules.filter((rule) => rule.selectors.includes(selector));
+
+/** The widest width a media condition applies up to, or null when it is not a width at all. */
+const widthOf = (media) => Number(/^\(max-width: (\d+)px\)$/.exec(media ?? "")?.[1] ?? NaN) || null;
+
+/** The rules that apply at `width`: the top level, and every width query that reaches down to it. */
+const applyingAt = (width) => RULES.filter((rule) => rule.media === null
+  || (widthOf(rule.media) !== null && width <= widthOf(rule.media)));
+
+/** How many tracks a grid-template-columns value declares; minmax(0, 1fr) is one. */
+const tracksIn = (value) => value.replace(/\([^)]*\)/g, "()").split(/\s+/).filter(Boolean).length;
+
+test("every cell of a row has a column at every width, and the details span the row below them", () => {
+  const shown = drawing();
+  shown.view.rebuildFeed([
+    Entries.entryFromRecord(settledRead({ invocation: "newest" }), null),
+    Entries.entryFromRecord(settledRead(), null)
+  ]);
+  const [row] = queueRows(shown);
+  const children = drawn(row.innerHTML).root.children;
+  const details = children.filter((cell) => cell.classes.has("row-history"));
+  const cells = children.filter((cell) => !cell.classes.has("row-history"));
+  assert.equal(details.length, 1);
+  assert.ok(cells.length >= 6, `a row of cells, saw ${cells.length}`);
+
+  const widths = [Infinity, ...new Set(naming(".row").map((rule) => widthOf(rule.media)).filter(Boolean))];
+  assert.ok(widths.length >= 3, "the row is laid out again at narrower widths");
+  for (const width of widths) {
+    const rules = applyingAt(width);
+    const grid = naming(".row", rules).filter((rule) => rule.declarations["grid-template-columns"]).at(-1);
+    const hidden = new Set(rules.filter((rule) => rule.declarations.display === "none")
+      .flatMap((rule) => rule.selectors).filter((selector) => /^\.row-[a-z-]+$/.test(selector)).map((selector) => selector.slice(1)));
+    const showing = cells.filter((cell) => ![...cell.classes].some((name) => hidden.has(name)));
+    assert.equal(tracksIn(grid.declarations["grid-template-columns"]), showing.length,
+      `at ${width}px the row declares ${grid.declarations["grid-template-columns"]} for ${showing.length} cells`);
+    const span = naming(".row-history", rules).map((rule) => rule.declarations["grid-column"]).filter(Boolean).at(-1);
+    assert.match(span, /\/ -1$/, `at ${width}px the details do not span to the row's end`);
+  }
+});
+
+test("every capability class has its own treatment, and a mixed one takes the most consequential", () => {
+  // Capability in governance/mod.rs, as it serializes.
+  for (const capability of ["read", "action", "write", "execute"]) {
+    const name = Words.capabilityClass({ capability });
+    assert.equal(name, `cap-${capability}`);
+    assert.ok(naming(`.${name}`).length > 0, `the ${capability} capability has no treatment`);
+  }
+  assert.equal(Words.capabilityClass({ capability: "read + write" }), "cap-write");
+  assert.equal(Words.capabilityClass({}), "cap-read");
+});
+
+test("with forced colours the band, the tabs and the rail keep their edges, and a selection takes the system highlight", () => {
+  const forced = RULES.filter((rule) => rule.media === "(forced-colors: active)");
+  const declared = (selector, property) => naming(selector, forced).map((rule) => rule.declarations[property] ?? "").join(" ");
+  for (const selector of [".lampband", ".state-word", ".tab", ".tab.active", ".rail-entry", ".rail-entry.active", ".rail-state"]) {
+    assert.ok(naming(selector, forced).length > 0, `forced colours leave ${selector} unstyled`);
+  }
+  for (const selector of [".tab", ".rail-entry"]) assert.match(declared(selector, "border"), /ButtonBorder/, selector);
+  for (const selector of [".tab.active", ".rail-entry.active"]) {
+    assert.match(declared(selector, "background"), /^Highlight$/, selector);
+    assert.match(declared(selector, "color"), /^HighlightText$/, selector);
+  }
+});
+
+test("About wears the published card and the product's own artwork, at a whole multiple of its pixels", () => {
+  const shown = page();
+  const card = shown.el("about-card");
+  assert.equal(card.tag, "button");
+  assert.ok(card.classes.has("tcg"), "the card keeps its own root, apart from the diagnostic cards");
+  assert.ok(card.closest("#view-about"));
+  const parts = [...card.descendants()];
+  for (const name of ["card-art", "card-divider", "card-disc", "card-notch", "card-pane", "card-title", "card-rules",
+    "card-foot", "holo2"]) {
+    assert.ok(parts.some((node) => node.classes.has(name)), `the card is missing ${name}`);
+  }
+  const mascot = parts.find((node) => node.classes.has("mascot"));
+  assert.equal(mascot.attributes.src, "ghostlight.png");
+  assert.ok(mascot.classes.has("px"));
+  assert.ok(RULES.some((rule) => rule.selectors.some((selector) => selector.startsWith(".tcg"))
+    && rule.declarations["mix-blend-mode"] === "color-dodge"), "the foil layer lost its blend");
+
+  // The size comes from the artwork itself: a different sprite fails here until the card matches.
+  const sprite = readFileSync(join(ui, "ghostlight.png"));
+  assert.equal(sprite.subarray(1, 4).toString("latin1"), "PNG");
+  const native = sprite.readUInt32BE(16);
+  assert.equal(sprite.readUInt32BE(20), native, "the card art assumes a square sprite");
+  const rendered = Number(/^(\d+)px$/.exec(naming(".tcg .card-art .mascot")[0].declarations.width)[1]);
+  assert.ok(rendered >= native, "the sprite is drawn below its own size");
+  assert.equal(rendered % native, 0, `${rendered}px from a ${native}px sprite splits its pixels unevenly`);
+  assert.equal(naming(".tcg img.px")[0].declarations["image-rendering"], "pixelated", "the sprite is smoothed");
 });

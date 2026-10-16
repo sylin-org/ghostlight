@@ -989,6 +989,96 @@ fn a_destination_opens_exactly_its_own_address() {
 }
 
 #[test]
+fn every_destination_has_its_name_and_points_at_the_products_own_surfaces() {
+    use super::WorkbenchDestination;
+
+    // The names the page sends. tests/workbench-settings.test.mjs pins the page's copy: About
+    // offers every one but get_chrome, which only the setup view offers.
+    let names = WorkbenchDestination::all().map(WorkbenchDestination::key);
+    assert_eq!(
+        names,
+        [
+            "home",
+            "demo",
+            "decision_aid",
+            "source",
+            "install_guide",
+            "governance_guide",
+            "scripting_guide",
+            "audit_guide",
+            "trust_center",
+            "decision_records",
+            "licensing_guide",
+            "sylin_tools",
+            "get_chrome",
+        ]
+    );
+    for destination in WorkbenchDestination::all() {
+        let key = destination.key();
+        assert_eq!(
+            serde_json::from_value::<WorkbenchDestination>(serde_json::json!(key)).ok(),
+            Some(destination),
+            "{key} is not the name the orchestrator reads"
+        );
+    }
+
+    // Get Chrome is Google's page; every other destination is one of the product's own.
+    for destination in WorkbenchDestination::all()
+        .into_iter()
+        .filter(|destination| *destination != WorkbenchDestination::GetChrome)
+    {
+        let url = destination.url();
+        assert!(
+            url.starts_with("https://sylin.org/")
+                || url.starts_with("https://github.com/sylin-org/"),
+            "{} points outside the product's own surfaces: {url}",
+            destination.key()
+        );
+    }
+
+    let branches: std::collections::BTreeSet<&str> = WorkbenchDestination::all()
+        .into_iter()
+        .filter_map(|destination| {
+            let url = destination.url();
+            ["/blob/", "/tree/"].into_iter().find_map(|marker| {
+                let (_, rest) = url.split_once(marker)?;
+                rest.split_once('/').map(|(branch, _)| branch)
+            })
+        })
+        .collect();
+    assert_eq!(
+        branches.len(),
+        1,
+        "Documentation links point at the branch named by the destination table: {branches:?}"
+    );
+}
+
+#[test]
+fn every_runtime_intent_reads_from_the_name_the_page_sends() {
+    use super::WorkbenchRuntimeIntent;
+
+    // Exhaustive on purpose: a new intent does not compile until it has a name. The page's buttons
+    // carry these names; tests/workbench-settings.test.mjs reads them from the markup.
+    let name = |intent: WorkbenchRuntimeIntent| match intent {
+        WorkbenchRuntimeIntent::Hold => "hold",
+        WorkbenchRuntimeIntent::Resume => "resume",
+        WorkbenchRuntimeIntent::EndSession => "end_session",
+        WorkbenchRuntimeIntent::StartSession => "start_session",
+    };
+    for intent in [
+        WorkbenchRuntimeIntent::Hold,
+        WorkbenchRuntimeIntent::Resume,
+        WorkbenchRuntimeIntent::EndSession,
+        WorkbenchRuntimeIntent::StartSession,
+    ] {
+        assert_eq!(
+            serde_json::from_value::<WorkbenchRuntimeIntent>(serde_json::json!(name(intent))).ok(),
+            Some(intent)
+        );
+    }
+}
+
+#[test]
 fn a_clients_download_opens_its_page_and_an_unknown_product_opens_nothing() {
     let (facade, acts, root) = facade_with_acts(true);
     let product = facade

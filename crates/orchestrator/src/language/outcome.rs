@@ -2243,6 +2243,30 @@ fn measured<T: TryInto<u32>>(value: T) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn every_observed_fact_is_documented_for_the_collectors_that_read_it() {
+        // The audit record's reader is a person configuring a collector, so the guide is where
+        // the vocabulary has to stay honest. The literal names every field, so a new one must be
+        // set here, and fails until the guide documents it.
+        let guide = include_str!("../../../../docs/guides/siem-integration.md");
+        let every_field = super::Observed {
+            host: Some("example.com".into()),
+            readiness: Some("complete".into()),
+            count: Some(1240),
+            width: Some(1280),
+            height: Some(720),
+            rebound: true,
+        };
+        let encoded = serde_json::to_value(every_field).expect("observations serialize");
+        let fields = encoded.as_object().expect("an observation is an object");
+        for field in fields.keys() {
+            assert!(
+                guide.contains(&format!("`{field}`")),
+                "siem-integration.md documents no {field} field, so collectors cannot expect it"
+            );
+        }
+    }
+
+    #[test]
     fn number_fields_and_list_boxes_keep_their_own_nouns() {
         assert_eq!(TargetRole::classify("spinbutton"), TargetRole::NumberField);
         assert_eq!(TargetRole::NumberField.noun(), "number field");
