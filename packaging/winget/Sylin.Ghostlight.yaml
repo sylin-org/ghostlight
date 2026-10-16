@@ -15,6 +15,8 @@ NestedInstallerType: portable
 NestedInstallerFiles:
   - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight.exe
     PortableCommandAlias: ghostlight
+  - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight-service.exe
+  - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight-desktop.exe
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/sylin-org/ghostlight/releases/download/v__VERSION__/ghostlight-v__VERSION__-x86_64-pc-windows-msvc.zip

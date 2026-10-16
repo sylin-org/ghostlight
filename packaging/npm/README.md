@@ -11,13 +11,13 @@ version-matched images from the GitHub release into temporary storage (the edge 
 service `ghostlight-service` and the window `ghostlight-desktop`), verifies all three against the
 checksums carried by the package, and runs the service's `deployment install` from there. The
 never-install commands run the installed edge, or with nothing installed a verified temporary
-edge and service that install nothing.
+service that answers them and installs nothing.
 `npx ghostlight deployment install` always runs this package's own verified service, and with
 `--restore` it replaces a development installation (a build the development loop installed) with
 this release; a release package never installs over one by itself.
-A bare `npx ghostlight` runs `ghostlight mcp`, the stdio server your client talks to;
-`npx ghostlight install` connects the browser side. On Linux the service runs without
-WebKitGTK; only the Ghostlight window (`ghostlight-desktop`) needs `libwebkit2gtk-4.1`, and
+A bare `npx -y ghostlight` runs `ghostlight mcp`, the stdio server your client talks to;
+`npx -y ghostlight install` installs Ghostlight and connects the browser side. On Linux the
+service runs without WebKitGTK; only the Ghostlight window (`ghostlight-desktop`) needs `libwebkit2gtk-4.1`, and
 without it `ghostlight status` names the window reason.
 
 ## Quick start

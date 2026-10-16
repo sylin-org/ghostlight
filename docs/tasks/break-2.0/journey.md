@@ -98,7 +98,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j07-options has landed. Next: c01-carriers (j08-toolbar-icon is skipped: JQ1 is No).
+c01-carriers has landed. Next: c02-get-scripts.
 
 ## Landed
 
@@ -110,6 +110,7 @@ j07-options has landed. Next: c01-carriers (j08-toolbar-icon is skipped: JQ1 is 
 | j04-setup-page | `extension/setup.html` is the kit page: the top bar with the wordmark and the Documentation link, the companion (ghost, lantern, stepper, step names) and the one column of eyebrow, heading, command, live line and fallback. `extension/lib/setup-view.js` (new, pure) holds every word and command and `view()` and `fallbackDue()`; `extension/setup.js` (new) places them, polls `ui_snapshot` every 1500 ms, plays the meeting once (`ghostlight.setup_met`) and sends `show_ghostlight`. The popup and options setup routes always open the bundled page and both remote URL literals are gone. The packager ships `setup.js`. The tests that pinned `setup.html` text are deleted; `extension/tests/setup-view.test.js` covers the pure module. | see `git log` |
 | j06-popup | `extension/lib/popup-view.js` (new, pure) holds every popup word, `popupView()` and `connection()`. `popup.html` is the kit page (mascot at 100 px, status block, actions, Settings link) and `popup.js` places the view, redrawing only when it changes. The captions switch, the notes, the setup paragraph, the debugger line and the version are gone. The held badge is the accent `#5eead4`, and `worker.js` sets the badge text colour `#08110f`. `kit.css` gains the popup note, quiet-button and problem rules. The tests that pinned popup text are deleted; `popup-view.test.js` and `state.test.js` are new. | see `git log` |
 | j07-options | `extension/options.html` is a kit page (`<html class="gl-page">`, `<body class="gl-stage options-page">`) linking `kit.css` then the new `extension/options.css`, which holds the cards, rows, switches and footer on kit tokens. The connection card's pill and line come from `GhostlightPopupView.connection()`: `gl-pill--ok` when connected, else `gl-pill--warn`; the setup button shows whenever `needsSetup` is true, is labelled `setupLabel` and opens the bundled `setup.html`. The words pass is done (strings under Owed to the owner). `extension/ui.css` is deleted and the packager ships `options.css` instead. The options source-text pins in `onboarding.test.js` and `shared.test.js` are deleted; `popup-view.test.js` gains two connection cases. | see `git log` |
+| c01-carriers | The carriers ship and run the three 2.0 images (`ghostlight`, `ghostlight-service`, `ghostlight-desktop`). Most of the slice had landed in earlier carrier fixes (see Notes); this commit finishes it. The npm never-install commands (`doctor`, `status`, `help`, `--version`, `install --help`) with nothing installed now stage and run `ghostlight-service` itself instead of a staged edge beside a staged service, so they download one image, not two. The WinGet template lists `ghostlight-service.exe` and `ghostlight-desktop.exe` as nested installer files with no alias, beside `ghostlight.exe` with the alias `ghostlight`; `winget validate` accepts it. The npm README says `npx -y ghostlight` is the MCP server and `npx -y ghostlight install` installs. | see `git log` |
 
 ## Owed live checks
 
@@ -121,6 +122,7 @@ j07-options has landed. Next: c01-carriers (j08-toolbar-icon is skipped: JQ1 is 
 - j06: the popup in each state (Ready, Paused, Session ended, Not connected with the install and the start words, Update needed, recording, debugger release) on Chrome and Edge, on Windows and Linux. The key cap and `aria-keyshortcuts` follow a changed shortcut. The mascot looks right at 100 px in the lit and waiting lights. The badge text is readable on the accent.
 - j04: the coordinator's check that the JQ4 one-liners run in Windows PowerShell 5.1, PowerShell 7 and `curl | sh` is not recorded in this ledger yet.
 - j07: the options page on Chrome and Edge, on Windows and Linux: it scrolls (the stage no longer clips), every switch still saves and survives a reload, the captions switch dims while effects are off, Save developer diagnostics still downloads, the connection card reads right in each state (Connected, Not connected with and without the setup button, Update needed), and the setup button opens the bundled setup page. The kit look is right at 390 px and with reduced motion.
+- c01: `npx -y ghostlight install` on test-01 (Windows) and on a Linux machine; then an MCP client with `npx -y ghostlight` connects. `npx -y ghostlight --version` on a machine with nothing installed downloads and runs only the service. The WinGet alias `ghostlight` finds `ghostlight-service` beside its target (the portable zip extracts all three to one folder). The Claude Desktop MCPB on Windows. The window and tray appear after each.
 
 ## Owed to the owner
 
@@ -277,3 +279,33 @@ j07-options has landed. Next: c01-carriers (j08-toolbar-icon is skipped: JQ1 is 
   (5) The `.visually-hidden` class became the kit's `gl-sr`. `options.css` has no reduced-motion
   block: the kit's `.gl-page` rule already covers every element. The still-historical mention of
   `ui.css` in `docs/tasks/1.0-plus/D1-presentation-stylesheet-module.md` is left as written.
+- c01: ran the gate checks the files require: (7) `npm test --prefix packaging/npm` (26 pass) and
+  `node --test packaging/mcpb/test/launcher.test.js` (11 pass), (8) `node --test
+  tests/guards/*.test.mjs`, (10) the repository integrity script. No Rust, extension or `.ps1`
+  file changed, so checks (1), (3) to (6) and (9) did not apply. `winget validate --manifest` on the
+  template filled with 2.0.0 and a dummy hash succeeded. `.github/workflows/release.yml` was reviewed
+  by eye, not run. The tree and the spec differed in these places.
+  (1) The spec describes the pre-edge carriers. Commits e0d24ba1, f7c6ce4d and 42c45a93 had already
+  moved them: `EXECUTABLES` is the three images, no arguments run `bin/ghostlight mcp`, the install
+  runs `<stage>/ghostlight-service deployment install` with stdout discarded, the development marker
+  and same-or-newer checks are in place, `launch.js` runs the installed `ghostlight mcp` after its
+  silent install, `package-mcpb.ps1` carries the three images, the WinGet archive script holds the
+  three `.exe`, `release.yml` stages the three images per target, and `prepare-npm-package.ps1`,
+  `assemble-release-candidate.ps1`, `check-release-candidate.ps1` and `verify-custody.ps1` name six
+  raw binaries. None of that needed a change. The launchers' currency check also requires the
+  installed service to exist, not the edge alone, which is stricter than the spec and kept.
+  (2) The one behaviour change in npm is the never-install branch: it stages `[SERVICE]` and runs the
+  staged service directly, as the spec says, where it had staged the edge and service and run the
+  edge. The tests that pinned the two-image stage now pin one.
+  (3) JQ4 is the short sylin.org one-liners redirecting to `main` (decision of 2026-10-16), not
+  release-attached, so `release.yml` does not attach `get.ps1` and `get.sh`. The JQ4 row of the table
+  above still says the release attaches them; the decision text supersedes that row, and c02 should
+  read it that way. `RESTORE_ROUTE` in both launchers keeps the raw.githubusercontent URLs because
+  `language/deployment.rs` words them that way and its test asserts the same text.
+  (4) The pre-edge names (`ghostlight-mcp-connector`, `ghostlight-browser-connector`) are gone from
+  `tests/fixed-installation-journey.mjs`, `tests/installer-powershell.ps1`, `tests/installer-shell.mjs`
+  and `tests/winget-archive.ps1`; none was edited. They remain, outside this slice, in
+  `.github/release-template.md`, `llms-install.md`, `SECURITY.md`, `extension/README.md`
+  and CHANGELOG history; j17 owns the docs.
+  (5) The MCPB README and manifest needed no edit: they carry no connector names. The WinGet
+  `InstallationNotes` are c02's and are unchanged.

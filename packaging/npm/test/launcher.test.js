@@ -265,11 +265,8 @@ async function launcherFixture() {
 
 const NO_DOWNLOAD = async () => { throw new Error("unexpected download"); };
 
-/** What a command that installs nothing downloads: the edge, then the service it hands the command to. */
-const STAGED_EDGE_AND_SERVICE = [
-  "ghostlight-x86_64-unknown-linux-gnu",
-  "ghostlight-service-x86_64-unknown-linux-gnu",
-];
+/** What a command that installs nothing downloads: the service, which answers the command itself. */
+const STAGED_SERVICE = ["ghostlight-service-x86_64-unknown-linux-gnu"];
 
 test("a launch with nothing installed downloads, verifies, installs from the stage, then runs the installed edge", async () => {
   const f = await launcherFixture();
@@ -450,13 +447,15 @@ test("never-install commands run the installed edge whatever its version and nev
   }
 });
 
-test("subcommand help with nothing installed stages the edge and service and installs nothing", async () => {
+test("subcommand help with nothing installed runs the staged service and installs nothing", async () => {
   for (const arguments_ of [["install", "--help"], ["uninstall", "-h"]]) {
     const f = await launcherFixture();
     try {
       const launch = await f.prepareLaunch({ ...f.options, arguments_ });
       assert.equal(f.activity.installs.length, 0, arguments_.join(" "));
-      assert.deepEqual(f.activity.downloads, STAGED_EDGE_AND_SERVICE);
+      assert.deepEqual(f.activity.downloads, STAGED_SERVICE);
+      assert.equal(basename(launch.executable), "ghostlight-service");
+      assert.deepEqual(launch.arguments_, arguments_);
       await launch.cleanup();
       assert.deepEqual(await readdir(f.home), [], "nothing is installed");
     } finally {
@@ -481,13 +480,14 @@ test("every other command with nothing installed installs the complete set first
   }
 });
 
-test("a never-install command with nothing installed runs a verified staged edge and installs nothing", async () => {
+test("a never-install command with nothing installed runs the verified staged service and installs nothing", async () => {
   const f = await launcherFixture();
   try {
     const launch = await f.prepareLaunch({ ...f.options, arguments_: ["--version"] });
     assert.equal(f.activity.installs.length, 0);
-    assert.deepEqual(f.activity.downloads, STAGED_EDGE_AND_SERVICE);
-    assert.equal(basename(launch.executable), "ghostlight");
+    assert.deepEqual(f.activity.downloads, STAGED_SERVICE);
+    assert.deepEqual(launch.arguments_, ["--version"]);
+    assert.equal(basename(launch.executable), "ghostlight-service");
     assert.equal(dirname(launch.executable).startsWith(f.home), true);
     assert.match(await readFile(launch.executable, "utf8"), /^2\.0\.0:/);
     await launch.cleanup();

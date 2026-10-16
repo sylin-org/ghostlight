@@ -282,7 +282,8 @@ async function stageDownloads({ indexes, packageJson, manifest, platform, archit
  * same as or newer than this package, or records the development channel; otherwise the verified
  * download installs itself first. The edge hands every command but `mcp` to the service beside
  * it, and a launch with no arguments is `mcp`. The never-install commands run the installed edge,
- * or a verified staged edge and service that install nothing.
+ * or with nothing installed the verified staged service itself, which answers them and installs
+ * nothing.
  *
  * Resolves to the executable, its arguments, and `cleanup` for any staged files.
  */
@@ -345,9 +346,9 @@ export async function prepareLaunch({
     return { executable: installedEdge, arguments_, cleanup: nothingToClean };
   }
   const { packageJson, manifest } = await readPackage();
-  const stage = await stageDownloads({ ...stageOptions, indexes: [EDGE, SERVICE], packageJson, manifest });
+  const stage = await stageDownloads({ ...stageOptions, indexes: [SERVICE], packageJson, manifest });
   return {
-    executable: join(stage, executables[EDGE]),
+    executable: join(stage, executables[SERVICE]),
     arguments_,
     cleanup: () => rm(stage, { recursive: true, force: true }),
   };
