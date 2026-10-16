@@ -1,9 +1,9 @@
-# Releasing Ghostlight 1.0
+# Releasing Ghostlight 2.0
 
-This is the release plan for the current implementation. The completed 0.8 publication record and
-the 0.8 harvest layer were retired on 2026-08-27 and live only in git history. The old raw-binary
-packages and implementation cannot be relabeled as 1.0; their accumulated platform facts and
-publication lessons are carried by this pipeline and its records.
+This is the release plan for the current implementation, the 2.0 line (ADR-0197). The completed
+0.8 publication record and the 0.8 harvest layer were retired on 2026-08-27 and live only in git
+history. The old raw-binary packages and implementation cannot be relabeled; their accumulated
+platform facts and publication lessons are carried by this pipeline and its records.
 
 Current gate state and evidence are tracked in the
 [1.0 release checklist](RELEASE-CHECKLIST.md). This file remains the process authority; the
@@ -114,17 +114,15 @@ reconciliation against GitHub, npm, the Chrome update feed, the official MCP Reg
 canonical website; a transient external outage does not make an otherwise valid source commit
 fail CI.
 
-ADR-0102 Decision 9's dogfooding boundary is a per-feature review check, not a standing release gate.
-It compared the completed workbench change against that change's starting revision and passed, with
-`crates/mcp-connector`, `crates/browser-connector`, `crates/bridge`, and `extension` untouched by the
-feature. Later work has deliberately changed the shared bridge and both connectors at their
-connection-lifetime seam, which that decision's body expressly permits.
-
-The durable invariant is the one behind it: the connectors, the shared bridge, and the extension
-change only when an already-real process boundary requires it, never to carry a product feature, and
-the extension stays policy-free. Review each release's diff against that rule rather than against an
-empty one. ADR-0102's own acceptance item 9 states the boundary more strictly than its decision body
-does; reconciling the two in a marked amendment is a G0 item in the
+ADR-0102 Decision 9's dogfooding boundary is a per-feature review check, not a standing release
+gate. The durable invariant behind it is the frozen set: `crates/edge`, `crates/relay` and
+`extension/` change only when an already-real process boundary requires it, never to carry a
+product feature, and the extension stays policy-free. Two guards hold that set. The edge guard,
+`node --test tests/guards/connectors.test.mjs`, ties `crates/edge` and `crates/relay` to the last
+published relay revision. The extension freeze, `tests/guards/extension-freeze.test.mjs`, holds
+every packaged extension file (ADR-0200 Decision 16). Review each release's diff against that rule
+rather than against an empty one. ADR-0102's own acceptance item 9 states the boundary more strictly
+than its decision body does; reconciling the two in a marked amendment is a G0 item in the
 [1.0 release checklist](RELEASE-CHECKLIST.md).
 
 ### Desktop and package
@@ -138,7 +136,9 @@ For Windows and Linux:
 4. Verify tray launch where the desktop provides one, non-tray Open access, open/hide/quit,
    desktop-startup failure, global search, plural snapshots, Status, notifications, MCP
    integrations connect/disconnect, JSONC/TOML preservation, and no remote WebView access.
-5. Verify native messaging points at the packaged sibling browser connector.
+5. Verify the native-host manifest names the installed edge, `~/.ghostlight/bin/ghostlight`
+   (through `~/.ghostlight/manifests/org.sylin.ghostlight.json` on Windows, where every browser's
+   registration names that fixed path).
 6. Upgrade from the latest supported public release without clobbering unrelated state.
 7. Uninstall and prove only Ghostlight-owned files, registrations, desktop entries, and selected
    harness entries are removed. Record the audit-retention choice.
@@ -167,13 +167,13 @@ attestations for every file in the candidate unit. The workflow uploads the unit
 It does not tag, platform-sign, publish, or mutate a store.
 
 This deliberately retains the 0.8 trust model. Ghostlight has no Windows Authenticode certificate
-and does not require one for 1.0. Artifact integrity comes from the immutable checksums and GitHub's
+and does not require one for 2.0. Artifact integrity comes from the immutable checksums and GitHub's
 keyless build-provenance attestations, not a maintainer-held or platform code-signing key.
 
 `ghostlight native-host check|install|uninstall` is the package-facing registration seam. It covers
 Chrome, Edge, Brave, and Chromium; repairs missing or Ghostlight-owned stale state; and leaves
-malformed or foreign state untouched. The 1.0 package installs no Run key, scheduled task, or
-systemd user service. The connectors demand-start the orchestrator.
+malformed or foreign state untouched. The package installs no Run key, scheduled task, or
+systemd user service. The MCP edge and the browser edge start the service when it is not running.
 
 ### Browser and MCP journeys
 
@@ -258,7 +258,7 @@ candidate's version in its binaries.
 tarball SHA-256, a candidate that contains that same npm asset, an observable matching GitHub
 release, and a valid GitHub provenance attestation for the tarball. The launcher carries all six
 raw-binary hashes, rechecks cached binaries on every invocation, and refuses downloads outside the
-fixed GitHub release host chain. npm publication is mandatory for 1.0; MCP Registry publication
+fixed GitHub release host chain. npm publication is mandatory for 2.0; MCP Registry publication
 remains downstream of it.
 
 The MCP Registry is downstream of the public npm coordinate in `server.json`.
