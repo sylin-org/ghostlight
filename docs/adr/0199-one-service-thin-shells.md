@@ -625,3 +625,39 @@ service image also contradict the owner's rule: zero or one Ghostlight, replaced
   and its early start-up code at once.
 - Going back to a release needs a release carrier, so a network fetch or a downloaded get script.
 - The entry rule loses a branch, and the doctor report and `status` lose the development marker.
+
+## Amendment (2026-10-15): Settings and the tray
+
+Owner answers after the shell milestone 1 demo, 2026-10-15. This replaces Decision 5 of the web
+apps amendment above (the shared Controls sheet) and adds to Decision 11 (presence).
+
+### Settings replaces the Controls sheet
+
+- Settings is a tab of its own, before About. The Controls button and its sheet are removed.
+- A rail on its left lists the sections: This screen, Sharing, Browser work, Notifications and
+  Diagnostics. Each entry shows its current state, so the rail reads as a summary. Each section
+  has its own address, such as `#settings/sharing`.
+- Pause stays on the band, so agents can be stopped with one press from every screen. The
+  sentence that counts the service's connections moves to the Status page.
+- In Control, every section works, and a Quit Ghostlight button ends the page.
+- In Watch, the rail and the values show as text and This screen works. Each other section has
+  one line, "Change this in the Ghostlight window.", whose Continue opens the window at the same
+  section. Pause works, as before.
+- In Closed, This screen works and the other sections show the watching-off sentence.
+
+### The tray
+
+- Decision 11 stands. The service owns the tray: what the icon and its menu say and do. The shell
+  draws it, and presence keeps the shell running whenever the desktop can show it. Closing the
+  window ends only the webview; the icon stays. The service links no UI toolkit.
+- The icon shows the band's state: ready, working, paused and needs attention. Its tooltip is the
+  sentence that counts the service's connections.
+- The first time the window is ever closed while the service runs, one notification says that
+  Ghostlight keeps running and where its icon is. It is shown once per home, never again.
+- The menu stays Open, Pause, Resume and Quit until the owner says otherwise.
+
+### Consequences
+
+- Links from the tray, a watcher's Continue and the docs can name a Settings section directly.
+- Task Manager shows Ghostlight service, Ghostlight (the tray and the window) and one Ghostlight
+  connection per client.
