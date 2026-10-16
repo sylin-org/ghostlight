@@ -1,13 +1,16 @@
 // Edge guards (ADR-0197 D25, ADR-0199 D21).
 //
-// Three facts about the edge crate, the relay crate it shares with the service, and the service:
+// Four facts about the edge crate, the relay crate it shares with the service, the service and
+// the shell:
 //   1. the crate names in the normal dependency tree of the edge on each supported
 //      target (tests/golden/cargo-tree/<crate>.<target>.txt), with no network crate among
 //      them (ADR-0028, never phone home);
 //   2. everything in crates/relay and crates/edge except test files equals the last published
 //      tag at the same relay revision, so a published revision never changes underneath users;
 //   3. the service links no UI toolkit and no async network stack (ADR-0199 D1 and D21): the
-//      window, the tray and the notices belong to ghostlight-desktop.
+//      window, the tray and the notices belong to ghostlight-desktop;
+//   4. the shell links no network crate except `http`, whose request and response types its web
+//      view library still brings (ADR-0199 D21).
 //
 // Run `GHOSTLIGHT_GUARD_UPDATE=1 node --test tests/guards/connectors.test.mjs`
 // to rewrite the dependency-tree goldens after a real dependency add or remove, then commit
@@ -38,6 +41,16 @@ const LOCKED = ["crates/relay", "crates/edge", ":(exclude)crates/*/tests/**", ":
 
 /** Crates the edge must never link: any network stack would break the never-phone-home promise (ADR-0028). */
 const NETWORK_CRATES = /^(hyper|reqwest|ureq|h2|http|rustls|native-tls|openssl|curl|isahc|tokio|socket2|mio)$/;
+
+/**
+ * The one network crate the shell may link: `wry` brings `http` for its request and response
+ * types, and the shell registers no custom scheme or IPC handler, so it does no I/O and opens no
+ * socket (ADR-0199 Decision 21).
+ */
+const SHELL_NETWORK_EXCEPTION = "http";
+
+/** The shell package, whose tree holds no network crate but the exception above (ADR-0199 D21). */
+const SHELL = "ghostlight-desktop";
 
 /** Cargo stderr that means the registry was unreachable, so the tree cannot be resolved. */
 const OFFLINE_FAILURE = /failed to download|failed to get|unable to update registry|couldn't resolve host|network failure/i;
@@ -167,6 +180,24 @@ for (const target of TARGETS) {
       stack,
       [],
       `${SERVICE} on ${target} links ${stack.join(", ")}, which left with the toolkit and must not come back`,
+    );
+  });
+}
+
+for (const target of TARGETS) {
+  test(`the shell links no network crate except ${SHELL_NETWORK_EXCEPTION} on ${target}`, (t) => {
+    const tree = cargoTree(SHELL, target);
+    if (typeof tree !== "string") {
+      t.skip(offlineSkipMessage(SHELL, target, tree));
+      return;
+    }
+    const network = tree
+      .split("\n")
+      .filter((name) => NETWORK_CRATES.test(name) && name !== SHELL_NETWORK_EXCEPTION);
+    assert.deepEqual(
+      network,
+      [],
+      `${SHELL} on ${target} links a network crate (${network.join(", ")}): the shell never phones home (ADR-0028, ADR-0199 D21)`,
     );
   });
 }
