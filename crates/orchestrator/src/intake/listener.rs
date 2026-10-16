@@ -22,7 +22,7 @@ pub mod control {
     use ghostlight_relay::protocol::StartReason;
     use serde::{Deserialize, Serialize};
 
-    use crate::language::workbench::ConnectionCounts;
+    use crate::language::workbench::{ConnectionCounts, WindowReason};
 
     /// Where the workbench is served and whether other screens may watch it. The bearer that
     /// opens the window is never part of it.
@@ -56,6 +56,10 @@ pub mod control {
         /// Where the workbench is served, once it is.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub workbench: Option<WorkbenchStatus>,
+        /// Why there is, or is not, a Ghostlight window. Service-defined content of the answer;
+        /// absent while the service has nothing to say yet.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub window: Option<WindowReason>,
     }
 
     /// The answer to `show`: whether a window was there to come forward.

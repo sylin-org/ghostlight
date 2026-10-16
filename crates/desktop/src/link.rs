@@ -2,12 +2,13 @@
 //! Decision 7 and its amendment of 2026-10-15).
 //!
 //! [`open_link`] connects to the service of a Ghostlight home, opens it as the desktop shell and
-//! reads the one frame that matters: where the workbench is and the bearer that makes its page
-//! the window's, or `already_open` when another shell holds the service's one desktop place. After
-//! that the stream carries a goodbye, a request to show the window, a notice
-//! and an act to carry out from the service, and a click on a tray entry and the result of each
-//! act from the shell. A frame this build cannot read is skipped, so a newer service's frame never
-//! ends an older shell during a hand-over.
+//! reads the one frame that matters: where the workbench is, the bearer that makes its page the
+//! window's and the tray to draw, or `already_open` when another shell holds the service's one
+//! desktop place. After that the stream carries a goodbye, a new tray, a request to show the
+//! window, a notice and an act to carry out from the service, and from the shell a click on a tray
+//! entry, the result of each act, that it cannot show a window and that the person closed the
+//! window. A frame this build cannot read is skipped, so a newer service's frame never ends an
+//! older shell during a hand-over.
 //!
 //! The frames are the service's `intake::desktop` contract, written again here because the shell
 //! depends on no workspace crate but the relay. `tests/golden/desktop/` holds the bytes both
@@ -53,8 +54,13 @@ pub enum DesktopFrame {
         url: String,
         /// The secret that makes a request the window's.
         bearer: String,
-        /// The tray to draw, when the service has none of its own.
-        tray: Option<TrayModel>,
+        /// The tray to draw.
+        tray: TrayModel,
+    },
+    /// From the service: the tray changed. It replaces the one drawn.
+    TrayModel {
+        /// The whole tray as it is now.
+        model: TrayModel,
     },
     /// From the service, once, in place of the workbench: another shell holds the desktop place.
     /// The stream ends right after and this shell leaves.
@@ -96,9 +102,31 @@ pub enum DesktopFrame {
         /// How it ended.
         outcome: ActOutcome,
     },
+    /// From the shell: it cannot show what the service wants shown.
+    Unavailable {
+        /// What is missing.
+        reason: UnavailableReason,
+    },
+    /// From the shell: the person closed the window.
+    Closed {
+        /// Whether the shell stays with its tray. When it does not, it leaves right after.
+        stays: bool,
+    },
     /// A frame kind this build does not know. Readers skip it.
     #[serde(other)]
     Unknown,
+}
+
+/// What the shell cannot show, as it tells the service.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnavailableReason {
+    /// The session has no display.
+    NoDisplay,
+    /// The computer has no web view runtime, or the window could not be built.
+    NoWebview,
+    /// The desktop has no tray to draw the icon in.
+    NoTray,
 }
 
 /// What the service asks of this computer.
@@ -152,6 +180,10 @@ impl fmt::Debug for DesktopFrame {
                 .field("bearer", &REDACTED)
                 .field("tray", tray)
                 .finish(),
+            Self::TrayModel { model } => formatter
+                .debug_struct("TrayModel")
+                .field("model", model)
+                .finish(),
             Self::AlreadyOpen => formatter.write_str("AlreadyOpen"),
             Self::Goodbye { reason } => formatter
                 .debug_struct("Goodbye")
@@ -176,6 +208,14 @@ impl fmt::Debug for DesktopFrame {
                 .debug_struct("ActResult")
                 .field("id", id)
                 .field("outcome", outcome)
+                .finish(),
+            Self::Unavailable { reason } => formatter
+                .debug_struct("Unavailable")
+                .field("reason", reason)
+                .finish(),
+            Self::Closed { stays } => formatter
+                .debug_struct("Closed")
+                .field("stays", stays)
                 .finish(),
             Self::Unknown => formatter.write_str("Unknown"),
         }
@@ -224,8 +264,8 @@ pub struct Workbench {
     pub url: String,
     /// The secret that makes a request the window's. It goes to the workbench page only.
     pub bearer: String,
-    /// The tray to draw. `None` while the service has a tray of its own.
-    pub tray: Option<TrayModel>,
+    /// The tray to draw.
+    pub tray: TrayModel,
 }
 
 impl Workbench {
@@ -400,6 +440,16 @@ impl Link {
         self.send(&DesktopFrame::Tray { item })
     }
 
+    /// Tells the service that the shell cannot show what it wants shown.
+    pub fn send_unavailable(&self, reason: UnavailableReason) -> Result<(), LinkError> {
+        self.send(&DesktopFrame::Unavailable { reason })
+    }
+
+    /// Tells the service that the person closed the window, and whether the shell stays.
+    pub fn send_closed(&self, stays: bool) -> Result<(), LinkError> {
+        self.send(&DesktopFrame::Closed { stays })
+    }
+
     /// Tells the service how the act with this `id` ended.
     pub fn send_act_result(&self, id: u64, outcome: ActOutcome) -> Result<(), LinkError> {
         self.send(&DesktopFrame::ActResult { id, outcome })
@@ -426,7 +476,8 @@ fn read_until_end(reader: &mut impl Read, mut on_frame: impl FnMut(DesktopFrame)
             Ok(Some(DesktopFrame::Goodbye { reason })) => return LinkEnd::Goodbye(reason),
             Ok(None) => return LinkEnd::Lost,
             Ok(Some(
-                request @ (DesktopFrame::Show { .. }
+                request @ (DesktopFrame::TrayModel { .. }
+                | DesktopFrame::Show { .. }
                 | DesktopFrame::Notice { .. }
                 | DesktopFrame::Act { .. }),
             )) => on_frame(request),
@@ -447,8 +498,18 @@ mod tests {
     use ghostlight_relay::protocol::{RefusalCode, Reply};
 
     use super::*;
+    use crate::tray::TrayState;
 
     const URL: &str = "http://127.0.0.1:41234/";
+
+    /// A tray of the right shape.
+    fn tray() -> TrayModel {
+        TrayModel {
+            tooltip: "Ghostlight service is up; nothing is connected yet.".to_owned(),
+            items: Vec::new(),
+            state: TrayState::Ready,
+        }
+    }
 
     /// A bearer of the right shape.
     const BEARER: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO-_";
@@ -466,21 +527,42 @@ mod tests {
 
     #[test]
     fn each_golden_decodes_to_its_frame() {
-        assert_eq!(
-            golden("workbench-no-tray.json"),
-            DesktopFrame::Workbench {
-                url: URL.to_owned(),
-                bearer: "BEARER".to_owned(),
-                tray: None,
-            }
-        );
-        let DesktopFrame::Workbench { tray, .. } = golden("workbench.json") else {
+        let DesktopFrame::Workbench { url, bearer, tray } = golden("workbench.json") else {
             panic!("workbench.json is a workbench frame");
         };
-        let tray = tray.expect("the golden carries a tray");
+        assert_eq!((url.as_str(), bearer.as_str()), (URL, "BEARER"));
         assert_eq!(tray.validate(), Ok(()));
-        let ids: Vec<&str> = tray.items.iter().map(|item| item.id.as_str()).collect();
-        assert_eq!(ids, ["open", "quit"]);
+        assert_eq!(tray.state, TrayState::Ready);
+        assert_eq!(
+            tray.tooltip,
+            "Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+        );
+        let ids: Vec<(&str, bool)> = tray
+            .items
+            .iter()
+            .map(|item| (item.id.as_str(), item.enabled))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("open", true),
+                ("hold", true),
+                ("resume", false),
+                ("quit", true)
+            ]
+        );
+        let DesktopFrame::TrayModel { model } = golden("tray-model.json") else {
+            panic!("tray-model.json is a tray model frame");
+        };
+        assert_eq!(model.validate(), Ok(()));
+        assert_eq!(model.state, TrayState::Paused);
+        let enabled: Vec<&str> = model
+            .items
+            .iter()
+            .filter(|item| item.enabled)
+            .map(|item| item.id.as_str())
+            .collect();
+        assert_eq!(enabled, ["open", "resume", "quit"]);
         assert_eq!(golden("already-open.json"), DesktopFrame::AlreadyOpen);
         assert_eq!(
             golden("goodbye.json"),
@@ -570,6 +652,37 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_writes_the_bytes_of_the_unavailable_and_closed_goldens() {
+        for (name, frame) in [
+            (
+                "unavailable.json",
+                DesktopFrame::Unavailable {
+                    reason: UnavailableReason::NoTray,
+                },
+            ),
+            ("closed.json", DesktopFrame::Closed { stays: true }),
+        ] {
+            assert_eq!(golden(name), frame, "{name} decodes to the frame");
+            assert_eq!(
+                serde_json::to_value(&frame).unwrap(),
+                serde_json::from_str::<serde_json::Value>(&golden_text(name)).unwrap(),
+                "{name} is the bytes the shell writes"
+            );
+        }
+    }
+
+    #[test]
+    fn every_reason_the_shell_gives_has_its_wire_word() {
+        for (reason, word) in [
+            (UnavailableReason::NoDisplay, "no_display"),
+            (UnavailableReason::NoWebview, "no_webview"),
+            (UnavailableReason::NoTray, "no_tray"),
+        ] {
+            assert_eq!(serde_json::to_value(reason).unwrap(), word);
+        }
+    }
+
+    #[test]
     fn a_frame_kind_this_build_does_not_know_is_unknown() {
         let frame: DesktopFrame = serde_json::from_str(r#"{"kind":"ping"}"#).unwrap();
         assert_eq!(frame, DesktopFrame::Unknown);
@@ -597,12 +710,12 @@ mod tests {
         let frame = DesktopFrame::Workbench {
             url: URL.to_owned(),
             bearer: secret.to_owned(),
-            tray: None,
+            tray: tray(),
         };
         let workbench = Workbench {
             url: URL.to_owned(),
             bearer: secret.to_owned(),
-            tray: None,
+            tray: tray(),
         };
         let errors = [
             LinkError::Refused {
@@ -654,7 +767,7 @@ mod tests {
         let workbench = Workbench {
             url: URL.to_owned(),
             bearer: BEARER.to_owned(),
-            tray: None,
+            tray: tray(),
         };
         assert_eq!(workbench.origin(), "http://127.0.0.1:41234");
     }
@@ -835,7 +948,7 @@ mod tests {
         DesktopFrame::Workbench {
             url: url.to_owned(),
             bearer: BEARER.to_owned(),
-            tray: None,
+            tray: tray(),
         }
     }
 
@@ -855,7 +968,7 @@ mod tests {
         let (link, workbench) = open_link(&home.0).expect("the workbench is handed over");
         assert_eq!(workbench.url, URL);
         assert_eq!(workbench.bearer, BEARER);
-        assert_eq!(workbench.tray, None);
+        assert_eq!(workbench.tray, tray());
         let (opening, _shell) = service.join().unwrap();
         assert_eq!(opening.role, Role::Desktop);
         assert_eq!(opening.edge.program, Program::Desktop);
@@ -996,7 +1109,7 @@ mod tests {
             vec![DesktopFrame::Workbench {
                 url: URL.to_owned(),
                 bearer: "short".to_owned(),
-                tray: None,
+                tray: tray(),
             }],
         );
         let failure = open_link(&home.0).err().expect("the bearer is refused");

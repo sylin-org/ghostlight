@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::browser::adapter::{PresentationActivity, RuntimeControlIntent, RuntimeControlState};
+use crate::intake::desktop::TrayModel;
 use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -397,7 +398,7 @@ impl WorkbenchProjection {
     }
 }
 
-/// Narrow application boundary consumed by the Tauri adapter.
+/// Narrow application boundary consumed by the loopback server.
 #[derive(Clone)]
 pub struct WorkbenchFacade {
     projection: WorkbenchProjection,
@@ -582,6 +583,17 @@ impl WorkbenchFacade {
     /// Attach what ends the service when the person asks for it.
     pub fn attach_quit(&self, port: Arc<dyn WorkbenchQuitPort>) {
         *lock(&self.quit) = Some(port);
+    }
+
+    /// Attach what is told of the tray each time a look at the service finds it changed.
+    pub fn attach_tray(&self, port: Arc<dyn WorkbenchTrayPort>) {
+        self.live.attach_tray(port);
+    }
+
+    /// The tray as the service describes it right now.
+    #[must_use]
+    pub fn tray_model(&self) -> TrayModel {
+        self.live.tray_model()
     }
 
     /// Begin a person's Quit, exactly as the tray's Quit does. Returns at once: the service
@@ -1274,6 +1286,16 @@ pub trait WorkbenchNativeActs: Send + Sync {
 pub trait WorkbenchQuitPort: Send + Sync {
     /// Begin a person's Quit. Returns at once; the service finishes what is in flight first.
     fn quit(&self);
+}
+
+/// What draws the tray when the service describes it differently.
+///
+/// The service attaches it, so the workbench says what the tray is without depending on how it
+/// reaches the shell that draws it.
+pub trait WorkbenchTrayPort: Send + Sync {
+    /// The tray changed. This returns at once: it is called from inside the refresh of the live
+    /// parts, so it must not wait on anything slow.
+    fn tray_changed(&self, model: TrayModel);
 }
 
 /// The start every address the service opens has.

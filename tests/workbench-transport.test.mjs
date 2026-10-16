@@ -1,9 +1,9 @@
 // The workbench transport, exercised for real.
 //
-// The transport is the only thing the page uses to talk to the service, in two ways: the native
-// shell's commands, and JSON over loopback. These tests run the real module with a fake fetch that
-// records what it was asked and a fake invoke that records what it was told. No page, no document
-// and no Ghostlight process is involved.
+// The transport is the only thing the page uses to talk to the service, and it has one road: JSON
+// over loopback, in the Ghostlight window and in a browser tab. These tests run the real module
+// with a fake fetch that records what it was asked. No page, no document and no Ghostlight
+// process is involved.
 //
 // Run with: node --test tests/workbench-transport.test.mjs
 import assert from "node:assert/strict";
@@ -441,88 +441,18 @@ test("stopping ends the stream and nothing opens again", async () => {
   assert.equal(world.calls.length, 1);
 });
 
-/* --------------------------------- the native shell -------------------------------- */
-
-test("the native shell path still invokes today's commands with today's arguments", async () => {
-  const invoked = [];
-  const transport = Transport.create({
-    invoke: async (command, args) => {
-      invoked.push(args === undefined ? [command] : [command, args]);
-      return null;
-    }
-  });
-  await transport.snapshot();
-  await transport.context();
-  await transport.search("q");
-  await transport.applyIntent("hold");
-  await transport.setDiagnostics(true);
-  await transport.setWatching(false);
-  await transport.revealDiagnostics();
-  await transport.policy();
-  await transport.previewPolicy("p");
-  await transport.applyPolicy("p", "tag");
-  await transport.removePolicy("tag");
-  await transport.refreshHarnesses();
-  await transport.setupDetectedHarnesses();
-  await transport.manageHarness("codex", "install", "available");
-  await transport.locateHarness("codex");
-  await transport.copyHarnessText("codex", "setup");
-  await transport.openHarnessDownload("codex");
-  await transport.testNotification();
-  await transport.openDestination("home");
-  await transport.continueInWindow();
-  await transport.continueInWindow("integrations");
-  await transport.quit();
-  assert.deepEqual(invoked, [
-    ["workbench_snapshot"],
-    ["workbench_context"],
-    ["workbench_search", { query: "q" }],
-    ["apply_runtime_intent", { intent: "hold" }],
-    ["set_diagnostics", { on: true }],
-    ["set_watching", { watch: false }],
-    ["reveal_diagnostics"],
-    ["workbench_policy"],
-    ["preview_user_policy", { document: "p" }],
-    ["apply_user_policy", { document: "p" }],
-    ["remove_user_policy"],
-    ["refresh_harnesses"],
-    ["setup_detected_harnesses"],
-    ["manage_harness", { id: "codex", action: "install" }],
-    ["locate_harness", { id: "codex" }],
-    ["copy_harness_text", { id: "codex", kind: "setup" }],
-    ["open_harness_download", { productId: "codex" }],
-    ["test_notification"],
-    ["open_destination", { destination: "home" }],
-    ["continue_in_window", { address: undefined }],
-    ["continue_in_window", { address: "integrations" }],
-    ["quit_ghostlight"]
-  ]);
-});
-
-test("the native shell path has no clipboard of its own and listens to its one event", async () => {
-  const listened = [];
-  let stopped = false;
-  const handlers = { change: () => {} };
-  const transport = Transport.create({
-    invoke: async () => null,
-    listen: async (event, handler) => {
-      listened.push([event, handler]);
-      return () => { stopped = true; };
-    },
-    changeEvent: Words.CHANGE_EVENT
-  });
-  assert.equal(transport.copyText, undefined);
-  const stop = transport.subscribe(handlers);
-  assert.deepEqual(listened, [[Words.CHANGE_EVENT, handlers.change]]);
-  await stop();
-  assert.equal(stopped, true);
-  assert.equal(Transport.create({ invoke: async () => null }).subscribe(handlers), null);
-});
-
-test("with nothing to invoke, every call rejects", async () => {
-  const transport = Transport.create({});
+test("with nothing to fetch with, every call rejects", async () => {
+  const transport = Transport.overHttp({});
   assert.equal(transport.available, false);
   await assert.rejects(transport.snapshot(), /no orchestrator/);
+});
+
+test("the transport has one road, over loopback", () => {
+  assert.equal(Transport.create, undefined);
+  assert.equal(typeof Transport.overHttp, "function");
+  const transport = Transport.overHttp({});
+  assert.equal(transport.copyHarnessText, undefined);
+  assert.equal(Words.CHANGE_EVENT, undefined);
 });
 
 test("the page's own words for copying and for waiting are the ones the transport's callers use", () => {

@@ -2,11 +2,17 @@
 //! of 2026-10-15).
 //!
 //! The shell opens the `desktop` stream to the running service, which hands it the workbench
-//! address, the bearer for the workbench page and, when the service has no tray of its own, the
-//! tray to draw. The window is a webview on that address. The shell decides nothing about
+//! address, the bearer for the workbench page and the tray to draw, and sends a new tray whenever
+//! it changes. The window is a webview on that address. The shell decides nothing about
 //! Ghostlight: a tray choice is reported to the service, and what the service asks afterwards is
 //! carried out here and on the event-loop thread: show the window (at a section of the page), show
 //! a notice, open a link or a folder, pick a file. Each act is answered with its result.
+//!
+//! The stream is opened first, before the display is initialised or anything is built, so that a
+//! shell that cannot run can say why: [`preflight`] asks the display, the web view runtime and, for
+//! a `--tray` shell, the tray host, and a missing one is reported to the service as `unavailable`
+//! before the shell ends. A window that cannot be built later is reported the same way and the
+//! shell stays with its tray. The person closing the window is reported as `closed`.
 //!
 //! The shell's own life is decided by [`Machine`](crate::machine::Machine), a pure state machine.
 //! This module is its glue: it carries out the machine's effects (open the stream on a worker
@@ -23,7 +29,7 @@
 //! One listener owns the end of the session (`session`). Its callback arms the fallback exit
 //! first and posts one event, and the shell then stops. Nothing starts once the session is ending.
 //!
-//! The pure parts (the tray action, the exit rule) are unit tested. [`run`] is native glue that
+//! The pure parts (the tray action, the exit rule, the preflight) are unit tested. [`run`] is native glue that
 //! opens a window, so it is checked live and never in `cargo test`.
 
 use std::ffi::OsStr;
@@ -32,7 +38,7 @@ use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ghostlight_relay::os::session::SessionListener;
 use ghostlight_relay::protocol::StartReason;
@@ -41,13 +47,13 @@ use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
 
 use crate::link::{open_link, ActOutcome, DesktopFrame, Link, LinkEnd, LinkError, NativeAct};
-use crate::link::{TrayItemId, Workbench};
+use crate::link::{TrayItemId, UnavailableReason, Workbench};
 use crate::machine::{self, Answer, Effect, Image, Machine, Outside, Screen};
 use crate::native::{self, ThisComputer};
 use crate::session::{self, Session, ThisSession};
 use crate::states::{StateButton, StateScreen};
 use crate::tray::{Tray, TrayEvent, TrayModel};
-use crate::webview::{prepare_profile, profile_directory};
+use crate::webview::{prepare_profile, profile_directory, runtime_available};
 use crate::window::{
     self, Callbacks, Content, LifecycleEvent, ShellWindow, WindowAct, WindowError, WindowLifecycle,
     WindowState,
@@ -57,8 +63,21 @@ use crate::{Launch, UPDATING_ARGUMENT};
 /// The exit code of a session with no display.
 pub const EXIT_NO_DISPLAY: u8 = 3;
 
-/// The exit code of a failure that is not a missing display.
+/// The exit code of a computer with no web view runtime.
+pub const EXIT_NO_WEBVIEW: u8 = 4;
+
+/// The exit code of a failure that is not a missing display or web view.
 const EXIT_FAILURE: u8 = 1;
+
+/// How long the shell waits after its last report before it ends.
+///
+/// A report written just before the shell closes the stream can be discarded unread when the
+/// service is busy at that moment, and the service would then not know why the shell left. The
+/// pause is short, and it only happens on the way out.
+const LAST_REPORT_LINGER: Duration = Duration::from_millis(300);
+
+/// What the tray's tooltip says while the window cannot be built.
+const WINDOW_FAILS_TOOLTIP: &str = "Ghostlight cannot open its window on this computer.";
 
 /// The file name of the shell in `bin`.
 #[cfg(windows)]
@@ -70,6 +89,76 @@ const SHELL_EXECUTABLE_NAME: &str = "ghostlight-desktop";
 
 /// The name of the thread that opens the stream to the service.
 const OPEN_THREAD_NAME: &str = "ghostlight-desktop-open";
+
+/// What the shell asks about the computer it runs on before it builds anything.
+pub trait Probe {
+    /// Whether a display is reachable; initialises it where the toolkit needs that.
+    fn display(&self) -> Result<(), WindowError>;
+
+    /// Whether the web view runtime the window needs is installed.
+    fn webview(&self) -> bool;
+
+    /// Whether the desktop can show a tray icon.
+    fn tray_host(&self) -> bool;
+}
+
+/// Why the shell cannot start on this computer, and how it ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Missing {
+    /// What is missing, as the service is told.
+    pub reason: UnavailableReason,
+    /// The exit code of the shell.
+    pub exit: u8,
+    /// The line written to standard error.
+    pub detail: String,
+}
+
+/// Decide whether the shell can run as `launch` says on the computer `probe` describes.
+///
+/// The display comes first, then the web view runtime, and then, for a `--tray` shell only, the
+/// tray host: a shell a person started has a window and goes without an icon, while one started
+/// for the icon has no use without it.
+pub fn preflight(launch: Launch, probe: &dyn Probe) -> Result<(), Missing> {
+    if let Err(error) = probe.display() {
+        return Err(Missing {
+            reason: UnavailableReason::NoDisplay,
+            exit: EXIT_NO_DISPLAY,
+            detail: error.to_string(),
+        });
+    }
+    if !probe.webview() {
+        return Err(Missing {
+            reason: UnavailableReason::NoWebview,
+            exit: EXIT_NO_WEBVIEW,
+            detail: "the web view runtime is not installed".to_owned(),
+        });
+    }
+    if launch == Launch::Tray && !probe.tray_host() {
+        return Err(Missing {
+            reason: UnavailableReason::NoTray,
+            exit: 0,
+            detail: "this desktop shows no tray icons".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// The computer the shell runs on.
+struct ThisPlace;
+
+impl Probe for ThisPlace {
+    fn display(&self) -> Result<(), WindowError> {
+        window::init_display()
+    }
+
+    fn webview(&self) -> bool {
+        runtime_available()
+    }
+
+    fn tray_host(&self) -> bool {
+        crate::tray::host_available()
+    }
+}
 
 /// What a tray choice asks the shell to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +264,14 @@ impl Outside for ThisWorld {
 
 /// The state the event loop carries.
 struct Shell {
+    launch: Launch,
+    /// Whether the desktop can show a tray icon.
+    tray_host: bool,
+    /// How the first attempt to open the stream ended, made before the display was initialised.
+    /// The machine's first request to open the stream takes it.
+    first_open: Option<Result<(Link, Workbench), LinkError>>,
+    /// Set while the window cannot be built.
+    window_fails: bool,
     machine: Machine,
     world: ThisWorld,
     lifecycle: WindowLifecycle,
@@ -227,8 +324,13 @@ impl Shell {
     }
 
     /// Tries to open the stream on a thread of its own, since the attempt may wait for the
-    /// service for several seconds.
-    fn open_stream(&self) {
+    /// service for several seconds. The first attempt was made before the display was
+    /// initialised, and its answer is used instead of asking again.
+    fn open_stream(&mut self) {
+        if let Some(opened) = self.first_open.take() {
+            post(&self.proxy, ShellEvent::Opened(opened));
+            return;
+        }
         let home = self.home.clone();
         let proxy = self.proxy.clone();
         let spawned = thread::Builder::new()
@@ -268,36 +370,67 @@ impl Shell {
             self.feed(machine::Event::Opened(Answer::NoAnswer), target);
             return;
         }
-        self.set_tray_model(workbench.tray.clone());
-        self.workbench = Some(workbench);
+        self.workbench = Some(workbench.clone());
         self.link = Some(link);
+        self.set_tray_model(workbench.tray);
         self.feed(machine::Event::Opened(Answer::Attached), target);
     }
 
-    /// Adopts the tray the service described: builds the icon when there is none, and drops it
-    /// when the service no longer asks for one.
-    fn set_tray_model(&mut self, model: Option<TrayModel>) {
-        match &model {
-            Some(model) if self.tray.is_none() => match Tray::build(model) {
+    /// Adopts the tray the service described: builds the icon when there is none and the desktop
+    /// can show one, and makes the icon say it.
+    ///
+    /// A tray that cannot be built is reported to the service as `unavailable` and ends a shell
+    /// that was started for the icon alone. A shell a person started goes on with its window.
+    fn set_tray_model(&mut self, model: TrayModel) {
+        if self.tray.is_none() && self.tray_host {
+            match Tray::build(&model) {
                 Ok(tray) => self.tray = Some(tray),
-                Err(error) => eprintln!("ghostlight-desktop: {error}"),
-            },
-            Some(_) => {}
-            None => self.tray = None,
+                Err(error) => {
+                    eprintln!("ghostlight-desktop: {error}");
+                    if self.launch == Launch::Tray {
+                        self.report_unavailable(UnavailableReason::NoTray);
+                        thread::sleep(LAST_REPORT_LINGER);
+                        self.exiting = true;
+                    }
+                }
+            }
         }
-        self.tray_model = model;
+        self.tray_model = Some(model);
+        self.sync_tray();
     }
 
     /// Makes the tray say what the shell shows.
-    fn sync_tray(&self) {
-        let (Some(tray), Some(model)) = (&self.tray, &self.tray_model) else {
+    fn sync_tray(&mut self) {
+        let Some(model) = &self.tray_model else {
             return;
         };
         let shown = match self.machine.screen() {
             Some(Screen::State(state)) => model.while_without_service(state.words()),
+            Some(Screen::Workbench) | None if self.window_fails => {
+                model.while_window_fails(WINDOW_FAILS_TOOLTIP)
+            }
             Some(Screen::Workbench) | None => model.clone(),
         };
+        let Some(tray) = &mut self.tray else {
+            return;
+        };
         if let Err(error) = tray.show(&shown) {
+            eprintln!("ghostlight-desktop: {error}");
+        }
+    }
+
+    /// Tells the service that the shell cannot show something.
+    fn report_unavailable(&self, reason: UnavailableReason) {
+        let Some(link) = &self.link else { return };
+        if let Err(error) = link.send_unavailable(reason) {
+            eprintln!("ghostlight-desktop: {error}");
+        }
+    }
+
+    /// Tells the service that the person closed the window, and whether the shell stays.
+    fn report_closed(&self, stays: bool) {
+        let Some(link) = &self.link else { return };
+        if let Err(error) = link.send_closed(stays) {
             eprintln!("ghostlight-desktop: {error}");
         }
     }
@@ -387,10 +520,17 @@ impl Shell {
                 }
                 window.focus();
                 self.window = Some(window);
+                if self.window_fails {
+                    self.window_fails = false;
+                    self.sync_tray();
+                }
             }
             Err(error) => {
                 eprintln!("ghostlight-desktop: {error}");
                 self.apply(LifecycleEvent::Destroyed, target);
+                self.window_fails = true;
+                self.report_unavailable(UnavailableReason::NoWebview);
+                self.sync_tray();
             }
         }
     }
@@ -408,6 +548,7 @@ impl Shell {
     fn serve(&mut self, request: DesktopFrame, target: &EventLoopWindowTarget<ShellEvent>) {
         match request {
             DesktopFrame::Show { address } => self.show(address, target),
+            DesktopFrame::TrayModel { model } => self.set_tray_model(model),
             DesktopFrame::Notice { title, body } => native::show_notice(title, body),
             DesktopFrame::Act { id, act } => {
                 let computer = ThisComputer {
@@ -483,9 +624,14 @@ impl Shell {
                 event: WindowEvent::CloseRequested,
                 ..
             } if self.window.as_ref().is_some_and(|w| w.id() == window_id) => {
-                if self.tray.is_some() {
+                // Only a person closes a window this way: an update, a crash and the loss of the
+                // renderer end it by other roads, and the service explains the icon only for this.
+                let stays = self.tray.is_some();
+                self.report_closed(stays);
+                if stays {
                     self.apply(LifecycleEvent::CloseRequested, target);
                 } else {
+                    thread::sleep(LAST_REPORT_LINGER);
                     self.exiting = true;
                 }
             }
@@ -555,20 +701,18 @@ impl Shell {
     }
 }
 
-/// Runs the shell as `launch` says: prepares the display, hears the end of the session, and lets
-/// the machine open the stream to the service and show what comes of it. Returns only when the
-/// shell cannot start; otherwise the process ends from the event loop.
+/// Runs the shell as `launch` says: opens the stream to the service, prepares the display, asks
+/// whether this computer can run the shell, hears the end of the session, and lets the machine
+/// show what the service hands over. Returns only when the shell cannot start; otherwise the
+/// process ends from the event loop.
 ///
-/// With no display or no Ghostlight folder it writes one line to standard error and returns a
-/// failure.
+/// A computer that cannot run the shell is reported to the service, when it answered, before the
+/// shell ends; one line goes to standard error either way. With no Ghostlight folder it writes one
+/// line and returns a failure.
 pub fn run(launch: Launch) -> ExitCode {
     window::apply_renderer_policy();
     window::prepare_identity();
     native::prepare_identity();
-    if let Err(error) = window::init_display() {
-        eprintln!("ghostlight-desktop: {error}");
-        return ExitCode::from(exit_code_of(&error));
-    }
     let home = match home::home() {
         Ok(home) => home,
         Err(error) => {
@@ -576,6 +720,16 @@ pub fn run(launch: Launch) -> ExitCode {
             return ExitCode::from(EXIT_FAILURE);
         }
     };
+    // First, so that a shell that cannot run can say why.
+    let first_open = open_link(&home);
+    if let Err(missing) = preflight(launch, &ThisPlace) {
+        eprintln!("ghostlight-desktop: {}", missing.detail);
+        if let Ok((link, _)) = &first_open {
+            let _ = link.send_unavailable(missing.reason);
+            thread::sleep(LAST_REPORT_LINGER);
+        }
+        return ExitCode::from(missing.exit);
+    }
     let event_loop = EventLoopBuilder::<ShellEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let ending = Mutex::new(proxy.clone());
@@ -601,6 +755,10 @@ pub fn run(launch: Launch) -> ExitCode {
         .ok()
         .and_then(|path| Image::of(&path));
     let mut shell = Shell {
+        launch,
+        tray_host: ThisPlace.tray_host(),
+        first_open: Some(first_open),
+        window_fails: false,
         machine: Machine::new(launch, image, Instant::now()),
         world: ThisWorld {
             session: ThisSession,
@@ -621,13 +779,6 @@ pub fn run(launch: Launch) -> ExitCode {
         _listener: listener,
     };
     event_loop.run(move |event, target, flow| shell.handle(event, target, flow))
-}
-
-fn exit_code_of(error: &WindowError) -> u8 {
-    match error {
-        WindowError::NoDisplay { .. } => EXIT_NO_DISPLAY,
-        WindowError::Native { .. } => EXIT_FAILURE,
-    }
 }
 
 #[cfg(test)]
@@ -687,15 +838,87 @@ mod tests {
         assert!(goes_on(false, WindowState::Absent, false));
     }
 
+    /// A computer the test describes.
+    struct Place {
+        display: bool,
+        webview: bool,
+        tray_host: bool,
+    }
+
+    impl Place {
+        const FULL: Place = Place {
+            display: true,
+            webview: true,
+            tray_host: true,
+        };
+    }
+
+    impl Probe for Place {
+        fn display(&self) -> Result<(), WindowError> {
+            if self.display {
+                Ok(())
+            } else {
+                Err(WindowError::NoDisplay {
+                    detail: "no display".to_owned(),
+                })
+            }
+        }
+
+        fn webview(&self) -> bool {
+            self.webview
+        }
+
+        fn tray_host(&self) -> bool {
+            self.tray_host
+        }
+    }
+
     #[test]
-    fn no_display_is_exit_code_three_and_other_failures_are_one() {
-        let no_display = WindowError::NoDisplay {
-            detail: String::new(),
+    fn a_computer_with_everything_runs_every_launch() {
+        for launch in [Launch::Person, Launch::Tray, Launch::Updating] {
+            assert_eq!(preflight(launch, &Place::FULL), Ok(()));
+        }
+    }
+
+    #[test]
+    fn no_display_is_exit_code_three_whatever_else_is_missing() {
+        let nothing = Place {
+            display: false,
+            webview: false,
+            tray_host: false,
         };
-        let native = WindowError::Native {
-            detail: String::new(),
+        for launch in [Launch::Person, Launch::Tray, Launch::Updating] {
+            let missing = preflight(launch, &nothing).unwrap_err();
+            assert_eq!(missing.reason, UnavailableReason::NoDisplay);
+            assert_eq!(missing.exit, EXIT_NO_DISPLAY);
+        }
+    }
+
+    #[test]
+    fn no_web_view_runtime_is_its_own_exit_code_for_every_launch() {
+        let place = Place {
+            webview: false,
+            ..Place::FULL
         };
-        assert_eq!(exit_code_of(&no_display), EXIT_NO_DISPLAY);
-        assert_eq!(exit_code_of(&native), EXIT_FAILURE);
+        for launch in [Launch::Person, Launch::Tray, Launch::Updating] {
+            let missing = preflight(launch, &place).unwrap_err();
+            assert_eq!(missing.reason, UnavailableReason::NoWebview);
+            assert_eq!(missing.exit, EXIT_NO_WEBVIEW);
+        }
+        assert_ne!(EXIT_NO_WEBVIEW, EXIT_NO_DISPLAY);
+        assert_ne!(EXIT_NO_WEBVIEW, EXIT_FAILURE);
+    }
+
+    #[test]
+    fn no_tray_host_ends_only_a_tray_shell_and_ends_it_with_status_zero() {
+        let place = Place {
+            tray_host: false,
+            ..Place::FULL
+        };
+        let missing = preflight(Launch::Tray, &place).unwrap_err();
+        assert_eq!(missing.reason, UnavailableReason::NoTray);
+        assert_eq!(missing.exit, 0);
+        assert_eq!(preflight(Launch::Person, &place), Ok(()));
+        assert_eq!(preflight(Launch::Updating, &place), Ok(()));
     }
 }

@@ -17,13 +17,14 @@ use super::parts::{
 };
 use super::{
     BrowserInstanceSummary, OperationSummary, ReadinessSummary, RuntimeSource, ServiceSummary,
-    SessionSummary, WebFacts, WorkbenchChange, WorkbenchProjection,
+    SessionSummary, WebFacts, WorkbenchChange, WorkbenchProjection, WorkbenchTrayPort,
 };
 use crate::browser::adapter::RuntimeControlState;
 use crate::browser::BrowserPort;
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
 use crate::governance::{GovernanceDiagnostics, GovernanceFacade};
+use crate::intake::desktop::TrayModel;
 use crate::intake::session::IntakeChannel;
 use crate::language::audit_health::AuditHealth;
 use crate::language::readiness;
@@ -71,6 +72,7 @@ struct Published {
     status: Option<StatusPart>,
     connections: Option<ConnectionsPart>,
     controls: Option<ControlsPart>,
+    tray: Option<TrayModel>,
 }
 
 /// What the facade remembers between looks.
@@ -112,6 +114,7 @@ pub(super) struct Live {
     published: Mutex<Published>,
     wanted: AtomicBool,
     remembered: Mutex<Remembered>,
+    tray: Mutex<Option<Arc<dyn WorkbenchTrayPort>>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -148,6 +151,7 @@ impl Live {
             started_at_ms,
             published: Mutex::default(),
             wanted: AtomicBool::new(false),
+            tray: Mutex::new(None),
         });
         let weak = Arc::downgrade(&live);
         projection.set_status_hook(Arc::new(move || {
@@ -272,6 +276,32 @@ impl Live {
         })
     }
 
+    /// The tray of one look: the icon state from the readiness, the tooltip from the connections
+    /// and the entries from the runtime state.
+    pub fn tray(&self, gathered: &Gathered) -> TrayModel {
+        TrayModel::of(
+            gathered.readiness.state,
+            gathered.runtime_state,
+            count_connections(
+                gathered
+                    .sessions
+                    .iter()
+                    .flat_map(|session| session.connections.iter()),
+                gathered.browsers.len(),
+            ),
+        )
+    }
+
+    /// The tray as it is right now.
+    pub fn tray_model(&self) -> TrayModel {
+        self.tray(&self.gather())
+    }
+
+    /// Attach what draws the tray. It is told the tray each time a look finds it changed.
+    pub fn attach_tray(&self, port: Arc<dyn WorkbenchTrayPort>) {
+        *lock(&self.tray) = Some(port);
+    }
+
     /// What is connected right now, without gathering operations, history or authority.
     pub fn connection_counts(&self) -> ConnectionCounts {
         let summaries = self.workspaces.summaries();
@@ -338,6 +368,14 @@ impl Live {
                     self.projection.publish(WorkbenchChange::ControlsChanged {
                         controls: Box::new(controls),
                     });
+                }
+                let tray = self.tray(&gathered);
+                if published.tray.as_ref() != Some(&tray) {
+                    published.tray = Some(tray.clone());
+                    let port = lock(&self.tray).clone();
+                    if let Some(port) = port {
+                        port.tray_changed(tray);
+                    }
                 }
             }
             drop(published);

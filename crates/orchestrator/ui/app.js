@@ -20,13 +20,13 @@
  * fetch can never fail on a missing snapshot, and a store that never sees the document cannot be
  * corrupted by a rendering fault.
  *
- * The page asks the service first what it may do, and renders what it is told. Inside the native
- * shell it speaks to the shell; anywhere else it speaks to the service over loopback, with the
- * key the shell hands to its own page and a browser tab never has.
+ * The page asks the service first what it may do, and renders what it is told. It speaks to the
+ * service over loopback, with the key the shell hands to its own page and a browser tab never
+ * has.
  */
 
 const {
-  CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
+  FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
   WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, DEFAULT_VIEW,
   parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
@@ -36,18 +36,11 @@ const SEQ_WAIT_MS = 2000;
 
 const { ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 
-const native = window.__TAURI__?.core?.invoke;
-const transport = native
-  ? globalThis.GhostlightTransport.create({
-    invoke: window.__TAURI__?.core?.invoke,
-    listen: window.__TAURI__?.event?.listen,
-    changeEvent: CHANGE_EVENT
-  })
-  : globalThis.GhostlightTransport.overHttp({
-    fetch: window.fetch.bind(window),
-    clipboard: navigator.clipboard,
-    bearer: globalThis.GhostlightAccess?.bearer
-  });
+const transport = globalThis.GhostlightTransport.overHttp({
+  fetch: window.fetch.bind(window),
+  clipboard: navigator.clipboard,
+  bearer: globalThis.GhostlightAccess?.bearer
+});
 
 /*
  * Nothing in this window is allowed to fail quietly.
@@ -111,7 +104,7 @@ const settings = globalThis.GhostlightSettings.create({
   continueInWindow,
   quit: quitGhostlight,
   mayQuit: () => allowed(ACT.quit),
-  copyText: typeof transport.copyText === "function" ? copyAddress : undefined,
+  copyText: copyAddress,
   onFailure: reportFailure
 });
 
@@ -516,12 +509,8 @@ async function handleHarnessAction(button) {
   }
   if (operation === "copy") {
     try {
-      if (typeof transport.copyText === "function") {
-        await transport.copyText(harnessText(id, copyKind));
-        view.toast(copyKind === COPY_KIND.command ? COPIED_COMMAND : COPIED_SETUP);
-      } else {
-        view.toast(await transport.copyHarnessText(id, copyKind));
-      }
+      await transport.copyText(harnessText(id, copyKind));
+      view.toast(copyKind === COPY_KIND.command ? COPIED_COMMAND : COPIED_SETUP);
     } catch (error) {
       view.toast(String(error), true);
     }
@@ -749,14 +738,6 @@ function wire() {
     }
   });
 
-  // Only the native shell has no live stream that tells it when it was away, so only the native
-  // shell asks again when it comes back into view.
-  if (native) {
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) resync();
-    });
-  }
-
   setInterval(() => {
     if (!document.hidden) view.tickElapsed(store.feed());
   }, 100);
@@ -836,14 +817,7 @@ async function start() {
 }
 
 function boot() {
-  // The native shell's heartbeat is its own recovery, so it is installed before anything that can
-  // fail. A bad subscription or a bad first snapshot then costs one cycle rather than the window.
   // A page on the live stream has no heartbeat: the stream tells it when it was away.
-  if (native) {
-    setInterval(() => {
-      if (!document.hidden) resync();
-    }, HEARTBEAT_MS);
-  }
   attempt("wiring the surface", wire);
   attempt("wiring Settings", () => settings.wire());
   attempt("starting", () => {

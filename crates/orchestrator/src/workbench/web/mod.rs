@@ -1,8 +1,7 @@
 //! The loopback server that serves the workbench to the Ghostlight window and to browser tabs.
 //!
-//! It is a second inbound adapter over [`WorkbenchFacade`], beside the Tauri commands. It binds
-//! 127.0.0.1 only, answers only when the `Host` header is its own address, and decides access per
-//! route in three contexts: Control (the request carries this start's bearer), Watch (no bearer
+//! It is the inbound adapter over [`WorkbenchFacade`]. It binds 127.0.0.1 only, answers only when
+//! the `Host` header is its own address, and decides access per route in three contexts: Control (the request carries this start's bearer), Watch (no bearer
 //! while "Others can watch" is on) and Closed (no bearer while it is off). Each part of the state
 //! is projected for its audience when the response is written (ADR-0199, amendment of 2026-10-15).
 //!

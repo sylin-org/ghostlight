@@ -271,6 +271,15 @@ static ROUTES: [Route; 20] = [
     ),
 ];
 
+/// The method and path of every route in the table, for the test that keeps it closed.
+#[cfg(test)]
+pub(super) fn table() -> Vec<(Method, &'static str)> {
+    ROUTES
+        .iter()
+        .map(|route| (route.method, route.path))
+        .collect()
+}
+
 /// The closed codes an error body carries.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ErrorCode {

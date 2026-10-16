@@ -52,7 +52,7 @@
     /*
      * What this screen was told it may do.
      *
-     * Until it is told, it may do everything, which is the native shell's own situation and what
+     * Until it is told, it may do everything, which is the Ghostlight window's own situation and what
      * a view built directly assumes. An act it may not do is drawn as the state it would have
      * changed, with one line saying where the change is made.
      */

@@ -4,17 +4,33 @@
 //! bare launch) and a script's `call` find the service through a control opening, and when none
 //! answers they start one detached, as a `person` or a `command` start (ADR-0199 Decision 10),
 //! and then wait for it: `open` until the window is shown, `call` until the service is ready.
+//!
+//! `serve` runs the service in this process until a quit. It has no window of its own: it binds
+//! its endpoint as soon as it has started (ADR-0199 Decision 5), and the shell that shows the
+//! window and the tray is started by presence (`service::presence`).
 
 use std::io;
+use std::path::Path;
+use std::sync::mpsc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
+use ghostlight_relay::os::session;
 use ghostlight_relay::protocol::StartReason;
+
+use crate::language::environment::SESSION_LISTENER_FAILED;
+use crate::service::{Quit, ServiceHost};
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const ACTIVATION_RETRY_DELAY: Duration = Duration::from_millis(50);
-// Native window construction can outlast service publication without indicating a failure.
+/// How long `open` waits for the window after it asked the service to show it. The service starts
+/// the shell when none is attached, which can take a few seconds on a cold start; the service
+/// answers within its own, shorter wait.
 const WORKBENCH_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(15);
+/// The status a `serve` start exits with when it never bound its endpoint in time.
+pub const READY_STALLED_EXIT: i32 = 3;
 const WORKBENCH_OPEN_TIMEOUT_MESSAGE: &str =
     "The Ghostlight workbench did not open in time. Run 'ghostlight open' to try again.";
 
@@ -61,14 +77,69 @@ impl Starter for Detached {
     }
 }
 
-/// Run the service and its backgrounded desktop in this process, for a start made for `reason`,
-/// until a quit.
+/// Run the service in this process, for a start made for `reason`, until a quit.
 ///
-/// The service never reveals a window on its own. It exits 0 without a word when another service
-/// already serves or when Quit holds a browser or recover start back, and it stops by itself,
-/// with a nonzero status and a diagnostics event, when it is not accepting openings in time.
+/// The service shows nothing itself. It exits 0 without a word when another service already
+/// serves or when Quit holds a browser or recover start back, and it stops by itself, with a
+/// nonzero status and a diagnostics event, when it is not accepting openings in time.
 pub fn serve(reason: StartReason) -> anyhow::Result<()> {
-    settle_serve(crate::desktop::run(reason))
+    let home = ghostlight_relay::home::home()?;
+    settle_serve(serve_in(
+        &home,
+        reason,
+        listen_for_session_end,
+        ServiceHost::start_waiting,
+    ))
+}
+
+/// Listen for the end of the session from this process's start.
+///
+/// On the final signal the fallback exit is armed first. A service that exists then says goodbye
+/// with `session_end` on every stream and leaves through its quit; a start that has no service
+/// yet holds nothing and leaves at once.
+fn listen_for_session_end(ending: Arc<OnceLock<Quit>>) -> io::Result<session::SessionListener> {
+    session::listen(move |event| session::stop_on_final(event, || end_session(ending.get())))
+}
+
+/// End this process because the session is ending: through the quit path when the service
+/// exists, at once when it does not.
+fn end_session(quit: Option<&Quit>) {
+    match quit {
+        Some(quit) => quit.session_end(),
+        None => std::process::exit(0),
+    }
+}
+
+/// Serve from the Ghostlight home `home` until a quit, with `listen` hearing the end of the
+/// session and `start` making the service.
+///
+/// In order: the session listener is installed, so a start still waiting for the service lock
+/// leaves at once; the service starts under its lock; the quit signal is installed; the ready
+/// limit is armed; and only then the endpoint is bound, so a quit that arrives the moment the
+/// first peer can connect is heard. The process then waits for the quit signal.
+fn serve_in<L>(
+    home: &Path,
+    reason: StartReason,
+    listen: impl FnOnce(Arc<OnceLock<Quit>>) -> io::Result<L>,
+    start: impl FnOnce(&Path, StartReason) -> anyhow::Result<ServiceHost>,
+) -> anyhow::Result<()> {
+    let ending = Arc::new(OnceLock::<Quit>::new());
+    let _session_listener = listen(Arc::clone(&ending))
+        .map_err(|error| anyhow::anyhow!("{SESSION_LISTENER_FAILED} {error}"))?;
+    let host = start(home, reason)?;
+    let _ = ending.set(host.quit_handle());
+    let (quit_sender, quit_received) = mpsc::channel::<()>();
+    host.install_quit_signal(Arc::new(move || {
+        let _ = quit_sender.send(());
+    }));
+    host.expect_ready_by(host.ready_deadline(), || {
+        std::process::exit(READY_STALLED_EXIT)
+    })?;
+    host.publish_ready().context("bind the relay endpoint")?;
+    eprintln!("Ghostlight {} ready", env!("CARGO_PKG_VERSION"));
+    // A quit signal that is never made, because the service was dropped, also ends the wait.
+    let _ = quit_received.recv();
+    Ok(())
 }
 
 /// Turn how a `serve` start ended into its exit: finding the service already running, or being
@@ -204,10 +275,57 @@ mod tests {
     };
 
     #[test]
+    fn the_session_listener_is_installed_before_the_service_starts_and_the_endpoint_binds_after() {
+        use crate::cli::client::control_at;
+        use ghostlight_relay::protocol::{Control, QuitReason};
+
+        let home = crate::service::test_home::TestHome::new("serve-order");
+        let order = std::sync::Mutex::new(Vec::<&str>::new());
+        let path = home.path().to_path_buf();
+        let probe = path.clone();
+        let quitter = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if control_at(
+                    &probe,
+                    Control::Quit {
+                        reason: QuitReason::Replace,
+                    },
+                )
+                .is_ok()
+                {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            false
+        });
+        let served = serve_in(
+            &path,
+            StartReason::Agent,
+            |_| {
+                order.lock().unwrap().push("listener");
+                assert!(
+                    control_at(&path, Control::Readiness).is_err(),
+                    "nothing is bound before the listener is installed"
+                );
+                Ok(())
+            },
+            |home, _| {
+                order.lock().unwrap().push("start");
+                ServiceHost::start(home)
+            },
+        );
+        assert!(quitter.join().unwrap(), "the endpoint was bound and quit");
+        served.unwrap();
+        assert_eq!(*order.lock().unwrap(), ["listener", "start"]);
+    }
+
+    #[test]
     fn serve_settles_a_refusal_to_start_as_success_and_any_other_failure_as_failure() {
         assert!(settle_serve(Err(crate::service::AuthorityAlreadyRunning.into())).is_ok());
         assert!(settle_serve(Err(crate::service::QuitLatched.into())).is_ok());
-        assert!(settle_serve(Err(anyhow::anyhow!("native desktop construction failed"))).is_err());
+        assert!(settle_serve(Err(anyhow::anyhow!("the endpoint could not be bound"))).is_err());
         assert!(settle_serve(Ok(())).is_ok());
     }
 
@@ -357,7 +475,7 @@ mod tests {
         let delayed_presentation = presentation.clone();
         let workbench = host.workbench.clone();
         let ready = std::thread::spawn(move || {
-            // A cold WebView can become ready after the old one-second activation budget.
+            // A cold shell can attach after the old one-second activation budget.
             std::thread::sleep(Duration::from_secs(2));
             workbench.attach_presentation(delayed_presentation);
         });

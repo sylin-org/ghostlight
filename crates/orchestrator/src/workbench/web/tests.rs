@@ -399,6 +399,66 @@ fn the_bearer_never_appears_in_what_the_server_prints() {
     assert!(!shared.contains(&bearer));
 }
 
+/// The command table of the page's transport: every route the page calls, in the page's words.
+const PAGE_TRANSPORT: &str = include_str!("../../../ui/lib/transport.js");
+
+#[test]
+fn the_route_table_is_closed_and_no_route_clears_history() {
+    use super::http::Method::{Delete, Get, Post, Put};
+
+    let mut table = routes::table();
+    table.sort_by_key(|(method, path)| (*path, format!("{method:?}")));
+    let mut expected = vec![
+        (Get, "/api/context"),
+        (Get, "/api/events"),
+        (Get, "/api/policy"),
+        (Get, "/api/snapshot"),
+        (Post, "/api/diagnostics/reveal"),
+        (Post, "/api/integrations/act"),
+        (Post, "/api/integrations/locate"),
+        (Post, "/api/integrations/rescan"),
+        (Post, "/api/integrations/setup-all"),
+        (Post, "/api/notifications/test"),
+        (Post, "/api/open"),
+        (Post, "/api/policy/preview"),
+        (Post, "/api/quit"),
+        (Post, "/api/runtime"),
+        (Post, "/api/search"),
+        (Post, "/api/window"),
+        (Put, "/api/controls/diagnostics"),
+        (Put, "/api/controls/viewing"),
+        (Put, "/api/policy/user"),
+        (Delete, "/api/policy/user"),
+    ];
+    expected.sort_by_key(|(method, path)| (*path, format!("{method:?}")));
+    assert_eq!(table, expected, "a route was added or removed; say so here");
+    for (_, path) in &table {
+        for word in ["clear", "history", "audit", "purge", "wipe"] {
+            assert!(
+                !path.contains(word),
+                "{path}: clearing the monitor is the page's own view state, never a route"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_route_the_page_calls_is_in_the_table_and_the_table_serves_nothing_else_to_the_page() {
+    let table = routes::table();
+    let called: Vec<&str> = PAGE_TRANSPORT
+        .split(['"', '`'])
+        .filter(|text| text.starts_with("/api/"))
+        .collect();
+    assert!(!called.is_empty());
+    for path in &called {
+        let path = path.split('?').next().unwrap_or(path);
+        assert!(
+            table.iter().any(|(_, served)| *served == path),
+            "the page calls {path}, which the server does not serve"
+        );
+    }
+}
+
 #[test]
 fn the_right_bearer_makes_every_route_answer_as_control() {
     let fixture = Fixture::start();

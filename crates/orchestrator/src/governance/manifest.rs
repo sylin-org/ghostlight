@@ -309,9 +309,8 @@ const MAX_NESTING_DEPTH: usize = 64;
 /// `serde_json::from_str` recurses once per nesting level with no cap, and a deeply nested
 /// document -- comfortably under any byte-size limit callers enforce -- overflows the call stack
 /// before parsing finishes. That aborts the whole process: it is not a panic, so `catch_unwind`
-/// cannot intercept it, and on this product's desktop build the orchestrator's real authority
-/// shares a process with the Tauri shell that can hand this function untrusted WebView input. A
-/// linear scan of raw bracket depth, skipping string contents, is cheap and catches this first.
+/// cannot intercept it, and the service that parses policy runs every agent's work in the same
+/// process. A linear scan of raw bracket depth, skipping string contents, is cheap and catches this first.
 fn reject_excessive_nesting(text: &str, source: &str) -> Result<(), ManifestError> {
     let mut depth: usize = 0;
     let mut in_string = false;

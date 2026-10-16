@@ -3,7 +3,7 @@
 // Every other guard over this window reads its source as text, which can only ever check that the
 // right strings are present. None of them could tell that the window did not start: one missing
 // element id threw at module scope and silently abandoned the snapshot, the change subscription
-// and the heartbeat behind it, and the guards stayed green.
+// and the first snapshot behind it, and the guards stayed green.
 //
 // This runs the real modules against a minimal DOM with one panel deliberately broken, and
 // asserts what a person would check by looking: the window still comes up, the failure is
@@ -57,7 +57,6 @@ nodes.get("confirm-dialog").querySelector = (selector) =>
     : selector === '[data-confirm="cancel"]' ? confirmCancel : null;
 
 const reported = [];
-let heartbeat = false;
 
 // The address bar of a page: what the page reads on load, and what it writes in place of a new
 // history entry.
@@ -136,6 +135,11 @@ const controlContext = {
 };
 const managedHarnesses = [];
 let pushChange = null;
+/** Push a change down the stream and let the page read it, as the service's own would arrive. */
+const pushed = async (change) => {
+  pushChange(change);
+  for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+};
 let policyReply = null;
 
 const snapshot = () => ({
@@ -189,6 +193,37 @@ const snapshot = () => ({
   overview: {}
 });
 
+/** The command a request to the window's own service is, by the route it goes to. */
+function windowCommandAt(method, pathname) {
+  const routes = {
+    "GET /api/context": "workbench_context",
+    "GET /api/snapshot": "workbench_snapshot",
+    "GET /api/policy": "workbench_policy",
+    "PUT /api/controls/diagnostics": "set_diagnostics",
+    "POST /api/window": "continue_in_window",
+    "POST /api/quit": "quit_ghostlight",
+    "POST /api/integrations/setup-all": "setup_detected_harnesses",
+    "POST /api/integrations/act": "manage_harness"
+  };
+  return routes[`${method} ${pathname}`] ?? null;
+}
+
+/** The parts of a snapshot answer, from the one flat snapshot this fixture is written as. */
+function partsOf(flat) {
+  return {
+    status: {
+      service: flat.service, readiness: flat.readiness, audit_health: flat.audit_health,
+      audit_notice: flat.audit_notice, configuration: flat.configuration,
+      ...(flat.runtime_note === undefined ? {} : { runtime_note: flat.runtime_note })
+    },
+    connections: { sessions: flat.sessions, browsers: flat.browsers },
+    activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage ?? [] },
+    integrations: { harnesses: flat.harnesses },
+    diagnostics: { diagnostics: flat.diagnostics },
+    controls: flat.controls
+  };
+}
+
 const sandbox = {
   console: { error: (detail) => reported.push(String(detail)), log() {}, warn() {} },
   document: {
@@ -208,32 +243,53 @@ const sandbox = {
     addEventListener: (kind) => listeners.push(`window:${kind}`),
     location: nativeBar,
     history: nativeBar.history,
-    __TAURI__: {
-      core: { invoke: async (cmd, args) => {
-        invoked.push(cmd);
-        if (cmd === "workbench_context") return controlContext;
-        if (cmd === "set_diagnostics") return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
-        if (cmd === "continue_in_window") return null;
-        if (cmd === "quit_ghostlight") return { message: QUITTING_SENTENCE };
-        if (cmd === "workbench_snapshot") return snapshot();
-        if (cmd === "workbench_policy" && policyReply) return policyReply();
-        if (cmd === "setup_detected_harnesses") {
-          bulkSetups += 1;
-          return { set_up: 1, updated: 1, needs_attention: 0, failures: [], message: "Set up everything." };
-        }
-        if (cmd === "manage_harness") {
-          managedHarnesses.push(args);
-          if (args.action === "fix") return { changed: true, message: "Fixed Cline." };
-          throw new Error("deliberate setup failure");
-        }
-        return [];
-      } },
-      event: { listen: async (_name, handler) => { pushChange = (change) => handler({ payload: change }); return () => {}; } }
-    }
+    fetch: async (path, init = {}) => {
+      const url = new URL(path, "http://127.0.0.1:41000");
+      const command = windowCommandAt(init.method ?? "GET", url.pathname);
+      if (command) invoked.push(command);
+      const arguments_ = init.body ? JSON.parse(init.body) : {};
+      const said = (status_, body) => ({
+        ok: status_ >= 200 && status_ < 300, status: status_,
+        headers: { get: () => null },
+        text: async () => (body === undefined ? "" : JSON.stringify(body))
+      });
+      if (command === "workbench_context") return said(200, controlContext);
+      if (command === "set_diagnostics") {
+        return said(200, { layer: arguments_.on ? "marker" : "off", directory: null, used_bytes: 0 });
+      }
+      if (command === "continue_in_window") return said(200, {});
+      if (command === "quit_ghostlight") return said(202, { message: QUITTING_SENTENCE });
+      if (command === "workbench_snapshot") {
+        const flat = snapshot();
+        return said(200, { seq: flat.seq, instance: "instance_1", parts: partsOf(flat) });
+      }
+      if (command === "workbench_policy" && policyReply) return said(200, policyReply());
+      if (command === "setup_detected_harnesses") {
+        bulkSetups += 1;
+        return said(200, { set_up: 1, updated: 1, needs_attention: 0, failures: [], message: "Set up everything." });
+      }
+      if (command === "manage_harness") {
+        managedHarnesses.push({ id: arguments_.id, action: arguments_.action });
+        if (arguments_.action === "fix") return said(200, { changed: true, message: "Fixed Cline." });
+        return said(500, { error: { code: "failed", message: "deliberate setup failure" } });
+      }
+      if (url.pathname === "/api/events") {
+        const stream = openStream();
+        pushChange = (change) => stream.write(`data: ${JSON.stringify(change)}
+
+`);
+        return { ok: true, status: 200, headers: { get: () => null }, body: { getReader: () => stream.reader } };
+      }
+      return said(200, []);
+    },
+    open: () => null
   },
+  navigator: { clipboard: { writeText: async () => undefined } },
+  GhostlightAccess: Object.freeze({ bearer: "key-1" }),
+  AbortController, TextDecoder, TextEncoder,
   setTimeout: (fn, ms) => { if (typeof fn === "function" && !ms) fn(); return 0; },
   clearTimeout() {}, clearInterval() {},
-  setInterval: () => { heartbeat = true; return 0; },
+  setInterval: () => 0,
   Date, JSON, Math, String, Number, Boolean, Array, Object, Set, Map, Promise, Error,
   isNaN, parseInt, parseFloat, performance: { now: () => 0 }, crypto: { randomUUID: () => "x" }
 };
@@ -346,15 +402,15 @@ const statusPush = (seq, runtime, note) => ({
 const requestsBeforePush = snapshotRequests();
 const seqBeforePush = snapshots;
 const wordBeforePush = nodes.get("state-word").textContent;
-pushChange(statusPush(seqBeforePush + 1, "held", "Paused from the tray."));
+await pushed(statusPush(seqBeforePush + 1, "held", "Paused from the tray."));
 const wordAfterPush = nodes.get("state-word").textContent;
 const wordTitleAfterPush = nodes.get("state-word").title;
 const wheelAfterPush = nodes.get("wheel").dataset.intent;
 const requestsAfterPush = snapshotRequests();
-pushChange(statusPush(seqBeforePush + 2, "active", null));
+await pushed(statusPush(seqBeforePush + 2, "active", null));
 const titleAfterResume = nodes.get("state-word").title;
-pushChange({ seq: seqBeforePush + 3, change: { kind: "part_changed", part: "integrations", etag: "tag-1" } });
-pushChange({ seq: seqBeforePush + 4, change: { kind: "part_changed", part: "policy", etag: "tag-2" } });
+await pushed({ seq: seqBeforePush + 3, change: { kind: "part_changed", part: "integrations", etag: "tag-1" } });
+await pushed({ seq: seqBeforePush + 4, change: { kind: "part_changed", part: "policy", etag: "tag-2" } });
 await new Promise((r) => setTimeout(r, 0));
 const requestsAfterHints = snapshotRequests();
 const policyReadsAfterHints = invoked.filter((cmd) => cmd === "workbench_policy").length;
@@ -558,7 +614,7 @@ const readsOnOpening = policyReads();
 // The service turns watching off and diagnostics off. The sheet and the chip follow the pushed
 // part with no snapshot asked for, and the chip is redrawn from the context the part names.
 const snapshotsBeforeControls = snapshotRequests();
-pushChange({
+await pushed({
   seq: ++hintSeq,
   change: { kind: "controls_changed", controls: controlsPart({ watch: false, layer: "off" }) }
 });
@@ -573,13 +629,13 @@ const sheetAfterPush = {
   chipTitle: sheetNode("context-chip").title,
   snapshots: snapshotRequests() - snapshotsBeforeControls
 };
-pushChange({ seq: ++hintSeq, change: { kind: "part_changed", part: "policy", etag: "tag-clean" } });
+await pushed({ seq: ++hintSeq, change: { kind: "part_changed", part: "policy", etag: "tag-clean" } });
 await new Promise((r) => setTimeout(r, 0));
 const readsAfterCleanHint = policyReads();
 appDraft("view.addRule()");
 const draftBeforeHint = appDraft("view.draftDocument()");
 const ruleListBeforeHint = nodes.get("rule-list").innerHTML;
-pushChange({ seq: ++hintSeq, change: { kind: "part_changed", part: "policy", etag: "tag-dirty" } });
+await pushed({ seq: ++hintSeq, change: { kind: "part_changed", part: "policy", etag: "tag-dirty" } });
 await new Promise((r) => setTimeout(r, 0));
 const readsAfterDirtyHint = policyReads();
 const draftAfterHint = appDraft("view.draftDocument()");
@@ -805,7 +861,8 @@ const queueAfterResync = nodes.get("queue-count").textContent;
 feedFixture = false;
 
 // ---------------------------------------------------------------------------------------------
-// The same page with no native shell: over loopback HTTP, in the three contexts.
+// The same page in each of the three contexts, over loopback HTTP: with the key the shell hands its
+// window (Control), and without it (Watch, and Closed while watching is off).
 //
 // Each run boots the real modules against a fresh stub document and a fake service that records
 // every request it is sent, so the assertions are about what a person would see and what the
@@ -976,7 +1033,7 @@ function fakeService(kind, { served = true } = {}) {
   return { state, fetch, emit, status };
 }
 
-/** One page: the real modules over a stub document, with no native shell. */
+/** One page: the real modules over a stub document, in one context. */
 function bootHttpPage(kind, options = {}) {
   const service = fakeService(kind, options);
   const bar = addressBar(options.hash ?? "");
@@ -1434,7 +1491,7 @@ const httpChecks = [
   ["Continue in the roster asks for the window at Integrations",
     rosterContinue === '{"view":"workbench","address":"integrations"}', String(rosterContinue)],
   ["opening Integrations looks for the clients once", rescanRequests === 1, `rescans=${rescanRequests}`],
-  ["a page with the key draws every control the native shell draws and no Continue line",
+  ["a page with the key draws every control the window draws and no Continue line",
     controlOpening.chip === "Full control" && controlOpening.setup === false && controlOpening.endSession === false
       && controlOpening.sendTest === false && controlOpening.wheelHidden === false
       && controlOpening.bandContinue === true && controlOpening.rosterLineHidden === true
@@ -1553,7 +1610,7 @@ const httpChecks = [
 
 const checks = [
   ...httpChecks,
-  ["the native shell's page is told it has full control and draws every control",
+  ["the window's page is told it has full control and draws every control",
     sheetAfterBoot.chip === "Full control"
       && nodes.get("setup-integrations").hidden === false && sheetAfterBoot.end === false
       && sheetAfterBoot.test === false && nodes.get("integrations-continue").hidden === true
@@ -1623,7 +1680,6 @@ const checks = [
   ...historyChecks,
   ...provenanceChecks,
   ["boot completed without throwing", bootThrew === null, bootThrew],
-  ["heartbeat installed", heartbeat],
   ["surface wired", listeners.some((l) => l.startsWith("document:click"))],
   ["global error handlers attached",
     listeners.includes("window:error") && listeners.includes("window:unhandledrejection")],
@@ -1855,7 +1911,7 @@ const checks = [
   ["the broken panel was attempted, not skipped", before > 0, `attempts: ${before}`]
 ];
 
-// Quit from the native window reaches the shell's own command, and the band then says so. It runs
+// Quit from the window reaches the service's quit route, and the band then says so. It runs
 // last, since the band stops vouching for anything afterwards.
 const nativeClick = (selector, element) => dispatchDocument("click", {
   target: { closest: (asked) => (asked === selector ? element : asked === "#view-settings" ? nodes.get("view-settings") : null) }
@@ -1868,7 +1924,7 @@ const nativeQuit = {
   commands: invoked.filter((cmd) => cmd === "quit_ghostlight").length,
   word: nodes.get("state-word").textContent
 };
-checks.push(["Quit in the native window is the shell's own command, and the band then says Ghostlight is quitting",
+checks.push(["Quit in the window is the service's quit route, and the band then says Ghostlight is quitting",
   nativeQuit.commands === 1 && nativeQuit.word === QUITTING_SENTENCE, JSON.stringify(nativeQuit)]);
 
 let ok = true;

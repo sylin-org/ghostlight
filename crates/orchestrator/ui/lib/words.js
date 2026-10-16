@@ -6,10 +6,6 @@
 })(globalThis, function createGhostlightWords() {
   "use strict";
 
-  /** Single channel the orchestrator publishes sequenced changes on. */
-  const CHANGE_EVENT = "ghostlight://change";
-  /** Slow safety pull for collections that have no change event of their own. */
-  const HEARTBEAT_MS = 10000;
   /** Bound on the retained feed, matching the orchestrator's own bounded history. */
   const FEED_LIMIT = 200;
 
@@ -574,7 +570,7 @@
     ]]
   ];
 
-  return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
+  return Object.freeze({ FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,

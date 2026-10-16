@@ -339,75 +339,138 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     }, spec.ms);
   };
 
-  window.__TAURI__ = {
-    core: {
-      invoke: async (command, args = {}) => {
-        if (command === "workbench_context") {
-          // The window's own context: every act is available, so the page draws all of it.
-          const acts = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
-            "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
-            "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"];
-          return {
-            context: "control", word: "Full control",
-            sentence: "Others on this computer can watch this view in a browser.",
-            instance: "preview", opener: "service",
-            acts: Object.fromEntries(acts.map((act) => [act, { available: true, why_not: null }])),
-            product: { version: "1.0.0", license: "Apache-2.0 OR MIT" }, links: {}
-          };
-        }
-        if (command === "set_diagnostics") {
-          preview.controls.diagnostics.on = args.on;
-          preview.controls.diagnostics.layer = args.on ? "marker" : "off";
-          publishControls();
-          return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
-        }
-        if (command === "set_watching") {
-          preview.controls.viewing.watch = args.watch;
-          publishControls();
-          return preview.controls;
-        }
-        if (command === "continue_in_window") return null;
-        if (command === "quit_ghostlight") return { message: "Ghostlight is quitting." };
-        if (command === "workbench_snapshot") return preview;
-        if (command === "workbench_search") return [];
-        if (command === "workbench_policy") return policyView;
-        if (command === "preview_user_policy") {
-          return {
-            considered: 42,
-            refused_total: 3,
-            refused: [
-              { tool: "browser_execute", host: "github.com", count: 2 },
-              { tool: "browser_upload", host: null, count: 1 }
-            ],
-            summary: "3 of the last 42 recorded actions would have been refused."
-          };
-        }
-        if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are applied: Your rules 2026-08-14." };
-        if (command === "remove_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are removed." };
-        if (command === "apply_runtime_intent") {
-          const state = args.intent === "end_session" ? "ended" : args.intent === "hold" ? "held" : "active";
-          preview.service.runtime_state = state;
-          preview.configuration.runtime_state = state;
-          publish({ kind: "runtime_changed", runtime_state: state });
-          publishControls();
-          if (state === "active") runOne();
-          // Mirrors crates/orchestrator/src/language/control.rs: the confirmation states the
-          // authority's state only, never browser delivery.
-          const confirmation = {
-            active: "Running. Agents can ask for browser work again. Earlier actions are not repeated.",
-            held: "Paused. Agents' browser actions will be refused until you resume.",
-            ended: "Session ended. Agents' browser actions will be refused until you start a new session."
-          };
-          return { accepted: true, runtime_state: state, message: confirmation[state] };
-        }
-        if (command === "refresh_harnesses") return preview.harnesses;
-        if (command === "test_notification") return null;
-        if (command === "manage_harness") return { changed: false, summary: {}, message: "Preview action completed." };
-        throw new Error("Unknown preview command " + command);
-      }
+  // What the service answers for each command. The page asks over HTTP, as it does in the window.
+  const answer = async (command, args = {}) => {
+    if (command === "workbench_context") {
+      // The window's own context: every act is available, so the page draws all of it.
+      const acts = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
+        "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
+        "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"];
+      return {
+        context: "control", word: "Full control",
+        sentence: "Others on this computer can watch this view in a browser.",
+        instance: "preview", opener: "service",
+        acts: Object.fromEntries(acts.map((act) => [act, { available: true, why_not: null }])),
+        product: { version: "1.0.0", license: "Apache-2.0 OR MIT" }, links: {}
+      };
+    }
+    if (command === "set_diagnostics") {
+      preview.controls.diagnostics.on = args.on;
+      preview.controls.diagnostics.layer = args.on ? "marker" : "off";
+      publishControls();
+      return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
+    }
+    if (command === "set_watching") {
+      preview.controls.viewing.watch = args.watch;
+      publishControls();
+      return preview.controls;
+    }
+    if (command === "continue_in_window") return null;
+    if (command === "quit_ghostlight") return { message: "Ghostlight is quitting." };
+    if (command === "workbench_snapshot") return preview;
+    if (command === "workbench_search") return [];
+    if (command === "workbench_policy") return policyView;
+    if (command === "preview_user_policy") {
+      return {
+        considered: 42,
+        refused_total: 3,
+        refused: [
+          { tool: "browser_execute", host: "github.com", count: 2 },
+          { tool: "browser_upload", host: null, count: 1 }
+        ],
+        summary: "3 of the last 42 recorded actions would have been refused."
+      };
+    }
+    if (command === "apply_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are applied: Your rules 2026-08-14." };
+    if (command === "remove_user_policy") return { accepted: true, runtime_state: "active", message: "Your rules are removed." };
+    if (command === "apply_runtime_intent") {
+      const state = args.intent === "end_session" ? "ended" : args.intent === "hold" ? "held" : "active";
+      preview.service.runtime_state = state;
+      preview.configuration.runtime_state = state;
+      publish({ kind: "runtime_changed", runtime_state: state });
+      publishControls();
+      if (state === "active") runOne();
+      // Mirrors crates/orchestrator/src/language/control.rs: the confirmation states the
+      // authority's state only, never browser delivery.
+      const confirmation = {
+        active: "Running. Agents can ask for browser work again. Earlier actions are not repeated.",
+        held: "Paused. Agents' browser actions will be refused until you resume.",
+        ended: "Session ended. Agents' browser actions will be refused until you start a new session."
+      };
+      return { accepted: true, runtime_state: state, message: confirmation[state] };
+    }
+    if (command === "refresh_harnesses") return preview.harnesses;
+    if (command === "test_notification") return null;
+    if (command === "manage_harness") return { changed: false, summary: {}, message: "Preview action completed." };
+    throw new Error("Unknown preview command " + command);
+  };
+
+  // The page speaks to its service over loopback HTTP with the key the shell hands to its window.
+  // The preview answers the same routes from the fixture above.
+  window.GhostlightAccess = Object.freeze({ bearer: "preview" });
+  const routes = {
+    "GET /api/context": "workbench_context",
+    "GET /api/snapshot": "workbench_snapshot",
+    "POST /api/search": "workbench_search",
+    "GET /api/policy": "workbench_policy",
+    "POST /api/policy/preview": "preview_user_policy",
+    "PUT /api/policy/user": "apply_user_policy",
+    "DELETE /api/policy/user": "remove_user_policy",
+    "POST /api/runtime": "apply_runtime_intent",
+    "PUT /api/controls/diagnostics": "set_diagnostics",
+    "PUT /api/controls/viewing": "set_watching",
+    "POST /api/integrations/rescan": "refresh_harnesses",
+    "POST /api/integrations/act": "manage_harness",
+    "POST /api/notifications/test": "test_notification",
+    "POST /api/window": "continue_in_window",
+    "POST /api/quit": "quit_ghostlight"
+  };
+  const reply = (status, body) => new Response(body === undefined ? "" : JSON.stringify(body), {
+    status, headers: { "content-type": "application/json" }
+  });
+  const partsOf = flat => ({
+    status: {
+      service: flat.service, readiness: flat.readiness, audit_health: flat.audit_health,
+      audit_notice: flat.audit_notice, configuration: flat.configuration,
+      ...(flat.runtime_note === undefined ? {} : { runtime_note: flat.runtime_note })
     },
-    event: {
-      listen: async (name, handler) => { listeners.push(handler); return () => {}; }
+    connections: { sessions: flat.sessions, browsers: flat.browsers },
+    activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage || [] },
+    integrations: { harnesses: flat.harnesses },
+    diagnostics: { diagnostics: flat.diagnostics },
+    controls: flat.controls
+  });
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (path, init = {}) => {
+    const url = new URL(path, window.location.href);
+    if (!url.pathname.startsWith("/api/")) return realFetch(path, init);
+    if (url.pathname === "/api/events") {
+      const encoder = new TextEncoder();
+      let handler = null;
+      const body = new ReadableStream({
+        start(controller) {
+          const hello = { context: "control", instance: "preview", seq: preview.seq };
+          controller.enqueue(encoder.encode("event: hello\\ndata: " + JSON.stringify(hello) + "\\n\\n"));
+          handler = event => controller.enqueue(encoder.encode("data: " + JSON.stringify(event.payload) + "\\n\\n"));
+          listeners.push(handler);
+        },
+        cancel() {
+          const at = listeners.indexOf(handler);
+          if (at >= 0) listeners.splice(at, 1);
+        }
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    const command = routes[(init.method || "GET") + " " + url.pathname];
+    if (!command) return reply(404, { error: { code: "not_found", message: "There is nothing at this address." } });
+    try {
+      const result = await answer(command, init.body ? JSON.parse(init.body) : {});
+      if (command === "workbench_snapshot") {
+        return reply(200, { seq: result.seq, instance: "preview", parts: partsOf(result) });
+      }
+      return reply(command === "quit_ghostlight" ? 202 : 200, result === null ? {} : result);
+    } catch (error) {
+      return reply(500, { error: { code: "failed", message: String(error) } });
     }
   };
 

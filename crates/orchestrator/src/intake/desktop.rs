@@ -4,13 +4,15 @@
 //! The relay opening and the goodbye frame this stream rides on are frozen. The frames below are
 //! not: the service serves the `desktop` role only to a shell of its own build, so the contract
 //! may change with any build. The service sends the workbench address with the secret that lets
-//! the window make changes, and optionally the tray the shell should draw. It then asks the shell
-//! to show the window (at a section of the page), to show a notice, and to carry out an act only
-//! this computer can do: open a link, open a folder, pick a file. The shell reports a click on a
-//! tray entry and the result of each act. The shell opens its own window, so an `open` click is
-//! only heard. The service has one desktop place: a shell that finds it taken is sent
-//! `already_open` in place of the workbench and leaves, and the shell that holds the place is
-//! asked to show its window.
+//! the window make changes, and the tray the shell draws: its icon state, its tooltip and its
+//! entries. The service owns the tray model and sends a new one whenever it changes; the shell
+//! only draws it. The service then asks the shell to show the window (at a section of the page),
+//! to show a notice, and to carry out an act only this computer can do: open a link, open a
+//! folder, pick a file. The shell reports a click on a tray entry, the result of each act, that it
+//! cannot show a window (`unavailable`) and that the person closed the window (`closed`). The
+//! shell opens its own window, so an `open` click is only heard. The service has one desktop
+//! place: a shell that finds it taken is sent `already_open` in place of the workbench and
+//! leaves, and the shell that holds the place is asked to show its window.
 //!
 //! A reader skips a frame kind it does not know. The service ends a stream only for a frame that
 //! does not decode.
@@ -23,8 +25,14 @@ use std::fmt;
 use ghostlight_relay::protocol::GoodbyeReason;
 use serde::{Deserialize, Serialize};
 
-use crate::language::workbench as words;
+use crate::browser::adapter::RuntimeControlState;
+use crate::language::readiness::Readiness;
+use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::workbench::PageAddress;
+
+/// The longest tooltip the shell draws, in characters: the Windows limit. The tooltip is the
+/// service line that counts connections, which stays well inside it.
+pub const MAX_TOOLTIP_LENGTH: usize = 127;
 
 /// One frame on a `desktop` stream, in either direction.
 ///
@@ -33,14 +41,19 @@ use crate::workbench::PageAddress;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DesktopFrame {
     /// From the service, once, right after the opening is accepted: where the workbench is, the
-    /// secret for its changes, and the tray to draw when the shell is to draw one.
+    /// secret for its changes, and the tray to draw.
     Workbench {
         /// The workbench address, ending in a slash.
         url: String,
         /// The secret that makes a request the window's. It goes to the shell's own page only.
         bearer: String,
-        /// The tray the shell draws. `None` while the service has a tray of its own.
-        tray: Option<TrayModel>,
+        /// The tray the shell draws.
+        tray: TrayModel,
+    },
+    /// From the service: the tray changed. The shell draws this model in place of the last one.
+    TrayModel {
+        /// The whole tray as it is now.
+        model: TrayModel,
     },
     /// From the service, once, in place of the workbench frame: another shell holds the desktop
     /// place. The stream ends right after, and the shell leaves. The shell that holds the place is
@@ -84,20 +97,53 @@ pub enum DesktopFrame {
         /// How it ended.
         outcome: ActOutcome,
     },
+    /// From the shell: it cannot show what the service wants shown.
+    Unavailable {
+        /// What is missing.
+        reason: UnavailableReason,
+    },
+    /// From the shell: the person closed the window.
+    Closed {
+        /// Whether the shell stays with its tray. When it does not, it leaves right after.
+        stays: bool,
+    },
     /// A frame kind this build does not know. Readers skip it.
     #[serde(other)]
     Unknown,
 }
 
 impl DesktopFrame {
-    /// The frame that hands the shell the workbench, with the full tray when the service has no
-    /// tray of its own to show.
+    /// The frame that hands the shell the workbench and the tray to draw.
     #[must_use]
-    pub fn workbench(url: &str, bearer: &str, native_tray: bool) -> Self {
+    pub fn workbench(url: &str, bearer: &str, tray: TrayModel) -> Self {
         Self::Workbench {
             url: url.to_owned(),
             bearer: bearer.to_owned(),
-            tray: (!native_tray).then(TrayModel::standard),
+            tray,
+        }
+    }
+}
+
+/// What the shell cannot show, as it tells the service.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnavailableReason {
+    /// The session has no display.
+    NoDisplay,
+    /// The computer has no web view runtime, or the window could not be built.
+    NoWebview,
+    /// The desktop has no tray to draw the icon in.
+    NoTray,
+}
+
+impl UnavailableReason {
+    /// The reason the window is missing, as `status` says it.
+    #[must_use]
+    pub const fn window_reason(self) -> words::WindowReason {
+        match self {
+            Self::NoDisplay => words::WindowReason::NoDisplay,
+            Self::NoWebview => words::WindowReason::NoWebview,
+            Self::NoTray => words::WindowReason::NoTray,
         }
     }
 }
@@ -111,6 +157,10 @@ impl fmt::Debug for DesktopFrame {
                 .field("url", url)
                 .field("bearer", &"[redacted]")
                 .field("tray", tray)
+                .finish(),
+            Self::TrayModel { model } => formatter
+                .debug_struct("TrayModel")
+                .field("model", model)
                 .finish(),
             Self::AlreadyOpen => formatter.write_str("AlreadyOpen"),
             Self::Goodbye { reason } => formatter
@@ -136,6 +186,14 @@ impl fmt::Debug for DesktopFrame {
                 .debug_struct("ActResult")
                 .field("id", id)
                 .field("outcome", outcome)
+                .finish(),
+            Self::Unavailable { reason } => formatter
+                .debug_struct("Unavailable")
+                .field("reason", reason)
+                .finish(),
+            Self::Closed { stays } => formatter
+                .debug_struct("Closed")
+                .field("stays", stays)
                 .finish(),
             Self::Unknown => formatter.write_str("Unknown"),
         }
@@ -242,29 +300,73 @@ pub struct TrayItem {
     pub enabled: bool,
 }
 
+/// The state the tray icon shows, the band's four states.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrayState {
+    /// Ghostlight is ready. The icon is the plain ghost.
+    Ready,
+    /// An agent is working in the browser.
+    Working,
+    /// Browser work is paused or the session ended.
+    Paused,
+    /// Something needs the person's attention.
+    Attention,
+}
+
+impl TrayState {
+    /// The state the band shows for `readiness`, by its tone: quiet is ready, working is working,
+    /// held is paused and attention is attention. With no browser connected the icon looks ready
+    /// and the tooltip says so.
+    #[must_use]
+    pub const fn of(readiness: Readiness) -> Self {
+        match readiness {
+            Readiness::Ready | Readiness::NotConnected => Self::Ready,
+            Readiness::Working => Self::Working,
+            Readiness::Paused | Readiness::SessionEnded => Self::Paused,
+            Readiness::PolicyInvalid | Readiness::HistoryUnavailable => Self::Attention,
+        }
+    }
+}
+
 /// The whole tray as the service describes it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TrayModel {
-    /// The hover text.
+    /// The hover text: the sentence that counts the service's connections.
     pub tooltip: String,
     /// The entries in order.
     pub items: Vec<TrayItem>,
+    /// The state the icon shows.
+    pub state: TrayState,
 }
 
 impl TrayModel {
-    /// The tray with every entry, in the order of [`TrayItemId::ALL`], all enabled.
+    /// The tray for a service in `readiness` with `runtime` control and `counts` connected.
+    ///
+    /// Open and Quit can always be chosen. Pause can be chosen while browser work is active, and
+    /// Resume while it is paused or the session ended.
     #[must_use]
-    pub fn standard() -> Self {
+    pub fn of(
+        readiness: Readiness,
+        runtime: RuntimeControlState,
+        counts: ConnectionCounts,
+    ) -> Self {
+        let active = runtime == RuntimeControlState::Active;
         Self {
-            tooltip: words::TRAY_TOOLTIP.to_owned(),
+            tooltip: words::service_line(Some(counts)),
             items: TrayItemId::ALL
                 .into_iter()
                 .map(|id| TrayItem {
                     id,
                     label: id.label().to_owned(),
-                    enabled: true,
+                    enabled: match id {
+                        TrayItemId::Open | TrayItemId::Quit => true,
+                        TrayItemId::Hold => active,
+                        TrayItemId::Resume => !active,
+                    },
                 })
                 .collect(),
+            state: TrayState::of(readiness),
         }
     }
 }
@@ -307,30 +409,47 @@ mod tests {
         );
     }
 
+    /// The counts the goldens' tray describes.
+    fn golden_counts() -> ConnectionCounts {
+        ConnectionCounts {
+            mcp_clients: 2,
+            command_line: 0,
+            browsers: 2,
+        }
+    }
+
+    /// The tray the goldens carry: ready, with two MCP clients and two browsers.
+    fn golden_tray() -> TrayModel {
+        TrayModel::of(
+            Readiness::Ready,
+            RuntimeControlState::Active,
+            golden_counts(),
+        )
+    }
+
     #[test]
     fn the_frames_match_their_goldens() {
         golden(
             "workbench.json",
-            &DesktopFrame::Workbench {
-                url: GOLDEN_URL.to_owned(),
-                bearer: GOLDEN_BEARER.to_owned(),
-                tray: Some(TrayModel {
-                    tooltip: words::TRAY_TOOLTIP.to_owned(),
-                    items: [TrayItemId::Open, TrayItemId::Quit]
-                        .into_iter()
-                        .map(|id| TrayItem {
-                            id,
-                            label: id.label().to_owned(),
-                            enabled: true,
-                        })
-                        .collect(),
-                }),
+            &DesktopFrame::workbench(GOLDEN_URL, GOLDEN_BEARER, golden_tray()),
+        );
+        golden(
+            "tray-model.json",
+            &DesktopFrame::TrayModel {
+                model: TrayModel::of(
+                    Readiness::Paused,
+                    RuntimeControlState::Held,
+                    golden_counts(),
+                ),
             },
         );
         golden(
-            "workbench-no-tray.json",
-            &DesktopFrame::workbench(GOLDEN_URL, GOLDEN_BEARER, true),
+            "unavailable.json",
+            &DesktopFrame::Unavailable {
+                reason: UnavailableReason::NoTray,
+            },
         );
+        golden("closed.json", &DesktopFrame::Closed { stays: true });
         golden("already-open.json", &DesktopFrame::AlreadyOpen);
         golden(
             "goodbye.json",
@@ -446,23 +565,83 @@ mod tests {
         assert!(frame.is_err());
     }
 
-    #[test]
-    fn the_standard_tray_lists_the_four_entries_with_their_words() {
-        let tray = TrayModel::standard();
-        assert_eq!(tray.tooltip, "Ghostlight");
-        let listed: Vec<(&str, &str, bool)> = tray
+    /// The entries of `model` as (id, label, enabled).
+    fn listed(model: &TrayModel) -> Vec<(&str, &str, bool)> {
+        model
             .items
             .iter()
             .map(|item| (item.id.as_str(), item.label.as_str(), item.enabled))
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn an_active_tray_lists_the_four_entries_and_offers_pause_but_not_resume() {
+        let tray = golden_tray();
         assert_eq!(
-            listed,
+            tray.tooltip,
+            "Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+        );
+        assert_eq!(tray.state, TrayState::Ready);
+        assert_eq!(
+            listed(&tray),
             [
                 ("open", "Open Ghostlight", true),
                 ("hold", "Pause browser work", true),
-                ("resume", "Resume browser work", true),
+                ("resume", "Resume browser work", false),
                 ("quit", "Quit Ghostlight", true),
             ]
+        );
+    }
+
+    #[test]
+    fn a_paused_or_ended_tray_offers_resume_but_not_pause() {
+        for (readiness, runtime) in [
+            (Readiness::Paused, RuntimeControlState::Held),
+            (Readiness::SessionEnded, RuntimeControlState::Ended),
+        ] {
+            let tray = TrayModel::of(readiness, runtime, golden_counts());
+            assert_eq!(tray.state, TrayState::Paused);
+            assert_eq!(
+                listed(&tray),
+                [
+                    ("open", "Open Ghostlight", true),
+                    ("hold", "Pause browser work", false),
+                    ("resume", "Resume browser work", true),
+                    ("quit", "Quit Ghostlight", true),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn the_icon_state_follows_the_tone_of_the_readiness() {
+        for readiness in Readiness::ALL {
+            let expected = match readiness.tone() {
+                "quiet" | "offline" => TrayState::Ready,
+                "working" => TrayState::Working,
+                "held" => TrayState::Paused,
+                "attention" => TrayState::Attention,
+                other => panic!("a tone the tray does not know: {other}"),
+            };
+            assert_eq!(TrayState::of(*readiness), expected, "{readiness:?}");
+        }
+    }
+
+    #[test]
+    fn the_longest_service_line_fits_the_windows_tooltip() {
+        // The most the service admits at once: its session capacity of command-line or MCP
+        // sessions, and as many browsers.
+        let counts = ConnectionCounts {
+            mcp_clients: 999,
+            command_line: 999,
+            browsers: 999,
+        };
+        let tray = TrayModel::of(Readiness::Ready, RuntimeControlState::Active, counts);
+        assert!(
+            tray.tooltip.chars().count() <= MAX_TOOLTIP_LENGTH,
+            "{} characters: {}",
+            tray.tooltip.chars().count(),
+            tray.tooltip
         );
     }
 
@@ -505,7 +684,7 @@ mod tests {
 
     #[test]
     fn the_secret_is_not_printed() {
-        let frame = DesktopFrame::workbench(GOLDEN_URL, "s3cr3t-bearer-value", false);
+        let frame = DesktopFrame::workbench(GOLDEN_URL, "s3cr3t-bearer-value", golden_tray());
         let printed = format!("{frame:?} {frame:#?}");
         assert!(!printed.contains("s3cr3t-bearer-value"), "{printed}");
         assert!(printed.contains("[redacted]"));

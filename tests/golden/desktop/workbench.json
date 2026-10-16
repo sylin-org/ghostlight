@@ -3,7 +3,7 @@
   "url": "http://127.0.0.1:41234/",
   "bearer": "BEARER",
   "tray": {
-    "tooltip": "Ghostlight",
+    "tooltip": "Ghostlight service is up; 2 MCP clients and 2 browsers connected.",
     "items": [
       {
         "id": "open",
@@ -11,10 +11,21 @@
         "enabled": true
       },
       {
+        "id": "hold",
+        "label": "Pause browser work",
+        "enabled": true
+      },
+      {
+        "id": "resume",
+        "label": "Resume browser work",
+        "enabled": false
+      },
+      {
         "id": "quit",
         "label": "Quit Ghostlight",
         "enabled": true
       }
-    ]
+    ],
+    "state": "ready"
   }
 }

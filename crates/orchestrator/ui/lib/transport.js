@@ -1,12 +1,12 @@
 // Ghostlight workbench -- the only thing here that talks to the orchestrator.
 //
 // Every call out of this page goes through one object, so what the surface can ask for is a list
-// you can read in one sitting. It holds no state and touches no page: give it a way to invoke and
-// a way to listen (inside the native shell), or a way to fetch and a clipboard (anywhere else),
-// and it will tell you what came back or throw trying.
+// you can read in one sitting. It holds no state and touches no page: give it a way to fetch and a
+// clipboard, and it will tell you what came back or throw trying.
 //
-// Both paths speak today's command names. Inside the native shell a name is an invoke command;
-// over loopback the same name is looked up in one table that gives its method, path and body.
+// The page has one road to the service: JSON over loopback, in the Ghostlight window and in a
+// browser tab alike. A command's name is looked up in one table that gives its method, path and
+// body.
 (function installGhostlightTransport(root, factory) {
   const api = factory();
   root.GhostlightTransport = api;
@@ -168,8 +168,8 @@
   /**
    * A refusal, as the page reads it.
    *
-   * It reads as the service's sentence wherever it is turned into text, the way a rejection from
-   * the native shell does, and it also carries the status and the code for a caller that cares.
+   * It reads as the service's sentence wherever it is turned into text, and it also carries the
+   * status and the code for a caller that cares.
    */
   function refusal(message, status, code) {
     return Object.freeze({ message, status, code, toString: () => message });
@@ -187,35 +187,7 @@
     return refusal(detail?.message ?? `HTTP ${response.status}`, response.status, detail?.code);
   }
 
-  /** Native shell path: today's commands, invoked. */
-  function create({ invoke, listen, changeEvent } = {}) {
-    /** Whether there is an orchestrator to talk to at all. */
-    const available = typeof invoke === "function";
-
-    function call(command, args) {
-      if (!available) return Promise.reject(new Error("no orchestrator is attached"));
-      return invoke(command, args);
-    }
-
-    return Object.freeze({
-      available,
-      ...commands(call),
-
-      /** Copy product-owned command or setup text without granting arbitrary clipboard access. */
-      copyHarnessText: (id, kind) => call("copy_harness_text", { id, kind }),
-
-      /** Sequenced changes, pushed. Returns a way to stop, or null when there is nothing to subscribe to. */
-      subscribe(handlers) {
-        if (typeof listen !== "function") return null;
-        const listening = listen(changeEvent, handlers.change);
-        return () => Promise.resolve(listening).then((stop) => {
-          if (typeof stop === "function") stop();
-        });
-      }
-    });
-  }
-
-  /** Loopback path: the same commands, sent as JSON to the service that served the page. */
+  /** The commands, sent as JSON to the service that served the page. */
   function overHttp({ fetch: send, clipboard, bearer, schedule, cancel } = {}) {
     const available = typeof send === "function";
     const later = schedule ?? ((work, ms) => setTimeout(work, ms));
@@ -256,8 +228,8 @@
      * Read the live stream until it ends, and open it again after each failure.
      *
      * An event the service names is passed to the handler of that name. Any other event is a
-     * change, handed over as `{ payload }` the way the native shell hands it over. A stream that
-     * ends, fails or says nothing for too long counts as lost until its next hello.
+     * change, handed over as `{ payload }`. A stream that ends, fails or says nothing for too long
+     * counts as lost until its next hello.
      */
     function subscribe(handlers) {
       let stopped = false;
@@ -404,10 +376,10 @@
   }
 
   /**
-   * The commands both paths share, written once against a way to call.
+   * The commands, written against a way to call.
    *
-   * `call(command, args, extra)` carries `extra` for the path that can use it: the native shell
-   * ignores the tag of the rules and the state of the client, because it has one screen.
+   * `call(command, args, extra)` carries `extra`: the tag of the rules a policy write was drawn
+   * from, and the state of the client an act on it was drawn with.
    */
   function commands(call) {
     return {
@@ -429,7 +401,7 @@
       /** Turn "Others can watch" on or off; returns the controls part the window now shows. */
       setWatching: (watch) => call("set_watching", { watch }),
 
-      /** Open the diagnostics folder through the native shell. */
+      /** Open the diagnostics folder through the service. */
       revealDiagnostics: () => call("reveal_diagnostics"),
 
       /** The compiled policy: what applies here, and who decided each line. */
@@ -461,7 +433,7 @@
       /** Set up, update, fix, or remove Ghostlight from one concrete MCP target, drawn in `expectedState`. */
       manageHarness: (id, action, expectedState) => call("manage_harness", { id, action }, { expectedState }),
 
-      /** Ask the native shell to locate one supported harness executable or settings file. */
+      /** Ask the service to have the person locate one supported harness executable or settings file. */
       locateHarness: (id) => call("locate_harness", { id }),
 
       /** Open one product-owned official download destination. */
@@ -490,6 +462,6 @@
   }
 
   return Object.freeze({
-    create, overHttp, flatten, seqOf, STALE, SNAPSHOT_PARTS, ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND
+    overHttp, flatten, seqOf, STALE, SNAPSHOT_PARTS, ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND
   });
 });

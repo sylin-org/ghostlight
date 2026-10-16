@@ -72,7 +72,7 @@ impl DiagnosticsHub {
             event::PROCESS_STARTED,
             Level::Info,
             None,
-            "desktop authority starting",
+            "service starting",
         );
         Arc::new(Self {
             sink,

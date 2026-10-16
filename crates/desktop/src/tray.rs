@@ -1,8 +1,13 @@
-//! The tray, built from a model (ADR-0199 Decision 7).
+//! The tray, built from a model (ADR-0199 Decision 7 and its amendment of 2026-10-15).
 //!
-//! The service sends a [`TrayModel`]: a tooltip and an ordered list of menu items. The shell
-//! renders it and reports clicks as [`TrayEvent`]s. The shell owns no item of its own: which
-//! entries exist, what they say and whether they are enabled are all the service's decisions.
+//! The service sends a [`TrayModel`]: a state, a tooltip and an ordered list of menu items, and
+//! sends a new one whenever it changes. The shell renders it and reports clicks as
+//! [`TrayEvent`]s. The shell owns no item of its own: which entries exist, what they say and
+//! whether they are enabled are all the service's decisions.
+//!
+//! The icon is the product icon, drawn at run time. A ready service shows the plain ghost; each
+//! other state adds a small filled dot in the lower right in the colour the window's band uses for
+//! that state ([`state_icon`]). No other artwork is shipped.
 //!
 //! Thread rule: the tray is created and updated on the event-loop thread, after the loop has
 //! started (on Linux `tao` has then initialized GTK). [`install_events`] may run on any thread
@@ -11,8 +16,8 @@
 //! Linux reports no tray clicks (the indicator shows its menu itself), so on Linux the way to
 //! open the window must be a menu item of the model, never the icon click alone.
 //!
-//! [`TrayModel::validate`], [`icon_image`] and [`decode_rgba`] are pure and unit tested. [`Tray`]
-//! and [`install_events`] are thin glue over `tray-icon` and are checked live.
+//! [`TrayModel::validate`], [`icon_image`], [`state_icon`] and [`decode_rgba`] are pure and unit
+//! tested. [`Tray`] and [`install_events`] are thin glue over `tray-icon` and are checked live.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -32,8 +37,33 @@ pub const MAX_ID_LEN: usize = 32;
 /// The longest item label, in characters.
 pub const MAX_LABEL_LEN: usize = 64;
 
-/// The longest tooltip, in characters.
-pub const MAX_TOOLTIP_LEN: usize = 64;
+/// The longest tooltip, in characters: the Windows limit.
+pub const MAX_TOOLTIP_LEN: usize = 127;
+
+/// The colour of the dot for a working service, the band's accent `--a`.
+pub const WORKING_COLOUR: [u8; 3] = [0x5e, 0xea, 0xd4];
+
+/// The colour of the dot for a paused service, the band's `--held`.
+pub const PAUSED_COLOUR: [u8; 3] = [0xfb, 0xbf, 0x24];
+
+/// The colour of the dot for a service that needs attention, the band's `--danger`.
+pub const ATTENTION_COLOUR: [u8; 3] = [0xf8, 0x71, 0x71];
+
+/// The colour of the thin ring that keeps the dot apart from the ghost, the window's night ground
+/// `--bg`.
+const RING_COLOUR: [u8; 3] = [0x0f, 0x0e, 0x12];
+
+/// The centre of the dot in pixels of the 32 pixel icon, counted from the top left.
+const DOT_CENTRE: (f32, f32) = (24.5, 24.5);
+
+/// The radius of the dot, in pixels of the 32 pixel icon.
+const DOT_RADIUS: f32 = 5.5;
+
+/// How much wider than the dot the ring is, in pixels.
+const RING_WIDTH: f32 = 1.5;
+
+/// The icon size the dot is drawn for. A larger icon scales the dot with it.
+const REFERENCE_SIZE: f32 = 32.0;
 
 /// The identity of the one tray icon.
 const TRAY_ID: &str = "ghostlight";
@@ -72,13 +102,41 @@ pub struct TrayItem {
     pub enabled: bool,
 }
 
+/// The state the icon shows, the band's four states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrayState {
+    /// Ready: the plain ghost.
+    Ready,
+    /// An agent is working: the ghost with a teal dot.
+    Working,
+    /// Browser work is paused or ended: the ghost with an amber dot.
+    Paused,
+    /// Something needs attention: the ghost with a red dot.
+    Attention,
+}
+
+impl TrayState {
+    /// The colour of the dot this state adds to the ghost, or `None` for the plain ghost.
+    pub const fn dot(self) -> Option<[u8; 3]> {
+        match self {
+            TrayState::Ready => None,
+            TrayState::Working => Some(WORKING_COLOUR),
+            TrayState::Paused => Some(PAUSED_COLOUR),
+            TrayState::Attention => Some(ATTENTION_COLOUR),
+        }
+    }
+}
+
 /// The whole tray as the service describes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrayModel {
-    /// The hover text, at most 64 characters.
+    /// The hover text, at most 127 characters.
     pub tooltip: String,
     /// The menu entries in order, 1 to 16 of them.
     pub items: Vec<TrayItem>,
+    /// The state the icon shows.
+    pub state: TrayState,
 }
 
 fn model_error(reason: impl Into<String>) -> TrayError {
@@ -135,8 +193,9 @@ impl TrayModel {
 }
 
 impl TrayModel {
-    /// The tray while the shell has no workbench to act for: the tooltip says `words`, and every
-    /// entry but Open is disabled, since the service cannot hear a click.
+    /// The tray while the shell has no workbench to act for: the tooltip says `words`, the icon
+    /// is the plain ghost, and every entry but Open is disabled, since the service cannot hear a
+    /// click.
     pub fn while_without_service(&self, words: &str) -> TrayModel {
         TrayModel {
             tooltip: words.to_owned(),
@@ -148,6 +207,16 @@ impl TrayModel {
                     ..item.clone()
                 })
                 .collect(),
+            state: TrayState::Ready,
+        }
+    }
+
+    /// The tray while the window cannot be built: the tooltip says `words` and the rest is as the
+    /// service described it.
+    pub fn while_window_fails(&self, words: &str) -> TrayModel {
+        TrayModel {
+            tooltip: words.to_owned(),
+            ..self.clone()
         }
     }
 }
@@ -174,6 +243,55 @@ pub fn icon_image() -> Result<(Vec<u8>, u32, u32), TrayError> {
     decode_rgba(ICON_PNG)
 }
 
+/// The icon for `state`: the product icon, with a filled dot in the lower right for every state
+/// but ready. The ready icon is the product icon's own pixels.
+pub fn state_icon(state: TrayState) -> Result<(Vec<u8>, u32, u32), TrayError> {
+    let (mut rgba, width, height) = icon_image()?;
+    if let Some(colour) = state.dot() {
+        draw_dot(&mut rgba, width, height, colour);
+    }
+    Ok((rgba, width, height))
+}
+
+/// Lay a ring and a dot over the lower right of `rgba`, with a soft edge one pixel wide.
+fn draw_dot(rgba: &mut [u8], width: u32, height: u32, colour: [u8; 3]) {
+    let scale = width as f32 / REFERENCE_SIZE;
+    let (centre_x, centre_y) = (DOT_CENTRE.0 * scale, DOT_CENTRE.1 * scale);
+    let dot = DOT_RADIUS * scale;
+    let ring = (DOT_RADIUS + RING_WIDTH) * scale;
+    for y in 0..height {
+        for x in 0..width {
+            let distance =
+                ((x as f32 + 0.5 - centre_x).powi(2) + (y as f32 + 0.5 - centre_y).powi(2)).sqrt();
+            let index = ((y * width + x) * 4) as usize;
+            let pixel = &mut rgba[index..index + 4];
+            lay(pixel, RING_COLOUR, coverage(ring, distance));
+            lay(pixel, colour, coverage(dot, distance));
+        }
+    }
+}
+
+/// How much of a pixel at `distance` from the centre lies inside a circle of `radius`.
+fn coverage(radius: f32, distance: f32) -> f32 {
+    (radius + 0.5 - distance).clamp(0.0, 1.0)
+}
+
+/// Lay `colour` over `pixel` with `coverage` of opacity, keeping the pixel's alpha channel
+/// straight.
+fn lay(pixel: &mut [u8], colour: [u8; 3], coverage: f32) {
+    if coverage <= 0.0 {
+        return;
+    }
+    let below = f32::from(pixel[3]) / 255.0;
+    let alpha = coverage + below * (1.0 - coverage);
+    for channel in 0..3 {
+        let mixed = f32::from(colour[channel]) * coverage
+            + f32::from(pixel[channel]) * below * (1.0 - coverage);
+        pixel[channel] = (mixed / alpha).round().clamp(0.0, 255.0) as u8;
+    }
+    pixel[3] = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+}
+
 fn native(error: impl std::fmt::Display) -> TrayError {
     TrayError::Native {
         detail: error.to_string(),
@@ -194,9 +312,16 @@ fn menu_for(model: &TrayModel) -> Result<Menu, TrayError> {
     Ok(menu)
 }
 
+fn icon_for(state: TrayState) -> Result<Icon, TrayError> {
+    let (rgba, width, height) = state_icon(state)?;
+    Icon::from_rgba(rgba, width, height).map_err(|_| TrayError::Icon)
+}
+
 /// The tray icon in the notification area.
 pub struct Tray {
     icon: TrayIcon,
+    /// What the icon shows now, so an unchanged model touches nothing.
+    shown: TrayModel,
 }
 
 impl Tray {
@@ -204,25 +329,72 @@ impl Tray {
     /// thread after the loop has started.
     pub fn build(model: &TrayModel) -> Result<Tray, TrayError> {
         model.validate()?;
-        let (rgba, width, height) = icon_image()?;
-        let icon = Icon::from_rgba(rgba, width, height).map_err(|_| TrayError::Icon)?;
         let icon = TrayIconBuilder::new()
             .with_id(TRAY_ID)
             .with_tooltip(&model.tooltip)
-            .with_icon(icon)
+            .with_icon(icon_for(model.state)?)
             .with_menu(Box::new(menu_for(model)?))
             .with_menu_on_left_click(false)
             .build()
             .map_err(native)?;
-        Ok(Tray { icon })
+        Ok(Tray {
+            icon,
+            shown: model.clone(),
+        })
     }
 
-    /// Validates the model and replaces the menu and tooltip with it.
-    pub fn show(&self, model: &TrayModel) -> Result<(), TrayError> {
+    /// Validates the model and replaces the icon, the menu and the tooltip with it. A model the
+    /// tray already shows changes nothing, so a menu that is open stays open.
+    pub fn show(&mut self, model: &TrayModel) -> Result<(), TrayError> {
         model.validate()?;
+        if *model == self.shown {
+            return Ok(());
+        }
+        if model.state != self.shown.state {
+            self.icon
+                .set_icon(Some(icon_for(model.state)?))
+                .map_err(native)?;
+        }
         self.icon.set_menu(Some(Box::new(menu_for(model)?)));
-        self.icon.set_tooltip(Some(&model.tooltip)).map_err(native)
+        self.icon
+            .set_tooltip(Some(&model.tooltip))
+            .map_err(native)?;
+        self.shown = model.clone();
+        Ok(())
     }
+}
+
+/// The well-known name of the StatusNotifier host that draws tray icons on a Linux desktop.
+#[cfg(target_os = "linux")]
+const STATUS_NOTIFIER_WATCHER: &str = "org.kde.StatusNotifierWatcher";
+
+/// How long the session bus may take to say whether the watcher has an owner.
+#[cfg(target_os = "linux")]
+const BUS_PATIENCE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether the desktop can show a tray icon: always on Windows, and on Linux when a
+/// StatusNotifier host owns `org.kde.StatusNotifierWatcher` on the session bus. A desktop without
+/// one, such as GNOME without its AppIndicator extension, draws no icon.
+pub fn host_available() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(connection) = dbus::blocking::Connection::new_session() else {
+            return false;
+        };
+        let bus = connection.with_proxy(
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            BUS_PATIENCE,
+        );
+        let owned: Result<(bool,), dbus::Error> = bus.method_call(
+            "org.freedesktop.DBus",
+            "NameHasOwner",
+            (STATUS_NOTIFIER_WATCHER,),
+        );
+        matches!(owned, Ok((true,)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    true
 }
 
 /// What the user did to the tray.
@@ -275,6 +447,7 @@ mod tests {
                 item("resume", "Resume browser work"),
                 item("quit", "Quit Ghostlight"),
             ],
+            state: TrayState::Ready,
         }
     }
 
@@ -326,11 +499,12 @@ mod tests {
     }
 
     #[test]
-    fn the_tooltip_is_bounded() {
+    fn the_tooltip_is_bounded_by_the_windows_limit() {
+        assert_eq!(MAX_TOOLTIP_LEN, 127);
         let mut m = model();
-        m.tooltip = "t".repeat(65);
+        m.tooltip = "t".repeat(128);
         assert!(refused(&m));
-        m.tooltip = "t".repeat(64);
+        m.tooltip = "t".repeat(127);
         assert_eq!(m.validate(), Ok(()));
     }
 
@@ -342,6 +516,7 @@ mod tests {
         assert_eq!(first["id"], "open");
         assert_eq!(first["label"], "Open Ghostlight");
         assert_eq!(first["enabled"], true);
+        assert_eq!(value["state"], "ready");
         let back: TrayModel = serde_json::from_value(value).unwrap();
         assert_eq!(back, model());
     }
@@ -358,6 +533,7 @@ mod tests {
             .map(|item| item.id.as_str())
             .collect();
         assert_eq!(enabled, ["open"]);
+        assert_eq!(shown.state, TrayState::Ready);
         assert_eq!(shown.items.len(), model().items.len());
         assert_eq!(
             shown.items.iter().map(|i| &i.label).collect::<Vec<_>>(),
@@ -371,6 +547,79 @@ mod tests {
         assert_eq!((width, height), (32, 32));
         assert_eq!(rgba.len(), 4096);
         assert!(rgba.chunks(4).any(|pixel| pixel[3] != 0));
+    }
+
+    /// The pixel at (`x`, `y`) of a 32 pixel wide RGBA image.
+    fn pixel(rgba: &[u8], x: usize, y: usize) -> [u8; 4] {
+        let at = (y * 32 + x) * 4;
+        [rgba[at], rgba[at + 1], rgba[at + 2], rgba[at + 3]]
+    }
+
+    #[test]
+    fn each_state_has_its_own_icon_and_ready_is_the_plain_ghost() {
+        let plain = icon_image().unwrap().0;
+        let icons: Vec<Vec<u8>> = [
+            TrayState::Ready,
+            TrayState::Working,
+            TrayState::Paused,
+            TrayState::Attention,
+        ]
+        .into_iter()
+        .map(|state| state_icon(state).unwrap().0)
+        .collect();
+        assert_eq!(icons[0], plain, "ready is the original icon bytes");
+        for (index, icon) in icons.iter().enumerate() {
+            assert_eq!(icon.len(), plain.len());
+            for other in &icons[index + 1..] {
+                assert_ne!(icon, other, "four distinct images");
+            }
+        }
+    }
+
+    #[test]
+    fn the_dot_sits_in_the_lower_right_in_the_colour_of_the_state() {
+        let plain = icon_image().unwrap().0;
+        for (state, colour) in [
+            (TrayState::Working, WORKING_COLOUR),
+            (TrayState::Paused, PAUSED_COLOUR),
+            (TrayState::Attention, ATTENTION_COLOUR),
+        ] {
+            let icon = state_icon(state).unwrap().0;
+            assert_eq!(
+                pixel(&icon, 24, 24),
+                [colour[0], colour[1], colour[2], 255],
+                "{state:?}: the middle of the dot is the colour, fully opaque"
+            );
+            let changed: Vec<(usize, usize)> = (0..32)
+                .flat_map(|y| (0..32).map(move |x| (x, y)))
+                .filter(|(x, y)| pixel(&icon, *x, *y) != pixel(&plain, *x, *y))
+                .collect();
+            assert!(!changed.is_empty());
+            assert!(
+                changed.iter().all(|(x, y)| *x >= 14 && *y >= 14),
+                "{state:?}: nothing changes outside the lower right"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dot_colours_are_the_tokens_of_the_windows_stylesheet() {
+        let styles = include_str!("../../orchestrator/ui/styles.css");
+        for (token, colour) in [
+            ("--a", WORKING_COLOUR),
+            ("--held", PAUSED_COLOUR),
+            ("--danger", ATTENTION_COLOUR),
+            ("--bg", RING_COLOUR),
+        ] {
+            let declared = format!(
+                "{token}: #{:02x}{:02x}{:02x};",
+                colour[0], colour[1], colour[2]
+            );
+            assert!(
+                styles.contains(&declared),
+                "{declared} is not in the stylesheet"
+            );
+        }
     }
 
     #[test]

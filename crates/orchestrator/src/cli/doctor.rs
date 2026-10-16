@@ -313,6 +313,7 @@ mod tests {
                         usual_port: true,
                         watching: false,
                     }),
+                    window: None,
                 }),
             },
             strays,
@@ -352,6 +353,32 @@ mod tests {
         assert!(line.ends_with(&crate::language::deployment::restore_route()));
         observed.binaries[0].1 = true;
         assert_eq!(observed.missing_development_executable(), None);
+    }
+
+    #[test]
+    fn doctor_says_why_there_is_no_window_in_text_and_in_json() {
+        use crate::language::workbench::WindowReason;
+
+        for reason in [
+            WindowReason::NoDisplay,
+            WindowReason::NoInteractiveDesktop,
+            WindowReason::NoShellFile,
+            WindowReason::NoWebview,
+            WindowReason::NoTray,
+            WindowReason::DidNotStay,
+        ] {
+            let mut observed = observation(Vec::new());
+            observed.runtime.status.as_mut().unwrap().window = Some(reason);
+            assert_eq!(
+                doctor_document(&observed)["service"]["window"],
+                reason.as_str()
+            );
+            assert!(crate::cli::status::runtime_lines(&observed.runtime, false)
+                .contains(&reason.sentence().unwrap().to_owned()));
+        }
+        assert!(doctor_document(&observation(Vec::new()))["service"]
+            .get("window")
+            .is_none());
     }
 
     #[test]

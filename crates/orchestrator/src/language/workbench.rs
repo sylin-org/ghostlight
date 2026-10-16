@@ -92,9 +92,6 @@ pub const PAUSED_FROM_BROWSER: &str = "Paused from the browser toolbar.";
 /// What a screen is told when every place for a live view of its kind is taken.
 pub const TOO_MANY_SCREENS: &str = "Too many screens are watching. Close one and try again.";
 
-/// The hover text of the tray icon.
-pub const TRAY_TOOLTIP: &str = "Ghostlight";
-
 /// The tray entry that brings the Ghostlight window forward.
 pub const TRAY_OPEN: &str = "Open Ghostlight";
 
@@ -106,6 +103,103 @@ pub const TRAY_RESUME: &str = "Resume browser work";
 
 /// The tray entry that quits Ghostlight.
 pub const TRAY_QUIT: &str = "Quit Ghostlight";
+
+/// The title of the one notice that explains the icon, shown the first time the window is closed.
+pub const TRAY_HINT_TITLE: &str = "Ghostlight is still running";
+
+/// The body of that notice: where the icon is and how to open the window again.
+#[cfg(windows)]
+pub const TRAY_HINT_BODY: &str = "Open it again from the Ghostlight icon in the notification area.";
+
+/// The body of that notice: where the icon is and how to open the window again.
+#[cfg(not(windows))]
+pub const TRAY_HINT_BODY: &str =
+    "Open it again from the Ghostlight icon in the system tray or from Applications.";
+
+/// Why there is, or is not, a Ghostlight window, as `status` reports it.
+///
+/// The service decides it (`shown` and `tray` from the shell it has, the rest from what keeps it
+/// from bringing one up) and `status --json` carries the word.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowReason {
+    /// The window is open.
+    Shown,
+    /// The window is closed and the icon is there.
+    Tray,
+    /// No display is reachable from the service.
+    NoDisplay,
+    /// The service runs where no one can see a window: a remote session or a background session.
+    NoInteractiveDesktop,
+    /// The window program is missing from the installation.
+    NoShellFile,
+    /// The computer has no web view runtime for the window.
+    NoWebview,
+    /// The desktop shows no tray icons, so the window program does not stay.
+    NoTray,
+    /// The window program started and ended again and again, so the service stopped starting it.
+    DidNotStay,
+}
+
+impl WindowReason {
+    /// The word `status --json` carries.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Shown => "shown",
+            Self::Tray => "tray",
+            Self::NoDisplay => "no_display",
+            Self::NoInteractiveDesktop => "no_interactive_desktop",
+            Self::NoShellFile => "no_shell_file",
+            Self::NoWebview => "no_webview",
+            Self::NoTray => "no_tray",
+            Self::DidNotStay => "did_not_stay",
+        }
+    }
+
+    /// The sentence `status` and `doctor` print for this reason, or `None` when the window is
+    /// open and there is nothing to say.
+    #[must_use]
+    pub const fn sentence(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Shown => return None,
+            Self::Tray => WINDOW_TRAY,
+            Self::NoDisplay => "No Ghostlight window: no display is reachable from the service.",
+            Self::NoInteractiveDesktop => {
+                "No Ghostlight window: the service is not running in a desktop session a person can see."
+            }
+            Self::NoShellFile => {
+                "No Ghostlight window: the window program is missing from the Ghostlight folder. Install Ghostlight again to restore it."
+            }
+            Self::NoWebview => WINDOW_NO_WEBVIEW,
+            Self::NoTray => WINDOW_NO_TRAY,
+            Self::DidNotStay => WINDOW_DID_NOT_STAY,
+        })
+    }
+}
+
+#[cfg(windows)]
+const WINDOW_TRAY: &str = "The Ghostlight window is closed. Its icon is in the notification area.";
+#[cfg(not(windows))]
+const WINDOW_TRAY: &str = "The Ghostlight window is closed. Its icon is in the system tray.";
+
+#[cfg(windows)]
+const WINDOW_NO_WEBVIEW: &str =
+    "No Ghostlight window: the Microsoft WebView2 runtime is not installed.";
+#[cfg(not(windows))]
+const WINDOW_NO_WEBVIEW: &str =
+    "No Ghostlight window: the WebKitGTK 4.1 web view is not installed.";
+
+#[cfg(windows)]
+const WINDOW_NO_TRAY: &str =
+    "No Ghostlight window: the notification area is not available to show the icon.";
+#[cfg(not(windows))]
+const WINDOW_NO_TRAY: &str = "No Ghostlight window: this desktop shows no tray icons. Install a tray extension (on GNOME, AppIndicator) or open Ghostlight from Applications.";
+
+#[cfg(windows)]
+const WINDOW_DID_NOT_STAY: &str = "No Ghostlight window: the window program ended again and again, so Ghostlight stopped starting it. Run ghostlight open to try again.";
+#[cfg(not(windows))]
+const WINDOW_DID_NOT_STAY: &str = "No Ghostlight window: the window program ended again and again, so Ghostlight stopped starting it. The usual cause on Linux is a missing WebKitGTK 4.1 (libwebkit2gtk-4.1). Run ghostlight open to try again.";
 
 /// Why the diagnostics folder cannot be shown: diagnostics are off.
 pub const DIAGNOSTICS_OFF: &str = "Diagnostics are off; turn them on first.";
@@ -329,6 +423,75 @@ pub fn never_touch_count(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const EVERY_WINDOW_REASON: [WindowReason; 8] = [
+        WindowReason::Shown,
+        WindowReason::Tray,
+        WindowReason::NoDisplay,
+        WindowReason::NoInteractiveDesktop,
+        WindowReason::NoShellFile,
+        WindowReason::NoWebview,
+        WindowReason::NoTray,
+        WindowReason::DidNotStay,
+    ];
+
+    #[test]
+    fn a_window_reason_is_its_wire_word_and_every_word_is_different() {
+        let mut words = std::collections::BTreeSet::new();
+        for reason in EVERY_WINDOW_REASON {
+            assert_eq!(serde_json::to_value(reason).unwrap(), reason.as_str());
+            assert!(words.insert(reason.as_str()), "{reason:?}");
+        }
+    }
+
+    #[test]
+    fn every_reason_but_an_open_window_has_one_plain_sentence() {
+        for reason in EVERY_WINDOW_REASON {
+            match reason.sentence() {
+                None => assert_eq!(reason, WindowReason::Shown),
+                Some(sentence) => {
+                    assert!(sentence.is_ascii(), "{sentence}");
+                    assert!(sentence.ends_with('.'), "{sentence}");
+                    assert!(!sentence.contains('\n'), "{sentence}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_window_reasons_open_with_the_same_words_and_the_linux_cause_is_named() {
+        for reason in [
+            WindowReason::NoDisplay,
+            WindowReason::NoInteractiveDesktop,
+            WindowReason::NoShellFile,
+            WindowReason::NoWebview,
+            WindowReason::NoTray,
+            WindowReason::DidNotStay,
+        ] {
+            assert!(reason
+                .sentence()
+                .unwrap()
+                .starts_with("No Ghostlight window: "));
+        }
+        if cfg!(not(windows)) {
+            assert!(WindowReason::DidNotStay
+                .sentence()
+                .unwrap()
+                .contains("WebKitGTK 4.1"));
+        }
+    }
+
+    #[test]
+    fn the_first_close_hint_says_that_ghostlight_is_still_running_and_where_the_icon_is() {
+        assert_eq!(TRAY_HINT_TITLE, "Ghostlight is still running");
+        assert!(TRAY_HINT_BODY.is_ascii());
+        assert!(TRAY_HINT_BODY.starts_with("Open it again from the Ghostlight icon in the "));
+        if cfg!(windows) {
+            assert!(TRAY_HINT_BODY.ends_with("notification area."));
+        } else {
+            assert!(TRAY_HINT_BODY.ends_with("system tray or from Applications."));
+        }
+    }
 
     #[test]
     fn every_sentence_is_plain_ascii_and_ends_a_sentence() {

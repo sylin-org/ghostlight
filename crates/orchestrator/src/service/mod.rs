@@ -1,12 +1,15 @@
 //! The persistent service: its lifetime, its one relay listener and the sessions it serves.
 //!
 //! [`ServiceHost`] holds the service lock, prepares the executor and the browser port, and binds
-//! the relay protocol 4 endpoint once the desktop is ready (ADR-0166, ADR-0199 Decisions 5 and
-//! 9). The workbench's loopback server starts first, on one port per user, and carries no relay
+//! the relay protocol 4 endpoint (ADR-0199 Decisions 5 and 9). The workbench's loopback server starts first, on one port per user, and carries no relay
 //! peer. Every connection then opens with one relay opening: an `mcp` stream is one MCP client
 //! session served by [`crate::intake::mcp::McpSession`], a `browser` stream is one adapter
 //! connection, a `control` stream answers one operation, and a `desktop` stream hands the shell of
 //! the same build the workbench address and its secret (ADR-0199 Decision 7).
+//!
+//! The service links no UI toolkit. [`presence`] keeps the shell running whenever the desktop can
+//! show it, and the service describes the tray the shell draws. It binds its endpoint as soon as
+//! it starts (ADR-0199 Decision 5).
 //!
 //! A start carries the reason it was made for (ADR-0199 Decision 10). The reason decides what a
 //! held lock and the quit latch mean to it ([`lifetime`], [`latch`]). A person's Quit sets the
@@ -15,9 +18,11 @@
 //! leaves without the latch and without waiting for work in flight (ADR-0199 Decision 13).
 
 mod admission;
+pub mod hint;
 pub mod latch;
 pub mod lifetime;
 pub mod lock;
+pub mod presence;
 pub mod shell;
 #[cfg(test)]
 pub(crate) mod test_home;
@@ -53,7 +58,7 @@ use crate::browser::{
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuthoritySnapshot, GovernanceFacade, JsonlAuditSink};
 use crate::install;
-use crate::intake::desktop::{DesktopFrame, TrayItemId};
+use crate::intake::desktop::{DesktopFrame, TrayItemId, TrayModel};
 use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
 use crate::intake::MCP_CHANNEL;
@@ -61,15 +66,17 @@ use crate::language::catalog_for;
 use crate::language::environment::{ELEVATED_SERVICE, QUIT_HELD};
 use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
 use crate::language::outcome::DialogKind;
+use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{
-    RuntimeSource, Watching, WorkbenchFacade, WorkbenchNativeActs, WorkbenchPresentationPort,
-    WorkbenchProjection, WorkbenchQuitPort,
+    RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection, WorkbenchQuitPort,
+    WorkbenchTrayPort,
 };
 use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
+use presence::Presence;
 use shell::{ShellRoute, Shells};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
@@ -106,7 +113,7 @@ fn published_detail(endpoint: Option<&str>, workbench: Option<&WorkbenchAddress>
     )
 }
 
-/// The desktop's request to leave its event loop, installed once the desktop exists.
+/// The request that ends the service's wait for a quit, installed by the process that serves.
 pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
 
 /// How often a start that waits for the service lock asks for it again.
@@ -148,8 +155,6 @@ pub struct ServiceHost {
     intake: Arc<Intake>,
     bound: Mutex<Option<Bound>>,
     quit: Quit,
-    /// What the workbench facade is given for its window, notices and native acts.
-    route: Arc<ShellRoute>,
     ready: Arc<ReadyWatch>,
     lock_taken: Instant,
     _lock: ServiceLock,
@@ -186,9 +191,34 @@ impl ServiceHost {
         )
     }
 
+    /// Like [`ServiceHost::start`], with presence acting on `world` and so starting no process.
+    #[cfg(test)]
+    pub(crate) fn start_in_world(
+        home: &Path,
+        world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
+    ) -> Result<Self> {
+        Self::start_with_world(
+            home,
+            StartTerms {
+                reason: StartReason::Agent,
+                lock_wait: Duration::ZERO,
+            },
+            || Ok(false),
+            world,
+        )
+    }
+
+    /// The route the workbench facade is given, for tests that drive it.
+    #[cfg(test)]
+    pub(crate) fn route(&self) -> Arc<ShellRoute> {
+        Arc::new(ShellRoute::new(
+            self.quit.shells(),
+            Arc::clone(&self.intake.presence),
+        ))
+    }
+
     /// Prepare the service in the Ghostlight home `home` for a start made for `reason`, under its
-    /// lifetime lock, without binding the endpoint. The desktop must call `publish_ready` only
-    /// after its native interaction route is ready.
+    /// lifetime lock, without binding the endpoint. `publish_ready` binds it.
     ///
     /// In order: a process whose token is elevated is refused; a browser or recover start is
     /// refused while the quit latch is set ([`QuitLatched`]); the lock is taken, and a start that
@@ -210,9 +240,21 @@ impl ServiceHost {
         terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
     ) -> Result<Self> {
+        Self::start_with_world(home, terms, elevated, presence::System::boxed)
+    }
+
+    /// Like [`ServiceHost::start_with_token`], with the world presence acts on made by `world`
+    /// from the installation and the question "has a quit begun". A test passes a world that
+    /// starts no process.
+    pub(crate) fn start_with_world(
+        home: &Path,
+        terms: StartTerms,
+        elevated: impl FnOnce() -> io::Result<bool>,
+        world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
+    ) -> Result<Self> {
         let diagnostics = DiagnosticsHub::birth(home);
-        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), terms, elevated).inspect_err(
-            |error| {
+        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), terms, elevated, world)
+            .inspect_err(|error| {
                 // Meeting the running service is how a racing start ends, not a failure, and a
                 // start Quit holds back is a decision, not a fault.
                 if error.is::<QuitLatched>() {
@@ -230,8 +272,7 @@ impl ServiceHost {
                         &format!("service startup: {error:#}"),
                     );
                 }
-            },
-        )
+            })
     }
 
     fn start_with_diagnostics(
@@ -239,6 +280,7 @@ impl ServiceHost {
         diagnostics: Arc<DiagnosticsHub>,
         terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
+        world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
     ) -> Result<Self> {
         refuse_elevated_token(elevated)?;
         let layout = install::layout::Layout::new(home);
@@ -305,9 +347,17 @@ impl ServiceHost {
             layout.quit_latch(),
             Arc::clone(&browser),
         );
-        let route = Arc::new(ShellRoute::new(quit.shells()));
+        let ending: presence::Ending = {
+            let quit = quit.clone();
+            Arc::new(move || quit.drain.is_quitting())
+        };
+        let presence = Arc::new(Presence::new(world(layout.clone(), ending)));
+        let route = Arc::new(ShellRoute::new(quit.shells(), Arc::clone(&presence)));
         workbench.attach_presentation(route.clone());
-        workbench.attach_native_acts(route.clone());
+        workbench.attach_native_acts(route);
+        let tray_relay = TrayRelay::spawn(quit.shells(), Arc::clone(&stop))?;
+        workbench.attach_tray(tray_relay.0);
+        let presence_thread = presence.spawn(Arc::clone(&stop))?;
         let refresher = spawn_refresher(governance.clone(), workbench.clone(), Arc::clone(&stop))?;
         let refresher_thread = refresher.thread().clone();
         let audit_stop = stop.clone();
@@ -334,7 +384,8 @@ impl ServiceHost {
             budget: QueueBudget::default(),
             stop: Arc::clone(&stop),
             workbench_server: OnceLock::new(),
-            native_tray: AtomicBool::new(false),
+            presence,
+            layout,
         });
         Ok(Self {
             workbench,
@@ -342,21 +393,20 @@ impl ServiceHost {
             browser,
             audit,
             stop,
-            threads: vec![audit_thread, refresher],
+            threads: vec![audit_thread, refresher, tray_relay.1, presence_thread],
             refresher: refresher_thread,
             home: home.into(),
             intake,
             bound: Mutex::new(None),
             quit,
-            route,
             ready: Arc::default(),
             lock_taken,
             _lock: lock,
         })
     }
 
-    /// Start the workbench's loopback server, then bind the relay endpoint after the desktop event
-    /// loop has established an interaction route, and start accepting on it.
+    /// Start the workbench's loopback server, then bind the relay endpoint and start accepting on
+    /// it. The shell is started two seconds later when none has attached (see [`presence`]).
     ///
     /// The server binds first and agents are barred from its address before it answers, so no
     /// agent request can arrive before the rule holds. The relay has no port, token or discovery
@@ -377,6 +427,7 @@ impl ServiceHost {
         let thread = spawn_listener(Arc::clone(&listener), Arc::clone(&self.intake));
         *bound = Some(Bound { listener, thread });
         self.ready.settle();
+        self.intake.presence.published();
         let endpoint = Endpoint::for_home(&self.home).map(|endpoint| endpoint.to_string());
         self.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::RUNTIME_PUBLISHED,
@@ -419,21 +470,6 @@ impl ServiceHost {
         Some(address)
     }
 
-    /// Install what shows the window, shows notices and carries out native acts while no shell is
-    /// attached. While Tauri is in this process, it is the window's fallback.
-    pub fn install_native_fallback(
-        &self,
-        presentation: Arc<dyn WorkbenchPresentationPort>,
-        acts: Arc<dyn WorkbenchNativeActs>,
-    ) {
-        self.route.install_fallback(presentation, acts);
-    }
-
-    /// Record that the desktop has a tray of its own, so a shell is not handed a second one.
-    pub fn native_tray_present(&self) {
-        self.intake.native_tray.store(true, Ordering::SeqCst);
-    }
-
     /// Where the workbench is served, once `publish_ready` has started its server.
     #[must_use]
     pub fn workbench_address(&self) -> Option<WorkbenchAddress> {
@@ -473,19 +509,20 @@ impl ServiceHost {
             .context("start the ready limit")
     }
 
-    /// Install the request the desktop makes to leave its event loop with status 0.
+    /// Install the request that ends the service's wait for a quit, made once the quit has said
+    /// goodbye on every stream.
     pub fn install_quit_signal(&self, signal: QuitSignal) {
         *lock(&self.quit.signal) = Some(signal);
     }
 
     /// Begin a quit for `reason`: refuse new work, let in-flight invocations finish for up to
-    /// `grace`, say goodbye on every stream, then ask the desktop to exit. Returns at once; a
+    /// `grace`, say goodbye on every stream, then make the quit signal. Returns at once; a
     /// second call while a quit is under way does nothing.
     pub fn begin_quit(&self, reason: QuitReason, grace: Duration) {
         self.quit.begin(reason, grace);
     }
 
-    /// The handle the desktop uses for a person's Quit from the tray or the workbench.
+    /// The handle for a person's Quit and for the end of the session.
     #[must_use]
     pub fn quit_handle(&self) -> Quit {
         self.quit.clone()
@@ -503,6 +540,9 @@ impl ServiceHost {
         self.stop.store(true, Ordering::SeqCst);
         self.audit.wake();
         self.refresher.unpark();
+        for handle in &self.threads {
+            handle.thread().unpark();
+        }
         if let Some(server) = self.intake.workbench_server.get() {
             server.stop();
         }
@@ -522,8 +562,8 @@ impl Drop for ServiceHost {
     }
 }
 
-/// How the service ends on request: refuse new work, drain what runs, say goodbye, then leave
-/// the desktop.
+/// How the service ends on request: refuse new work, drain what runs, say goodbye, then make the
+/// quit signal that lets the process leave.
 ///
 /// A person's Quit also sets the quit latch first, so a browser that restarts does not bring
 /// Ghostlight back. A replacement or an uninstall leaves it alone.
@@ -555,7 +595,7 @@ impl Quit {
 
     /// Begin a quit for `reason` unless one is under way: set the latch for a person's Quit,
     /// refuse new work, and once the work in flight has finished or `grace` has passed, say
-    /// goodbye on every stream and ask the desktop to exit.
+    /// goodbye on every stream and make the quit signal.
     pub fn begin(&self, reason: QuitReason, grace: Duration) {
         if !self.drain.begin_quit() {
             return;
@@ -606,7 +646,7 @@ impl Quit {
     }
 
     /// Leave because the session is ending: refuse new work, say `session_end` goodbye on every
-    /// stream, then ask the desktop to exit. Returns at once, and neither waits for work in
+    /// stream, then make the quit signal. Returns at once, and neither waits for work in
     /// flight nor sets the latch, since a sign-out is not a person's Quit and the caller has
     /// already armed the fallback exit that bounds this stop.
     pub fn session_end(&self) {
@@ -737,8 +777,10 @@ struct Intake {
     /// The workbench's server, once `publish_ready` has started it. The desktop role reads its
     /// address and bearer from here.
     workbench_server: OnceLock<Arc<WorkbenchServer>>,
-    /// Whether the desktop has a tray of its own. While it does, a shell is sent no tray.
-    native_tray: AtomicBool,
+    /// Keeps the shell running whenever the desktop can show it.
+    presence: Arc<Presence>,
+    /// Where the installation keeps its files.
+    layout: install::layout::Layout,
 }
 
 impl Intake {
@@ -826,12 +868,14 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
 ///
 /// The service has one desktop place. A shell that finds it taken is told `already_open` instead of
 /// the workbench, the shell that holds the place is asked to show its window, and the stream ends.
-/// Otherwise the shell is handed the workbench address and its secret, and the tray when the
-/// service has none of its own. It is then attached, so the window, notices and native acts of the
-/// workbench go to it, and a quit says goodbye to it. What the shell sends is a click on a tray
-/// entry and the result of each act it was asked for; the shell opens its own window, so an `open`
-/// click and a frame kind this build does not know are skipped. A frame that does not decode ends
-/// the stream, and the shell is detached.
+/// Otherwise the shell is handed the workbench address and its secret and the tray to draw. It is
+/// then attached, so the window, notices and native acts of the workbench go to it, a quit says
+/// goodbye to it, and presence knows a shell is there. If a request to show the window was waiting
+/// for a shell, the shell is asked to show it. What the shell sends is a click on a tray entry, the
+/// result of each act, that it cannot show a window, and that the person closed the window; the
+/// first close that stays is explained once. The shell opens its own window, so an `open` click and
+/// a frame kind this build does not know are skipped. A frame that does not decode ends the
+/// stream, and the shell is detached.
 fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let Some(server) = intake.workbench_server.get() else {
         listener::refuse(&connection, OpeningRefusal::Unsupported);
@@ -848,22 +892,43 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let claim = match intake.quit.shells().claim() {
         Ok(claim) => claim,
         Err(occupied) => {
-            occupied.show();
+            if occupied.show() {
+                intake.presence.person_acted();
+                intake.presence.window_shown();
+            }
             writer.native(&DesktopFrame::AlreadyOpen)?;
             return Ok(());
         }
     };
+    let tray = intake.workbench.tray_model();
     writer.native(&DesktopFrame::workbench(
         server.address().url(),
         server.bearer(),
-        intake.native_tray.load(Ordering::SeqCst),
+        tray.clone(),
     ))?;
-    let attached = claim.attach(writer);
+    let attached = claim.attach(writer, tray);
+    let _present = ShellPresent::begin(&intake.presence);
+    if let Some(wanted) = intake.presence.attached() {
+        attached.show(wanted.address);
+    }
+    // A change between the tray handed over and the shell being attached would have gone nowhere.
+    attached.draw_tray(intake.workbench.tray_model());
     while let Some(frame) = reader.native::<DesktopFrame>(None)? {
         let item = match frame {
             DesktopFrame::Tray { item } => item,
             DesktopFrame::ActResult { id, outcome } => {
                 attached.answer(id, outcome);
+                continue;
+            }
+            DesktopFrame::Unavailable { reason } => {
+                intake.presence.unavailable(reason.window_reason());
+                continue;
+            }
+            DesktopFrame::Closed { stays } => {
+                intake.presence.closed(stays);
+                if stays {
+                    explain_close(intake, &attached);
+                }
                 continue;
             }
             _ => continue,
@@ -886,6 +951,79 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     Ok(())
 }
 
+/// Tells presence that a shell is gone when it is dropped, however the stream ended.
+struct ShellPresent<'a>(&'a Presence);
+
+impl<'a> ShellPresent<'a> {
+    fn begin(presence: &'a Presence) -> Self {
+        Self(presence)
+    }
+}
+
+impl Drop for ShellPresent<'_> {
+    fn drop(&mut self) {
+        self.0.detached();
+    }
+}
+
+/// Say, once per home, that closing the window left Ghostlight running and where its icon is.
+fn explain_close(intake: &Intake, shell: &shell::Attached) {
+    match hint::first_close(&intake.layout.tray_hint()) {
+        Ok(true) => shell.notice(TRAY_HINT_TITLE, TRAY_HINT_BODY),
+        Ok(false) => {}
+        Err(error) => intake.diagnostics.sink().emit(
+            ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+            ghostlight_bridge::diagnostics::Level::Warn,
+            None,
+            &format!("the tray hint marker could not be written: {error}"),
+        ),
+    }
+}
+
+/// Carries the tray the workbench describes to the attached shell on a thread of its own, so a
+/// refresh of the live parts never waits on a stream.
+struct TrayRelay {
+    latest: Mutex<Option<TrayModel>>,
+    thread: OnceLock<Thread>,
+}
+
+impl TrayRelay {
+    /// Start the thread that writes each tray the workbench describes to the attached shell, until
+    /// `stop` is set. The thread is unparked by whoever sets `stop`.
+    fn spawn(
+        shells: Arc<Shells>,
+        stop: Arc<AtomicBool>,
+    ) -> io::Result<(Arc<Self>, JoinHandle<()>)> {
+        let relay = Arc::new(Self {
+            latest: Mutex::new(None),
+            thread: OnceLock::new(),
+        });
+        let carrying = Arc::clone(&relay);
+        let handle = thread::Builder::new()
+            .name("ghostlight-tray".into())
+            .spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    let model = lock(&carrying.latest).take();
+                    match model {
+                        Some(model) => shells.send_tray(model),
+                        None => thread::park(),
+                    }
+                }
+            })?;
+        let _ = relay.thread.set(handle.thread().clone());
+        Ok((relay, handle))
+    }
+}
+
+impl WorkbenchTrayPort for TrayRelay {
+    fn tray_changed(&self, model: TrayModel) {
+        *lock(&self.latest) = Some(model);
+        if let Some(thread) = self.thread.get() {
+            thread.unpark();
+        }
+    }
+}
+
 /// The answer to a control `status`: who this service is, what is connected and where the
 /// workbench is. The workbench's bearer is never part of it.
 fn control_status(intake: &Intake) -> control::Status {
@@ -903,6 +1041,7 @@ fn control_status(intake: &Intake) -> control::Status {
                 usual_port: server.address().usual(),
                 watching: intake.workbench.watching(),
             }),
+        window: intake.presence.window_reason(),
     }
 }
 
@@ -1740,8 +1879,10 @@ mod tests {
     };
     use serde_json::{json, Value};
 
+    use super::presence::testing::Fake;
     use super::test_home::TestHome;
     use crate::browser::adapter::BrowserCommand;
+    use crate::browser::adapter::RuntimeControlIntent;
     use crate::browser::adapter::RuntimeControlState;
     use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
     use crate::cli::client as cli_client;
@@ -1751,8 +1892,8 @@ mod tests {
     use crate::intake::mcp::ResumeState;
     use crate::language::intake::OpeningRefusal;
     use crate::workbench::{
-        PageAddress, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
-        WorkbenchPresentationPort,
+        PageAddress, RuntimeSource, WorkbenchNativeActs, WorkbenchNotification,
+        WorkbenchPresentationError, WorkbenchPresentationPort,
     };
     use crate::workspace::ReleasedTabs;
 
@@ -2375,7 +2516,8 @@ mod tests {
             budget: super::QueueBudget::default(),
             stop: Arc::default(),
             workbench_server: std::sync::OnceLock::new(),
-            native_tray: std::sync::atomic::AtomicBool::new(false),
+            presence: Arc::new(super::Presence::new(Arc::new(Fake::default()).world())),
+            layout: crate::install::layout::Layout::new(home.path()),
         });
         let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
         let thread = super::spawn_listener(Arc::clone(&listener), intake.clone());
@@ -2567,6 +2709,7 @@ mod tests {
                 started_by: StartReason::Agent,
                 connections: Some(crate::language::workbench::ConnectionCounts::default()),
                 workbench: None,
+                window: None,
             }
         );
         drop(served);
@@ -3743,7 +3886,7 @@ mod tests {
     }
 
     /// The address, the bearer and the tray of a frame that hands over the workbench.
-    fn handed_over(handed: DesktopFrame) -> (String, String, Option<TrayModel>) {
+    fn handed_over(handed: DesktopFrame) -> (String, String, TrayModel) {
         match handed {
             DesktopFrame::Workbench { url, bearer, tray } => (url, bearer, tray),
             other => panic!("not the workbench: {other:?}"),
@@ -3800,9 +3943,10 @@ mod tests {
         assert_eq!(url, address.url());
         assert_eq!(
             tray,
-            Some(TrayModel::standard()),
-            "the service has no tray of its own here"
+            host.workbench.tray_model(),
+            "the workbench frame carries the tray the service describes"
         );
+        assert_eq!(tray.state, crate::intake::desktop::TrayState::Ready);
         let hold = r#"{"intent":"hold"}"#;
         let (status, _) = workbench_call(
             address.port(),
@@ -3824,15 +3968,49 @@ mod tests {
     }
 
     #[test]
-    fn a_shell_is_sent_no_tray_while_the_service_has_one_of_its_own() {
-        let home = TestHome::new("desktop-native-tray");
-        let host = ServiceHost::start(home.path()).unwrap();
+    fn a_pause_sends_the_shell_one_tray_model_with_resume_enabled() {
+        let home = TestHome::new("desktop-tray-model");
+        let host =
+            ServiceHost::start_in_world(home.path(), |_, _| Fake::default().into_world()).unwrap();
         host.publish_ready().unwrap();
-        host.native_tray_present();
+        let (mut stream, handed) = open_desktop();
+        let (_, _, tray) = handed_over(handed);
+        assert_eq!(tray.state, crate::intake::desktop::TrayState::Ready);
 
-        let (_stream, handed) = open_desktop();
+        host.workbench
+            .apply_runtime_control(RuntimeControlIntent::Hold, RuntimeSource::Window);
 
-        assert_eq!(handed_over(handed).2, None);
+        let DesktopFrame::TrayModel { model } = next_frame(&mut stream) else {
+            panic!("the first frame after a pause is the new tray");
+        };
+        // No browser is connected here, so the icon looks ready, as the band does (owner answer,
+        // 2026-10-15); the entries follow the runtime.
+        assert_eq!(model.state, crate::intake::desktop::TrayState::Ready);
+        let enabled: Vec<(&str, bool)> = model
+            .items
+            .iter()
+            .map(|item| (item.id.as_str(), item.enabled))
+            .collect();
+        assert_eq!(
+            enabled,
+            [
+                ("open", true),
+                ("hold", false),
+                ("resume", true),
+                ("quit", true)
+            ]
+        );
+        // Asking again with nothing changed sends nothing; the next frame is a later change.
+        host.workbench.refresh_live_parts();
+        host.workbench
+            .apply_runtime_control(RuntimeControlIntent::Resume, RuntimeSource::Window);
+        let DesktopFrame::TrayModel { model } = next_frame(&mut stream) else {
+            panic!("a resume is the next change, not a repeat of the pause");
+        };
+        assert!(model
+            .items
+            .iter()
+            .any(|item| item.id == TrayItemId::Hold && item.enabled));
         drop(host);
     }
 
@@ -4017,7 +4195,7 @@ mod tests {
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
         let mut stream = attached_shell(&host);
-        let route = Arc::clone(&host.route);
+        let route = host.route();
 
         let picked = in_background(move || route.pick_file("Choose a file"));
         let (id, act) = next_act(&mut stream);
@@ -4043,13 +4221,13 @@ mod tests {
             Some(std::path::PathBuf::from("chosen.json"))
         );
 
-        let route = Arc::clone(&host.route);
+        let route = host.route();
         let closed = in_background(move || route.pick_file("Again"));
         let (id, _) = next_act(&mut stream);
         answer(&mut stream, id, ActOutcome::Cancelled);
         assert_eq!(closed.recv_timeout(PATIENCE).unwrap().unwrap(), None);
 
-        let route = Arc::clone(&host.route);
+        let route = host.route();
         let refused = in_background(move || route.pick_file("Once more"));
         let (id, _) = next_act(&mut stream);
         answer(&mut stream, id, ActOutcome::Failed);
@@ -4068,7 +4246,7 @@ mod tests {
         let mut stream = attached_shell(&host);
 
         for (outcome, opened) in [(ActOutcome::Done, true), (ActOutcome::Failed, false)] {
-            let route = Arc::clone(&host.route);
+            let route = host.route();
             let link = in_background(move || route.open_url("https://example.com/docs"));
             let (id, act) = next_act(&mut stream);
             assert_eq!(
@@ -4080,7 +4258,7 @@ mod tests {
             answer(&mut stream, id, outcome.clone());
             assert_eq!(link.recv_timeout(PATIENCE).unwrap().is_ok(), opened);
 
-            let route = Arc::clone(&host.route);
+            let route = host.route();
             let folder = in_background(move || route.open_folder(std::path::Path::new("logs")));
             let (id, act) = next_act(&mut stream);
             assert_eq!(
@@ -4119,7 +4297,7 @@ mod tests {
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
         let mut stream = attached_shell(&host);
-        let route = Arc::clone(&host.route);
+        let route = host.route();
 
         let picked = in_background(move || route.pick_file("Choose"));
         next_act(&mut stream);
@@ -4139,7 +4317,7 @@ mod tests {
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
         let mut stream = attached_shell(&host);
-        let route = Arc::clone(&host.route);
+        let route = host.route();
 
         let picked = in_background(move || route.pick_file("Choose"));
         next_act(&mut stream);
@@ -4162,7 +4340,7 @@ mod tests {
     fn a_quit_releases_a_pick_at_once_and_does_not_wait_for_it() {
         let (_home, host, quit_requested) = quittable_host("shell-pick-quit");
         let mut stream = attached_shell(&host);
-        let route = Arc::clone(&host.route);
+        let route = host.route();
 
         let picked = in_background(move || route.pick_file("Choose"));
         next_act(&mut stream);
@@ -4182,7 +4360,7 @@ mod tests {
         );
         assert!(
             matches!(
-                host.route.pick_file("Too late"),
+                host.route().pick_file("Too late"),
                 Err(WorkbenchPresentationError::Unavailable)
             ),
             "no act starts once a quit has begun"
@@ -4194,7 +4372,7 @@ mod tests {
     fn a_session_end_releases_a_pick() {
         let (_home, host, _quit_requested) = quittable_host("shell-pick-session-end");
         let mut stream = attached_shell(&host);
-        let route = Arc::clone(&host.route);
+        let route = host.route();
 
         let picked = in_background(move || route.pick_file("Choose"));
         next_act(&mut stream);
@@ -4247,88 +4425,156 @@ mod tests {
     }
 
     #[test]
-    fn with_no_shell_the_fallback_serves_and_without_one_the_request_is_unavailable() {
-        #[derive(Default)]
-        struct Fallback(std::sync::Mutex<Vec<String>>);
-
-        impl WorkbenchPresentationPort for Fallback {
-            fn reveal(
-                &self,
-                address: Option<PageAddress>,
-            ) -> Result<(), WorkbenchPresentationError> {
-                self.0.lock().unwrap().push(format!("reveal {address:?}"));
-                Ok(())
-            }
-
-            fn notify(
-                &self,
-                _notification: WorkbenchNotification,
-            ) -> Result<(), WorkbenchPresentationError> {
-                self.0.lock().unwrap().push("notify".to_owned());
-                Ok(())
-            }
-        }
-
-        impl WorkbenchNativeActs for Fallback {
-            fn open_url(&self, url: &str) -> Result<(), WorkbenchPresentationError> {
-                self.0.lock().unwrap().push(format!("open {url}"));
-                Ok(())
-            }
-
-            fn open_folder(
-                &self,
-                _path: &std::path::Path,
-            ) -> Result<(), WorkbenchPresentationError> {
-                Ok(())
-            }
-
-            fn pick_file(
-                &self,
-                _title: &str,
-            ) -> Result<Option<std::path::PathBuf>, WorkbenchPresentationError> {
-                Ok(None)
-            }
-        }
-
-        let home = TestHome::new("shell-fallback");
+    fn with_no_shell_a_notice_and_an_act_are_unavailable_and_a_show_has_no_shell_to_start() {
+        let home = TestHome::new("shell-none");
+        // A test home has no shell file, so presence starts nothing.
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
-        assert!(matches!(
+        for result in [
             host.workbench.reveal(None),
-            Err(crate::workbench::WorkbenchError::PresentationUnavailable)
-        ));
-
-        let fallback = Arc::new(Fallback::default());
-        host.install_native_fallback(fallback.clone(), fallback.clone());
-        host.workbench.reveal(Some(PageAddress::Status)).unwrap();
-        host.workbench.test_notification().unwrap();
-        host.workbench
+            host.workbench.test_notification(),
+        ] {
+            assert!(
+                matches!(
+                    result,
+                    Err(crate::workbench::WorkbenchError::PresentationUnavailable)
+                ),
+                "{result:?}"
+            );
+        }
+        assert!(host
+            .workbench
             .open_destination(crate::workbench::WorkbenchDestination::Home)
-            .unwrap();
-        assert_eq!(fallback.0.lock().unwrap().len(), 3);
+            .is_err());
+        drop(host);
+    }
 
-        let mut stream = attached_shell(&host);
-        host.workbench.reveal(Some(PageAddress::Policy)).unwrap();
+    #[test]
+    fn showing_the_window_with_no_shell_starts_one_without_tray_and_shows_it_when_it_attaches() {
+        let home = TestHome::new("shell-show-launch");
+        let fake = Arc::new(Fake::default());
+        let host = ServiceHost::start_in_world(home.path(), {
+            let fake = Arc::clone(&fake);
+            move |_, _| fake.world()
+        })
+        .unwrap();
+        host.publish_ready().unwrap();
+
+        let asked = {
+            let workbench = host.workbench.clone();
+            in_background(move || workbench.reveal(Some(PageAddress::SettingsSharing)))
+        };
+        eventually(|| fake.launches() == [false]);
+        let (mut stream, handed) = open_desktop();
+        assert!(matches!(handed, DesktopFrame::Workbench { .. }));
+
         assert_eq!(
             next_frame(&mut stream),
             DesktopFrame::Show {
-                address: Some(PageAddress::Policy)
+                address: Some(PageAddress::SettingsSharing)
+            },
+            "the address asked for before the shell attached is shown when it does"
+        );
+        assert!(asked
+            .recv_timeout(PATIENCE)
+            .expect("the request is answered once the shell is attached")
+            .is_ok());
+        assert_eq!(
+            fake.launches(),
+            [false],
+            "one launch, and not a tray one: the window is asked for"
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn the_status_names_the_window_by_what_presence_knows() {
+        use crate::language::workbench::WindowReason;
+
+        let home = TestHome::new("status-window");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let window = || cli_client::status_at(home.path()).unwrap().window;
+        assert_eq!(window(), None, "presence has nothing to say yet");
+
+        let (mut stream, _) = open_desktop();
+        eventually(|| window() == Some(WindowReason::Shown));
+        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
+        eventually(|| window() == Some(WindowReason::Tray));
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Unavailable {
+                reason: crate::intake::desktop::UnavailableReason::NoWebview,
+            },
+        )
+        .unwrap();
+        // A click is answered after the frame before it was read, so the reason is recorded.
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Tray {
+                item: TrayItemId::Hold,
+            },
+        )
+        .unwrap();
+        while !matches!(next_frame(&mut stream), DesktopFrame::TrayModel { .. }) {}
+        drop(stream);
+        eventually(|| window() == Some(WindowReason::NoWebview));
+        drop(host);
+    }
+
+    #[test]
+    fn the_first_close_that_stays_is_explained_once_and_never_again() {
+        let home = TestHome::new("tray-hint");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let hint = home.path().join("state").join("tray-hint");
+        let (mut stream, _) = open_desktop();
+
+        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Notice {
+                title: crate::language::workbench::TRAY_HINT_TITLE.to_owned(),
+                body: crate::language::workbench::TRAY_HINT_BODY.to_owned(),
             }
         );
-        assert_eq!(
-            fallback.0.lock().unwrap().len(),
-            3,
-            "an attached shell takes the request"
-        );
+        assert!(hint.is_file(), "the marker is written");
 
-        drop(stream);
-        eventually(|| host.quit.shells().attached() == 0);
-        host.workbench.reveal(None).unwrap();
-        assert_eq!(
-            fallback.0.lock().unwrap().len(),
-            4,
-            "the fallback serves again"
+        // A second close says nothing: a Hold click is answered by a tray model, not a notice.
+        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Tray {
+                item: TrayItemId::Hold,
+            },
+        )
+        .unwrap();
+        assert!(
+            matches!(next_frame(&mut stream), DesktopFrame::TrayModel { .. }),
+            "no second notice"
         );
+        drop(host);
+    }
+
+    #[test]
+    fn a_close_that_does_not_stay_says_nothing_and_leaves_no_marker() {
+        let home = TestHome::new("tray-hint-none");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let (mut stream, _) = open_desktop();
+        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: false }).unwrap();
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Tray {
+                item: TrayItemId::Hold,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            next_frame(&mut stream),
+            DesktopFrame::TrayModel { .. }
+        ));
+        assert!(!home.path().join("state").join("tray-hint").exists());
         drop(host);
     }
 

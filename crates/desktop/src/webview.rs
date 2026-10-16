@@ -58,6 +58,12 @@ pub fn access_script(origin: &str, bearer: &str) -> String {
     )
 }
 
+/// Whether this computer has the web view runtime the window needs: WebView2 on Windows, and the
+/// WebKitGTK the shell was linked against on Linux.
+pub fn runtime_available() -> bool {
+    wry::webview_version().is_ok()
+}
+
 /// The folder the window keeps web storage in: `<home>/state/desktop-webview`.
 ///
 /// It holds only what the workbench page stores for its own loopback origin, which is why the

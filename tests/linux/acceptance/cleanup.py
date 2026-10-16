@@ -13,7 +13,7 @@ for path in pathlib.Path('/proc').iterdir():
  if path.name.isdigit():
   item=identity(path.name)
   if item and pathlib.Path(item['image']).name in ('ghostlight','ghostlight-mcp-connector') and not item['image'].startswith(str(area)+'/'):protected.append(item)
-  if item and item['image'].startswith(str(area)+'/') and '/guest/' not in item['image'] and pathlib.Path(item['image']).name=='ghostlight':owned.append(item)
+  if item and item['image'].startswith(str(area)+'/') and '/guest/' not in item['image'] and pathlib.Path(item['image']).name in ('ghostlight','ghostlight-desktop'):owned.append(item)  # the tray item belongs to the shell, ghostlight-desktop
 report={'before':owned,'quit':[],'fallback_cleanup':[]}
 items=call('org.kde.StatusNotifierWatcher','/StatusNotifierWatcher','org.freedesktop.DBus.Properties','Get',GLib.Variant('(ss)',('org.kde.StatusNotifierWatcher','RegisteredStatusNotifierItems')))[0]
 for item in items:
@@ -35,7 +35,7 @@ for item in owned:
  if identity(item['pid'])==item:
   # The private session bus may already have exited. This is only the exact authority created
   # for that disposable no-tray test; never fall back to terminating other installations.
-  assert item['image']==str(area/'no-tray/bin/ghostlight'),item
+  assert pathlib.Path(item['image']).parent==area/'no-tray/bin',item
   os.kill(item['pid'],signal.SIGTERM);report['fallback_cleanup'].append(item)
 time.sleep(.5)
 report['remaining']=[p for p in owned if identity(p['pid'])==p]

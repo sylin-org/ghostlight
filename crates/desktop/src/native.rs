@@ -3,9 +3,8 @@
 //! 2026-10-15, shell milestone 2).
 //!
 //! The service decides what to show or open and when; the shell only carries it out. The pure
-//! parts live here and are unit tested: the address check that keeps the script the window runs
-//! safe, the start address of a window opened at a section, and [`carry_out`], which turns one
-//! act into its result. [`ThisComputer`] is the thin glue to the operating system (the opener, the
+//! parts live here and are unit tested: the address check, the address a window loads to open at
+//! a section ([`section_url`]), and [`carry_out`], which turns one act into its result. [`ThisComputer`] is the thin glue to the operating system (the opener, the
 //! file dialog) and [`show_notice`] is the notification call; both are checked live.
 //!
 //! An act is answered through a callback, because a file dialog is not always finished when it is
@@ -56,10 +55,10 @@ pub fn prepare_identity() {
     }
 }
 
-/// Whether `address` is safe to put in the script that moves the window: one to
+/// Whether `address` is safe to put after the `#` of the workbench address: one to
 /// [`ADDRESS_LIMIT`] characters of `a` to `z`, `/` and `-`, and nothing else.
 ///
-/// This keeps the script safe and nothing more. Which addresses the page has is the service's to
+/// This keeps the address safe and nothing more. Which addresses the page has is the service's to
 /// say; it checks every address before it sends one.
 pub fn is_safe_address(address: &str) -> bool {
     !address.is_empty()
@@ -78,9 +77,15 @@ pub fn start_url(workbench: &str, address: Option<&str>) -> String {
     }
 }
 
-/// The script that moves an open window to `address`, or `None` when the address is not safe.
-pub fn move_script(address: &str) -> Option<String> {
-    is_safe_address(address).then(|| format!("window.location.hash = \"{address}\";"))
+/// The address an open window navigates to in order to show `address`, or `None` when the address
+/// is not safe.
+///
+/// `origin` is the workbench origin, with no trailing slash. The window is moved by navigating to
+/// this address, which the webview does as a change of the address after the `#` and the page
+/// reads as such. A script run in the page would be lost when the page is still loading, which is
+/// how a request for a section made right after the window opened was dropped.
+pub fn section_url(origin: &str, address: &str) -> Option<String> {
+    is_safe_address(address).then(|| start_url(&format!("{origin}/"), Some(address)))
 }
 
 /// Where the result of one act goes. It is called exactly once, on the thread that carried the
@@ -361,13 +366,23 @@ mod tests {
     }
 
     #[test]
-    fn the_script_that_moves_the_window_holds_the_address_and_nothing_else() {
+    fn an_open_window_is_moved_by_navigating_to_the_section_not_by_running_a_script() {
+        let origin = "http://127.0.0.1:41234";
+        // The first request and every later one take the same road, whatever the window shows.
+        for address in ["settings/diagnostics", "settings/sharing", "monitor"] {
+            assert_eq!(
+                section_url(origin, address),
+                Some(format!("{origin}/#{address}")),
+                "{address}"
+            );
+        }
+        assert_eq!(section_url(origin, "x\"; alert(1); \""), None);
+        assert_eq!(section_url(origin, ""), None);
         assert_eq!(
-            move_script("settings/sharing").as_deref(),
-            Some("window.location.hash = \"settings/sharing\";")
+            section_url(origin, "settings/sharing"),
+            Some(start_url(&format!("{origin}/"), Some("settings/sharing"))),
+            "a window opened at a section and one moved to it load the same address"
         );
-        assert_eq!(move_script("x\"; alert(1); \""), None);
-        assert_eq!(move_script(""), None);
     }
 
     #[test]

@@ -3015,6 +3015,7 @@ mod tests {
                         started_by: StartReason::Update,
                         connections: None,
                         workbench: None,
+                        window: None,
                     },
                 )
                 .unwrap();

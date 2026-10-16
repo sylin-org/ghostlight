@@ -57,7 +57,7 @@ public static class GhostlightNativeJourney {
             if (process != owner) return true;
             var name = new StringBuilder(256);
             GetClassName(window, name, name.Capacity);
-            if (name.ToString() != "Tauri Window") return true;
+            if (name.ToString() != "Ghostlight Window") return true;
             UIntPtr ignored;
             result.Add(new Window {
                 Handle=window.ToInt64(), Visible=IsWindowVisible(window), Minimized=IsIconic(window),
@@ -86,7 +86,7 @@ public static class GhostlightNativeJourney {
             var name = new StringBuilder(256);
             GetClassName(window, name, name.Capacity);
             if (name.ToString().StartsWith("GhostlightSessionListener_")) listener = window;
-            if (name.ToString() == "Tauri Window") workbench = window;
+            if (name.ToString() == "Ghostlight Window") workbench = window;
             return true;
         }, IntPtr.Zero);
         if (listener == IntPtr.Zero) throw new InvalidOperationException("Session listener window is unavailable.");
@@ -265,7 +265,7 @@ try {
             if ([DateTime]::UtcNow -gt $deadline) { throw 'Desktop runtime discovery was not published.' }
             Start-Sleep -Milliseconds 2
         }
-        # Publication precedes Tauri Ready. Start the real authenticated Open calls immediately.
+        # The endpoint binds at start, before any shell attaches. Start the real authenticated Open calls immediately.
         $openers = @(for ($index = 0; $index -lt $OpenBurst; $index++) { Start-OwnedProcess @('open') })
         Wait-OpenBurst $authority $openers
         $window = @(Wait-WindowState $authority 'restored')[0]

@@ -5,8 +5,9 @@
 //! desktop place: a second shell is turned away (it is told `already_open`) and the attached shell
 //! is shown instead. [`ShellRoute`] is the one adapter the workbench facade is given for both its
 //! presentation port and its native acts: with a shell attached it writes `show`, `notice` and
-//! `act` frames to it, and without one it hands the request to the fallback adapter (the Tauri
-//! window, while it is still in this process).
+//! `act` frames to it. Without one, a request to show the window goes to presence, which starts a
+//! shell, and every other request is unavailable. The tray model the service describes is written
+//! to the attached shell each time it differs from the one the shell last drew.
 //!
 //! An act waits for the shell's `act_result`. A stream that ends, a goodbye, and a quit that
 //! begins each release every act waiting on the streams they touch, and the waiting act answers
@@ -17,13 +18,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use ghostlight_relay::protocol::GoodbyeReason;
 
+use super::presence::{Presence, Shown};
 use crate::browser::transport::SocketWriter;
-use crate::intake::desktop::{ActOutcome, DesktopFrame, NativeAct};
+use crate::intake::desktop::{ActOutcome, DesktopFrame, NativeAct, TrayModel};
 use crate::language::workbench as words;
 use crate::workbench::{
     PageAddress, WorkbenchNativeActs, WorkbenchNotification, WorkbenchPresentationError,
@@ -138,6 +140,13 @@ impl Shells {
         }
     }
 
+    /// Describe the tray to the attached shell, when it differs from the one the shell last drew.
+    pub fn send_tray(&self, model: TrayModel) {
+        if let Some(stream) = self.attached_stream() {
+            stream.draw(model);
+        }
+    }
+
     /// Say goodbye with `reason` to the attached shell and release the acts waiting on it.
     pub fn say_goodbye(&self, reason: GoodbyeReason) {
         if let Some(stream) = self.attached_stream() {
@@ -155,9 +164,9 @@ pub struct Claim {
 }
 
 impl Claim {
-    /// Attach the shell on `writer`: it is the one requests go to until the returned guard is
-    /// dropped.
-    pub fn attach(mut self, writer: Arc<SocketWriter>) -> Attached {
+    /// Attach the shell on `writer`, which has been sent `tray`: it is the one requests go to
+    /// until the returned guard is dropped.
+    pub fn attach(mut self, writer: Arc<SocketWriter>, tray: TrayModel) -> Attached {
         let mut registry = lock(&self.shells.registry);
         registry.next_stream += 1;
         let stream = Arc::new(Stream {
@@ -165,6 +174,7 @@ impl Claim {
             writer,
             next_act: AtomicU64::new(0),
             waiting: Mutex::default(),
+            tray: Mutex::new(tray),
         });
         registry.place = Place::Attached(Arc::clone(&stream));
         self.attached = true;
@@ -189,11 +199,12 @@ pub struct Occupied {
 }
 
 impl Occupied {
-    /// Bring the holder's window forward, best effort. A shell that is still being handed the
-    /// workbench is about to open its window anyway.
-    pub fn show(&self) {
-        if let Some(stream) = &self.holder {
-            let _ = stream.tell(&DesktopFrame::Show { address: None });
+    /// Bring the holder's window forward, best effort, and say whether there was a holder to ask.
+    /// A shell that is still being handed the workbench is about to open its window anyway.
+    pub fn show(&self) -> bool {
+        match &self.holder {
+            Some(stream) => stream.tell(&DesktopFrame::Show { address: None }).is_ok(),
+            None => false,
         }
     }
 }
@@ -205,6 +216,24 @@ pub struct Attached {
 }
 
 impl Attached {
+    /// Describe the tray to this shell, when it differs from the one the shell last drew.
+    pub fn draw_tray(&self, model: TrayModel) {
+        self.stream.draw(model);
+    }
+
+    /// Ask this shell to bring its window forward at `address`.
+    pub fn show(&self, address: Option<PageAddress>) {
+        let _ = self.stream.tell(&DesktopFrame::Show { address });
+    }
+
+    /// Hand this shell one notice to show.
+    pub fn notice(&self, title: &str, body: &str) {
+        let _ = self.stream.tell(&DesktopFrame::Notice {
+            title: title.to_owned(),
+            body: body.to_owned(),
+        });
+    }
+
     /// The shell reported how act `id` ended.
     pub fn answer(&self, id: u64, outcome: ActOutcome) {
         let waiting = lock(&self.stream.waiting).acts.remove(&id);
@@ -232,6 +261,8 @@ struct Stream {
     writer: Arc<SocketWriter>,
     next_act: AtomicU64,
     waiting: Mutex<Waiting>,
+    /// The tray the shell last drew, as far as the service has told it.
+    tray: Mutex<TrayModel>,
 }
 
 #[derive(Default)]
@@ -247,6 +278,22 @@ impl Stream {
         self.writer
             .native(frame)
             .map_err(|_| WorkbenchPresentationError::Unavailable)
+    }
+
+    /// Tell the shell to draw `model` when it is not the tray it already draws.
+    fn draw(&self, model: TrayModel) {
+        let mut drawn = lock(&self.tray);
+        if *drawn == model {
+            return;
+        }
+        if self
+            .tell(&DesktopFrame::TrayModel {
+                model: model.clone(),
+            })
+            .is_ok()
+        {
+            *drawn = model;
+        }
     }
 
     /// Ask the shell to carry out `act` and wait for its answer: for `patience` when one is
@@ -295,53 +342,31 @@ impl Stream {
 
 /// What the workbench facade is given for its window, notices and native acts.
 ///
-/// With a shell attached, a request goes to it. With none, it goes to the fallback
-/// when one is installed, and is unavailable otherwise. A quit that has begun makes every request
-/// unavailable. The fallback is the Tauri window and goes when Tauri leaves the service.
+/// With a shell attached, a request goes to it. With none, a request to show the window goes to
+/// presence, which starts a shell and shows the window when it attaches, and every other request
+/// is unavailable. A quit that has begun makes every request unavailable.
 pub struct ShellRoute {
     shells: Arc<Shells>,
-    fallback: OnceLock<Fallback>,
-}
-
-struct Fallback {
-    presentation: Arc<dyn WorkbenchPresentationPort>,
-    acts: Arc<dyn WorkbenchNativeActs>,
+    presence: Arc<Presence>,
 }
 
 /// Where one request goes.
-enum Target<'a> {
+enum Target {
     Shell(Arc<Stream>),
-    Fallback(&'a Fallback),
     Nowhere,
 }
 
 impl ShellRoute {
-    /// A route over `shells`, with no fallback.
+    /// A route over `shells`, which asks `presence` for a shell when there is none.
     #[must_use]
-    pub fn new(shells: Arc<Shells>) -> Self {
-        Self {
-            shells,
-            fallback: OnceLock::new(),
-        }
+    pub fn new(shells: Arc<Shells>, presence: Arc<Presence>) -> Self {
+        Self { shells, presence }
     }
 
-    /// Install what serves a request while no shell is attached. The first install stands.
-    pub fn install_fallback(
-        &self,
-        presentation: Arc<dyn WorkbenchPresentationPort>,
-        acts: Arc<dyn WorkbenchNativeActs>,
-    ) {
-        let _ = self.fallback.set(Fallback { presentation, acts });
-    }
-
-    fn target(&self) -> Target<'_> {
+    fn target(&self) -> Target {
         match self.shells.current() {
             Current::Shell(stream) => Target::Shell(stream),
-            Current::Closing => Target::Nowhere,
-            Current::None => self
-                .fallback
-                .get()
-                .map_or(Target::Nowhere, Target::Fallback),
+            Current::Closing | Current::None => Target::Nowhere,
         }
     }
 
@@ -358,10 +383,20 @@ impl ShellRoute {
 
 impl WorkbenchPresentationPort for ShellRoute {
     fn reveal(&self, address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
-        match self.target() {
-            Target::Shell(stream) => stream.tell(&DesktopFrame::Show { address }),
-            Target::Fallback(fallback) => fallback.presentation.reveal(address),
-            Target::Nowhere => Err(WorkbenchPresentationError::Unavailable),
+        loop {
+            match self.shells.current() {
+                Current::Shell(stream) => {
+                    stream.tell(&DesktopFrame::Show { address })?;
+                    self.presence.window_shown();
+                    return Ok(());
+                }
+                Current::Closing => return Err(WorkbenchPresentationError::Unavailable),
+                Current::None => match self.presence.request_show(address) {
+                    Ok(Shown::Delivered) => return Ok(()),
+                    Ok(Shown::Attached) => {}
+                    Err(_) => return Err(WorkbenchPresentationError::Unavailable),
+                },
+            }
         }
     }
 
@@ -374,7 +409,6 @@ impl WorkbenchPresentationPort for ShellRoute {
                 title: notification.title,
                 body: notification.body,
             }),
-            Target::Fallback(fallback) => fallback.presentation.notify(notification),
             Target::Nowhere => Err(WorkbenchPresentationError::Unavailable),
         }
     }
@@ -389,7 +423,6 @@ impl WorkbenchNativeActs for ShellRoute {
                     url: url.to_owned(),
                 },
             ),
-            Target::Fallback(fallback) => fallback.acts.open_url(url),
             Target::Nowhere => Err(WorkbenchPresentationError::Unavailable),
         }
     }
@@ -407,7 +440,6 @@ impl WorkbenchNativeActs for ShellRoute {
                     },
                 )
             }
-            Target::Fallback(fallback) => fallback.acts.open_folder(path),
             Target::Nowhere => Err(WorkbenchPresentationError::Unavailable),
         }
     }
@@ -426,7 +458,6 @@ impl WorkbenchNativeActs for ShellRoute {
                     ),
                 }
             }
-            Target::Fallback(fallback) => fallback.acts.pick_file(title),
             Target::Nowhere => Err(WorkbenchPresentationError::Unavailable),
         }
     }

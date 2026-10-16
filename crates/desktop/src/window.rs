@@ -32,7 +32,7 @@ use tao::event_loop::EventLoopWindowTarget;
 use tao::window::{Icon, Window, WindowBuilder, WindowId};
 use wry::{WebContext, WebView, WebViewBuilder};
 
-use crate::native::move_script;
+use crate::native::section_url;
 use crate::states::{self, StateButton, StateScreen};
 use crate::tray::icon_image;
 use crate::webview;
@@ -459,20 +459,25 @@ impl ShellWindow {
         self.window.set_focus();
     }
 
-    /// Moves the open page to `address`, a place the service named. An address that is not safe
-    /// to put in a script changes nothing.
+    /// Moves the open page to `address`, a place the service named, by navigating to the
+    /// workbench address with it after the `#`. An address that is not safe changes nothing.
+    ///
+    /// This is a navigation and not a script run in the page: a script is lost when the page is
+    /// still loading, and a request made right after the window opens would leave the page where
+    /// it was. A navigation lands whatever the page is doing, and the page reads it as a change of
+    /// its address.
     pub fn go_to(&self, address: &str) {
-        let Some(script) = move_script(address) else {
-            return;
-        };
         let Some(Shown {
             webview,
-            content: Content::Workbench { .. },
+            content: Content::Workbench { origin, .. },
         }) = &self.shown
         else {
             return;
         };
-        if let Err(error) = webview.evaluate_script(&script) {
+        let Some(url) = section_url(origin, address) else {
+            return;
+        };
+        if let Err(error) = webview.load_url(&url) {
             eprintln!("ghostlight-desktop: {}", native(error));
         }
     }

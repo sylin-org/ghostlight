@@ -1,7 +1,7 @@
 //! Bounds on what a surface may send the workbench, checked before anything parses it.
 //!
-//! The Tauri adapter and the loopback server share these, so every screen says the same thing
-//! about the same bad input.
+//! Every request the loopback server reads is checked with these, so every screen says the same
+//! thing about the same bad input.
 
 use crate::language::workbench as words;
 

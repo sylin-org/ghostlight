@@ -8,7 +8,7 @@ use ghostlight_relay::endpoint::Endpoint;
 use crate::install::layout::Layout;
 use crate::install::record::{Channel, InstallRecord};
 use crate::intake::listener::control::Status;
-use crate::language::workbench as words;
+use crate::language::workbench::{self as words, WindowReason};
 
 /// What the local service looks like right now.
 #[derive(Clone, Debug)]
@@ -38,7 +38,8 @@ pub fn observe_runtime() -> anyhow::Result<RuntimeObservation> {
 
 /// The `status --json` document scripts read.
 ///
-/// A service that did not report its connections or its workbench carries neither field.
+/// A service that did not report its connections, its workbench or why it has no window carries
+/// none of those fields.
 pub fn runtime_document(observation: &RuntimeObservation) -> serde_json::Value {
     let Some(status) = &observation.status else {
         return serde_json::json!({
@@ -58,13 +59,17 @@ pub fn runtime_document(observation: &RuntimeObservation) -> serde_json::Value {
     if let Some(workbench) = &status.workbench {
         document["workbench"] = serde_json::json!(workbench);
     }
+    if let Some(window) = status.window {
+        document["window"] = serde_json::json!(window.as_str());
+    }
     document
 }
 
 /// The lines the text `status` and `doctor` print about the service, in order.
 ///
-/// A running service gives one sentence counting its connections and, once it serves one, a line
-/// for the workbench. When nothing answers, `idle_is_ready` adds that the service starts by itself.
+/// A running service gives one sentence counting its connections, once it serves one a line for
+/// the workbench, and, when there is no window or it is closed, one sentence that says why. When
+/// nothing answers, `idle_is_ready` adds that the service starts by itself.
 #[must_use]
 pub fn runtime_lines(observation: &RuntimeObservation, idle_is_ready: bool) -> Vec<String> {
     let Some(status) = &observation.status else {
@@ -80,6 +85,9 @@ pub fn runtime_lines(observation: &RuntimeObservation, idle_is_ready: bool) -> V
             workbench.watching,
             workbench.usual_port,
         ));
+    }
+    if let Some(sentence) = status.window.and_then(WindowReason::sentence) {
+        lines.push(sentence.to_owned());
     }
     lines
 }
@@ -135,6 +143,7 @@ mod tests {
                 started_by: StartReason::Agent,
                 connections,
                 workbench,
+                window: None,
             }),
         }
     }
@@ -227,6 +236,49 @@ mod tests {
                 "instance": "instance_old",
                 "endpoint": ENDPOINT,
             })
+        );
+    }
+
+    #[test]
+    fn each_reason_for_the_window_gets_its_sentence_and_its_word() {
+        for reason in [
+            WindowReason::Tray,
+            WindowReason::NoDisplay,
+            WindowReason::NoInteractiveDesktop,
+            WindowReason::NoShellFile,
+            WindowReason::NoWebview,
+            WindowReason::NoTray,
+            WindowReason::DidNotStay,
+        ] {
+            let mut seen = observation(counts(), workbench(true, true));
+            seen.status.as_mut().unwrap().window = Some(reason);
+            let lines = runtime_lines(&seen, false);
+            assert_eq!(lines.len(), 3, "{reason:?}");
+            assert_eq!(lines[2], reason.sentence().unwrap());
+            assert_eq!(runtime_document(&seen)["window"], reason.as_str());
+        }
+        assert_eq!(
+            runtime_lines(&nothing_answers(), false).len(),
+            1,
+            "no service, no window sentence"
+        );
+    }
+
+    #[test]
+    fn an_open_window_has_a_word_and_no_sentence() {
+        let mut seen = observation(counts(), workbench(true, true));
+        seen.status.as_mut().unwrap().window = Some(WindowReason::Shown);
+        assert_eq!(runtime_lines(&seen, false).len(), 2);
+        assert_eq!(runtime_document(&seen)["window"], "shown");
+        seen.status.as_mut().unwrap().window = None;
+        assert!(runtime_document(&seen).get("window").is_none());
+    }
+
+    #[test]
+    fn the_status_sentence_for_no_display_is_the_one_in_the_spec() {
+        assert_eq!(
+            WindowReason::NoDisplay.sentence(),
+            Some("No Ghostlight window: no display is reachable from the service.")
         );
     }
 
