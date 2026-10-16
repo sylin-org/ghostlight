@@ -12,6 +12,8 @@ use crate::cli::parse::{NativeHostCommand, SetupOptions};
 use crate::install::container::{self, AppContainer};
 use crate::install::deployment::{stop_found_strays, StrayStop, SystemProcessControl};
 use crate::install::layout::Layout;
+use crate::install::version_directories;
+use crate::language::deployment as deployment_words;
 use crate::language::workbench as stray_words;
 
 /// Registrations an install left unwritten because the app container it ran in keeps them private.
@@ -22,7 +24,19 @@ struct KeptPrivate {
 }
 
 /// Run installation or uninstallation across detected browsers and MCP clients.
+///
+/// An install that wrote its registrations also removes the 1.x version directories from `bin`,
+/// with the programs running from them already stopped.
 pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
+    run_setup_steps(install, options)?;
+    if install && !options.dry_run {
+        remove_version_directories(&Layout::current()?);
+    }
+    Ok(())
+}
+
+/// The registration steps of [`run_setup`].
+fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     use crate::install::command_path::{CommandPath, CommandPathState, PATH_ENTRY_REGISTRATION};
     use crate::install::container::Residence;
     use crate::install::desktop_entry::DesktopIntegration;
@@ -232,6 +246,33 @@ fn stop_older_installation_programs() -> anyhow::Result<()> {
         println!("{line}");
     }
     Ok(())
+}
+
+/// Archive the audit log of each 1.x version directory in `layout`'s `bin`, remove the directory,
+/// and say what became of each. A directory that cannot be removed is said so and does not fail
+/// the install: the next one tries again.
+fn remove_version_directories(layout: &Layout) {
+    let directories = version_directories::find(layout);
+    let archives = version_directories::archives(layout, &directories);
+    let retired = version_directories::retire(&directories, &archives);
+    for directory in &retired.removed {
+        println!(
+            "{}",
+            deployment_words::removed_version_directory(&directory.display().to_string())
+        );
+        if let Some(archive) = version_directories::archive_of(&archives, directory) {
+            println!(
+                "{}",
+                deployment_words::archived_version_audit(&archive.to.display().to_string())
+            );
+        }
+    }
+    for directory in &retired.kept {
+        eprintln!(
+            "{}",
+            deployment_words::kept_entry(&directory.display().to_string())
+        );
+    }
 }
 
 /// One line for each stray `stop` stopped and each it could not.
@@ -595,6 +636,45 @@ mod tests {
             select_install_browsers(&windows, &SetupOptions::default()).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn an_install_archives_and_removes_the_1x_version_directories_and_nothing_else() {
+        use std::fs;
+
+        use super::remove_version_directories;
+        use crate::install::layout::Layout;
+        use crate::install::scratch::Scratch;
+
+        let scratch = Scratch::new();
+        let layout = Layout::new(scratch.path());
+        let bin = layout.bin();
+        for name in ["v1.3.5", "v1.3.6", "vnext"] {
+            fs::create_dir_all(bin.join(name)).unwrap();
+            fs::write(bin.join(name).join("ghostlight-mcp-connector"), "image").unwrap();
+        }
+        fs::write(
+            bin.join("v1.3.5").join("audit.jsonl"),
+            b"log
+",
+        )
+        .unwrap();
+        fs::write(bin.join("v1.3.7"), "a file").unwrap();
+
+        remove_version_directories(&layout);
+
+        assert!(!bin.join("v1.3.5").exists());
+        assert!(!bin.join("v1.3.6").exists());
+        assert!(bin.join("vnext").join("ghostlight-mcp-connector").is_file());
+        assert!(bin.join("v1.3.7").is_file());
+        assert_eq!(
+            fs::read(layout.state().join("audit-v1.3.5.jsonl")).unwrap(),
+            b"log
+"
+        );
+
+        remove_version_directories(&layout);
+        assert!(bin.join("vnext").is_dir());
     }
 
     #[test]

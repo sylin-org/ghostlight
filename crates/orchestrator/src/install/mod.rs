@@ -17,6 +17,7 @@ pub(crate) mod scratch;
 pub mod swap;
 pub mod user_assets;
 pub mod user_path;
+pub mod version_directories;
 #[cfg(windows)]
 pub mod windows_entry;
 

@@ -18,6 +18,7 @@ use crate::install::container;
 use crate::install::deployment::{stray_processes, StrayProcess};
 use crate::install::layout::Layout;
 use crate::install::record::{Channel, InstallRecord};
+use crate::install::version_directories;
 use crate::language::deployment as deployment_words;
 use crate::language::workbench as words;
 
@@ -38,6 +39,7 @@ pub struct DoctorObservation {
     harnesses: Vec<crate::install::HarnessSummary>,
     runtime: RuntimeObservation,
     strays: Vec<StrayProcess>,
+    version_directories: Vec<PathBuf>,
     readiness: Option<crate::workbench::ReadinessSummary>,
     diagnostics: crate::diagnostics::DiagnosticsReport,
 }
@@ -96,6 +98,7 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         harnesses: HarnessRegistry::discover().refresh()?,
         runtime,
         strays,
+        version_directories: version_directories::find(&layout),
         readiness,
         diagnostics,
     })
@@ -185,6 +188,12 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     for stray in &observation.strays {
         println!("{}", words::stray_line(&stray.image.display().to_string()));
     }
+    for directory in &observation.version_directories {
+        println!(
+            "{}",
+            words::version_directory_line(&directory.display().to_string())
+        );
+    }
     let report = &observation.diagnostics;
     match (report.layer, &report.directory) {
         (layer, Some(directory)) => println!(
@@ -234,6 +243,7 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "mcp_clients": observation.harnesses,
         "service": runtime_document(&observation.runtime),
         "strays": observation.strays,
+        "version_directories": observation.version_directories,
         "readiness": observation.readiness,
         "process_diagnostics": observation.diagnostics,
     })
@@ -306,6 +316,7 @@ mod tests {
                 }),
             },
             strays,
+            version_directories: Vec::new(),
             readiness: None,
             diagnostics: crate::diagnostics::DiagnosticsReport {
                 layer: "off",
@@ -372,6 +383,21 @@ mod tests {
                 "watching": false,
                 "usual_port": true,
             })
+        );
+    }
+
+    #[test]
+    fn doctor_json_lists_the_1x_version_directories_left_in_bin() {
+        let mut observed = observation(Vec::new());
+        assert_eq!(
+            doctor_document(&observed)["version_directories"],
+            serde_json::json!([])
+        );
+        observed.version_directories =
+            vec![PathBuf::from("bin/v1.3.5"), PathBuf::from("bin/v1.3.6")];
+        assert_eq!(
+            doctor_document(&observed)["version_directories"],
+            serde_json::json!(["bin/v1.3.5", "bin/v1.3.6"])
         );
     }
 

@@ -28,7 +28,8 @@
 //!    development build that cannot be asked; stops what runs from the retired development
 //!    directory and removes that directory and its marker, which earlier development builds used;
 //!    archives the 1.x audit log, then removes the 1.x lifecycle files, the installation record
-//!    last;
+//!    last; stops what runs from a 1.x `bin/v<version>` directory, archives the audit log it
+//!    holds into `state`, and removes it (see [`version_directories`]);
 //! 6. starts `bin/ghostlight-service serve` and writes `install.json` only once a service answers a
 //!    control status with an instance other than the one that was replaced.
 //!
@@ -53,10 +54,11 @@ use thiserror::Error;
 
 use super::entry::{canonical_path, same_path};
 use super::layout::{retired_connector_names, Layout, DESKTOP_EXECUTABLE_NAME};
-use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan};
+use super::migration::{self, FlatpakStep, Legacy, LegacyRoots, MigrationPlan, Move};
 use super::reconcile::{PendingRegistration, ReconcileReport, Registrations};
 use super::record::{self, Channel, InstallRecord, PayloadRefused, Standing};
 use super::swap;
+use super::version_directories;
 use crate::cli::client;
 use crate::language::deployment as words;
 use crate::service::lock::ServiceLock;
@@ -290,6 +292,8 @@ pub enum StrayKind {
     /// A program still running from the directory earlier 2.0 development builds ran in, which
     /// an install removes.
     RetiredDevelopment,
+    /// A program still running from a 1.x `bin/v<version>` directory, which an install removes.
+    RetiredVersionDirectory,
 }
 
 /// A process of an older installation that is still running.
@@ -356,10 +360,11 @@ fn stray_refresh() -> ProcessRefreshKind {
 /// Whether the process running `image` is a leftover of an older installation.
 ///
 /// Only executables under the Ghostlight home count, so a program of the same name elsewhere is
-/// left alone. Anything running from the retired development directory is a leftover; elsewhere
-/// the name decides, so a process whose file has since been removed is still found. The current
-/// edge, the shell and the current service image are never strays, nor is the process asking. The
-/// retired directory comes first, so the answering service is a stray when it runs from there.
+/// left alone. Anything running from the retired development directory or from a 1.x version
+/// directory is a leftover; elsewhere the name decides, so a process whose file has since been
+/// removed is still found. The current edge, the shell and the current service image are never
+/// strays, nor is the process asking. The retired directories come first, so the answering
+/// service is a stray when it runs from one.
 fn classify(
     image: &Path,
     pid: u32,
@@ -372,6 +377,12 @@ fn classify(
     }
     if lies_under(image, &layout.retired_development_directory()) {
         return Some(StrayKind::RetiredDevelopment);
+    }
+    if version_directories::find(layout)
+        .iter()
+        .any(|directory| lies_under(image, directory))
+    {
+        return Some(StrayKind::RetiredVersionDirectory);
     }
     let file_name = image.file_name()?.to_str()?;
     let (base, is_moved_aside) = match swap::moved_aside(file_name) {
@@ -534,8 +545,12 @@ pub struct InstallPlan {
     /// running service's if it does not quit.
     pub processes_to_stop: Vec<PathBuf>,
     /// Files and directories removed once `bin` holds the new executables: the retired
-    /// development directory and its marker, where an earlier development build ran.
+    /// development directory and its marker, where an earlier development build ran, and the 1.x
+    /// `bin/v<version>` directories.
     pub deletions: Vec<PathBuf>,
+    /// The audit logs of the 1.x version directories, each moved into `state` before its
+    /// directory is removed.
+    pub version_audit_archives: Vec<Move>,
     /// Registrations the reconcile will write.
     pub registrations_to_rewrite: Vec<PendingRegistration>,
 }
@@ -689,6 +704,9 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
     let migration = migration::plan(layout.home(), &context.legacy)?;
     let installed = InstallRecord::read(&layout.install_record())?;
     let retired = RetiredDevelopment::find(layout);
+    let version_directories = version_directories::find(layout);
+    let mut deletions = retired.deletions.clone();
+    deletions.extend(version_directories.iter().cloned());
     let mut plan = InstallPlan {
         mode,
         version: context.build.version.clone(),
@@ -698,7 +716,8 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
         restart: true,
         record: None,
         processes_to_stop: Vec::new(),
-        deletions: retired.deletions.clone(),
+        deletions,
+        version_audit_archives: version_directories::archives(layout, &version_directories),
         registrations_to_rewrite: Vec::new(),
     };
     let edge_changes = edge_changes(context, installed.as_ref())?;
@@ -719,7 +738,10 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                     return Err(PayloadRefused::new(installed, &payload_record).into());
                 }
                 Standing::Same
-                    if !edge_changes && plan.migration.is_empty() && retired.is_empty() =>
+                    if !edge_changes
+                        && plan.migration.is_empty()
+                        && retired.is_empty()
+                        && version_directories.is_empty() =>
                 {
                     plan.unchanged = true;
                     plan.restart = false;
@@ -785,8 +807,10 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 /// The retired development directory and marker go the same way: once `bin` holds the new
 /// executables and the registrations name them, the service is asked to quit (it may be running
 /// from that directory), whatever else runs from there is stopped, and the directory and the
-/// marker are removed. An entry that cannot be removed is reported in [`Outcome::left_behind`];
-/// it does not fail the install.
+/// marker are removed. The 1.x version directories follow the same order and are removed last,
+/// after the migration has archived its own audit log: the log each holds is archived first, and
+/// a directory whose log could not be archived stays. An entry that cannot be removed is
+/// reported in [`Outcome::left_behind`]; it does not fail the install.
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
     if plan.unchanged {
@@ -826,13 +850,13 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         }
         // A program that will not stop is reported; it blocks nothing here.
         strays_left = stop_found_strays(context.control, layout, None).stuck;
-        left_behind = remove_retired_development(&plan);
         if migrating {
             migration::retire_state(&copied)?;
             migration::archive_audit(&plan.migration)?;
             migration::finish(&plan.migration)?;
             flatpak = migration::retire_flatpak_route(&plan.migration);
         }
+        left_behind = remove_deletions(layout, &plan);
         Some(
             context.control.start_serve(layout).is_ok()
                 && context.control.wait_ready(layout, replaced.as_deref()),
@@ -1019,13 +1043,19 @@ impl RetiredDevelopment {
     }
 }
 
-/// Remove what `plan` lists as deletions: the retired development directory and its marker.
-/// Returns the entries that could not be removed. The programs that ran from there were stopped
-/// by pid with the other strays, and one that would not stop is reported with them, so a removal
-/// that fails here names only what stayed.
-fn remove_retired_development(plan: &InstallPlan) -> Vec<PathBuf> {
-    plan.deletions
+/// Remove what `plan` lists as deletions: the retired development directory and its marker, and
+/// the 1.x version directories after their audit logs are archived. Returns the entries that
+/// could not be removed. The programs that ran from there were stopped by pid with the other
+/// strays, and one that would not stop is reported with them, so a removal that fails here names
+/// only what stayed.
+fn remove_deletions(layout: &Layout, plan: &InstallPlan) -> Vec<PathBuf> {
+    let (versions, others): (Vec<PathBuf>, Vec<PathBuf>) = plan
+        .deletions
         .iter()
+        .cloned()
+        .partition(|path| version_directories::is_version_directory(layout, path));
+    let mut kept: Vec<PathBuf> = others
+        .into_iter()
         .filter(|path| {
             let removed = if path.is_dir() {
                 fs::remove_dir_all(path)
@@ -1034,8 +1064,9 @@ fn remove_retired_development(plan: &InstallPlan) -> Vec<PathBuf> {
             };
             removed.is_err_and(|error| error.kind() != io::ErrorKind::NotFound)
         })
-        .cloned()
-        .collect()
+        .collect();
+    kept.extend(version_directories::retire(&versions, &plan.version_audit_archives).kept);
+    kept
 }
 
 /// Every image a running service of this home may have been started from: the ones in `bin` and
@@ -1184,6 +1215,10 @@ mod tests {
         strays: Vec<StrayProcess>,
         /// Whether the programs of an older installation refuse to stop.
         strays_stay: bool,
+        /// A directory whose presence the fake notes each time it is asked to stop strays.
+        watched_directory: Option<PathBuf>,
+        /// Whether `watched_directory` existed at each stop of strays.
+        watched_present: RefCell<Vec<bool>>,
         calls: RefCell<Vec<Call>>,
         sightings: RefCell<Vec<Sighting>>,
     }
@@ -1202,6 +1237,8 @@ mod tests {
                 failing_stops: Cell::new(0),
                 strays: Vec::new(),
                 strays_stay: false,
+                watched_directory: None,
+                watched_present: RefCell::new(Vec::new()),
                 calls: RefCell::new(Vec::new()),
                 sightings: RefCell::new(Vec::new()),
             }
@@ -1271,6 +1308,9 @@ mod tests {
         }
 
         fn stop_strays(&self, strays: &[StrayProcess]) -> Vec<StrayProcess> {
+            if let Some(directory) = &self.watched_directory {
+                self.watched_present.borrow_mut().push(directory.is_dir());
+            }
             self.note(Call::StopStrays(
                 strays.iter().map(|stray| stray.pid).collect(),
             ));
@@ -2164,6 +2204,167 @@ mod tests {
         assert!(!fixture.layout.retired_development_directory().exists());
         assert!(!fixture.layout.retired_development_marker().exists());
         assert_eq!(control.calls()[0], Call::Quit);
+    }
+
+    /// Put what the 1.x launchers left in `bin`: `v1.3.5` with an audit log and runtime files,
+    /// `v1.3.6` with executables, and two entries that are not version directories.
+    fn plant_version_directories(fixture: &Fixture) -> (PathBuf, PathBuf) {
+        let bin = fixture.layout.bin();
+        let first = bin.join("v1.3.5");
+        let second = bin.join("v1.3.6");
+        for directory in [&first, &second] {
+            fs::create_dir_all(directory).unwrap();
+            for name in legacy_image_names() {
+                fs::write(directory.join(name), "1.x image").unwrap();
+            }
+        }
+        fs::write(first.join(AUDIT_FILE_NAME), VERSION_AUDIT).unwrap();
+        for name in [
+            "ghostlight-runtime.json",
+            "ghostlight-runtime.lock",
+            "ghostlight-runtime.startup",
+        ] {
+            fs::write(first.join(name), "runtime").unwrap();
+        }
+        fs::create_dir_all(bin.join("vnext")).unwrap();
+        fs::write(bin.join("vnext").join("keep"), "keep").unwrap();
+        fs::write(bin.join("v1.3.7"), "a file").unwrap();
+        (first, second)
+    }
+
+    /// What `v1.3.5` held as its audit log.
+    const VERSION_AUDIT: &[u8] = b"{\"event\":\"1.x\"}\n";
+
+    /// The entries of `bin` that are not version directories, to show they stay.
+    fn untouched_entries(fixture: &Fixture) -> [PathBuf; 2] {
+        let bin = fixture.layout.bin();
+        [bin.join("vnext").join("keep"), bin.join("v1.3.7")]
+    }
+
+    #[test]
+    fn a_development_deploy_archives_and_removes_the_1x_version_directories() {
+        let fixture = Fixture::new();
+        let (first, second) = plant_version_directories(&fixture);
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert!(outcome.left_behind.is_empty());
+        assert_eq!(outcome.plan.deletions, [first.clone(), second.clone()]);
+        assert!(!first.exists());
+        assert!(!second.exists());
+        assert_eq!(
+            fs::read(fixture.layout.state().join("audit-v1.3.5.jsonl")).unwrap(),
+            VERSION_AUDIT
+        );
+        for kept in untouched_entries(&fixture) {
+            assert!(kept.is_file(), "{}", kept.display());
+        }
+        assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
+    }
+
+    #[test]
+    fn a_release_and_a_restore_remove_them_too_and_a_second_install_has_nothing_to_do() {
+        for mode in [Mode::Release, Mode::Restore] {
+            let fixture = Fixture::new();
+            let (first, second) = plant_version_directories(&fixture);
+            let outcome = fixture.run(mode, VERSION, &FakeControl::new()).unwrap();
+            assert!(outcome.left_behind.is_empty(), "{mode:?}");
+            assert!(!first.exists() && !second.exists(), "{mode:?}");
+            assert!(fixture.layout.state().join("audit-v1.3.5.jsonl").is_file());
+
+            let again = fixture.run(mode, VERSION, &FakeControl::new()).unwrap();
+            assert!(again.plan.deletions.is_empty(), "{mode:?}");
+            assert!(again.plan.version_audit_archives.is_empty(), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn the_same_release_still_removes_the_1x_version_directories() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        let (first, second) = plant_version_directories(&fixture);
+        let outcome = fixture
+            .run(Mode::Release, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(!outcome.plan.unchanged);
+        assert!(outcome.plan.swaps.is_empty());
+        assert!(!first.exists() && !second.exists());
+    }
+
+    #[test]
+    fn a_plan_lists_the_1x_version_directories_and_their_archives_and_changes_nothing() {
+        let fixture = Fixture::new();
+        let (first, second) = plant_version_directories(&fixture);
+        let before = fixture.snapshot();
+        let control = FakeControl::new();
+        let outcome = install(
+            &fixture.context(fixture.build(VERSION), &control),
+            &Request {
+                payload: None,
+                mode: Mode::Development,
+                plan_only: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(outcome.plan.deletions, [first.clone(), second]);
+        assert_eq!(
+            outcome.plan.version_audit_archives,
+            [Move {
+                from: first.join(AUDIT_FILE_NAME),
+                to: fixture.layout.state().join("audit-v1.3.5.jsonl"),
+            }]
+        );
+        assert_eq!(fixture.snapshot(), before);
+        assert!(control.calls().is_empty());
+    }
+
+    #[test]
+    fn a_program_running_from_a_1x_version_directory_is_stopped_before_the_directory_goes() {
+        let fixture = Fixture::new();
+        let (first, second) = plant_version_directories(&fixture);
+        let mut control = FakeControl::new();
+        control.watched_directory = Some(second.clone());
+        control.strays = vec![StrayProcess {
+            pid: 52,
+            image: second.join(EDGE_EXECUTABLE_NAME),
+            kind: StrayKind::RetiredVersionDirectory,
+        }];
+        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+        assert!(outcome.strays_left.is_empty());
+        assert_eq!(
+            control.calls(),
+            [
+                Call::Quit,
+                Call::StopStrays(vec![52]),
+                Call::Start,
+                Call::Wait
+            ]
+        );
+        assert_eq!(*control.watched_present.borrow(), [true]);
+        assert!(!first.exists() && !second.exists());
+    }
+
+    #[test]
+    fn a_log_that_cannot_be_archived_keeps_its_directory_and_is_reported() {
+        let fixture = Fixture::new();
+        let (first, second) = plant_version_directories(&fixture);
+        fs::create_dir_all(fixture.layout.state()).unwrap();
+        let archive = fixture.layout.state().join("audit-v1.3.5.jsonl");
+        fs::write(&archive, "an earlier archive").unwrap();
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(outcome.left_behind, std::slice::from_ref(&first));
+        assert_eq!(
+            fs::read(first.join(AUDIT_FILE_NAME)).unwrap(),
+            VERSION_AUDIT
+        );
+        assert_eq!(fixture.read(archive), "an earlier archive");
+        assert!(!second.exists());
     }
 
     #[cfg(windows)]
@@ -3080,6 +3281,39 @@ mod tests {
         assert_eq!(
             serde_json::to_value(StrayKind::RetiredDevelopment).unwrap(),
             serde_json::json!("retired_development")
+        );
+    }
+
+    #[test]
+    fn anything_running_from_a_1x_version_directory_is_a_stray_of_its_own_kind() {
+        let (_scratch, layout) = stray_home();
+        let directory = layout.bin().join("v1.3.6");
+        fs::create_dir_all(&directory).unwrap();
+        fs::create_dir_all(layout.bin().join("vnext")).unwrap();
+        for name in [
+            EDGE_EXECUTABLE_NAME.to_owned(),
+            SERVICE_EXECUTABLE_NAME.to_owned(),
+            retired_connector_names()[1].clone(),
+            "helper".to_owned(),
+        ] {
+            let image = directory.join(&name);
+            assert_eq!(
+                kind_of(&layout, &image, 7030, Some(7031)),
+                Some(StrayKind::RetiredVersionDirectory),
+                "{name}"
+            );
+        }
+        let answering = directory.join(SERVICE_EXECUTABLE_NAME);
+        assert_eq!(
+            kind_of(&layout, &answering, 7032, Some(7032)),
+            Some(StrayKind::RetiredVersionDirectory),
+            "the answering service is not spared when it runs from a version directory"
+        );
+        let beside = layout.bin().join("vnext").join(SERVICE_EXECUTABLE_NAME);
+        assert_eq!(kind_of(&layout, &beside, 7033, None), None);
+        assert_eq!(
+            serde_json::to_value(StrayKind::RetiredVersionDirectory).unwrap(),
+            "retired_version_directory"
         );
     }
 

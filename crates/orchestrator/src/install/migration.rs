@@ -1171,8 +1171,8 @@ fn publish_original(from: &Path, to: &Path) -> Result<(), MigrationError> {
     remove_original(from)
 }
 
-/// Move the old audit log to its archive file, or finish a move an earlier run began.
-fn archive_transfer(transfer: &Move) -> Result<(), MigrationError> {
+/// Move an old audit log to its archive file, or finish a move an earlier run began.
+pub(super) fn archive_transfer(transfer: &Move) -> Result<(), MigrationError> {
     let Move { from, to } = transfer;
     if !from.is_file() || same_location(from, to) {
         return Ok(());

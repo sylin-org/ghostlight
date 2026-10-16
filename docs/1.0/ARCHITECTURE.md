@@ -88,7 +88,10 @@ rename-swapped (`install/swap.rs`), and the edge is replaced only when the relay
 changes, the edge in `bin` is missing or is not the one the record names, or `bin` still holds
 the layout of an earlier development build, where the service image had the edge's name and two
 connector images sat beside it; the installer stops those exact images and deletes the connector
-files. A release also refuses to install over the development channel and names the restore
+files. It also stops what runs from each 1.x `bin/v<version>` directory, moves the audit log the
+directory holds into `state` under a name that says which version it came from, and removes the
+directory (`install/version_directories.rs`); a log that cannot be moved keeps its directory.
+A release also refuses to install over the development channel and names the restore
 commands of the release carriers (npm and the get scripts), after it has checked that the payload
 is not `bin` itself. `--development` places the same files in `bin` the same way, but swaps the service
 every time, whatever version is installed, and records `"channel": "development"` in

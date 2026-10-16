@@ -11,6 +11,7 @@ use crate::install::entry::same_path;
 use crate::install::layout::Layout;
 use crate::install::migration::FlatpakStep;
 use crate::install::reconcile::ReconcileReport;
+use crate::install::version_directories;
 use crate::language::deployment::{self as words, Placed};
 use crate::language::environment;
 use crate::language::workbench as stray_words;
@@ -123,24 +124,33 @@ fn service_line(outcome: &Outcome, layout: &Layout) -> Option<Line> {
     }
 }
 
-/// What became of the directory and the marker earlier development builds used.
+/// What became of the directory and the marker earlier development builds used and of the 1.x
+/// version directories, with the archive each removed directory's audit log went to.
 fn deletion_lines(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
     let marker = layout.retired_development_marker();
-    outcome
-        .plan
-        .deletions
-        .iter()
-        .map(|path| {
-            let is_marker = same_path(path, &marker);
-            let kept = outcome.left_behind.contains(path);
-            let shown = path.display().to_string();
-            match (is_marker, kept) {
-                (false, false) => Line::output(words::removed_development_directory(&shown)),
-                (true, false) => Line::output(words::removed_development_marker(&shown)),
-                (_, true) => Line::problem(words::kept_development_entry(&shown)),
-            }
-        })
-        .collect()
+    let mut lines = Vec::new();
+    for path in &outcome.plan.deletions {
+        let shown = path.display().to_string();
+        if outcome.left_behind.contains(path) {
+            lines.push(Line::problem(words::kept_entry(&shown)));
+        } else if same_path(path, &marker) {
+            lines.push(Line::output(words::removed_development_marker(&shown)));
+        } else if version_directories::is_version_directory(layout, path) {
+            lines.push(Line::output(words::removed_version_directory(&shown)));
+            lines.extend(
+                version_directories::archive_of(&outcome.plan.version_audit_archives, path).map(
+                    |archive| {
+                        Line::output(words::archived_version_audit(
+                            &archive.to.display().to_string(),
+                        ))
+                    },
+                ),
+            );
+        } else {
+            lines.push(Line::output(words::removed_development_directory(&shown)));
+        }
+    }
+    lines
 }
 
 /// What became of one file the earlier Flatpak browser route left in the home.
@@ -213,6 +223,7 @@ mod tests {
             record: None,
             processes_to_stop: Vec::new(),
             deletions,
+            version_audit_archives: Vec::new(),
             registrations_to_rewrite: Vec::new(),
         }
     }
@@ -322,6 +333,65 @@ mod tests {
         assert!(
             kept.iter()
                 .any(|line| line.stream == Stream::Problem && line.text == kept_directory),
+            "{kept:?}"
+        );
+    }
+
+    #[test]
+    fn a_removed_or_kept_version_directory_is_named_with_the_archive_of_its_log() {
+        use crate::install::migration::Move;
+
+        let layout = Layout::new("home");
+        let first = layout.bin().join("v1.3.5");
+        let second = layout.bin().join("v1.3.6");
+        let archive = layout.state().join("audit-v1.3.5.jsonl");
+        let outcome = |left_behind: Vec<PathBuf>| Outcome {
+            plan: InstallPlan {
+                version_audit_archives: vec![Move {
+                    from: first.join("audit.jsonl"),
+                    to: archive.clone(),
+                }],
+                ..plan(
+                    Mode::Development,
+                    &layout,
+                    vec![first.clone(), second.clone()],
+                )
+            },
+            service_started: Some(true),
+            registrations: None,
+            flatpak: Vec::new(),
+            left_behind,
+            strays_left: Vec::new(),
+        };
+
+        let removed = report(&outcome(Vec::new()), &layout);
+        let removed_first = format!(
+            "Removed {}, where an earlier Ghostlight kept one of its versions.",
+            first.display()
+        );
+        let kept_log = format!("Kept its audit log as {}.", archive.display());
+        let start = removed
+            .iter()
+            .position(|line| line.text == removed_first)
+            .unwrap_or_else(|| panic!("{removed:?}"));
+        assert_eq!(removed[start + 1].text, kept_log);
+        assert!(removed.iter().any(|line| line
+            .text
+            .starts_with(&format!("Removed {}", second.display()))));
+        assert_eq!(
+            removed.iter().filter(|line| line.text == kept_log).count(),
+            1
+        );
+        assert!(removed.iter().all(|line| line.stream == Stream::Output));
+
+        let kept = report(&outcome(vec![second.clone()]), &layout);
+        let sentence = format!(
+            "Could not remove {}. The next install tries again.",
+            second.display()
+        );
+        assert!(
+            kept.iter()
+                .any(|line| line.stream == Stream::Problem && line.text == sentence),
             "{kept:?}"
         );
     }

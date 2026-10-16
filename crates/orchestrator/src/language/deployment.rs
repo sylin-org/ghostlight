@@ -159,10 +159,23 @@ pub fn removed_development_marker(path: &str) -> String {
     format!("Removed {path}, the marker earlier development builds used to pick a build.")
 }
 
-/// An entry of the retired development layout could not be removed. The cause is not known to
-/// the installer, so the sentence does not name one.
+/// The directory an earlier 1.x Ghostlight kept one version of itself in was removed.
 #[must_use]
-pub fn kept_development_entry(path: &str) -> String {
+pub fn removed_version_directory(path: &str) -> String {
+    format!("Removed {path}, where an earlier Ghostlight kept one of its versions.")
+}
+
+/// The audit log of a removed 1.x version directory is kept in the state directory.
+#[must_use]
+pub fn archived_version_audit(archive: &str) -> String {
+    format!("Kept its audit log as {archive}.")
+}
+
+/// An entry the install removes, such as the retired development layout or a 1.x version
+/// directory, could not be removed. The cause is not known to the installer, so the sentence
+/// does not name one.
+#[must_use]
+pub fn kept_entry(path: &str) -> String {
     format!("Could not remove {path}. The next install tries again.")
 }
 
@@ -296,7 +309,9 @@ mod tests {
             payload_other_build("d"),
             service_did_not_start("bin", 30),
             removed_development_marker("m"),
-            kept_development_entry("m"),
+            removed_version_directory("d"),
+            archived_version_audit("a"),
+            kept_entry("m"),
         ];
         assert!(sentences.iter().all(|sentence| sentence.is_ascii()));
     }

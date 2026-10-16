@@ -258,6 +258,12 @@ pub fn stray_line(image: &str) -> String {
     )
 }
 
+/// The line `doctor` prints for a 1.x version directory still in `bin`.
+#[must_use]
+pub fn version_directory_line(directory: &str) -> String {
+    format!("An older Ghostlight left {directory} in bin. Run ghostlight install to remove it.")
+}
+
 /// The line `ghostlight install` and `doctor --fix` print for a stray they stopped.
 #[must_use]
 pub fn stray_stopped_line(image: &str) -> String {
@@ -401,6 +407,10 @@ mod tests {
         assert_eq!(
             stray_line("C:/gl/bin/old.exe"),
             "Something from an older Ghostlight installation is still running: C:/gl/bin/old.exe. Close it, or run ghostlight install."
+        );
+        assert_eq!(
+            version_directory_line("C:/gl/bin/v1.3.5"),
+            "An older Ghostlight left C:/gl/bin/v1.3.5 in bin. Run ghostlight install to remove it."
         );
         assert_eq!(stray_stopped_line("old.exe"), "Stopped old.exe.");
         assert_eq!(

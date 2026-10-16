@@ -63,6 +63,12 @@ them. A deploy that finds either one stops what runs from `dev` (the service fir
 then any edge or shell), removes the directory and the marker, and reports an entry a running
 program kept; the next deploy removes it.
 
+The 1.x launchers unpacked each release into `~/.ghostlight/bin/v<version>`. Every deploy and
+`ghostlight install` stops what runs from such a directory (a directory directly under `bin`
+named `v` and a semantic version; nothing else in `bin` is touched), moves its `audit.jsonl` to
+`~/.ghostlight/state/audit-v<version>.jsonl`, and removes the directory. A log that cannot be
+moved keeps its directory, and `--plan` lists each directory and each move.
+
 Agents that run inside Claude desktop or Codex: Windows runs every process those apps start in
 the app's container, where registry and `%APPDATA%` writes reach only that app and no browser
 sees them. Run `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal. It
