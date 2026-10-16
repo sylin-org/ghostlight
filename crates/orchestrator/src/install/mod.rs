@@ -1070,11 +1070,13 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             HarnessState::Available if edge_ready => {
                 "Detected and ready for an explicit Ghostlight registration.".into()
             }
-            HarnessState::Available => "Detected, but the Ghostlight edge is missing.".into(),
+            HarnessState::Available => "Detected, but the Ghostlight program is missing.".into(),
             HarnessState::NotDetected if edge_ready => {
                 "Not detected. You can prepare its user configuration before installing it.".into()
             }
-            HarnessState::NotDetected => "Not detected, and the Ghostlight edge is missing.".into(),
+            HarnessState::NotDetected => {
+                "Not detected, and the Ghostlight program is missing.".into()
+            }
             HarnessState::NeedsAttention => String::new(),
         },
     };
@@ -2178,7 +2180,7 @@ pub enum HarnessError {
     #[error("supported harness `{0}` has no official download for this platform")]
     NoDownload(String),
     /// The installed edge is unavailable.
-    #[error("the Ghostlight edge is missing")]
+    #[error("the Ghostlight program is missing")]
     EdgeMissing,
     /// The harness config could not be read.
     #[error("could not read harness configuration: {0}")]

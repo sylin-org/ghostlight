@@ -121,10 +121,10 @@ pub(crate) fn detail(name: &str, package: BrowserPackage) -> String {
             format!("A native {name} package can start Ghostlight.")
         }
         BrowserPackage::Snap => format!(
-            "{name} is installed as a Snap. Its sandbox cannot start Ghostlight; install a supported native browser package."
+            "{name} is installed as a Snap. Its sandbox cannot connect to Ghostlight; install a supported native browser package."
         ),
         BrowserPackage::Flatpak => format!(
-            "{name} is installed as a Flatpak. Its sandbox cannot start Ghostlight; install a supported native browser package."
+            "{name} is installed as a Flatpak. Its sandbox cannot connect to Ghostlight; install a supported native browser package."
         ),
         BrowserPackage::MultipleSandboxes => format!(
             "{name} is installed as Snap and Flatpak packages. Neither sandbox can start Ghostlight; install a supported native browser package."

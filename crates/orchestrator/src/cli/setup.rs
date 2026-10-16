@@ -726,9 +726,14 @@ pub fn select_harnesses(
         .collect())
 }
 
+/// Print the line that names the Ghostlight program browsers start.
+fn print_program_line(program: &std::path::Path) {
+    println!("Ghostlight program: {}", program.display());
+}
+
 /// Print the native host registration status report to stdout.
 pub(crate) fn print_native_host_report(report: &NativeHostReport) {
-    println!("Ghostlight program: {}", report.connector.display());
+    print_program_line(&report.connector);
     for browser in &report.browsers {
         match &report.private_view {
             Some(container) => println!(
@@ -811,7 +816,7 @@ pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    println!("Ghostlight program: {}", report.connector.display());
+    print_program_line(&report.connector);
     for browser in report.browsers {
         let state = match browser.state {
             NativeHostState::Missing => "missing",

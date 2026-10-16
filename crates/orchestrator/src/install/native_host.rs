@@ -1236,7 +1236,9 @@ fn remove_retired_firefox_registration(
 fn state_detail(state: NativeHostState) -> &'static str {
     match state {
         NativeHostState::Missing => "Ghostlight is not registered with this browser.",
-        NativeHostState::Current => "The browser starts this installation of Ghostlight.",
+        NativeHostState::Current => {
+            "This browser is registered to start this installation of Ghostlight."
+        }
         NativeHostState::Updatable => "A Ghostlight-owned registration points at older details.",
         NativeHostState::OwnedElsewhere => {
             "A Ghostlight-owned registration belongs to another installation."
