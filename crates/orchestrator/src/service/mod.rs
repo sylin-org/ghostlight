@@ -76,7 +76,7 @@ use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{
-    RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection, WorkbenchQuitPort,
+    PageAddress, RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection, WorkbenchQuitPort,
     WorkbenchTrayPort,
 };
 use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
@@ -1025,6 +1025,11 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
             TrayItemId::Open => {
                 intake.presence.person_acted();
                 intake.presence.window_shown();
+                // The shell shows its own window, where it last was. While setup is incomplete
+                // the person is brought back to it, as a window opened fresh would be.
+                if let Some(address) = intake.workbench.show_address() {
+                    let _ = reveal_off_thread(intake.workbench.clone(), Some(address), || {});
+                }
             }
         }
     }
@@ -1923,7 +1928,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The name of the short-lived thread that carries out a browser's request to be shown.
+/// The name of the short-lived thread that carries out a request to show the window.
 const SHOW_REQUEST_THREAD: &str = "ghostlight-show-request";
 
 /// Applies what a connected browser reports: its tabs, its dialogs and its toolbar's pause, and
@@ -1955,18 +1960,34 @@ impl ServiceBrowserEvents {
         if self.showing.swap(true, Ordering::SeqCst) {
             return;
         }
-        let workbench = self.workbench.clone();
         let showing = Arc::clone(&self.showing);
-        let spawned = thread::Builder::new()
-            .name(SHOW_REQUEST_THREAD.into())
-            .spawn(move || {
-                let _ = workbench.reveal(workbench.show_address());
-                showing.store(false, Ordering::SeqCst);
-            });
+        let address = self.workbench.show_address();
+        let spawned = reveal_off_thread(self.workbench.clone(), address, move || {
+            showing.store(false, Ordering::SeqCst);
+        });
         if spawned.is_err() {
             self.showing.store(false, Ordering::SeqCst);
         }
     }
+}
+
+/// Reveal the workbench at `address` on a short-lived thread, then run `finished`.
+///
+/// Revealing can wait for a shell to start and attach, so a reader that must keep reading never
+/// does it inline. The answer is not read: with nothing to show, or nothing to show it, the
+/// person is no worse off. `finished` does not run when the thread cannot be started.
+fn reveal_off_thread(
+    workbench: WorkbenchFacade,
+    address: Option<PageAddress>,
+    finished: impl FnOnce() + Send + 'static,
+) -> std::io::Result<()> {
+    thread::Builder::new()
+        .name(SHOW_REQUEST_THREAD.into())
+        .spawn(move || {
+            let _ = workbench.reveal(address);
+            finished();
+        })
+        .map(|_| ())
 }
 
 impl BrowserEventSink for ServiceBrowserEvents {
@@ -4920,6 +4941,58 @@ mod tests {
         eventually(|| window() == Some(WindowReason::Tray));
         open(&mut stream);
         eventually(|| window() == Some(WindowReason::Shown));
+        drop(host);
+    }
+
+    #[test]
+    fn a_tray_open_brings_the_window_to_setup_until_setup_is_complete() {
+        use crate::install::setup_state::{self, SetupRecord};
+        use crate::workbench::setup::SetupProgress;
+
+        let home = TestHome::new("tray-open-setup");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut stream = attached_shell(&host);
+        let open = |stream: &mut _| {
+            frame::write_frame(
+                stream,
+                &DesktopFrame::Tray {
+                    item: TrayItemId::Open,
+                },
+            )
+            .unwrap();
+        };
+
+        open(&mut stream);
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Show {
+                address: Some(PageAddress::Setup)
+            },
+            "an open window comes back to setup"
+        );
+
+        // With setup complete the tray asks for nothing more than the shell already does.
+        let record = host.intake.layout.setup_record();
+        assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
+        host.workbench.attach_setup(SetupProgress::load(&record));
+        open(&mut stream);
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Tray {
+                item: TrayItemId::Hold,
+            },
+        )
+        .unwrap();
+        while !matches!(next_frame(&mut stream), DesktopFrame::TrayModel { .. }) {}
+        host.workbench.reveal(Some(PageAddress::About)).unwrap();
+        assert_eq!(
+            next_frame(&mut stream),
+            DesktopFrame::Show {
+                address: Some(PageAddress::About)
+            },
+            "no show was written for the open"
+        );
         drop(host);
     }
 
