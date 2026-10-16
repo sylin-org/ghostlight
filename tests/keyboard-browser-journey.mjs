@@ -76,13 +76,15 @@ async function freshRibbons(page, seen) {
   return { host: null, shadow: null, ribbons: [] };
 }
 
-// Computed pointer-events of the host and every element in its shadow root, read in one round trip
-// so no step holds a node id across a re-render.
+// Computed pointer-events of the host and every element in its shadow root, with each element's
+// class, read in one round trip so no step holds a node id across a re-render. The read is null
+// when the denial ribbon is no longer in the root, so a caller never mistakes an expired denial
+// for an empty one.
 async function pointerEventsInside(page, shadow) {
   const { object } = await page.send("DOM.resolveNode", { backendNodeId: shadow.backendNodeId });
   const { result } = await page.send("Runtime.callFunctionOn", {
     objectId: object.objectId,
-    functionDeclaration: "function() { return [this.host, ...this.querySelectorAll('*')].map((node) => [node.nodeName, getComputedStyle(node).pointerEvents]); }",
+    functionDeclaration: "function() { if (!this.querySelector('.denial-ribbon')) return null; return [this.host, ...this.querySelectorAll('*')].map((node) => [node.nodeName, getComputedStyle(node).pointerEvents, node.className]); }",
     returnByValue: true
   });
   return result.value;
@@ -193,26 +195,18 @@ try {
   await page.evaluate("credential.focus(); true");
   const second = await call("browser_click", { tab, target: credential.target });
   assert.equal(second.status, "blocked", JSON.stringify(second));
-  // Each attempt takes one snapshot of the second denial and checks it in place. A denial that
-  // expires between snapshot and check is the only failure a second attempt can cure.
-  let inspectedRoot;
-  let pointerEvents;
-  for (let attempt = 0; attempt < 2 && !pointerEvents; attempt++) {
-    inspectedRoot = await freshRibbons(page, firstRibbons);
-    assert.ok(inspectedRoot.ribbons.length > 0, "the second denial rendered");
-    try {
-      pointerEvents = await pointerEventsInside(page, inspectedRoot.shadow);
-    } catch (error) {
-      if (attempt > 0) throw error;
-    }
-  }
+  // The denial lasts a few seconds, so the snapshot and the read happen right away.
+  const inspectedRoot = await freshRibbons(page, firstRibbons);
+  assert.ok(inspectedRoot.ribbons.length > 0, "the second denial rendered");
+  const pointerEvents = await pointerEventsInside(page, inspectedRoot.shadow);
+  assert.ok(pointerEvents, "the second denial was still showing when pointer input was read");
   const inside = descendants(inspectedRoot.shadow);
   const elements = inside.filter((node) => node.nodeType === 1);
   const controls = elements.filter((node) => CONTROL_ELEMENTS.has(node.nodeName)
     || CONTROL_ATTRIBUTES.some((name) => attributesOf(node).has(name)) || attributesOf(node).get("role") === "button");
   assert.equal(inside.some((node) => node.nodeName === "STYLE"), false, "the stylesheet stayed missing");
   assert.equal(controls.length, 0, "denial feedback has no controls");
-  assert.ok(pointerEvents.length > 1, "pointer input was read for the host and its elements");
+  assert.ok(pointerEvents.some(([, , cls]) => cls === "denial-ribbon"), "the live read included the second denial");
   for (const [name, value] of pointerEvents) assert.equal(value, "none", `${name} takes no pointer input`);
   assert.ok(inside.filter((node) => node.nodeType === 3).some((node) => node.nodeValue.trim() !== ""), "the denial says why");
   assert.equal(await page.evaluate("document.activeElement === credential"), true, "the page keeps its focus");
