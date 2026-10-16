@@ -206,3 +206,14 @@ In order:
 5. Documents last.
 
 The ledger is [docs/tasks/break-2.0/journey.md](../tasks/break-2.0/journey.md).
+
+## Amendment (2026-10-16): where the short commands point
+
+The redirects behind `https://sylin.org/ghostlight/get.ps1` and `get.sh` point at the installers on
+Ghostlight's `main` branch (`https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/`),
+not at release assets. `main` is the published product, so the short commands install the current
+release from the day the redirects go live and follow `main` to 2.0 at publication, with no change on
+the website and none in the frozen extension. The release still attaches the scripts for its own
+custody. The redirects live in the website repository (`src/_redirects`, kept by its site check);
+publishing them is the owner's push there. This replaces the redirect target named in Decision JQ4
+above.
