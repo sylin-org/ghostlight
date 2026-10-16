@@ -60,10 +60,21 @@ either case.
 - `state/tray-hint` in the home is an empty file. It exists once the window has been closed for
   the first time, so the notification that explains the tray icon is shown once and never again.
   It holds nothing and leaves the computer nowhere.
+- `bin/install.json` in the home is the install record: the service version, the relay revision,
+  the hashes of the service image and the edge, and the channel (release or development) that
+  installed them. It holds nothing about the person, the agent or any page.
+- `state/quit` in the home is an empty file, the Quit latch. A person's Quit writes it, and a
+  browser or recover start that finds it does not bring Ghostlight back. It holds nothing.
+- `state/watch.off` in the home is an empty file that exists exactly while "Others can watch" is
+  off. It holds nothing.
 - `state/setup.json` in the home records, once, the time of the first agent request that reached a
   browser and succeeded, or the time of the upgrade for a 1.x home already in use. It holds that
   time and nothing about the person, the agent or the page. While it is absent, setup is
   incomplete and the Ghostlight window can show its setup steps.
+- `state/audit-v<version>.jsonl` and `state/audit-pre-<version>.jsonl` in the home are the audit
+  logs of 1.x, moved aside when an install finds them (from a 1.x per-version directory in `bin`,
+  or from the 1.x log location). They keep the content-minimized records they had and gain no
+  new ones. They can be deleted or kept for a collector.
 - `state/desktop-webview` in the home is the web-engine profile of the Ghostlight window
   (WebView2 on Windows, WebKitGTK on Linux). It holds the web storage of the workbench page,
   such as the Density and Motion choices, and the engine's own caches. On Linux it is closed to
@@ -75,8 +86,9 @@ either case.
   stores.
 - On Linux, the audit log, policy, state, run and diagnostics files that Ghostlight creates
   under `~/.ghostlight` are readable only by the user, and the directories it creates there are
-  closed to other users. That includes the files an upgrade from 1.x copies there. A file that
-  already existed keeps its mode.
+  closed to other users. That includes `bin/install.json`, `state/quit`, `state/watch.off`,
+  `state/setup.json`, the archived 1.x logs, and the files an upgrade from 1.x copies there. A
+  file that already existed keeps its mode.
 
 The governed host and optional bounded target name are the only page-derived audit text. Audit
 does not contain paths, queries, fragments, arbitrary page text, selectors, target handles, typed

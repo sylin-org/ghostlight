@@ -129,7 +129,7 @@ panic kill switch terminates the session outright.
 See [docs/SPEC.md](../SPEC.md) and the
 [governance configuration guide](../guides/governance-configuration.md).
 
-Evidence: docs/SPEC.md (capability classification, modes, take-the-wheel, panic kill); docs/guides/governance-configuration.md.
+Evidence: docs/SPEC.md (capability classification, take-the-wheel, panic kill); docs/guides/governance-configuration.md.
 
 ### What is logged per agent action? Does the audit record capture the policy state at decision time?
 
