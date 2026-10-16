@@ -67,7 +67,7 @@ Internal browser commands are combined when a person experiences them as one job
 - The tray opens a calm workbench that answers what is running, what happened, whether Ghostlight
   is healthy, which controls apply, and where it is connected, without turning setup into a CLI
   archaeology exercise.
-- Once its registration and browser extension are installed, Ghostlight needs no
+- Once Ghostlight and its browser extension are installed, Ghostlight needs no
   separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
   when it is absent, except that a person's Quit holds: a browser restart does not bring
   Ghostlight back, and the next agent request, a command that needs it, or a person does.
@@ -216,8 +216,9 @@ The unpacked extension is a complete local product surface, not an invisible rel
 
 - No configured policy leaves HTTP(S) browser work open, including localhost, loopback, and
   link-local destinations. Host restrictions belong to policy.
-- Configured schema-4 grants admit complete independent RAWX sets; every authority tier and
-  request restriction can only tighten them.
+- Configured schema-4 grants admit complete independent RAWX sets; every authority tier
+  can only tighten them. A call's own arguments change neither: `restrict_hosts` and
+  `restrict_capabilities` are refused.
 - Started work uses one immutable configured authority snapshot. Tool calls do not author policy.
 - Ownership, leases, runtime controls, and landing authority are checked at their final boundary.
 - Model-driven tab closure occurs only when the immutable service authority and the browser's

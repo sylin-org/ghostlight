@@ -54,8 +54,8 @@ local human
   browser topology, content-free feedback, and the local toolbar/options experience.
 
 Only process, lifecycle, and trust boundaries justify these crates. Product contexts remain
-modules inside the orchestrator. The dependency direction points inward to `bridge` types and
-orchestrator ports. The orchestrator does not depend on MCP or Chromium APIs.
+modules inside the orchestrator. The dependency direction points inward to the orchestrator's
+ports. The orchestrator does not depend on MCP or Chromium APIs.
 
 The `ghostlight-service` executable links no UI toolkit and serves with no display. The shell,
 `ghostlight-desktop`, draws the window, the tray and the notices, and presence (below) keeps it
@@ -249,11 +249,11 @@ process that received the signal refuses. While it holds, `start_service` and `s
 refuse and nothing is spawned; browser recovery launches no browser and an install shows no window.
 
 On the final signal a process arms a 2 s fallback exit first. The service then says
-`goodbye{session_end}` on every stream and leaves through the desktop's exit, without waiting for
-work in flight and without setting the quit latch. An edge, which may find the service already
-gone, exits 0 on its own signal and on a `session_end` goodbye, and a stream that drops while the
-session is ending never leads to a start. A one-shot command leaves at once. Desktop retention is
-disarmed while the state holds, so the native event loop never keeps the process alive.
+`goodbye{session_end}` on every stream, closes the shell's streams and signals its own quit,
+without waiting for work in flight and without setting the quit latch. The shell ends on that
+goodbye. An edge, which may find the service already gone, exits 0 on its own signal and on a
+`session_end` goodbye, and a stream that drops while the session is ending never leads to a
+start. A one-shot command leaves at once.
 
 ## Fringe stability
 
@@ -267,10 +267,12 @@ and recovery, or the preserved Ghostlight user experience. Any product feature e
 existing physical browser capabilities changes only the orchestrator.
 
 The browser relay treats adapter frames as opaque bounded bytes. A small relay protocol owns
-the peer checks and backend availability separately from the adapter protocol. The relay keeps
-Chromium's native port alive while the service is unavailable, reconnects to the endpoint of the
-home, repeats only the relay and cached adapter handshakes, and never interprets or replays a
-physical operation.
+the peer checks and backend availability separately from the adapter protocol. The edge holds the
+extension's first frame, the adapter hello, and sends it first once a service accepts the stream.
+When no service accepts the stream it writes `backend_unavailable` to the browser once and drops what
+the browser sends. When a service answers again it exits (`Ended::ServiceReturned`), so the
+extension reconnects on a new port with a fresh hello. It never interprets or replays a physical
+operation.
 
 The adapter is a policy-free browser execution engine, not merely a collection of API calls. It
 owns browser-local operation state, safe mechanism retries, duplicate-operation suppression,
@@ -280,15 +282,16 @@ journey composition. A physical effect is repeated only when the browser engine 
 was not dispatched or that the physical sub-step is idempotent. Insufficient evidence produces an
 unknown disposition.
 
-Compatibility uses separate axes for the external MCP revision, the service edge bridge, the
-browser relay, and the adapter protocol. Adapter behavior is selected by explicitly advertised
+Compatibility uses three axes, all additive (ADR-0199 Decision 8): the relay protocol, the
+adapter protocol, and the MCP revision, which only the service negotiates. The shell has no axis
+of its own. Adapter behavior is selected by explicitly advertised
 physical capabilities, never by parsing an implementation version. A new service may continue to
 use an older adapter for every capability that adapter advertises.
 
 Each adapter has one closed executable handler table. Its hello capability revisions are derived
 from that table and its passive frame handlers, never maintained as a second declaration. Platform
 is identity and presentation information; executor dispatch is capability-based. A vendor protocol
-such as CDP is private adapter technique, not a second bridge vocabulary.
+such as CDP is private adapter technique, not a second wire vocabulary.
 
 The browser adapter is a service component. `browser/adapter/mod.rs` names a closed `Family`
 (Chromium) and re-exports the service's internal browser work vocabulary from
@@ -306,24 +309,25 @@ files sit under `assets/tests` and run with `node --test`. The golden fixtures i
 `tests/golden/protocol4` pin the asset id, the wire and the world messages for both the service
 and the extension.
 
-## Stable bridges
+## Stable seams
 
-The service bridge has generic messages for hello, catalog, invoke, cancel, result, and error, plus
-authenticated pre-session openings for workbench activation and content-free readiness inspection.
-Invocation carries a tool name and JSON input. Catalog, result, and readiness projections are
-opaque to the bridge; their meaning remains in the orchestrator. One small typed content vocabulary
-lets the edge render bounded screenshots and GIFs without knowing which tool produced them. MCP
-request ids and protocol revisions do not cross this bridge. Readiness inspection returns before
+The MCP edge passes JSON-RPC lines between the client and the service unchanged
+(`crates/edge/src/forward.rs`: the edge authors no words). It looks inside a line only to track
+outstanding request ids per direction, to answer `ping`, and to answer outstanding requests with
+the failure templates the service handed over when the service is cut off. The MCP session engine
+lives in the service (`intake/mcp.rs`): it negotiates the revision, serves `tools/list` and
+`tools/call`, and renders each result as the lean model view in `structuredContent`, with the
+authored summary and safe next steps in the ordinary text block; a session on an MCP revision
+before 2025-06-18 gets the same lean JSON in that block too. The view only omits fields at their
+default. It never branches on a tool name, and the canonical envelope stays in the service for
+audit, history and flow references. This keeps the edge free of product vocabulary and of MCP
+revision logic. Content-free readiness inspection is a `control` opening that returns before
 workspace creation and never demand-starts the authority or writes audit.
-The MCP edge renders each result as the lean model view in `structuredContent`, with the authored
-summary and safe next steps in the ordinary text block; a session on an MCP revision before
-2025-06-18 gets the same lean JSON in that block too. The view only omits fields at their default.
-It never branches on a tool name, and the canonical envelope stays in the service for audit,
-history and flow references. This keeps the edge free of product vocabulary.
 
-The browser bridge has generic messages for hello, primitive request, receipt, browser event,
-cancel, and presentation. It carries a closed primitive vocabulary but no model-facing tool
-names, product defaults, governance decisions, recovery text, or result envelopes.
+The browser side is adapter protocol 4, carried opaquely by the browser relay. Its messages are
+hello, primitive request, receipt, browser event, cancel, and presentation. It carries a closed
+primitive vocabulary but no model-facing tool names, product defaults, governance decisions,
+recovery text, or result envelopes.
 
 The service bounds unfinished exchanges and response delivery while keeping healthy idle peers
 connected. Fixed per-connection workers absorb bursts in bounded ordinary and independent-control
@@ -359,7 +363,7 @@ capability declarations. They identify and describe one local extension installa
 diagnostics, compatibility, reconnect continuity, and routing. The installation id is the browser's
 identity: it never grants authority and never replaces workspace ownership, but it is the key the
 service routes on and the opaque handle a model may name. Human toolbar actions
-cross the browser bridge as a closed control-intent vocabulary. The service applies them to its
+cross the adapter protocol as a closed control-intent vocabulary. The service applies them to its
 authoritative runtime controls and publishes the resulting content-free control state back to the
 adapter. Ended state is terminal for hold and resume; only explicit start-new-session intent creates
 a new active runtime session.
@@ -475,7 +479,7 @@ the extension; ADR-0109 places the GIF encode and its delivery there too.
 
 ### Governance
 
-Owns authority loading, immutable snapshots, request restriction, capabilities, scheme boundaries,
+Owns authority loading, immutable snapshots, capabilities, scheme boundaries,
 policy-protected hosts, admission, landing decisions, runtime controls, holds, and content-minimized
 audit intent. Operation handlers see only the governance facade.
 
@@ -531,9 +535,10 @@ same surrounding document, and uses the same backup and atomic replacement seam.
 automatic or aggregate action. The UI exposes no generic filesystem or process operation.
 
 Linux desktop integration is another installer-owned local-human capability. A per-user install
-owns one XDG desktop entry and one byte-identical icon. The entry invokes the exact installed
-orchestrator with `open`; update and uninstall touch only explicitly owned files. The Debian package
-owns the equivalent system entry and does not create a per-user shadow. Browser package provenance
+owns one XDG desktop entry and one byte-identical icon. The entry runs the shell,
+`bin/ghostlight-desktop`, from the one fixed `bin` directory, and the shell starts the service when
+none runs; update and uninstall touch only explicitly owned files. Ghostlight ships no Debian
+package. Browser package provenance
 is read-only and typed separately from native-host registration, so a current manifest cannot make
 a sandboxed or absent browser look usable.
 
@@ -672,8 +677,8 @@ parent invocation and position. Only the parent settles the lifecycle. Actual ch
 one receipt; aggregate wrappers do not repeat them or create a denial counter.
 
 `governance/evidence.rs` captures bounded permission checks from the admission evaluator, including
-positive grant identities for each evaluated layer. Legacy receipts retain old request restriction
-evidence without applying that retired mechanism to new calls.
+positive grant identities for each evaluated layer. It carries no caller restriction: a call that
+sends `restrict_hosts` or `restrict_capabilities` is refused at decoding, before dispatch.
 `language/history.rs` owns the readable explanations. `workbench/history.rs` projects and restores
 whole groups, at most 500 with at most 20 children each. Missing receipts stay unconfirmed; only
 parent evidence establishes a never-run suffix. A composition-change projection updates the
@@ -716,8 +721,8 @@ requests are not members of the vocabulary. The Chromium adapter may use CDP pri
 browser adapter is not an active product until it can execute the complete capability set in the
 user's ordinary visible, authenticated, already-running session (ADR-0183).
 
-Ordinary product features compose these primitives only in the orchestrator. A bridge or adapter
-change requires a new physical browser capability or a bridge protocol requirement.
+Ordinary product features compose these primitives only in the orchestrator. A relay or adapter
+change requires a new physical browser capability or an adapter protocol requirement.
 
 The composed semantic layer is the physical page-observation boundary. Inside each injected
 http(s) frame, the extension walks rendered elements and text through open shadow roots and assigned
@@ -759,7 +764,7 @@ commit, zoom change, viewport mismatch, or newer screenshot invalidates the old 
 
 File upload is a cross-boundary capability with explicit owners. The language accepts bounded
 absolute paths. The orchestrator validates and reads only those files after governance admission,
-then sends bounded names, media types, and bytes through the physical bridge. The extension creates
+then sends bounded names, media types, and bytes through the adapter protocol. The extension creates
 browser `File` objects for the already selected file input. The relay never reads paths or files.
 Credential-like metadata on that file control does not block explicitly requested file upload or
 recording save; the physical file-target checks and configured authority remain in force.
@@ -860,7 +865,7 @@ receipt yields `unknown`, never failure or success. Cancellation follows the sam
 before dispatch it is reported as a cancellation, never as a disconnection. The other
 before-dispatch facts keep their own names: a browser that is attached but not answering, a
 browser that is not connected, a bound browser that is gone while a different one is connected,
-and a connection busy with other work. A bridge contract failure has its own name too, but it
+and a connection busy with other work. An adapter contract failure has its own name too, but it
 is not a before-dispatch fact: a receipt in the wrong shape arrives after dispatch, so its
 sentence makes no claim about what was sent.
 Stale tabs and targets fail before dispatch. Sequence failure reports completed step count and
