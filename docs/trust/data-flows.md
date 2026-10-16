@@ -63,6 +63,12 @@ either case.
 - `bin/install.json` in the home is the install record: the service version, the relay revision,
   the hashes of the service image and the edge, and the channel (release or development) that
   installed them. It holds nothing about the person, the agent or any page.
+- `install.lock` in the home is an empty file. An install holds it while it runs so two installs
+  do not overlap. It holds nothing.
+- `manifests/org.sylin.ghostlight.json` in the home exists on Windows only. It is the browser
+  native-host manifest: the path of the edge and the extension's allowed origin, nothing about
+  the person, the agent or any page. On Linux each browser reads its own manifest from its
+  configuration directory instead.
 - `state/quit` in the home is an empty file, the Quit latch. A person's Quit writes it, and a
   browser or recover start that finds it does not bring Ghostlight back. It holds nothing.
 - `state/watch.off` in the home is an empty file that exists exactly while "Others can watch" is
@@ -86,9 +92,10 @@ either case.
   stores.
 - On Linux, the audit log, policy, state, run and diagnostics files that Ghostlight creates
   under `~/.ghostlight` are readable only by the user, and the directories it creates there are
-  closed to other users. That includes `bin/install.json`, `state/quit`, `state/watch.off`,
-  `state/setup.json`, the archived 1.x logs, and the files an upgrade from 1.x copies there. A
-  file that already existed keeps its mode.
+  closed to other users. That includes `bin/install.json`, `install.lock`, `state/quit`,
+  `state/watch.off`, `state/setup.json`, the archived 1.x logs, and the files an upgrade from 1.x
+  copies there. The Windows native-host manifest is not in this list. A file that already existed
+  keeps its mode.
 
 The governed host and optional bounded target name are the only page-derived audit text. Audit
 does not contain paths, queries, fragments, arbitrary page text, selectors, target handles, typed

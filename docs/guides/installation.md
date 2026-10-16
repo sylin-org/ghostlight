@@ -166,9 +166,10 @@ opens in a dedicated normal window rather than disrupting the user's active wind
 
 ## Recovery
 
-- **Service is not running:** reconnect the MCP integration or enable the matching extension.
-  Either edge starts the installed service when none answers: the MCP edge keeps retrying, and
-  the extension reconnects on its own.
+- **Service is not running:** the MCP edge starts the installed service the next time an agent
+  calls, and so does `ghostlight open` or opening Ghostlight from the Start menu or Applications.
+  A browser or extension reconnect starts it too, unless the person chose Quit: after Quit only
+  an agent, a command or opening Ghostlight brings it back.
 - **Workbench window is gone:** open Ghostlight from the Start menu or Applications, run
   `ghostlight open`, or choose Open in the tray. Closing the window leaves the service and the
   tray running.
