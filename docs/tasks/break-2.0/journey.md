@@ -98,7 +98,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j06-popup has landed. Next: j07-options.
+j07-options has landed. Next: c01-carriers (j08-toolbar-icon is skipped: JQ1 is No).
 
 ## Landed
 
@@ -109,6 +109,7 @@ j06-popup has landed. Next: j07-options.
 | j03-show-event | Protocol 4 gains one browser-level event, `show_requested`, with no fields: the golden vocabulary and fixture, `extension/lib/protocol.js`, the worker (`show_ghostlight` page message, `requestShow()`, refused while the link is down), `wire::Event::ShowRequested`, `BrowserEvent::ShowRequested`, and `ServiceBrowserEvents` calling `WorkbenchFacade::reveal(None)` and ignoring the answer. The adapter-protocol-4 note carries the row and the browser-level sentence. | see `git log` |
 | j04-setup-page | `extension/setup.html` is the kit page: the top bar with the wordmark and the Documentation link, the companion (ghost, lantern, stepper, step names) and the one column of eyebrow, heading, command, live line and fallback. `extension/lib/setup-view.js` (new, pure) holds every word and command and `view()` and `fallbackDue()`; `extension/setup.js` (new) places them, polls `ui_snapshot` every 1500 ms, plays the meeting once (`ghostlight.setup_met`) and sends `show_ghostlight`. The popup and options setup routes always open the bundled page and both remote URL literals are gone. The packager ships `setup.js`. The tests that pinned `setup.html` text are deleted; `extension/tests/setup-view.test.js` covers the pure module. | see `git log` |
 | j06-popup | `extension/lib/popup-view.js` (new, pure) holds every popup word, `popupView()` and `connection()`. `popup.html` is the kit page (mascot at 100 px, status block, actions, Settings link) and `popup.js` places the view, redrawing only when it changes. The captions switch, the notes, the setup paragraph, the debugger line and the version are gone. The held badge is the accent `#5eead4`, and `worker.js` sets the badge text colour `#08110f`. `kit.css` gains the popup note, quiet-button and problem rules. The tests that pinned popup text are deleted; `popup-view.test.js` and `state.test.js` are new. | see `git log` |
+| j07-options | `extension/options.html` is a kit page (`<html class="gl-page">`, `<body class="gl-stage options-page">`) linking `kit.css` then the new `extension/options.css`, which holds the cards, rows, switches and footer on kit tokens. The connection card's pill and line come from `GhostlightPopupView.connection()`: `gl-pill--ok` when connected, else `gl-pill--warn`; the setup button shows whenever `needsSetup` is true, is labelled `setupLabel` and opens the bundled `setup.html`. The words pass is done (strings under Owed to the owner). `extension/ui.css` is deleted and the packager ships `options.css` instead. The options source-text pins in `onboarding.test.js` and `shared.test.js` are deleted; `popup-view.test.js` gains two connection cases. | see `git log` |
 
 ## Owed live checks
 
@@ -119,12 +120,24 @@ j06-popup has landed. Next: j07-options.
 - j04: measure a cold get-script run on test-01 after c02 and tune `FALLBACK_AFTER_COPY_MS` (90000) and `FALLBACK_AFTER_OPEN_MS` (120000) in `extension/lib/setup-view.js` before x01.
 - j06: the popup in each state (Ready, Paused, Session ended, Not connected with the install and the start words, Update needed, recording, debugger release) on Chrome and Edge, on Windows and Linux. The key cap and `aria-keyshortcuts` follow a changed shortcut. The mascot looks right at 100 px in the lit and waiting lights. The badge text is readable on the accent.
 - j04: the coordinator's check that the JQ4 one-liners run in Windows PowerShell 5.1, PowerShell 7 and `curl | sh` is not recorded in this ledger yet.
+- j07: the options page on Chrome and Edge, on Windows and Linux: it scrolls (the stage no longer clips), every switch still saves and survives a reload, the captions switch dims while effects are off, Save developer diagnostics still downloads, the connection card reads right in each state (Connected, Not connected with and without the setup button, Update needed), and the setup button opens the bundled setup page. The kit look is right at 390 px and with reduced motion.
 
 ## Owed to the owner
 
 - Publish the sylin.org redirects `/ghostlight/get.ps1` and `/ghostlight/get.sh` to the latest
   GitHub release assets (separate repository). x01 waits until both answer.
 - The Edge listing is not requested; Edge installs from the Chrome Web Store (JQ9).
+
+- j07 words pass for the options page, for approval at Demo 1, before x01 (no setting key, default
+  or behaviour changed). Before -> after:
+  - Subtitle: "Local browser behavior and feedback. Governance lives in the binary." -> "Settings for this browser."
+  - Checking line: "Checking the link to the Ghostlight service..." -> "Checking Ghostlight on this computer..."
+  - Preserve tabs: "Keep controlled pages open as visible evidence after Ghostlight works. When enabled, agent requests to close tabs are refused even when service policy permits them. You can always close tabs yourself." -> "Agents cannot close the tabs Ghostlight works in."
+  - Effects: "The phantom cursor, click ripples, scan-lines, and the rest while the agent works. Turn off for a completely quiet browser." -> "Shows the cursor, click ripples and scan-lines while an agent works."
+  - Captions: "A subtitle naming each action ("Reading page", "Screenshot"). Handy when recording a demo; off for everyday." -> "Names each action in a caption as the agent does it."
+  - Diagnostics: "Saves bounded connection details for this browser and shows the raw connection error. Off by default." -> "Keeps connection details for this browser and shows the raw connection error."
+  - Governance card: heading "Governance and policy" and the paragraph "Which domains the agent may touch, ... a local physical interlock that can refuse closing but never grant authority." -> no heading, one line "Policy and activity are in the Ghostlight window."
+  - Connection card (now the popup's words): "Connected / The agent can reach this browser." -> "Connected / Ghostlight on this computer is answering."; "Not installed here / Ghostlight is not installed on this computer yet. The extension came with your Chrome profile. Install Ghostlight here to connect it." -> "Not connected / Ghostlight on this computer isn't answering." with button "Set up this computer"; "Waiting / Waiting for the Ghostlight service. Start it, and this turns green on its own." -> "Not connected / Open Ghostlight on this computer. It is in the Start menu." (or "in your applications."); "Version mismatch / The extension and Ghostlight service cannot communicate until their adapter contracts match." -> "Not connected / Ghostlight on this computer isn't answering." with the setup button; "Update needed / Update Ghostlight on this computer." keeps its line and gains the button "Update this computer"; "Session ended / Browser access is severed. Start a new session from the toolbar popup to reconnect." -> the card reads Connected (the popup tells the session state).
 
 ## Notes
 
@@ -245,3 +258,22 @@ j06-popup has landed. Next: j07-options.
   start_session by that hook and waits on `#pop[data-light=lit]` and `#title` (Ready, Paused, Session
   ended). `popupText()` in `tests/installed-journey.mjs` waits for the lit light, not a sentence. Both
   are `node --check` only; the coordinator's live runs are the proof.
+- j07: ran the gate checks the files require: (3) `npm test` in `extension/` (492 pass), (5) the
+  packager to `.tmp/lane-journey/extension.zip` (its page check passed with `options.html` naming
+  `kit.css`, `options.css`, `lib/shared.js`, `lib/setup-view.js`, `lib/popup-view.js` and
+  `options.js`), (8) `node --test tests/guards/*.test.mjs`, (9) `node --check extension/options.js`
+  and a PowerShell parse of the packager, (10) the repository integrity script. `git tag --list
+  'v2*'` was empty. The tree and the spec differed in these places.
+  (1) `options.html` no longer loads `lib/state.js`, which `options.js` never used; it loads
+  `lib/shared.js`, `lib/setup-view.js` and `lib/popup-view.js` in that order.
+  (2) The connection pill lost its dot: `gl-pill` has none, and the pill text carries the state.
+  The checking state is `gl-pill--quiet`, and the file-opened state is `gl-pill--warn`.
+  (3) `connection()` ignores the control state (j06 note 4), so the card shows Connected for a held
+  or ended session; the old "Session ended" card is gone. Two cases in `popup-view.test.js` pin
+  that and the outdated button. The platform comes from `chrome.runtime.getPlatformInfo()`, read
+  once on the first load.
+  (4) `shared.test.js` also pinned the options page ("You can always close tabs yourself."); that
+  test is deleted with the three in `onboarding.test.js`, which keeps its `linkState` tests.
+  (5) The `.visually-hidden` class became the kit's `gl-sr`. `options.css` has no reduced-motion
+  block: the kit's `.gl-page` rule already covers every element. The still-historical mention of
+  `ui.css` in `docs/tasks/1.0-plus/D1-presentation-stylesheet-module.md` is left as written.

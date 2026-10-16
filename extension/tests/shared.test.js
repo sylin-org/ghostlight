@@ -157,10 +157,3 @@ test("unseen denial delivery is bounded, coalesced, and expires", () => {
   now += 100;
   assert.equal(queue.size(), 0);
 });
-
-
-test("the preserve-tabs choice is offered on the options page", () => {
-  const options = readFileSync(join(__dirname, "..", "options.html"), "utf8");
-  assert.match(options, /id="preserve-tabs"/);
-  assert.match(options, /You can always close tabs yourself\./);
-});

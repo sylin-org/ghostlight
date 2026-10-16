@@ -43,13 +43,13 @@ try {
         "manifest.json",
         "offscreen.html",
         "offscreen.js",
+        "options.css",
         "options.html",
         "options.js",
         "popup.html",
         "popup.js",
         "setup.html",
         "setup.js",
-        "ui.css",
         "worker.js"
     )
     $iconFiles = @(

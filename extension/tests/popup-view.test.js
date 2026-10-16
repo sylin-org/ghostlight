@@ -199,3 +199,18 @@ test("an unreachable connection names where Ghostlight is and offers no setup", 
   const linux = popup.connection(away(shared.LINK_UNREACHABLE), { platform: LINUX });
   assert.equal(linux.line, "Open Ghostlight on this computer. It is in your applications.");
 });
+
+test("the options connection is Connected for a live link whatever the session says", () => {
+  for (const controlState of ["active", "held", "ended"]) {
+    const connection = popup.connection(snapshot({ control_state: controlState }), { platform: WIN });
+    assert.equal(connection.title, popup.WORDS.connected.title);
+    assert.equal(connection.needsSetup, false);
+  }
+});
+
+test("an outdated service offers its update on the options connection", () => {
+  const connection = popup.connection(away(shared.LINK_SERVICE_OUTDATED, { compatible: false }), { platform: LINUX });
+  assert.equal(connection.title, "Update needed");
+  assert.equal(connection.needsSetup, true);
+  assert.equal(connection.setupLabel, "Update this computer");
+});

@@ -1,6 +1,8 @@
 (function ghostlightOptions() {
   "use strict";
 
+  const view = globalThis.GhostlightPopupView;
+  const SETUP_PAGE = "setup.html";
   const effects = document.getElementById("effects");
   const captions = document.getElementById("captions");
   const diagnostics = document.getElementById("debug");
@@ -10,8 +12,9 @@
   const linkText = document.getElementById("link-text");
   const linkSub = document.getElementById("link-sub");
   const setupRoute = document.getElementById("setup-route");
+  let platform = null;
   if (!globalThis.chrome?.runtime?.id) {
-    linkPill.className = "pill wait";
+    linkPill.className = "gl-pill gl-pill--warn";
     linkText.textContent = "Open extension options";
     linkSub.textContent = "This is a local file, not the installed extension. Open Ghostlight's options from Chrome's Extensions menu to see its connection and settings.";
     document.querySelectorAll("input, button").forEach(control => { control.disabled = true; });
@@ -30,7 +33,7 @@
   });
 
   setupRoute.addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("setup.html") }).catch(() => {});
+    chrome.tabs.create({ url: chrome.runtime.getURL(SETUP_PAGE) }).catch(() => {});
   });
 
   async function request(message) {
@@ -44,33 +47,17 @@
   }
 
   function renderLink(snapshot) {
-    if (snapshot.control_state === "ended") {
-      linkPill.className = "pill";
-      linkText.textContent = "Session ended";
-      linkSub.textContent = "Browser access is severed. Start a new session from the toolbar popup to reconnect.";
-    } else if (snapshot.connected && snapshot.compatible) {
-      linkPill.className = "pill on";
-      linkText.textContent = "Connected";
-      linkSub.textContent = "The agent can reach this browser.";
-    } else if (snapshot.link_state === "service_outdated") {
-      linkPill.className = "pill wait";
-      linkText.textContent = "Update needed";
-      linkSub.textContent = "Update Ghostlight on this computer.";
-    } else if (snapshot.link_state === "host_absent") {
-      linkPill.className = "pill wait";
-      linkText.textContent = "Not installed here";
-      linkSub.textContent = "Ghostlight is not installed on this computer yet. The extension came with your Chrome profile. Install Ghostlight here to connect it.";
-    } else {
-      linkPill.className = "pill wait";
-      linkText.textContent = snapshot.compatible ? "Waiting" : "Version mismatch";
-      linkSub.textContent = snapshot.compatible
-        ? "Waiting for the Ghostlight service. Start it, and this turns green on its own."
-        : "The extension and Ghostlight service cannot communicate until their adapter contracts match.";
-    }
-    setupRoute.hidden = snapshot.link_state !== "host_absent";
+    const connection = view.connection(snapshot, { platform });
+    const connected = connection.title === view.WORDS.connected.title;
+    linkPill.className = connected ? "gl-pill gl-pill--ok" : "gl-pill gl-pill--warn";
+    linkText.textContent = connection.title;
+    linkSub.textContent = connection.line;
+    setupRoute.hidden = !connection.needsSetup;
+    setupRoute.textContent = connection.setupLabel ?? "";
   }
 
   async function load() {
+    if (platform === null) platform = (await chrome.runtime.getPlatformInfo().catch(() => null))?.os ?? null;
     const [preferences, snapshot] = await Promise.all([
       request({ kind: "get_preferences" }),
       request({ kind: "ui_snapshot" })
