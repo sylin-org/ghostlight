@@ -335,6 +335,7 @@ mod linux_source {
             assert!(session_ending(), "the handler sets the state itself");
             assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Terminating));
             dispatch(SessionEvent::Cancelled);
+            assert_eq!(events.recv_timeout(PROMPTLY), Ok(SessionEvent::Cancelled));
         }
 
         drop(listener);

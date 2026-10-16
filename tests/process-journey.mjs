@@ -11,7 +11,15 @@ import {
 } from "./lib/home.mjs";
 import { COLD_REQUEST_MS, McpEdge, RelayMcp, SyntheticBrowser, World, structured } from "./lib/peers.mjs";
 
-const catalog = JSON.parse(readFileSync(join(repository, "docs", "1.0", "catalog.json"), "utf8"));
+// docs/1.0/catalog.json is written on Windows. The catalog advertises an upload example path in the
+// service's own platform form (EXAMPLE_UPLOAD_PATH in crates/orchestrator/src/language/catalog.rs),
+// so on every other platform the golden's path is read in the form the service advertises there.
+const GOLDEN_UPLOAD_PATH = "C:\\Users\\me\\notes.txt";
+const PLATFORM_UPLOAD_PATH = "/home/me/notes.txt";
+const goldenText = readFileSync(join(repository, "docs", "1.0", "catalog.json"), "utf8");
+const catalog = JSON.parse(process.platform === "win32"
+  ? goldenText
+  : goldenText.replaceAll(JSON.stringify(GOLDEN_UPLOAD_PATH), JSON.stringify(PLATFORM_UPLOAD_PATH)));
 const DENIED_HOST = "blocked.localhost";
 const BROWSER_ABSENT = (frame) => frame.kind === "backend_unavailable" && frame.service === "absent";
 const CONTENDERS = 10;

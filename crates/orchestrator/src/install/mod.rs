@@ -1252,11 +1252,16 @@ fn inspect_toml(
         .unwrap_or_default();
     let args = toml_entry_args(entry);
     let state = command_registration_state(command, args.as_deref(), edge, windows);
-    if matches!(
+    if !matches!(
         state,
-        RegistrationState::Current | RegistrationState::Updatable
-    ) && !missing_codex_desktop_environment(entry, windows)?.is_empty()
-    {
+        RegistrationState::Current | RegistrationState::Updatable | RegistrationState::Retired
+    ) {
+        return Ok(state);
+    }
+    // Every entry this install owns is validated, so inspection refuses the same malformed
+    // members an edit of that entry refuses.
+    let missing = missing_codex_desktop_environment(entry, windows)?;
+    if state == RegistrationState::Current && !missing.is_empty() {
         return Ok(RegistrationState::Updatable);
     }
     Ok(state)
@@ -3606,6 +3611,8 @@ mod tests {
         let directory = temporary("codex-desktop");
         let path = directory.join("config.toml");
         let edge = edge(&directory);
+        // The edge command with no arguments is an updatable registration on purpose: the edit
+        // rewrites the arguments and adds the desktop forwarding together.
         let source = format!(
             "# keep me\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nstartup_timeout_sec = 45\nenv_vars = [\"CUSTOM_SETTING\", {{ name = \"DISPLAY\", source = \"local\" }}, {{ name = \"WAYLAND_DISPLAY\" }}, {{ name = \"CUSTOM_REMOTE\", source = \"remote\" }}]\n[mcp_servers.ghostlight.env]\nXAUTHORITY = \"/explicit/test-authority\"\n[mcp_servers.other]\ncommand = \"other-server\"\n",
             edge.to_string_lossy()
@@ -3654,8 +3661,9 @@ mod tests {
         let path = directory.join("config.toml");
         let edge = edge(&directory);
         let source = format!(
-            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nenv_vars = \"not-an-array\"\n",
-            edge.to_string_lossy()
+            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenv_vars = \"not-an-array\"\n",
+            edge.to_string_lossy(),
+            super::MCP_ARGUMENTS
         );
         fs::write(&path, &source).unwrap();
         assert!(inspect_toml(&source, &edge, false).is_err());
@@ -3674,6 +3682,9 @@ mod tests {
         let directory = temporary("codex-malformed-env-members");
         let path = directory.join("config.toml");
         let edge = edge(&directory);
+        // The edge command with its current arguments is the current registration. The retired
+        // connector command is a retired one. Both are owned, so both refuse malformed members.
+        let arguments = format!("{:?}", super::MCP_ARGUMENTS);
         for members in [
             "123",
             "true",
@@ -3689,11 +3700,11 @@ mod tests {
             for command in [&edge, &directory.join("old/ghostlight-mcp-connector")] {
                 for source in [
                     format!(
-                        "# preserve exactly\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = []\nenv_vars = [{members}]\n",
+                        "# preserve exactly\n[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {arguments}\nenv_vars = [{members}]\n",
                         command.to_string_lossy()
                     ),
                     format!(
-                        "# preserve exactly\n[mcp_servers]\nghostlight = {{ command = {:?}, args = [], env_vars = [{members}] }}\n",
+                        "# preserve exactly\n[mcp_servers]\nghostlight = {{ command = {:?}, args = {arguments}, env_vars = [{members}] }}\n",
                         command.to_string_lossy()
                     ),
                 ] {
@@ -3716,6 +3727,7 @@ mod tests {
         let directory = temporary("codex-inline-env");
         let path = directory.join("config.toml");
         let edge = edge(&directory);
+        // The edge command with no arguments is an updatable registration on purpose.
         fs::write(&path, format!(
             "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
             edge.to_string_lossy()

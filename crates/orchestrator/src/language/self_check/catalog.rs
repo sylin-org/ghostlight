@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use super::golden::{check_golden, golden_text, repository_path, CATALOG_GOLDEN};
 use super::schema::{is_valid, violations};
+use crate::language::tool_catalog::EXAMPLE_UPLOAD_PATH;
 use crate::language::{catalog, decode};
 
 /// An absolute path the decoder accepts on the platform the tests run on.
@@ -19,6 +20,13 @@ const ABSOLUTE_PATH: &str = "C:\\Users\\me\\report.pdf";
 /// An absolute path the decoder accepts on the platform the tests run on.
 #[cfg(not(windows))]
 const ABSOLUTE_PATH: &str = "/home/me/report.pdf";
+
+/// The upload example path as `docs/1.0/catalog.json` spells it, on every platform.
+///
+/// The catalog advertises a path the service's own platform accepts (`EXAMPLE_UPLOAD_PATH`), so
+/// its text differs by operating system. The golden is one file, written on Windows, so the
+/// comparison and the update both use this form.
+const CANONICAL_UPLOAD_PATH: &str = "C:\\Users\\me\\notes.txt";
 
 /// Ordinary calls a model makes, at least two per tool (one for a tool that takes no input).
 ///
@@ -579,7 +587,12 @@ fn the_documented_shortest_calls_lead_their_examples() {
 
 #[test]
 fn the_catalog_matches_docs_1_0_catalog_json() {
-    check_golden(CATALOG_GOLDEN, &golden_text(&catalog()));
+    let platform = serde_json::to_string(EXAMPLE_UPLOAD_PATH).expect("a path encodes");
+    let canonical = serde_json::to_string(CANONICAL_UPLOAD_PATH).expect("a path encodes");
+    check_golden(
+        CATALOG_GOLDEN,
+        &golden_text(&catalog()).replace(&platform, &canonical),
+    );
 }
 
 #[test]

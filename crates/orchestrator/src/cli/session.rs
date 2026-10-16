@@ -67,11 +67,16 @@ fn reported_name(file_name: &str) -> &str {
     }
 }
 
-/// Whether a process name is the edge or the service image.
+/// Whether a process name is the edge or the service image, as the full image name or as the
+/// operating system reports it. Linux truncates the reported name to 15 bytes, while a source that
+/// reads the executable path or the command line yields the full name.
 fn is_ghostlight(name: &str) -> bool {
     [EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME]
         .into_iter()
-        .any(|file_name| name.eq_ignore_ascii_case(reported_name(file_name)))
+        .any(|file_name| {
+            name.eq_ignore_ascii_case(file_name)
+                || name.eq_ignore_ascii_case(reported_name(file_name))
+        })
 }
 
 /// Climb from `start` past every Ghostlight executable, then to the outermost of the run of
@@ -167,8 +172,8 @@ fn caller() -> Option<SessionMarker> {
 #[cfg(test)]
 mod tests {
     use super::{
-        caller, marker, nearest_foreign_ancestor, reported_name, Ancestor, EDGE_EXECUTABLE_NAME,
-        MAX_ANCESTORS_READ, SERVICE_EXECUTABLE_NAME, SESSION_VARIABLE,
+        caller, is_ghostlight, marker, nearest_foreign_ancestor, reported_name, Ancestor,
+        EDGE_EXECUTABLE_NAME, MAX_ANCESTORS_READ, SERVICE_EXECUTABLE_NAME, SESSION_VARIABLE,
     };
     use crate::intake::session::SessionMarker;
 
@@ -211,6 +216,17 @@ mod tests {
             process(10, "pwsh.exe", Some(1)),
         ];
         assert_eq!(walk(&two, 30), Some(10));
+    }
+
+    #[test]
+    fn ghostlight_is_recognized_by_its_full_name_and_by_the_name_the_system_reports() {
+        for file_name in [EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME] {
+            assert!(is_ghostlight(file_name));
+            assert!(is_ghostlight(&file_name.to_uppercase()));
+            assert!(is_ghostlight(reported_name(file_name)));
+        }
+        assert!(!is_ghostlight("pwsh.exe"));
+        assert!(!is_ghostlight("ghostlight-other"));
     }
 
     #[test]

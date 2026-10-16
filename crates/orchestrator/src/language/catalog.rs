@@ -988,11 +988,11 @@ fn upload_schema() -> Value {
 /// An absolute path in the form the service's own platform accepts, so the advertised upload
 /// example is a call the decoder takes wherever Ghostlight runs.
 #[cfg(windows)]
-const EXAMPLE_UPLOAD_PATH: &str = "C:\\Users\\me\\notes.txt";
+pub(crate) const EXAMPLE_UPLOAD_PATH: &str = "C:\\Users\\me\\notes.txt";
 /// An absolute path in the form the service's own platform accepts, so the advertised upload
 /// example is a call the decoder takes wherever Ghostlight runs.
 #[cfg(not(windows))]
-const EXAMPLE_UPLOAD_PATH: &str = "/home/me/notes.txt";
+pub(crate) const EXAMPLE_UPLOAD_PATH: &str = "/home/me/notes.txt";
 
 fn evaluate_schema() -> Value {
     examples(
