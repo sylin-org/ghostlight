@@ -238,22 +238,26 @@ function Record-State([int] $Round, [string] $State) {
     Write-Output "PASS round=$Round $State count=$($windows.Count)"
 }
 
-function Assert-IsolatedWebView([int] $Round, [int] $ShellId) {
+function Assert-IsolatedWebView([int] $Round, [int] $ShellProcessId) {
     # Query only children of the exact shell of this home. Never collect unrelated browser profiles.
-    $webViews = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $ShellId AND Name = 'msedgewebview2.exe'")
+    # The parameter is not named ShellId: that is a read-only automatic variable of PowerShell.
+    $webViews = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $ShellProcessId AND Name = 'msedgewebview2.exe'")
     $profiles = @()
     foreach ($webView in $webViews) {
         if ($webView.CommandLine -match '(?:^|\s)--user-data-dir=(?:"([^"]+)"|(\S+))') {
-            $profile = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
-            $profiles += [IO.Path]::GetFullPath($profile)
+            $directory = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+            $profiles += [IO.Path]::GetFullPath($directory)
         }
     }
-    # WebView2 keeps Chromium's browser profile in EBWebView beneath the shell's profile directory.
+    # The window keeps one persistent profile under the home, state/desktop-webview (ADR-0199
+    # Decision 7). WebView2 keeps Chromium's browser profile in EBWebView beneath it. Every
+    # WebView2 process of the shell must use exactly that folder, so the window shares a profile
+    # with neither Edge nor any other application.
     $expected = [IO.Path]::GetFullPath((Join-Path $ghostlightHome 'state/desktop-webview/EBWebView'))
     if (-not $profiles.Count -or @($profiles | Where-Object { $_ -ine $expected }).Count) {
-        throw 'The shell WebView2 did not use the profile directory of this home.'
+        throw "The shell WebView2 did not use the profile directory of this home: expected $expected, found $($profiles -join ', ')."
     }
-    $observations.Add(@{ round=$Round; state='isolated-webview-profile'; pid=$ShellId; directory=$expected })
+    $observations.Add(@{ round=$Round; state='isolated-webview-profile'; pid=$ShellProcessId; directory=$expected })
     Write-Output "PASS round=$Round isolated-webview-profile"
 }
 
