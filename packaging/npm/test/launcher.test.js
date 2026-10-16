@@ -358,6 +358,25 @@ test("the development channel keeps the installed set whatever its version", asy
     await f.install("1.0.0", "installed", "development");
     const launch = await f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD });
     assert.equal(launch.executable, join(f.bin, "ghostlight"));
+    assert.deepEqual(launch.arguments_, ["mcp"]);
+    assert.equal(f.activity.installs.length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a development installation whose edge is gone names the way back and installs nothing", async () => {
+  const f = await launcherFixture();
+  try {
+    await f.install("1.0.0", "installed", "development");
+    await rm(join(f.bin, "ghostlight"));
+    await assert.rejects(
+      f.prepareLaunch({ ...f.options, arguments_: [], fetchImpl: NO_DOWNLOAD }),
+      error => error.message.includes(`development build, but ${join(f.bin, "ghostlight")} is missing`)
+        && error.message.includes("npx ghostlight deployment install --restore")
+        && error.message.includes("-Restore")
+        && error.message.includes("get.sh | sh -s -- --restore"),
+    );
     assert.equal(f.activity.installs.length, 0);
   } finally {
     await f.cleanup();

@@ -1,9 +1,9 @@
 // The installed Ghostlight a live journey drives.
 //
 // A live journey runs `ghostlight mcp` from the Ghostlight home's `bin` directory: an edge that runs
-// from anywhere else is a carrier, hands its arguments to the service beside it, and never serves
-// the MCP relay. So the journey names the installed edge, and records the images it ran against so
-// the evidence says which build was active.
+// from anywhere else is a carrier, and `mcp` through a repo-built one would carrier-install that
+// build as a release. So the journey names the installed edge, and records the images it ran
+// against so the evidence says which build was active.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -37,7 +37,7 @@ export function installedBinDirectory() {
   const named = process.env.GHOSTLIGHT_BIN_DIR;
   if (named && !samePlace(named, home)) {
     throw Object.assign(new Error(
-      `GHOSTLIGHT_BIN_DIR ${named} is not the Ghostlight home's bin directory ${home}; an edge outside it is a carrier and does not serve mcp`),
+      `GHOSTLIGHT_BIN_DIR ${named} is not the Ghostlight home's bin directory ${home}; an edge outside it is a carrier and would install itself as a release`),
     { code: "ERR_NOT_INSTALLED_BIN" });
   }
   return resolve(named || home);

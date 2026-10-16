@@ -74,7 +74,11 @@ if (-not $rejected -or (Get-FileHash (Join-Path $destination 'ghostlight.exe')).
 foreach ($download in $global:fixtureDownloads) {
     if (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName($download))) { throw 'Temporary download was retained' }
 }
-if (@(Get-ChildItem -LiteralPath $destination -Filter '*.exe').Count -ne $global:fixtureNames.Count) { throw 'Unexpected installed copies' }
+$expectedFiles = @($global:fixtureNames | ForEach-Object { "$_.exe" }) + 'install.json' | Sort-Object
+$installedFiles = @(Get-ChildItem -LiteralPath $destination -File | ForEach-Object { $_.Name } | Sort-Object)
+if (($installedFiles -join '|') -ne ($expectedFiles -join '|')) {
+    throw "Unexpected installed files: $($installedFiles -join ', ')"
+}
 Write-Output 'PASS PowerShell installer: fixed paths, the three verified images, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
 '@
 [IO.File]::WriteAllText($scenario, $scenarioSource)
@@ -82,9 +86,23 @@ try {
     & pwsh -NoProfile -File $scenario -Repository $repo -Binaries $BinaryDirectory -UserDirectory (Join-Path $area 'user with spaces')
     if ($LASTEXITCODE -ne 0) { throw "PowerShell installer fixture failed: $LASTEXITCODE" }
 } finally {
+    # The install starts the fixture service and presence launches the shell. Stop exactly the
+    # images of this fixture home, by path, before the home is removed.
+    $installedBin = Join-Path $area 'user with spaces/.ghostlight/bin'
+    $stopFailures = @()
+    foreach ($name in @('ghostlight-desktop', 'ghostlight-service')) {
+        $image = Join-Path $installedBin "$name.exe"
+        foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Path -ieq $image })) {
+            try {
+                Stop-Process -InputObject $process -Force
+                if (-not $process.WaitForExit(5000)) { $stopFailures += "Fixture process $($process.Id) did not exit." }
+            } catch { $stopFailures += $_.Exception.Message }
+        }
+    }
     $expectedRoot = $repo.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar + '.tmp' + [IO.Path]::DirectorySeparatorChar
     if (-not [IO.Path]::GetFullPath($area).StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Unsafe fixture cleanup: $area"
     }
     Remove-Item -LiteralPath $area -Recurse -Force
+    if ($stopFailures.Count) { throw ($stopFailures -join '; ') }
 }

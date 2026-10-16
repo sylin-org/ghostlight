@@ -34,6 +34,13 @@ const TEST_HOME_VARIABLE = "GHOSTLIGHT_TEST_HOME";
 const INSTALL_RECORD_NAME = "install.json";
 /** The channel `install.json` records for a build the development loop installed. */
 const DEVELOPMENT_CHANNEL = "development";
+/** The way back from a development build to a release, in the words the service uses. */
+const RESTORE_ROUTE = [
+  "To return to a release, run one of these:",
+  "  npx ghostlight deployment install --restore",
+  "  PowerShell: & ([scriptblock]::Create((irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1))) -Restore",
+  "  macOS and Linux: curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh -s -- --restore",
+].join("\n");
 /** First argument of the installer command, which always runs this package's own verified service. */
 const DEPLOYMENT_COMMAND = "deployment";
 /** First arguments of the commands that never install (ADR-0197 Decision 13). */
@@ -90,6 +97,11 @@ export function neverInstalls(arguments_) {
     return true;
   }
   return arguments_.length > 0 && NEVER_INSTALL_COMMANDS.has(arguments_[0]);
+}
+
+/** The sentence for a development installation whose edge is gone, as the service words it. */
+export function developmentExecutableMissing(executable) {
+  return `The installed Ghostlight is a development build, but ${executable} is missing. ${RESTORE_ROUTE}`;
 }
 
 /**
@@ -313,6 +325,9 @@ export async function prepareLaunch({
     const packageVersion = JSON.parse(await readFile(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
     const development = (await readInstallRecord(directory))?.channel === DEVELOPMENT_CHANNEL;
     const present = existsSync(installedEdge) && existsSync(installedService);
+    if (development && !existsSync(installedEdge)) {
+      throw new Error(developmentExecutableMissing(installedEdge));
+    }
     if (development || (present && await installedSetIsCurrent(directory, packageVersion))) {
       return { executable: installedEdge, arguments_: edgeArguments(arguments_), cleanup: nothingToClean };
     }

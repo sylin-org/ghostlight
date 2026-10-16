@@ -186,6 +186,9 @@ binaries. The live service runs from copies in `~/.ghostlight`, so it never lock
 or running journeys in this checkout, use `.target-lane-<name>` and pass `GHOSTLIGHT_BIN_DIR` to
 every journey.
 
+Live installed journeys (`tests/live-journey.mjs`, `tests/settlement-live-journey.mjs`) use the
+home's `<home>/bin` and refuse any other `GHOSTLIGHT_BIN_DIR`.
+
 ## Code style
 
 - Edition and lints come from the workspace `Cargo.toml`, and fmt and clippy `-D warnings` are in

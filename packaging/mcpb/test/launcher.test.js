@@ -119,6 +119,30 @@ test("a current record whose installed edge or service is missing installs first
   }
 });
 
+test("a development record starts the installed MCP relay without installing, whatever its version", () => {
+  const { status, calls, errors, home } = launch(JSON.stringify({ service_version: "1.0.0", channel: "development" }));
+  assert.equal(status, 0);
+  assert.deepEqual(errors, []);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, path.join(home, "bin", "ghostlight.exe"));
+  assert.deepEqual(calls[0].args, ["mcp"]);
+  assert.equal(calls[0].options.stdio, "inherit");
+});
+
+test("a development record whose edge is gone names the way back and installs nothing", () => {
+  const { status, calls, errors, home } = launch(
+    JSON.stringify({ service_version: "1.0.0", channel: "development" }),
+    { missing: "ghostlight" },
+  );
+  assert.notEqual(status, 0);
+  assert.equal(calls.length, 0);
+  const printed = errors.join("");
+  assert.ok(printed.includes(`development build, but ${path.join(home, "bin", "ghostlight.exe")} is missing`));
+  assert.ok(printed.includes("npx ghostlight deployment install --restore"));
+  assert.ok(printed.includes("-Restore"));
+  assert.ok(printed.includes("get.sh | sh -s -- --restore"));
+});
+
 test("the install record is read from the bin directory of the Ghostlight home", () => {
   const home = homeWithRecord(JSON.stringify({ service_version: "2.0.0" }));
   try {

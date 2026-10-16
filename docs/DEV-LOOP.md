@@ -170,8 +170,8 @@ It includes the omitted real-browser and continuity lanes, writes per-gate evide
 a required lane cannot run or source changes during execution. See the
 [feature coverage guide](tasks/security-hardening/regression-suite.md). Installed validation uses
 `node tests/live-journey.mjs` separately after the changed components are active. It runs the
-installed `~/.ghostlight/bin/ghostlight mcp` (an edge outside the home's `bin` is a carrier and
-does not serve `mcp`), records the SHA-256 of the installed edge, service and shell, and needs
+installed `~/.ghostlight/bin/ghostlight mcp` (an edge outside the home's `bin` is a carrier, and
+`mcp` through a repo-built one would carrier-install that build as a release), records the SHA-256 of the installed edge, service and shell, and needs
 all-open authority. `GHOSTLIGHT_BIN_DIR` may name that `bin` directory; it must be the home's own.
 `tests/settlement-live-journey.mjs` drives the installed stack the same way.
 

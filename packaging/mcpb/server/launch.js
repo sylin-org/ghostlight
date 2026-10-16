@@ -17,6 +17,15 @@ const EDGE_IMAGE = "ghostlight";
 const SERVICE_IMAGE = "ghostlight-service";
 /** The edge command that starts the MCP stdio relay. */
 const MCP_COMMAND = "mcp";
+/** The channel `install.json` records for a build the development loop installed. */
+const DEVELOPMENT_CHANNEL = "development";
+/** The way back from a development build to a release, in the words the service uses. */
+const RESTORE_ROUTE = [
+  "To return to a release, run one of these:",
+  "  npx ghostlight deployment install --restore",
+  "  PowerShell: & ([scriptblock]::Create((irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1))) -Restore",
+  "  macOS and Linux: curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh -s -- --restore",
+].join("\n");
 
 const TARGETS = Object.freeze({
   "win32/x64": "x86_64-pc-windows-msvc",
@@ -74,18 +83,26 @@ function installedImage(home, platform, name) {
   return path.join(home, "bin", `${name}${platform === "win32" ? ".exe" : ""}`);
 }
 
+/** The installed `install.json`, or null when it is absent or unreadable. */
+function readInstallRecord(home) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(home, INSTALL_RECORD_PATH), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** The sentence for a development installation whose edge is gone, as the service words it. */
+function developmentExecutableMissing(executable) {
+  return `The installed Ghostlight is a development build, but ${executable} is missing. ${RESTORE_ROUTE}\n`;
+}
+
 /**
  * True when the installed service is the same as or newer than this bundle. An absent,
  * unreadable or unordered `install.json` counts as older, so the bundle installs itself.
  */
 function installIsCurrent(home, version) {
-  let record;
-  try {
-    record = JSON.parse(fs.readFileSync(path.join(home, INSTALL_RECORD_PATH), "utf8"));
-  } catch {
-    return false;
-  }
-  const order = compareVersions(record?.service_version, version);
+  const order = compareVersions(readInstallRecord(home)?.service_version, version);
   return order !== null && order >= 0;
 }
 
@@ -114,10 +131,15 @@ function run(options = {}) {
     return 1;
   }
 
+  const development = readInstallRecord(home)?.channel === DEVELOPMENT_CHANNEL;
+  if (development && !fs.existsSync(edge)) {
+    standardError.write(developmentExecutableMissing(edge));
+    return 1;
+  }
   let current;
   try {
-    current = fs.existsSync(edge) && fs.existsSync(installedService)
-      && installIsCurrent(home, options.version ?? bundleVersion(serverDirectory));
+    current = development || (fs.existsSync(edge) && fs.existsSync(installedService)
+      && installIsCurrent(home, options.version ?? bundleVersion(serverDirectory)));
   } catch (error) {
     standardError.write(`Ghostlight MCPB setup failed: ${error.message}\n`);
     return 1;
