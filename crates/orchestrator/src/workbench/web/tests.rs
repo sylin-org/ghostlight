@@ -519,8 +519,17 @@ fn a_watcher_reads_projected_state_and_may_only_hold() {
     let body = snapshot.json();
     assert_eq!(body["instance"], "instance_test");
     for part in Part::ALL {
+        if part == Part::Setup {
+            continue;
+        }
         assert!(body["parts"][part.token()].is_object(), "{}", part.token());
     }
+    assert!(
+        body["parts"].get(Part::Setup.token()).is_none(),
+        "a watcher is shown the ordinary workbench while setup is under way"
+    );
+    let asked = fixture.watch(get("/api/snapshot?parts=setup")).json();
+    assert!(asked["parts"].as_object().unwrap().is_empty());
     assert_eq!(fixture.watch(get("/api/policy")).status, 200);
 
     let held = fixture.watch(post("/api/runtime", r#"{"intent":"hold"}"#));
@@ -600,6 +609,7 @@ fn closed_serves_the_pages_and_the_product_and_nothing_else() {
 
     let data_routes = [
         get("/api/snapshot"),
+        get("/api/snapshot?parts=setup"),
         get("/api/policy"),
         post("/api/search", r#"{"query":"x"}"#),
         post(
@@ -684,6 +694,8 @@ fn a_snapshot_holds_the_parts_it_is_asked_for() {
         everything["parts"].as_object().unwrap().len(),
         Part::ALL.len()
     );
+    let setup = fixture.control(get("/api/snapshot?parts=setup")).json();
+    assert_eq!(setup["parts"]["setup"]["stage"], "retired");
 }
 
 #[test]

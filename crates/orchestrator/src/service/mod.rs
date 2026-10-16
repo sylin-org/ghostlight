@@ -1129,7 +1129,7 @@ fn control_status(intake: &Intake) -> control::Status {
 fn serve_control(connection: Connection, operation: Option<Control>, intake: &Intake) {
     let value = match operation {
         Some(Control::Readiness) => {
-            serde_json::to_value(intake.workbench.snapshot().readiness).unwrap_or(Value::Null)
+            serde_json::to_value(intake.workbench.readiness()).unwrap_or(Value::Null)
         }
         Some(Control::Status) => {
             serde_json::to_value(control_status(intake)).unwrap_or(Value::Null)

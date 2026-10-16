@@ -96,6 +96,28 @@ fn history_item(invocation: &str, check: PermissionCheck) -> HistoryItem {
     }
 }
 
+/// The setup view of a computer with a native Chrome that does not have Ghostlight yet.
+fn setup_view() -> crate::language::setup::SetupView {
+    use crate::language::setup::{compose, BrowserFact, BrowserForm, Platform, SetupFacts};
+    compose(&SetupFacts {
+        complete: false,
+        finished: false,
+        platform: Platform::Linux,
+        finish_on_this_computer: false,
+        browsers: vec![BrowserFact {
+            id: "chrome".into(),
+            name: "Google Chrome".into(),
+            short: "Chrome".into(),
+            form: BrowserForm::Native,
+            connected: false,
+            extension: None,
+        }],
+        agents: Vec::new(),
+        mcp_command: "ghostlight mcp".into(),
+        agent_name: None,
+    })
+}
+
 /// A snapshot with every field filled, so the keys of each part are all the keys it can have.
 fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
     let path = temp_policy();
@@ -235,6 +257,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             },
             policy: governance.policy_chip(),
         },
+        setup: setup_view(),
         controls: ControlsPart::of(&ControlsFacts {
             runtime_state: RuntimeControlState::Held,
             runtime_note: Some("Paused from the tray."),
@@ -691,6 +714,43 @@ fn each_part_holds_exactly_the_keys_classified_for_its_audience() {
         assert_eq!(shown(Part::Controls), controls_keys(), "{audience:?}");
     }
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn only_the_window_is_shown_the_setup_part() {
+    let (snapshot, _, path) = populated();
+    let window = projection(Audience::Control);
+    assert!(window.shows(Part::Setup));
+    assert_eq!(
+        window.part(Part::Setup, &snapshot),
+        serde_json::to_value(setup_view()).unwrap()
+    );
+    let watcher = projection(Audience::Watch);
+    assert!(!watcher.shows(Part::Setup));
+    assert_eq!(watcher.part(Part::Setup, &snapshot), Value::Null);
+    for part in Part::ALL {
+        if part != Part::Setup {
+            assert!(watcher.shows(part), "{part:?}");
+        }
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn a_setup_hint_gives_a_watcher_no_tag_to_test_guesses_against() {
+    let event = WorkbenchEvent {
+        seq: 5,
+        change: WorkbenchChange::PartChanged {
+            part: HintedPart::Setup,
+            etag: "abc".into(),
+        },
+    };
+    let window = projection(Audience::Control).event(&event);
+    assert_eq!(window["change"]["part"], "setup");
+    assert_eq!(window["change"]["etag"], "abc");
+    let watcher = projection(Audience::Watch).event(&event);
+    assert_eq!(watcher["change"]["part"], "setup");
+    assert!(watcher["change"].get("etag").is_none());
 }
 
 #[test]

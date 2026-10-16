@@ -99,7 +99,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j11b-agent-outcomes has landed. Next: j12-setup-part. Rule 8 still binds: a packaged extension file changes only with a recorded owner decision to withdraw and resubmit. The release order is unchanged: release candidate as a prerelease, pinned install proof, staged submission, approval, then the one-sitting cutover (ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval"). j12 composes with `language::setup::compose` and j15 prints `language::setup::install_lines`; j12 reads `WorkbenchFacade::setup()` for `is_complete()`, `finished()` and `on_complete()`.
+j12-setup-part has landed. Next: j13-setup-actions. Rule 8 still binds: a packaged extension file changes only with a recorded owner decision to withdraw and resubmit. The release order is unchanged: release candidate as a prerelease, pinned install proof, staged submission, approval, then the one-sitting cutover (ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval"). j14 draws the setup part: `GET /api/snapshot?parts=setup` (Control only), announced over the stream by `part_changed` with `part` `setup` and the part's `etag`; the window reads the part again on a hint and calls `POST /api/integrations/rescan` once when the setup view opens. j13 turns the row actions into service acts. j15 prints `language::setup::install_lines`.
 
 ## Landed
 
@@ -120,12 +120,14 @@ j11b-agent-outcomes has landed. Next: j12-setup-part. Rule 8 still binds: a pack
 | j10-profiles | The service can tell "extension added, browser closed" from "extension missing". `install/native_host.rs`: `BrowserSpec` gains `short` (Chrome, Edge, Brave, Chromium); `NativeHostRegistry::user_data_directory(browser_id)` (the vendor path under `LOCALAPPDATA` plus `User Data` on Windows; the XDG config home plus `linux_directory` minus `NativeMessagingHosts` on Linux) and `browser_identities() -> Vec<BrowserIdentity { id, name, short }>` in table order. `install/browser_profiles.rs` (new): `ExtensionProfile { directory, name }`, `ProfileScan { profiles, with_extension }`, `scan_user_data(user_data, extension_id)` (never errors; reads at most 8 MiB of `Local State` `profile.info_cache` in file order, uses only keys of 1 to 64 characters that are one plain path component, shows names cleaned and cut to 40 characters, and falls back to an unnamed `Default`, counted when its directory exists) and `scan(registry)` for every browser whose executable is found, returning `BrowserProfiles { browser, scan }`. Read-only, local, nothing written, logged, stored or sent. Nothing uses the result until j12. | see `git log` |
 | j11-setup-language | `crates/orchestrator/src/language/setup.rs` (new, pure, no I/O, shaped like `readiness.rs`) holds the words of the setup view and of the install summary. `compose(&SetupFacts) -> SetupView` resolves the stage (Done, Retired, Computer, Browser, Agent) and builds the headline, steps, code panels, rows and live lines; `RowAction`, `SetupAction` (tag `kind`: `add_in_browser`, `open_browser`, `get_chrome`, `connect_agent`, `review_agent`) and `Pending` carry the actions and the words the page shows after a click. `install_lines(&InstallFacts)` is the whole success output of a real install, with exactly one Next line while setup is incomplete. `STORE_LISTING_URL`, `PROMPT`, `TAGLINE` and the step names are constants. The module doc classifies which deployment lines print beside the summary and which only in `--dry-run`. Nothing calls it yet (j12 and j15 do). | see `git log` |
 | j11b-agent-outcomes | The agent's answers say where the extension comes from. `language/outcome.rs` gains `ExtensionAdvice` (`Plain`, `AddFromStore`; `resolve(setup_complete, extension_in_a_profile)`), carried by `Refusal::BrowserStartupManual` and `Refusal::BrowserRecoveryFailed`. With `AddFromStore` the no-browser answer gains one next step and the `ExtensionAbsent` step is replaced by it: ask the user to add Ghostlight in Browser from `language::setup::STORE_LISTING_URL`, or to open the Ghostlight window for the setup steps. The executor (`work/mod.rs`) decides when the refusal is built: `WorkbenchProjection::setup()` (new) says whether setup is complete, and only while it is not does `extension_probe` run the j10 `browser_profiles::scan`. No attached setup progress means no advice. The incompatible-extension words are `language::adapter::ADAPTER_INCOMPATIBLE` ("Ghostlight in Browser is out of date. It updates itself within a day; to update now, open chrome://extensions, turn on Developer mode and click Update.") and the agent's next step for the contract refusals, both from `adapter::UPDATE_NOW`. `docs/1.0/LANGUAGE.md` and ADR-0200 Consequences carry the wording. | see `git log` |
+| j12-setup-part | The setup part is live. `Part::Setup` (token `setup`) is the last of `Part::ALL`; the window's projection is the `SetupView` and a watcher's omits it (`Projection::shows`, JQ5), so `GET /api/snapshot` leaves it out for a watcher and `parts=setup` as a watcher answers an empty `parts`; Closed gets nothing, as for every part. Screens learn of a change from `part_changed` with `part` `setup` and the tag of the view (`HintedPart::Setup`; a watcher's hint carries no tag). `workbench/setup.rs` holds the facts and `setup_view()`: complete and finished from `SetupProgress`; platform from `cfg!(windows)`; `finish_on_this_computer` when the native-host report has a private view; each browser's form from the report's package (`NotChecked` and an unreadable report fall back to whether the executable is found), its profile from the j10 scan, `connected` by name; an unknown connected browser is a connected `Chromium`; agents from the cached roster (`NotDetected` is no row; `seen` when a live session's client label matches the roster label or id, any case); the MCP command from the roster's `connector_command`. A complete setup reads nothing from the machine; an incomplete one reads the report and runs the scan each time the part is built. `workbench/live.rs` builds the part with every look, but only when a connected browser's name or a session's client label changed, or a caller said setup changed; it announces the part only when its tag differs. `WorkbenchFacade::attach_setup` wires `on_complete` to a rebuild, and every publication of the integrations part (a rescan or a client act) also rebuilds setup. `WorkbenchSnapshot` gains `setup`. The `SetupMachine` trait is the one seam to the computer, with a fake in `setup::test_support`. | see `git log` |
 
 
 ## Owed live checks
 
 - j01: none. Docs only.
 - j10: none. Nothing uses the scan until j12; the first live check is the setup part reading a real Chrome, Edge or Brave profile (an extension added from the Chrome Web Store, browser closed) on Windows and Linux.
+- j12: the setup part on a real machine: in a fresh 2.0 home, `GET /api/snapshot?parts=setup` from the window shows the Browser stage with an Add row for the installed browser; with the extension added from the store and the browser closed, the row reads "Open <browser>" (the j10 scan on Windows and Linux); when the extension connects the stage becomes Agent and the stream carries `part_changed` for `setup`; a client written by `ghostlight install` reads "Restart <label> to finish." until its first session, then Connected; the first successful agent request turns the part Done and the stream announces it once; the same machine after a restart shows Retired. Inside an app container (Claude Desktop's Store package) the stage is Computer.
 - j11: none. Pure words; the first live check is the window's setup view (j14) and the install output (j15).
 - j11b (Demo 2): install through the plugin with no Ghostlight extension and setup incomplete, ask the agent to browse, and see the store link in its answer (no window opens, JQ10). With the extension added in a closed browser, or after the first successful request, the answer carries no link. A 1.x extension connecting to a 2.0 service shows the new update sentence in its own words.
 - j02: none. The page markup that links the kit lands in j04, j06 and j07; the live look is checked there.
@@ -521,3 +523,37 @@ j11b-agent-outcomes has landed. Next: j12-setup-part. Rule 8 still binds: a pack
   key order; the browser's order is the order of `with_extension`.
   (5) The two Rust files were formatted with `rustfmt` on those files, not `cargo fmt -p`, to leave
   other lanes' files alone.
+- j12: ran the gate checks the files require: (1) `cargo fmt --all -- --check`, `cargo clippy --workspace
+  --all-targets -- -D warnings` and `cargo test -p ghostlight-service` (1813 pass), (6) the workbench
+  fixtures (`node tests/workbench-surface.mjs`, `node --test tests/workbench-transport.test.mjs
+  tests/workbench-settings.test.mjs`), (9) `node --check` on the two fixture servers, and (10) the
+  integrity script. No extension, page asset, golden, guard or `crates/orchestrator/ui` file changed,
+  so (2) to (5), (7) and (8) did not apply and the extension freeze held.
+  The tree and the spec differed in these places.
+  (1) Screens are told with a hint, not the whole part: `part_changed` with `part` `setup` and the
+  tag, like the integrations and the policy. A hint cannot leak the part to a watcher (whose hint
+  carries no tag) and keeps one projection path; the window reads `parts=setup` on a hint. The page
+  ignores a hinted part it does not know, so the current window is unaffected until j14.
+  (2) `service/mod.rs` does not wire `on_complete`: `WorkbenchFacade::attach_setup` does, with a
+  weak reference to the live parts, so the service's one `attach_setup` call and every test that
+  attaches progress through the facade get it. The only change in `service/mod.rs` is that the
+  readiness control operation calls the new `WorkbenchFacade::readiness()` instead of building a
+  whole snapshot, so a readiness check does not read the machine while setup is incomplete.
+  (3) Every publication of the integrations part rebuilds setup, not only `refresh_harnesses`:
+  a client act (install, fix, uninstall, locate, set up all) changes the agent rows too, and j13
+  needs the part to follow them.
+  (4) A service with no `SetupProgress` attached tracks no setup: the part is the retired view and
+  nothing is built or announced. This keeps every test that does not care about setup unchanged.
+  (5) `agent_name` is resolved once, when the finishing session is still live, and kept
+  (`Remembered`), so ending that session does not change the Done headline. It also accepts a
+  label equal to a roster label, and a label equal to a product id is named by the product name
+  (the roster label of one of several hosts would be wrong).
+  (6) Unknown connected browsers are listed as `other` with the reported name and the short name
+  `Chromium`. The snapshot builds the setup part for every request, so a snapshot of a service whose
+  setup is incomplete reads the report and the scan; the window asks for all parts, and only
+  `GET /api/snapshot` and the stream's rebuilds cause reads.
+  (7) The fixtures add a `retired` setup part to `tests/workbench-preview-server.mjs` and
+  `tests/workbench-surface.mjs` (control view only). `SNAPSHOT_PARTS` in the window's `transport.js`
+  still names six parts; j14 adds `setup`, and `workbench-transport.test.mjs` is unchanged until then.
+  (8) `Live::new` reads the start time itself instead of taking it, to keep its argument count under
+  the lint.

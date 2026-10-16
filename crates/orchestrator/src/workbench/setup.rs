@@ -5,15 +5,34 @@
 //! remembers in memory which workspace did it, and calls the callback a surface attached so it
 //! can tell the person. The browser, the policy and the page played no part in the decision, and
 //! the record carries nothing about them.
+//!
+//! The same module reads the machine and composes the setup part (ADR-0200 Decisions 8 to 11): the
+//! facts [`setup_view`] gathers from the connected browsers, the live sessions, the cached client
+//! roster and, while setup is incomplete, the native-host report and the profile scan. The words
+//! are [`crate::language::setup`]'s; nothing here words anything.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::{BrowserInstanceSummary, SessionSummary};
 use crate::audit::AuditRecord;
+use crate::install::browser_package::BrowserPackage;
+use crate::install::browser_profiles::{self, BrowserProfiles};
+use crate::install::native_host::{BrowserIdentity, NativeHostRegistry, NativeHostReport};
 use crate::install::setup_state::{self, SetupRecord};
+use crate::install::{HarnessState, HarnessSummary};
 use crate::intake::session::IntakeChannel;
+use crate::language::setup as words;
+use crate::language::setup::{
+    AgentFact, AgentState, BrowserFact, BrowserForm, Platform, ProfileFact, SetupFacts, SetupView,
+};
 use crate::work::result::Status;
+
+/// The id given to a connected browser that is none of the supported families.
+const OTHER_BROWSER_ID: &str = "other";
+/// The short name of a connected browser that is none of the supported families.
+const OTHER_BROWSER_SHORT: &str = "Chromium";
 
 /// What completed setup during this run of the service. It is not stored.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,10 +121,409 @@ fn qualifies(record: &AuditRecord) -> bool {
         && record.browser.is_some()
 }
 
+/// What the setup view reads from this computer. Only an incomplete setup asks for the report and
+/// the scan; a complete setup reads nothing. A test supplies a fake.
+pub(crate) trait SetupMachine: Send + Sync {
+    /// The native-host report, when it can be read.
+    fn native_hosts(&self) -> Option<NativeHostReport>;
+    /// Every supported browser family, in table order. This is a table and reads nothing.
+    fn browsers(&self) -> Vec<BrowserIdentity>;
+    /// Whether an ordinary installation of the browser is found.
+    fn browser_found(&self, browser_id: &str) -> bool;
+    /// The profiles that hold the Ghostlight extension, for every installed browser.
+    fn extension_profiles(&self) -> Vec<BrowserProfiles>;
+}
+
+/// The machine the service runs on.
+pub(super) struct ThisComputer(NativeHostRegistry);
+
+impl ThisComputer {
+    /// The machine as the current user's environment describes it.
+    pub(super) fn discover() -> Self {
+        Self(NativeHostRegistry::discover())
+    }
+}
+
+impl SetupMachine for ThisComputer {
+    fn native_hosts(&self) -> Option<NativeHostReport> {
+        self.0.check().ok()
+    }
+
+    fn browsers(&self) -> Vec<BrowserIdentity> {
+        self.0.browser_identities()
+    }
+
+    fn browser_found(&self, browser_id: &str) -> bool {
+        self.0.browser_executable(browser_id).is_some()
+    }
+
+    fn extension_profiles(&self) -> Vec<BrowserProfiles> {
+        browser_profiles::scan(&self.0)
+    }
+}
+
+/// Everything the setup part is composed from, as one look found it.
+pub(super) struct SetupInputs<'a> {
+    /// The setup progress, when the service tracks setup. Without it nothing is tracked and the
+    /// part is the retired view.
+    pub progress: Option<&'a SetupProgress>,
+    /// The live sessions.
+    pub sessions: &'a [SessionSummary],
+    /// The connected browsers.
+    pub browsers: &'a [BrowserInstanceSummary],
+    /// The cached client roster.
+    pub harnesses: &'a [HarnessSummary],
+    /// What is read from this computer.
+    pub machine: &'a dyn SetupMachine,
+    /// The agent that finished setup, once it is known.
+    pub agent_name: Option<&'a str>,
+}
+
+/// The setup part: the facts composed into the view the window draws.
+///
+/// An incomplete setup re-reads the native-host report and runs the profile scan, both bounded
+/// local reads. A complete setup reads nothing from the machine, so a finished run shows the done
+/// view and an earlier one the retired view.
+pub(super) fn setup_view(inputs: &SetupInputs<'_>) -> SetupView {
+    let finished = inputs.progress.and_then(SetupProgress::finished);
+    let complete = inputs.progress.is_none_or(SetupProgress::is_complete);
+    let mut facts = SetupFacts {
+        complete,
+        finished: finished.is_some(),
+        platform: if cfg!(windows) {
+            Platform::Windows
+        } else {
+            Platform::Linux
+        },
+        finish_on_this_computer: false,
+        browsers: Vec::new(),
+        agents: Vec::new(),
+        mcp_command: String::new(),
+        agent_name: None,
+    };
+    if complete {
+        if finished.is_some() {
+            let identities = inputs.machine.browsers();
+            facts.browsers = browser_facts(&identities, inputs.browsers, |_| {
+                (BrowserForm::Native, None)
+            });
+            facts.agent_name = inputs.agent_name.map(str::to_owned);
+        }
+        return words::compose(&facts);
+    }
+    let report = inputs.machine.native_hosts();
+    facts.finish_on_this_computer = report
+        .as_ref()
+        .is_some_and(|report| report.private_view.is_some());
+    let identities = inputs.machine.browsers();
+    let profiles = inputs.machine.extension_profiles();
+    facts.browsers = browser_facts(&identities, inputs.browsers, |identity| {
+        let package = report.as_ref().and_then(|report| {
+            report
+                .browsers
+                .iter()
+                .find(|registered| registered.id == identity.id)
+                .map(|registered| registered.package)
+        });
+        let form = form_of(package, || inputs.machine.browser_found(identity.id));
+        let extension = profiles
+            .iter()
+            .find(|found| found.browser.id == identity.id)
+            .and_then(|found| {
+                found
+                    .scan
+                    .with_extension
+                    .first()
+                    .map(|profile| ProfileFact {
+                        directory: profile.directory.clone(),
+                        name: profile.name.clone(),
+                        profiles: found.scan.profiles,
+                    })
+            });
+        (form, extension)
+    });
+    facts.agents = inputs
+        .harnesses
+        .iter()
+        .filter_map(|harness| agent_fact(harness, inputs.sessions))
+        .collect();
+    facts.mcp_command = inputs
+        .harnesses
+        .first()
+        .map(|harness| harness.connector_command.clone())
+        .unwrap_or_default();
+    words::compose(&facts)
+}
+
+/// How a browser family is installed. `found` says whether an ordinary installation is found, and
+/// is asked only when the package form was not inspected.
+fn form_of(package: Option<BrowserPackage>, found: impl FnOnce() -> bool) -> BrowserForm {
+    match package {
+        Some(BrowserPackage::Native) => BrowserForm::Native,
+        Some(BrowserPackage::Snap) => BrowserForm::Snap,
+        Some(BrowserPackage::Flatpak) => BrowserForm::Flatpak,
+        Some(BrowserPackage::MultipleSandboxes) => BrowserForm::SnapAndFlatpak,
+        Some(BrowserPackage::NotDetected) => BrowserForm::Missing,
+        Some(BrowserPackage::NotChecked) | None => {
+            if found() {
+                BrowserForm::Native
+            } else {
+                BrowserForm::Missing
+            }
+        }
+    }
+}
+
+/// Whether the browser name a connected browser reported is this family.
+fn names(identity: &BrowserIdentity, family: &str) -> bool {
+    family.eq_ignore_ascii_case(identity.name) || family.eq_ignore_ascii_case(identity.short)
+}
+
+/// One fact for every supported family, then one for each connected browser that is none of them.
+/// An unknown connected browser still completes the step; it is shown as Chromium.
+fn browser_facts(
+    identities: &[BrowserIdentity],
+    connected: &[BrowserInstanceSummary],
+    how: impl Fn(&BrowserIdentity) -> (BrowserForm, Option<ProfileFact>),
+) -> Vec<BrowserFact> {
+    let mut facts: Vec<BrowserFact> = identities
+        .iter()
+        .map(|identity| {
+            let (form, extension) = how(identity);
+            BrowserFact {
+                id: identity.id.to_owned(),
+                name: identity.name.to_owned(),
+                short: identity.short.to_owned(),
+                form,
+                connected: connected
+                    .iter()
+                    .any(|browser| names(identity, &browser.family)),
+                extension,
+            }
+        })
+        .collect();
+    for browser in connected {
+        let known = identities
+            .iter()
+            .any(|identity| names(identity, &browser.family));
+        let listed = facts
+            .iter()
+            .any(|fact| fact.id == OTHER_BROWSER_ID && fact.name == browser.family);
+        if !known && !listed {
+            facts.push(BrowserFact {
+                id: OTHER_BROWSER_ID.to_owned(),
+                name: browser.family.clone(),
+                short: OTHER_BROWSER_SHORT.to_owned(),
+                form: BrowserForm::Native,
+                connected: true,
+                extension: None,
+            });
+        }
+    }
+    facts
+}
+
+/// One client on this computer as the setup view knows it, or none for a client that is not here.
+fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<AgentFact> {
+    let state = match harness.state {
+        HarnessState::NotDetected => return None,
+        HarnessState::Installed => AgentState::Written,
+        HarnessState::Available | HarnessState::Updatable => AgentState::Found,
+        HarnessState::NeedsAttention => AgentState::NeedsAttention,
+    };
+    Some(AgentFact {
+        id: harness.id.clone(),
+        label: harness.label.clone(),
+        state,
+        private_view: harness.private_view,
+        seen: sessions.iter().any(|session| {
+            session.client_label.eq_ignore_ascii_case(&harness.label)
+                || session.client_label.eq_ignore_ascii_case(&harness.id)
+        }),
+    })
+}
+
+/// The name of the agent whose request finished setup: the roster's name for the client whose
+/// label the finishing session reported, and none when the session is gone or the label is not a
+/// client Ghostlight knows.
+pub(super) fn agent_name(
+    finished: &Finished,
+    sessions: &[SessionSummary],
+    harnesses: &[HarnessSummary],
+) -> Option<String> {
+    let label = &sessions
+        .iter()
+        .find(|session| session.id == finished.workspace)?
+        .client_label;
+    harnesses
+        .iter()
+        .find(|harness| {
+            label.eq_ignore_ascii_case(&harness.id) || label.eq_ignore_ascii_case(&harness.label)
+        })
+        .map(|harness| harness.label.clone())
+        .or_else(|| {
+            harnesses
+                .iter()
+                .find(|harness| label.eq_ignore_ascii_case(&harness.product_id))
+                .map(|harness| harness.name.clone())
+        })
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A computer the setup part is read from in tests: what it holds is set by the test, and it
+/// counts how often the report and the scan were read.
+#[cfg(test)]
+pub(super) mod test_support {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, PoisonError};
+
+    use super::{
+        BrowserIdentity, BrowserInstanceSummary, BrowserProfiles, NativeHostReport, SessionSummary,
+        SetupMachine, SetupView,
+    };
+    use crate::install::container::AppContainer;
+    use crate::install::{HarnessState, HarnessSummary};
+    use crate::intake::session::IntakeChannel;
+
+    /// A fake computer. Every browser family is known; none is installed until the test says.
+    #[derive(Default)]
+    pub struct Computer {
+        report: Mutex<Option<NativeHostReport>>,
+        found: Mutex<Vec<&'static str>>,
+        profiles: Mutex<Vec<BrowserProfiles>>,
+        reads: AtomicUsize,
+    }
+
+    impl Computer {
+        /// Make the browser with `id` found on this computer.
+        pub fn install(&self, id: &'static str) {
+            self.found
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(id);
+        }
+
+        /// Say what the profile scan finds from now on.
+        pub fn find_profiles(&self, profiles: Vec<BrowserProfiles>) {
+            *self.profiles.lock().unwrap_or_else(PoisonError::into_inner) = profiles;
+        }
+
+        /// Say that this computer's view is an app container's private one.
+        pub fn run_inside_an_app_container(&self) {
+            *self.report.lock().unwrap_or_else(PoisonError::into_inner) = Some(NativeHostReport {
+                connector: PathBuf::new(),
+                browsers: Vec::new(),
+                private_view: Some(AppContainer {
+                    app: "Claude".into(),
+                }),
+            });
+        }
+
+        /// How many times the report or the scan was read.
+        pub fn reads(&self) -> usize {
+            self.reads.load(Ordering::SeqCst)
+        }
+    }
+
+    impl SetupMachine for Computer {
+        fn native_hosts(&self) -> Option<NativeHostReport> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.report
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+
+        fn browsers(&self) -> Vec<BrowserIdentity> {
+            [
+                ("chrome", "Google Chrome", "Chrome"),
+                ("edge", "Microsoft Edge", "Edge"),
+                ("brave", "Brave", "Brave"),
+                ("chromium", "Chromium", "Chromium"),
+            ]
+            .into_iter()
+            .map(|(id, name, short)| BrowserIdentity { id, name, short })
+            .collect()
+        }
+
+        fn browser_found(&self, browser_id: &str) -> bool {
+            self.found
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains(&browser_id)
+        }
+
+        fn extension_profiles(&self) -> Vec<BrowserProfiles> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.profiles
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+    }
+
+    /// A client on the roster in `state`, started by `ghostlight mcp`.
+    pub fn harness(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
+        HarnessSummary {
+            id: id.into(),
+            product_id: id.into(),
+            name: label.into(),
+            label: label.into(),
+            target: label.into(),
+            icon: format!("{id}.svg"),
+            state,
+            detail: String::new(),
+            evidence: None,
+            can_install: false,
+            can_fix: false,
+            can_uninstall: false,
+            can_download: false,
+            can_locate: true,
+            private_view: false,
+            config_path: String::new(),
+            connector_command: "ghostlight mcp".into(),
+            manual_setup: String::new(),
+        }
+    }
+
+    /// A session from the client that calls itself `client_label`.
+    pub fn session(id: &str, client_label: &str) -> SessionSummary {
+        SessionSummary {
+            id: id.into(),
+            client_label: client_label.into(),
+            connections: Vec::new(),
+            channel: IntakeChannel::Mcp,
+            leased: false,
+            tab_count: 0,
+            held_tab_count: 0,
+            active_operations: 0,
+            browser: None,
+        }
+    }
+
+    /// A connected browser that reported `family`.
+    pub fn connected(family: &str) -> BrowserInstanceSummary {
+        BrowserInstanceSummary {
+            id: format!("browser_{family}"),
+            family: family.into(),
+            adapter_version: Some("1.0.0".into()),
+            connected: true,
+        }
+    }
+
+    /// The row with `id`, which the view must have.
+    pub fn row<'a>(view: &'a SetupView, id: &str) -> &'a crate::language::setup::Row {
+        view.rows
+            .iter()
+            .find(|row| row.id == id)
+            .unwrap_or_else(|| panic!("no row {id} in {:?}", view.rows))
+    }
 }
 
 #[cfg(test)]
@@ -113,11 +531,14 @@ mod tests {
     use std::fs;
     use std::sync::atomic::AtomicUsize;
 
+    use super::test_support::{connected, harness, row, session, Computer};
     use super::*;
     use crate::governance::{CapabilitySet, Decision};
+    use crate::install::browser_profiles::{ExtensionProfile, ProfileScan};
     use crate::install::scratch::Scratch;
     use crate::language::history::{CompositionKind, StepReceipt};
     use crate::language::outcome::Outcome;
+    use crate::language::setup::{RowTone, SetupAction, Stage};
 
     fn request(status: &str) -> AuditRecord {
         let mut record = AuditRecord::now(
@@ -293,5 +714,319 @@ mod tests {
         projection.record(&succeeded(), Storage::Saved);
         assert!(progress.is_complete());
         assert!(path.is_file());
+    }
+
+    // The setup part: the facts read and the view composed from them.
+
+    /// A setup that has not completed, over `computer`, with the given look.
+    fn incomplete(
+        computer: &Computer,
+        browsers: &[BrowserInstanceSummary],
+        sessions: &[SessionSummary],
+        harnesses: &[HarnessSummary],
+    ) -> SetupView {
+        let scratch = Scratch::new();
+        let (progress, _) = progress(&scratch);
+        setup_view(&SetupInputs {
+            progress: Some(&progress),
+            sessions,
+            browsers,
+            harnesses,
+            machine: computer,
+            agent_name: None,
+        })
+    }
+
+    fn chrome_with_the_extension(profiles: usize) -> BrowserProfiles {
+        BrowserProfiles {
+            browser: BrowserIdentity {
+                id: "chrome",
+                name: "Google Chrome",
+                short: "Chrome",
+            },
+            scan: ProfileScan {
+                profiles,
+                with_extension: vec![ExtensionProfile {
+                    directory: "Profile 1".into(),
+                    name: Some("Work".into()),
+                }],
+            },
+        }
+    }
+
+    #[test]
+    fn no_browser_and_a_native_chrome_without_the_extension_asks_to_add_it() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        let view = incomplete(&computer, &[], &[], &[]);
+        assert_eq!(view.stage, Stage::Browser);
+        let chrome = row(&view, "chrome");
+        assert_eq!(chrome.detail, "Not added");
+        assert!(matches!(
+            chrome.action.as_ref().map(|action| &action.action),
+            Some(SetupAction::AddInBrowser { browser }) if browser == "chrome"
+        ));
+    }
+
+    #[test]
+    fn a_chrome_that_holds_the_extension_is_opened_not_added() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        computer.find_profiles(vec![chrome_with_the_extension(2)]);
+        let view = incomplete(&computer, &[], &[], &[]);
+        assert_eq!(view.stage, Stage::Browser);
+        assert!(matches!(
+            row(&view, "chrome").action.as_ref().map(|action| &action.action),
+            Some(SetupAction::OpenBrowser { browser, profile })
+                if browser == "chrome" && profile.as_deref() == Some("Profile 1")
+        ));
+    }
+
+    #[test]
+    fn a_connected_chrome_moves_setup_to_the_agent_step() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        let view = incomplete(&computer, &[connected("Google Chrome")], &[], &[]);
+        assert_eq!(view.stage, Stage::Agent);
+        assert_eq!(connected_line(&view), "Chrome is connected.");
+    }
+
+    fn connected_line(view: &SetupView) -> String {
+        view.connected_line
+            .clone()
+            .expect("a connected browser is named")
+    }
+
+    #[test]
+    fn a_browser_none_of_the_families_still_completes_the_step_as_chromium() {
+        let computer = Computer::default();
+        let view = incomplete(&computer, &[connected("Vivaldi")], &[], &[]);
+        assert_eq!(view.stage, Stage::Agent);
+        assert_eq!(connected_line(&view), "Chromium is connected.");
+    }
+
+    #[test]
+    fn an_installed_client_nobody_has_seen_says_to_restart_it_and_a_session_turns_it_connected() {
+        let computer = Computer::default();
+        let roster = [harness(
+            "claude-code",
+            "Claude Code",
+            HarnessState::Installed,
+        )];
+        let browsers = [connected("Chrome")];
+        let unseen = incomplete(&computer, &browsers, &[], &roster);
+        assert_eq!(unseen.stage, Stage::Agent);
+        let waiting = row(&unseen, "claude-code");
+        assert_eq!(waiting.detail, "Restart Claude Code to finish.");
+        assert_eq!(waiting.tone, RowTone::Attention);
+
+        let seen = incomplete(
+            &computer,
+            &browsers,
+            &[session("workspace_1", "CLAUDE-CODE")],
+            &roster,
+        );
+        let connected_row = row(&seen, "claude-code");
+        assert_eq!(connected_row.detail, "Connected");
+        assert_eq!(connected_row.tone, RowTone::Done);
+        let by_label = incomplete(
+            &computer,
+            &browsers,
+            &[session("workspace_1", "claude code")],
+            &roster,
+        );
+        assert_eq!(row(&by_label, "claude-code").detail, "Connected");
+    }
+
+    #[test]
+    fn a_client_that_is_not_here_is_no_row_and_the_others_keep_their_states() {
+        let computer = Computer::default();
+        let roster = [
+            harness("goose", "Goose", HarnessState::NotDetected),
+            harness("cursor", "Cursor", HarnessState::Available),
+            harness("zed", "Zed", HarnessState::Updatable),
+            harness("codex", "Codex", HarnessState::NeedsAttention),
+        ];
+        let view = incomplete(&computer, &[connected("Chrome")], &[], &roster);
+        let ids: Vec<&str> = view.rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, ["cursor", "zed", "codex"]);
+        assert!(matches!(
+            row(&view, "cursor")
+                .action
+                .as_ref()
+                .map(|action| &action.action),
+            Some(SetupAction::ConnectAgent { .. })
+        ));
+        assert!(matches!(
+            row(&view, "zed")
+                .action
+                .as_ref()
+                .map(|action| &action.action),
+            Some(SetupAction::ConnectAgent { .. })
+        ));
+        assert!(matches!(
+            row(&view, "codex")
+                .action
+                .as_ref()
+                .map(|action| &action.action),
+            Some(SetupAction::ReviewAgent { .. })
+        ));
+    }
+
+    #[test]
+    fn no_client_at_all_gives_the_command_to_paste() {
+        let computer = Computer::default();
+        let roster = [harness("goose", "Goose", HarnessState::NotDetected)];
+        let view = incomplete(&computer, &[connected("Chrome")], &[], &roster);
+        assert!(view.rows.is_empty());
+        assert_eq!(view.code.expect("the command panel").text, "ghostlight mcp");
+    }
+
+    #[test]
+    fn an_app_container_must_finish_on_the_computer_itself() {
+        let computer = Computer::default();
+        computer.install("chrome");
+        computer.run_inside_an_app_container();
+        let view = incomplete(&computer, &[connected("Chrome")], &[], &[]);
+        assert_eq!(view.stage, Stage::Computer);
+    }
+
+    #[test]
+    fn the_package_form_decides_how_a_browser_is_installed() {
+        let never = || -> bool { panic!("an inspected package form is not looked up") };
+        assert_eq!(
+            form_of(Some(BrowserPackage::Native), never),
+            BrowserForm::Native
+        );
+        assert_eq!(
+            form_of(Some(BrowserPackage::Snap), never),
+            BrowserForm::Snap
+        );
+        assert_eq!(
+            form_of(Some(BrowserPackage::Flatpak), never),
+            BrowserForm::Flatpak
+        );
+        assert_eq!(
+            form_of(Some(BrowserPackage::MultipleSandboxes), never),
+            BrowserForm::SnapAndFlatpak
+        );
+        assert_eq!(
+            form_of(Some(BrowserPackage::NotDetected), never),
+            BrowserForm::Missing
+        );
+        for unchecked in [Some(BrowserPackage::NotChecked), None] {
+            assert_eq!(form_of(unchecked, || true), BrowserForm::Native);
+            assert_eq!(form_of(unchecked, || false), BrowserForm::Missing);
+        }
+    }
+
+    #[test]
+    fn a_record_from_this_run_is_done_and_names_the_agent_that_made_it() {
+        let scratch = Scratch::new();
+        let (progress, _) = progress(&scratch);
+        assert!(progress.observe(&succeeded()));
+        let computer = Computer::default();
+        let roster = [harness(
+            "claude-code",
+            "Claude Code",
+            HarnessState::Installed,
+        )];
+        let sessions = [session("workspace_1", "claude-code")];
+        let finished = progress.finished().expect("this run finished setup");
+        let name = agent_name(&finished, &sessions, &roster);
+        assert_eq!(name.as_deref(), Some("Claude Code"));
+        let view = setup_view(&SetupInputs {
+            progress: Some(&progress),
+            sessions: &sessions,
+            browsers: &[connected("Chrome")],
+            harnesses: &roster,
+            machine: &computer,
+            agent_name: name.as_deref(),
+        });
+        assert_eq!(view.stage, Stage::Done);
+        assert_eq!(view.headline.lead, "Claude Code just used your browser. ");
+        assert_eq!(computer.reads(), 0, "a complete setup reads nothing");
+    }
+
+    #[test]
+    fn an_agent_nobody_knows_by_that_label_is_not_named() {
+        let finished = Finished {
+            workspace: "workspace_1".into(),
+        };
+        let roster = [harness(
+            "claude-code",
+            "Claude Code",
+            HarnessState::Installed,
+        )];
+        assert_eq!(
+            agent_name(&finished, &[session("workspace_1", "my-script")], &roster),
+            None
+        );
+        assert_eq!(
+            agent_name(&finished, &[session("workspace_2", "claude-code")], &roster),
+            None,
+            "the finishing session is gone"
+        );
+        let mut two_hosts = [
+            harness("cline-cursor", "Cline (Cursor)", HarnessState::Available),
+            harness("cline-cli", "Cline (CLI)", HarnessState::Available),
+        ];
+        for host in &mut two_hosts {
+            host.product_id = "cline".into();
+            host.name = "Cline".into();
+        }
+        assert_eq!(
+            agent_name(&finished, &[session("workspace_1", "Cline")], &two_hosts).as_deref(),
+            Some("Cline"),
+            "a product shared by two hosts is named by the product"
+        );
+    }
+
+    #[test]
+    fn a_record_from_an_earlier_run_is_retired_and_nothing_is_read() {
+        let scratch = Scratch::new();
+        let path = scratch.path().join("setup.json");
+        fs::write(&path, br#"{"first_request_ms":1}"#).unwrap();
+        let progress = SetupProgress::load(&path);
+        let computer = Computer::default();
+        computer.install("chrome");
+        let view = setup_view(&SetupInputs {
+            progress: Some(&progress),
+            sessions: &[session("workspace_1", "claude-code")],
+            browsers: &[connected("Chrome")],
+            harnesses: &[harness(
+                "claude-code",
+                "Claude Code",
+                HarnessState::Installed,
+            )],
+            machine: &computer,
+            agent_name: None,
+        });
+        assert_eq!(view.stage, Stage::Retired);
+        assert_eq!(computer.reads(), 0, "neither the report nor the scan ran");
+    }
+
+    #[test]
+    fn a_service_that_tracks_no_setup_shows_the_retired_view_and_reads_nothing() {
+        let computer = Computer::default();
+        let view = setup_view(&SetupInputs {
+            progress: None,
+            sessions: &[],
+            browsers: &[],
+            harnesses: &[],
+            machine: &computer,
+            agent_name: None,
+        });
+        assert_eq!(view.stage, Stage::Retired);
+        assert_eq!(computer.reads(), 0);
+    }
+
+    #[test]
+    fn an_incomplete_setup_reads_the_report_and_the_scan_each_time() {
+        let computer = Computer::default();
+        incomplete(&computer, &[], &[], &[]);
+        assert_eq!(computer.reads(), 2);
+        incomplete(&computer, &[], &[], &[]);
+        assert_eq!(computer.reads(), 4);
     }
 }

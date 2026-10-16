@@ -821,6 +821,7 @@ fn snapshot(shared: &Shared, head: &Head, projection: &Projection) -> Response {
     let snapshot = shared.facade.snapshot();
     let body: serde_json::Map<String, Value> = parts
         .into_iter()
+        .filter(|part| projection.shows(*part))
         .map(|part| {
             let mut value = projection.part(part, &snapshot);
             if part == Part::Integrations {

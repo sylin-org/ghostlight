@@ -490,6 +490,7 @@ impl WorkbenchFacade {
         diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     ) -> Self {
         let web: Arc<OnceLock<WebFacts>> = Arc::default();
+        let harnesses = HarnessRegistry::discover();
         let live = live::Live::new(
             &projection,
             workspaces,
@@ -497,13 +498,13 @@ impl WorkbenchFacade {
             browser,
             Arc::clone(&diagnostics),
             Arc::clone(&web),
-            unix_ms(),
+            harnesses.clone(),
         );
         Self {
             projection,
             governance,
             diagnostics,
-            harnesses: HarnessRegistry::discover(),
+            harnesses,
             live,
             web,
             native_acts: Arc::default(),
@@ -516,7 +517,16 @@ impl WorkbenchFacade {
     /// The same facade over a client registry that never touches this user's clients.
     #[cfg(test)]
     pub(crate) fn with_harnesses(mut self, harnesses: HarnessRegistry) -> Self {
+        self.live.use_harnesses(harnesses.clone());
         self.harnesses = harnesses;
+        self
+    }
+
+    /// The same facade over a computer the setup part reads from a fake, for tests that must not
+    /// read this one.
+    #[cfg(test)]
+    pub(crate) fn with_setup_machine(self, machine: Arc<dyn setup::SetupMachine>) -> Self {
+        self.live.use_machine(machine);
         self
     }
 
@@ -595,8 +605,14 @@ impl WorkbenchFacade {
     }
 
     /// Attach the setup progress that watches the service's audit records for the first agent
-    /// request that reaches a browser.
+    /// request that reaches a browser. When setup completes, every screen is told over the stream.
     pub fn attach_setup(&self, progress: Arc<setup::SetupProgress>) {
+        let live = Arc::downgrade(&self.live);
+        progress.on_complete(move || {
+            if let Some(live) = live.upgrade() {
+                live.setup_changed();
+            }
+        });
         self.projection.attach_setup(progress);
     }
 
@@ -725,6 +741,13 @@ impl WorkbenchFacade {
         self.live.authority_refreshed();
     }
 
+    /// The one aggregate answer alone, without the rest of a snapshot: no history is read and an
+    /// unfinished setup does not read this computer.
+    #[must_use]
+    pub fn readiness(&self) -> ReadinessSummary {
+        self.live.gather().readiness
+    }
+
     /// Build an immutable, content-minimized snapshot for a disposable UI.
     #[must_use]
     pub fn snapshot(&self) -> WorkbenchSnapshot {
@@ -736,6 +759,7 @@ impl WorkbenchFacade {
         let gathered = self.live.gather();
         let status = self.live.status(&gathered);
         let controls = self.live.controls(&gathered);
+        let setup = self.live.setup(&gathered);
         let live::Gathered {
             operations,
             sessions,
@@ -829,6 +853,7 @@ impl WorkbenchFacade {
             },
             service: status.service,
             controls,
+            setup,
         }
     }
 
@@ -1158,12 +1183,14 @@ impl WorkbenchFacade {
         Ok(summaries)
     }
 
-    /// Tell every screen that the roster of clients was looked at again, with its tag.
+    /// Tell every screen that the roster of clients was looked at again, with its tag. The setup
+    /// part lists the same clients, so it is looked at again too.
     fn integrations_changed(&self, summaries: &[HarnessSummary]) {
         self.projection.publish(WorkbenchChange::PartChanged {
             part: parts::HintedPart::Integrations,
             etag: parts::json_etag(&summaries),
         });
+        self.live.setup_changed();
     }
 
     /// Tell every screen that an act changed the roster of clients.
@@ -1549,6 +1576,8 @@ pub struct WorkbenchSnapshot {
     pub configuration: ConfigurationSummary,
     /// The controls part Settings is drawn from, as the window sees it.
     pub controls: parts::ControlsPart,
+    /// The setup part, as the window sees it. A watcher is not shown it.
+    pub setup: crate::language::setup::SetupView,
 }
 
 /// Current service facts.

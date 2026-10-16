@@ -100,6 +100,18 @@ if (JSON.stringify(actualHarnessIds) !== JSON.stringify(expectedHarnessIds)
   throw new Error(`preview harness roster drifted: ${harnesses.length} rows / ${previewProductCount} products`);
 }
 
+// The setup part of a computer whose setup finished earlier: the window shows the workbench.
+const setupFixture = {
+  stage: "retired", eyebrow: "", headline: { lead: "", accent: "", trail: "" }, lead: null,
+  steps: [
+    { name: "This computer", state: "done", word: "Installed", sr: "This computer, done" },
+    { name: "Your browser", state: "done", word: "Connected", sr: "Your browser, done" },
+    { name: "Your agent", state: "done", word: "Connected", sr: "Your agent, done" }
+  ],
+  light: "lit", code: null, rows_label: null, rows: [], extra_code: null, live: null,
+  connected_line: null, tagline: null
+};
+
 // The controls part Settings is drawn from, as the window sees it: every act available, watching on.
 const controlsFixture = {
   runtime: {
@@ -152,6 +164,7 @@ const snapshot = {
   ],
   harnesses,
   controls: controlsFixture,
+  setup: setupFixture,
   configuration: {
     runtime_state: "active",
     local_policy_configured: true,
@@ -445,7 +458,8 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage || [] },
     integrations: { harnesses: flat.harnesses },
     diagnostics: { diagnostics: flat.diagnostics },
-    controls: flat.controls
+    controls: flat.controls,
+    setup: flat.setup
   });
   const realFetch = window.fetch.bind(window);
   window.fetch = async (path, init = {}) => {

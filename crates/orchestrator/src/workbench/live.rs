@@ -1,12 +1,18 @@
 //! The live parts of the workbench: what a screen shows the moment something connects, pauses or
 //! starts working.
 //!
-//! The status, connections and controls parts change without any act of a screen. A pause from the
+//! The status, connections, controls and setup parts change without any act of a screen. A pause from the
 //! tray or the browser toolbar, a session that opens, a browser that goes away, process diagnostics
 //! turned on from a terminal: none of them is a domain event of the work projection. This module
 //! builds those parts the light way (no history), remembers the last ones it published, and
 //! publishes a part only when it differs from that. Every caller that knows something may have
 //! changed asks for a refresh and nothing more (ADR-0199, amendment of 2026-10-15).
+//!
+//! The setup part is read on demand like the integrations: a look tells screens it changed with a
+//! hint that carries its tag. It is built again only when a browser connects or leaves, when a
+//! session's client arrives or leaves, or when a caller says setup changed (the client roster was
+//! looked at again, or setup completed), because an incomplete setup reads the machine each time
+//! it is built (ADR-0200 Decision 8).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
@@ -15,6 +21,7 @@ use super::parts::{
     self, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, StatusConfiguration,
     StatusPart, ViewingFacts,
 };
+use super::setup::{self, SetupInputs, SetupMachine, ThisComputer};
 use super::{
     BrowserInstanceSummary, OperationSummary, ReadinessSummary, RuntimeSource, ServiceSummary,
     SessionSummary, WebFacts, WorkbenchChange, WorkbenchProjection, WorkbenchTrayPort,
@@ -24,10 +31,12 @@ use crate::browser::BrowserPort;
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
 use crate::governance::{GovernanceDiagnostics, GovernanceFacade};
+use crate::install::HarnessRegistry;
 use crate::intake::desktop::TrayModel;
 use crate::intake::session::IntakeChannel;
 use crate::language::audit_health::AuditHealth;
 use crate::language::readiness;
+use crate::language::setup::SetupView;
 use crate::language::workbench::ConnectionCounts;
 use crate::provenance::ConnectionDetails;
 use crate::workspace::WorkspaceStore;
@@ -73,6 +82,19 @@ struct Published {
     connections: Option<ConnectionsPart>,
     controls: Option<ControlsPart>,
     tray: Option<TrayModel>,
+    /// What the setup part was last built for, so it is built again only when this changes.
+    setup_inputs: Option<SetupInputsKey>,
+    /// The tag of the setup part last announced.
+    setup_etag: Option<String>,
+}
+
+/// What, among the things a look sees, decides whether the setup part is built again: which
+/// browsers are connected, which clients have sessions, and whether setup is complete.
+#[derive(Debug, Eq, PartialEq)]
+struct SetupInputsKey {
+    browsers: Vec<String>,
+    clients: Vec<String>,
+    complete: bool,
 }
 
 /// What the facade remembers between looks.
@@ -82,6 +104,18 @@ struct Remembered {
     runtime: Option<(RuntimeControlState, RuntimeSource)>,
     /// The authority id a policy hint was last published for.
     authority: String,
+    /// The name of the agent that finished setup, kept once it is known because its session may
+    /// end before the person has read it.
+    agent_name: Option<String>,
+}
+
+/// What the setup part is read from besides the look itself.
+#[derive(Clone)]
+struct SetupSources {
+    /// The client roster, which a look reads from its cache.
+    harnesses: HarnessRegistry,
+    /// This computer.
+    machine: Arc<dyn SetupMachine>,
 }
 
 /// Count `connections` by the intake that admitted each, beside `browsers`.
@@ -113,6 +147,9 @@ pub(super) struct Live {
     started_at_ms: u64,
     published: Mutex<Published>,
     wanted: AtomicBool,
+    /// Whether the next look builds the setup part whatever it saw.
+    setup_wanted: AtomicBool,
+    sources: Mutex<SetupSources>,
     remembered: Mutex<Remembered>,
     tray: Mutex<Option<Arc<dyn WorkbenchTrayPort>>>,
 }
@@ -135,7 +172,7 @@ impl Live {
         browser: Arc<dyn BrowserPort>,
         diagnostics: Arc<DiagnosticsHub>,
         web: Arc<OnceLock<WebFacts>>,
-        started_at_ms: u64,
+        harnesses: HarnessRegistry,
     ) -> Arc<Self> {
         let live = Arc::new(Self {
             projection: projection.clone(),
@@ -143,12 +180,18 @@ impl Live {
             remembered: Mutex::new(Remembered {
                 runtime: None,
                 authority: governance.snapshot().id().to_owned(),
+                agent_name: None,
+            }),
+            setup_wanted: AtomicBool::new(false),
+            sources: Mutex::new(SetupSources {
+                harnesses,
+                machine: Arc::new(ThisComputer::discover()),
             }),
             governance,
             browser,
             diagnostics,
             web,
-            started_at_ms,
+            started_at_ms: super::unix_ms(),
             published: Mutex::default(),
             wanted: AtomicBool::new(false),
             tray: Mutex::new(None),
@@ -276,6 +319,56 @@ impl Live {
         })
     }
 
+    /// The setup part of one look, as the window sees it.
+    ///
+    /// Only an incomplete setup reads this computer. The name of the agent that finished setup is
+    /// resolved once and kept.
+    pub fn setup(&self, gathered: &Gathered) -> SetupView {
+        let progress = self.projection.setup();
+        let SetupSources { harnesses, machine } = lock(&self.sources).clone();
+        let harnesses = harnesses.summaries();
+        let agent_name = progress
+            .as_ref()
+            .and_then(|progress| progress.finished())
+            .and_then(|finished| {
+                let mut remembered = lock(&self.remembered);
+                if remembered.agent_name.is_none() {
+                    remembered.agent_name =
+                        setup::agent_name(&finished, &gathered.sessions, &harnesses);
+                }
+                remembered.agent_name.clone()
+            });
+        setup::setup_view(&SetupInputs {
+            progress: progress.as_deref(),
+            sessions: &gathered.sessions,
+            browsers: &gathered.browsers,
+            harnesses: &harnesses,
+            machine: machine.as_ref(),
+            agent_name: agent_name.as_deref(),
+        })
+    }
+
+    /// What decides whether the setup part is built again.
+    fn setup_inputs_key(gathered: &Gathered, complete: bool) -> SetupInputsKey {
+        let mut browsers: Vec<String> = gathered
+            .browsers
+            .iter()
+            .map(|browser| browser.family.clone())
+            .collect();
+        browsers.sort();
+        let mut clients: Vec<String> = gathered
+            .sessions
+            .iter()
+            .map(|session| session.client_label.clone())
+            .collect();
+        clients.sort();
+        SetupInputsKey {
+            browsers,
+            clients,
+            complete,
+        }
+    }
+
     /// The tray of one look: the icon state from the readiness, the tooltip from the connections
     /// and the entries from the runtime state.
     pub fn tray(&self, gathered: &Gathered) -> TrayModel {
@@ -311,6 +404,26 @@ impl Live {
                 .flat_map(|workspace| workspace.connections.iter()),
             self.browser.browsers().len(),
         )
+    }
+
+    /// Say that the setup part may have changed in a way a look cannot see, and look.
+    ///
+    /// Call it after the client roster was looked at again and when setup completes.
+    pub fn setup_changed(&self) {
+        self.setup_wanted.store(true, Ordering::Release);
+        self.refresh();
+    }
+
+    /// Replace the client roster the setup part is read from.
+    #[cfg(test)]
+    pub fn use_harnesses(&self, harnesses: HarnessRegistry) {
+        lock(&self.sources).harnesses = harnesses;
+    }
+
+    /// Replace the computer the setup part is read from.
+    #[cfg(test)]
+    pub fn use_machine(&self, machine: Arc<dyn SetupMachine>) {
+        lock(&self.sources).machine = machine;
     }
 
     /// Remember who brought the runtime to `state`. A request that leaves the state as it was
@@ -369,6 +482,7 @@ impl Live {
                         controls: Box::new(controls),
                     });
                 }
+                self.publish_setup(&mut published, &gathered);
                 let tray = self.tray(&gathered);
                 if published.tray.as_ref() != Some(&tray) {
                     published.tray = Some(tray.clone());
@@ -382,6 +496,30 @@ impl Live {
             if !self.wanted.load(Ordering::Acquire) {
                 return;
             }
+        }
+    }
+
+    /// Announce the setup part when it differs from the one last announced.
+    ///
+    /// Nothing is built or announced unless the service tracks setup. The part is built only when
+    /// what it is read from changed, or when a caller said it did.
+    fn publish_setup(&self, published: &mut Published, gathered: &Gathered) {
+        let wanted = self.setup_wanted.swap(false, Ordering::AcqRel);
+        let Some(progress) = self.projection.setup() else {
+            return;
+        };
+        let key = Self::setup_inputs_key(gathered, progress.is_complete());
+        if !wanted && published.setup_inputs.as_ref() == Some(&key) {
+            return;
+        }
+        published.setup_inputs = Some(key);
+        let etag = parts::json_etag(&self.setup(gathered));
+        if published.setup_etag.as_ref() != Some(&etag) {
+            published.setup_etag = Some(etag.clone());
+            self.projection.publish(WorkbenchChange::PartChanged {
+                part: HintedPart::Setup,
+                etag,
+            });
         }
     }
 

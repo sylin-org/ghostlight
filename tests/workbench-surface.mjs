@@ -210,6 +210,18 @@ function windowCommandAt(method, pathname) {
   return routes[`${method} ${pathname}`] ?? null;
 }
 
+/** The setup part of a computer whose setup finished earlier: the window shows the workbench. */
+const retiredSetup = {
+  stage: "retired", eyebrow: "", headline: { lead: "", accent: "", trail: "" }, lead: null,
+  steps: [
+    { name: "This computer", state: "done", word: "Installed", sr: "This computer, done" },
+    { name: "Your browser", state: "done", word: "Connected", sr: "Your browser, done" },
+    { name: "Your agent", state: "done", word: "Connected", sr: "Your agent, done" }
+  ],
+  light: "lit", code: null, rows_label: null, rows: [], extra_code: null, live: null,
+  connected_line: null, tagline: null
+};
+
 /** The parts of a snapshot answer, from the one flat snapshot this fixture is written as. */
 function partsOf(flat) {
   return {
@@ -222,7 +234,8 @@ function partsOf(flat) {
     activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage ?? [] },
     integrations: { harnesses: flat.harnesses },
     diagnostics: { diagnostics: flat.diagnostics },
-    controls: flat.controls
+    controls: flat.controls,
+    setup: retiredSetup
   };
 }
 
@@ -970,7 +983,8 @@ function fakeService(kind, { served = true } = {}) {
     diagnostics: {
       diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Accepting connections." }]
     },
-    controls: controls()
+    controls: controls(),
+    ...(kind === "control" ? { setup: retiredSetup } : {})
   });
   const emit = (change) => {
     state.seq += 1;

@@ -1,10 +1,12 @@
 //! The parts of the workbench state a screen may ask for, and what each audience sees of them.
 //!
-//! A snapshot is cut into closed parts: status, connections, activity, integrations, diagnostics
-//! and controls. Policy has its own route. Each part is projected for an [`Audience`] when the
-//! response is written, so a page never redacts and never holds data its context may not see
+//! A snapshot is cut into closed parts: status, connections, activity, integrations, diagnostics,
+//! controls and setup. Policy has its own route. Each part is projected for an [`Audience`] when
+//! the response is written, so a page never redacts and never holds data its context may not see
 //! (ADR-0199, amendment of 2026-10-15). The projection drops what nobody reads, shows home-relative
 //! paths to everyone, and turns the person's own lists of sensitive sites into counts for a watcher.
+//! Setup is the window's alone: a watcher is shown the ordinary workbench while setup is under way
+//! (ADR-0200, JQ5), so the part is simply not part of what a watcher is shown.
 
 use std::path::{Path, PathBuf};
 
@@ -77,6 +79,8 @@ pub enum Part {
     /// The controls Settings is drawn from: pause and the session, who can watch, process diagnostics and
     /// the notification test, with what each context may do.
     Controls,
+    /// The install journey: where the person is and what comes next. The window alone is shown it.
+    Setup,
 }
 
 /// A part token the service does not know.
@@ -86,13 +90,14 @@ pub struct UnknownPart;
 
 impl Part {
     /// Every part, in the order a snapshot lists them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Status,
         Self::Connections,
         Self::Activity,
         Self::Integrations,
         Self::Diagnostics,
         Self::Controls,
+        Self::Setup,
     ];
 
     /// The snake_case token that names this part on the wire.
@@ -105,6 +110,7 @@ impl Part {
             Self::Integrations => "integrations",
             Self::Diagnostics => "diagnostics",
             Self::Controls => "controls",
+            Self::Setup => "setup",
         }
     }
 
@@ -119,8 +125,8 @@ impl Part {
 
 /// A part whose change is announced as a hint: the page reads it again if it shows it.
 ///
-/// Policy has its own route, and integrations and diagnostics are parts of a snapshot. None of
-/// them travels in an event, because each can be large or private to the window.
+/// Policy has its own route, and integrations, diagnostics and setup are parts of a snapshot. None
+/// of them travels in an event, because each can be large or private to the window.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HintedPart {
@@ -130,6 +136,8 @@ pub enum HintedPart {
     Policy,
     /// Checkup cards and process diagnostics.
     Diagnostics,
+    /// The install journey. A watcher is told that it changed and never what it says.
+    Setup,
 }
 
 /// The status part: readiness, service facts, saving health and the policy chip.
@@ -585,7 +593,15 @@ impl Projection {
         }
     }
 
-    /// One part of `snapshot`, as this audience sees it.
+    /// Whether this audience is shown `part` at all. A route asks before it asks for the part, and
+    /// leaves out of its answer a part the audience is not shown.
+    #[must_use]
+    pub const fn shows(&self, part: Part) -> bool {
+        !(self.watching() && matches!(part, Part::Setup))
+    }
+
+    /// One part of `snapshot`, as this audience sees it. A part the audience is not shown (see
+    /// [`Self::shows`]) comes back null.
     #[must_use]
     pub fn part(&self, part: Part, snapshot: &WorkbenchSnapshot) -> Value {
         match part {
@@ -612,6 +628,8 @@ impl Projection {
                 value
             }
             Part::Controls => self.controls(&snapshot.controls),
+            Part::Setup if !self.shows(part) => Value::Null,
+            Part::Setup => to_value(&snapshot.setup),
             Part::Diagnostics => to_value(&DiagnosticsPart {
                 diagnostics: &snapshot.diagnostics,
             }),
@@ -645,7 +663,7 @@ impl Projection {
     ///
     /// The stream projects an event once for each audience that has a subscriber, with the same
     /// rules as the routes: a watcher is told how many sites a document excluded and never which,
-    /// and is given no policy tag to test guesses against.
+    /// and is given no policy or setup tag to test guesses against.
     #[must_use]
     pub fn event(&self, event: &WorkbenchEvent) -> Value {
         let mut value = to_value(event);
@@ -668,7 +686,7 @@ impl Projection {
                 change["controls"] = self.controls(controls);
             }
             WorkbenchChange::PartChanged {
-                part: HintedPart::Policy,
+                part: HintedPart::Policy | HintedPart::Setup,
                 ..
             } if self.watching() => remove(change, &["etag"]),
             _ => {}

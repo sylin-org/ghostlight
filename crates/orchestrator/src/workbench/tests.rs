@@ -1178,3 +1178,296 @@ fn the_controls_are_published_when_they_differ_and_not_otherwise() {
     );
     assert_eq!(*controls[1], facade.snapshot().controls);
 }
+
+/// A browser port whose one browser connects and leaves when a test says so.
+struct ComingAndGoing {
+    connected: std::sync::atomic::AtomicBool,
+}
+
+impl ComingAndGoing {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            connected: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    fn connect(&self, connected: bool) {
+        self.connected
+            .store(connected, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl crate::browser::BrowserPort for ComingAndGoing {
+    fn call(
+        &self,
+        _: &str,
+        _: &str,
+        _: crate::browser::adapter::BrowserCommand,
+        _: std::time::Instant,
+        _: &std::sync::atomic::AtomicBool,
+    ) -> Result<crate::browser::adapter::BrowserOutcome, crate::browser::BrowserError> {
+        panic!("setup must not dispatch browser work");
+    }
+
+    fn browsers(&self) -> Vec<crate::browser::BrowserSummary> {
+        if !self.connected.load(std::sync::atomic::Ordering::SeqCst) {
+            return Vec::new();
+        }
+        vec![crate::browser::BrowserSummary {
+            id: "browser-1".into(),
+            name: Some("Google Chrome".into()),
+            adapter_version: "1.0.0".into(),
+            attended: true,
+        }]
+    }
+
+    fn publish_control_state(
+        &self,
+        _: crate::browser::adapter::RuntimeControlState,
+    ) -> Result<(), crate::browser::BrowserError> {
+        Ok(())
+    }
+}
+
+/// A workbench that tracks an unfinished setup over a fake computer and a browser that comes and
+/// goes. Its client roster is empty, so nothing on this machine is read.
+struct SetupBench {
+    facade: WorkbenchFacade,
+    projection: WorkbenchProjection,
+    workspaces: crate::workspace::WorkspaceStore,
+    browser: Arc<ComingAndGoing>,
+    computer: Arc<super::setup::test_support::Computer>,
+    events: Arc<Events>,
+    _scratch: crate::install::scratch::Scratch,
+}
+
+impl SetupBench {
+    fn start() -> Self {
+        let scratch = crate::install::scratch::Scratch::new();
+        let projection = WorkbenchProjection::default();
+        let workspaces = crate::workspace::WorkspaceStore::default();
+        let browser = ComingAndGoing::new();
+        let computer = Arc::new(super::setup::test_support::Computer::default());
+        let facade = WorkbenchFacade::new(
+            projection.clone(),
+            workspaces.clone(),
+            GovernanceFacade::new(None, None),
+            browser.clone(),
+            crate::diagnostics::DiagnosticsHub::for_tests(),
+        )
+        .with_harnesses(crate::install::HarnessRegistry::isolated(
+            &scratch.path().join("clients"),
+            &scratch.path().join("ghostlight"),
+            &scratch.path().join("state"),
+        ))
+        .with_setup_machine(computer.clone());
+        facade.attach_setup(super::setup::SetupProgress::load(
+            &scratch.path().join("state").join("setup.json"),
+        ));
+        let events = Arc::new(Events::default());
+        facade.attach_events(events.clone());
+        Self {
+            facade,
+            projection,
+            workspaces,
+            browser,
+            computer,
+            events,
+            _scratch: scratch,
+        }
+    }
+
+    /// The tags of the setup hints heard so far, in order.
+    fn setup_hints(&self) -> Vec<String> {
+        heard(&self.events)
+            .into_iter()
+            .filter_map(|event| match event.change {
+                WorkbenchChange::PartChanged {
+                    part: super::parts::HintedPart::Setup,
+                    etag,
+                } => Some(etag),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The tag of the setup part as a snapshot reads it now.
+    fn setup_etag(&self) -> String {
+        super::parts::json_etag(&self.facade.snapshot().setup)
+    }
+}
+
+fn a_request_that_reached_a_browser(workspace: &str) -> AuditRecord {
+    let mut record = AuditRecord::now(
+        "invocation_1",
+        workspace,
+        "browser_read",
+        Capability::Read,
+        "authority_1",
+        Decision::permitted(),
+        "succeeded",
+        "none",
+        &crate::language::outcome::Outcome::StepNotStarted.audit(),
+        5,
+    )
+    .from_channel(Some(crate::intake::session::IntakeChannel::Mcp))
+    .with_browser(Some("Google Chrome".into()));
+    record.timestamp_ms = 1234;
+    record
+}
+
+#[test]
+fn a_service_that_tracks_no_setup_announces_none() {
+    let facade = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+    );
+    let events = Arc::new(Events::default());
+    facade.attach_events(events.clone());
+    facade.refresh_live_parts();
+    facade.refresh_harnesses().unwrap();
+    let setup_hints = heard(&events)
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event.change,
+                WorkbenchChange::PartChanged {
+                    part: super::parts::HintedPart::Setup,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(setup_hints, 0);
+    assert_eq!(
+        facade.snapshot().setup.stage,
+        crate::language::setup::Stage::Retired
+    );
+}
+
+#[test]
+fn a_browser_that_connects_or_leaves_publishes_the_setup_part() {
+    use crate::language::setup::Stage;
+
+    let bench = SetupBench::start();
+    bench.computer.install("chrome");
+    bench.facade.refresh_live_parts();
+    assert_eq!(
+        bench.setup_hints(),
+        [bench.setup_etag()],
+        "the first look announces the part"
+    );
+    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Browser);
+    let reads = bench.computer.reads();
+
+    bench.facade.refresh_live_parts();
+    assert_eq!(bench.setup_hints().len(), 1, "nothing changed");
+    assert_eq!(
+        bench.computer.reads(),
+        reads,
+        "a look that saw the same browsers and clients builds nothing"
+    );
+
+    bench.browser.connect(true);
+    bench.facade.refresh_live_parts();
+    let hints = bench.setup_hints();
+    assert_eq!(hints.len(), 2);
+    assert_eq!(hints[1], bench.setup_etag());
+    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Agent);
+
+    bench.browser.connect(false);
+    bench.facade.refresh_live_parts();
+    assert_eq!(bench.setup_hints().len(), 3);
+    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Browser);
+}
+
+#[test]
+fn a_client_whose_session_arrives_publishes_the_setup_part() {
+    let bench = SetupBench::start();
+    bench.facade.refresh_live_parts();
+    assert_eq!(bench.setup_hints().len(), 1);
+    let first_build = bench.computer.reads();
+    bench.facade.refresh_live_parts();
+    assert_eq!(
+        bench.computer.reads(),
+        first_build,
+        "the same look builds nothing"
+    );
+
+    bench.workspaces.admit(
+        "a client".into(),
+        crate::intake::session::IntakeChannel::Mcp,
+    );
+    bench.facade.refresh_live_parts();
+    let arrived = bench.computer.reads();
+    assert!(
+        arrived > first_build,
+        "the arrival of a client builds the part again"
+    );
+    bench.facade.refresh_live_parts();
+    assert_eq!(bench.computer.reads(), arrived);
+    assert_eq!(
+        bench.setup_hints().len(),
+        1,
+        "an unknown client changes nothing the view says"
+    );
+}
+
+#[test]
+fn a_rescan_of_the_clients_republishes_the_setup_part() {
+    let bench = SetupBench::start();
+    bench.facade.refresh_live_parts();
+    assert_eq!(bench.setup_hints().len(), 1);
+
+    bench.facade.refresh_harnesses().unwrap();
+    assert_eq!(
+        bench.setup_hints().len(),
+        1,
+        "the rescan built the part again and it said the same"
+    );
+
+    bench.computer.install("chrome");
+    bench.facade.refresh_harnesses().unwrap();
+    let hints = bench.setup_hints();
+    assert_eq!(
+        hints.len(),
+        2,
+        "the rescan found a browser to add Ghostlight to"
+    );
+    assert_eq!(hints[1], bench.setup_etag());
+}
+
+#[test]
+fn completing_setup_publishes_the_finished_part_once() {
+    use crate::language::setup::Stage;
+
+    let bench = SetupBench::start();
+    bench.browser.connect(true);
+    let workspace = bench.workspaces.admit(
+        "a client".into(),
+        crate::intake::session::IntakeChannel::Mcp,
+    );
+    bench.facade.refresh_live_parts();
+    let before = bench.setup_hints().len();
+    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Agent);
+
+    let record = a_request_that_reached_a_browser(workspace.as_str());
+    bench
+        .projection
+        .record(&record, crate::language::audit_health::Storage::Saved);
+    let hints = bench.setup_hints();
+    assert_eq!(
+        hints.len(),
+        before + 1,
+        "completion announces the part once"
+    );
+    assert_eq!(hints.last(), Some(&bench.setup_etag()));
+    assert_eq!(bench.facade.snapshot().setup.stage, Stage::Done);
+
+    let mut again = a_request_that_reached_a_browser(workspace.as_str());
+    again.invocation = "invocation_2".into();
+    bench
+        .projection
+        .record(&again, crate::language::audit_health::Storage::Saved);
+    assert_eq!(bench.setup_hints().len(), before + 1);
+}
