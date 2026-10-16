@@ -4,7 +4,9 @@
 //! world. It holds one include marker that lists the other page sources. The marker is replaced
 //! by each listed source followed by one newline, in the listed order, which is exactly what the
 //! page-asset tests' `bundle.js` does, so the JavaScript tests and the service run the same bytes.
-//! The asset id is the lowercase hex SHA-256 of the expanded source.
+//! The asset id is the lowercase hex SHA-256 of the expanded source, with every line ending
+//! written as LF. A checkout that converts text files to CRLF therefore ships the same source and
+//! the same id as a clean one.
 
 use std::fmt::Write as _;
 use std::sync::{Arc, OnceLock};
@@ -44,7 +46,8 @@ pub fn page_assets() -> Arc<Assets> {
     static ASSETS: OnceLock<Arc<Assets>> = OnceLock::new();
     Arc::clone(ASSETS.get_or_init(|| {
         let source = expand(WORLD, &SOURCES)
-            .expect("world.js holds one include marker naming compiled-in page sources");
+            .expect("world.js holds one include marker naming compiled-in page sources")
+            .replace("\r\n", "\n");
         Arc::new(Assets {
             id: sha256_hex(&source),
             source,
@@ -99,6 +102,7 @@ mod tests {
         assert_eq!(assets.id, PINNED_ID.trim());
         assert_eq!(assets.id, sha256_hex(&assets.source));
         assert!(!assets.source.contains(INCLUDE_OPEN));
+        assert!(!assets.source.contains('\r'));
     }
 
     #[test]

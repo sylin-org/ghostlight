@@ -48,6 +48,7 @@ test("the include marker expands to the listed files in order, each followed by 
   const body = bundle.includes().map((name) => `${bundle.read(name)}\n`).join("");
   assert.equal(SOURCE, `${before}${body}${after}`);
   assert.ok(!SOURCE.includes("@include"));
+  assert.ok(!SOURCE.includes("\r"), "the expanded source holds LF line endings only");
 });
 
 test("the bundle hash equals the pinned asset id", () => {
