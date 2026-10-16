@@ -39,6 +39,10 @@ The week of daily use in the release bar started on 2026-10-16, once the shell w
 a change to the service or shell lifecycle (start, stop, presence, session end, update) restarts
 it; install-time work does not (the owner delegated this call to the coordinator, 2026-10-16).
 
+CI is green on the 2.0 tree for the first time (run 38931431333 on dev b88f3d3c, 2026-10-16): Rust,
+the extension, page assets, supply chain and every process and real-browser journey on Linux and
+Windows.
+
 Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
 journey offers an Add step for Chrome only.
 

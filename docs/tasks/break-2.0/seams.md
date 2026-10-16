@@ -167,6 +167,10 @@ w01-windows-user-path has landed. polish-01-deployment-report has landed. tidy-0
 
 ## Owed live checks
 
+- Result, 2026-10-16: CI run 38931431333 on dev b88f3d3c is the first fully green run of the 2.0 tree: all
+  11 jobs on Linux and Windows. The process lane passed every journey on both systems, including the
+  owed checks below for ci-resume-binds-on-call (process), ci-continuity-no-replay (continuity) and
+  ci-desktop-windows-webview (desktop-windows, every round), and the browser lane passed on both.
 The coordinator runs every live check a slice names and records it here; implementers never run
 them.
 
