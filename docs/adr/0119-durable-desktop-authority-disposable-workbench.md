@@ -2,6 +2,8 @@
 
 Amended by ADR-0197 Decision 11: Quit holds until the next request, open, or client or browser launch.
 
+Amended by ADR-0199 Decision 11: Decisions 2 and 3 (window close, Open and renderer loss) moved into the shell unchanged, and presence keeps the shell running.
+
 - Status: Accepted
 - Date: 2026-08-13
 - Supersedes: ADR-0102 Decision 1 close-to-hide behavior

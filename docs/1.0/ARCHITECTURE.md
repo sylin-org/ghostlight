@@ -17,7 +17,7 @@ MCP client
   -> advertised privileged browser mechanisms
 
 local human
-  -> bundled Tauri workbench
+  -> ghostlight-desktop (the window and the tray, over the loopback workbench)
   -> typed WorkbenchFacade
   -> the same orchestrator contexts
 ```
@@ -52,9 +52,10 @@ Only process, lifecycle, and trust boundaries justify these crates. Product cont
 modules inside the orchestrator. The dependency direction points inward to `bridge` types and
 orchestrator ports. The orchestrator does not depend on MCP or Chromium APIs.
 
-The `ghostlight-service` executable also hosts the Tauri 2 desktop event loop. Tauri is a presentation
-adapter inside the modular monolith, not another service or state authority. Every supported
-orchestrator start initializes this desktop authority; there is no service-only launch mode.
+The `ghostlight-service` executable links no UI toolkit and serves with no display. The shell,
+`ghostlight-desktop`, draws the window, the tray and the notices, and presence (below) keeps it
+running whenever the desktop can show it. A computer with no display, no web view runtime or no
+tray still gets a service, and `status` and `doctor` say why there is no window.
 
 ## Local lifecycle
 
@@ -154,8 +155,9 @@ lock held exits 0 at once and touches nothing, because the service that holds it
 starter's own connection; only an `update` start waits, up to 30 s, so the service it replaces
 can finish leaving. A service that is not accepting openings within 30 s of taking the lock exits
 with a nonzero status and a diagnostics event, so a stalled start never blocks the next one. The
-desktop binds the endpoint only after native Ready has established its interaction route
-(ADR-0166).
+service binds the endpoint as soon as it has started, with the session listener and the quit signal
+already installed (ADR-0199 Decision 5). The timed discovery of ADR-0166, which waited for a
+desktop to be ready before the endpoint existed, is gone with the desktop.
 
 A person's Quit (the tray, the workbench, or control `quit` with reason `quit`) writes the latch
 `state/quit` before the service finishes in-flight work and exits. While it exists a `browser` or
@@ -173,20 +175,41 @@ ends with no goodbye is a crash and is handled as before.
 
 A no-argument launch and the explicit local-human `ghostlight open` intent send control `show` to
 a running service. When no service answers, they start `bin/ghostlight-service serve --reason person`
-detached, wait for it to accept an opening, and send `show`, retrying until the window is shown
-or 15 s have passed. Nothing serves in the foreground. The service creates its tray and
-backgrounds the workbench: minimized on Windows and hidden on Linux. The request admits no
-workspace and adds no listener. No supported launch can create an authority that refuses
-presentation by design.
+detached and wait for it to accept an opening. The service answers `show` by asking the attached
+shell to show its window, or, when none is attached, by starting one with no argument and showing
+the window when it attaches; the command line retries until the window is shown or 15 s have
+passed. Nothing serves in the foreground. The request admits no workspace and adds no listener.
 
-The tray and authority do not depend on a permanent window. Native close destroys only the
-disposable workbench, and native minimize remains compositor-owned. Windows Open focuses or
-restores the existing window and rebuilds it when absent. Wayland cannot report or unset a
-client's minimized state, so Linux Open coalesces, destroys any existing view, waits for Tauri's
-destroyed event, and rebuilds from the canonical configuration. On Linux, abnormal WebKit renderer
-termination discards that exact window after the signal callback; the next explicit Open creates a
-fresh WebView without an automatic crash loop. Explicit Quit alone ends the desktop authority, and
-it holds (see above).
+Presence (`service/presence.rs`) keeps the shell running whenever the desktop can show it. The
+service starts `bin/ghostlight-desktop --tray` 2 s after it is ready when no shell is attached, and
+2 s after the last shell stream ended with no goodbye. A `--tray` shell shows only the icon; a
+request to show the window starts a shell with no argument, which opens its own window. After a
+launch nothing else launches until a shell attaches or 15 s pass, at most three launches happen in
+two minutes, and once they are spent the reason `did_not_stay` is latched until a person acts
+(asks to show the window, or starts a shell that attaches). A shell that says it cannot show a
+window (`unavailable`: no display, no web view runtime, no tray) or that closed with no tray is
+recorded as the reason, spends no budget, and nothing launches until a person acts. Nothing
+launches while the session is ending or a quit has begun, when `bin` holds no shell, or when no
+display is reachable: on Linux `DISPLAY` or `WAYLAND_DISPLAY` is set in the service's environment,
+and on Windows the process sits in the visible window station (so not in session 0 and not over an
+OpenSSH session). The control `status` answer carries the reason as `window`.
+
+The service owns the tray model and the shell draws it. The model is a state (ready, working,
+paused or attention, from the same readiness the band shows; a service with no browser connected
+looks ready), a tooltip (the sentence that counts connections) and four entries: Open and Quit
+always, Pause while work is active, Resume while it is paused or ended. The first workbench frame
+carries it and a `tray_model` frame follows each change. The shell draws the state as a small dot
+over the original icon bytes at run time; no other artwork is shipped.
+
+The tray and the service do not depend on a permanent window. Closing the window destroys only the
+disposable workbench view in the shell, which stays with its icon; the shell tells the service
+(`closed`), and the first time, the service explains the icon in one notice, once per home
+(`state/tray-hint`). Windows Open focuses or restores the existing window and rebuilds it when
+absent. Wayland cannot report or unset a client's minimized state, so Linux Open coalesces,
+destroys any existing view, waits for the destroyed event, and rebuilds from the canonical
+configuration. On Linux, abnormal WebKit renderer termination discards that exact window after the
+signal callback; the next explicit Open creates a fresh WebView without an automatic crash loop.
+Explicit Quit alone ends the service, and it holds (see above).
 Every Ghostlight process honors the end of the session: the service, the edge in every role, and
 every one-shot command. The listener is one module, `ghostlight_relay::os::session`. On Windows it is a
 hidden top-level window on its own thread, never a message-only window, plus the console handler;
@@ -489,20 +512,20 @@ owns the equivalent system entry and does not create a per-user shadow. Browser 
 is read-only and typed separately from native-host registration, so a current manifest cannot make
 a sandboxed or absent browser look usable.
 
-Tauri commands form a small typed inbound adapter over `WorkbenchFacade`. The loopback server in
-`workbench/web` is a second inbound adapter over the same facade. It decides access per route in
-three contexts (Control with the per-start bearer, Watch, Closed) and projects each part for its
-audience in the service. One numbered event stream fans out to every screen, and the tray, the
-window, a watching screen and the browser toolbar change the runtime through one facade call that
-publishes it. File work runs outside the UI event loop. The native notification port is
-best effort and content-free. WebView, tray, notification, and recoverable Tauri failures cannot
-change domain truth; startup or event-loop failure ends the desktop authority instead of leaving
-an invisible process. Every Ghostlight web app shares one band and a Settings tab with a rail of sections from `ui/kit`, drawn from the service's controls part; the person's Quit is one of its acts, in Control only.
+The loopback server in `workbench/web` is the typed inbound adapter over `WorkbenchFacade`. It
+decides access per route in three contexts (Control with the per-start bearer, Watch, Closed) and
+projects each part for its audience in the service. The route table is closed, and no route
+clears history. One numbered event stream fans out to every screen, and the tray, the window, a
+watching screen and the browser toolbar change the runtime through one facade call that publishes
+it. File work runs outside the UI event loop. The notification port is best effort and
+content-free. WebView, tray and notification failures cannot change domain truth, and a broken
+window never stops agent work. Every Ghostlight web app shares one band and a Settings tab with a
+rail of sections from `ui/kit`, drawn from the service's controls part; the person's Quit is one of its acts, in Control only.
 
 The page reads its context from the service before it draws and renders what it is told: an act
-its context cannot make is shown as state, with one line that leads to the Ghostlight window.
-Inside the Tauri window it speaks Tauri commands; anywhere else it speaks JSON and one live stream
-over loopback. Both paths use the same command names, through one transport.
+its context cannot make is shown as state, with one line that leads to the Ghostlight window. It
+speaks JSON and one live stream over loopback, in the window and in a tab alike, through one
+transport.
 
 `ghostlight-desktop` is the webview over the loopback workbench. It gets the workbench address and
 the bearer over the relay's `desktop` role and gives the bearer to the page of that origin only,
@@ -516,8 +539,16 @@ operating-system notification with Ghostlight-authored words, best effort. `act`
 open a link or a folder or to pick a file, and the shell answers each with `act_result`. A
 notice, a link, a folder and a file dialog are therefore carried out by the shell, in its own
 process and under its own application id, not by the service. A reader skips a frame kind it does
-not know. While Tauri is still in the service, one route sends each request to the attached shell
-and, when none is attached, to the Tauri window; it goes when Tauri leaves the service.
+not know. One route sends each request to the attached shell. With none attached, a request to show
+the window goes to presence and every other request is unavailable.
+
+The shell tells the service two things about itself. `unavailable` says it cannot show what was
+asked (`no_display`, `no_webview`, `no_tray`), and `closed` says the person closed the window and
+whether the shell stays with its tray. It opens its stream before it initialises the display or
+builds anything, so a shell that cannot run can say why before it ends; a `--tray` shell with no
+tray host or no web view runtime reports and exits, and a later failure to build the window is
+reported while the shell stays with its tray. The shell sends `closed` only for a person's close,
+never for an update or a crash.
 
 One shell runs at a time, because the service has one desktop place. A shell that attaches while
 another is attached is sent `already_open` in place of the workbench and exits with status 0, and
@@ -908,7 +939,7 @@ and controls.
 
 The page renderer creates only passive messages and animations, never buttons, focusable controls,
 or a pointer-intercepting layer. That property holds when CSS fails. Runtime-state changes alone do not create a page dialog.
-Interactive runtime control belongs in the Tauri workbench.
+Interactive runtime control belongs in the Ghostlight window.
 
 Obsolete request fields fail during decoding. Permission receipts retain the final decision and actual evaluated layers. The executor supplies a live
 admission callback to the common browser port; the relay invokes it after writer acquisition and

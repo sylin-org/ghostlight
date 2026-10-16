@@ -63,7 +63,7 @@ Internal browser commands are combined when a person experiences them as one job
   page joins the same workspace when ownership is unambiguous.
 - Visual feedback follows the active document without leaking page content or becoming required
   for successful work. Page feedback contains no buttons or focusable controls and never intercepts
-  human pointer or keyboard input. Interactive runtime control belongs in the Tauri workbench.
+  human pointer or keyboard input. Interactive runtime control belongs in the Ghostlight window.
 - The tray opens a calm workbench that answers what is running, what happened, whether Ghostlight
   is healthy, which controls apply, and where it is connected, without turning setup into a CLI
   archaeology exercise.
@@ -71,14 +71,15 @@ Internal browser commands are combined when a person experiences them as one job
   separate startup ritual. Launching an MCP client or Chromium demand-starts the local service
   when it is absent, except that a person's Quit holds: a browser restart does not bring
   Ghostlight back, and the next agent request, a command that needs it, or a person does.
-- Every normal Ghostlight startup creates the tray and begins with the workbench backgrounded:
-  minimized on Windows and hidden on Linux. An explicit `ghostlight open` intent or a tray click
-  opens and focuses the workbench owned by the running authority. Windows restores its existing
+- Whatever started Ghostlight, the service brings up the shell whenever the desktop can show it,
+  and the shell draws the tray. When an agent started Ghostlight, only the icon appears; a
+  Start-menu launch, `ghostlight open`, a watcher's Continue and the tray's Open always show the
+  window. The icon shows the band's state and its tooltip counts the connections. Closing the
+  window leaves the icon, and the first time one notice says so. Windows restores its existing
   view; Linux reconstructs its disposable view because Wayland cannot report or unset
   minimization.
-- Every Linux install has an Applications entry. It uses the explicit `ghostlight open` intent,
-  which demand-starts the same backgrounded authority when absent and then reveals it through the
-  existing authenticated activation seam. A tray is never the only route to the workbench.
+- Every Linux install has an Applications entry. It runs the shell, which starts the service when
+  none runs and shows the window. A tray is never the only route to the workbench.
 - Six destinations and one global search reach every workbench surface and user-visible record:
   At a glance, MCP integrations, Status, Policy, Settings, and About. At a glance is where the window opens;
   it carries the current action in full and the recent ones beneath it, so a glance is enough. The
@@ -97,10 +98,11 @@ Internal browser commands are combined when a person experiences them as one job
 ## Desktop workbench experience
 
 The workbench is the orchestrator's local-human presentation surface. It is part of the same
-installed product and process, while remaining a separate presentation and application context.
-Every supported orchestrator start initializes this desktop authority. There is no service-only
-or presentation-free launch mode. A desktop session without a tray retains `ghostlight open` and
-the Applications entry as interaction routes.
+installed product, drawn by the shell in its own process, while remaining a separate presentation
+and application context.
+The service serves with no display. It brings up the shell, which draws the window and the tray,
+whenever a display is reachable, and says why when there is no window. A desktop session without
+a tray retains `ghostlight open` and the Applications entry as interaction routes.
 
 - At a glance is where the work becomes visible. The current action stands in full with its elapsed
   time running. When the next one starts, that action settles and drops into a newest-first queue

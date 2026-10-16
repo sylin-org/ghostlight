@@ -410,16 +410,17 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 
 ## Desktop workbench gates
 
-1. Every supported `ghostlight` startup initializes the desktop authority and backgrounds the
-   workbench (minimized on Windows, hidden on Linux), or opens and focuses the running authority's
-   workbench. Windows restores its existing view; Linux coalesces Open requests and reconstructs
-   its disposable view after the old window's destroyed event. A tray is created when the desktop
-   session provides one; the Applications entry and `ghostlight open` remain available when it
-   does not. Closing destroys only the workbench window, tray Open rebuilds it, and only explicit
-   quit stops the process. Native minimize does not close or hide the window.
+1. Whatever starts the service, the shell appears whenever a display is reachable: the service
+   starts `ghostlight-desktop --tray` 2 s after it is ready, shows only the icon, and starts a shell
+   with no argument when the window is asked for. An explicit `ghostlight open` or a watcher's
+   Continue opens and focuses the window. Windows restores its existing view; Linux coalesces Open
+   requests and reconstructs its disposable view after the old window's destroyed event. The
+   Applications entry and `ghostlight open` remain available when the desktop has no tray. Closing
+   destroys only the workbench window, the tray's Open rebuilds it, and only explicit quit stops the
+   service. Native minimize does not close or hide the window.
    Concurrent Open calls during startup and after close produce one responsive native workbench
-   for the exact authority process. Windows acceptance counts actual Tauri windows, including
-   hidden windows; a single service PID or a mocked activation result is insufficient evidence.
+   for the exact service. Windows acceptance counts actual shell windows, including hidden
+   windows; a single service PID or a mocked activation result is insufficient evidence.
    Open tolerates delayed native startup within its bounded wait; an expired wait permits retry
    without telling the person to stop a healthy authority. Ghostlight never delays a sign-out or
    shutdown, and starts nothing once the session is ending. Every process (the service, both
@@ -440,7 +441,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    diagnostics, configuration, and supported harnesses. Search input is bounded at the adapter.
 4. Reloading the disposable WebView reconstructs its state from `WorkbenchFacade`; it owns no
    product state, runtime token, authority, or durable history.
-5. Abnormal Linux WebKit renderer termination discards only the failed workbench. The authority and
+5. Abnormal Linux WebKit renderer termination discards only the failed workbench. The service and
    tray remain live, and the next explicit Open creates one replacement without an automatic retry
    loop.
 6. Blocked operations request at most one content-free native notification
@@ -471,12 +472,14 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    remote-navigation, or network capability. File mutation terminates in the explicit harness
    application service, outside the UI event loop.
 12. The desktop executable, tray, bundle, and workbench use the original Ghostlight icon bytes,
-    established palette and spring curve, and a static readable reduced-motion treatment.
-13. A Tauri setup or event-loop failure ends the authority instead of leaving an invisible
-    process. A tray-construction failure on a session without tray support is contained when the
-    workbench still gives the Applications entry and `ghostlight open` an interaction route. If
-    neither tray nor workbench can be constructed, startup exits. The MCP connector, browser
-    connector, shared bridge, and extension have empty diffs for the complete workbench feature.
+    established palette and spring curve, and a static readable reduced-motion treatment. The
+    tray's state dot is drawn at run time over the original icon bytes, in the band's colours;
+    the ready icon is the original bytes.
+13. A broken window never stops agent work. A shell that cannot start, a window that cannot be
+    built, a missing display, web view runtime or tray, and a shell that vanishes leave the service
+    serving; `status` and `doctor` say why there is no window, and presence relaunches a vanished
+    shell at most three times in two minutes. The MCP connector, browser connector, shared
+    bridge, and extension have empty diffs for the complete workbench feature.
 14. Clear view removes completed actions from the current At a glance surface, preserves running work,
     issues no orchestrator mutation, and leaves the durable audit unchanged. A later action appears
     normally, and a fresh desktop process may reconstruct the cleared history from audit.
@@ -539,7 +542,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
 5. `tests/process-journey.mjs` checks real JSONL during parent execution and after completion.
    `tests/workbench-surface.mjs` checks projection updates and escaping. The isolated Chromium
    `tests/workbench-history-browser.mjs` checks the bundled UI at 1280 and 720 pixels using synthetic
-   events. These do not establish installed Tauri/MV3 deployment or H5 timing guarantees.
+   events. These do not establish installed shell/MV3 deployment or H5 timing guarantees.
 6. Ordinary action names toggle inline hero details with mouse, Space, and Enter. Receipt updates
    and newer actions retain open panels and keyboard focus. Expanded content fits its row at both
    widths, with no horizontal overflow. Pause precedes At a glance visually and in keyboard order.
@@ -566,7 +569,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    focusable elements, or input-intercepting layers, even when its stylesheet is unavailable.
 6. Rust application/relay tests and the fresh-build process journey cover timing and isolation with
    fake/synthetic browser adapters. The isolated Chromium history journey exercises bundled UI.
-   These do not establish installed Tauri/MV3, physical input timing, or Linux runtime evidence.
+   These do not establish installed shell/MV3, physical input timing, or Linux runtime evidence.
 
 ## Document boundary evidence (ADR-0158)
 
@@ -612,7 +615,7 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    through updates and recovery. Audit refusal does not emit repeated native notifications.
 6. Rust sink/executor/history tests, the real-process journey with a synthetic browser adapter,
    and the bundled workbench in isolated Chromium own these checks. Installed native transport,
-   active Tauri deployment, Linux runtime, and storage power-loss behavior remain separate lanes.
+   active shell deployment, Linux runtime, and storage power-loss behavior remain separate lanes.
 
 ## Connection reporting (ADR-0161)
 

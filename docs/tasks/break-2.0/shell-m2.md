@@ -67,17 +67,17 @@ Rules:
 
 ## RESUME HERE
 
-m2-01-settings-tab, m2-02-shell-carries-the-desktop and m2-03-shell-lifecycle have landed (see
-Landed). The shell now keeps one window at a time (the service's one desktop place), starts the
-service on a person's launch, shows Starting, Updating, Restarting and Stopped, reopens its window
-on the new build after an update, and hears the end of the session through the relay's shared
-listener. `--tray` (m2-04's presence) and `--updating` are accepted. While Tauri is still in the
-service, one route (`ShellRoute`) sends a request to the attached shell and otherwise to the Tauri
-window. Next: the coordinator deploys m2-03 and runs its live checks with the owner, then
-m2-04-the-switch starts. m2-04 deletes the Tauri branch of the route
-(`ShellRoute::install_fallback`, `ServiceHost::install_native_fallback` and its one call in
-`desktop/mod.rs`), makes the service start `ghostlight-desktop --tray`, and gives the Start-menu
-shortcut the AUMID `Sylin.Ghostlight`.
+m2-01 to m2-04 have landed (see Landed). The service links no UI toolkit in code: it serves with no
+display, binds its endpoint at start, and presence (`service/presence.rs`) starts
+`ghostlight-desktop --tray` 2 s after it is ready and whenever a shell vanishes without a goodbye.
+The shell draws the tray the service describes (state dot, connection-count tooltip, Open, Pause,
+Resume, Quit), reports `unavailable` and `closed`, and the first close that stays is explained once
+(`state/tray-hint`). The Start-menu shortcut targets the shell with the AUMID `Sylin.Ghostlight`,
+and the Linux entry runs the shell. Tauri no longer draws anything; its crates, `build.rs`,
+`tauri.conf.json` and `capabilities/` remain until m2-05. Next: the coordinator deploys m2-04 and
+runs its live checks with the owner (below), then m2-05-tauri-out starts: remove the Tauri crates
+and the version resource's dependence on `tauri-build`, give the service its own version resource
+("Ghostlight service"), make it a console program with no console window, and add the guard.
 
 ## Landed
 
@@ -86,6 +86,7 @@ shortcut the AUMID `Sylin.Ghostlight`.
 | m2-01-settings-tab | Settings, a tab with a left rail before About, replaces the Controls button and sheet. The rail has This screen, Sharing, Browser work, Notifications and Diagnostics, each with its state word, and `kit/controls.js` became `kit/settings.js`. Every tab has an address from the closed list `ADDRESSES` (`#settings/sharing`, and so on), written in place with `history.replaceState`. In Control the page can quit Ghostlight: `WebAct::Quit`, `POST /api/quit` (202), a quit port the service attaches to the facade, and `quit_ghostlight` on both transports. Watch shows the Continue line in each section and Closed shows the watching-off line. The connection sentence moved to Status. The UI-surface guard tests moved out of `desktop/mod.rs` into `workbench/surface_tests.rs`. The Policy page's ceilings end with the line "Ghostlight's own control page on this computer is never automated.", authored once. Forced-colors rules cover the band, the tabs, the rail and the state words. | see `git log` |
 | m2-02-shell-carries-the-desktop | The service asks the shell, over the `desktop` stream, to show the window at a section, show a notice, open a link or a folder and pick a file. New frames `show`, `notice`, `act` (service to shell) and `act_result` (shell to service) with goldens in `tests/golden/desktop/`. `PageAddress` (`workbench/address.rs`) is the Rust copy of the page's address list, `POST /api/window` takes `{view, address?}` (unknown address: 400) and a Watch Continue sends its section or screen. `service/shell.rs` holds the attached shells and `ShellRoute`, the one adapter the facade gets for presentation and native acts. The shell (`crates/desktop/src/native.rs`) carries them out with `notify-rust`, `open` and a file dialog (`rfd` on Windows, GTK on Linux), names itself `Sylin.Ghostlight`, and skips any frame it cannot read. The blocked and checkup notice words moved to `language/workbench.rs`. | see `git log` |
 | m2-03-shell-lifecycle | One shell at a time: the service holds one desktop place, and a second shell is sent `already_open` (new frame, golden `already-open.json`) and exits 0 while the attached shell is sent `show`. The shell takes `--tray` and `--updating` (`Launch`). Its life is a pure state machine (`machine.rs`) with four screens in one built-in document (`states.rs`): a person's launch starts the service once and shows Starting, the update hand-over shows Updating or relaunches the shell on the new build, a loss without goodbye shows Restarting and starts the service up to three times, and Stopped offers Start and Diagnostics. A new workbench frame rebuilds the webview. The shell adopts the relay's session listener and drops its own signal sources. | see `git log` |
+| m2-04-the-switch | The service brings up the shell by itself and the shell draws the service's tray. `crates/orchestrator/src/desktop/` (Tauri's tray, window, 21 commands) is deleted and `serve` binds its endpoint at start. Presence (`service/presence.rs`) launches `ghostlight-desktop --tray` 2 s after ready and after a shell vanishes, launches a shell with no argument for a Show and shows the window when it attaches, and latches `did_not_stay` after three launches in two minutes. `TrayModel` gained a state and live items; `tray_model`, `unavailable` and `closed` frames; the state dot is drawn at run time. `status` and `doctor` carry `window`. The Start-menu shortcut names the shell with the AUMID; the Linux entry runs the shell. The page has one transport. The shell moves an open page by navigating to the section, not by a script that a loading page loses (the Continue finding; a live check is owed). | see `git log` |
 
 ## Owner questions
 
@@ -124,6 +125,46 @@ Each has a default the work uses until the owner answers.
   starts.
 
 ## Owed live checks
+
+After the coordinator deploys m2-04, with the owner (Windows unless it says Linux):
+
+- m2-04, one icon: exactly one Ghostlight icon in the notification area, the plain ghost while
+  ready. Its tooltip is the connection sentence ("Ghostlight service is up; ..."). An agent read
+  shows the teal working dot. Pause in the tray shows the amber dot, with Resume enabled and Pause
+  disabled; Resume puts it back. Open and Quit are always enabled. With no browser connected the
+  icon is the plain ghost and the tooltip says nothing is connected.
+- m2-04, close: close the window. The icon stays and, the first time only, one notice says
+  "Ghostlight is still running" and where the icon is. Open the window again from the icon and
+  close it again: no notice. `state/tray-hint` exists.
+- m2-04, Start menu: with Ghostlight running, a Start-menu launch brings the window forward and
+  does not add a second icon. Pin the entry to the taskbar: the pin and the window share one
+  button. `(New-Object -ComObject Shell.Application)` on the Start-menu entry reads
+  `System.AppUserModel.ID` = `Sylin.Ghostlight`.
+- m2-04, toast: Settings > Notifications > Send a test shows a toast from "Ghostlight", and Focus
+  Assist silences it.
+- m2-04, Continue (the live finding): from a Chrome watch tab (the URL `ghostlight status` prints)
+  each Settings section's Continue opens the window at that section on the first press, with the
+  window already open, freshly opened, or minimized. Press Continue on Diagnostics and then
+  Sharing in quick succession: the window ends on Sharing.
+- m2-04, quit and come back: Quit from Settings. The icon and the window are gone and no
+  `ghostlight-desktop.exe` or `ghostlight-service.exe` is left. Chrome does not bring Ghostlight
+  back; a Start-menu launch does.
+- m2-04, presence: with Ghostlight running and the window closed, end `ghostlight-desktop.exe` in
+  Task Manager: the icon is back within about 2 s. End it three times in a row within two
+  minutes: it stops coming back and `ghostlight status` says the window program ended again and
+  again; `ghostlight open` starts it again.
+- m2-04, an agent starts Ghostlight: with Ghostlight not running, start an MCP client. Only the
+  icon appears; no window opens on its own.
+- m2-04, sign out and restart: no "this app is preventing shutdown", no stray process.
+- m2-04, status (Windows): `ghostlight status` from an OpenSSH session or a session-0 service
+  reports that no window is possible there; `ghostlight status --json` carries
+  `"window": "no_interactive_desktop"`.
+- m2-04, Linux (later): the Applications entry starts the shell. A `--tray` shell on GNOME without
+  the AppIndicator extension reports `no_tray` in `ghostlight status` and starts nothing again.
+  `DISPLAY` and `WAYLAND_DISPLAY` both unset in the service's environment reports `no_display`.
+  Wayland Open after minimise rebuilds the window (ADR-0120); bursts of Open give one window
+  (ADR-0119). `libdbus-1-dev` is needed to build (`dbus` is now a direct dependency of the shell
+  on Linux).
 
 After the coordinator deploys m2-03, with the owner (Tauri's tray and window are still present):
 
@@ -402,7 +443,82 @@ After the coordinator deploys m2-01, with the owner:
   itself (`--updating`, on a replace goodbye). A `--tray` shell with no tray in its workbench frame
   ends after its first attach, since it would otherwise hold the desktop place invisibly.
 
+- m2-04: the Tauri crates, `build.rs`, `tauri.conf.json`, `capabilities/` and the Linux
+  `glib` and `webkit2gtk` dependencies stay in `crates/orchestrator` and are linked into nothing:
+  no source names them. `tauri-build` still stamps the version resource. m2-05 removes them.
+- m2-04: `serve_in` (`cli/desktop.rs`) is the serve path, with the session listener, the starter
+  and the quit signal given to it, so a unit test pins the order (listener, start, quit signal,
+  ready limit, bind). `READY_STALLED_EXIT` moved there. The quit signal is a channel the main
+  thread waits on, and the process returns exit 0 when it is sent.
+- m2-04: no working latch in the service. The icon's working dot follows `Readiness::Working` as
+  it happens; the band keeps its own 10 s latch in `store.js`, so the two can differ for up to 10 s
+  after the last action. `TrayState::of` maps `Readiness` itself (an exhaustive match) rather
+  than the `tone()` strings, and a test proves the two agree for every readiness. Offline (no
+  browser connected) maps to ready, owner answer Q1, so a service with no browser that is paused
+  shows the plain ghost with Resume enabled and Pause disabled: the entries follow the runtime
+  state and the dot follows the readiness, as the band does.
+- m2-04: tray dedupe is per shell. `Live::refresh` hands the tray to a port when it differs from
+  the one it last gave; the service's port (`TrayRelay`) keeps only the latest model, writes it from
+  a thread of its own so a refresh never waits on a stream, and the stream writes a frame only when
+  the model differs from the last one that shell was sent. After a shell attaches the service
+  asks again, so a change between the workbench frame and the attach is not lost.
+- m2-04: presence's status word. `window` is `shown` while a shell is attached and has been shown
+  a window, `tray` after a close that stays or for a `--tray` shell no window was ever asked of,
+  and otherwise the latched or last-refused reason. It is absent while presence has nothing to say
+  (before the first launch is due). `shown` is the service's knowledge: a shell started by a person
+  counts as showing its window, and every Show frame the service sends marks it shown; the shell
+  sends no frame when it opens a window by itself.
+- m2-04: a shell's `closed {stays:false}` is recorded as `no_tray`, since that is the only reason a
+  shell leaves when its window closes. `did_not_stay` is only the launch budget.
+- m2-04: spec deviation, `unavailable` for no display and for no web view applies to every launch,
+  not only `--tray`: a shell a person started with no web view runtime cannot show a window either,
+  and ends with the new `EXIT_NO_WEBVIEW` (4) after telling the service. The tray-host check ends
+  only a `--tray` shell (status 0); a person's shell goes on without an icon.
+- m2-04: the shell's first attempt to open the stream is made on the main thread before the
+  display is initialised, and the machine's first request to open uses its answer. A report written
+  just before the shell exits can be discarded unread when the service is busy at that moment (a
+  test saw it on Windows named pipes), so the shell lingers 300 ms after its last report
+  (`LAST_REPORT_LINGER`) before it ends. This is a spot fix for a relay property; the relay is
+  frozen, so the root cause is not touched here.
+- m2-04: the live finding (a watcher's Continue left the open window on At a glance on the first
+  press). Cause found by reading, not by reproducing: the shell moved the open page by running
+  `window.location.hash = ...` in it, and a script run in a page that is still loading (a window
+  that has just been created, or a webview just rebuilt) runs against the document before the
+  page and is lost. The second press worked because the page had loaded by then. The candidate
+  of a request routed to the Tauri window instead of the shell no longer exists (the fallback is
+  deleted) and cannot be told apart from this one on the deployed m2-02 build, where both are
+  possible. The fix is at the root of the move: `ShellWindow::go_to` navigates the webview to
+  `<origin>/#<section>` (`native::section_url`), which the webview takes as a change of the
+  address after the `#` or as the first load, whatever the page is doing, and the page reads it
+  through its `hashchange` listener or its first `openAddress`. The script and `move_script`
+  are gone. A test pins the address; whether it lands is a live check above.
+- m2-04: `sync_tray` skips a model the tray already shows (`Tray::show` compares), so an open menu
+  is not rebuilt by a refresh that changed nothing.
+- m2-04: the Start-menu shortcut falls back to the service image when `bin` holds no shell
+  (`windows_entry::shortcut_target`), since the shell is built with the service but a hand-made
+  payload may lack it.
+- m2-04: the Linux code (the StatusNotifier probe with `dbus`, the display variables, the
+  Applications entry) was written on a Windows machine and compiled only for Windows. It is
+  covered by pure tests where it can be (`display_named`, the desktop entry text) and by the owed
+  Linux checks.
+- m2-04: `Cargo.lock` gained `dbus` as a dependency of `ghostlight-desktop` on Linux (the package
+  was already locked through `notify-rust`). The crates/desktop network guard passes.
+- m2-04: `tests/windows-desktop-journey.ps1` now looks for the window class "Ghostlight Window",
+  but it still looks for it in the service's process; the shell's window lives in the shell's
+  process, so the journey needs its owner (the install journey lane) to follow the process. It
+  was not run (no journeys may run in this lane). `tests/linux/acceptance/cleanup.py` now counts
+  `ghostlight-desktop` among the processes it finds, since the tray item belongs to the shell.
+- m2-04: `tests/workbench-preview-server.mjs` and `tests/workbench-surface.mjs` answer the page's
+  HTTP routes from the same fixtures as before (the surface test pushes changes down a real
+  stream, so each push waits a few turns for the page to read it). The preview server was not
+  started in this lane; its fixture script was syntax-checked.
+
 ## Rollback
+
+Redeploying the m2-03 payload restores the Tauri tray and window: the service hosts them again and
+starts no shell, the page speaks Tauri commands, and the Start-menu shortcut and the Linux entry
+name the service image. A deploy of the m2-03 payload also needs the Start-menu shortcut written
+again (the install does it). `state/tray-hint`, if it exists, is harmless.
 
 Redeploying the m2-02 payload restores the old shell: no arguments, a stderr line and exit 1 with
 no service, an exit at any goodbye, and a service that admits two desktop streams. The

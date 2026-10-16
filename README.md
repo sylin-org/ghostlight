@@ -176,8 +176,10 @@ policy is not valid, Ghostlight refuses all browser work and the header never re
 Policy not valid and points to Policy, unless a more urgent state such as Not connected or Paused
 comes first. A broken edit to a local policy that is already in force is different: the last valid
 version stays in force, Status warns about the edit, and the header does not change. Closing the
-window returns it to the tray and leaves the authority running. If the desktop shell cannot start,
-Ghostlight exits instead of leaving an invisible authority.
+window leaves the icon in the tray and Ghostlight running, and the first time it says so in one
+notification. The service serves with no display, so if the window program cannot start, or the
+computer has no display, web view or tray, Ghostlight keeps working and `ghostlight status` says
+why there is no window.
 
 ## Build it from source
 

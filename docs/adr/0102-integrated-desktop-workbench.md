@@ -1,5 +1,7 @@
 # ADR-0102: Integrated desktop workbench in the orchestrator monolith
 
+Amended by ADR-0199 Decision 11: Decisions 1 and 6 (the workbench inside the orchestrator process, and its Tauri adapter) are superseded. The shell, `ghostlight-desktop`, draws the window and the tray over the loopback workbench.
+
 - Status: Accepted; amended 2026-08-11 (see the amendment below)
 - Date: 2026-08-10
 - Amends: ADR-0030's local console process placement and ADR-0077's management surface

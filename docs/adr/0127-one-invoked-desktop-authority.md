@@ -1,5 +1,7 @@
 # ADR-0127: One invoked desktop authority
 
+Amended by ADR-0199 Decision 11: Decisions 1 and 3 (one invoked desktop authority, and a desktop event-loop fault ending the service) are superseded. The service serves with no display, and presence brings up the shell whenever the desktop can show it.
+
 - Status: Accepted
 - Date: 2026-08-16
 - Amends: ADR-0102 Decision 1 and acceptance evidence 7, ADR-0104 Decisions 3 and 4,

@@ -128,8 +128,12 @@ reason the service was started with) and, when the service has them, `connection
 (`{mcp_clients, command_line, browsers}`, how many of each are connected) and `workbench`
 (`{url, usual_port, watching}`, where the workbench is served and whether other screens on this
 computer may watch; the bearer that opens the window is never part of it), `show` with `{shown}`
-(whether a window came forward) and `quit` with `{quitting: true}`. A reader treats `connections`
-and `workbench` as optional: an older service answers without them. An operation this revision
+(whether a window came forward) and `quit` with `{quitting: true}`. The `status` answer also
+carries `window` when the service has something to say: why there is, or is not, a Ghostlight
+window (`shown`, `tray`, `no_display`, `no_interactive_desktop`, `no_shell_file`, `no_webview`,
+`no_tray` or `did_not_stay`). That word is service-defined status content, added after the
+revision's first form and unknown to the frozen edge, which never reads it. A reader treats
+`connections`, `workbench` and `window` as optional: an older service answers without them. An operation this revision
 does not know is refused as `unsupported`.
 
 **`desktop`** carries the same-build shell contract of ADR-0199 Decision 7 and its 2026-10-15

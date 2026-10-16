@@ -234,7 +234,7 @@ the owner wants, and what this project learned the hard way.
   follow-up observation cannot erase an acknowledged action (ADR-0185).
 - **Browser feedback is passive.** Messages and animations may appear on the page; buttons,
   focusable controls, and input-intercepting overlays may not. Interactive runtime control belongs
-  in the Tauri workbench, including when page styling fails (ADR-0185).
+  in the Ghostlight window, including when page styling fails (ADR-0185).
 - **Explicit user instructions permit credential input.** Fill and typing accept the per-request
   `user_authorized_credentials` acknowledgement. Prior explicit user authorization is sufficient;
   do not ask again. Without it, return guidance for that request, not a session hold. The caller's
@@ -260,19 +260,23 @@ the owner wants, and what this project learned the hard way.
   content without document inventory; a refusal sends no capture command. Separate text, target,
   and action restrictions remain. Restricted recordings stop at document-set changes, and
   replay export checks every captured source. Scripts have no inferred containment mechanism.
-- **One desktop authority startup.** Connectors, CLI demand-start, and direct execution all launch
-  the same no-argument desktop authority. It creates a tray where the desktop offers one and starts
-  the workbench backgrounded: minimized on Windows and hidden on Linux. A session without a tray
-  keeps the Applications entry and `ghostlight open`; there is no service-only launch mode.
+- **Presence brings up the shell; the service never needs a display.** Whatever started the
+  service, it starts `ghostlight-desktop --tray` 2 s after it is ready when no shell is attached,
+  and again 2 s after a shell vanishes without a goodbye, only when a display is reachable (Linux
+  `DISPLAY` or `WAYLAND_DISPLAY`; Windows the visible window station). Three launches in two
+  minutes latch `did_not_stay` until a person acts. With no display, web view runtime or tray the
+  service still serves and `status` says why there is no window (`window` in `status --json`). A
+  session without a tray keeps the Applications entry and `ghostlight open`
+  (ADR-0199 Decision 11, which superseded ADR-0127's desktop-authority startup).
 - **A held lease is not readiness.** Publish discovery only once the interaction route exists,
   reap every child that failed or lost the lease race, and bound concurrent starters' retries, or
   they take turns spawning failures (32 authorities in four seconds, ADR-0166; current mechanics
   in ADR-0197 Decision 10).
 - **One process does not prove one workbench.** A startup/Open race created two responsive native
-  windows inside one authority. Publish activation only after startup construction finishes;
-  Tauri's label lookup does not reserve a window under construction. Native lifecycle acceptance
-  counts actual windows, including hidden ones, through startup and close/reopen bursts. A mock
-  activation port or process count cannot prove this promise (ADR-0119's September 7 amendment).
+  windows inside one authority. The service now holds one desktop place and a second shell is sent
+  `already_open`, but native lifecycle acceptance still counts actual windows, including hidden
+  ones, through startup and close/reopen bursts. A mock activation port or process count cannot
+  prove this promise (ADR-0119's September 7 amendment).
 - **Keep browser work visible and user-placed.** Reuse the same-name Ghostlight group wherever the
   user put it; create a dedicated window only when none exists; never reclaim an unrelated one.
 - **Keep visual evidence.** Model-driven close needs both orchestrator authority and the extension's
@@ -567,8 +571,8 @@ Every one of these cost something to learn.
   boundary for that executable shape.
 - **Probe the intended native window, not a process-level main-window guess.** Tray helpers,
   event-loop helpers, and console hosts can make `MainWindowHandle` look healthy after the actual
-  Tauri workbench has died. Windows desktop acceptance identifies the exact `Ghostlight` / `Tauri
-  Window` HWND and checks its visible, minimized, Close, activation, and recreation states.
+  workbench window has died. Windows desktop acceptance identifies the exact `Ghostlight` /
+  `Ghostlight Window` (window class) HWND in the shell's process and checks its visible, minimized, Close, activation, and recreation states.
 - **Diff the public surfaces by name before calling a rewrite complete.** A file-level 'missing'
   list reads as intentional rewrite when it is really identity and release machinery: the 1.0
   clean-room dropped the README hero GIF, badge row and onboarding spine, the Homebrew template, the

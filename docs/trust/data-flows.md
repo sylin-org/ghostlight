@@ -44,6 +44,9 @@ nothing Ghostlight does contacts the vendor.
 - There is no discovery file. The workbench listens on one loopback port, which ghostlight status
   shows on its Workbench line; it carries no MCP and starts no browser work. `run/` in the home
   holds the service lock and, on Linux, the relay socket.
+- `state/tray-hint` in the home is an empty file. It exists once the window has been closed for
+  the first time, so the notification that explains the tray icon is shown once and never again.
+  It holds nothing and leaves the computer nowhere.
 - `state/desktop-webview` in the home is the web-engine profile of the Ghostlight window
   (WebView2 on Windows, WebKitGTK on Linux). It holds the web storage of the workbench page,
   such as the Density and Motion choices, and the engine's own caches. On Linux it is closed to
