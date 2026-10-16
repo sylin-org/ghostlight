@@ -962,7 +962,7 @@ check("cross-origin-frames", "(19) two-level cross-origin iframes: read, find, c
   await t.succeed("browser_wait", { tab: snapshot, condition: "text_present", value: "Project name", timeout_ms: 30000 });
   await t.succeed("browser_type_text", { tab: snapshot, target: (await t.matches(snapshot, "Project name", "textbox"))[0].target, text: "Snapshot project" });
   assert.match((await t.succeed("browser_read", { tab: snapshot, max_chars: 20000 })).facts.text, /Snapshot project/);
-  await verifyComposedFrame(t, snapshot, t.tag);
+  await verifyComposedFrame(t, snapshot, `/sylin?${t.tag}`);
 });
 
 check("shadow-dom", "(20) open shadow DOM: find, click, type", async (t) => {
