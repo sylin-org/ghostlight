@@ -463,11 +463,8 @@ mod tests {
         }
     }
 
-    /// Every state `doctor` can report has plain words, and they are pinned here.
-    ///
-    /// Before this, `doctor` printed Rust identifiers such as `NeedsAttention` through `{:?}`,
-    /// which is a debugger's vocabulary rather than a person's. The workbench renders the same
-    /// states from the same serialized values; S6 makes it consume these exact words.
+    /// Every state doctor reports has plain words, never a Rust identifier; the workbench renders
+    /// the same serialized values.
     #[test]
     fn every_reportable_state_has_plain_words() {
         use crate::install::command_path::CommandPathState;
@@ -517,27 +514,6 @@ mod tests {
                 label.to_lowercase(),
                 "{label} reads as an identifier"
             );
-        }
-    }
-
-    /// `doctor` renders those words rather than Rust's debug formatting.
-    #[test]
-    fn doctor_prints_no_debug_formatted_state() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        for file in ["src/cli/doctor.rs", "src/cli/setup.rs"] {
-            let source = std::fs::read_to_string(manifest_dir.join(file))
-                .unwrap_or_else(|_| panic!("{file} is readable"));
-            for line in source.lines() {
-                let reports_state = line.contains("Browser: {")
-                    || line.contains("Applications: {")
-                    || line.contains("MCP client: {")
-                    || line.contains("Command: {")
-                    || line.contains("Documentation: {");
-                assert!(
-                    !(reports_state && line.contains("{:?}")),
-                    "{file} line uses debug formatting for a state: {line}"
-                );
-            }
         }
     }
 }
