@@ -34,7 +34,7 @@ fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
 use crate::browser::{BrowserDispatch, BrowserPort, BrowserSummary};
 use crate::governance::{CapabilitySet, ReasonCode};
 use crate::workbench::{
-    WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
+    PageAddress, WorkbenchNotification, WorkbenchPresentationError, WorkbenchPresentationPort,
 };
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
@@ -118,7 +118,7 @@ fn policy_explain_still_honors_cancellation_and_original_deadlines() {
 struct Notices(Mutex<Vec<WorkbenchNotification>>);
 
 impl WorkbenchPresentationPort for Notices {
-    fn reveal(&self) -> Result<(), WorkbenchPresentationError> {
+    fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
         Ok(())
     }
     fn notify(&self, notice: WorkbenchNotification) -> Result<(), WorkbenchPresentationError> {
@@ -549,6 +549,7 @@ fn control_after_dispatch_preserves_applied_and_uncertain_receipts() {
                 tab: tab(7, "https://example.com/"),
                 value: "1".into(),
                 truncated: false,
+                form: crate::browser::adapter::ScriptForm::AsWritten,
                 committed_urls: vec![],
             })
         });

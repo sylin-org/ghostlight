@@ -78,7 +78,12 @@ function requestChannel(write) {
   };
 }
 
-const fixture = createServer((_request, response) => {
+const fixture = createServer((request, response) => {
+  if (request.url === "/data") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ answer: 42 }));
+    return;
+  }
   response.writeHead(200, { "content-type": "text/html" });
   response.end("<!doctype html><title>Ghostlight script fixture</title><p id='effect'>0</p>");
 });
@@ -229,6 +234,31 @@ try {
     assert.equal(result.status, "succeeded", JSON.stringify(result));
     assert.equal(result.facts.value, expected);
     assert.equal(executions - before, 1);
+    checks += 1;
+  }
+  // A script that is one expression is awaited, so a promise it evaluates to resolves. A script
+  // that is a statement is not, and a value of {} says what else reads as {}.
+  for (const [script, expected] of [
+    ["new Promise((done) => setTimeout(() => done(42), 20))", 42],
+    ["fetch('/data').then((response) => response.json())", { answer: 42 }]
+  ]) {
+    const before = executions;
+    const result = await execute(script);
+    assert.equal(result.status, "succeeded", JSON.stringify(result));
+    assert.deepEqual(result.facts.value, expected);
+    assert.deepEqual(result.next_steps ?? [], []);
+    assert.equal(executions - before, 1);
+    checks += 1;
+  }
+  for (const [script, words] of [
+    ["let pending = Promise.resolve(1); pending", "unawaited promise, a DOM node or a Map"],
+    ["document.getElementById('effect')", "DOM node, a Map or a class instance"]
+  ]) {
+    const result = await execute(script);
+    assert.equal(result.status, "succeeded", JSON.stringify(result));
+    assert.deepEqual(result.facts.value, {});
+    assert.equal(result.next_steps?.length, 1, JSON.stringify(result));
+    assert.ok(result.next_steps[0].includes(words), result.next_steps[0]);
     checks += 1;
   }
   await raw("document.getElementById('effect').textContent = '0'");

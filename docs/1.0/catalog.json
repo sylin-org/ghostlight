@@ -1678,7 +1678,7 @@
   },
   {
     "name": "browser_execute",
-    "description": "Run JavaScript in the page main world. It may read, mutate, or navigate; prefer a semantic tool.",
+    "description": "Run JavaScript in the page main world. It may read, mutate, or navigate; prefer a semantic tool. A script that is one expression is awaited, so a promise it evaluates to resolves.",
     "inputSchema": {
       "additionalProperties": false,
       "examples": [

@@ -387,6 +387,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
             tab: tab(7, PAGE),
             value: "\"PRIVATE_SCRIPT_RESULT\"".into(),
             truncated: false,
+            form: crate::browser::adapter::ScriptForm::AsWritten,
             committed_urls: vec![PAGE.into()],
         }],
     );

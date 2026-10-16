@@ -440,6 +440,7 @@ fn all_open_scripts_keep_their_browser_behavior_without_document_host_restrictio
         tab: tab(7, "https://example.com/"),
         value: "2".into(),
         truncated: false,
+        form: crate::browser::adapter::ScriptForm::AsWritten,
         committed_urls: vec![],
     }));
     let result = executor.execute(
@@ -536,6 +537,7 @@ fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch(
                 tab: tab(7, "https://example.com/"),
                 value: "2".into(),
                 truncated: false,
+                form: crate::browser::adapter::ScriptForm::AsWritten,
                 committed_urls: vec![],
             }));
         }

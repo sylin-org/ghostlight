@@ -7,7 +7,9 @@ use super::super::super::geometry;
 use super::super::super::keys;
 use super::super::super::wire::{CaptureClip, InputStep, Point};
 use super::*;
-use crate::browser::adapter::{CaptureScope, PhysicalFile, PhysicalRectangle, ViewportGeometry};
+use crate::browser::adapter::{
+    CaptureScope, PhysicalFile, PhysicalRectangle, ScriptForm, ViewportGeometry,
+};
 
 const NESTED: &str = "C:c1:locator_a1_1";
 const TOP_LOCATOR: &str = "T:t1:locator_a1_2";
@@ -925,7 +927,13 @@ fn a_script_runs_in_the_main_world_with_the_scope_guard() {
     };
     assert_eq!((tab.tab_id, value.as_str(), truncated), (12, "42", false));
     let evaluated = evaluated_seen(&fake);
-    assert_eq!(evaluated[0].script, "6 * 7");
+    assert_eq!(
+        evaluated[0].script,
+        "await (
+6 * 7
+)",
+        "a script that is one expression is sent awaited"
+    );
     assert_eq!(evaluated[0].max_result_chars, 100);
     assert_eq!(evaluated[0].settle_ms, 100);
     assert!(evaluated[0].guard.is_some());
@@ -935,6 +943,149 @@ fn a_script_runs_in_the_main_world_with_the_scope_guard() {
         evaluated_seen(&fake)[1].guard.is_none(),
         "work sent without a scope carries no guard"
     );
+}
+
+/// The scripts the extension was asked to evaluate, in order.
+fn scripts_seen(fake: &FakeExtension) -> Vec<String> {
+    evaluated_seen(fake)
+        .into_iter()
+        .map(|evaluated| evaluated.script)
+        .collect()
+}
+
+fn script_value(value: &str) -> Value {
+    json!({"value": value, "truncated": false, "exception": null})
+}
+
+fn script_form(outcome: BrowserOutcome) -> (String, ScriptForm) {
+    match unscoped(outcome) {
+        BrowserOutcome::ScriptEvaluated { value, form, .. } => (value, form),
+        other => panic!("a script result, not {other:?}"),
+    }
+}
+
+#[test]
+fn an_awaited_expression_is_sent_once_and_its_value_returned() {
+    let (port, fake) = rig(page(), |_| Out::Effect(script_value("42")));
+    let outcome = call(
+        &port,
+        scoped(
+            all_open(),
+            evaluate("new Promise(r => setTimeout(() => r(42), 50))"),
+        ),
+    )
+    .unwrap();
+    assert_eq!(script_form(outcome), ("42".into(), ScriptForm::Awaited));
+    assert_eq!(
+        scripts_seen(&fake),
+        ["await (
+new Promise(r => setTimeout(() => r(42), 50))
+)"]
+    );
+}
+
+#[test]
+fn a_refusal_before_dispatch_sends_the_original_once_and_returns_its_answer() {
+    let (port, fake) = rig(page(), |primitive| match primitive {
+        wire::Primitive::EvaluateMain(evaluate) if evaluate.script.starts_with("await (") => {
+            Out::Fail(wire::Failure::InvalidRequest, false)
+        }
+        _ => Out::Effect(script_value("7")),
+    });
+    let outcome = call(&port, scoped(all_open(), evaluate("a, b"))).unwrap();
+    assert_eq!(script_form(outcome), ("7".into(), ScriptForm::AsWritten));
+    assert_eq!(
+        scripts_seen(&fake),
+        [
+            "await (
+a, b
+)",
+            "a, b"
+        ]
+    );
+}
+
+#[test]
+fn the_original_scripts_own_refusal_is_what_the_agent_sees() {
+    let (port, fake) = rig(page(), |_| Out::Fail(wire::Failure::InvalidRequest, false));
+    let error = call(&port, scoped(all_open(), evaluate("x y"))).unwrap_err();
+    assert!(matches!(error, BrowserError::Protocol(_)), "{error:?}");
+    assert_eq!(
+        scripts_seen(&fake),
+        [
+            "await (
+x y
+)",
+            "x y"
+        ]
+    );
+}
+
+#[test]
+fn nothing_but_a_refusal_before_dispatch_sends_a_script_again() {
+    let failures = [
+        (wire::Failure::InvalidRequest, true),
+        (wire::Failure::Timeout, true),
+        (wire::Failure::Timeout, false),
+        (wire::Failure::SessionLost, true),
+        (wire::Failure::BrowserRefused, false),
+        (wire::Failure::DocumentChanged, false),
+        (wire::Failure::DebuggerUnavailable, false),
+    ];
+    for (failure, dispatched) in failures {
+        let (port, fake) = rig(page(), move |_| Out::Fail(failure, dispatched));
+        assert!(call(&port, scoped(all_open(), evaluate("f()"))).is_err());
+        assert_eq!(
+            scripts_seen(&fake),
+            ["await (
+f()
+)"],
+            "{failure:?} dispatched {dispatched}"
+        );
+    }
+
+    let (port, fake) = rig(page(), |_| {
+        Out::Effect(
+            json!({"value": "", "truncated": false, "exception": "TypeError: f is not a function"}),
+        )
+    });
+    assert_eq!(
+        call(&port, scoped(all_open(), evaluate("f()"))),
+        Err(BrowserError::EffectUnknown(
+            "TypeError: f is not a function".into()
+        ))
+    );
+    assert_eq!(scripts_seen(&fake).len(), 1);
+}
+
+#[test]
+fn a_script_that_is_not_one_expression_is_sent_as_written() {
+    for script in [
+        "return 1",
+        "let a = 1; a",
+        "{a: 1}",
+        "a / b",
+        "f(
+",
+    ] {
+        let (port, fake) = rig(page(), |_| Out::Effect(script_value("1")));
+        let outcome = call(&port, scoped(all_open(), evaluate(script))).unwrap();
+        assert_eq!(script_form(outcome).1, ScriptForm::AsWritten, "{script:?}");
+        assert_eq!(scripts_seen(&fake), [script]);
+    }
+}
+
+#[test]
+fn a_wrap_longer_than_a_script_may_be_is_skipped() {
+    let longest = "x".repeat(crate::language::SCRIPT_MAX_CHARS);
+    let (port, fake) = rig(page(), |_| Out::Effect(script_value("1")));
+    let outcome = call(&port, scoped(all_open(), evaluate(&longest))).unwrap();
+    assert_eq!(script_form(outcome).1, ScriptForm::AsWritten);
+    assert_eq!(scripts_seen(&fake), [longest]);
+
+    let fits = "x".repeat(crate::language::SCRIPT_MAX_CHARS - 10);
+    let outcome = call(&port, scoped(all_open(), evaluate(&fits))).unwrap();
+    assert_eq!(script_form(outcome).1, ScriptForm::Awaited);
 }
 
 #[test]

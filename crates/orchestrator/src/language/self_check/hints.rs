@@ -35,7 +35,8 @@ use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-    CheckFailure, DialogKind, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
+    CheckFailure, DialogKind, EmptyObject, Outcome, Refusal, SavedTo, TargetNoun, TargetRole,
+    WorkspaceReason,
 };
 
 /// Words a hint may put between `with` and the field it names.
@@ -793,7 +794,18 @@ fn outcome_samples() -> Vec<Outcome> {
             host: host(),
             subject: None,
         },
-        Outcome::ScriptEvaluated { host: host() },
+        Outcome::ScriptEvaluated {
+            host: host(),
+            empty_object: EmptyObject::Absent,
+        },
+        Outcome::ScriptEvaluated {
+            host: host(),
+            empty_object: EmptyObject::Awaited,
+        },
+        Outcome::ScriptEvaluated {
+            host: host(),
+            empty_object: EmptyObject::NotAwaited,
+        },
         Outcome::DialogHandled { accepted: true },
         Outcome::DialogObserved {
             present: true,

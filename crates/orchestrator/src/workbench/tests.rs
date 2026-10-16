@@ -339,7 +339,11 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
                 Decision::permitted(),
                 "succeeded",
                 "applied",
-                &crate::language::outcome::Outcome::ScriptEvaluated { host: None }.audit(),
+                &crate::language::outcome::Outcome::ScriptEvaluated {
+                    host: None,
+                    empty_object: crate::language::outcome::EmptyObject::Absent,
+                }
+                .audit(),
                 1,
             )
             .with_observation(Observed {

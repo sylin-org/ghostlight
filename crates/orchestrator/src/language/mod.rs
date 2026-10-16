@@ -48,6 +48,9 @@ pub(super) const MAX_POSTCONDITION_VALUE_CHARS: usize = 2_000;
 pub const DEFAULT_DOCUMENT_DEPTH: usize = 6;
 /// The most items one `browser_inspect` call may ask for.
 pub const MAX_INSPECT_ITEMS: usize = 200;
+/// The most characters a `browser_execute` script may have, as the model sends it. The adapter
+/// sends nothing longer, so it also bounds a script it wraps.
+pub const SCRIPT_MAX_CHARS: usize = 20_000;
 const RETIRED_RESTRICTIONS: &[&str] = &["restrict_hosts", "restrict_capabilities"];
 /// A wait condition name for the concept `visual_settle` already names, refused with a pointer to it.
 const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
@@ -1232,7 +1235,7 @@ pub fn decode(name: &str, input: Value) -> Result<Operation, LanguageError> {
                 "timeout_ms",
             ],
             |value: &RunScript| {
-                validate_text(&value.script, 20_000, "script")?;
+                validate_text(&value.script, SCRIPT_MAX_CHARS, "script")?;
                 validate_optional_handle(value.tab.as_deref(), "tab_")?;
                 validate_range(value.max_result_chars, 100, 20_000, "max_result_chars")?;
                 validate_timeout(value.timeout_ms)?;

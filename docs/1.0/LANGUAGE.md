@@ -816,10 +816,19 @@ Inputs: required non-empty `script` up to 20000 characters; optional `tab`; opti
 `max_result_chars` from 100 to 20000, default 8000; optional `timeout_ms`.
 Capability: `execute`.
 
-The adapter parses the source before dispatch and selects the async form for a top-level return.
-Ordinary scripts retain REPL scope, including top-level await and repeated declarations. A local
-syntax rejection sends no page evaluation. Browser evaluation is sent once; a runtime exception
-or lost reply remains uncertain regardless of its text or exception class.
+The service sends a script that its lexical scan proves to be one expression as `await (<script>)`,
+so a promise it evaluates to resolves. The scan declines anything it cannot read with certainty:
+statements and declarations, a top-level `;` or `return`, a `/` that is not a comment, unpaired
+brackets, and unterminated strings, templates or comments. If the adapter refuses that form before
+evaluation, the original script is sent instead. Any other script is sent as written. The adapter
+parses the source before dispatch and selects the async form for a top-level return. Scripts that
+are not wrapped retain REPL scope, including top-level await and repeated declarations. A local
+syntax rejection sends no page evaluation. Browser evaluation happens at most once: a runtime
+exception or lost reply remains uncertain regardless of its text or exception class, and only a
+refusal before any evaluation allows the original to be sent.
+
+A `{}` value adds one next step that names what else reads as `{}`: a DOM node, a Map or a class
+instance, and, for a script sent as written, an unawaited promise.
 
 Facts: `tab`, `value`, `truncated`, and any governed committed landing. Script source and result
 never enter audit or presentation.

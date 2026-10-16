@@ -275,6 +275,16 @@ pub struct PhysicalFile {
     pub size: u64,
 }
 
+/// How the adapter sent a script to the page.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScriptForm {
+    /// The service proved the script is one expression and sent it awaited, so a promise it
+    /// evaluates to resolved.
+    Awaited,
+    /// The script went to the page exactly as written.
+    AsWritten,
+}
+
 /// Browser diagnostic sources selected at the physical adapter boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1039,6 +1049,7 @@ pub enum BrowserOutcome {
         tab: PhysicalTab,
         value: String,
         truncated: bool,
+        form: ScriptForm,
         committed_urls: Vec<String>,
     },
     /// Condition observation receipt.

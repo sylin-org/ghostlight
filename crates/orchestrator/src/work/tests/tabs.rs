@@ -391,6 +391,7 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         tab: tab(7, "https://example.com/#settings"),
         value: "null".into(),
         truncated: false,
+        form: crate::browser::adapter::ScriptForm::AsWritten,
         committed_urls: vec![],
     }));
     let anchored = executor.execute(
@@ -449,6 +450,7 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         tab: tab(7, "https://example.org/"),
         value: "null".into(),
         truncated: false,
+        form: crate::browser::adapter::ScriptForm::AsWritten,
         committed_urls: vec![],
     }));
     let moved = executor.execute(

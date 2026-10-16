@@ -320,6 +320,25 @@ impl DialogKind {
 const HANDLE_DIALOG_FIRST: &str =
     "Call browser_dialog with action accept or dismiss (or respond with text for a prompt) before continuing.";
 
+/// The step after a script whose value is `{}` and that was sent awaited. A promise has resolved
+/// by then, so what remains is a value JSON cannot show.
+const EMPTY_OBJECT_AWAITED: &str = "The value {} is also how a DOM node, a Map or a class instance reads as JSON. Return plain fields, such as el.textContent or Array.from(map), to read them.";
+
+/// The step after a script whose value is `{}` and that was sent as written. A promise the script
+/// ends in was not awaited, and says nothing in JSON.
+const EMPTY_OBJECT_NOT_AWAITED: &str = "The value {} is also how an unawaited promise, a DOM node or a Map reads as JSON. To wait for a promise, end the script with return await <promise>.";
+
+/// Whether a script's value was `{}`, which several different things read as.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EmptyObject {
+    /// The value was something else, or was cut.
+    Absent,
+    /// The value was exactly `{}` and the script was sent awaited.
+    Awaited,
+    /// The value was exactly `{}` and the script was sent as written.
+    NotAwaited,
+}
+
 /// What one completed browser action did in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Outcome {
@@ -452,7 +471,10 @@ pub enum Outcome {
         subject: Option<ActionSubject>,
     },
     /// A bounded page script was evaluated.
-    ScriptEvaluated { host: Option<String> },
+    ScriptEvaluated {
+        host: Option<String>,
+        empty_object: EmptyObject,
+    },
     /// An explicit observable condition was awaited.
     Waited {
         condition: String,
@@ -779,7 +801,7 @@ impl Outcome {
                     place(host, "the page")
                 ),
             },
-            Self::ScriptEvaluated { host } => {
+            Self::ScriptEvaluated { host, .. } => {
                 format!("Executed JavaScript on {}.", place(host, "the page"))
             }
             Self::Waited {
@@ -923,6 +945,14 @@ impl Outcome {
                     .into(),
             ],
             Self::DialogObserved { present: true, .. } => vec![HANDLE_DIALOG_FIRST.into()],
+            Self::ScriptEvaluated {
+                empty_object: EmptyObject::Awaited,
+                ..
+            } => vec![EMPTY_OBJECT_AWAITED.into()],
+            Self::ScriptEvaluated {
+                empty_object: EmptyObject::NotAwaited,
+                ..
+            } => vec![EMPTY_OBJECT_NOT_AWAITED.into()],
             Self::DialogOpened { action, .. } => {
                 let mut steps = vec![HANDLE_DIALOG_FIRST.to_owned()];
                 steps.extend(action.next_steps());
@@ -1046,7 +1076,7 @@ impl Outcome {
             | Self::Hovered { host, .. }
             | Self::KeyboardSent { host, .. }
             | Self::Dragged { host, .. }
-            | Self::ScriptEvaluated { host }
+            | Self::ScriptEvaluated { host, .. }
             | Self::RecordingStarted { host } => Observed {
                 host: host.clone(),
                 ..Observed::default()
@@ -2045,8 +2075,8 @@ mod tests {
 
     use super::{
         ActionSubject, BlockedReason, BrowserUnavailableReason, CaptureKind, CheckFailure,
-        DialogKind, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole, WorkspaceReason,
-        HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
+        DialogKind, EmptyObject, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole,
+        WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
     use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::field_problem::ControlRef;
@@ -2350,6 +2380,7 @@ mod tests {
             (
                 Outcome::ScriptEvaluated {
                     host: Some("example.com".into()),
+                    empty_object: EmptyObject::Absent,
                 },
                 "Executed JavaScript on example.com.",
             ),
@@ -2384,6 +2415,7 @@ mod tests {
             (
                 Outcome::ScriptEvaluated {
                     host: Some("example.com".into()),
+                    empty_object: EmptyObject::Absent,
                 }
                 .with_open_dialog(DialogKind::classify("a kind from the future")),
                 "Executed JavaScript on example.com. A JavaScript dialog is now open.",
@@ -2597,6 +2629,7 @@ Changes are \"unsaved\".".into()),
             },
             Outcome::ScriptEvaluated {
                 host: Some("example.com".into()),
+                empty_object: EmptyObject::Absent,
             },
         ];
         for outcome in host_outcomes {
@@ -3279,6 +3312,35 @@ Changes are \"unsaved\".".into()),
             WorkspaceReason::WorkspaceClosed.next_steps(),
             vec!["Start over; the next call opens a fresh session and old handles will not work."]
         );
+    }
+
+    /// An empty-object script value adds one step, worded for whether the script was awaited, and
+    /// no measurement or sentence.
+    #[test]
+    fn an_empty_object_value_adds_one_step_and_nothing_else() {
+        let evaluated = |empty_object| Outcome::ScriptEvaluated {
+            host: Some("example.com".into()),
+            empty_object,
+        };
+        assert!(evaluated(EmptyObject::Absent).next_steps().is_empty());
+        assert_eq!(
+            evaluated(EmptyObject::Awaited).next_steps(),
+            vec!["The value {} is also how a DOM node, a Map or a class instance reads as JSON. Return plain fields, such as el.textContent or Array.from(map), to read them."]
+        );
+        assert_eq!(
+            evaluated(EmptyObject::NotAwaited).next_steps(),
+            vec!["The value {} is also how an unawaited promise, a DOM node or a Map reads as JSON. To wait for a promise, end the script with return await <promise>."]
+        );
+        for empty_object in [EmptyObject::Awaited, EmptyObject::NotAwaited] {
+            assert_eq!(
+                evaluated(empty_object).summary(),
+                "Executed JavaScript on example.com."
+            );
+            assert_eq!(
+                evaluated(empty_object).observed(),
+                evaluated(EmptyObject::Absent).observed()
+            );
+        }
     }
 
     /// Outcome guidance leads with the recovery action and stays truthful about partial work.

@@ -347,8 +347,19 @@ pub struct Link<'a> {
     workspace: &'a str,
     dispatch: BrowserDispatch<'a>,
     effect_started: bool,
+    refused_invalid: bool,
     committed: Vec<String>,
     last_tab: Option<wire::Tab>,
+}
+
+/// What a primitive that may be refused as invalid came back with.
+#[derive(Debug)]
+pub enum Answer<T> {
+    /// The primitive ran, and this is its outcome.
+    Done(T),
+    /// The adapter refused the request as invalid before it did anything. Nothing ran, so the
+    /// caller may send a different request.
+    Refused,
 }
 
 impl<'a> Link<'a> {
@@ -360,6 +371,7 @@ impl<'a> Link<'a> {
             workspace,
             dispatch,
             effect_started: false,
+            refused_invalid: false,
             committed: Vec::new(),
             last_tab: None,
         }
@@ -418,11 +430,32 @@ impl<'a> Link<'a> {
         Ok(outcome)
     }
 
+    /// Send one primitive like [`Self::send`], except that a receipt refusing the request as
+    /// invalid before anything was dispatched is an [`Answer::Refused`] and not a failure.
+    ///
+    /// The refusal is the adapter's own check of the request, made before it acquires the tab,
+    /// so a caller that sends an alternative afterwards still has the command's single effect.
+    ///
+    /// # Errors
+    ///
+    /// Returns every other failure exactly as [`Self::send`] does.
+    pub fn send_unless_refused<P: Spec>(
+        &mut self,
+        primitive: P,
+    ) -> Result<Answer<P::Outcome>, BrowserError> {
+        match self.send(primitive) {
+            Ok(outcome) => Ok(Answer::Done(outcome)),
+            Err(_) if self.refused_invalid && !self.effect_started => Ok(Answer::Refused),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Send one primitive and return its outcome with whether its receipt says an effectful
     /// primitive dispatched. Every failure has already counted that effect; a successful outcome
     /// leaves it to the caller, which may judge it more finely from the outcome itself.
     fn exchange<P: Spec>(&mut self, primitive: P) -> Result<(P::Outcome, bool), BrowserError> {
         let effectful = primitive.carries_effect();
+        self.refused_invalid = false;
         self.ready()?;
         let correlation = format!("{CORRELATION_PREFIX}{}", Uuid::new_v4().simple());
         let payload = serde_json::to_vec(&wire::Outbound::Request {
@@ -655,6 +688,8 @@ impl<'a> Link<'a> {
     ) -> Result<(P::Outcome, bool), BrowserError> {
         self.keep(&receipt);
         let dispatched = effectful && receipt.dispatched;
+        self.refused_invalid =
+            receipt.failure == Some(wire::Failure::InvalidRequest) && !dispatched;
         let decoded = match (receipt.ok, receipt.failure) {
             (Some(ok), None) => serde_json::from_value(ok)
                 .map_err(|error| BrowserError::Protocol(error.to_string())),

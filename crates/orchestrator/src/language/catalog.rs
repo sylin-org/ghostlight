@@ -10,7 +10,7 @@ use crate::governance::AuthoritySnapshot;
 use super::{
     DEFAULT_DOCUMENT_DEPTH, DEFAULT_FILL_TIMEOUT_MS, DEFAULT_RECORD_TIMEOUT_MS, DEFAULT_TIMEOUT_MS,
     MAX_INSPECT_ITEMS, MAX_POSTCONDITION_VALUE_CHARS, MAX_TIMEOUT_MS, MIN_TIMEOUT_MS, NAMED_KEYS,
-    SEMANTIC_ROLES,
+    SCRIPT_MAX_CHARS, SEMANTIC_ROLES,
 };
 
 /// Canonical tool names in the complete catalog.
@@ -176,7 +176,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_execute",
             "Execute JavaScript",
-            "Run JavaScript in the page main world. It may read, mutate, or navigate; prefer a semantic tool.",
+            "Run JavaScript in the page main world. It may read, mutate, or navigate; prefer a semantic tool. A script that is one expression is awaited, so a promise it evaluates to resolves.",
             evaluate_schema(),
             Hints::browser_action(true),
         ),
@@ -998,7 +998,7 @@ fn evaluate_schema() -> Value {
     examples(
         object(
             vec![
-                ("script", text(1, 20_000, "")),
+                ("script", text(1, SCRIPT_MAX_CHARS, "")),
                 ("tab", tab()),
                 ("max_result_chars", integer(100, 20_000, Some(8_000), "")),
             ],

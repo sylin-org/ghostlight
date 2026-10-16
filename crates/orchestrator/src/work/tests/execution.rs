@@ -740,6 +740,7 @@ fn audit_excludes_script_results_and_invalid_input_context() {
         tab: tab(7, "https://example.com/"),
         value: json!({"PRIVATE_RESULT_KEY":"PRIVATE_RESULT_VALUE"}).to_string(),
         truncated: false,
+        form: crate::browser::adapter::ScriptForm::AsWritten,
         committed_urls: vec![],
     }));
     let result = executor.execute(
@@ -790,6 +791,74 @@ fn audit_excludes_script_results_and_invalid_input_context() {
     );
     assert!(!encoded.contains(tab_handle));
     assert_eq!(records[1].summary, "Executed JavaScript on example.com.");
+}
+
+/// A script whose value is exactly `{}` gets one step naming what else reads as `{}`, worded for
+/// whether the script was awaited. Nothing else changes, and nothing of the script or its value
+/// reaches the audit.
+#[test]
+fn an_empty_object_result_says_what_else_reads_as_empty() {
+    use crate::browser::adapter::ScriptForm;
+
+    let awaited = "DOM node, a Map or a class instance";
+    let unawaited = "unawaited promise, a DOM node or a Map";
+    for (value, truncated, form, step) in [
+        ("{}", false, ScriptForm::Awaited, Some(awaited)),
+        ("{}", false, ScriptForm::AsWritten, Some(unawaited)),
+        ("{\"a\":1}", false, ScriptForm::Awaited, None),
+        ("{\"a\":1}", false, ScriptForm::AsWritten, None),
+        ("null", false, ScriptForm::AsWritten, None),
+        ("{}", true, ScriptForm::Awaited, None),
+        ("{}", true, ScriptForm::AsWritten, None),
+    ] {
+        let (executor, browser, _, workspace, audit) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            reused: false,
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        browser.push(Ok(BrowserOutcome::ScriptEvaluated {
+            tab: tab(7, "https://example.com/"),
+            value: value.into(),
+            truncated,
+            form,
+            committed_urls: vec![],
+        }));
+        let result = executor.execute(
+            &workspace,
+            "browser_execute",
+            json!({"script":"PRIVATE_SCRIPT"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Succeeded, "{result:?}");
+        assert_eq!(result.summary, "Executed JavaScript on example.com.");
+        match step {
+            Some(words) => {
+                assert_eq!(result.next_steps.len(), 1, "{value} {form:?}: {result:?}");
+                assert!(
+                    result.next_steps[0].contains(words),
+                    "{:?}",
+                    result.next_steps
+                );
+            }
+            None => assert!(
+                result.next_steps.is_empty(),
+                "{value} {truncated} {form:?}: {:?}",
+                result.next_steps
+            ),
+        }
+        assert_eq!(result.facts["truncated"], truncated);
+        let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+        assert!(!encoded.contains("PRIVATE_SCRIPT") && !encoded.contains("reads as JSON"));
+    }
 }
 
 /// Audit retains a closed failure category; browser-authored details belong to the client.
@@ -1079,6 +1148,7 @@ fn flow_result_budget_preserves_step_metadata_and_reference_values() {
         tab: tab(7, "https://example.com/"),
         value: json!({"PRIVATE_PAYLOAD":"x".repeat(110_000),"limit":500}).to_string(),
         truncated: false,
+        form: crate::browser::adapter::ScriptForm::AsWritten,
         committed_urls: vec![],
     }));
     browser.push(Ok(BrowserOutcome::Text {

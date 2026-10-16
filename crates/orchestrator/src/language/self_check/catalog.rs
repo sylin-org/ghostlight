@@ -507,7 +507,7 @@ fn the_checker_rejects_invalid_calls_against_the_real_catalog() {
 /// The most characters the `tools` array of `tools/list` may serialize to (ADR-0198 decision 26).
 ///
 /// A commit that adds a behavior needing words raises this ceiling, and says so.
-const CATALOG_BUDGET_CHARS: usize = 31_700;
+const CATALOG_BUDGET_CHARS: usize = 31_800;
 
 /// Tools that carry the most guidance get their own cap on the serialized tool object, so one
 /// tool cannot grow while the whole stays under budget.

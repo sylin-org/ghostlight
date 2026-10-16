@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, FieldNow, ObservedTarget, PhysicalActionSubject, PhysicalField,
-    PhysicalValue,
+    PhysicalValue, ScriptForm,
 };
 use crate::browser::BrowserError;
 use crate::governance::Decision;
@@ -15,7 +15,7 @@ use crate::governance::{Capability, CapabilitySet};
 use crate::language::{
     field_echo::{self, HeldField},
     field_problem::{self, ControlRef, FieldProblem, RejectedControl, RejectedField},
-    outcome::{Observed, Outcome, Refusal, TargetRole},
+    outcome::{EmptyObject, Observed, Outcome, Refusal, TargetRole},
     FillForm, PressKey, RunScript, TypeText, UploadFiles, Wait,
 };
 use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
@@ -623,11 +623,14 @@ impl ApplicationExecutor {
                         tab,
                         value,
                         truncated,
+                        form,
                         committed_urls,
                     }) => {
+                        let empty_object = empty_object(&value, truncated, form);
                         let rendered = serde_json::from_str(&value).unwrap_or(Value::String(value));
                         let outcome = Outcome::ScriptEvaluated {
                             host: observed_host(&tab.url),
+                            empty_object,
                         };
                         self.action_success(
                             context,
@@ -1225,6 +1228,17 @@ impl ApplicationExecutor {
 }
 
 /// The control a credential refusal names, from what the page last reported about it.
+/// What `{}` means for a script's result. Only a value that is exactly `{}` and was not cut can
+/// be anything JSON shows as empty, and what the agent should try depends on whether the script
+/// was awaited.
+fn empty_object(value: &str, truncated: bool, form: ScriptForm) -> EmptyObject {
+    match (value == "{}" && !truncated, form) {
+        (false, _) => EmptyObject::Absent,
+        (true, ScriptForm::Awaited) => EmptyObject::Awaited,
+        (true, ScriptForm::AsWritten) => EmptyObject::NotAwaited,
+    }
+}
+
 fn credential_control(
     context: &InvocationContext<'_>,
     observed: &ObservedTarget,
