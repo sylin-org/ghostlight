@@ -23,7 +23,7 @@ complete -c ghostlight -n "__fish_seen_subcommand_from install" -l all-browsers 
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l client -d "Select one MCP client" -x
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l all-clients -d "Include clients not currently detected"
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l no-clients -d "Leave MCP client configuration unchanged"
-complete -c ghostlight -n "__fish_seen_subcommand_from install" -l no-open -d "Do not open the extension walkthrough"
+complete -c ghostlight -n "__fish_seen_subcommand_from install" -l no-open -d "Do not open the Ghostlight window"
 complete -c ghostlight -n "__fish_seen_subcommand_from uninstall" -l dry-run -d "Show changes without writing them"
 complete -c ghostlight -n "__fish_seen_subcommand_from doctor" -l json -d "Print one JSON document"
 complete -c ghostlight -n "__fish_seen_subcommand_from doctor" -l fix -d "Apply ownership-safe repairs"

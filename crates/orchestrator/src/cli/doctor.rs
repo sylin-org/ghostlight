@@ -206,7 +206,13 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
     }
     if fix {
         println!("Applying ownership-safe repairs.");
-        run_setup(true, &SetupOptions::default())?;
+        run_setup(
+            true,
+            &SetupOptions {
+                no_open: true,
+                ..SetupOptions::default()
+            },
+        )?;
     }
     Ok(())
 }

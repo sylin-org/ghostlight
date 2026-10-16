@@ -27,7 +27,7 @@ _ghostlight() {
                 '--client[Select one MCP client]:client:' \
                 '--all-clients[Include clients not currently detected]' \
                 '--no-clients[Leave MCP client configuration unchanged]' \
-                '--no-open[Do not open the extension walkthrough]'
+                '--no-open[Do not open the Ghostlight window]'
             ;;
         uninstall)
             _arguments \

@@ -41,8 +41,7 @@ pub const INSTALL_RECORD_NAME: &str = "install.json";
 /// Lock file held by whichever process is installing.
 pub const INSTALL_LOCK_NAME: &str = "install.lock";
 
-/// Directory of the service's own state: audit log, harness locations, setup record, handoff
-/// marker.
+/// Directory of the service's own state: audit log, harness locations, setup record.
 pub const STATE_DIRECTORY_NAME: &str = "state";
 
 /// The quit latch under the state directory: a person's Quit writes it, and a browser or recover

@@ -389,12 +389,6 @@ pub fn version_directory_line(directory: &str) -> String {
     format!("An older Ghostlight left {directory} in bin. Run ghostlight install to remove it.")
 }
 
-/// The line `ghostlight install` and `doctor --fix` print for a stray they stopped.
-#[must_use]
-pub fn stray_stopped_line(image: &str) -> String {
-    format!("Stopped {image}.")
-}
-
 /// The line `ghostlight install`, a deploy and `doctor --fix` print for a stray that would not
 /// stop.
 #[must_use]
@@ -614,7 +608,6 @@ mod tests {
             version_directory_line("C:/gl/bin/v1.3.5"),
             "An older Ghostlight left C:/gl/bin/v1.3.5 in bin. Run ghostlight install to remove it."
         );
-        assert_eq!(stray_stopped_line("old.exe"), "Stopped old.exe.");
         assert_eq!(
             stray_not_stopped_line("old.exe"),
             "Could not stop old.exe. Close it yourself."

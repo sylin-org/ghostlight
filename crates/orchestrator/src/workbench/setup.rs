@@ -255,13 +255,42 @@ pub(super) fn setup_view(inputs: &SetupInputs<'_>) -> SetupView {
         }
         return words::compose(&facts);
     }
-    let report = inputs.machine.native_hosts();
-    facts.finish_on_this_computer = report
-        .as_ref()
-        .is_some_and(|report| report.private_view.is_some());
-    let identities = inputs.machine.browsers();
-    let profiles = inputs.machine.extension_profiles();
-    facts.browsers = browser_facts(&identities, inputs.browsers, |identity| {
+    let here = browsers_here(inputs.machine, inputs.browsers);
+    facts.finish_on_this_computer = here.private_view;
+    facts.browsers = here.facts;
+    facts.agents = inputs
+        .harnesses
+        .iter()
+        .filter_map(|harness| agent_fact(harness, inputs.sessions))
+        .collect();
+    facts.mcp_command = inputs
+        .harnesses
+        .first()
+        .map(|harness| harness.connector_command.clone())
+        .unwrap_or_default();
+    words::compose(&facts)
+}
+
+/// What this computer shows of the supported browsers.
+pub(crate) struct BrowsersHere {
+    /// One fact for every supported family, then one for each connected browser that is none of
+    /// them.
+    pub facts: Vec<BrowserFact>,
+    /// Whether the report was read inside an app container, whose registry is that app's own view.
+    pub private_view: bool,
+}
+
+/// Read the native-host report and the profile scan, and say how each supported browser stands:
+/// how it is installed, whether `connected` holds it, and the profile that holds the extension.
+/// Both reads are bounded and local.
+pub(crate) fn browsers_here(
+    machine: &dyn SetupMachine,
+    connected: &[BrowserInstanceSummary],
+) -> BrowsersHere {
+    let report = machine.native_hosts();
+    let identities = machine.browsers();
+    let profiles = machine.extension_profiles();
+    let facts = browser_facts(&identities, connected, |identity| {
         let package = report.as_ref().and_then(|report| {
             report
                 .browsers
@@ -270,7 +299,7 @@ pub(super) fn setup_view(inputs: &SetupInputs<'_>) -> SetupView {
                 .map(|registered| registered.package)
         });
         let form = form_of(package, || {
-            inputs.machine.browser_executable(identity.id).is_some()
+            machine.browser_executable(identity.id).is_some()
         });
         let extension = profiles
             .iter()
@@ -288,17 +317,18 @@ pub(super) fn setup_view(inputs: &SetupInputs<'_>) -> SetupView {
             });
         (form, extension)
     });
-    facts.agents = inputs
-        .harnesses
-        .iter()
-        .filter_map(|harness| agent_fact(harness, inputs.sessions))
-        .collect();
-    facts.mcp_command = inputs
-        .harnesses
-        .first()
-        .map(|harness| harness.connector_command.clone())
-        .unwrap_or_default();
-    words::compose(&facts)
+    BrowsersHere {
+        facts,
+        private_view: report
+            .as_ref()
+            .is_some_and(|report| report.private_view.is_some()),
+    }
+}
+
+/// How the supported browsers stand on this computer now, for the install summary: the same
+/// reads the setup view makes, with no browser connected.
+pub(crate) fn browsers_on_this_computer() -> BrowsersHere {
+    browsers_here(&ThisComputer::discover(), &[])
 }
 
 /// Carry out one setup step that starts a browser.

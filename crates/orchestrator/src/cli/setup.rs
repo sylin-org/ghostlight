@@ -4,20 +4,31 @@
 //! messaging host with Chromium browsers, updating MCP client configurations,
 //! and handling uninstallation.
 //!
+//! A real install says what the person needs and nothing about its mechanism: it prints the
+//! summary [`crate::language::setup::install_lines`] composes, plus the lines that need a person
+//! (errors, registrations that need attention, what an app container kept private). The detail of
+//! what changed prints only with `--dry-run`. While setup is incomplete the install also shows the
+//! Ghostlight window, so the next step is in front of the person (ADR-0200 Decisions 10 to 12).
+//!
 //! Inside a Windows app container the registry and `AppData` writes reach only that app, so an
 //! install there leaves those registrations unwritten, says which, and names the one command that
 //! finishes them from a regular terminal (see `crate::install::container`).
 
+use crate::cli::desktop::{self, Detached};
 use crate::cli::parse::{NativeHostCommand, SetupOptions};
-use crate::install::container::{self, AppContainer};
+use crate::install::container::{self, AppContainer, Residence};
 use crate::install::deployment::{stop_found_strays, StrayStop, SystemProcessControl};
 use crate::install::layout::Layout;
+use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
 use crate::install::reconcile::{
     windows_entries_failure, PendingWindowsEntries, ReconcileReport, Registrations, WindowsRemoval,
 };
 use crate::install::record::InstallRecord;
-use crate::install::version_directories;
+use crate::install::{setup_state, version_directories};
+use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::deployment as deployment_words;
+use crate::language::environment::{self, Environment};
+use crate::language::setup::{self as setup_words, BrowserFact, InstallAgent, InstallFacts};
 use crate::language::workbench as stray_words;
 
 /// Registrations an install left unwritten because the app container it ran in keeps them private.
@@ -25,6 +36,17 @@ use crate::language::workbench as stray_words;
 struct KeptPrivate {
     container: Option<AppContainer>,
     registrations: Vec<String>,
+}
+
+/// What a real install learned that its closing summary needs.
+#[derive(Default)]
+struct Collected {
+    /// Whether the user `Path` was written, so a terminal that is already open lacks it.
+    path_written: bool,
+    /// The agents on this computer as the install left them.
+    agents: Vec<InstallAgent>,
+    /// The command an agent starts to run Ghostlight's MCP server.
+    mcp_command: String,
 }
 
 /// Run installation or uninstallation across detected browsers and MCP clients.
@@ -42,18 +64,20 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
 /// The registration steps of [`run_setup`].
 fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     use crate::install::command_path::{CommandPath, CommandPathState, PATH_ENTRY_REGISTRATION};
-    use crate::install::container::Residence;
-    use crate::install::desktop_entry::DesktopIntegration;
-    use crate::install::native_host::{NativeHostRegistry, NativeHostState};
+    use crate::install::desktop_entry::{DesktopIntegration, DesktopIntegrationState};
+    use crate::install::native_host::NativeHostRegistry;
+    use crate::install::user_assets::{UserAssetState, UserAssets};
     use crate::install::{HarnessAction, HarnessRegistry};
-    use crate::language::environment;
 
     ghostlight_relay::home::home()?;
-    if install && !options.dry_run {
+    // A real install says only what the summary says, and what needs a person.
+    let real_install = install && !options.dry_run;
+    if real_install {
         stop_older_installation_programs()?;
     }
     let native_hosts = NativeHostRegistry::discover();
     let mut kept_private = KeptPrivate::default();
+    let mut collected = Collected::default();
     let mut install_usable = false;
     let initial_browser_report = native_hosts.check()?;
     let install_browser_ids = if install {
@@ -72,16 +96,6 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
             None => native_hosts.install()?,
             Some(browser_ids) => native_hosts.install_selected(browser_ids)?,
         };
-        println!(
-            "Browser connection {}; changed: {}",
-            if result.private.is_empty() {
-                "installed"
-            } else {
-                "prepared"
-            },
-            result.changed
-        );
-        print_native_host_report(&result.report);
         kept_private.container = result.report.private_view.clone();
         kept_private
             .registrations
@@ -94,6 +108,13 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
                     || result.private.contains(&browser.name))
                 && (browser.package.native_messaging_usable() || options.all_browsers)
         });
+        for line in browser_attention_lines(
+            &result.report,
+            install_browser_ids.as_deref(),
+            install_usable,
+        ) {
+            println!("{line}");
+        }
     } else {
         let result = if options.browser_ids.is_empty() {
             native_hosts.uninstall()?
@@ -113,10 +134,13 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         } else {
             command_path.uninstall()?
         };
-        if result.report.state != CommandPathState::NotApplicable {
+        let state = result.report.state;
+        if state == CommandPathState::NeedsAttention
+            || (!install && state != CommandPathState::NotApplicable)
+        {
             print_command_path_report(&result.report);
         }
-        if install && result.report.state == CommandPathState::PrivateView {
+        if install && state == CommandPathState::PrivateView {
             if kept_private.container.is_none() {
                 kept_private.container = Residence::detect().container().cloned();
             }
@@ -124,22 +148,23 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
                 .registrations
                 .push(PATH_ENTRY_REGISTRATION.to_owned());
         }
-        if result.needs_new_terminal {
-            println!("{}", environment::OPEN_NEW_TERMINAL);
-        }
+        collected.path_written = result.needs_new_terminal;
     }
 
-    let user_assets = crate::install::user_assets::UserAssets::discover();
+    let user_assets = UserAssets::discover();
     if !options.dry_run {
         let result = if install {
             user_assets.install()?
         } else {
             user_assets.uninstall()?
         };
-        if result.report.state != crate::install::user_assets::UserAssetState::NotApplicable {
+        let state = result.report.state;
+        if state == UserAssetState::NeedsAttention
+            || (!install && state != UserAssetState::NotApplicable)
+        {
             println!(
                 "Documentation: {} -- {}",
-                result.report.state.label(),
+                state.label(),
                 result.report.detail
             );
         }
@@ -154,14 +179,11 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         } else {
             desktop.uninstall()?
         };
-        if result.report.state
-            != crate::install::desktop_entry::DesktopIntegrationState::NotApplicable
-        {
-            println!(
-                "Applications entry {}; changed: {}",
-                if install { "installed" } else { "removed" },
-                result.changed
-            );
+        let state = result.report.state;
+        if state == DesktopIntegrationState::NeedsAttention {
+            print_desktop_integration_report(&result.report);
+        } else if !install && state != DesktopIntegrationState::NotApplicable {
+            println!("Applications entry removed; changed: {}", result.changed);
             print_desktop_integration_report(&result.report);
         }
     }
@@ -172,37 +194,55 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         remove_windows_entries(options)?;
     }
 
-    if install && !options.dry_run && !install_usable {
-        return conclude(install, options, install_usable, &kept_private);
+    if real_install && !install_usable {
+        return conclude(install, options, install_usable, &kept_private, &collected);
     }
 
-    if options.no_clients {
+    if options.no_clients && !real_install {
         println!("MCP client configuration was left unchanged.");
-        return conclude(install, options, install_usable, &kept_private);
+        return conclude(install, options, install_usable, &kept_private, &collected);
     }
 
+    // The scan only reads. A real install reads it even with `--no-clients`, so the summary can
+    // name the agents that are here.
     let harnesses = HarnessRegistry::discover();
     let summaries = harnesses.refresh()?;
-    let attention_count = summaries
-        .iter()
-        .filter(|summary| summary.state == crate::install::HarnessState::NeedsAttention)
-        .inspect(|summary| {
-            eprintln!(
-                "MCP client needs attention: {} -- {}",
-                summary.label, summary.detail
-            );
-        })
-        .count();
-    let selected = select_harnesses(&summaries, options, install)?;
+    collected.mcp_command = summaries
+        .first()
+        .map(|summary| summary.connector_command.clone())
+        .unwrap_or_default();
+    let attention_count = if options.no_clients {
+        0
+    } else {
+        summaries
+            .iter()
+            .filter(|summary| summary.state == HarnessState::NeedsAttention)
+            .inspect(|summary| {
+                eprintln!(
+                    "MCP client needs attention: {} -- {}",
+                    summary.label, summary.detail
+                );
+            })
+            .count()
+    };
+    let selected = if options.no_clients {
+        Vec::new()
+    } else {
+        select_harnesses(&summaries, options, install)?
+    };
     if selected.is_empty() {
-        if attention_count == 0 {
-            println!("No MCP client configuration needs to change.");
-        } else {
-            println!("No MCP client configuration can be changed automatically.");
+        if !real_install {
+            if attention_count == 0 {
+                println!("No MCP client configuration needs to change.");
+            } else {
+                println!("No MCP client configuration can be changed automatically.");
+            }
         }
-        return conclude(install, options, install_usable, &kept_private);
+        collected.agents = install_agents(&summaries, &[]);
+        return conclude(install, options, install_usable, &kept_private, &collected);
     }
     let mut failures = Vec::new();
+    let mut applied = Vec::new();
     for summary in selected {
         if options.dry_run {
             println!(
@@ -225,14 +265,20 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
             HarnessAction::Uninstall
         };
         match harnesses.apply(&summary.id, action) {
-            Ok(result) => println!("{}", result.message),
+            Ok(result) => {
+                if !install {
+                    println!("{}", result.message);
+                }
+                applied.push(result);
+            }
             Err(error) => {
                 eprintln!("{}: {error}", summary.label);
                 failures.push(summary.label);
             }
         }
     }
-    conclude(install, options, install_usable, &kept_private)?;
+    collected.agents = install_agents(&summaries, &applied);
+    conclude(install, options, install_usable, &kept_private, &collected)?;
     if !failures.is_empty() {
         anyhow::bail!(
             "Ghostlight could not update {} MCP client integration(s)",
@@ -242,8 +288,67 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Write the Windows Start-menu shortcut and Uninstall key the way a deploy does, saying each one
-/// changed, or, with `--dry-run`, each one that would change. Inside an app container they would
+/// The agents on this computer as an install left them: each one detected or just configured,
+/// whether it now has Ghostlight's entry, and whether this run wrote or changed that entry.
+fn install_agents(
+    summaries: &[HarnessSummary],
+    applied: &[HarnessActionResult],
+) -> Vec<InstallAgent> {
+    summaries
+        .iter()
+        .filter_map(|summary| {
+            let result = applied
+                .iter()
+                .find(|result| result.summary.id == summary.id);
+            let now = result.map_or(summary, |result| &result.summary);
+            (now.state != HarnessState::NotDetected).then(|| InstallAgent {
+                label: now.label.clone(),
+                has_entry: now.state == HarnessState::Installed,
+                changed: result.is_some_and(|result| result.changed),
+            })
+        })
+        .collect()
+}
+
+/// The lines about browsers that a person has to read after a real install: a registration that
+/// needs attention or belongs to another installation, and, when no browser ended up usable, every
+/// browser the install chose, so the reason is in front of them. Inside an app container the
+/// report is that app's own view and says nothing; the closing lines name what it kept private.
+fn browser_attention_lines(
+    report: &NativeHostReport,
+    selected: Option<&[String]>,
+    install_usable: bool,
+) -> Vec<String> {
+    if report.private_view.is_some() {
+        return Vec::new();
+    }
+    report
+        .browsers
+        .iter()
+        .filter(|browser| {
+            let chosen = selected.is_none_or(|ids| ids.contains(&browser.id));
+            matches!(
+                browser.state,
+                NativeHostState::NeedsAttention | NativeHostState::OwnedElsewhere
+            ) || (chosen && !install_usable)
+        })
+        .map(browser_line)
+        .collect()
+}
+
+/// One browser's package, registration state and detail, as the reports print it.
+fn browser_line(browser: &BrowserRegistration) -> String {
+    format!(
+        "Browser: {} -- {} -- {} -- {}",
+        browser.name,
+        browser.package_detail,
+        browser.state.label(),
+        browser.detail
+    )
+}
+
+/// Write the Windows Start-menu shortcut and Uninstall key the way a deploy does, or, with
+/// `--dry-run`, say each one that would change. Inside an app container they would
 /// land in that app's private view, so each out-of-date one is added to `kept_private` instead.
 ///
 /// The version is the installed one from `bin/install.json`, or the running service's when no
@@ -296,12 +401,10 @@ fn pending_entry_lines(pending: &PendingWindowsEntries, layout: &Layout) -> Vec<
     lines
 }
 
-/// Say what a reconcile of the Windows entries wrote and what failed, and carry the registrations
-/// it left to an app container into `kept_private` for the closing lines.
+/// Say what failed in a reconcile of the Windows entries, and carry the registrations it left to
+/// an app container into `kept_private` for the closing lines. What it wrote is mechanism and is
+/// not said.
 fn carry_windows_report(report: ReconcileReport, kept_private: &mut KeptPrivate) {
-    for entry in &report.platform {
-        println!("{}", deployment_words::platform_entry_updated(entry));
-    }
     for failure in &report.failures {
         eprintln!("{}", deployment_words::registration_failed(failure));
     }
@@ -372,38 +475,27 @@ fn installed_version(layout: &Layout) -> String {
 /// Stop what an older Ghostlight installation left running, so one install leaves nothing behind
 /// that `doctor` would name. The service that answers is spared unless it runs from the retired
 /// development directory or from a 1.x version directory, which an install removes, so that one
-/// is stopped too. A program that will not stop is said so and does not fail the install.
+/// is stopped too. A program that will not stop is said so, because the person has to close it,
+/// and does not fail the install.
 fn stop_older_installation_programs() -> anyhow::Result<()> {
     let layout = Layout::current()?;
     let service_pid = crate::cli::client::status_at(layout.home())
         .ok()
         .map(|status| status.pid);
     let stop = stop_found_strays(&SystemProcessControl, &layout, service_pid);
-    for line in stray_stop_lines(&stop) {
+    for line in stray_not_stopped_lines(&stop) {
         println!("{line}");
     }
     Ok(())
 }
 
-/// Archive the audit log of each 1.x version directory in `layout`'s `bin`, remove the directory,
-/// and say what became of each. A directory that cannot be removed is said so and does not fail
-/// the install: the next one tries again.
+/// Archive the audit log of each 1.x version directory in `layout`'s `bin` and remove the
+/// directory. A directory that cannot be removed is said so and does not fail the install: the
+/// next one tries again.
 fn remove_version_directories(layout: &Layout) {
     let directories = version_directories::find(layout);
     let archives = version_directories::archives(layout, &directories);
     let retired = version_directories::retire(&directories, &archives);
-    for directory in &retired.removed {
-        println!(
-            "{}",
-            deployment_words::removed_version_directory(&directory.display().to_string())
-        );
-        if let Some(archive) = version_directories::archive_of(&retired.archived, directory) {
-            println!(
-                "{}",
-                deployment_words::archived_version_audit(&archive.to.display().to_string())
-            );
-        }
-    }
     for directory in &retired.kept {
         eprintln!(
             "{}",
@@ -412,18 +504,11 @@ fn remove_version_directories(layout: &Layout) {
     }
 }
 
-/// One line for each stray `stop` stopped and each it could not.
-fn stray_stop_lines(stop: &StrayStop) -> Vec<String> {
-    let image =
-        |stray: &crate::install::deployment::StrayProcess| stray.image.display().to_string();
-    stop.stopped
+/// One line for each stray `stop` could not stop. The ones it stopped need no word.
+fn stray_not_stopped_lines(stop: &StrayStop) -> Vec<String> {
+    stop.stuck
         .iter()
-        .map(|stray| stray_words::stray_stopped_line(&image(stray)))
-        .chain(
-            stop.stuck
-                .iter()
-                .map(|stray| stray_words::stray_not_stopped_line(&image(stray))),
-        )
+        .map(|stray| stray_words::stray_not_stopped_line(&stray.image.display().to_string()))
         .collect()
 }
 
@@ -436,12 +521,13 @@ fn private_browser_registrations(browsers: &[String]) -> Vec<String> {
 }
 
 /// Finish the setup: when registrations were left unwritten because an app container keeps them
-/// private, name them and the command that finishes them; otherwise present the ready summary.
+/// private, name them and the command that finishes them; otherwise present the install summary.
 fn conclude(
     install: bool,
     options: &SetupOptions,
     install_usable: bool,
     kept_private: &KeptPrivate,
+    collected: &Collected,
 ) -> anyhow::Result<()> {
     let container = match &kept_private.container {
         Some(container)
@@ -449,7 +535,7 @@ fn conclude(
         {
             container
         }
-        _ => return finish_setup(install, options, install_usable),
+        _ => return finish_setup(install, options, install_usable, collected),
     };
     println!();
     for line in
@@ -523,43 +609,87 @@ pub(crate) fn select_install_browsers(
     anyhow::bail!("{}", sandboxed.join(" "))
 }
 
-/// Finish the setup sequence by presenting environment status and opening the walkthrough.
-pub fn finish_setup(
+/// Whether an install shows the Ghostlight window: not for a dry run, not when the person said
+/// `--no-open`, not in an automated run (`CI` is set), only when a browser registration is
+/// usable, not inside an app container (the window would be that app's), and only while setup is
+/// incomplete.
+fn should_show_window(
+    dry_run: bool,
+    no_open: bool,
+    automated: bool,
+    install_usable: bool,
+    in_container: bool,
+    setup_complete: bool,
+) -> bool {
+    !dry_run && !no_open && !automated && install_usable && !in_container && !setup_complete
+}
+
+/// Show the Ghostlight window the way `ghostlight open` does: start the service when none
+/// answers, then ask it to show. While setup is incomplete the service opens the window at the
+/// setup view. A start that fails counts as not shown; the install goes on and its exit code
+/// stays.
+fn show_window() -> bool {
+    desktop::open_with(&Detached).is_ok()
+}
+
+/// The facts the install summary is worded from, put together from what the run collected and
+/// what the computer shows now.
+fn install_facts(
+    collected: &Collected,
+    version: String,
+    environment: Environment,
+    browsers: Vec<BrowserFact>,
+    setup_complete: bool,
+    window_shown: bool,
+) -> InstallFacts {
+    InstallFacts {
+        version,
+        environment,
+        path_written: collected.path_written,
+        agents: collected.agents.clone(),
+        mcp_command: collected.mcp_command.clone(),
+        browsers,
+        complete: setup_complete,
+        window_shown,
+    }
+}
+
+/// Finish an install: show the window while setup is incomplete, then print the summary.
+fn finish_setup(
     install: bool,
     options: &SetupOptions,
     install_usable: bool,
+    collected: &Collected,
 ) -> anyhow::Result<()> {
-    use crate::install::handoff::{self, HandoffOutcome, EXTENSION_INSTALL_URL};
-
     if !install || options.dry_run {
         return Ok(());
     }
     if !install_usable {
         anyhow::bail!("Ghostlight could not establish a usable browser registration");
     }
-
-    use crate::language::environment;
-
-    println!();
-    println!("Ghostlight's local connection is ready.");
-    let here = environment::current();
-    println!("{}", here.location());
-    if let Some(caveat) = here.caveat() {
-        println!("{caveat}");
-    }
-    println!("Browser extension: {EXTENSION_INSTALL_URL}");
+    let layout = Layout::current()?;
+    let setup_complete = setup_state::is_complete(&layout.setup_record());
     let automated = std::env::var_os("CI").is_some();
-    match handoff::offer(options.dry_run, options.no_open, automated, install_usable) {
-        Ok(HandoffOutcome::Opened) => println!("Opened the browser-extension walkthrough."),
-        Ok(HandoffOutcome::AlreadyOffered) => {}
-        Ok(HandoffOutcome::Suppressed) => {
-            if options.no_open {
-                println!("The walkthrough was not opened because --no-open was used.");
-            }
-        }
-        Err(error) => eprintln!("Could not open the browser-extension walkthrough: {error}"),
+    let in_container = Residence::detect().container().is_some();
+    let window_shown = should_show_window(
+        options.dry_run,
+        options.no_open,
+        automated,
+        install_usable,
+        in_container,
+        setup_complete,
+    ) && show_window();
+    let facts = install_facts(
+        collected,
+        installed_version(&layout),
+        environment::current(),
+        crate::workbench::setup::browsers_on_this_computer().facts,
+        setup_complete,
+        window_shown,
+    );
+    for line in setup_words::install_lines(&facts) {
+        println!("{line}");
     }
-    println!("After adding the extension, restart or reconnect your MCP client. That is it.");
     Ok(())
 }
 
@@ -597,7 +727,7 @@ pub fn select_harnesses(
 }
 
 /// Print the native host registration status report to stdout.
-pub(crate) fn print_native_host_report(report: &crate::install::native_host::NativeHostReport) {
+pub(crate) fn print_native_host_report(report: &NativeHostReport) {
     println!("Browser connector: {}", report.connector.display());
     for browser in &report.browsers {
         match &report.private_view {
@@ -608,13 +738,7 @@ pub(crate) fn print_native_host_report(report: &crate::install::native_host::Nat
                 container::NOT_VISIBLE,
                 container.app
             ),
-            None => println!(
-                "Browser: {} -- {} -- {} -- {}",
-                browser.name,
-                browser.package_detail,
-                browser.state.label(),
-                browser.detail
-            ),
+            None => println!("{}", browser_line(browser)),
         }
     }
 }
@@ -654,7 +778,7 @@ pub(crate) fn print_desktop_integration_report(
 
 /// Execute a native host registration subcommand.
 pub fn run_native_host(command: NativeHostCommand) -> anyhow::Result<()> {
-    use crate::install::native_host::{NativeHostRegistry, NativeHostState};
+    use crate::install::native_host::NativeHostRegistry;
 
     ghostlight_relay::home::home()?;
     let registry = NativeHostRegistry::discover();
@@ -709,7 +833,11 @@ mod tests {
     use crate::install::browser_package::BrowserPackage;
     use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
 
-    use super::{private_browser_registrations, select_install_browsers, stray_stop_lines};
+    use super::{
+        private_browser_registrations, select_install_browsers, stray_not_stopped_lines, Collected,
+    };
+    use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
+    use crate::language::setup::{BrowserFact, BrowserForm, InstallAgent};
 
     fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
         BrowserRegistration {
@@ -927,7 +1055,7 @@ mod tests {
     }
 
     #[test]
-    fn an_install_says_what_it_stopped_and_what_it_could_not() {
+    fn an_install_says_only_the_programs_it_could_not_stop() {
         use crate::install::deployment::{StrayKind, StrayProcess, StrayStop};
 
         let stray = |image: &str| StrayProcess {
@@ -935,14 +1063,284 @@ mod tests {
             image: PathBuf::from(image),
             kind: StrayKind::RetiredConnector,
         };
-        assert!(stray_stop_lines(&StrayStop::default()).is_empty());
-        let lines = stray_stop_lines(&StrayStop {
+        assert!(stray_not_stopped_lines(&StrayStop::default()).is_empty());
+        let lines = stray_not_stopped_lines(&StrayStop {
             stopped: vec![stray("a.exe")],
             stuck: vec![stray("b.exe")],
         });
+        assert_eq!(lines, ["Could not stop b.exe. Close it yourself."]);
+    }
+
+    #[test]
+    fn the_window_opens_only_for_a_usable_install_that_is_not_complete_and_not_held_back() {
+        use super::should_show_window;
+
+        for bits in 0u8..64 {
+            let flag = |bit: u8| bits & (1 << bit) != 0;
+            let (dry_run, no_open, automated) = (flag(0), flag(1), flag(2));
+            let (install_usable, in_container, complete) = (flag(3), flag(4), flag(5));
+            let expected =
+                !dry_run && !no_open && !automated && install_usable && !in_container && !complete;
+            assert_eq!(
+                should_show_window(
+                    dry_run,
+                    no_open,
+                    automated,
+                    install_usable,
+                    in_container,
+                    complete
+                ),
+                expected,
+                "{bits:06b}"
+            );
+        }
+        assert!(should_show_window(false, false, false, true, false, false));
+    }
+
+    fn harness(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
+        HarnessSummary {
+            id: id.into(),
+            product_id: id.into(),
+            name: label.into(),
+            label: label.into(),
+            target: label.into(),
+            icon: format!("{id}.svg"),
+            state,
+            detail: String::new(),
+            evidence: None,
+            can_install: true,
+            can_fix: false,
+            can_uninstall: false,
+            can_download: false,
+            can_locate: false,
+            private_view: false,
+            config_path: String::new(),
+            connector_command: "/home/ghostlight mcp".into(),
+            manual_setup: String::new(),
+        }
+    }
+
+    fn applied(id: &str, label: &str, changed: bool) -> HarnessActionResult {
+        HarnessActionResult {
+            changed,
+            summary: harness(id, label, HarnessState::Installed),
+            message: String::new(),
+        }
+    }
+
+    fn agent(label: &str, has_entry: bool, changed: bool) -> InstallAgent {
+        InstallAgent {
+            label: label.into(),
+            has_entry,
+            changed,
+        }
+    }
+
+    #[test]
+    fn the_agents_of_an_install_are_those_here_with_what_this_run_did() {
+        use super::install_agents;
+
+        let summaries = vec![
+            harness("claude-code", "Claude Code", HarnessState::Available),
+            harness("codex", "Codex", HarnessState::Updatable),
+            harness("cursor", "Cursor", HarnessState::Installed),
+            harness("zed", "Zed", HarnessState::NeedsAttention),
+            harness("cline", "Cline", HarnessState::NotDetected),
+        ];
+        // Nothing applied (for instance `--no-clients`): what each already has.
         assert_eq!(
-            lines,
-            ["Stopped a.exe.", "Could not stop b.exe. Close it yourself."]
+            install_agents(&summaries, &[]),
+            [
+                agent("Claude Code", false, false),
+                agent("Codex", false, false),
+                agent("Cursor", true, false),
+                agent("Zed", false, false),
+            ]
         );
+        // Two written, one of them was only brought up to date.
+        assert_eq!(
+            install_agents(
+                &summaries,
+                &[
+                    applied("claude-code", "Claude Code", true),
+                    applied("codex", "Codex", true),
+                    applied("cursor", "Cursor", false),
+                ]
+            ),
+            [
+                agent("Claude Code", true, true),
+                agent("Codex", true, true),
+                agent("Cursor", true, false),
+                agent("Zed", false, false),
+            ]
+        );
+        // A client named on the command line counts once Ghostlight wrote its entry.
+        assert_eq!(
+            install_agents(&summaries[4..], &[applied("cline", "Cline", true)]),
+            [agent("Cline", true, true)]
+        );
+    }
+
+    fn native_chrome() -> BrowserFact {
+        BrowserFact {
+            id: "chrome".into(),
+            name: "Google Chrome".into(),
+            short: "Chrome".into(),
+            form: BrowserForm::Native,
+            connected: false,
+            extension: None,
+        }
+    }
+
+    fn lines_of(
+        collected: &Collected,
+        browsers: Vec<BrowserFact>,
+        setup_complete: bool,
+        window_shown: bool,
+    ) -> Vec<String> {
+        use super::install_facts;
+        use crate::language::environment::Environment;
+        use crate::language::setup::install_lines;
+
+        install_lines(&install_facts(
+            collected,
+            "2.0.0".into(),
+            Environment::Windows,
+            browsers,
+            setup_complete,
+            window_shown,
+        ))
+    }
+
+    fn two_agents_changed() -> Collected {
+        Collected {
+            path_written: false,
+            agents: vec![agent("Claude Code", true, true), agent("Codex", true, true)],
+            mcp_command: "/home/ghostlight mcp".into(),
+        }
+    }
+
+    #[test]
+    fn a_first_install_with_the_window_shown_points_at_the_window() {
+        assert_eq!(
+            lines_of(&two_agents_changed(), vec![native_chrome()], false, true),
+            [
+                "Ghostlight 2.0.0 is installed.",
+                "Ghostlight is in your notification area, and in the Start menu.",
+                "Agents: Claude Code and Codex (restart them before you ask).",
+                "Next: add Ghostlight to Chrome in the Ghostlight window.",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_first_install_without_the_window_gives_the_listing() {
+        use crate::language::setup::STORE_LISTING_URL;
+
+        let lines = lines_of(&two_agents_changed(), vec![native_chrome()], false, false);
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("Next: add Ghostlight to Chrome: {STORE_LISTING_URL}")
+        );
+        assert_eq!(lines.len(), 4, "{lines:?}");
+    }
+
+    #[test]
+    fn the_path_just_written_says_to_open_a_new_terminal() {
+        let collected = Collected {
+            path_written: true,
+            ..two_agents_changed()
+        };
+        let lines = lines_of(&collected, vec![native_chrome()], false, true);
+        assert_eq!(lines[2], "Open a new terminal to use ghostlight.");
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.starts_with("Next:"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_extension_already_in_a_profile_goes_to_the_agent_step() {
+        use crate::language::setup::{ProfileFact, PROMPT};
+
+        let mut chrome = native_chrome();
+        chrome.extension = Some(ProfileFact {
+            directory: "Default".into(),
+            name: None,
+            profiles: 1,
+        });
+        let lines = lines_of(&two_agents_changed(), vec![chrome], false, false);
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("Next: restart Claude Code and Codex, then ask one: {PROMPT}")
+        );
+        assert!(!lines.iter().any(|line| line.contains("Chrome Web Store")));
+    }
+
+    #[test]
+    fn a_complete_setup_has_no_next_line_and_asks_for_a_restart_only_of_what_changed() {
+        let lines = lines_of(&two_agents_changed(), vec![native_chrome()], true, false);
+        assert!(!lines.iter().any(|line| line.starts_with("Next:")));
+        assert_eq!(
+            lines.last().unwrap(),
+            "Restart Claude Code and Codex to use Ghostlight."
+        );
+        let unchanged = Collected {
+            agents: vec![agent("Claude Code", true, false)],
+            ..two_agents_changed()
+        };
+        let lines = lines_of(&unchanged, vec![native_chrome()], true, false);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines[2].starts_with("Agents: Claude Code"));
+    }
+
+    #[test]
+    fn no_agents_gives_the_command_to_add() {
+        let collected = Collected {
+            agents: Vec::new(),
+            ..two_agents_changed()
+        };
+        let lines = lines_of(&collected, vec![native_chrome()], false, true);
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("No agents") && line.ends_with("/home/ghostlight mcp")));
+    }
+
+    #[test]
+    fn only_a_browser_that_needs_a_person_is_named_after_an_install() {
+        use super::browser_attention_lines;
+
+        let mut report = browser_report(vec![
+            browser("chrome", BrowserPackage::Native),
+            browser("edge", BrowserPackage::Native),
+            browser("brave", BrowserPackage::Native),
+        ]);
+        for registered in &mut report.browsers {
+            registered.state = NativeHostState::Current;
+        }
+        assert!(browser_attention_lines(&report, None, true).is_empty());
+
+        report.browsers[2].state = NativeHostState::OwnedElsewhere;
+        report.browsers[1].state = NativeHostState::NeedsAttention;
+        let lines = browser_attention_lines(&report, Some(&["chrome".to_owned()]), true);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("Browser: edge -- "));
+        assert!(lines[1].starts_with("Browser: brave -- "));
+
+        // No usable browser: every browser the install chose, so the reason is on the screen.
+        report.browsers[1].state = NativeHostState::Current;
+        report.browsers[2].state = NativeHostState::Current;
+        let lines = browser_attention_lines(&report, Some(&["chrome".to_owned()]), false);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("Browser: chrome -- "));
+
+        // Inside an app container the report is that app's own view and says nothing.
+        report.private_view = Some(crate::install::container::AppContainer {
+            app: "Claude".into(),
+        });
+        assert!(browser_attention_lines(&report, None, false).is_empty());
     }
 }

@@ -1142,7 +1142,10 @@ fn serve_control(connection: Connection, operation: Option<Control>, intake: &In
             serde_json::to_value(control_status(intake)).unwrap_or(Value::Null)
         }
         Some(Control::Show) => serde_json::to_value(control::Shown {
-            shown: intake.workbench.reveal(None).is_ok(),
+            shown: intake
+                .workbench
+                .reveal(intake.workbench.show_address())
+                .is_ok(),
         })
         .unwrap_or(Value::Null),
         Some(Control::Quit { reason }) => {
@@ -3807,6 +3810,29 @@ mod tests {
         host.workbench.attach_presentation(reveals.clone());
         assert!(cli_client::activate_workbench().unwrap());
         assert_eq!(reveals.0.load(Ordering::SeqCst), 1);
+        drop(host);
+    }
+
+    #[test]
+    fn a_show_control_opens_the_window_at_setup_until_setup_is_complete() {
+        use crate::install::setup_state::{self, SetupRecord};
+
+        let home = TestHome::new("show-control-address");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let revealed = Arc::new(RevealedAt::default());
+        host.workbench.attach_presentation(revealed.clone());
+
+        assert!(cli_client::activate_workbench().unwrap());
+        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup)]);
+
+        // Once the setup record exists the window opens where it last was.
+        let record = crate::install::layout::Layout::new(home.path()).setup_record();
+        assert!(setup_state::record_if_absent(&record, &SetupRecord::now()).unwrap());
+        host.workbench
+            .attach_setup(crate::workbench::setup::SetupProgress::load(&record));
+        assert!(cli_client::activate_workbench().unwrap());
+        assert_eq!(revealed.addresses(), [Some(PageAddress::Setup), None]);
         drop(host);
     }
 
