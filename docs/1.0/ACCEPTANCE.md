@@ -505,8 +505,9 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
     an owned version path, foreign state is preserved, and repeat uninstall is a no-op. A Debian
     package owns the system entry and creates no per-user shadow.
     On Windows, uninstall removes the Start-menu shortcut and the per-user Uninstall key, each only
-    when it is this home's (the shortcut starts a program in `bin` or carries the AppUserModelID, the
-    key's command or location points into the home), leaves and names any other, and a repeat
+    when it is this home's (the shortcut starts a program in `bin`, or carries the AppUserModelID
+    when no target can be read from it; the key's command or location points into the home),
+    leaves and names any other, including another home's shortcut, and a repeat
     uninstall is a no-op.
 16. Install and doctor distinguish native, Snap, Flatpak, multiple-sandbox, missing, and unchecked
     browser package forms from native-host registration. Default Linux setup selects only detected

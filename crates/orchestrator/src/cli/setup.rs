@@ -317,8 +317,9 @@ fn carry_windows_report(report: ReconcileReport, kept_private: &mut KeptPrivate)
 /// each one removed, or, with `--dry-run`, each one that would be, and each one left because it
 /// names something else. A failure is reported and does not stop the rest of the uninstall.
 ///
-/// Inside an app container `uninstall` has already been refused by the browser connection step,
-/// which comes first, so this is not reached there.
+/// Inside an app container a real `uninstall` has already been refused by the browser connection
+/// step, which comes first. A `--dry-run` uninstall does reach this, and prints nothing for the
+/// Windows entries because no removal is planned inside a container.
 fn remove_windows_entries(options: &SetupOptions) -> anyhow::Result<()> {
     let layout = Layout::current()?;
     let registrations = Registrations::discover();

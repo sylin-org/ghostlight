@@ -117,8 +117,8 @@ As soon as `bin` holds the executables, and before anything old is stopped,
 one that names another path), owned MCP client entries, the Linux desktop entry, command link and
 manual pages, and on Windows the Start-menu shortcut and Uninstall key (`install/windows_entry.rs`).
 `uninstall` removes those two again, each only when it is provably this home's: the shortcut when it
-starts a program in `bin` or carries the AppUserModelID, the key when its `UninstallString` or
-`InstallLocation` points into the home. An entry that names anything else is left and named, and a
+starts a program in `bin` (or, when no target can be read from it, carries the AppUserModelID), the
+key when its `UninstallString` or `InstallLocation` points into the home. An entry that names anything else is left and named, and a
 second uninstall finds both gone (ADR-0199 Decision 20).
 On Windows the command line is the `bin` directory on the per-user `Path` (`install/user_path.rs`):
 install appends it, uninstall removes only it, a `WM_SETTINGCHANGE` broadcast tells new terminals,

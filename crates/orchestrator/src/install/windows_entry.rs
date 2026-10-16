@@ -157,8 +157,8 @@ pub fn plan_removal(layout: &Layout) -> WindowsEntryRemoval {
 /// Remove the Start-menu shortcut and the Uninstall key when each is this installation's.
 ///
 /// Ownership is read from the entry itself: the shortcut must target a program inside `layout`'s
-/// `bin` or carry the AppUserModelID, and the key's `UninstallString` or `InstallLocation` must
-/// point into `layout`'s home. An entry that is not provably this installation's, such as one an
+/// `bin`, or carry the AppUserModelID when no target can be read from it, and the key's
+/// `UninstallString` or `InstallLocation` must point into `layout`'s home. An entry that is not provably this installation's, such as one an
 /// NSIS install or another home wrote, is left alone and reported as [`EntryFate::Kept`].
 /// Removing what is already gone changes nothing, so a second call finds both
 /// [`EntryFate::Absent`].
@@ -179,7 +179,9 @@ fn settle(
     }
 }
 
-/// The shortcut at `path` is removed when it targets a program in `bin` or names the product.
+/// The shortcut at `path` is removed when it targets a program in `bin`. A target it names
+/// decides; only a shortcut with no readable target is judged by the product's AppUserModelID,
+/// so another home's shortcut, which carries the same id, is kept.
 fn settle_shortcut(layout: &Layout, path: Option<&Path>, apply: bool) -> EntryFate {
     let Some(path) = path else {
         return EntryFate::Absent;
@@ -190,11 +192,10 @@ fn settle_shortcut(layout: &Layout, path: Option<&Path>, apply: bool) -> EntryFa
         Err(error) => return EntryFate::Failed(error.to_string()),
     };
     let facts = read_shortcut(&bytes);
-    let own = facts.app_user_model_id.as_deref() == Some(APP_USER_MODEL_ID)
-        || facts
-            .target
-            .as_deref()
-            .is_some_and(|target| is_inside(target, &layout.bin()));
+    let own = match facts.target.as_deref() {
+        Some(target) => is_inside(target, &layout.bin()),
+        None => facts.app_user_model_id.as_deref() == Some(APP_USER_MODEL_ID),
+    };
     if !own {
         return EntryFate::Kept;
     }
@@ -934,13 +935,25 @@ mod tests {
         );
     }
 
+    /// `bytes`, a link [`shortcut_bytes`] wrote, with its LinkInfo saying it holds no local path,
+    /// so no target can be read from it.
+    fn without_readable_target(mut bytes: Vec<u8>) -> Vec<u8> {
+        let header = link::HEADER_SIZE as usize;
+        let info = header + 2 + usize::from(u16::from_le_bytes([bytes[header], bytes[header + 1]]));
+        let flags_at = info + 8;
+        let flags = u32::from_le_bytes(bytes[flags_at..flags_at + 4].try_into().unwrap());
+        let cleared = flags & !link::VOLUME_ID_AND_LOCAL_BASE_PATH;
+        bytes[flags_at..flags_at + 4].copy_from_slice(&cleared.to_le_bytes());
+        bytes
+    }
+
     #[test]
-    fn a_shortcut_is_own_by_its_target_or_by_its_id_alone() {
+    fn a_shortcut_is_own_by_its_target_and_by_its_id_only_when_it_names_none() {
         let scratch = crate::install::scratch::Scratch::new();
         let layout = Layout::new(scratch.path().join("home"));
         let shortcut = scratch.path().join("Ghostlight.lnk");
         let list = [4, 0, 1, 2, 0, 0];
-        let elsewhere = Path::new(r"C:\Program Files\Ghostlight\Ghostlight.exe");
+        let other_home = Path::new(r"C:\Other\.ghostlight\bin\ghostlight-desktop.exe");
         fs::write(
             &shortcut,
             shortcut_without_id(&layout.service_executable(), layout.home()),
@@ -951,11 +964,24 @@ mod tests {
             EntryFate::Removed,
             "an older shortcut that names the service in this bin"
         );
-        fs::write(&shortcut, shortcut_bytes(&list, elsewhere, layout.home())).unwrap();
+        let foreign = shortcut_bytes(&list, other_home, layout.home());
+        assert_eq!(
+            read_shortcut(&foreign).app_user_model_id.as_deref(),
+            Some(APP_USER_MODEL_ID)
+        );
+        fs::write(&shortcut, &foreign).unwrap();
+        assert_eq!(
+            settle_shortcut(&layout, Some(&shortcut), true),
+            EntryFate::Kept,
+            "another home's shortcut carries the same id, and its target decides"
+        );
+        let targetless = without_readable_target(foreign);
+        assert_eq!(read_shortcut(&targetless).target, None);
+        fs::write(&shortcut, targetless).unwrap();
         assert_eq!(
             settle_shortcut(&layout, Some(&shortcut), true),
             EntryFate::Removed,
-            "the AppUserModelID alone"
+            "with no readable target, the AppUserModelID alone"
         );
     }
 
