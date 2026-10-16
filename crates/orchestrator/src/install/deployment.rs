@@ -173,7 +173,8 @@ pub trait ProcessControl {
     /// Whether any process runs one of `images`.
     fn is_running(&self, images: &[PathBuf]) -> bool;
     /// The programs of an older installation that still run in `layout`'s home. The answering
-    /// service `service_pid` is spared unless it runs from the retired development directory.
+    /// service `service_pid` is spared unless it runs from the retired development directory or
+    /// from a 1.x version directory.
     fn strays(&self, layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess>;
     /// Stop `strays` and wait for them to exit. Returns the ones that would not stop.
     fn stop_strays(&self, strays: &[StrayProcess]) -> Vec<StrayProcess>;
@@ -325,7 +326,7 @@ fn running_image(reported: &Path) -> PathBuf {
 /// The processes of this home that an older installation left running.
 ///
 /// `service_pid` is the service that answers, when one does: it is spared unless it runs from the
-/// retired development directory. The process table is read once.
+/// retired development directory or from a 1.x version directory. The process table is read once.
 #[must_use]
 pub fn stray_processes(layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess> {
     let mut system = System::new();
@@ -569,6 +570,9 @@ pub struct Outcome {
     /// Entries of the plan's deletions that could not be removed. The next install tries again;
     /// this one is not failed by them.
     pub left_behind: Vec<PathBuf>,
+    /// The audit logs of the 1.x version directories that this install moved into `state`, as
+    /// observed: the plan lists what it intends, this lists what happened.
+    pub archived_version_audits: Vec<Move>,
     /// Programs of an older installation that would not stop. The next install, deploy or
     /// `doctor --fix` tries again; this one is not failed by them.
     pub strays_left: Vec<StrayProcess>,
@@ -690,6 +694,7 @@ pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outco
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),
+            archived_version_audits: Vec::new(),
             strays_left: Vec::new(),
         });
     }
@@ -707,6 +712,17 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
     let version_directories = version_directories::find(layout);
     let mut deletions = retired.deletions.clone();
     deletions.extend(version_directories.iter().cloned());
+    // The break migration archives the log of a 1.x state directory that is itself a version
+    // directory; it is not archived a second time.
+    let version_audit_archives = version_directories::archives(layout, &version_directories)
+        .into_iter()
+        .filter(|transfer| {
+            !migration
+                .audit_archive
+                .as_ref()
+                .is_some_and(|archive| same_path(&archive.from, &transfer.from))
+        })
+        .collect();
     let mut plan = InstallPlan {
         mode,
         version: context.build.version.clone(),
@@ -717,7 +733,7 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
         record: None,
         processes_to_stop: Vec::new(),
         deletions,
-        version_audit_archives: version_directories::archives(layout, &version_directories),
+        version_audit_archives,
         registrations_to_rewrite: Vec::new(),
     };
     let edge_changes = edge_changes(context, installed.as_ref())?;
@@ -820,6 +836,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),
+            archived_version_audits: Vec::new(),
             strays_left: Vec::new(),
         });
     }
@@ -831,6 +848,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
     let mut copied = Vec::new();
     let mut flatpak = Vec::new();
     let mut left_behind = Vec::new();
+    let mut archived_version_audits = Vec::new();
     let mut strays_left = Vec::new();
     if migrating {
         migration::prepare(&plan.migration)?;
@@ -856,7 +874,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             migration::finish(&plan.migration)?;
             flatpak = migration::retire_flatpak_route(&plan.migration);
         }
-        left_behind = remove_deletions(layout, &plan);
+        (left_behind, archived_version_audits) = remove_deletions(layout, &plan);
         Some(
             context.control.start_serve(layout).is_ok()
                 && context.control.wait_ready(layout, replaced.as_deref()),
@@ -875,6 +893,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         registrations: Some(registrations),
         flatpak,
         left_behind,
+        archived_version_audits,
         strays_left,
     })
 }
@@ -1045,10 +1064,10 @@ impl RetiredDevelopment {
 
 /// Remove what `plan` lists as deletions: the retired development directory and its marker, and
 /// the 1.x version directories after their audit logs are archived. Returns the entries that
-/// could not be removed. The programs that ran from there were stopped by pid with the other
+/// could not be removed and the audit logs that were archived. The programs that ran from there were stopped by pid with the other
 /// strays, and one that would not stop is reported with them, so a removal that fails here names
 /// only what stayed.
-fn remove_deletions(layout: &Layout, plan: &InstallPlan) -> Vec<PathBuf> {
+fn remove_deletions(layout: &Layout, plan: &InstallPlan) -> (Vec<PathBuf>, Vec<Move>) {
     let (versions, others): (Vec<PathBuf>, Vec<PathBuf>) = plan
         .deletions
         .iter()
@@ -1065,8 +1084,9 @@ fn remove_deletions(layout: &Layout, plan: &InstallPlan) -> Vec<PathBuf> {
             removed.is_err_and(|error| error.kind() != io::ErrorKind::NotFound)
         })
         .collect();
-    kept.extend(version_directories::retire(&versions, &plan.version_audit_archives).kept);
-    kept
+    let retired = version_directories::retire(&versions, &plan.version_audit_archives);
+    kept.extend(retired.kept);
+    (kept, retired.archived)
 }
 
 /// Every image a running service of this home may have been started from: the ones in `bin` and
@@ -1348,6 +1368,8 @@ mod tests {
         legacy_policy: Option<PathBuf>,
         /// The directory a 1.x installation served from, holding its three executables.
         legacy_serving: Option<PathBuf>,
+        /// The directory the 1.x installation record names as holding its audit log.
+        legacy_state: Option<PathBuf>,
         /// The directory that holds the browser manifests the registrations write.
         hosts: PathBuf,
     }
@@ -1372,6 +1394,7 @@ mod tests {
                 registrations,
                 legacy_policy: None,
                 legacy_serving: None,
+                legacy_state: None,
                 hosts,
             }
         }
@@ -1416,13 +1439,15 @@ mod tests {
 
         fn legacy(&self) -> Legacy {
             Legacy {
-                installation: (self.legacy_policy.is_some() || self.legacy_serving.is_some()).then(
-                    || LegacyInstallation {
-                        policy_directory: self.legacy_policy.clone(),
-                        serving_directory: self.legacy_serving.clone(),
-                        ..LegacyInstallation::default()
-                    },
-                ),
+                installation: (self.legacy_policy.is_some()
+                    || self.legacy_serving.is_some()
+                    || self.legacy_state.is_some())
+                .then(|| LegacyInstallation {
+                    policy_directory: self.legacy_policy.clone(),
+                    serving_directory: self.legacy_serving.clone(),
+                    state_directory: self.legacy_state.clone(),
+                    ..LegacyInstallation::default()
+                }),
                 roots: LegacyRoots::within(&self.scratch.path().join("profile")),
                 registrations: Vec::new(),
             }
@@ -2257,6 +2282,13 @@ mod tests {
             fs::read(fixture.layout.state().join("audit-v1.3.5.jsonl")).unwrap(),
             VERSION_AUDIT
         );
+        assert_eq!(
+            outcome.archived_version_audits,
+            [Move {
+                from: first.join(AUDIT_FILE_NAME),
+                to: fixture.layout.state().join("audit-v1.3.5.jsonl"),
+            }]
+        );
         for kept in untouched_entries(&fixture) {
             assert!(kept.is_file(), "{}", kept.display());
         }
@@ -2348,6 +2380,47 @@ mod tests {
     }
 
     #[test]
+    fn a_1x_state_directory_that_is_a_version_directory_has_its_log_archived_once() {
+        let mut fixture = Fixture::new();
+        let (first, second) = plant_version_directories(&fixture);
+        fixture.legacy_state = Some(first.clone());
+        fs::create_dir_all(fixture.layout.home()).unwrap();
+        fs::write(fixture.legacy_record(), "{}").unwrap();
+        let log = first.join(AUDIT_FILE_NAME);
+        let migration_archive = Move {
+            from: log.clone(),
+            to: fixture.layout.state().join("audit-pre-2.0.jsonl"),
+        };
+
+        let planned = install(
+            &fixture.context(fixture.build(VERSION), &FakeControl::new()),
+            &Request {
+                payload: None,
+                mode: Mode::Development,
+                plan_only: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            planned.plan.migration.audit_archive,
+            Some(migration_archive)
+        );
+        assert!(planned.plan.version_audit_archives.is_empty());
+
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert!(outcome.left_behind.is_empty());
+        assert!(outcome.archived_version_audits.is_empty());
+        assert_eq!(
+            fs::read(fixture.layout.state().join("audit-pre-2.0.jsonl")).unwrap(),
+            VERSION_AUDIT
+        );
+        assert!(!fixture.layout.state().join("audit-v1.3.5.jsonl").exists());
+        assert!(!first.exists() && !second.exists());
+    }
+
+    #[test]
     fn a_log_that_cannot_be_archived_keeps_its_directory_and_is_reported() {
         let fixture = Fixture::new();
         let (first, second) = plant_version_directories(&fixture);
@@ -2359,6 +2432,7 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.service_started, Some(true));
         assert_eq!(outcome.left_behind, std::slice::from_ref(&first));
+        assert!(outcome.archived_version_audits.is_empty());
         assert_eq!(
             fs::read(first.join(AUDIT_FILE_NAME)).unwrap(),
             VERSION_AUDIT

@@ -234,8 +234,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
 
 /// Stop what an older Ghostlight installation left running, so one install leaves nothing behind
 /// that `doctor` would name. The service that answers is spared unless it runs from the retired
-/// development directory, which an install removes, so that one is stopped too. A program that
-/// will not stop is said so and does not fail the install.
+/// development directory or from a 1.x version directory, which an install removes, so that one
+/// is stopped too. A program that will not stop is said so and does not fail the install.
 fn stop_older_installation_programs() -> anyhow::Result<()> {
     let layout = Layout::current()?;
     let service_pid = crate::cli::client::status_at(layout.home())
@@ -260,7 +260,7 @@ fn remove_version_directories(layout: &Layout) {
             "{}",
             deployment_words::removed_version_directory(&directory.display().to_string())
         );
-        if let Some(archive) = version_directories::archive_of(&archives, directory) {
+        if let Some(archive) = version_directories::archive_of(&retired.archived, directory) {
             println!(
                 "{}",
                 deployment_words::archived_version_audit(&archive.to.display().to_string())

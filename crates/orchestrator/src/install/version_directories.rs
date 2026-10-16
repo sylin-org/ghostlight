@@ -32,6 +32,9 @@ pub struct Retired {
     /// The directories that stay: their audit log could not be archived, or they could not be
     /// removed. The next install tries again.
     pub kept: Vec<PathBuf>,
+    /// The audit logs this run moved into `state`: only a log that was there and now sits at its
+    /// archive file.
+    pub archived: Vec<Move>,
 }
 
 /// Whether `name` is the name of a 1.x version directory: `v` followed by a semantic version.
@@ -96,35 +99,43 @@ pub fn archive_of<'a>(archives: &'a [Move], directory: &Path) -> Option<&'a Move
 }
 
 /// Move each log of `archives` to its archive file, the way the break migration moves the 1.x
-/// log. Returns the directories whose log could not be archived, which must stay.
+/// log. Returns the moves this run carried out and the directories whose log could not be
+/// archived, which must stay.
 ///
 /// A move an earlier run began is finished. An archive file that already holds other content is
-/// never overwritten: the log stays and so does its directory.
-fn archive(archives: &[Move]) -> Vec<PathBuf> {
-    archives
-        .iter()
-        .filter(|transfer| {
-            let prepared = transfer
-                .to
-                .parent()
-                .map_or(Ok(()), private::create_dir_all)
-                .map_err(|_| ());
-            prepared
-                .and_then(|()| migration::archive_transfer(transfer).map_err(|_| ()))
-                .is_err()
-        })
-        .filter_map(|transfer| transfer.from.parent().map(Path::to_path_buf))
-        .collect()
+/// never overwritten: the log stays and so does its directory. A log that is no longer there,
+/// because the break migration archived it first, is neither moved nor listed.
+fn archive(archives: &[Move]) -> (Vec<Move>, Vec<PathBuf>) {
+    let mut archived = Vec::new();
+    let mut unarchived = Vec::new();
+    for transfer in archives {
+        let present = transfer.from.is_file();
+        let moved = transfer
+            .to
+            .parent()
+            .map_or(Ok(()), private::create_dir_all)
+            .map_err(|_| ())
+            .and_then(|()| migration::archive_transfer(transfer).map_err(|_| ()));
+        match moved {
+            Ok(()) if present && transfer.to.is_file() => archived.push(transfer.clone()),
+            Ok(()) => {}
+            Err(()) => unarchived.extend(transfer.from.parent().map(Path::to_path_buf)),
+        }
+    }
+    (archived, unarchived)
 }
 
 /// Archive the logs of `archives`, then remove each of `directories`. A directory whose log
-/// could not be archived is not removed.
+/// could not be archived is not removed. The result names what was done, not what was planned.
 ///
 /// The programs running from the directories must already have been stopped.
 #[must_use]
 pub fn retire(directories: &[PathBuf], archives: &[Move]) -> Retired {
-    let unarchived = archive(archives);
-    let mut retired = Retired::default();
+    let (archived, unarchived) = archive(archives);
+    let mut retired = Retired {
+        archived,
+        ..Retired::default()
+    };
     for directory in directories {
         let removed = !unarchived.iter().any(|kept| same_path(kept, directory))
             && match fs::remove_dir_all(directory) {

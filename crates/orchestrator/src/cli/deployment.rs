@@ -125,7 +125,8 @@ fn service_line(outcome: &Outcome, layout: &Layout) -> Option<Line> {
 }
 
 /// What became of the directory and the marker earlier development builds used and of the 1.x
-/// version directories, with the archive each removed directory's audit log went to.
+/// version directories, with the archive each removed directory's audit log went to, as
+/// observed.
 fn deletion_lines(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
     let marker = layout.retired_development_marker();
     let mut lines = Vec::new();
@@ -138,7 +139,7 @@ fn deletion_lines(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
         } else if version_directories::is_version_directory(layout, path) {
             lines.push(Line::output(words::removed_version_directory(&shown)));
             lines.extend(
-                version_directories::archive_of(&outcome.plan.version_audit_archives, path).map(
+                version_directories::archive_of(&outcome.archived_version_audits, path).map(
                     |archive| {
                         Line::output(words::archived_version_audit(
                             &archive.to.display().to_string(),
@@ -242,6 +243,7 @@ mod tests {
                 registrations: None,
                 flatpak: Vec::new(),
                 left_behind,
+                archived_version_audits: Vec::new(),
                 strays_left: Vec::new(),
             },
             layout,
@@ -346,21 +348,19 @@ mod tests {
         let second = layout.bin().join("v1.3.6");
         let archive = layout.state().join("audit-v1.3.5.jsonl");
         let outcome = |left_behind: Vec<PathBuf>| Outcome {
-            plan: InstallPlan {
-                version_audit_archives: vec![Move {
-                    from: first.join("audit.jsonl"),
-                    to: archive.clone(),
-                }],
-                ..plan(
-                    Mode::Development,
-                    &layout,
-                    vec![first.clone(), second.clone()],
-                )
-            },
+            plan: plan(
+                Mode::Development,
+                &layout,
+                vec![first.clone(), second.clone()],
+            ),
             service_started: Some(true),
             registrations: None,
             flatpak: Vec::new(),
             left_behind,
+            archived_version_audits: vec![Move {
+                from: first.join("audit.jsonl"),
+                to: archive.clone(),
+            }],
             strays_left: Vec::new(),
         };
 
@@ -408,6 +408,7 @@ mod tests {
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),
+            archived_version_audits: Vec::new(),
             strays_left: vec![StrayProcess {
                 pid: 7,
                 image: image.clone(),
