@@ -29,6 +29,16 @@ export const COLD_REQUEST_MS = 45_000;
 /** A real one-pixel JPEG, the shape a capture hands over. */
 export const ONE_PIXEL_JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
 
+/**
+ * A frame id in the browser's alphabet. The service accepts only ASCII letters, digits and '-' in
+ * a browser id (`is_browser_id` in protocol4/locator.rs), so an underscore here would make every
+ * document-bound command fail admission. Real Chrome frame ids are uppercase hex.
+ */
+export const frameIdOf = (tabId) => `F${tabId}`;
+
+/** A loader id in the browser's alphabet; see frameIdOf. */
+export const loaderIdOf = (load) => `L${load}`;
+
 const initializeParams = (name) => ({ protocolVersion: MCP_REVISION, capabilities: {}, clientInfo: { name, version: "1" } });
 
 /** The structured facts of a tool call's response, after checking it is not a protocol error. */
@@ -419,7 +429,7 @@ export class SyntheticBrowser {
         return done({ tab_id: tab.tab_id }, { dispatched: true });
       case "frames":
         return done({
-          frames: [{ frame_id: `frame_${tab.tab_id}`, loader_id: `loader_${tab.load}`, url: tab.url, unreachable: false }],
+          frames: [{ frame_id: frameIdOf(tab.tab_id), loader_id: loaderIdOf(tab.load), url: tab.url, unreachable: false }],
           complete: true,
           unseen: []
         });

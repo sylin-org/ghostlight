@@ -180,6 +180,11 @@ export class EdgeBridge {
     await new Promise((done) => this.server.close(done));
   }
 
+  /** The stderr tail of every edge this bridge started, for an error that would otherwise name nothing. */
+  edgeOutput() {
+    return [...this.ports.values()].map((port) => `edge ${port.id}: ${port.child.output?.trim() || "(no stderr)"}`).join("\n");
+  }
+
   /** The names of the primitives the service sent after `index`, in order; world calls are `call:<kind>`. */
   sentSince(index = 0) {
     return this.sent.slice(index);
@@ -388,7 +393,11 @@ export class BrowserRig {
       .find((info) => info.type === "service_worker" && info.url === workerUrl), "the extension's service worker", CONNECT_MS);
     const { sessionId } = await this.cdp.send("Target.attachToTarget", { targetId: target.targetId, flatten: true });
     this.workerSession = sessionId;
-    await until(() => this.bridge.accepted > 0, "the service accepts the extension's hello", CONNECT_MS);
+    try {
+      await until(() => this.bridge.accepted > 0, "the service accepts the extension's hello", CONNECT_MS);
+    } catch (error) {
+      throw new Error(`${error.message}\n${this.bridge.edgeOutput() || "no edge was started"}`);
+    }
   }
 
   /** The value of `expression` in the extension's worker, awaiting a promise it returns. */

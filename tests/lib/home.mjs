@@ -7,10 +7,10 @@
 // from the user and the home path. Every closed word comes from tests/golden/relay4/vocabulary.json,
 // the same file the Rust goldens bind.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 /** The root of the repository. */
 export const repository = resolve(import.meta.dirname, "..", "..");
@@ -32,6 +32,23 @@ export const BIN_DIRECTORY = "bin";
 
 /** The quit latch under the home: it is written when a person quits and read by browser starts. */
 export const QUIT_LATCH = ["state", "quit"];
+
+/** The diagnostics directory under the home; the twin of DIAGNOSTICS_DIRECTORY_NAME in crates/relay/src/home.rs. */
+export const DIAGNOSTICS_DIRECTORY = "diagnostics";
+
+/**
+ * The environment variable that names a directory to keep a journey's failure evidence in. The
+ * hardening suite sets it to a folder under its uploaded output; `JourneyHome.cleanup` writes
+ * each started program's command line, exit and captured output there, and copies the home's
+ * diagnostics, before it removes the home.
+ */
+export const EVIDENCE_VARIABLE = "GHOSTLIGHT_JOURNEY_EVIDENCE";
+
+/** The file in a home's evidence folder that lists the programs the journey ran. */
+export const EVIDENCE_PROGRAMS_FILE = "programs.json";
+
+/** How much of a program's output the journey keeps, in characters. */
+const OUTPUT_TAIL = 6000;
 
 /** The signal that ends a process with no chance to say goodbye. Windows ends it the same way. */
 const HARD_KILL = "SIGKILL";
@@ -402,7 +419,7 @@ export class JourneyHome {
       GHOSTLIGHT_POLICY_FILE: this.policyFile,
       GHOSTLIGHT_AUDIT_FILE: this.auditFile,
       GHOSTLIGHT_NATIVE_HOST_DIR: this.nativeHostDir,
-      GHOSTLIGHT_DIAGNOSTICS_DIR: join(this.path, "diagnostics"),
+      GHOSTLIGHT_DIAGNOSTICS_DIR: join(this.path, DIAGNOSTICS_DIRECTORY),
       HOME: user,
       USERPROFILE: user,
       APPDATA: join(user, "roaming"),
@@ -413,6 +430,7 @@ export class JourneyHome {
     };
     delete this.environment.GHOSTLIGHT_RUNTIME_FILE;
     this.children = [];
+    this.programs = [];
     this.serviceImages = new Set([this.service]);
   }
 
@@ -436,7 +454,8 @@ export class JourneyHome {
       ...options.spawn
     });
     child.output = "";
-    child.stderr?.on("data", (chunk) => { child.output = (child.output + chunk).slice(-6000); });
+    child.stderr?.on("data", (chunk) => { child.output = (child.output + chunk).slice(-OUTPUT_TAIL); });
+    this.programs.push({ argv: [executable, ...args], child });
     child.exited = new Promise((done) => child.once("exit", (code, signal) => done({ code, signal })));
     child.on("error", (error) => { child.failure = error; });
     this.children.push(child);
@@ -445,13 +464,43 @@ export class JourneyHome {
 
   /** Run `executable` to the end in this home and return its result. */
   run(executable, args = [], options = {}) {
-    return spawnSync(executable, args, {
+    const result = spawnSync(executable, args, {
       env: { ...this.environment, ...options.env },
       encoding: "utf8",
       windowsHide: true,
       timeout: options.timeout ?? 60_000,
       input: options.input
     });
+    this.programs.push({
+      argv: [executable, ...args],
+      result: { code: result.status, signal: result.signal, error: result.error?.message, output: `${result.stdout ?? ""}${result.stderr ?? ""}`.slice(-OUTPUT_TAIL) }
+    });
+    return result;
+  }
+
+  /**
+   * Keep what a failure needs from this home in the folder named by EVIDENCE_VARIABLE: the
+   * programs the journey ran with their exit and output, and the home's diagnostics. Nothing is
+   * written when the variable is unset. Journeys use no credentials, so nothing here is secret.
+   */
+  keepEvidence() {
+    const root = process.env[EVIDENCE_VARIABLE];
+    if (!root) return;
+    const folder = join(root, basename(this.area));
+    try {
+      mkdirSync(folder, { recursive: true });
+      const programs = this.programs.map(({ argv, child, result }) => ({
+        argv,
+        ...(child
+          ? { code: child.exitCode, signal: child.signalCode, failure: child.failure?.message, running_at_cleanup: child.runningAtCleanup, output: child.output }
+          : result)
+      }));
+      writeFileSync(join(folder, EVIDENCE_PROGRAMS_FILE), JSON.stringify(programs, null, 2));
+      const diagnostics = join(this.path, DIAGNOSTICS_DIRECTORY);
+      if (existsSync(diagnostics)) cpSync(diagnostics, join(folder, DIAGNOSTICS_DIRECTORY), { recursive: true });
+    } catch (error) {
+      process.stderr.write(`evidence of ${this.area}: ${error.message}\n`);
+    }
   }
 
   /** The service's answer to one control operation, or null when no service listens. */
@@ -528,11 +577,13 @@ export class JourneyHome {
     } catch (error) {
       problems.push(error.message);
     }
+    for (const child of this.children) child.runningAtCleanup = child.exitCode === null && child.signalCode === null;
     for (const child of [...this.children].reverse()) {
       if (child.exitCode !== null || child.signalCode !== null) continue;
       child.kill();
       await Promise.race([child.exited, delay(5000)]);
     }
+    this.keepEvidence();
     try {
       rmSync(this.area, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
     } catch (error) {

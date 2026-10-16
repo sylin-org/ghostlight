@@ -35,13 +35,18 @@ const report = { lane, platform: process.platform, node: process.version,
   source_sha256: source(), binaries: {}, started_at: new Date().toISOString(), results: [] };
 const save = () => writeFileSync(join(output, "results.json"), JSON.stringify(report, null, 2) + "\n");
 save();
+// The lines of a log that name why a journey failed; the tail alone can hide them.
+const FAILURE_LINE = /AssertionError|^Error|panicked/;
+// Where each journey keeps its failure evidence, inside the uploaded output folder.
+const EVIDENCE_VARIABLE = "GHOSTLIGHT_JOURNEY_EVIDENCE";
 async function run(name, command, commandArgs, cwd = root, onLine) {
   const started = Date.now();
   const logPath = join(output, `${name}.log`);
   const log = createWriteStream(logPath);
   console.log(`RUN ${name}`);
   const result = await new Promise(done => {
-    const child = spawn(command, commandArgs, { cwd, env: environment, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const evidence = join(output, "evidence", name);
+    const child = spawn(command, commandArgs, { cwd, env: { ...environment, [EVIDENCE_VARIABLE]: evidence }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     child.stdout.on("data", bytes => log.write(bytes));
     child.stderr.on("data", bytes => log.write(bytes));
     if (onLine) createInterface({ input: child.stdout }).on("line", onLine);
@@ -52,7 +57,12 @@ async function run(name, command, commandArgs, cwd = root, onLine) {
   report.results.push({ name, ...result, duration_ms: Date.now() - started, log: logPath });
   save();
   console.log(`${result.status.toUpperCase()} ${name} (${Date.now() - started} ms)`);
-  if (result.status !== "passed") console.error(readFileSync(logPath, "utf8").slice(-6000));
+  if (result.status !== "passed") {
+    const text = readFileSync(logPath, "utf8");
+    const decisive = text.split(/\r?\n/).filter(line => FAILURE_LINE.test(line));
+    if (decisive.length) console.error(`Failure lines of ${name}:\n${decisive.slice(0, 40).join("\n")}\n`);
+    console.error(text.slice(-6000));
+  }
   return result.status === "passed";
 }
 function blocked(name, reason) { report.results.push({ name, status: "blocked", reason }); save(); }

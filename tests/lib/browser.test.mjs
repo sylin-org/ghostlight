@@ -111,3 +111,11 @@ test("the bridge records the primitives and notices the service sends", () => {
   assert.deepEqual(bridge.sentSince(1), ["call:read_text", "call:inspect"]);
   assert.equal(bridge.notices.length, 1);
 });
+
+test("the bridge reports the stderr tail of each edge it started", () => {
+  const bridge = new EdgeBridge(standInHome());
+  assert.equal(bridge.edgeOutput(), "");
+  bridge.ports.set(1, { id: 1, child: { output: "relay refused the opening\n" } });
+  bridge.ports.set(2, { id: 2, child: { output: "" } });
+  assert.equal(bridge.edgeOutput(), "edge 1: relay refused the opening\nedge 2: (no stderr)");
+});

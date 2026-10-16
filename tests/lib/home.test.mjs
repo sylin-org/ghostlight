@@ -1,8 +1,13 @@
-// Unit tests for the journey helper's relay arithmetic. Nothing here starts a process or a service.
+// Unit tests for the journey helper's relay arithmetic. No Ghostlight program or service starts.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeFrames, encodeFrame, fnv1a32, goodbyeIn, homeHash, pipeName, role, socketPath, vocabulary } from "./home.mjs";
+import { frameIdOf, loaderIdOf } from "./peers.mjs";
+import {
+  DIAGNOSTICS_DIRECTORY, EVIDENCE_PROGRAMS_FILE, EVIDENCE_VARIABLE, JourneyHome, decodeFrames, encodeFrame, fnv1a32, goodbyeIn, homeHash, pipeName, role, socketPath, vocabulary
+} from "./home.mjs";
 
 const example = vocabulary.endpoint.windows.example;
 
@@ -51,4 +56,38 @@ test("a goodbye is read only from a frame that is one", () => {
 test("a word outside the vocabulary is refused", () => {
   assert.equal(role.control, "control");
   assert.throws(() => role.bystander, /not in the relay vocabulary/);
+});
+
+test("the synthetic browser mints ids in the browser's alphabet", () => {
+  // The service admits only ASCII letters, digits and '-' (is_browser_id in
+  // crates/orchestrator/src/browser/adapter/chromium/protocol4/locator.rs).
+  for (const id of [frameIdOf(41), loaderIdOf(7)]) assert.match(id, /^[A-Za-z0-9-]+$/);
+});
+
+test("cleanup keeps each program's exit and output as evidence, then removes the home", async () => {
+  const evidence = mkdtempSync(join(tmpdir(), "ghostlight-evidence-test-"));
+  const earlier = process.env[EVIDENCE_VARIABLE];
+  process.env[EVIDENCE_VARIABLE] = evidence;
+  const home = new JourneyHome({ label: "evidence-test" });
+  try {
+    const started = home.start(process.execPath, ["-e", "console.error('started program says boom'); process.exit(3)"]);
+    await started.exited;
+    home.run(process.execPath, ["-e", "console.log('ran program says hello')"]);
+    mkdirSync(home.file(DIAGNOSTICS_DIRECTORY), { recursive: true });
+    writeFileSync(home.file(DIAGNOSTICS_DIRECTORY, "service.log"), "diagnostic line");
+    await home.cleanup();
+    assert.equal(existsSync(home.area), false);
+    const [folder] = readdirSync(evidence);
+    const programs = JSON.parse(readFileSync(join(evidence, folder, EVIDENCE_PROGRAMS_FILE), "utf8"));
+    assert.equal(programs.length, 2);
+    assert.equal(programs[0].code, 3);
+    assert.match(programs[0].output, /started program says boom/);
+    assert.equal(programs[1].code, 0);
+    assert.match(programs[1].output, /ran program says hello/);
+    assert.equal(readFileSync(join(evidence, folder, DIAGNOSTICS_DIRECTORY, "service.log"), "utf8"), "diagnostic line");
+  } finally {
+    if (earlier === undefined) delete process.env[EVIDENCE_VARIABLE];
+    else process.env[EVIDENCE_VARIABLE] = earlier;
+    rmSync(evidence, { recursive: true, force: true });
+  }
 });

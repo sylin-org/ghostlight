@@ -13,6 +13,7 @@ import { EDGE_NAME, SERVICE_NAME, binaryDirectory, copyImages, JourneyHome, star
 import { McpEdge } from "./lib/peers.mjs";
 
 const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+const leftover = (name) => name.endsWith(".new") || name.includes(".old-");
 const home = new JourneyHome({ label: "fixed" });
 const stage = join(home.area, "download");
 
@@ -63,10 +64,13 @@ try {
   assert.equal(mcp.child.pid, edgePid);
   const catalogAfter = (await mcp.request("tools/list")).result.tools.map((tool) => tool.name);
   assert.deepEqual(catalogAfter, catalogBefore, "the same session serves the same catalog");
-  const entries = readdirSync(home.bin).sort();
-  assert.deepEqual(entries, [EDGE_NAME, SERVICE_NAME].sort(), "bin holds the two images and no leftovers");
+  // bin also holds the installer's record and may hold the shell; a swap leaves no `.new` copy
+  // and, once the old service has exited, no `.old-<n>` image (install/swap.rs).
+  await until(() => !readdirSync(home.bin).some(leftover), "the swap leaves no old or new image", 30_000);
+  const entries = readdirSync(home.bin);
+  assert.ok(entries.includes(EDGE_NAME) && entries.includes(SERVICE_NAME), "bin holds the edge and the service");
   mcp.child.stdin.end();
-  console.log("PASS replacing the service keeps the MCP edge, its session and the catalog; bin holds only the installed images");
+  console.log("PASS replacing the service keeps the MCP edge, its session and the catalog; bin keeps only the installed images");
   console.log("fixed installation journey ok");
 } finally {
   await home.cleanup();
