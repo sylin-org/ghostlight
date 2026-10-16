@@ -12,7 +12,6 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use super::locator::Locator;
 use super::tree::{document_id, FrameTree};
 use super::wire::{CallAnswer, DocumentGuard, FrameRef, GuardDoc, WorldCall};
 use super::world::{self, AssetErrorCode, EffectClass, Message, ScopeClass};
@@ -201,8 +200,9 @@ impl Scope {
     /// # Errors
     ///
     /// Returns the plain failure for an absent or malformed locator.
+    #[cfg(test)]
     pub fn doc_of(&self, locator: Option<&str>) -> Result<FrameRef, BrowserError> {
-        Locator::decode(locator.unwrap_or_default()).map(|locator| locator.doc)
+        super::locator::Locator::decode(locator.unwrap_or_default()).map(|locator| locator.doc)
     }
 
     /// The document an encoded locator belongs to, or the top when there is none.
