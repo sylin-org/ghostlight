@@ -1,66 +1,31 @@
-// The command-line intake, against the real executable and a real service (ADR-0105).
+// The command line through the real edge and a real service, in a test home (ADR-0105, ADR-0199).
 //
 // Unit tests cover argument parsing and exit-code mapping. This proves the parts only a process
-// can prove: that a script reaches the same executor, that its work is attributed to the cli
-// channel in the audit file the service wrote, and that a batch keeps one workspace so handles
-// from one line resolve on the next.
-
+// can prove: `status` and `doctor` print and return their exit codes without starting a service,
+// `call` starts one with the start reason `command` when none runs, a script reaches the same
+// executor, its work is attributed to the cli channel in the audit file, and a batch keeps one
+// workspace so handles from one line resolve on the next. Every process runs in a fresh test home;
+// nothing touches the real one.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { buildVersion, createHome, repository, startReason, until } from "./lib/home.mjs";
 
-const repository = resolve(import.meta.dirname, "..");
-const executableSuffix = process.platform === "win32" ? ".exe" : "";
-const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
-// ADR-0150: the runtime override elects the authority directory, so it points inside the
-// build under test rather than at a directory that holds no authority.
-const runtimeFile = join(binDir, `.ghostlight-cli-journey-runtime-${process.pid}.json`);
-const auditFile = join(repository, `tests/.ghostlight-cli-audit-${process.pid}.jsonl`);
-// The service holds its lifetime lease beside the runtime file; killing it leaves the lease behind.
-const leaseFile = runtimeFile.replace(/\.json$/, ".lock");
-// The whole native-host registration surface (manifests and Windows registry keys) is isolated
-// below this directory. Recovery silently repairs Ghostlight-owned registrations toward the
-// running tree (ADR-0149), so an un-isolated journey would adopt the machine's real browser
-// registration into whatever build is under test -- exactly the 2026-08-30 preflight leak.
-const nativeHostDir = join(repository, `tests/.ghostlight-cli-native-host-${process.pid}`);
-const environment = {
-  ...process.env,
-  GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
-  GHOSTLIGHT_AUDIT_FILE: auditFile,
-  GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
-};
+const catalogNames = JSON.parse(readFileSync(join(repository, "docs", "1.0", "catalog.json"), "utf8")).map((tool) => tool.name);
+const LIST = '{"action":"list"}';
+const EXIT_FAILED = 4;
 
 // The machine's persistent native-host registration, as one comparable string. The journey
 // snapshots it before its first process and asserts it is byte-identical after its last, so no
-// journey beat can ever mutate the real registration unnoticed.
-const REGISTRY_VENDORS = [
-  ["Google", "Chrome"],
-  ["Microsoft", "Edge"],
-  ["BraveSoftware", "Brave-Browser"],
-  ["Chromium"]
-];
-const LINUX_MANIFEST_DIRECTORIES = [
-  "google-chrome",
-  "microsoft-edge",
-  "BraveSoftware/Brave-Browser",
-  "chromium"
-];
+// beat can mutate the real registration unnoticed.
+const REGISTRY_VENDORS = [["Google", "Chrome"], ["Microsoft", "Edge"], ["BraveSoftware", "Brave-Browser"], ["Chromium"]];
+const LINUX_MANIFEST_DIRECTORIES = ["google-chrome", "microsoft-edge", "BraveSoftware/Brave-Browser", "chromium"];
 function machineRegistration() {
   const parts = [];
-  const readManifest = (path) =>
-    existsSync(path) ? readFileSync(path, "utf8") : "<absent>";
+  const readManifest = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "<absent>");
   if (process.platform === "win32") {
-    parts.push(
-      readManifest(
-        join(
-          process.env.USERPROFILE || "",
-          ".ghostlight",
-          "manifests",
-          "org.sylin.ghostlight.json"
-        )
-      )
-    );
+    parts.push(readManifest(join(process.env.USERPROFILE || "", ".ghostlight", "manifests", "org.sylin.ghostlight.json")));
     for (const vendor of REGISTRY_VENDORS) {
       const key = `HKCU\\Software\\${vendor.join("\\")}\\NativeMessagingHosts\\org.sylin.ghostlight`;
       const query = spawnSync("reg", ["query", key, "/ve"], { encoding: "utf8" });
@@ -69,106 +34,94 @@ function machineRegistration() {
   } else {
     const configHome = process.env.XDG_CONFIG_HOME || join(process.env.HOME || "", ".config");
     for (const directory of LINUX_MANIFEST_DIRECTORIES) {
-      parts.push(
-        readManifest(join(configHome, directory, "NativeMessagingHosts", "org.sylin.ghostlight.json"))
-      );
+      parts.push(readManifest(join(configHome, directory, "NativeMessagingHosts", "org.sylin.ghostlight.json")));
     }
   }
   return parts.join("\n---\n");
 }
 const registrationBefore = machineRegistration();
 
-const ghostlight = join(binDir, `ghostlight${executableSuffix}`);
-if (!existsSync(ghostlight)) throw new Error(`Missing ${ghostlight}; build the workspace first.`);
-// The expected banner derives from the workspace version so a version bump cannot silently
-// invalidate this journey; the pin is "banner reflects source truth", not a literal.
-const sourceVersion = readFileSync(join(repository, "Cargo.toml"), "utf8")
-  .match(/\[workspace\.package\][\s\S]*?^version = "([^"]+)"/m)?.[1];
-if (!sourceVersion) throw new Error("Could not read the workspace version from Cargo.toml");
-
-const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-const call = (args, input) =>
-  spawnSync(ghostlight, ["call", ...args], { env: environment, encoding: "utf8", input });
-
-function records() {
-  return readFileSync(auditFile, "utf8")
-    .trim()
-    .split("\n")
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
-}
-
-rmSync(runtimeFile, { force: true });
-rmSync(auditFile, { force: true });
-rmSync(leaseFile, { force: true });
-const services = [];
-const cleanup = [runtimeFile, auditFile, leaseFile];
+const home = createHome({ label: "cli" });
+const version = buildVersion();
+const edge = (args, input) => home.run(home.edge, args, { input, timeout: 120_000 });
+const call = (args, input) => edge(["call", ...args], input);
 
 try {
-  const version = spawnSync(ghostlight, ["--version"], { env: environment, encoding: "utf8" });
-  assert.equal(version.status, 0, version.stderr);
-  assert.equal(version.stdout.trim(), `ghostlight ${sourceVersion}`);
-  const help = spawnSync(ghostlight, ["--help"], { env: environment, encoding: "utf8" });
+  // Nothing here may start a service.
+  const reported = edge(["--version"]);
+  assert.equal(reported.status, 0, reported.stderr);
+  assert.equal(reported.stdout.trim(), `ghostlight ${version}`);
+  const help = edge(["--help"]);
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /ghostlight install/);
   assert.match(help.stdout, /ghostlight doctor/);
   assert.doesNotMatch(help.stdout, /ghostlight service|--headless/);
   for (const removed of [["service"], ["--headless"]]) {
-    const rejectedLaunch = spawnSync(ghostlight, removed, { env: environment, encoding: "utf8" });
-    assert.notEqual(rejectedLaunch.status, 0, `${removed[0]} must not start an authority`);
-    assert.equal(existsSync(runtimeFile), false, `${removed[0]} must not publish runtime discovery`);
+    const rejected = edge(removed);
+    assert.notEqual(rejected.status, 0, `${removed[0]} must not start a service`);
   }
-  const dryRun = spawnSync(ghostlight, ["install", "--dry-run", "--no-clients"], {
-    env: environment,
-    encoding: "utf8"
-  });
+  const dryRun = edge(["install", "--dry-run", "--no-clients"]);
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /no machine state will change/);
 
-  const authority = spawn(ghostlight, [], {
-    env: environment,
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-  services.push(authority);
-  authority.stderr.on("data", (chunk) => process.stderr.write(`[ghostlight] ${chunk}`));
+  const absent = edge(["status"]);
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.match(absent.stdout, new RegExp(`^Ghostlight ${version.replaceAll(".", "\\.")}$`, "m"));
+  assert.match(absent.stdout, /Ghostlight service is not running\./);
+  const absentJson = edge(["status", "--json"]);
+  assert.equal(absentJson.status, 0, absentJson.stderr);
+  assert.equal(JSON.parse(absentJson.stdout).running, false);
+  const absentDoctor = edge(["doctor"]);
+  assert.equal(absentDoctor.status, 0, absentDoctor.stderr);
+  assert.match(absentDoctor.stdout, new RegExp(`Ghostlight ${version.replaceAll(".", "\\.")} diagnostics`));
+  assert.match(absentDoctor.stdout, /Ghostlight service is not running\./);
+  const absentDiagnosis = edge(["doctor", "--json"]);
+  assert.equal(absentDiagnosis.status, 0, absentDiagnosis.stderr);
+  const unreached = JSON.parse(absentDiagnosis.stdout);
+  assert.equal(unreached.service.running, false);
+  assert.equal(unreached.readiness, null, "no service means no readiness to report");
+  assert.equal(await home.status(), null, "status, doctor, help, version and a dry run start no service");
+  console.log("PASS status and doctor print and return without starting a service");
 
-  for (let attempt = 0; attempt < 80 && !existsSync(runtimeFile); attempt += 1) await sleep(50);
-  assert.equal(existsSync(runtimeFile), true, "the service never published runtime discovery");
-  const status = spawnSync(ghostlight, ["status", "--json"], {
-    env: environment,
-    encoding: "utf8"
-  });
+  // A call starts the service when none runs, as a command start.
+  const catalog = call(["--catalog"]);
+  assert.equal(catalog.status, 0, catalog.stderr);
+  assert.deepEqual(catalog.stdout.trim().split("\n").sort(), [...catalogNames].sort(), "the CLI sees the whole catalog");
+  const started = await home.serviceUp();
+  assert.equal(started.started_by, startReason.command, "a call that finds no service starts one for the command line");
+  assert.equal(started.service, version);
+  console.log("PASS call starts one service with the start reason command");
+
+  // With a service running, status and doctor report it and still return zero.
+  const status = edge(["status", "--json"]);
   assert.equal(status.status, 0, status.stderr);
   const statusJson = JSON.parse(status.stdout);
   assert.equal(statusJson.running, true);
+  assert.equal(statusJson.instance, started.instance);
   assert.equal("token" in statusJson, false, "status must never reveal local authentication material");
-  const doctor = spawnSync(ghostlight, ["doctor"], {
-    env: environment,
-    encoding: "utf8"
-  });
+  const doctor = edge(["doctor"]);
   assert.equal(doctor.status, 0, doctor.stderr);
   assert.match(
     doctor.stdout,
     /Readiness: Not connected -- No browser is connected\. Open a supported Chromium browser with the Ghostlight extension installed\./
   );
-  const doctorJson = spawnSync(ghostlight, ["doctor", "--json"], {
-    env: environment,
-    encoding: "utf8"
-  });
+  const doctorJson = edge(["doctor", "--json"]);
   assert.equal(doctorJson.status, 0, doctorJson.stderr);
   const diagnosis = JSON.parse(doctorJson.stdout);
   assert.equal(diagnosis.readiness.state, "not_connected");
   assert.equal(diagnosis.readiness.word, "Not connected");
+  assert.equal(diagnosis.service.running, true);
+  console.log("PASS status and doctor report the running service");
 
-  const listed = call(["browser_tabs", '{"action":"list"}']);
-  // A live read has nothing to read without a connected browser: it refuses instead of
-  // answering from remembered state. Which honest answer arrives depends on this machine's
-  // installed browsers, so the journey pins the closed language contract, not the inventory:
-  // plural evidence asks the person to open a named browser, unusable registrations name the
-  // choice-free remedy, and no refusal ever says Ghostlight declined to choose.
-  assert.notEqual(listed.status, 0, listed.stderr);
-  const rendered = call(["browser_tabs", '{"action":"list"}', "--json"]);
-  assert.notEqual(rendered.status, 0);
+  const listed = call(["browser_tabs", LIST]);
+  // A live read has nothing to read without a connected browser: it refuses instead of answering
+  // from remembered state. Which honest answer arrives depends on this machine's installed
+  // browsers, so the journey pins the closed language contract, not the inventory: plural evidence
+  // asks the person to open a named browser, unusable registrations name the choice-free remedy,
+  // and no refusal ever says Ghostlight declined to choose.
+  assert.equal(listed.status, EXIT_FAILED, listed.stderr);
+  const rendered = call(["browser_tabs", LIST, "--json"]);
+  assert.equal(rendered.status, EXIT_FAILED);
   const result = JSON.parse(rendered.stdout.trim());
   assert.equal(result.status, "failed");
   if (result.facts.reason === "browser_startup_manual") {
@@ -177,14 +130,9 @@ try {
       /^No browser is connected\. Ask the user to open a .+ browser window with the Ghostlight extension installed, then repeat the call\.$/
     );
     assert.ok(result.facts.browsers.length >= 1, listed.stdout);
-    if (result.facts.browsers.length === 1) {
-      assert.equal(result.facts.browser, result.facts.browsers[0]);
-    }
+    if (result.facts.browsers.length === 1) assert.equal(result.facts.browser, result.facts.browsers[0]);
   } else if (result.facts.reason === "native_host_unavailable") {
-    assert.equal(
-      listed.stdout.trim(),
-      "The browser cannot use Ghostlight's native messaging registration."
-    );
+    assert.equal(listed.stdout.trim(), "The browser cannot use Ghostlight's native messaging registration.");
     assert.ok(result.facts.details.length >= 1, listed.stdout);
   } else if (result.facts.reason === "browser_absent") {
     assert.equal(listed.stdout.trim(), "No supported Chromium browser is installed.");
@@ -192,58 +140,60 @@ try {
     assert.fail(`unexpected no-browser reason: ${result.facts.reason}`);
   }
 
-  const catalog = call(["--catalog"]);
-  assert.equal(catalog.status, 0);
-  assert.equal(catalog.stdout.trim().split("\n").length, 24, "the CLI sees the whole catalog");
-
   // A refusal must not look like success to a shell.
   const rejected = call(["browser_navigate", "{}"]);
   assert.notEqual(rejected.status, 0);
   assert.equal(rejected.stdout.trim(), "The call does not match the Ghostlight catalog.");
 
-  // One process, one session: even refusals from an earlier line share the workspace with
-  // later ones.
-  const batch = call(["--stdin"], 'browser_tabs {"action":"list"}\nbrowser_tabs {"action":"list"}\n\nbrowser_tabs {"action":"list"}\n');
+  // One process, one session: even refusals from an earlier line share the workspace with later
+  // ones.
+  const batch = call(["--stdin"], `browser_tabs ${LIST}\nbrowser_tabs ${LIST}\n\nbrowser_tabs ${LIST}\n`);
   // Every line refuses for the same honest reason; the batch reports the failure.
-  assert.notEqual(batch.status, 0, batch.stderr);
-  for (const line of batch.stdout.trim().split("\n")) {
-    if (line.trim()) {
-      assert.match(line, /No browser is connected|native messaging registration/);
-    }
-  }
+  assert.equal(batch.status, EXIT_FAILED, batch.stderr);
+  const lines = batch.stdout.trim().split("\n").filter((line) => line.trim());
+  assert.equal(lines.length, 3, "every line of the batch is answered");
+  for (const line of lines) assert.match(line, /No browser is connected|native messaging registration|No supported Chromium browser/);
 
-  await sleep(300);
-  // Three separate processes, then three batched calls. Retrieving the catalog invokes nothing
-  // and is deliberately not an audited action.
-  const written = records();
-  assert.equal(written.length, 6, `expected every invocation to be audited, saw ${written.length}`);
+  // Retrieving the catalog invokes nothing and is deliberately not an audited action.
+  const tabRecords = await until(() => {
+    const found = home.auditRecords().filter((record) => record.tool === "browser_tabs");
+    return found.length >= 5 && found;
+  }, "the five browser_tabs calls are audited");
+  assert.equal(tabRecords.length, 5, "two separate calls and a batch of three are audited once each");
+  const written = home.auditRecords();
   for (const record of written) {
     assert.equal(record.channel, "cli", "scripted work must be attributed to its own channel");
   }
   assert.equal(
-    new Set(written.slice(-3).map((record) => record.workspace)).size,
+    new Set(tabRecords.slice(-3).map((record) => record.workspace)).size,
     1,
     "a batch must hold one workspace across its calls"
   );
-  // Every call here came from this one node process, so the session marker gathers all of them --
-  // the separate processes and the batch alike -- into a single workspace (ADR-0106).
+  // Every call came from this one node process, so the session marker gathers all of them -- the
+  // separate processes and the batch alike -- into a single workspace (ADR-0106).
   assert.equal(
     new Set(written.map((record) => record.workspace)).size,
     1,
     "calls from one caller must reach one workspace, whatever process each ran in"
   );
+  console.log("PASS a call reaches the executor as the cli channel and a batch keeps one workspace");
 
-  // The strongest guarantee this journey owns: after every beat, the machine's real
-  // native-host registration is byte-identical to the snapshot taken before the first process.
-  assert.equal(
-    machineRegistration(),
-    registrationBefore,
-    "the journey changed the machine's native-host registration"
-  );
+  // After a quit the next call starts a service again, as a command start.
+  const quit = await home.quit();
+  assert.ok(quit, "the service quits");
+  assert.equal(await home.status(), null);
+  const again = call(["--catalog"]);
+  assert.equal(again.status, 0, again.stderr);
+  const second = await home.serviceUp();
+  assert.notEqual(second.instance, started.instance, "the second service is a new instance");
+  assert.equal(second.started_by, startReason.command);
+  console.log("PASS a call after a quit starts a new service with the start reason command");
 
-  console.log("cli journey ok: demand-free call -> governed result -> cli-attributed audit -> batch session");
+  // The strongest guarantee this journey owns: after every beat, the machine's real native-host
+  // registration is byte-identical to the snapshot taken before the first process.
+  assert.equal(machineRegistration(), registrationBefore, "the journey changed the machine's native-host registration");
+
+  console.log("cli journey ok: status and doctor without a service -> call starts one -> governed result -> cli-attributed audit -> batch session");
 } finally {
-  for (const child of services) if (!child.killed) child.kill();
-  for (const file of cleanup) rmSync(file, { force: true });
-  rmSync(nativeHostDir, { force: true, recursive: true });
+  await home.cleanup();
 }

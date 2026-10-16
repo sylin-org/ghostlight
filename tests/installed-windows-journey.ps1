@@ -4,8 +4,9 @@
 Exercises the real installed Chrome/native-host/service path, then every MCP tool.
 .DESCRIPTION
 Opt-in, disruptive integration test for an idle development installation. Removes and restores
-the owned native-host registration, stops the exact browser connector, and crashes the exact
-authority to prove demand-start. Chrome stays running. No browser settings or policy are changed.
+the owned native-host registration, stops the exact browser edge, and crashes the exact service
+to prove that the MCP edge starts the next one and the browser reconnects through a new edge.
+Chrome stays running. No browser settings or policy are changed.
 Requires the normal four owned registrations. Refuses environment redirection and foreign paths.
 Run on a dedicated release test machine for candidate acceptance; a dev install is not a package.
 #>
@@ -21,9 +22,9 @@ if (-not $IsWindows -or -not $ExerciseInstalledStack) { throw 'Requires explicit
 $repo = Split-Path -Parent $PSScriptRoot
 $binRoot = (Resolve-Path -LiteralPath $BinDir).Path
 $chromeImage = (Resolve-Path -LiteralPath $ChromePath).Path
-$authorityImage = Join-Path $binRoot 'ghostlight.exe'
-$connectorImage = Join-Path $binRoot 'ghostlight-browser-connector.exe'
-foreach ($name in @('GHOSTLIGHT_RUNTIME_FILE', 'GHOSTLIGHT_NATIVE_HOST_DIR', 'GHOSTLIGHT_PROFILE_DIR')) {
+$serviceImage = Join-Path $binRoot 'ghostlight-service.exe'
+$edgeImage = Join-Path $binRoot 'ghostlight.exe'
+foreach ($name in @('GHOSTLIGHT_TEST_HOME', 'GHOSTLIGHT_NATIVE_HOST_DIR', 'GHOSTLIGHT_PROFILE_DIR')) {
     if ([Environment]::GetEnvironmentVariable($name)) { throw "Remove ${name}: this journey requires the actual installation." }
 }
 $output = Join-Path $repo ('.tmp/installed-windows/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfff'))
@@ -40,7 +41,7 @@ function Save-Evidence {
 }
 function Invoke-Product([string[]]$Arguments) {
     $info = [Diagnostics.ProcessStartInfo]::new()
-    $info.FileName = $authorityImage
+    $info.FileName = $edgeImage
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
     foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
@@ -58,6 +59,13 @@ function Get-Doctor { (Invoke-Product @('doctor', '--json')) | ConvertFrom-Json 
 function Get-ExactProcess([string]$Image) {
     @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($Image)) -ErrorAction SilentlyContinue |
         Where-Object Path -EQ $Image)
+}
+# The browser edges: the edge image started by Chrome with an extension origin.
+function Get-NativeEdge {
+    @(Get-CimInstance Win32_Process -Filter "name='ghostlight.exe'" |
+        Where-Object { $_.ExecutablePath -eq $edgeImage -and $_.CommandLine -match 'chrome-extension://' } |
+        ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue } |
+        Where-Object { $null -ne $_ })
 }
 function Get-ChromeRoot {
     @(Get-CimInstance Win32_Process -Filter "name='chrome.exe'" |
@@ -90,7 +98,7 @@ function Phase([string]$Name, [long]$Elapsed) {
 function Invoke-Mcp([int]$RequestId, [string]$Method, [hashtable]$Parameters) {
     $frame = @{ jsonrpc = '2.0'; id = $RequestId; method = $Method; params = $Parameters }
     $script:mcp.StandardInput.WriteLine(($frame | ConvertTo-Json -Compress -Depth 10))
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
         $line = $script:mcp.StandardOutput.ReadLineAsync()
         $remaining = [int][Math]::Max(1, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
@@ -109,7 +117,7 @@ $registrations = @{}
 $script:mcp = $null
 try {
     Save-Evidence
-    foreach ($name in @('ghostlight.exe', 'ghostlight-browser-connector.exe', 'ghostlight-mcp-connector.exe')) {
+    foreach ($name in @('ghostlight.exe', 'ghostlight-service.exe')) {
         $path = Join-Path $binRoot $name
         $report.binaries[$name] = @{ path = $path; sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
     }
@@ -119,8 +127,8 @@ try {
     $report.chrome_pid = $script:chromeProcessId
     $report.chrome_version = (Get-Item -LiteralPath $chromeImage).VersionInfo.ProductVersion
     if ((Get-Doctor).readiness.state -ne 'ready') { throw 'Requires an idle, Ready installation.' }
-    $authorities = @(Get-ExactProcess $authorityImage); $connectors = @(Get-ExactProcess $connectorImage)
-    if ($authorities.Count -ne 1 -or $connectors.Count -ne 1) { throw 'Requires one exact installed authority and connector.' }
+    $authorities = @(Get-ExactProcess $serviceImage); $connectors = @(Get-NativeEdge)
+    if ($authorities.Count -ne 1 -or $connectors.Count -ne 1) { throw 'Requires one exact installed service and browser edge.' }
     $authority = $authorities[0]
     $keys = @('Google/Chrome', 'Microsoft/Edge', 'BraveSoftware/Brave-Browser', 'Chromium') |
         ForEach-Object { "HKCU:/Software/$_/NativeMessagingHosts/org.sylin.ghostlight" }
@@ -142,7 +150,7 @@ try {
             throw 'Requires a physical per-user Ghostlight manifest path.'
         }
         $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        if ($manifest.name -ne 'org.sylin.ghostlight' -or $manifest.path -ne $connectorImage) {
+        if ($manifest.name -ne 'org.sylin.ghostlight' -or $manifest.path -ne $edgeImage) {
             throw 'Registration is foreign or belongs to another installation.'
         }
         $registrations[$key] = @{ path = $path; hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash;
@@ -151,7 +159,7 @@ try {
     $restoreOwed = $true
     $null = Invoke-Product @('native-host', 'uninstall')
     foreach ($key in $keys) { if (Test-Path -LiteralPath $key) { throw 'Registration was not removed.' } }
-    Stop-Exact $connectors[0] $connectorImage
+    Stop-Exact $connectors[0] $edgeImage
     Wait-Readiness 'not_connected'
     Start-Sleep -Seconds 5
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -164,23 +172,24 @@ try {
         }
     }
     $restoreOwed = $false
-    if ((Get-ExactProcess $authorityImage)[0].Id -ne $authority.Id) { throw 'Authority restarted during registration recovery.' }
+    if ((Get-ExactProcess $serviceImage)[0].Id -ne $authority.Id) { throw 'The service restarted during registration recovery.' }
     Phase 'registration-reinstalled-with-Chrome-running' $timer.ElapsedMilliseconds
 
-    $connector = @(Get-ExactProcess $connectorImage)[0]
-    Stop-Exact $connector $connectorImage
+    $connector = @(Get-NativeEdge)[0]
+    Stop-Exact $connector $edgeImage
     $timer.Restart()
     do {
         Start-Sleep -Milliseconds 250
-        $replacement = @(Get-ExactProcess $connectorImage)
+        $replacement = @(Get-NativeEdge)
     } while (($replacement.Count -ne 1 -or $replacement[0].Id -eq $connector.Id) -and $timer.Elapsed.TotalSeconds -lt 45)
-    if ($replacement.Count -ne 1 -or $replacement[0].Id -eq $connector.Id) { throw 'Chrome did not replace its crashed connector.' }
+    if ($replacement.Count -ne 1 -or $replacement[0].Id -eq $connector.Id) { throw 'Chrome did not replace its crashed browser edge.' }
     Wait-Readiness 'ready'
-    Phase 'native-connector-crash-recovers-automatically' $timer.ElapsedMilliseconds
+    Phase 'browser-edge-crash-recovers-automatically' $timer.ElapsedMilliseconds
 
     $connector = $replacement[0]
     $info = [Diagnostics.ProcessStartInfo]::new()
-    $info.FileName = Join-Path $binRoot 'ghostlight-mcp-connector.exe'
+    $info.FileName = $edgeImage
+    $info.ArgumentList.Add('mcp')
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true
     $script:mcp = [Diagnostics.Process]::new(); $script:mcp.StartInfo = $info
@@ -192,18 +201,25 @@ try {
     $listed = Invoke-Mcp 2 'tools/call' @{ name = 'browser_tabs'; arguments = @{ action = 'list' } }
     if ($listed.structuredContent.status -ne 'succeeded') { throw 'MCP browser work failed before service interruption.' }
     $report.retained_mcp_pid = $script:mcp.Id
-    Stop-Exact $authority $authorityImage
+    Stop-Exact $authority $serviceImage
     $timer.Restart()
+    # The MCP edge keeps its stream and starts the next service when a request needs it. The browser
+    # edge exits once that service answers, and Chrome starts a new one.
+    $relisted = Invoke-Mcp 3 'tools/list' @{}
+    if (@($relisted.tools).Count -eq 0 -or $script:mcp.HasExited) { throw 'The initialized MCP stream did not survive the lost service.' }
     Wait-Readiness 'ready'
-    $restarted = @(Get-ExactProcess $authorityImage)
-    if ($restarted.Count -ne 1 -or $restarted[0].Id -eq $authority.Id) { throw 'Authority was not demand-started.' }
-    $retained = @(Get-ExactProcess $connectorImage)
-    if ($retained.Count -ne 1 -or $retained[0].Id -ne $connector.Id) { throw 'Native port was replaced during authority recovery.' }
-    $listed = Invoke-Mcp 3 'tools/call' @{ name = 'browser_tabs'; arguments = @{ action = 'list' } }
+    $restarted = @(Get-ExactProcess $serviceImage)
+    if ($restarted.Count -ne 1 -or $restarted[0].Id -eq $authority.Id) { throw 'A new service did not answer.' }
+    do {
+        Start-Sleep -Milliseconds 250
+        $reconnected = @(Get-NativeEdge)
+    } while (($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $connector.Id) -and $timer.Elapsed.TotalSeconds -lt 45)
+    if ($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $connector.Id) { throw 'Chrome did not start a new browser edge after the service returned.' }
+    $listed = Invoke-Mcp 4 'tools/call' @{ name = 'browser_tabs'; arguments = @{ action = 'list' } }
     if ($listed.structuredContent.status -ne 'succeeded' -or $script:mcp.HasExited) {
         throw 'Same initialized MCP stream did not complete browser work after recovery.'
     }
-    Phase 'authority-crash-recovers-with-same-native-port' $timer.ElapsedMilliseconds
+    Phase 'service-crash-keeps-the-MCP-stream-and-the-browser-reconnects' $timer.ElapsedMilliseconds
     $script:mcp.StandardInput.Close()
     if (-not $script:mcp.WaitForExit(3000)) { $script:mcp.Kill() }
     $script:mcp.Dispose(); $script:mcp = $null

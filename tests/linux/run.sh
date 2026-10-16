@@ -15,7 +15,6 @@ esac
 if test "$driver" != --print-env; then test -f "$scripts/$driver"; fi
 
 export GHOSTLIGHT_LINUX_VERSION=${GHOSTLIGHT_LINUX_VERSION:-$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')}
-export GHOSTLIGHT_LINUX_PREVIOUS_VERSION=${GHOSTLIGHT_LINUX_PREVIOUS_VERSION:-1.3.4}
 export GHOSTLIGHT_LINUX_AREA=${GHOSTLIGHT_LINUX_AREA:-$repository/.tmp/linux-local}
 export GHOSTLIGHT_LINUX_INSTALLED_AREA=${GHOSTLIGHT_LINUX_INSTALLED_AREA:-$repository/.tmp/linux-installed}
 export GHOSTLIGHT_LINUX_BIN_DIR=${GHOSTLIGHT_LINUX_BIN_DIR:-$GHOSTLIGHT_LINUX_AREA/portable-a/ghostlight-v$GHOSTLIGHT_LINUX_VERSION-x86_64-unknown-linux-gnu}

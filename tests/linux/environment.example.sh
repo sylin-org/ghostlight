@@ -9,8 +9,7 @@ export GHOSTLIGHT_LINUX_BRAVE="$GHOSTLIGHT_LINUX_AREA/brave/opt/brave.com/brave/
 # Optional: point to already-built/extracted artifacts instead of the default area layout.
 # export GHOSTLIGHT_LINUX_BIN_DIR="$PWD/.tmp/candidate/bin"
 # export GHOSTLIGHT_LINUX_PORTABLE_ARCHIVE="$PWD/.tmp/candidate/portable.tar.gz"
-export GHOSTLIGHT_LINUX_PREVIOUS_VERSION=1.3.4
-# Candidate version defaults to Cargo.toml. This predecessor pin reproduces the recorded lane.
+# Candidate version defaults to Cargo.toml.
 
 # Optional build-guest tool locations. The Rust toolchain defaults to rustup's active toolchain.
 # export GHOSTLIGHT_LINUX_GUEST_AREA="$GHOSTLIGHT_LINUX_AREA/guest"

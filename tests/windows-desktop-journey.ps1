@@ -1,5 +1,6 @@
-# Exercise the real Windows workbench lifetime, including Open racing native startup.
-# All window operations address only exact Ghostlight processes spawned by this journey.
+# Exercise the real Windows workbench lifetime, including Open racing the service's startup.
+# The journey runs in a test home under .tmp holding its own copies of the edge, the service and
+# the shell. Every window and process operation addresses only exact images of that home.
 param(
     [string] $BinDir = $env:GHOSTLIGHT_BIN_DIR,
     [ValidateRange(1, 10)] [int] $StartupRounds = 3,
@@ -10,11 +11,19 @@ $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'This journey requires an interactive Windows desktop.' }
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $BinDir) { $BinDir = Join-Path $repository '.target-ghostlight-1.0/debug' }
-$executable = (Resolve-Path -LiteralPath (Join-Path $BinDir 'ghostlight.exe')).Path
-$binaryDirectory = Split-Path -Parent $executable
 $stamp = [Guid]::NewGuid().ToString('N')
 $evidence = Join-Path $repository ".tmp/native-desktop-$stamp"
-$null = New-Item -ItemType Directory -Path $evidence
+$ghostlightHome = Join-Path $evidence 'home'
+$null = New-Item -ItemType Directory -Path (Join-Path $ghostlightHome 'bin')
+foreach ($name in @('ghostlight.exe', 'ghostlight-service.exe', 'ghostlight-desktop.exe')) {
+    $source = Join-Path $BinDir $name
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing $source; build the workspace first." }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $ghostlightHome 'bin')
+}
+$edgeImage = (Resolve-Path -LiteralPath (Join-Path $ghostlightHome 'bin/ghostlight.exe')).Path
+$serviceImage = (Resolve-Path -LiteralPath (Join-Path $ghostlightHome 'bin/ghostlight-service.exe')).Path
+$shellImage = (Resolve-Path -LiteralPath (Join-Path $ghostlightHome 'bin/ghostlight-desktop.exe')).Path
+$env:GHOSTLIGHT_TEST_HOME = $ghostlightHome
 $env:GHOSTLIGHT_AUDIT_FILE = Join-Path $evidence 'audit.jsonl'
 $env:GHOSTLIGHT_POLICY_FILE = Join-Path $evidence 'policy.json'
 @{
@@ -24,8 +33,11 @@ $env:GHOSTLIGHT_POLICY_FILE = Join-Path $evidence 'policy.json'
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $env:GHOSTLIGHT_POLICY_FILE -Encoding utf8
 $env:GHOSTLIGHT_NATIVE_HOST_DIR = Join-Path $evidence 'native-host'
 $env:GHOSTLIGHT_DIAGNOSTICS_DIR = Join-Path $evidence 'diagnostics'
-$binaryHash = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
-Write-Output "Native desktop binary: $executable SHA256=$binaryHash"
+$hashes = @{}
+foreach ($image in @($edgeImage, $serviceImage, $shellImage)) {
+    $hashes[[IO.Path]::GetFileName($image)] = (Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash
+}
+Write-Output "Native desktop images: $($hashes.Keys -join ', ') from $BinDir"
 Write-Output "Native desktop evidence: $evidence"
 
 Add-Type -TypeDefinition @'
@@ -36,6 +48,7 @@ using System.Text;
 public static class GhostlightNativeJourney {
     public class Window {
         public long Handle;
+        public int Owner;
         public bool Visible;
         public bool Minimized;
         public bool Responsive;
@@ -60,7 +73,7 @@ public static class GhostlightNativeJourney {
             if (name.ToString() != "Ghostlight Window") return true;
             UIntPtr ignored;
             result.Add(new Window {
-                Handle=window.ToInt64(), Visible=IsWindowVisible(window), Minimized=IsIconic(window),
+                Handle=window.ToInt64(), Owner=owner, Visible=IsWindowVisible(window), Minimized=IsIconic(window),
                 Responsive=SendMessageTimeout(window, 0, UIntPtr.Zero, IntPtr.Zero, 2, 250, out ignored) != IntPtr.Zero
             });
             return true;
@@ -76,9 +89,10 @@ public static class GhostlightNativeJourney {
             if (!PostMessage(window, 0x0010, UIntPtr.Zero, IntPtr.Zero)) throw new InvalidOperationException("WM_CLOSE failed.");
         } else if (!ShowWindowAsync(window, 6)) throw new InvalidOperationException("Minimize failed.");
     }
+    // Every Ghostlight process owns one session listener window (class GhostlightSessionListener_*).
+    // This sends it the end-session messages Windows sends at sign-out and shutdown.
     public static void EndSession(int owner) {
         IntPtr listener = IntPtr.Zero;
-        IntPtr workbench = IntPtr.Zero;
         EnumWindows((window, data) => {
             uint process;
             GetWindowThreadProcessId(window, out process);
@@ -86,7 +100,6 @@ public static class GhostlightNativeJourney {
             var name = new StringBuilder(256);
             GetClassName(window, name, name.Capacity);
             if (name.ToString().StartsWith("GhostlightSessionListener_")) listener = window;
-            if (name.ToString() == "Ghostlight Window") workbench = window;
             return true;
         }, IntPtr.Zero);
         if (listener == IntPtr.Zero) throw new InvalidOperationException("Session listener window is unavailable.");
@@ -94,28 +107,23 @@ public static class GhostlightNativeJourney {
         UIntPtr result;
         if (SendMessageTimeout(listener, 0x0011, UIntPtr.Zero, IntPtr.Zero, 2, 1000, out result) == IntPtr.Zero || result.ToUInt64() != 1)
             throw new InvalidOperationException("WM_QUERYENDSESSION was not accepted promptly.");
-
-        // Exercise the worst order observed during a real shutdown: Tao can destroy its event
-        // target before the dedicated listener receives WM_ENDSESSION. These sends may race the
-        // expected process exit, so only the earlier query has a reply assertion.
-        if (workbench != IntPtr.Zero)
-            SendMessageTimeout(workbench, 0x0016, new UIntPtr(1), IntPtr.Zero, 2, 250, out result);
+        // The process may exit before this send returns, so only the earlier query has a reply
+        // assertion.
         SendMessageTimeout(listener, 0x0016, new UIntPtr(1), IntPtr.Zero, 2, 250, out result);
     }
 }
 '@
 
 $children = [Collections.Generic.List[Diagnostics.Process]]::new()
-$connectorChildren = [Collections.Generic.List[object]]::new()
+$edgeChildren = [Collections.Generic.List[Diagnostics.Process]]::new()
 $observations = [Collections.Generic.List[object]]::new()
-$runtimeFiles = [Collections.Generic.List[string]]::new()
 $script:launch = 0
 $failure = $null
 
-function Start-OwnedProcess([string[]] $Arguments = @()) {
+function Start-OwnedProcess([string] $FilePath, [string[]] $Arguments = @()) {
     $script:launch++
     $options = @{
-        FilePath = $executable; PassThru = $true; WindowStyle = 'Hidden'
+        FilePath = $FilePath; PassThru = $true; WindowStyle = 'Hidden'
         RedirectStandardOutput = (Join-Path $evidence "$script:launch.stdout.log")
         RedirectStandardError = (Join-Path $evidence "$script:launch.stderr.log")
     }
@@ -125,22 +133,50 @@ function Start-OwnedProcess([string[]] $Arguments = @()) {
     return $child
 }
 
-function Get-OwnedWindows([Diagnostics.Process] $Authority) {
-    $Authority.Refresh()
-    if ($Authority.HasExited) { throw "Authority $($Authority.Id) exited unexpectedly with $($Authority.ExitCode)." }
-    if ($Authority.MainModule.FileName -ine $executable) { throw 'Authority executable ownership changed.' }
-    $windows = @([GhostlightNativeJourney]::Inspect($Authority.Id))
+# The processes whose executable is exactly `$Image`, an image of this journey's own home.
+function Get-ImageProcesses([string] $Image) {
+    @(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($Image)) -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -ieq $Image })
+}
+
+function Get-OwnedService {
+    $services = @(Get-ImageProcesses $serviceImage)
+    if ($services.Count -ne 1) { throw "Expected one service of this home, found $($services.Count)." }
+    return $services[0]
+}
+
+# The window belongs to the shell. A second shell exits at once, so at most one window exists in
+# any process of this home at any time.
+function Get-OwnedWindows {
+    $null = Get-OwnedService
+    $windows = @()
+    foreach ($shell in @(Get-ImageProcesses $shellImage)) {
+        $windows += @([GhostlightNativeJourney]::Inspect($shell.Id))
+    }
     if ($windows.Count -gt 1) {
         $details = $windows | ConvertTo-Json -Compress
-        throw "Duplicate native workbenches in owned PID $($Authority.Id): $details"
+        throw "Duplicate native workbenches in this home: $details"
     }
     return $windows
 }
 
-function Wait-WindowState([Diagnostics.Process] $Authority, [string] $State) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+function Wait-ServiceRunning {
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
-        $windows = @(Get-OwnedWindows $Authority)
+        $text = & $edgeImage status --json 2>$null
+        if ($LASTEXITCODE -eq 0 -and $text) {
+            $status = $text | ConvertFrom-Json
+            if ($status.running) { return $status }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'The service did not answer status.'
+}
+
+function Wait-WindowState([string] $State) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $windows = @(Get-OwnedWindows)
         $ready = switch ($State) {
             'closed' { $windows.Count -eq 0 }
             'minimized' { $windows.Count -eq 1 -and $windows[0].Responsive -and $windows[0].Minimized }
@@ -150,35 +186,35 @@ function Wait-WindowState([Diagnostics.Process] $Authority, [string] $State) {
         if ($ready) { return $windows }
         Start-Sleep -Milliseconds 25
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Timed out waiting for $State workbench in PID $($Authority.Id)."
+    throw "Timed out waiting for $State workbench."
 }
 
-function Wait-OpenBurst([Diagnostics.Process] $Authority, [object[]] $Openers) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+function Wait-OpenBurst([object[]] $Openers) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(45)
     do {
-        $null = @(Get-OwnedWindows $Authority)
         $pending = 0
         foreach ($opener in $Openers) {
             $opener.Refresh()
             if (-not $opener.HasExited) { $pending++; continue }
             if ($opener.ExitCode -ne 0) { throw "Open process $($opener.Id) failed: $($opener.ExitCode)." }
         }
+        # Count windows only once the service exists; the first openers race to start it.
+        if (@(Get-ImageProcesses $serviceImage).Count -eq 1) { $null = @(Get-OwnedWindows) }
         if ($pending -eq 0) { return }
         Start-Sleep -Milliseconds 25
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Concurrent Open requests did not settle.'
 }
 
-function Record-State([int] $Round, [string] $State, [Diagnostics.Process] $Authority) {
-    $windows = @(Get-OwnedWindows $Authority)
-    $observations.Add(@{ round=$Round; state=$State; pid=$Authority.Id; windows=$windows })
+function Record-State([int] $Round, [string] $State) {
+    $windows = @(Get-OwnedWindows)
+    $observations.Add(@{ round=$Round; state=$State; pid=(Get-OwnedService).Id; windows=$windows })
     Write-Output "PASS round=$Round $State count=$($windows.Count)"
 }
 
-function Assert-IsolatedWebView([int] $Round, [Diagnostics.Process] $Authority) {
-    # Query only children of the exact owned authority. Never collect unrelated browser profiles.
-    $null = @(Get-OwnedWindows $Authority)
-    $webViews = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($Authority.Id) AND Name = 'msedgewebview2.exe'")
+function Assert-IsolatedWebView([int] $Round, [int] $ShellId) {
+    # Query only children of the exact shell of this home. Never collect unrelated browser profiles.
+    $webViews = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $ShellId AND Name = 'msedgewebview2.exe'")
     $profiles = @()
     foreach ($webView in $webViews) {
         if ($webView.CommandLine -match '(?:^|\s)--user-data-dir=(?:"([^"]+)"|(\S+))') {
@@ -186,116 +222,112 @@ function Assert-IsolatedWebView([int] $Round, [Diagnostics.Process] $Authority) 
             $profiles += [IO.Path]::GetFullPath($profile)
         }
     }
-    # WebView2 keeps Chromium's browser profile in EBWebView beneath the selected UDF.
-    $expected = [IO.Path]::GetFullPath((Join-Path $env:WEBVIEW2_USER_DATA_FOLDER 'EBWebView'))
+    # WebView2 keeps Chromium's browser profile in EBWebView beneath the shell's profile directory.
+    $expected = [IO.Path]::GetFullPath((Join-Path $ghostlightHome 'state/desktop-webview/EBWebView'))
     if (-not $profiles.Count -or @($profiles | Where-Object { $_ -ine $expected }).Count) {
-        throw 'Owned WebView2 did not use its isolated evidence directory.'
+        throw 'The shell WebView2 did not use the profile directory of this home.'
     }
-    if (-not (Test-Path -LiteralPath $expected -PathType Container)) {
-        throw 'Owned WebView2 did not create its isolated data directory.'
-    }
-    $observations.Add(@{ round=$Round; state='isolated-webview-profile'; pid=$Authority.Id; directory=$expected })
+    $observations.Add(@{ round=$Round; state='isolated-webview-profile'; pid=$ShellId; directory=$expected })
     Write-Output "PASS round=$Round isolated-webview-profile"
+}
+
+function Stop-ImageProcesses([string] $Image) {
+    foreach ($process in @(Get-ImageProcesses $Image)) {
+        Stop-Process -InputObject $process -Force
+        if (-not $process.WaitForExit(5000)) { throw "Owned process $($process.Id) did not exit." }
+    }
 }
 
 function Stop-OwnedProcess([Diagnostics.Process] $Child) {
     $Child.Refresh()
     if (-not $Child.HasExited) {
-        if ($Child.MainModule.FileName -ine $executable) { throw 'Cleanup executable ownership changed.' }
         Stop-Process -InputObject $Child -Force
         if (-not $Child.WaitForExit(5000)) { throw "Owned child $($Child.Id) did not exit." }
     }
 }
 
-function Assert-ConnectorShutdown([string] $FileName) {
-    $image = (Resolve-Path -LiteralPath (Join-Path $BinDir $FileName)).Path
+# Starts the edge with held input and a verb, waits for its session listener, delivers the
+# end-session sequence and requires a prompt, successful exit.
+function Assert-EdgeShutdown([string[]] $Arguments, [string] $Label) {
     $info = [Diagnostics.ProcessStartInfo]::new()
-    $info.FileName = $image
+    $info.FileName = $edgeImage
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
     $info.RedirectStandardInput = $true
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
-    $connector = [Diagnostics.Process]::new()
-    $connector.StartInfo = $info
-    if (-not $connector.Start()) { throw "Could not start $FileName." }
-    $connectorChildren.Add(@{ process=$connector; image=$image })
+    $edge = [Diagnostics.Process]::new()
+    $edge.StartInfo = $info
+    if (-not $edge.Start()) { throw "Could not start the edge for $Label." }
+    $edgeChildren.Add($edge)
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     $listenerReady = $false
     do {
-        $connector.Refresh()
-        if ($connector.HasExited) { throw "$FileName exited before its shutdown listener was ready." }
+        $edge.Refresh()
+        if ($edge.HasExited) { throw "The $Label edge exited before its session listener was ready." }
         try {
-            [GhostlightNativeJourney]::EndSession($connector.Id)
+            [GhostlightNativeJourney]::EndSession($edge.Id)
             $listenerReady = $true
             break
         } catch {
-            if ($_.Exception.Message -notmatch 'Shutdown listener window is unavailable') { throw }
+            if ($_.Exception.Message -notmatch 'Session listener window is unavailable') { throw }
         }
         Start-Sleep -Milliseconds 25
     } while ([DateTime]::UtcNow -lt $deadline)
-    if (-not $listenerReady) { throw "$FileName did not create its shutdown listener." }
-    if (-not $connector.WaitForExit(4000)) { throw "$FileName ignored WM_ENDSESSION." }
-    if ($connector.ExitCode -ne 0) { throw "$FileName ended session with status $($connector.ExitCode)." }
-    $observations.Add(@{ round=0; state='connector-shutdown-exit'; process=$FileName; pid=$connector.Id; windows=@() })
-    Write-Output "PASS process=$FileName system-shutdown-exit"
+    if (-not $listenerReady) { throw "The $Label edge did not create its session listener." }
+    if (-not $edge.WaitForExit(4000)) { throw "The $Label edge ignored WM_ENDSESSION." }
+    if ($edge.ExitCode -ne 0) { throw "The $Label edge ended session with status $($edge.ExitCode)." }
+    $observations.Add(@{ round=0; state='edge-shutdown-exit'; process=$Label; pid=$edge.Id; windows=@() })
+    Write-Output "PASS process=$Label system-shutdown-exit"
 }
 
 try {
-    $connectorRuntime = Join-Path $binaryDirectory ".ghostlight-native-$stamp-connectors.json"
-    $runtimeFiles.Add($connectorRuntime)
-    $runtimeFiles.Add([IO.Path]::ChangeExtension($connectorRuntime, '.lock'))
-    $env:GHOSTLIGHT_RUNTIME_FILE = $connectorRuntime
-    Assert-ConnectorShutdown 'ghostlight-mcp-connector.exe'
-    Assert-ConnectorShutdown 'ghostlight-browser-connector.exe'
+    Assert-EdgeShutdown @('mcp') 'mcp'
+    Assert-EdgeShutdown @('chrome-extension://abcdefghijklmnopabcdefghijklmnop/') 'browser'
+    if (@(Get-ImageProcesses $serviceImage).Count) { throw 'An idle edge started a service.' }
 
     for ($round = 1; $round -le $StartupRounds; $round++) {
-        # The runtime override stays beside the exact executable under test (ADR-0150).
-        $runtime = Join-Path $binaryDirectory ".ghostlight-native-$stamp-$round.json"
-        $runtimeFiles.Add($runtime)
-        $runtimeFiles.Add([IO.Path]::ChangeExtension($runtime, '.lock'))
-        $env:GHOSTLIGHT_RUNTIME_FILE = $runtime
-        $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $evidence "webview2-$round"
-        $authority = Start-OwnedProcess
-        $deadline = [DateTime]::UtcNow.AddSeconds(15)
-        while (-not (Test-Path -LiteralPath $runtime)) {
-            $authority.Refresh()
-            if ($authority.HasExited) { throw 'The ordinary desktop launch exited before publishing discovery.' }
-            if ([DateTime]::UtcNow -gt $deadline) { throw 'Desktop runtime discovery was not published.' }
-            Start-Sleep -Milliseconds 2
-        }
-        # The endpoint binds at start, before any shell attaches. Start the real authenticated Open calls immediately.
-        $openers = @(for ($index = 0; $index -lt $OpenBurst; $index++) { Start-OwnedProcess @('open') })
-        Wait-OpenBurst $authority $openers
-        $window = @(Wait-WindowState $authority 'restored')[0]
+        # A person's start: the openers race to start the service, one wins, and the shell brings up
+        # one window. Open requests keep arriving while the service starts.
+        $openers = @(for ($index = 0; $index -lt $OpenBurst; $index++) { Start-OwnedProcess $serviceImage @('open') })
+        Wait-OpenBurst $openers
+        $null = Wait-ServiceRunning
+        $service = Get-OwnedService
+        $window = @(Wait-WindowState 'restored')[0]
         for ($sample = 0; $sample -lt 10; $sample++) {
-            $null = @(Get-OwnedWindows $authority)
+            $null = @(Get-OwnedWindows)
             Start-Sleep -Milliseconds 50
         }
-        Record-State $round 'startup-open-burst' $authority
-        Assert-IsolatedWebView $round $authority
+        Record-State $round 'startup-open-burst'
+        Assert-IsolatedWebView $round $window.Owner
 
         $minimizedHandle = $window.Handle
-        [GhostlightNativeJourney]::Control($authority.Id, $window.Handle, $false)
-        $null = @(Wait-WindowState $authority 'minimized')
-        Record-State $round 'native-minimize' $authority
-        Wait-OpenBurst $authority @((Start-OwnedProcess @('open')))
-        $window = @(Wait-WindowState $authority 'restored')[0]
+        [GhostlightNativeJourney]::Control($window.Owner, $window.Handle, $false)
+        $null = @(Wait-WindowState 'minimized')
+        Record-State $round 'native-minimize'
+        Wait-OpenBurst @((Start-OwnedProcess $serviceImage @('open')))
+        $window = @(Wait-WindowState 'restored')[0]
         if ($window.Handle -ne $minimizedHandle) { throw 'Open replaced the minimized native window instead of restoring it.' }
-        Record-State $round 'restore-existing' $authority
+        Record-State $round 'restore-existing'
 
-        [GhostlightNativeJourney]::Control($authority.Id, $window.Handle, $true)
-        $null = @(Wait-WindowState $authority 'closed')
-        Record-State $round 'native-close-authority-alive' $authority
-        $openers = @(for ($index = 0; $index -lt $OpenBurst; $index++) { Start-OwnedProcess @('open') })
-        Wait-OpenBurst $authority $openers
-        $null = @(Wait-WindowState $authority 'restored')
-        Record-State $round 'reopen-burst-one-replacement' $authority
-        [GhostlightNativeJourney]::EndSession($authority.Id)
-        if (-not $authority.WaitForExit(4000)) { throw "Authority $($authority.Id) ignored WM_ENDSESSION." }
-        if ($authority.ExitCode -ne 0) { throw "Authority $($authority.Id) ended session with status $($authority.ExitCode)." }
-        $observations.Add(@{ round=$round; state='system-shutdown-exit'; pid=$authority.Id; windows=@() })
+        [GhostlightNativeJourney]::Control($window.Owner, $window.Handle, $true)
+        $null = @(Wait-WindowState 'closed')
+        if ((Get-OwnedService).Id -ne $service.Id) { throw 'The service ended when its window closed.' }
+        Record-State $round 'native-close-service-alive'
+        $openers = @(for ($index = 0; $index -lt $OpenBurst; $index++) { Start-OwnedProcess $serviceImage @('open') })
+        Wait-OpenBurst $openers
+        $null = @(Wait-WindowState 'restored')
+        Record-State $round 'reopen-burst-one-replacement'
+
+        # The end of the session reaches the service, which says goodbye to the shell; both leave.
+        [GhostlightNativeJourney]::EndSession($service.Id)
+        if (-not $service.WaitForExit(6000)) { throw "Service $($service.Id) ignored WM_ENDSESSION." }
+        $deadline = [DateTime]::UtcNow.AddSeconds(6)
+        while (@(Get-ImageProcesses $shellImage).Count -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
+        if (@(Get-ImageProcesses $shellImage).Count) { throw 'The shell outlived the end of the session.' }
+        $observations.Add(@{ round=$round; state='system-shutdown-exit'; pid=$service.Id; windows=@() })
         Write-Output "PASS round=$round system-shutdown-exit"
     }
     Write-Output "Windows native desktop journey passed: $($observations.Count) lifecycle checks."
@@ -304,31 +336,23 @@ try {
     throw
 } finally {
     $cleanupFailures = @()
-    # Stop Open callers first so none can demand-start a replacement during cleanup.
+    # Stop Open callers first so none can start a replacement during cleanup.
     for ($index = $children.Count - 1; $index -ge 0; $index--) {
         try { Stop-OwnedProcess $children[$index] }
         catch { $cleanupFailures += $_.Exception.Message }
     }
-    for ($index = $connectorChildren.Count - 1; $index -ge 0; $index--) {
-        try {
-            $record = $connectorChildren[$index]
-            $process = $record.process
-            $process.Refresh()
-            if (-not $process.HasExited) {
-                if ($process.MainModule.FileName -ine $record.image) { throw 'Connector cleanup executable ownership changed.' }
-                Stop-Process -InputObject $process -Force
-                if (-not $process.WaitForExit(5000)) { throw "Owned connector $($process.Id) did not exit." }
-            }
-        } catch { $cleanupFailures += $_.Exception.Message }
+    foreach ($edge in $edgeChildren) {
+        try { Stop-OwnedProcess $edge } catch { $cleanupFailures += $_.Exception.Message }
     }
-    if (-not $cleanupFailures.Count) {
-        foreach ($runtime in $runtimeFiles) {
-            try { if (Test-Path -LiteralPath $runtime) { Remove-Item -LiteralPath $runtime -Force } }
-            catch { $cleanupFailures += $_.Exception.Message }
-        }
+    foreach ($image in @($shellImage, $serviceImage)) {
+        try { Stop-ImageProcesses $image } catch { $cleanupFailures += $_.Exception.Message }
     }
     $failureCode = if ($failure) { 'native_lifecycle' } elseif ($cleanupFailures.Count) { 'cleanup' } else { $null }
-    @{ executable=$executable; sha256=$binaryHash; passed=($null -eq $failureCode); failure_code=$failureCode; failure=$failure; cleanup_failures=$cleanupFailures; rounds=$StartupRounds; open_burst=$OpenBurst; observations=$observations } |
+    @{ images=$hashes; passed=($null -eq $failureCode); failure_code=$failureCode; failure=$failure; cleanup_failures=$cleanupFailures; rounds=$StartupRounds; open_burst=$OpenBurst; observations=$observations } |
         ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidence 'results.json') -Encoding utf8
+    if (-not $cleanupFailures.Count) {
+        # The images are the only bulk; the evidence stays.
+        try { Remove-Item -LiteralPath (Join-Path $ghostlightHome 'bin') -Recurse -Force } catch { Write-Warning "Could not remove the copied images: $($_.Exception.Message)" }
+    }
     if ($cleanupFailures.Count -and -not $failure) { throw ($cleanupFailures -join '; ') }
 }

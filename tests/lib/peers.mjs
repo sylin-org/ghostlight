@@ -291,7 +291,7 @@ export class SyntheticBrowser {
   /** A browser behind a real `ghostlight chrome-extension://<id>/` edge of `home`. */
   static viaEdge(home, world, origin = EXTENSION_ORIGIN, browserId) {
     const child = home.start(home.edge, [origin]);
-    const browser = new SyntheticBrowser(new EdgeTransport(child), world, browserId);
+    const browser = new this(new EdgeTransport(child), world, browserId);
     browser.child = child;
     return browser;
   }
@@ -302,7 +302,7 @@ export class SyntheticBrowser {
       edge: { program: program.edge, revision: vocabulary.relay, build: buildVersion() }, origin: EXTENSION_ORIGIN
     }), patience);
     assert.equal(reply.accepted, true, JSON.stringify(reply));
-    return new SyntheticBrowser(new RelayTransport(stream), world, browserId);
+    return new this(new RelayTransport(stream), world, browserId);
   }
 
   /** The hello frame of this browser. */

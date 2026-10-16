@@ -1,269 +1,86 @@
-// The PowerShell deliverable, against real executables and a scripted browser adapter.
+// The PowerShell deliverable, against the real edge and service and a scripted browser.
 //
 // scripts/browser-journey.ps1 is meant to run on a real machine with a real Chromium. This harness
-// stands up the same process topology with a scripted adapter in the browser's place, so the script
-// itself -- its session handling, its handle passing, its screenshot file, its exit code -- is
-// proved rather than assumed.
-
+// stands up the same process topology in a test home with a synthetic protocol 4 browser in the
+// browser's place, so the script itself -- its session handling, its handle passing, its
+// screenshot file, the exit code a script sees -- is proved rather than assumed.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { createHome, openPolicy, repository, startReason } from "./lib/home.mjs";
+import { ONE_PIXEL_JPEG, SyntheticBrowser, World } from "./lib/peers.mjs";
 
-const repository = resolve(import.meta.dirname, "..");
-const executableSuffix = process.platform === "win32" ? ".exe" : "";
-const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
-// ADR-0150: the runtime override elects the authority directory, so it points inside the
-// build under test rather than at a directory that holds no authority.
-const runtimeFile = join(binDir, `.ghostlight-ps-journey-runtime-${process.pid}.json`);
-const leaseFile = runtimeFile.replace(/\.json$/, ".lock");
-const auditFile = join(repository, `tests/.ghostlight-ps-audit-${process.pid}.jsonl`);
-const shotFile = join(repository, `tests/.ghostlight-ps-shot-${process.pid}.jpg`);
-const nativeHostDir = join(repository, `tests/.ghostlight-ps-native-host-${process.pid}`);
-const environment = {
-  ...process.env,
-  GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
-  GHOSTLIGHT_AUDIT_FILE: auditFile,
-  // No process this journey spawns may touch the machine's real native-host registration
-  // (ADR-0149 makes recovery repair owned registrations toward the running tree).
-  GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
-};
-const children = [];
-const physicalRequests = [];
-let adapterFailure;
+const DENIED_HOST = "blocked.localhost";
+const PAGE_TEXT = "Example Domain. This domain is for use in documentation.";
+const home = createHome({ policy: openPolicy([DENIED_HOST]), label: "ps" });
+const shotFile = join(home.area, "shot.jpg");
+const shell = process.platform === "win32" ? "pwsh.exe" : "pwsh";
 
-function executable(name) {
-  const path = join(binDir, `${name}${executableSuffix}`);
-  if (!existsSync(path)) throw new Error(`Missing ${path}; build the workspace first.`);
-  return path;
-}
-
-function start(command, args = []) {
-  const child = spawn(command, args, { env: environment, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-  child.stderr.on("data", (chunk) => process.stderr.write(`[${command.split(/[\\/]/).at(-1)}] ${chunk}`));
-  children.push(child);
-  return child;
-}
-
-const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-
-/** Length-prefixed native messaging, the same framing the real extension speaks. */
-class NativePeer {
-  constructor(child) {
-    this.child = child;
-    this.buffer = Buffer.alloc(0);
-    this.queue = [];
-    this.waiters = [];
-    this.observers = [];
-    child.stdout.on("data", (chunk) => this.receive(chunk));
-  }
-
-  send(value) {
-    const payload = Buffer.from(JSON.stringify(value));
-    const header = Buffer.alloc(4);
-    header.writeUInt32LE(payload.length);
-    this.child.stdin.write(Buffer.concat([header, payload]));
-  }
-
-  receive(chunk) {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    while (this.buffer.length >= 4) {
-      const length = this.buffer.readUInt32LE(0);
-      if (this.buffer.length < length + 4) return;
-      const value = JSON.parse(this.buffer.subarray(4, length + 4).toString("utf8"));
-      this.buffer = this.buffer.subarray(length + 4);
-
-      for (const observer of [...this.observers]) {
-        if (!observer.predicate(value)) continue;
-        this.observers.splice(this.observers.indexOf(observer), 1);
-        clearTimeout(observer.timer);
-        observer.resolve(value);
-      }
-      const waiter = this.waiters.shift();
-      if (waiter) waiter(value);
-      else this.queue.push(value);
-    }
-  }
-
-  next(timeoutMs = 10000) {
-    const queued = this.queue.shift();
-    if (queued) return Promise.resolve(queued);
-    // The adapter loop waits indefinitely; only the handshake wants a deadline.
-    if (timeoutMs <= 0) return new Promise((resolvePromise) => this.waiters.push(resolvePromise));
-    return new Promise((resolvePromise, reject) => {
-      const timer = setTimeout(() => reject(new Error("Timed out waiting for a native frame")), timeoutMs);
-      this.waiters.push((value) => { clearTimeout(timer); resolvePromise(value); });
+/** A synthetic browser whose pages hold a longer text, so the audit can be checked for page content. */
+class PageBrowser extends SyntheticBrowser {
+  callAnswers(args, tab) {
+    return super.callAnswers(args, tab).map((answer) => {
+      const value = answer.envelope?.value;
+      return typeof value?.text === "string" && value.text !== ""
+        ? { ...answer, envelope: { ok: true, value: { ...value, text: PAGE_TEXT } } }
+        : answer;
     });
   }
 }
 
-// A one-pixel JPEG, so the screenshot the script writes is real bytes rather than a placeholder.
-const PIXEL_JPEG =
-  "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
-
-async function runAdapter(peer) {
-  let tab = { tab_id: 41, title: "", url: "about:blank", active: true, readiness: "complete" };
-  for (;;) {
-    const frame = await peer.next(0);
-    if (frame.kind === "heartbeat") {
-      peer.send({ kind: "heartbeat_ack", sequence: frame.sequence });
-      continue;
-    }
-    if (frame.kind !== "request") continue;
-    const request = frame.request;
-    const scope = request.command.command === "in_documents" ? request.command.scope : null;
-    const command = scope ? request.command.primitive : request.command;
-    physicalRequests.push({ command, scope });
-    let result;
-    switch (command.command) {
-      case "present":
-        result = { outcome: "presented", rendered: true };
-        break;
-      case "open_tab":
-        tab = { ...tab, title: "Example Domain", url: "https://example.com/", readiness: "complete" };
-        result = { outcome: "tab_opened", tab, committed_urls: [tab.url] };
-        break;
-      case "describe_documents":
-        assert.equal(command.tab_id, tab.tab_id);
-        result = { outcome: "documents", tab_id: tab.tab_id, inventory: {
-          documents: [{ id: "powershell-document", url: tab.url, parent: null, supported: true }],
-          subjects: [], unresolved: false, incomplete: false
-        } };
-        break;
-      case "read_text":
-      case "read_document":
-        result = {
-          outcome: "text",
-          tab_id: tab.tab_id,
-          text: "Example Domain. This domain is for use in documentation.",
-          truncated: false,
-          title: tab.title,
-          url: tab.url
-        };
-        break;
-      case "screenshot":
-        result = {
-          outcome: "screenshot",
-          tab_id: tab.tab_id,
-          mime_type: "image/jpeg",
-          data: PIXEL_JPEG,
-          width: 1280,
-          height: 720,
-          viewport: {
-            scope: "viewport",
-            page_x: 0, page_y: 0, css_width: 1280, css_height: 720,
-            visual_page_x: 0, visual_page_y: 0, visual_css_width: 1280, visual_css_height: 720,
-            device_scale: 1, zoom: 1, output_scale: 1
-          }
-        };
-        break;
-      case "close_tab":
-        result = { outcome: "tab_closed", tab_id: command.tab_id };
-        break;
-      case "list_tabs":
-        result = { outcome: "tabs", tabs: [tab] };
-        break;
-      default:
-        throw new Error(`Unexpected physical primitive ${command.command}`);
-    }
-    if (scope) {
-      assert.deepEqual(scope.allowed, ["powershell-document"], "the CLI observes only the admitted document");
-      result = { outcome: "in_documents", result, observation: {
-        visited: scope.allowed, unavailable: [], limited_by_size: false
-      } };
-    }
-    peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
-  }
-}
-
-for (const file of [runtimeFile, leaseFile, auditFile, shotFile]) rmSync(file, { force: true });
-
-try {
-  const service = start(executable("ghostlight"));
-  for (let attempt = 0; attempt < 100 && !existsSync(runtimeFile); attempt += 1) await sleep(50);
-  assert.equal(existsSync(runtimeFile), true, "the service never published runtime discovery");
-  assert.equal(service.exitCode, null);
-
-  const browserConnector = start(executable("ghostlight-browser-connector"));
-  const native = new NativePeer(browserConnector);
-  native.send({
-    kind: "hello",
-    // The relay refuses a stale major outright, so this has to track ADAPTER_PROTOCOL_MAJOR.
-    major: 3,
-    adapter_version: "1.0.0",
-    browser_id: "browser_psjourney",
-    adapter_epoch: "adapter_psjourney",
-    capabilities: [
-      "document_scope", "adapter_liveness", "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
-      "keyboard_input", "files", "script", "observation", "dialogs",
-      "operation_recovery", "presentation"
-    ].map((name) => ({ name, revision: { document_scope: 2, script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, navigation: 2, files: 3, observation: 2 }[name] ?? 1 }))
-  });
-  // Wait for the relay's own handshake rather than guessing: until the connector answers
-  // hello_accepted there is no adapter, and every browser call would fail as disconnected.
-  const accepted = await native.next();
-  assert.equal(
-    accepted.kind,
-    "hello_accepted",
-    `the relay never accepted the adapter: ${JSON.stringify(accepted)}`
-  );
-  runAdapter(native).catch((error) => { adapterFailure = error; process.stderr.write(`[adapter] ${error}\n`); });
-
-  // Never spawnSync here. The scripted adapter answers on this event loop, and a synchronous
-  // child would block it, so every browser call would dispatch and then time out as unknown.
-  const shell = process.platform === "win32" ? "pwsh.exe" : "pwsh";
-  const journey = await new Promise((resolvePromise) => {
-    const child = spawn(
-      shell,
-      [
-        "-NoProfile", "-File", join(repository, "scripts", "browser-journey.ps1"),
-        "-Ghostlight", executable("ghostlight"),
-        "-OutputPath", shotFile
-      ],
-      { env: environment, windowsHide: true }
-    );
+/**
+ * Run a script under pwsh in the test home. It is never spawnSync: the synthetic browser answers on
+ * this event loop, and a synchronous child would block it, so every browser call would dispatch and
+ * then time out as unknown.
+ */
+function powershell(script, args) {
+  return new Promise((done) => {
+    const child = spawn(shell, ["-NoProfile", "-File", join(repository, "scripts", script), ...args], {
+      env: home.environment,
+      windowsHide: true
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("close", (status) => resolvePromise({ status, stdout, stderr }));
+    child.on("close", (status) => done({ status, stdout, stderr }));
   });
-  process.stdout.write(journey.stdout ?? "");
-  if (journey.status !== 0) process.stderr.write(journey.stderr ?? "");
-  assert.equal(adapterFailure, undefined, `the adapter failed: ${adapterFailure}`);
+}
+
+try {
+  home.start(home.service, ["serve", "--reason", startReason.agent], { stdio: ["ignore", "ignore", "pipe"] });
+  await home.serviceUp();
+  const world = new World();
+  const browser = PageBrowser.viaEdge(home, world);
+  await browser.connect();
+
+  const journey = await powershell("browser-journey.ps1", ["-Ghostlight", home.edge, "-OutputPath", shotFile]);
+  process.stdout.write(journey.stdout);
+  if (journey.status !== 0) process.stderr.write(journey.stderr);
   assert.equal(journey.status, 0, "the PowerShell journey must exit zero when every step succeeds");
 
-  const output = journey.stdout ?? "";
   for (const expected of [
     "Opened example.com.",
     "Read 9 words from example.com.",
-    "Captured the viewport at 1280x720.",
     "Closed the controlled tab."
   ]) {
-    assert.ok(output.includes(expected), `the journey never reported: ${expected}`);
+    assert.ok(journey.stdout.includes(expected), `the journey never reported: ${expected}`);
   }
+  assert.match(journey.stdout, /Captured the viewport at \d+x\d+\./);
 
   assert.equal(existsSync(shotFile), true, "the journey wrote no screenshot");
   const image = readFileSync(shotFile);
-  assert.ok(image.length > 100, "the screenshot is too small to be an image");
   assert.equal(image[0], 0xff, "the screenshot is not JPEG bytes");
   assert.equal(image[1], 0xd8, "the screenshot is not JPEG bytes");
-  assert.deepEqual(image, Buffer.from(PIXEL_JPEG, "base64"), "the CLI saves the exact delivered screenshot bytes");
-  const contentRequests = physicalRequests.filter(({ command }) => ["read_text", "read_document", "screenshot"].includes(command.command));
-  assert.equal(contentRequests.filter(({ command }) => command.command !== "screenshot").length, 1, "the read physically executes once");
-  assert.equal(contentRequests.filter(({ command }) => command.command === "screenshot").length, 1, "the capture physically executes once");
-  for (const request of contentRequests) {
-    if (request.command.command === "screenshot") assert.equal(request.scope, null, "capture dispatches without document admission");
-    else assert.deepEqual(request.scope?.allowed, ["powershell-document"], "read uses document admission");
-  }
+  assert.deepEqual(image, Buffer.from(ONE_PIXEL_JPEG, "base64"), "the CLI saves the exact delivered screenshot bytes");
+  const reads = browser.requested("call").filter((request) => request.primitive.args.calls.some((entry) => entry.message.kind === "read_text"));
+  assert.equal(reads.length, 1, "the read physically executes once");
+  assert.equal(browser.requested("capture").length, 1, "the capture physically executes once");
 
-  await sleep(300);
-  const records = readFileSync(auditFile, "utf8")
-    .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const records = home.auditRecords();
   const tools = records.map((record) => record.tool);
-  for (const tool of [
-    "browser_navigate", "browser_tabs", "browser_read", "browser_screenshot"
-  ]) {
+  for (const tool of ["browser_navigate", "browser_tabs", "browser_read", "browser_screenshot"]) {
     assert.ok(tools.includes(tool), `${tool} never reached the executor`);
   }
   for (const record of records) {
@@ -275,48 +92,32 @@ try {
   const encoded = JSON.stringify(records);
   assert.equal(encoded.includes("This domain is for use"), false, "page text reached the audit");
   assert.ok(encoded.includes('"host":"example.com"'), "the landing host was not recorded");
+  // Every step was its own process, so one workspace across all of them is the session marker
+  // working (ADR-0106).
+  assert.equal(new Set(records.map((record) => record.workspace)).size, 1, "steps from one caller must share a workspace, whatever process each ran in");
+  console.log("PASS the script opens, lists, reads, captures and closes as the cli channel in one workspace");
 
-  // Every step of that journey was its own process, so one workspace across all of them is the
-  // session marker working (ADR-0106). Before it, this number was five.
-  assert.equal(
-    new Set(records.map((record) => record.workspace)).size,
-    1,
-    "steps from one caller must share a workspace, whatever process each ran in"
-  );
+  // A refused step is the exit code a script sees: the script stops and reports it.
+  const opens = browser.requested("open_tab").length;
+  const refused = await powershell("browser-journey.ps1", ["-Ghostlight", home.edge, "-OutputPath", shotFile, "-Url", `http://${DENIED_HOST}:3000/`]);
+  assert.notEqual(refused.status, 0, "a refused step must end the script with a nonzero exit code");
+  assert.match(`${refused.stdout}\n${refused.stderr}`, /blocked/i);
+  assert.equal(browser.requested("open_tab").length, opens, "a refused navigation never reaches the browser");
+  console.log("PASS a refused step ends the script with a nonzero exit code");
 
-  const demoFailure = await new Promise((resolvePromise) => {
-    const child = spawn(
-      shell,
-      [
-        "-NoProfile", "-File", join(repository, "scripts", "demo-foundry.ps1"),
-        // Node treats Ghostlight's first `call` argument as a missing script, exits nonzero, and
-        // writes no JSON. That gives the demo a portable real-process transport failure.
-        "-Ghostlight", process.execPath,
-        "-Beat", "0"
-      ],
-      { env: environment, windowsHide: true }
-    );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("close", (status) => resolvePromise({ status, stdout, stderr }));
-  });
-  const failureOutput = `${demoFailure.stdout ?? ""}\n${demoFailure.stderr ?? ""}`;
+  const demoFailure = await powershell("demo-foundry.ps1", [
+    // Node treats Ghostlight's first `call` argument as a missing script, exits nonzero, and writes
+    // no JSON. That gives the demo a portable real-process transport failure.
+    "-Ghostlight", process.execPath,
+    "-Beat", "0"
+  ]);
+  const failureOutput = `${demoFailure.stdout}\n${demoFailure.stderr}`;
   assert.notEqual(demoFailure.status, 0, "the demo must fail when Ghostlight returns no result");
-  assert.ok(
-    /open did not return a JSON result \(exit [1-9][0-9]*\)/.test(failureOutput),
-    `the demo hid its transport failure: ${failureOutput}`
-  );
-  assert.equal(
-    failureOutput.includes("The property 'status' cannot be found"),
-    false,
-    "the demo regressed to dereferencing an absent result"
-  );
+  assert.ok(/open did not return a JSON result \(exit [1-9][0-9]*\)/.test(failureOutput), `the demo hid its transport failure: ${failureOutput}`);
+  assert.equal(failureOutput.includes("The property 'status' cannot be found"), false, "the demo regressed to dereferencing an absent result");
 
-  console.log("\npowershell journey ok: separate processes, one session, open/list/read/capture/close");
+  browser.close();
+  console.log("\npowershell journey ok: separate processes, one session, open/list/read/capture/close, refusal exit code");
 } finally {
-  for (const child of children.reverse()) if (!child.killed) child.kill();
-  for (const file of [runtimeFile, leaseFile, auditFile, shotFile]) rmSync(file, { force: true });
-  rmSync(nativeHostDir, { force: true, recursive: true });
+  await home.cleanup();
 }

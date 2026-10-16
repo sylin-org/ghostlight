@@ -1,5 +1,9 @@
 // Opt-in recovery acceptance through Linux's real registered native host. The caller supplies
 // an idle development/test installation and a dedicated running browser; no native pipe is mocked.
+// The installation holds two images: the edge `ghostlight`, which is the MCP relay and the browser
+// relay, and the service `ghostlight-service`. A lost service takes its browser edge with it: once
+// a service answers again the browser edge exits and the browser starts a new one, while an MCP
+// edge keeps its session and starts the next service when a request needs it.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -8,6 +12,8 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSy
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { RelayMcp } from "../lib/peers.mjs";
+import { templateKind } from "../lib/home.mjs";
 
 const options = new Map();
 for (let index = 2; index < process.argv.length; index++) {
@@ -21,15 +27,15 @@ for (let index = 2; index < process.argv.length; index++) {
 assert.ok(process.platform === "linux" && options.get("--exercise-installed-stack") &&
   options.get("--bin-dir") && options.get("--browser"),
 "Usage: node tests/linux/installed-journey.mjs --bin-dir <installed siblings> --browser <running executable> --exercise-installed-stack [--devtools-port-file <dedicated browser file>]");
-for (const name of ["GHOSTLIGHT_RUNTIME_FILE", "GHOSTLIGHT_NATIVE_HOST_DIR", "GHOSTLIGHT_PROFILE_DIR", "GHOSTLIGHT_POLICY_FILE"]) {
+for (const name of ["GHOSTLIGHT_TEST_HOME", "GHOSTLIGHT_NATIVE_HOST_DIR", "GHOSTLIGHT_PROFILE_DIR", "GHOSTLIGHT_POLICY_FILE"]) {
   assert.ok(!process.env[name], `Remove ${name}: this journey requires the installation's ordinary paths.`);
 }
 const root = resolve(import.meta.dirname, "../..");
 const bin = realpathSync(options.get("--bin-dir"));
 const browserImage = realpathSync(options.get("--browser"));
-const authorityImage = join(bin, "ghostlight");
-const nativeImage = join(bin, "ghostlight-browser-connector");
-const mcpImage = join(bin, "ghostlight-mcp-connector");
+const serviceImage = join(bin, "ghostlight-service");
+const edgeImage = join(bin, "ghostlight");
+const installedHome = join(homedir(), ".ghostlight");
 const configRoot = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
 const output = join(process.env.GHOSTLIGHT_LINUX_INSTALLED_AREA || join(root, ".tmp/linux-installed"),
   "recovery", `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`);
@@ -49,16 +55,18 @@ save();
 function identity(pid) {
   try {
     const fields = readFileSync(`/proc/${pid}/stat`, "utf8").split(/\) /).at(-1).split(" ");
-    return { pid: Number(pid), image: readlinkSync(`/proc/${pid}/exe`), start_ticks: fields[19], parent: Number(fields[1]) };
+    return { pid: Number(pid), image: readlinkSync(`/proc/${pid}/exe`), args: readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").slice(1).filter(Boolean),
+      start_ticks: fields[19], parent: Number(fields[1]) };
   } catch (error) { if (["ENOENT", "EACCES", "EPERM", "ESRCH"].includes(error.code)) return null; throw error; }
 }
-function processes(image) {
-  return readdirSync("/proc").filter(name => /^\d+$/.test(name)).map(identity).filter(item => item?.image === image);
+function processes(image, wanted = () => true) {
+  return readdirSync("/proc").filter(name => /^\d+$/.test(name)).map(identity).filter(item => item?.image === image && wanted(item));
 }
-function only(image) { const matches = processes(image); assert.equal(matches.length, 1, `Requires one exact process: ${image}`); return matches[0]; }
+const isBrowserEdge = item => item.args[0]?.startsWith("chrome-extension://");
+const nativeEdges = () => processes(edgeImage, isBrowserEdge);
+function only(image, wanted) { const matches = processes(image, wanted); assert.equal(matches.length, 1, `Requires one exact process: ${image}`); return matches[0]; }
 function unchanged(observed) { const current = identity(observed.pid); assert.equal(current?.image, observed.image, "Process executable changed"); assert.equal(current?.start_ticks, observed.start_ticks, "Process lifetime changed"); }
 function stop(observed) { unchanged(observed); process.kill(observed.pid, "SIGKILL"); }
-function nativePipes(observed) { unchanged(observed); return [0, 1].map(fd => readlinkSync(`/proc/${observed.pid}/fd/${fd}`)); }
 function descendsFrom(observed, ancestor) {
   let current = observed;
   for (let depth = 0; current && depth < 16; depth++) {
@@ -67,7 +75,7 @@ function descendsFrom(observed, ancestor) {
   }
   return false;
 }
-function product(args) { return execFileSync(authorityImage, args, { encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "pipe"] }); }
+function product(args) { return execFileSync(edgeImage, args, { encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "pipe"] }); }
 function doctor() { return JSON.parse(product(["doctor", "--json"])); }
 async function until(check, label, timeout = 45000) {
   const deadline = Date.now() + timeout;
@@ -116,11 +124,11 @@ const fixture = createServer((incoming, response) => {
   response.end("<!doctype html><title>Ghostlight recovery fixture</title><h1>Recovery fixture ready</h1>");
 });
 try {
-  for (const image of [authorityImage, nativeImage, mcpImage]) report.binaries[image] = hash(readFileSync(image));
+  for (const image of [serviceImage, edgeImage]) report.binaries[image] = hash(readFileSync(image));
   const roots = processes(browserImage).filter(item => !readFileSync(`/proc/${item.pid}/cmdline`, "utf8").includes("--type="));
   assert.equal(roots.length, 1, "Requires one running browser root at the selected executable");
   browser = roots[0]; report.identities.browser = browser;
-  let authority = only(authorityImage), native = only(nativeImage);
+  let authority = only(serviceImage), native = only(edgeImage, isBrowserEdge);
   assert.ok(descendsFrom(native, browser), "Native host must descend from the selected real browser");
   assert.equal(doctor().readiness?.state, "ready", "Requires an idle Ready installation");
   report.identities.initial_authority = authority; report.identities.initial_native = native;
@@ -131,7 +139,7 @@ try {
     assert.ok(lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(), "Requires ordinary native manifests");
     const bytes = readFileSync(path), manifest = JSON.parse(bytes);
     assert.equal(manifest.name, "org.sylin.ghostlight");
-    assert.equal(manifest.path, nativeImage, "Every registration must belong to this installation");
+    assert.equal(manifest.path, edgeImage, "Every registration must belong to this installation");
     registrations.push({ path, bytes, sha256: hash(bytes) });
   }
   save();
@@ -148,18 +156,18 @@ try {
   for (const item of registrations) assert.equal(hash(readFileSync(item.path)), item.sha256, "Restored manifest bytes differ");
   restoreOwed = false;
   unchanged(authority);
-  native = only(nativeImage);
+  native = only(edgeImage, isBrowserEdge);
   assert.ok(descendsFrom(native, browser));
   phase("registration-reinstalled-with-browser-running", started);
 
   const priorNative = native;
   activePhase = "native-connector-crash-recovers";
   started = Date.now(); stop(priorNative);
-  native = await until(() => { const matches = processes(nativeImage); return matches.length === 1 && matches[0].pid !== priorNative.pid && matches[0]; }, "native connector replacement");
+  native = await until(() => { const matches = nativeEdges(); return matches.length === 1 && matches[0].pid !== priorNative.pid && matches[0]; }, "browser edge replacement");
   await ready(); unchanged(authority); assert.ok(descendsFrom(native, browser));
   phase("native-connector-crash-recovers", started);
 
-  mcp = spawn(mcpImage, [], { stdio: ["pipe", "pipe", "pipe"] });
+  mcp = spawn(edgeImage, ["mcp"], { stdio: ["pipe", "pipe", "pipe"] });
   mcp.stderr.on("data", () => {});
   mcp.on("error", error => { for (const waiter of pending.values()) { clearTimeout(waiter.timer); waiter.reject(error); } pending.clear(); });
   mcp.on("exit", () => { for (const waiter of pending.values()) { clearTimeout(waiter.timer); waiter.reject(new Error("MCP exited")); } pending.clear(); });
@@ -169,22 +177,36 @@ try {
   mcp.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
   await call("browser_tabs", { action: "list" });
   report.identities.retained_mcp = identity(mcp.pid);
-  const pipes = nativePipes(native);
-  report.identities.retained_native = { ...native, pipes };
-  activePhase = "authority-crash-retains-native-pipes-and-initialized-MCP";
+  // A service lost to a crash: the MCP edge keeps its stream and starts the next service when a
+  // request needs it; the browser edge exits once that service answers and the browser starts a new
+  // one. Both ends are the same stream and the same browser, with a new edge between them.
+  async function recoverAfterServiceLoss(lost) {
+    const relisted = await request("tools/list");
+    assert.equal(relisted.error, undefined, "The initialized MCP stream must survive a lost service");
+    assert.ok(relisted.result.tools.length > 0);
+    await ready();
+    const replacement = only(serviceImage);
+    assert.notEqual(replacement.pid, lost.pid, "A new service must answer");
+    const edge = await until(() => { const matches = nativeEdges(); return matches.length === 1 && matches[0].pid !== native.pid && matches[0]; }, "browser edge replacement after the service returns");
+    assert.ok(descendsFrom(edge, browser), "The new browser edge must descend from the selected browser");
+    unchanged(report.identities.retained_mcp);
+    return { replacement, edge };
+  }
+  activePhase = "service-crash-keeps-the-initialized-MCP-stream-and-the-browser-reconnects";
   started = Date.now(); stop(authority);
-  await ready(); unchanged(native); assert.deepEqual(nativePipes(native), pipes);
-  authority = only(authorityImage);
+  ({ replacement: authority, edge: native } = await recoverAfterServiceLoss(authority));
   assert.notEqual(authority.pid, report.identities.initial_authority.pid);
   await call("browser_tabs", { action: "list" });
-  unchanged(report.identities.retained_mcp);
-  phase("authority-crash-retains-native-pipes-and-initialized-MCP", started);
+  phase("service-crash-keeps-the-initialized-MCP-stream-and-the-browser-reconnects", started);
 
   await new Promise(done => fixture.listen(0, "127.0.0.1", done));
   const opened = await call("browser_navigate", { url: `http://127.0.0.1:${fixture.address().port}/`, new_tab: true });
   await call("browser_wait", { tab: opened.facts.tab, condition: "load_ready" });
   const read = await call("browser_read", { tab: opened.facts.tab });
   assert.match(read.facts.text, /Recovery fixture ready/);
+  const probe = await RelayMcp.open({ path: installedHome });
+  const cutOff = probe.reply.templates[templateKind.cut_off]["tools/call"].result.content;
+  probe.close();
   started = Date.now();
   activePhase = "in-flight-browser-effect-is-not-replayed";
   const interrupted = request("tools/call", { name: "browser_execute", arguments: { tab: opened.facts.tab,
@@ -193,9 +215,10 @@ try {
   await until(() => effectCount === 1, "independently observed browser effect", 15000);
   stop(authority);
   const interruptedReply = await interrupted;
-  assert.match(interruptedReply.error?.message || "", /outcome is unavailable/);
+  assert.equal(interruptedReply.result?.isError, true, "A call cut off by a lost service is an error result");
+  assert.deepEqual(interruptedReply.result.content, cutOff, "The cut-off call answers with the service's own words");
   heldResponse.end("recorded"); heldResponse = null;
-  await ready(); unchanged(native); assert.deepEqual(nativePipes(native), pipes);
+  ({ replacement: authority, edge: native } = await recoverAfterServiceLoss(authority));
   await call("browser_tabs", { action: "list" });
   await delay(1500);
   assert.equal(effectCount, 1, "Uncertain browser effect must never replay");
@@ -224,7 +247,7 @@ try {
     const { processInfo } = await send("SystemInfo.getProcessInfo");
     assert.ok(processInfo.some(item => item.type === "browser" && item.id === browser.pid), "CDP must belong to the selected dedicated browser");
     const { targetInfos } = await send("Target.getTargets");
-    const worker = targetInfos.find(item => item.type === "service_worker" && /^chrome-extension:\/\/(cjcmhepmagomefjggkcohdbfemacojoa|lejccfmoeogmhemakeknjjdhkfkgncdl)\/service-worker\.js$/.test(item.url));
+    const worker = targetInfos.find(item => item.type === "service_worker" && /^chrome-extension:\/\/[a-p]{32}\/worker\.js$/.test(item.url));
     assert.ok(worker, "Requires the actual Ghostlight worker");
     const page = targetInfos.find(item => item.type === "page" && item.url === `http://127.0.0.1:${fixture.address().port}/`);
     assert.ok(page, "Requires this journey's own fixture tab");
@@ -270,7 +293,7 @@ try {
     if (restoreOwed) {
       // Re-check after interruption. Never overwrite a registration installed by another actor.
       for (const item of registrations) {
-        if (existsSync(item.path)) assert.equal(JSON.parse(readFileSync(item.path)).path, nativeImage, "Cleanup found a different installation");
+        if (existsSync(item.path)) assert.equal(JSON.parse(readFileSync(item.path)).path, edgeImage, "Cleanup found a different installation");
         writeFileSync(item.path, item.bytes);
         assert.equal(hash(readFileSync(item.path)), item.sha256);
       }

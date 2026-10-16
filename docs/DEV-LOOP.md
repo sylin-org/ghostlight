@@ -172,15 +172,15 @@ a required lane cannot run or source changes during execution. See the
 `node tests/live-journey.mjs` separately after the changed components are active.
 
 On Windows, the full and process lanes include the `desktop-windows` gate. It requires
-PowerShell 7 and a Windows desktop. The journey launches an isolated authority, sends concurrent
-Open requests during startup, counts its real native workbench windows, and checks responsiveness,
-minimize/restore, and close/reopen while the authority stays alive. It uses the fresh
-`GHOSTLIGHT_BIN_DIR` build and changes only its own processes, windows, endpoint, and WebView
-profile. It also starts both edge roles with held input, delivers the Windows end-session sequence
-to all three exact processes, and requires bounded successful exit, including the worst ordering
-where Tao's event target ends before the authority's dedicated listener. It verifies the spawned
-WebView uses that isolated profile; the installed stack and browser registration stay intact. To
-run it directly after building:
+PowerShell 7 and a Windows desktop. The journey copies the edge, the service and the shell from
+the fresh `GHOSTLIGHT_BIN_DIR` build into a test home, sends concurrent `ghostlight-service open`
+requests while the service starts, counts the real native workbench windows (they belong to the
+shell), and checks responsiveness, minimize/restore, and close/reopen while the service stays
+alive. It changes only the processes, windows, endpoint and WebView profile of that home. It also
+starts both edge roles with held input and delivers the Windows end-session sequence to them and
+to the service, requiring a bounded successful exit and that the shell leaves with the service. It
+verifies the spawned WebView uses the home's profile; the installed stack and browser registration
+stay intact. To run it directly after building:
 
 ```powershell
 pwsh -NoProfile -File tests/windows-desktop-journey.ps1

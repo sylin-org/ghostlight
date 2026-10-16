@@ -36,7 +36,6 @@ Run the moved helpers through this runner, rather than invoking them without con
 | `GHOSTLIGHT_LINUX_AREA` | `.tmp/linux-local`; dedicated local fixture and report root |
 | `GHOSTLIGHT_LINUX_INSTALLED_AREA` | `.tmp/linux-installed`; installed desktop/worker fixture and new `recovery/` reports |
 | `GHOSTLIGHT_LINUX_VERSION` | Workspace version in `Cargo.toml`; expected candidate version |
-| `GHOSTLIGHT_LINUX_PREVIOUS_VERSION` | `1.3.4`; recorded public npm predecessor |
 | `GHOSTLIGHT_LINUX_BIN_DIR` | `$AREA/portable-a/ghostlight-v$VERSION-x86_64-unknown-linux-gnu`; extracted siblings for setup |
 | `GHOSTLIGHT_LINUX_PORTABLE_ARCHIVE` | `$AREA/portable-fixed-a/ghostlight-v$VERSION-x86_64-unknown-linux-gnu.tar.gz` |
 | `GHOSTLIGHT_LINUX_CHROMIUM` | `/usr/lib/chromium/chromium`; native Chromium executable |
@@ -76,7 +75,7 @@ by the runner.
 | `acceptance/no-tray/desktop-check.py` | KWin lifecycle, exact descendant renderer failure, and Applications launch using the private-bus context. |
 | `acceptance/no-tray/desktop_atspi_driver.py` | Diagnostic accessibility tree probe; lack of a usable tree is not a passing accessibility result. |
 | `acceptance/portable-lifecycle.py` | Ownership-safe install/remove/reinstall using the no-tray context and disposable home. |
-| `acceptance/npm/native.mjs` | Real public npm launcher and registered native browser journey. First install `ghostlight@$PREVIOUS_VERSION` with npm prefix `$AREA/npm/prefix`; it downloads the published binaries into `$AREA/npm/cache`. |
+| `acceptance/npm/native.mjs` | The npm launcher and the registered native browser journey. First install `ghostlight@$VERSION` (the published package, or a tarball from `npm pack`) with npm prefix `$AREA/npm/prefix`; the launcher downloads the two images into `$AREA/npm/cache/bin`. The journey runs `ghostlight install`, then starts the launcher with no arguments, which is the MCP edge. |
 | `acceptance/cleanup.py` | Quit authorities inside `$AREA` through their tray; exact no-tray fallback only. Close dedicated browsers first; unrelated authority/connector identities must remain unchanged. |
 | `acceptance/guest/get-rootfs.py` | Download and digest-check official `debian` or `ubuntu` image layers; arguments are image and tag. Writes only under `$GUEST_AREA`. |
 | `acceptance/guest/enter.sh` | Enter a prepared build root at `$GUEST_AREA/root`; mount the prepared source/build tree at `$GUEST_AREA/build` and configured build tools. Remaining arguments are the guest command. |

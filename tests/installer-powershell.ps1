@@ -1,5 +1,8 @@
 #Requires -Version 7
-# Offline exercise of the shipped downloader and real native package installation seam.
+# Offline exercise of the shipped downloader and the real package installation seam: both images
+# are verified and installed by the downloaded service, and a corrupt image installs nothing. The
+# fixture sets GHOSTLIGHT_NO_REGISTER so the final `ghostlight install` never writes the machine's
+# Start-menu shortcut or Uninstall key; the console output of that step is an owed live check.
 param([string]$BinaryDirectory = $env:GHOSTLIGHT_BIN_DIR)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -18,8 +21,8 @@ $env:LOCALAPPDATA = Join-Path $UserDirectory 'local'
 $env:CODEX_HOME = Join-Path $UserDirectory 'codex'
 $env:GHOSTLIGHT_NATIVE_HOST_DIR = Join-Path $UserDirectory 'native-host'
 $env:GHOSTLIGHT_NO_REGISTER = '1'
-Remove-Item Env:GHOSTLIGHT_RUNTIME_FILE -ErrorAction SilentlyContinue
-$global:fixtureNames = @('ghostlight', 'ghostlight-mcp-connector', 'ghostlight-browser-connector')
+Remove-Item Env:GHOSTLIGHT_TEST_HOME -ErrorAction SilentlyContinue
+$global:fixtureNames = @('ghostlight', 'ghostlight-service')
 $global:fixtureBinaries = $Binaries
 $global:fixtureChecksums = @($global:fixtureNames | ForEach-Object {
     $hash = (Get-FileHash -LiteralPath (Join-Path $global:fixtureBinaries "$_.exe") -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -40,7 +43,7 @@ function Invoke-WebRequest {
     if ($Uri.EndsWith('/SHA256SUMS')) { return [pscustomobject]@{ Content = $global:fixtureChecksums } }
     $name = ($Uri.Split('/')[-1] -replace '-x86_64-pc-windows-msvc', '')
     $global:fixtureDownloads.Add($OutFile)
-    if ($global:fixtureCorrupt -and $name -eq 'ghostlight-browser-connector.exe') {
+    if ($global:fixtureCorrupt -and $name -eq 'ghostlight-service.exe') {
         [IO.File]::WriteAllText($OutFile, 'invalid final download')
     } else { Copy-Item -LiteralPath (Join-Path $global:fixtureBinaries $name) -Destination $OutFile }
 }
@@ -70,8 +73,8 @@ if (-not $rejected -or (Get-FileHash (Join-Path $destination 'ghostlight.exe')).
 foreach ($download in $global:fixtureDownloads) {
     if (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName($download))) { throw 'Temporary download was retained' }
 }
-if ((Get-ChildItem -LiteralPath $destination).Count -ne 3) { throw 'Unexpected installed copies' }
-Write-Output 'PASS PowerShell installer: fixed paths, complete verified payload, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
+if ((Get-ChildItem -LiteralPath $destination).Count -ne $global:fixtureNames.Count) { throw 'Unexpected installed copies' }
+Write-Output 'PASS PowerShell installer: fixed paths, both verified images, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
 '@
 [IO.File]::WriteAllText($scenario, $scenarioSource)
 try {
