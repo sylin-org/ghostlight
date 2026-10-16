@@ -117,18 +117,16 @@ body.runtime-working .lamp-core { box-shadow: 0 0 16px rgba(var(--argb), .85); }
 @keyframes halo-breathe { 0%, 100% { opacity: .55; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.1); } }
 body.runtime-held .lamp-halo { opacity: .9; background: radial-gradient(circle, rgba(251, 191, 36, .32), transparent 66%); }
 body.runtime-held .lamp-core { background: #fbbf24; box-shadow: 0 0 12px rgba(251, 191, 36, .55); }
-body.runtime-attention .lamp-halo,
-body.runtime-blocked .lamp-halo { opacity: 1; background: radial-gradient(circle, rgba(248, 113, 113, .38), transparent 66%); }
+body.runtime-attention .lamp-halo { opacity: 1; background: radial-gradient(circle, rgba(248, 113, 113, .38), transparent 66%); }
 body.runtime-offline .lamp-halo { opacity: .12; background: radial-gradient(circle, rgba(113, 113, 122, .35), transparent 66%); }
-body.runtime-attention .lamp-core,
-body.runtime-blocked .lamp-core { background: #f87171; box-shadow: 0 0 12px rgba(248, 113, 113, .6); }
+body.runtime-attention .lamp-core { background: #f87171; box-shadow: 0 0 12px rgba(248, 113, 113, .6); }
 body.runtime-offline .lamp-core { background: var(--faint); box-shadow: none; }
 
 .state { display: flex; min-width: 0; align-items: baseline; gap: 12px; }
 .state-word { flex: none; color: var(--ink); font-size: 15px; font-weight: 300; letter-spacing: -.01em; }
 body.runtime-working .state-word { color: var(--a); }
 body.runtime-held .state-word { color: var(--held); }
-body.runtime-attention .state-word, body.runtime-blocked .state-word { color: var(--danger); }
+body.runtime-attention .state-word { color: var(--danger); }
 body.runtime-offline .state-word { color: var(--muted); }
 .state-facts { min-width: 0; overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
 .state-facts b { color: var(--ink-3); font-weight: 400; }
@@ -796,7 +794,7 @@ a.ghost-button { text-decoration: none; }
   .lamp-core { background: Highlight; box-shadow: none; forced-color-adjust: none; }
   .state-word, .state-facts, .state-facts b,
   body.runtime-working .state-word, body.runtime-held .state-word,
-  body.runtime-attention .state-word, body.runtime-blocked .state-word,
+  body.runtime-attention .state-word,
   body.runtime-offline .state-word { color: CanvasText; }
   .tab { border: 1px solid ButtonBorder; color: ButtonText; }
   .tab:hover { border-color: Highlight; }
