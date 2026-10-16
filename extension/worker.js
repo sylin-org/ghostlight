@@ -210,6 +210,7 @@ function updateBadge() {
     ? { text: "!", color: "#ef4444" }
     : stateApi.badge({ ...liveState, recording_tabs: recording.count() });
   chrome.action.setBadgeBackgroundColor({ color: badge.color });
+  chrome.action.setBadgeTextColor?.({ color: stateApi.BADGE_TEXT_COLOR });
   chrome.action.setBadgeText({ text: badge.text });
   chrome.action.setTitle({ title: unseen > 0 ? "Ghostlight has an unseen guardrail notice" : manifest.name });
 }

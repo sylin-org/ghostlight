@@ -98,7 +98,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j04-setup-page has landed. Next: j06-popup.
+j06-popup has landed. Next: j07-options.
 
 ## Landed
 
@@ -108,6 +108,7 @@ j04-setup-page has landed. Next: j06-popup.
 | j02-kit | `extension/kit.css` is the one stylesheet for the extension pages: the sylin.org night tokens and base rules under `.gl-page`, the kit components, the setup layout, the companion with its two-segment stepper, and the popup. `scripts/package-extension.ps1` ships `kit.css` and `icons/ghostlight-mascot.png` and throws when a staged page names a local file the package lacks. The source-grep test for `setup.html` is deleted. | see `git log` |
 | j03-show-event | Protocol 4 gains one browser-level event, `show_requested`, with no fields: the golden vocabulary and fixture, `extension/lib/protocol.js`, the worker (`show_ghostlight` page message, `requestShow()`, refused while the link is down), `wire::Event::ShowRequested`, `BrowserEvent::ShowRequested`, and `ServiceBrowserEvents` calling `WorkbenchFacade::reveal(None)` and ignoring the answer. The adapter-protocol-4 note carries the row and the browser-level sentence. | see `git log` |
 | j04-setup-page | `extension/setup.html` is the kit page: the top bar with the wordmark and the Documentation link, the companion (ghost, lantern, stepper, step names) and the one column of eyebrow, heading, command, live line and fallback. `extension/lib/setup-view.js` (new, pure) holds every word and command and `view()` and `fallbackDue()`; `extension/setup.js` (new) places them, polls `ui_snapshot` every 1500 ms, plays the meeting once (`ghostlight.setup_met`) and sends `show_ghostlight`. The popup and options setup routes always open the bundled page and both remote URL literals are gone. The packager ships `setup.js`. The tests that pinned `setup.html` text are deleted; `extension/tests/setup-view.test.js` covers the pure module. | see `git log` |
+| j06-popup | `extension/lib/popup-view.js` (new, pure) holds every popup word, `popupView()` and `connection()`. `popup.html` is the kit page (mascot at 100 px, status block, actions, Settings link) and `popup.js` places the view, redrawing only when it changes. The captions switch, the notes, the setup paragraph, the debugger line and the version are gone. The held badge is the accent `#5eead4`, and `worker.js` sets the badge text colour `#08110f`. `kit.css` gains the popup note, quiet-button and problem rules. The tests that pinned popup text are deleted; `popup-view.test.js` and `state.test.js` are new. | see `git log` |
 
 ## Owed live checks
 
@@ -116,6 +117,7 @@ j04-setup-page has landed. Next: j06-popup.
 - j03: the unpacked extension's Open Ghostlight brings the window forward on Windows and Linux (live, once j04 lands the button). The button has landed in j04; the check is still owed.
 - j04: the unpacked extension in a fresh profile on a machine with no Ghostlight: the page opens once, the command copies (and `Copied` is announced), the meeting plays once when the service from the development channel answers, and Open Ghostlight shows the window. Also reduced motion, a 390 px window, and the Documentation link opening in a new tab.
 - j04: measure a cold get-script run on test-01 after c02 and tune `FALLBACK_AFTER_COPY_MS` (90000) and `FALLBACK_AFTER_OPEN_MS` (120000) in `extension/lib/setup-view.js` before x01.
+- j06: the popup in each state (Ready, Paused, Session ended, Not connected with the install and the start words, Update needed, recording, debugger release) on Chrome and Edge, on Windows and Linux. The key cap and `aria-keyshortcuts` follow a changed shortcut. The mascot looks right at 100 px in the lit and waiting lights. The badge text is readable on the accent.
 - j04: the coordinator's check that the JQ4 one-liners run in Windows PowerShell 5.1, PowerShell 7 and `curl | sh` is not recorded in this ledger yet.
 
 ## Owed to the owner
@@ -210,3 +212,31 @@ j04-setup-page has landed. Next: j06-popup.
   (the link is down), because the page already shows the waiting words.
   (7) The step names and the Documentation link text are placed by `setup.js` from `WORDS` and
   `LINKS`, not written in `setup.html`, so each string has one home.
+- j06: ran the gate checks the files require: (3) `npm test` in `extension/` (494 pass), (5) the
+  packager to `.tmp/lane-journey/extension.zip` (its page check passed with `popup.html` naming
+  `kit.css`, `lib/shared.js`, `lib/setup-view.js`, `lib/popup-view.js` and `popup.js`), (8) `node
+  --test tests/guards/*.test.mjs`, (9) `node --check extension/popup.js`, (10) the repository
+  integrity script. `git tag --list 'v2*'` was empty. The tree and the spec differed in these places.
+  (1) `popup.html` loads `lib/shared.js` and `lib/setup-view.js` before `lib/popup-view.js`, and no
+  longer loads `lib/state.js`, which the popup never used. The sentences "Open Ghostlight on this
+  computer." and "It is in the Start menu." are read from `setup-view.js`, so each has one home.
+  (2) The hold and resume actions carry the shortcut as a `key` field, absent when the browser has no
+  shortcut. The debugger release is `{ label, release: true }`; the script sends
+  `release_debugger_sessions`.
+  (3) A link that is not connected shows its not-connected words whatever the control state is, so a
+  stale `ended` never hides "Not connected". A connected link that is not compatible reads as "isn't
+  answering" with the setup button, per the spec; the setup page shows the start words for that case
+  (j04 note 4). Reconcile the two if the live check shows it confuses.
+  (4) `connection()` for a connected link returns "Connected" and "Ghostlight on this computer is
+  answering." (the spec left this open). It ignores the control state; the popup tells that. For an
+  unreachable link its line joins the sentence and the place: "Open Ghostlight on this computer. It is
+  in the Start menu."
+  (5) The popup redraws only when the view changes, so the 1500 ms poll never drops keyboard focus. A
+  failed request shows its message in a `role="alert"` line under the actions.
+  (6) `kit.css` also gains `.gl-popup` (body width 284 px), `.gl-pop__note`, `.gl-pop__quiet` and
+  `.gl-pop__problem`; the section 15 markup comment shows them. The held and recording badge colours and
+  the badge text colour are named constants in `lib/state.js`; `BADGE_TEXT_COLOR` is exported.
+  (7) `shared.test.js` pinned the old held badge colour and now expects `#5eead4`. The worker test
+  fake gains `setBadgeTextColor`, and the unseen-notice test checks the text colour.
+  (8) `onboarding.test.js` keeps its linkState tests and the options pins that j07 deletes; its outdated
+  test now pins only the options card.

@@ -116,6 +116,7 @@ async function boot({
   const runtimeMessages = [];
   const alarms = { created: [], cleared: [], onAlarm: event() };
   const badge = [];
+  const badgeTextColors = [];
   const timers = makeTimers();
   const chrome = {
     ...browser,
@@ -144,6 +145,7 @@ async function boot({
     action: {
       setBadgeText(value) { badge.push(wireFrame(value)); },
       setBadgeBackgroundColor() {},
+      setBadgeTextColor(value) { badgeTextColors.push(value.color); },
       setTitle() {}
     },
     commands: { onCommand: event() },
@@ -179,7 +181,7 @@ async function boot({
   await flush();
 
   const harness = {
-    chrome, browser, timers, ports, attached, detachCalls, runtimeMessages, alarms, badge,
+    chrome, browser, timers, ports, attached, detachCalls, runtimeMessages, alarms, badge, badgeTextColors,
     get port() { return ports[ports.length - 1]; },
     /** Receipts sent on one port (default: the latest). */
     receipts(port = harness.port) { return port.posted.filter((frame) => frame.kind === "receipt"); },
@@ -669,6 +671,7 @@ test("a notice for a tab nobody is looking at waits in the persisted queue", asy
     assert.equal(stored[0].tabId, TAB);
     assert.equal((await worker.ask({ kind: "ui_snapshot" })).value.unseen_denials, 1);
     assert.deepEqual(worker.badge.at(-1), { text: "!" });
+    assert.equal(worker.badgeTextColors.at(-1), "#08110f");
   } finally { worker.dispose(); }
 });
 

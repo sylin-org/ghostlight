@@ -1,21 +1,53 @@
+// Ghostlight -- the toolbar popup. It places the words GhostlightPopupView chose, follows the
+// connection the worker reports, and sends the person's choice back as a request. It holds no
+// policy and no words of its own.
 (function ghostlightPopup() {
   "use strict";
 
-  const status = document.getElementById("status");
-  const toggle = document.getElementById("toggle");
-  const linkDot = document.getElementById("link-dot");
-  const sessionStatus = document.getElementById("session-status");
-  const sessionButton = document.getElementById("session-button");
-  const releaseDebuggerButton = document.getElementById("release-debugger-button");
-  const setupSection = document.getElementById("setup-section");
-  const setupRoute = document.getElementById("setup-route");
-  const captions = document.getElementById("captions-toggle");
-  const HOST_ABSENT = "host_absent";
-  const SERVICE_OUTDATED = "service_outdated";
-  const UPDATE_SERVICE = "Update Ghostlight on this computer.";
-  const NOT_INSTALLED_HERE = "Ghostlight is not installed on this computer yet.";
-  let latestSnapshot = null;
-  let latestPreferences = null;
+  const view = globalThis.GhostlightPopupView;
+
+  const MESSAGE = Object.freeze({
+    SNAPSHOT: "ui_snapshot",
+    STATE_CHANGED: "ui_state_changed",
+    CONTROL: "runtime_control",
+    RELEASE: "release_debugger_sessions"
+  });
+  // The command whose shortcut the key cap shows; the manifest declares it.
+  const TOGGLE_COMMAND = "toggle-hold";
+  const SETUP_PAGE = "setup.html";
+  const POLL_MS = 1500;
+
+  // These strings are constants in this file; nothing from the page or the worker is ever parsed
+  // as markup.
+  const ICON = Object.freeze({
+    pause: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+      + 'stroke-linejoin="round" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>',
+    play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+      + 'stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg>'
+  });
+  const ICON_FOR_INTENT = Object.freeze({
+    [view.INTENT.HOLD]: ICON.pause,
+    [view.INTENT.RESUME]: ICON.play
+  });
+
+  const pop = document.getElementById("pop");
+  const eyebrow = document.getElementById("eyebrow");
+  const title = document.getElementById("title");
+  const line = document.getElementById("line");
+  const line2 = document.getElementById("line2");
+  const note = document.getElementById("note");
+  const actions = document.getElementById("actions");
+  const problem = document.getElementById("problem");
+  const settings = document.getElementById("settings");
+
+  // What the connection is when the worker does not answer: the same words as an unreachable link.
+  const UNREACHABLE = Object.freeze({
+    connected: false, compatible: true, control_state: "active", attached_tabs: 0, recording_tabs: 0, activity: []
+  });
+
+  let platform = null;
+  let shortcut = null;
+  let signature = null;
 
   async function request(message) {
     const response = await chrome.runtime.sendMessage(message);
@@ -23,153 +55,125 @@
     return response.value;
   }
 
-  function renderLink(snapshot) {
-    linkDot.className = "";
-    if (snapshot.control_state === "ended") {
-      linkDot.title = "Session ended";
-    } else if (snapshot.connected && snapshot.compatible) {
-      linkDot.className = "on";
-      linkDot.title = "Connected to Ghostlight";
-    } else if (snapshot.link_state === SERVICE_OUTDATED) {
-      linkDot.className = "wait";
-      linkDot.title = UPDATE_SERVICE;
-    } else if (snapshot.link_state === HOST_ABSENT) {
-      linkDot.className = "wait";
-      linkDot.title = NOT_INSTALLED_HERE;
+  function element(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function icon(markup) {
+    const holder = document.createElement("template");
+    holder.innerHTML = markup;
+    return holder.content.firstElementChild;
+  }
+
+  function showProblem(message) {
+    problem.textContent = message;
+    problem.hidden = message === "";
+  }
+
+  function open(target) {
+    if (target === view.OPEN.SETUP) {
+      chrome.tabs.create({ url: chrome.runtime.getURL(SETUP_PAGE) }).catch(() => {});
+    } else if (target === view.OPEN.OPTIONS) {
+      chrome.runtime.openOptionsPage();
+    }
+  }
+
+  // A request that changes the browser's state. The view is redrawn from the answer either way, so
+  // a pressed button is never left disabled.
+  async function send(message) {
+    try {
+      await request(message);
+      showProblem("");
+    } catch (error) {
+      showProblem(String(error?.message ?? error));
+    }
+    await refresh(true);
+  }
+
+  function pressFor(action) {
+    if (action.open) return () => open(action.open);
+    if (action.release) return () => send({ kind: MESSAGE.RELEASE });
+    return () => send({ kind: MESSAGE.CONTROL, intent: action.intent });
+  }
+
+  function actionButton(action, className) {
+    const button = element("button", className);
+    button.type = "button";
+    if (action.key) {
+      const markup = ICON_FOR_INTENT[action.intent];
+      if (markup) button.append(icon(markup));
+      button.append(element("span", "gl-pop__pause-label", action.label));
+      // The cap is a visual hint; the button names the shortcut for assistive technology.
+      const cap = element("span", "gl-kbd", action.key);
+      cap.setAttribute("aria-hidden", "true");
+      button.append(cap);
+      button.setAttribute("aria-keyshortcuts", action.key);
+      button.classList.add("gl-pop__pause");
     } else {
-      linkDot.className = "wait";
-      linkDot.title = snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch";
+      button.textContent = action.label;
     }
+    const press = pressFor(action);
+    button.addEventListener("click", () => {
+      // A page that opens closes the popup; a request disables its button until the answer redraws.
+      if (!action.open) button.disabled = true;
+      press();
+    });
+    return button;
   }
 
-  // The extension arrives on a second computer with a synced browser profile; the native host does
-  // not. Until it is installed here, "waiting" would be a lie with no end, so this is the one state
-  // that offers a way out of the popup.
-  function renderSetup(snapshot) {
-    setupSection.hidden = snapshot.link_state !== HOST_ABSENT;
+  function renderActions(model) {
+    actions.replaceChildren();
+    if (model.primary) actions.append(actionButton(model.primary, "gl-btn gl-btn--primary"));
+    if (model.secondary) actions.append(actionButton(model.secondary, "gl-btn gl-btn--ghost"));
+    if (model.quiet) actions.append(actionButton(model.quiet, "gl-pop__quiet"));
+    if (model.release) actions.append(actionButton(model.release, "gl-pop__quiet"));
   }
 
-  function renderHold(snapshot) {
-    const connected = snapshot.connected && snapshot.compatible;
-    if (!connected || snapshot.control_state === "ended") {
-      status.textContent = "No active browsing session.";
-      toggle.textContent = "Pause agent browsing (take the wheel)";
-      toggle.disabled = true;
-      return;
-    }
-    toggle.disabled = false;
-    if (snapshot.control_state === "held") {
-      status.textContent = "Agent browsing is PAUSED.";
-      toggle.textContent = "Resume agent browsing";
-    } else {
-      status.textContent = "Agent browsing is allowed.";
-      toggle.textContent = "Pause agent browsing (take the wheel)";
-    }
+  // The view is drawn only when it changes, so the poll never drops the person's keyboard focus or
+  // a button they are pressing.
+  function render(snapshot, force) {
+    const model = view.popupView(snapshot, { shortcut, platform });
+    const next = JSON.stringify(model);
+    if (!force && next === signature) return;
+    signature = next;
+    pop.dataset.light = model.light;
+    eyebrow.textContent = model.eyebrow;
+    title.textContent = model.title;
+    line.textContent = model.line;
+    line2.textContent = model.line2 ?? "";
+    line2.hidden = model.line2 === null;
+    note.textContent = model.note ?? "";
+    note.hidden = model.note === null;
+    settings.textContent = model.settings.label;
+    renderActions(model);
   }
 
-  function renderSession(snapshot) {
-    if (snapshot.control_state === "ended") {
-      sessionStatus.textContent = "Session ended. Browser access is severed until you start a new session.";
-      sessionButton.textContent = "Start new session";
-      sessionButton.dataset.intent = "start_session";
-      sessionButton.classList.remove("kill");
-      sessionButton.disabled = !snapshot.connected || !snapshot.compatible;
-      return;
-    }
-    const connectedLine = snapshot.connected && snapshot.compatible
-      ? "Connected to Ghostlight."
-      : snapshot.link_state === SERVICE_OUTDATED ? UPDATE_SERVICE
-        : snapshot.link_state === HOST_ABSENT ? NOT_INSTALLED_HERE
-          : snapshot.compatible ? "Waiting for the Ghostlight service..." : "Ghostlight version mismatch.";
-    const recordingLine = snapshot.recording_tabs > 0 ? ` REC on ${snapshot.recording_tabs} tab(s).` : "";
-    sessionStatus.textContent = `${connectedLine} Debugger attached to ${snapshot.attached_tabs || 0} tab(s).${recordingLine}`;
-    sessionButton.textContent = "End session now";
-    sessionButton.dataset.intent = "end_session";
-    sessionButton.classList.add("kill");
-    sessionButton.disabled = !snapshot.connected || !snapshot.compatible;
-  }
-
-  // Unlike "End session now", this never needs a live connection: it is a purely local release
-  // of Chrome's own debugger attachment, not a governance decision the orchestrator has to make.
-  // It exists specifically for the case "End session" cannot cover -- the service crashed, was
-  // uninstalled, or is simply not running -- which used to leave the automation banner stuck with
-  // no way to clear it short of Chrome's own infobar or closing every tab by hand.
-  function renderReleaseDebugger(snapshot) {
-    const attached = snapshot.attached_tabs || 0;
-    releaseDebuggerButton.hidden = attached === 0;
-    releaseDebuggerButton.disabled = attached === 0;
-    releaseDebuggerButton.textContent = attached === 1
-      ? "Release debugger session (1 tab)"
-      : `Release debugger sessions (${attached} tabs)`;
-  }
-
-  function render(snapshot) {
-    latestSnapshot = snapshot;
-    renderLink(snapshot);
-    renderHold(snapshot);
-    renderSession(snapshot);
-    renderReleaseDebugger(snapshot);
-    renderSetup(snapshot);
-  }
-
-  async function refresh() {
+  async function refresh(force = false) {
     try {
-      const [snapshot, preferences] = await Promise.all([
-        request({ kind: "ui_snapshot" }),
-        request({ kind: "get_preferences" })
-      ]);
-      latestPreferences = preferences;
-      captions.checked = Boolean(preferences.captions);
-      render(snapshot);
-    } catch (error) {
-      render({ connected: false, compatible: true, control_state: "active", attached_tabs: 0, recording_tabs: 0, activity: [] });
-      sessionStatus.textContent = String(error?.message ?? error);
+      render(await request({ kind: MESSAGE.SNAPSHOT }), force);
+    } catch {
+      render(UNREACHABLE, force);
     }
   }
 
-  async function runtimeAction(intent) {
-    try {
-      await request({ kind: "runtime_control", intent });
-      await refresh();
-    } catch (error) {
-      sessionStatus.textContent = String(error?.message ?? error);
-    }
+  async function start() {
+    const [info, commands] = await Promise.all([
+      chrome.runtime.getPlatformInfo().catch(() => null),
+      chrome.commands.getAll().catch(() => [])
+    ]);
+    platform = info?.os ?? null;
+    shortcut = commands.find((command) => command.name === TOGGLE_COMMAND)?.shortcut || null;
+    settings.addEventListener("click", (event) => {
+      event.preventDefault();
+      open(view.OPEN.OPTIONS);
+    });
+    chrome.runtime.onMessage.addListener((message) => { if (message?.kind === MESSAGE.STATE_CHANGED) refresh(); });
+    setInterval(refresh, POLL_MS);
+    refresh();
   }
 
-  toggle.addEventListener("click", async () => {
-    toggle.disabled = true;
-    await runtimeAction(latestSnapshot?.control_state === "active" ? "hold" : "resume");
-  });
-  sessionButton.addEventListener("click", async () => {
-    sessionButton.disabled = true;
-    await runtimeAction(sessionButton.dataset.intent);
-  });
-  releaseDebuggerButton.addEventListener("click", async () => {
-    releaseDebuggerButton.disabled = true;
-    try {
-      await request({ kind: "release_debugger_sessions" });
-    } catch (error) {
-      sessionStatus.textContent = String(error?.message ?? error);
-    } finally {
-      await refresh();
-    }
-  });
-  captions.addEventListener("change", async () => {
-    try {
-      latestPreferences = await request({
-        kind: "set_preferences",
-        preferences: { ...latestPreferences, captions: captions.checked }
-      });
-    } catch (error) {
-      captions.checked = !captions.checked;
-      sessionStatus.textContent = String(error?.message ?? error);
-    }
-  });
-  setupRoute.addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("setup.html") }).catch(() => {});
-  });
-  document.getElementById("open-options").addEventListener("click", () => chrome.runtime.openOptionsPage());
-  chrome.runtime.onMessage.addListener((message) => { if (message?.kind === "ui_state_changed") refresh(); });
-  setInterval(refresh, 1500);
-  refresh();
+  start();
 })();

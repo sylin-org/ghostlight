@@ -129,7 +129,7 @@ test("adapter state is content-free and deterministic", () => {
   });
   assert.equal(state.connectionLabel({ connected: true, compatible: true, control_state: "held" }), "Paused");
   assert.equal(state.controlState("attention"), "active");
-  assert.deepEqual(state.badge({ connected: true, compatible: true, control_state: "held" }), { text: "II", color: "#38bdf8" });
+  assert.deepEqual(state.badge({ connected: true, compatible: true, control_state: "held" }), { text: "II", color: "#5eead4" });
 });
 
 

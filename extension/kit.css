@@ -484,8 +484,10 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
          <div role="status" aria-live="polite"><span class="gl-eyebrow">Ghostlight</span>
            <p class="gl-pop__title">Ready</p><p class="gl-pop__line">No agent is browsing.</p></div>
        </div>
-       <button class="gl-btn gl-btn--ghost gl-pop__pause" type="button"><svg ...></svg>
-         <span class="gl-pop__pause-label">Pause agents</span><span class="gl-kbd">Alt+Shift+P</span></button>
+       <p class="gl-pop__note">Recording in 1 tab.</p>
+       <button class="gl-btn gl-btn--ghost gl-pop__pause" type="button" aria-keyshortcuts="Alt+Shift+P"><svg ...></svg>
+         <span class="gl-pop__pause-label">Pause agents</span><span class="gl-kbd" aria-hidden="true">Alt+Shift+P</span></button>
+       <button class="gl-pop__quiet" type="button">End session</button>
        <p class="gl-pop__foot"><a class="gl-link" href="options.html">Settings</a></p>
      </div>
    --------------------------------------------------------------------------- */
@@ -499,7 +501,14 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-pop .gl-btn { width: 100%; margin-top: 16px; }
 .gl-pop__pause { justify-content: flex-start; }
 .gl-pop__pause-label { flex: 1; text-align: left; }
-.gl-pop__foot { margin-top: 12px; }
+.gl-pop__note { margin-top: 14px; font-size: var(--fs-small); line-height: 1.5; color: var(--ink-3); }
+.gl-pop__problem { margin-top: 12px; font-size: var(--fs-small); line-height: 1.5; color: var(--danger-soft); }
+.gl-pop__quiet { display: block; margin-top: 14px; padding: 0; border: 0; background: none; font: 400 var(--fs-small)/1.4 var(--sans); color: var(--ink-3); cursor: pointer; transition: color var(--beat-quick) var(--calm); }
+.gl-pop__quiet:hover { color: var(--ink); }
+.gl-pop__quiet[disabled] { opacity: .5; cursor: default; }
+.gl-pop__foot { margin-top: 14px; }
+/* The popup page is exactly the popup: the browser sizes the window to the body. */
+.gl-popup { width: 284px; }
 
 /* ---------------------------------------------------------------------------
    16. REDUCED MOTION

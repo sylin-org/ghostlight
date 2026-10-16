@@ -1,42 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="gl-page">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Ghostlight in Browser</title>
-    <link rel="stylesheet" href="ui.css">
+    <title>Ghostlight</title>
+    <link rel="stylesheet" href="kit.css">
   </head>
-  <body class="popup-shell">
-    <main>
-      <header id="brand">
-        <img src="icons/icon48.png" alt="" width="22" height="22">
-        <h1>Ghostlight in Browser</h1>
-        <span id="link-dot" title="Checking connection..."></span>
-      </header>
-
-      <div id="status" aria-live="polite">Loading...</div>
-      <button id="toggle" type="button" disabled>Loading...</button>
-      <p id="shortcut-note">Keyboard shortcut: Alt+Shift+P by default; change it at chrome://extensions/shortcuts</p>
-      <p id="local-note">Local only. No Ghostlight account or sign-in is required.</p>
-
-      <section id="setup-section" hidden aria-labelledby="setup-title">
-        <hr>
-        <h2 id="setup-title">Ghostlight is not installed on this computer yet.</h2>
-        <p id="setup-note">The extension came with your Chrome profile. Install Ghostlight here to connect it.</p>
-        <button id="setup-route" type="button">Set up Ghostlight</button>
-      </section>
-
-      <hr>
-      <div id="session-status" aria-live="polite">Loading...</div>
-      <button id="session-button" type="button" disabled>Loading...</button>
-      <button id="release-debugger-button" type="button" class="link-button" disabled hidden>Release debugger sessions</button>
-
-      <hr>
-      <label id="captions-row"><input type="checkbox" id="captions-toggle"> Show action captions</label>
-      <p id="captions-note">A subtitle naming each agent action. Off by default; handy when recording a demo.</p>
-      <button id="open-options" class="link-button" type="button">More settings</button>
-    </main>
-    <script src="lib/state.js"></script>
+  <body class="gl-popup">
+    <div class="gl-pop" id="pop" data-light="waiting">
+      <div class="gl-pop__head">
+        <div class="gl-pop__art">
+          <span class="gl-mascot gl-companion__mascot gl-companion__mascot--sm">
+            <span class="gl-mascot__halo"></span>
+            <img class="gl-px gl-mascot__img" src="icons/ghostlight-mascot.png" alt="" width="100" height="100">
+            <span class="gl-lantern" aria-hidden="true"><span class="gl-lantern__ember"></span><span class="gl-lantern__ring"></span><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i></span>
+          </span>
+        </div>
+        <div role="status" aria-live="polite">
+          <span class="gl-eyebrow" id="eyebrow"></span>
+          <p class="gl-pop__title" id="title"></p>
+          <p class="gl-pop__line" id="line"></p>
+          <p class="gl-pop__line" id="line2" hidden></p>
+        </div>
+      </div>
+      <p class="gl-pop__note" id="note" hidden></p>
+      <div id="actions"></div>
+      <p class="gl-pop__problem" id="problem" role="alert" hidden></p>
+      <p class="gl-pop__foot"><a class="gl-link" id="settings" href="options.html"></a></p>
+    </div>
+    <script src="lib/shared.js"></script>
+    <script src="lib/setup-view.js"></script>
+    <script src="lib/popup-view.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -17,6 +17,10 @@
     diagnostics: false,
     preserveTabs: true
   });
+  // The toolbar badge: the accent for a pause, red for a recording. The text is dark on every badge colour.
+  const BADGE_HELD = "#5eead4";
+  const BADGE_RECORDING = "#ef4444";
+  const BADGE_TEXT_COLOR = "#08110f";
   const CONTROL_STATES = Object.freeze(["active", "held", "ended"]);
 
   function newBrowserId(randomUuid) {
@@ -66,9 +70,9 @@
   }
 
   function badge(snapshot) {
-    if (snapshot.control_state === "held") return { text: "II", color: "#38bdf8" };
-    if (snapshot.recording_tabs > 0) return { text: "REC", color: "#ef4444" };
-    return { text: "", color: "#38bdf8" };
+    if (snapshot.control_state === "held") return { text: "II", color: BADGE_HELD };
+    if (snapshot.recording_tabs > 0) return { text: "REC", color: BADGE_RECORDING };
+    return { text: "", color: BADGE_HELD };
   }
 
   return Object.freeze({
@@ -79,6 +83,7 @@
     DEBUG_KEY,
     PRESERVE_TABS_KEY,
     DEFAULT_PREFERENCES,
+    BADGE_TEXT_COLOR,
     newBrowserId,
     preferences,
     preferencesFromStorage,
