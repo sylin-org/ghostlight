@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
+use crate::link::TrayItemId;
+
 /// The most items a tray model may hold.
 pub const MAX_ITEMS: usize = 16;
 
@@ -129,6 +131,24 @@ impl TrayModel {
             }
         }
         Ok(())
+    }
+}
+
+impl TrayModel {
+    /// The tray while the shell has no workbench to act for: the tooltip says `words`, and every
+    /// entry but Open is disabled, since the service cannot hear a click.
+    pub fn while_without_service(&self, words: &str) -> TrayModel {
+        TrayModel {
+            tooltip: words.to_owned(),
+            items: self
+                .items
+                .iter()
+                .map(|item| TrayItem {
+                    enabled: item.enabled && item.id == TrayItemId::Open.as_str(),
+                    ..item.clone()
+                })
+                .collect(),
+        }
     }
 }
 
@@ -324,6 +344,25 @@ mod tests {
         assert_eq!(first["enabled"], true);
         let back: TrayModel = serde_json::from_value(value).unwrap();
         assert_eq!(back, model());
+    }
+
+    #[test]
+    fn without_a_service_the_tooltip_is_the_state_and_only_open_can_be_chosen() {
+        let shown = model().while_without_service("Ghostlight is restarting...");
+        assert_eq!(shown.tooltip, "Ghostlight is restarting...");
+        assert_eq!(shown.validate(), Ok(()));
+        let enabled: Vec<&str> = shown
+            .items
+            .iter()
+            .filter(|item| item.enabled)
+            .map(|item| item.id.as_str())
+            .collect();
+        assert_eq!(enabled, ["open"]);
+        assert_eq!(shown.items.len(), model().items.len());
+        assert_eq!(
+            shown.items.iter().map(|i| &i.label).collect::<Vec<_>>(),
+            model().items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
     }
 
     #[test]

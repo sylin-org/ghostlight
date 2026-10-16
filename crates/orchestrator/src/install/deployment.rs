@@ -1239,6 +1239,10 @@ mod tests {
         watched_directory: Option<PathBuf>,
         /// Whether `watched_directory` existed at each stop of strays.
         watched_present: RefCell<Vec<bool>>,
+        /// A file whose text the fake reads at the quit.
+        quit_sees: Option<PathBuf>,
+        /// The text of `quit_sees` when the quit was asked, if the file was there.
+        seen_at_quit: RefCell<Option<String>>,
         calls: RefCell<Vec<Call>>,
         sightings: RefCell<Vec<Sighting>>,
     }
@@ -1259,6 +1263,8 @@ mod tests {
                 strays_stay: false,
                 watched_directory: None,
                 watched_present: RefCell::new(Vec::new()),
+                quit_sees: None,
+                seen_at_quit: RefCell::new(None),
                 calls: RefCell::new(Vec::new()),
                 sightings: RefCell::new(Vec::new()),
             }
@@ -1300,6 +1306,9 @@ mod tests {
 
     impl ProcessControl for FakeControl {
         fn quit(&self, _layout: &Layout) -> bool {
+            if let Some(path) = &self.quit_sees {
+                *self.seen_at_quit.borrow_mut() = fs::read_to_string(path).ok();
+            }
             self.note(Call::Quit);
             self.quits
         }
@@ -3161,6 +3170,29 @@ mod tests {
             .run(Mode::Development, VERSION, &FakeControl::new())
             .unwrap();
         assert_eq!(placed(&outcome.plan), [named(SERVICE_EXECUTABLE_NAME)]);
+    }
+
+    #[test]
+    fn the_new_shell_is_in_bin_when_the_running_service_is_asked_to_quit() {
+        // A shell that is told to hand over compares its own image with the one in `bin`, so the
+        // swap must come before the quit.
+        let fixture = Fixture::new();
+        add_shell(&fixture, "shell");
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+
+        add_shell(&fixture, "next shell");
+        let mut control = FakeControl::new();
+        control.quit_sees = Some(fixture.layout.bin().join(DESKTOP_EXECUTABLE_NAME));
+        fixture.run(Mode::Development, VERSION, &control).unwrap();
+
+        assert_eq!(control.calls().first(), Some(&Call::Quit));
+        assert_eq!(
+            control.seen_at_quit.borrow().as_deref(),
+            Some("next shell"),
+            "the quit finds the new shell already in bin"
+        );
     }
 
     #[test]

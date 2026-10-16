@@ -23,7 +23,6 @@ wry = "=0.55.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "=0.18.2"
 webkit2gtk = "=2.0.2"
-libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "=0.16.0", default-features = false, features = ["common-controls-v6"] }

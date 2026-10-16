@@ -5,6 +5,12 @@
 //! do with the window when something happens to it. [`ShellWindow`] is the thin native glue that
 //! creates the `tao` window and its `wry` webview and carries out the lifecycle's decisions.
 //!
+//! The window shows one [`Content`] at a time: the service's workbench or one of the shell's own
+//! state screens. [`plan`] decides how the window gets from one content to another. A workbench
+//! with another origin or another bearer is never navigated to: the webview is rebuilt, because the
+//! bearer is fixed when a webview is built and the service that issued it may be gone. A state
+//! screen to another state screen reloads its document.
+//!
 //! Linux keeps one extra rule. Wayland gives a client no way to unminimize its own window, so on
 //! Linux an Open request destroys the existing window and builds a fresh one after the destroyed
 //! event, and further Open requests while that replacement is pending are coalesced. A Linux
@@ -17,7 +23,9 @@
 //! Everything but the native glue is pure and unit tested. The glue is checked live.
 
 use std::ffi::OsStr;
+use std::fmt;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use tao::dpi::{LogicalSize, PhysicalPosition};
 use tao::event_loop::EventLoopWindowTarget;
@@ -25,8 +33,9 @@ use tao::window::{Icon, Window, WindowBuilder, WindowId};
 use wry::{WebContext, WebView, WebViewBuilder};
 
 use crate::native::move_script;
+use crate::states::{self, StateButton, StateScreen};
 use crate::tray::icon_image;
-use crate::webview::{access_script, harden};
+use crate::webview;
 
 /// The window title, the product name.
 pub const WINDOW_TITLE: &str = "Ghostlight";
@@ -243,25 +252,99 @@ pub fn centered_origin(
     )
 }
 
-/// What a window shows and what its page is handed.
-pub struct ShellView {
-    /// The first URL to load, the workbench address.
-    pub start_url: String,
-    /// The workbench origin: the only place the webview may navigate to and the only page that is
-    /// handed the bearer.
-    pub origin: String,
-    /// The secret that makes the page's requests the window's.
-    pub bearer: String,
-    /// The folder the webview keeps web storage in.
-    pub profile: PathBuf,
+/// What a window shows.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Content {
+    /// The service's workbench.
+    Workbench {
+        /// The first URL to load, the workbench address and the section to open at.
+        start_url: String,
+        /// The workbench origin: the only place the webview may navigate to and the only page
+        /// that is handed the bearer.
+        origin: String,
+        /// The secret that makes the page's requests the window's.
+        bearer: String,
+    },
+    /// One of the shell's own states.
+    State(StateScreen),
+}
+
+impl fmt::Debug for Content {
+    /// Prints the content without the bearer.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Workbench {
+                start_url, origin, ..
+            } => formatter
+                .debug_struct("Workbench")
+                .field("start_url", start_url)
+                .field("origin", origin)
+                .field("bearer", &"[redacted]")
+                .finish(),
+            Self::State(screen) => formatter.debug_tuple("State").field(screen).finish(),
+        }
+    }
+}
+
+/// How a window gets to a content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentAct {
+    /// The window already shows it.
+    Keep,
+    /// Load the new state screen's document into the state webview.
+    Reload,
+    /// Build a new webview and drop the old one.
+    Rebuild,
+}
+
+/// How a window showing `current` gets to `wanted`.
+///
+/// A workbench is never navigated: the same origin and bearer is kept as it is and any other is a
+/// rebuilt webview, so the bearer a page holds is always the one its service issued.
+pub fn plan(current: Option<&Content>, wanted: &Content) -> ContentAct {
+    match (current, wanted) {
+        (
+            Some(Content::Workbench { origin, bearer, .. }),
+            Content::Workbench {
+                origin: wanted_origin,
+                bearer: wanted_bearer,
+                ..
+            },
+        ) if origin == wanted_origin && bearer == wanted_bearer => ContentAct::Keep,
+        (Some(Content::State(shown)), Content::State(wanted)) => {
+            if shown == wanted {
+                ContentAct::Keep
+            } else {
+                ContentAct::Reload
+            }
+        }
+        _ => ContentAct::Rebuild,
+    }
+}
+
+/// What the webviews of a window call back into. Each runs on the event-loop thread and must only
+/// post an event to the loop.
+pub struct Callbacks {
+    /// A button of a state screen was pressed.
+    pub pressed: Rc<dyn Fn(StateButton)>,
+    /// The webview's renderer process ended.
+    #[cfg(target_os = "linux")]
+    pub renderer_lost: Rc<dyn Fn()>,
+}
+
+/// The webview of a window and what it shows.
+struct Shown {
+    webview: WebView,
+    content: Content,
 }
 
 /// The shell's one window with its webview.
 pub struct ShellWindow {
     // The webview drops before the window it is attached to, and both before the context.
-    webview: WebView,
+    shown: Option<Shown>,
     window: Window,
-    _context: WebContext,
+    context: WebContext,
+    callbacks: Callbacks,
 }
 
 fn window_icon(rgba: Vec<u8>, width: u32, height: u32) -> Result<Icon, WindowError> {
@@ -269,11 +352,13 @@ fn window_icon(rgba: Vec<u8>, width: u32, height: u32) -> Result<Icon, WindowErr
 }
 
 impl ShellWindow {
-    /// Builds the window and its webview, shows the window centered on its monitor and loads
-    /// the view's start URL. Call on the event-loop thread.
+    /// Builds the window, shows it centered on its monitor with `content` in it, and keeps
+    /// `profile` as the folder the webviews store web data in. Call on the event-loop thread.
     pub fn create<T: 'static>(
         target: &EventLoopWindowTarget<T>,
-        view: ShellView,
+        profile: PathBuf,
+        content: Content,
+        callbacks: Callbacks,
     ) -> Result<ShellWindow, WindowError> {
         let (rgba, width, height) = icon_image().map_err(native)?;
         let builder = WindowBuilder::new()
@@ -294,24 +379,70 @@ impl ShellWindow {
         let window = builder.build(target).map_err(native)?;
         center(&window);
 
-        let ShellView {
-            start_url,
-            origin,
-            bearer,
-            profile,
-        } = view;
-        let mut context = WebContext::new(Some(profile));
-        let webview_builder = harden(WebViewBuilder::new_with_web_context(&mut context), &origin)
-            .with_initialization_script_for_main_only(access_script(&origin, &bearer), true)
-            .with_url(start_url);
-        let webview = build_webview(webview_builder, &window)?;
-
-        window.set_visible(true);
-        Ok(ShellWindow {
-            webview,
+        let mut shell_window = ShellWindow {
+            shown: None,
             window,
-            _context: context,
-        })
+            context: WebContext::new(Some(profile)),
+            callbacks,
+        };
+        shell_window.show(content)?;
+        shell_window.window.set_visible(true);
+        Ok(shell_window)
+    }
+
+    /// Makes the window show `wanted`, the way [`plan`] says. A failure leaves the window with no
+    /// webview, and the caller discards it.
+    pub fn show(&mut self, wanted: Content) -> Result<(), WindowError> {
+        match plan(self.shown.as_ref().map(|shown| &shown.content), &wanted) {
+            ContentAct::Keep => Ok(()),
+            ContentAct::Reload => {
+                if let (Some(shown), Content::State(screen)) = (self.shown.as_mut(), &wanted) {
+                    shown
+                        .webview
+                        .load_html(&states::document(*screen))
+                        .map_err(native)?;
+                    shown.content = wanted;
+                }
+                Ok(())
+            }
+            ContentAct::Rebuild => {
+                // The old webview goes first: dropping it removes the window's resize hook, which
+                // a webview built before the drop would lose with it.
+                self.shown = None;
+                let webview = self.build(&wanted)?;
+                self.shown = Some(Shown {
+                    webview,
+                    content: wanted,
+                });
+                Ok(())
+            }
+        }
+    }
+
+    fn build(&mut self, content: &Content) -> Result<WebView, WindowError> {
+        let pressed = Rc::clone(&self.callbacks.pressed);
+        let builder = WebViewBuilder::new_with_web_context(&mut self.context);
+        let builder = match content {
+            Content::Workbench {
+                start_url,
+                origin,
+                bearer,
+            } => webview::workbench(builder, origin, bearer, start_url.clone()),
+            Content::State(screen) => {
+                webview::state_screen(builder, *screen, move |button| pressed(button))
+            }
+        };
+        let webview = build_webview(builder, &self.window)?;
+        #[cfg(target_os = "linux")]
+        {
+            use webkit2gtk::WebViewExt;
+            use wry::WebViewExtUnix;
+            let lost = Rc::clone(&self.callbacks.renderer_lost);
+            webview
+                .webview()
+                .connect_web_process_terminated(move |_, _| lost());
+        }
+        Ok(webview)
     }
 
     /// Restores the window from minimized, shows it and gives it focus.
@@ -334,7 +465,14 @@ impl ShellWindow {
         let Some(script) = move_script(address) else {
             return;
         };
-        if let Err(error) = self.webview.evaluate_script(&script) {
+        let Some(Shown {
+            webview,
+            content: Content::Workbench { .. },
+        }) = &self.shown
+        else {
+            return;
+        };
+        if let Err(error) = webview.evaluate_script(&script) {
             eprintln!("ghostlight-desktop: {}", native(error));
         }
     }
@@ -347,19 +485,6 @@ impl ShellWindow {
     /// The window's id in the event loop.
     pub fn id(&self) -> WindowId {
         self.window.id()
-    }
-
-    /// Calls `callback` whenever the webview's renderer process ends.
-    ///
-    /// The callback runs inside a WebKitGTK signal. It must only post an event to the loop and
-    /// never drop this window there.
-    #[cfg(target_os = "linux")]
-    pub fn on_renderer_lost(&self, callback: impl Fn() + 'static) {
-        use webkit2gtk::WebViewExt;
-        use wry::WebViewExtUnix;
-        self.webview
-            .webview()
-            .connect_web_process_terminated(move |_, _| callback());
     }
 }
 
@@ -529,6 +654,71 @@ mod tests {
             WindowAct::Focus
         };
         assert_eq!(lifecycle.on(OpenRequested), Some(expected));
+    }
+
+    fn workbench(origin: &str, bearer: &str) -> Content {
+        Content::Workbench {
+            start_url: format!("{origin}/"),
+            origin: origin.to_owned(),
+            bearer: bearer.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_first_content_builds_a_webview() {
+        assert_eq!(
+            plan(None, &workbench("http://127.0.0.1:41000", "a")),
+            ContentAct::Rebuild
+        );
+        assert_eq!(
+            plan(None, &Content::State(StateScreen::Starting)),
+            ContentAct::Rebuild
+        );
+    }
+
+    #[test]
+    fn a_second_workbench_with_another_origin_or_bearer_rebuilds_and_never_navigates() {
+        let shown = workbench("http://127.0.0.1:41000", "a");
+        for wanted in [
+            workbench("http://127.0.0.1:41001", "a"),
+            workbench("http://127.0.0.1:41000", "b"),
+            workbench("http://127.0.0.1:41001", "b"),
+        ] {
+            assert_eq!(
+                plan(Some(&shown), &wanted),
+                ContentAct::Rebuild,
+                "{wanted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_same_workbench_is_kept_whatever_section_it_starts_at() {
+        let shown = workbench("http://127.0.0.1:41000", "a");
+        let wanted = Content::Workbench {
+            start_url: "http://127.0.0.1:41000/#settings".to_owned(),
+            origin: "http://127.0.0.1:41000".to_owned(),
+            bearer: "a".to_owned(),
+        };
+        assert_eq!(plan(Some(&shown), &wanted), ContentAct::Keep);
+    }
+
+    #[test]
+    fn a_state_screen_reloads_into_another_and_is_rebuilt_to_and_from_the_workbench() {
+        let starting = Content::State(StateScreen::Starting);
+        let stopped = Content::State(StateScreen::Stopped);
+        let page = workbench("http://127.0.0.1:41000", "a");
+        assert_eq!(plan(Some(&starting), &starting), ContentAct::Keep);
+        assert_eq!(plan(Some(&starting), &stopped), ContentAct::Reload);
+        assert_eq!(plan(Some(&starting), &page), ContentAct::Rebuild);
+        assert_eq!(plan(Some(&page), &starting), ContentAct::Rebuild);
+    }
+
+    #[test]
+    fn the_bearer_is_never_printed() {
+        let printed = format!("{:?}", workbench("http://127.0.0.1:41000", "s3cr3t-bearer"));
+        assert!(!printed.contains("s3cr3t-bearer"), "{printed}");
+        assert!(printed.contains("[redacted]"));
     }
 
     #[test]

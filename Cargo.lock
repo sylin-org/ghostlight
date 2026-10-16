@@ -1484,7 +1484,6 @@ dependencies = [
  "embed-resource",
  "ghostlight-relay",
  "gtk",
- "libc",
  "notify-rust",
  "open",
  "png 0.18.1",

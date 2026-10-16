@@ -35,8 +35,10 @@ use std::ffi::OsString;
 
 pub mod app;
 pub mod link;
+pub mod machine;
 pub mod native;
 pub mod session;
+pub mod states;
 pub mod tray;
 pub mod webview;
 pub mod window;
@@ -44,21 +46,89 @@ pub mod window;
 /// The exit code of a run with arguments the program does not accept.
 pub const EXIT_USAGE: u8 = 2;
 
-/// Whether the command line, without the program name, is one the program accepts.
-///
-/// The window process takes no arguments: everything it does is decided by the service.
-pub fn accepts_arguments(args: &[OsString]) -> bool {
-    args.is_empty()
+/// The argument of a shell the service started to show its tray.
+pub const TRAY_ARGUMENT: &str = "--tray";
+
+/// The argument of a shell that reopens the window after an update.
+pub const UPDATING_ARGUMENT: &str = "--updating";
+
+/// How a shell was started. It decides what the shell may do before it first attaches to the
+/// service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Launch {
+    /// A person started it, from the Start menu or a file manager. It opens the window and may
+    /// start the service.
+    Person,
+    /// The service started it to show the tray (`--tray`). It opens no window and never starts the
+    /// service, so a start that races a person's Quit cannot undo the Quit.
+    Tray,
+    /// The window reopening after an update (`--updating`). It opens the window on the Updating
+    /// screen and never starts the service.
+    Updating,
+}
+
+impl Launch {
+    /// The launch the command line, without the program name, asks for, or `None` for a command
+    /// line the program does not accept.
+    pub fn from_arguments(args: &[OsString]) -> Option<Launch> {
+        match args {
+            [] => Some(Launch::Person),
+            [only] if only == TRAY_ARGUMENT => Some(Launch::Tray),
+            [only] if only == UPDATING_ARGUMENT => Some(Launch::Updating),
+            _ => None,
+        }
+    }
+
+    /// The argument that starts a shell with this launch, if it has one.
+    pub fn argument(self) -> Option<&'static str> {
+        match self {
+            Launch::Person => None,
+            Launch::Tray => Some(TRAY_ARGUMENT),
+            Launch::Updating => Some(UPDATING_ARGUMENT),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn launch(args: &[&str]) -> Option<Launch> {
+        let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+        Launch::from_arguments(&args)
+    }
+
     #[test]
-    fn no_arguments_are_accepted_and_any_argument_is_refused() {
-        assert!(accepts_arguments(&[]));
-        assert!(!accepts_arguments(&[OsString::from("--help")]));
-        assert!(!accepts_arguments(&[OsString::new()]));
+    fn no_argument_is_a_persons_launch() {
+        assert_eq!(launch(&[]), Some(Launch::Person));
+    }
+
+    #[test]
+    fn the_two_arguments_the_shell_knows_are_accepted() {
+        assert_eq!(launch(&["--tray"]), Some(Launch::Tray));
+        assert_eq!(launch(&["--updating"]), Some(Launch::Updating));
+    }
+
+    #[test]
+    fn anything_else_is_refused() {
+        for args in [
+            &["--help"][..],
+            &[""],
+            &["tray"],
+            &["--TRAY"],
+            &["--tray", "--updating"],
+            &["--tray", "extra"],
+            &["--tray="],
+        ] {
+            assert_eq!(launch(args), None, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn a_launch_names_the_argument_that_makes_it() {
+        for launch in [Launch::Person, Launch::Tray, Launch::Updating] {
+            let args: Vec<OsString> = launch.argument().map(OsString::from).into_iter().collect();
+            assert_eq!(Launch::from_arguments(&args), Some(launch));
+        }
     }
 }

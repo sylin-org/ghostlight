@@ -824,12 +824,14 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
 
 /// Serve one shell of this build on an accepted `desktop` stream.
 ///
-/// The shell is handed the workbench address and its secret, and the tray when the service has
-/// none of its own. It is then attached, so the window, notices and native acts of the workbench
-/// go to it, and a quit says goodbye to it. What the shell sends is a click on a tray entry and
-/// the result of each act it was asked for; the shell opens its own window, so an `open` click and
-/// a frame kind this build does not know are skipped. A frame that does not decode ends the
-/// stream, and the shell is detached.
+/// The service has one desktop place. A shell that finds it taken is told `already_open` instead of
+/// the workbench, the shell that holds the place is asked to show its window, and the stream ends.
+/// Otherwise the shell is handed the workbench address and its secret, and the tray when the
+/// service has none of its own. It is then attached, so the window, notices and native acts of the
+/// workbench go to it, and a quit says goodbye to it. What the shell sends is a click on a tray
+/// entry and the result of each act it was asked for; the shell opens its own window, so an `open`
+/// click and a frame kind this build does not know are skipped. A frame that does not decode ends
+/// the stream, and the shell is detached.
 fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let Some(server) = intake.workbench_server.get() else {
         listener::refuse(&connection, OpeningRefusal::Unsupported);
@@ -843,12 +845,20 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
+    let claim = match intake.quit.shells().claim() {
+        Ok(claim) => claim,
+        Err(occupied) => {
+            occupied.show();
+            writer.native(&DesktopFrame::AlreadyOpen)?;
+            return Ok(());
+        }
+    };
     writer.native(&DesktopFrame::workbench(
         server.address().url(),
         server.bearer(),
         intake.native_tray.load(Ordering::SeqCst),
     ))?;
-    let attached = intake.quit.shells().attach(writer);
+    let attached = claim.attach(writer);
     while let Some(frame) = reader.native::<DesktopFrame>(None)? {
         let item = match frame {
             DesktopFrame::Tray { item } => item,
@@ -4198,30 +4208,40 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_of_two_shells_gets_the_request() {
-        let home = TestHome::new("shell-newest");
+    fn a_second_shell_is_told_it_is_already_open_and_the_first_is_shown() {
+        let home = TestHome::new("shell-already-open");
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
         let mut first = attached_shell(&host);
-        let mut second = attached_shell(&host);
+
+        let (mut second, handed) = open_desktop();
+
+        assert_eq!(handed, DesktopFrame::AlreadyOpen);
+        assert_eq!(next_frame(&mut first), DesktopFrame::Show { address: None });
+        assert!(
+            matches!(
+                frame::read_frame::<DesktopFrame>(&mut second),
+                Ok(None) | Err(_)
+            ),
+            "the stream of the shell that was turned away ends"
+        );
+        assert_eq!(host.quit.shells().attached(), 1);
 
         host.workbench.reveal(Some(PageAddress::About)).unwrap();
         assert_eq!(
-            next_frame(&mut second),
-            DesktopFrame::Show {
-                address: Some(PageAddress::About)
-            }
-        );
-
-        drop(second);
-        eventually(|| host.quit.shells().attached() == 1);
-        host.workbench.reveal(Some(PageAddress::Policy)).unwrap();
-        assert_eq!(
             next_frame(&mut first),
             DesktopFrame::Show {
-                address: Some(PageAddress::Policy)
+                address: Some(PageAddress::About)
             },
-            "the older shell serves once the newer one is gone"
+            "the first shell still serves"
+        );
+
+        drop(first);
+        eventually(|| host.quit.shells().attached() == 0);
+        let (_third, handed) = open_desktop();
+        assert!(
+            matches!(handed, DesktopFrame::Workbench { .. }),
+            "the place is free again: {handed:?}"
         );
         drop(host);
     }
@@ -4313,24 +4333,6 @@ mod tests {
     }
 
     #[test]
-    fn a_third_desktop_stream_is_refused_for_capacity_until_a_place_frees() {
-        let home = TestHome::new("desktop-capacity");
-        let host = ServiceHost::start(home.path()).unwrap();
-        host.publish_ready().unwrap();
-        let (first, _) = open_desktop();
-        let (_second, _) = open_desktop();
-
-        let (_, reply) = dial(&desktop_opening());
-        assert!(!reply.accepted);
-        assert_eq!(reply.code, Some(RefusalCode::Capacity));
-        assert_eq!(reply.say, Some(OpeningRefusal::Capacity.message()));
-
-        drop(first);
-        eventually(|| dial(&desktop_opening()).1.accepted);
-        drop(host);
-    }
-
-    #[test]
     fn a_service_with_no_workbench_refuses_the_desktop_role_as_unsupported() {
         let home = TestHome::new("desktop-no-workbench");
         let served = serve_fake(&home);
@@ -4348,8 +4350,7 @@ mod tests {
         let home = TestHome::new("desktop-garbage");
         let host = ServiceHost::start(home.path()).unwrap();
         host.publish_ready().unwrap();
-        let (mut stream, _) = open_desktop();
-        let (mut other, _) = open_desktop();
+        let mut stream = attached_shell(&host);
 
         frame::write_frame_raw(&mut stream, b"{ not json at all").unwrap();
 
@@ -4357,6 +4358,8 @@ mod tests {
             frame::read_frame::<DesktopFrame>(&mut stream),
             Ok(None) | Err(_)
         ));
+        eventually(|| host.quit.shells().attached() == 0);
+        let (mut other, _) = open_desktop();
         frame::write_frame(
             &mut other,
             &DesktopFrame::Tray {

@@ -14,7 +14,7 @@
 //! dialog's own response. Windows shows its dialog modally and answers before it returns.
 //!
 //! The shell starts a process only while the session is not ending
-//! ([`SessionState::may_start_process`]), and a link or a folder is opened without a console
+//! ([`Session::may_start_process`]), and a link or a folder is opened without a console
 //! window: the shell is a graphical program and the opener asks the shell of the system, never a
 //! command interpreter.
 
@@ -28,7 +28,7 @@ use std::rc::Rc;
 use tao::window::Window;
 
 use crate::link::{ActOutcome, NativeAct};
-use crate::session::SessionState;
+use crate::session::Session;
 
 /// The shell's AppUserModelID. Windows groups the window with a Start-menu shortcut that carries
 /// the same id, and shows a notification from an unpackaged program only then (ADR-0199
@@ -110,7 +110,7 @@ pub trait Computer {
 ///
 /// A link or a folder is opened only while the session is not ending, because opening one starts a
 /// process. A link that is not a secure address and an act this build does not know fail.
-pub fn carry_out(act: &NativeAct, session: &SessionState, computer: &dyn Computer, answer: Answer) {
+pub fn carry_out(act: &NativeAct, session: &dyn Session, computer: &dyn Computer, answer: Answer) {
     let opened = |result: io::Result<()>| match result {
         Ok(()) => ActOutcome::Done,
         Err(error) => {
@@ -239,7 +239,7 @@ mod tests {
     use std::rc::Rc;
 
     use super::*;
-    use crate::session::SessionSignal;
+    use crate::session::fake::FakeSession;
 
     /// A computer that records what it was asked and answers as told. A computer that `defers`
     /// keeps the dialog's callback until the test finishes the dialog.
@@ -288,7 +288,7 @@ mod tests {
     /// Carry out `act`, and return every outcome it was answered with so far.
     fn answered(
         act: &NativeAct,
-        session: &SessionState,
+        session: &dyn Session,
         computer: &dyn Computer,
     ) -> Rc<RefCell<Vec<ActOutcome>>> {
         let outcomes = Rc::new(RefCell::new(Vec::new()));
@@ -303,17 +303,11 @@ mod tests {
     }
 
     /// The one outcome `act` is answered with straight away.
-    fn outcome_of(act: &NativeAct, session: &SessionState, computer: &dyn Computer) -> ActOutcome {
+    fn outcome_of(act: &NativeAct, session: &dyn Session, computer: &dyn Computer) -> ActOutcome {
         let outcomes = answered(act, session, computer);
         let outcomes = outcomes.borrow();
         assert_eq!(outcomes.len(), 1, "answered exactly once");
         outcomes[0].clone()
-    }
-
-    fn ending() -> SessionState {
-        let state = SessionState::new();
-        state.on(SessionSignal::Query);
-        state
     }
 
     #[test]
@@ -379,7 +373,7 @@ mod tests {
     #[test]
     fn a_link_and_a_folder_are_opened_and_reported_done() {
         let computer = Recording::default();
-        let session = SessionState::new();
+        let session = FakeSession::new();
         let link = NativeAct::OpenUrl {
             url: "https://example.com/a".to_owned(),
         };
@@ -400,7 +394,7 @@ mod tests {
             refuses: true,
             ..Recording::default()
         };
-        let session = SessionState::new();
+        let session = FakeSession::new();
         for act in [
             NativeAct::OpenUrl {
                 url: "https://example.com".to_owned(),
@@ -416,7 +410,7 @@ mod tests {
     #[test]
     fn while_the_session_is_ending_nothing_is_started_and_the_act_fails() {
         let computer = Recording::default();
-        let session = ending();
+        let session = FakeSession::ending();
         for act in [
             NativeAct::OpenUrl {
                 url: "https://example.com".to_owned(),
@@ -433,7 +427,7 @@ mod tests {
     #[test]
     fn a_link_that_is_not_secure_is_never_opened() {
         let computer = Recording::default();
-        let session = SessionState::new();
+        let session = FakeSession::new();
         for url in [
             "http://example.com",
             "file:///etc/passwd",
@@ -451,7 +445,7 @@ mod tests {
 
     #[test]
     fn a_picked_file_is_reported_with_its_path_and_a_closed_dialog_is_cancelled() {
-        let session = SessionState::new();
+        let session = FakeSession::new();
         let act = NativeAct::PickFile {
             title: "Choose".to_owned(),
         };
@@ -474,7 +468,7 @@ mod tests {
 
     #[test]
     fn a_dialog_that_is_still_open_leaves_the_act_unanswered_until_the_person_decides() {
-        let session = SessionState::new();
+        let session = FakeSession::new();
         let act = NativeAct::PickFile {
             title: "Choose".to_owned(),
         };
@@ -506,7 +500,7 @@ mod tests {
         assert_eq!(
             outcome_of(
                 &NativeAct::Unknown,
-                &SessionState::new(),
+                &FakeSession::new(),
                 &Recording::default()
             ),
             ActOutcome::Failed

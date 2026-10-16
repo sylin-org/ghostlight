@@ -1,11 +1,12 @@
 //! The Ghostlight shell as the service's window, notices and native acts (ADR-0199 Decision 7 and
 //! its amendment of 2026-10-15, shell milestone 2).
 //!
-//! A shell of this build attaches by opening a `desktop` stream. [`Shells`] holds the attached
-//! streams. [`ShellRoute`] is the one adapter the workbench facade is given for both its
+//! A shell of this build attaches by opening a `desktop` stream. [`Shells`] holds the service's one
+//! desktop place: a second shell is turned away (it is told `already_open`) and the attached shell
+//! is shown instead. [`ShellRoute`] is the one adapter the workbench facade is given for both its
 //! presentation port and its native acts: with a shell attached it writes `show`, `notice` and
-//! `act` frames to the newest one, and without one it hands the request to the fallback adapter
-//! (the Tauri window, while it is still in this process).
+//! `act` frames to it, and without one it hands the request to the fallback adapter (the Tauri
+//! window, while it is still in this process).
 //!
 //! An act waits for the shell's `act_result`. A stream that ends, a goodbye, and a quit that
 //! begins each release every act waiting on the streams they touch, and the waiting act answers
@@ -40,7 +41,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// The shells attached to the service, newest last.
+/// The service's one desktop place.
 #[derive(Default)]
 pub struct Shells {
     registry: Mutex<Registry>,
@@ -48,15 +49,27 @@ pub struct Shells {
 
 #[derive(Default)]
 struct Registry {
-    streams: Vec<Arc<Stream>>,
+    place: Place,
     /// Set when a quit begins: no new act is carried out, and none is waited for.
     closing: bool,
     next_stream: u64,
 }
 
+/// Who holds the desktop place.
+#[derive(Default)]
+enum Place {
+    /// No shell holds it.
+    #[default]
+    Free,
+    /// A shell has been admitted and is being handed the workbench. It takes no request yet.
+    Claimed,
+    /// A shell is attached.
+    Attached(Arc<Stream>),
+}
+
 /// Which shell, if any, a request goes to.
-enum Newest {
-    /// The newest attached shell.
+enum Current {
+    /// The attached shell.
     Shell(Arc<Stream>),
     /// A quit has begun.
     Closing,
@@ -65,9 +78,87 @@ enum Newest {
 }
 
 impl Shells {
-    /// Record the shell on `writer` as attached until the returned guard is dropped.
-    pub fn attach(self: &Arc<Self>, writer: Arc<SocketWriter>) -> Attached {
+    /// Claim the desktop place for a shell that has just been admitted, or learn who holds it.
+    ///
+    /// The claim is not attached yet: requests keep going elsewhere until [`Claim::attach`], which
+    /// the caller does after it has handed the shell the workbench.
+    pub fn claim(self: &Arc<Self>) -> Result<Claim, Occupied> {
         let mut registry = lock(&self.registry);
+        match &registry.place {
+            Place::Free => {
+                registry.place = Place::Claimed;
+                Ok(Claim {
+                    shells: Arc::clone(self),
+                    attached: false,
+                })
+            }
+            Place::Claimed => Err(Occupied { holder: None }),
+            Place::Attached(stream) => Err(Occupied {
+                holder: Some(Arc::clone(stream)),
+            }),
+        }
+    }
+
+    /// Whether a shell is attached.
+    #[cfg(test)]
+    pub(crate) fn attached(&self) -> usize {
+        usize::from(matches!(lock(&self.registry).place, Place::Attached(_)))
+    }
+
+    fn current(&self) -> Current {
+        let registry = lock(&self.registry);
+        if registry.closing {
+            return Current::Closing;
+        }
+        match &registry.place {
+            Place::Attached(stream) => Current::Shell(Arc::clone(stream)),
+            Place::Free | Place::Claimed => Current::None,
+        }
+    }
+
+    fn attached_stream(&self) -> Option<Arc<Stream>> {
+        match &lock(&self.registry).place {
+            Place::Attached(stream) => Some(Arc::clone(stream)),
+            Place::Free | Place::Claimed => None,
+        }
+    }
+
+    /// A quit has begun: carry out no more acts and release every act that is waiting.
+    pub fn close(&self) {
+        let stream = {
+            let mut registry = lock(&self.registry);
+            registry.closing = true;
+            match &registry.place {
+                Place::Attached(stream) => Some(Arc::clone(stream)),
+                Place::Free | Place::Claimed => None,
+            }
+        };
+        if let Some(stream) = stream {
+            stream.release();
+        }
+    }
+
+    /// Say goodbye with `reason` to the attached shell and release the acts waiting on it.
+    pub fn say_goodbye(&self, reason: GoodbyeReason) {
+        if let Some(stream) = self.attached_stream() {
+            let _ = stream.writer.native(&DesktopFrame::Goodbye { reason });
+            stream.release();
+        }
+    }
+}
+
+/// The desktop place, claimed by a shell that is being handed the workbench. Dropping it before
+/// [`Claim::attach`] frees the place.
+pub struct Claim {
+    shells: Arc<Shells>,
+    attached: bool,
+}
+
+impl Claim {
+    /// Attach the shell on `writer`: it is the one requests go to until the returned guard is
+    /// dropped.
+    pub fn attach(mut self, writer: Arc<SocketWriter>) -> Attached {
+        let mut registry = lock(&self.shells.registry);
         registry.next_stream += 1;
         let stream = Arc::new(Stream {
             id: registry.next_stream,
@@ -75,48 +166,34 @@ impl Shells {
             next_act: AtomicU64::new(0),
             waiting: Mutex::default(),
         });
-        registry.streams.push(Arc::clone(&stream));
+        registry.place = Place::Attached(Arc::clone(&stream));
+        self.attached = true;
         Attached {
-            shells: Arc::clone(self),
+            shells: Arc::clone(&self.shells),
             stream,
         }
     }
+}
 
-    /// How many shells are attached.
-    #[cfg(test)]
-    pub(crate) fn attached(&self) -> usize {
-        lock(&self.registry).streams.len()
-    }
-
-    fn newest(&self) -> Newest {
-        let registry = lock(&self.registry);
-        if registry.closing {
-            return Newest::Closing;
-        }
-        registry
-            .streams
-            .last()
-            .map_or(Newest::None, |stream| Newest::Shell(Arc::clone(stream)))
-    }
-
-    /// A quit has begun: carry out no more acts and release every act that is waiting.
-    pub fn close(&self) {
-        let streams = {
-            let mut registry = lock(&self.registry);
-            registry.closing = true;
-            registry.streams.clone()
-        };
-        for stream in streams {
-            stream.release();
+impl Drop for Claim {
+    fn drop(&mut self) {
+        if !self.attached {
+            lock(&self.shells.registry).place = Place::Free;
         }
     }
+}
 
-    /// Say goodbye with `reason` on every attached shell and release the acts waiting on them.
-    pub fn say_goodbye(&self, reason: GoodbyeReason) {
-        let streams = lock(&self.registry).streams.clone();
-        for stream in streams {
-            let _ = stream.writer.native(&DesktopFrame::Goodbye { reason });
-            stream.release();
+/// The shell that holds the desktop place, as a second shell learns it.
+pub struct Occupied {
+    holder: Option<Arc<Stream>>,
+}
+
+impl Occupied {
+    /// Bring the holder's window forward, best effort. A shell that is still being handed the
+    /// workbench is about to open its window anyway.
+    pub fn show(&self) {
+        if let Some(stream) = &self.holder {
+            let _ = stream.tell(&DesktopFrame::Show { address: None });
         }
     }
 }
@@ -140,10 +217,11 @@ impl Attached {
 
 impl Drop for Attached {
     fn drop(&mut self) {
-        let id = self.stream.id;
-        lock(&self.shells.registry)
-            .streams
-            .retain(|stream| stream.id != id);
+        let mut registry = lock(&self.shells.registry);
+        if matches!(&registry.place, Place::Attached(held) if held.id == self.stream.id) {
+            registry.place = Place::Free;
+        }
+        drop(registry);
         self.stream.release();
     }
 }
@@ -217,7 +295,7 @@ impl Stream {
 
 /// What the workbench facade is given for its window, notices and native acts.
 ///
-/// With a shell attached, a request goes to the newest shell. With none, it goes to the fallback
+/// With a shell attached, a request goes to it. With none, it goes to the fallback
 /// when one is installed, and is unavailable otherwise. A quit that has begun makes every request
 /// unavailable. The fallback is the Tauri window and goes when Tauri leaves the service.
 pub struct ShellRoute {
@@ -257,10 +335,10 @@ impl ShellRoute {
     }
 
     fn target(&self) -> Target<'_> {
-        match self.shells.newest() {
-            Newest::Shell(stream) => Target::Shell(stream),
-            Newest::Closing => Target::Nowhere,
-            Newest::None => self
+        match self.shells.current() {
+            Current::Shell(stream) => Target::Shell(stream),
+            Current::Closing => Target::Nowhere,
+            Current::None => self
                 .fallback
                 .get()
                 .map_or(Target::Nowhere, Target::Fallback),

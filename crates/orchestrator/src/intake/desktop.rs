@@ -8,7 +8,9 @@
 //! to show the window (at a section of the page), to show a notice, and to carry out an act only
 //! this computer can do: open a link, open a folder, pick a file. The shell reports a click on a
 //! tray entry and the result of each act. The shell opens its own window, so an `open` click is
-//! only heard.
+//! only heard. The service has one desktop place: a shell that finds it taken is sent
+//! `already_open` in place of the workbench and leaves, and the shell that holds the place is
+//! asked to show its window.
 //!
 //! A reader skips a frame kind it does not know. The service ends a stream only for a frame that
 //! does not decode.
@@ -40,6 +42,10 @@ pub enum DesktopFrame {
         /// The tray the shell draws. `None` while the service has a tray of its own.
         tray: Option<TrayModel>,
     },
+    /// From the service, once, in place of the workbench frame: another shell holds the desktop
+    /// place. The stream ends right after, and the shell leaves. The shell that holds the place is
+    /// asked to show its window.
+    AlreadyOpen,
     /// From the service: it is about to close the stream. Byte for byte the goodbye of an `mcp`
     /// stream, so the service writes both with one code path.
     Goodbye {
@@ -106,6 +112,7 @@ impl fmt::Debug for DesktopFrame {
                 .field("bearer", &"[redacted]")
                 .field("tray", tray)
                 .finish(),
+            Self::AlreadyOpen => formatter.write_str("AlreadyOpen"),
             Self::Goodbye { reason } => formatter
                 .debug_struct("Goodbye")
                 .field("reason", reason)
@@ -324,6 +331,7 @@ mod tests {
             "workbench-no-tray.json",
             &DesktopFrame::workbench(GOLDEN_URL, GOLDEN_BEARER, true),
         );
+        golden("already-open.json", &DesktopFrame::AlreadyOpen);
         golden(
             "goodbye.json",
             &DesktopFrame::Goodbye {

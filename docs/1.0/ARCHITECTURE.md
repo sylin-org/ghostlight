@@ -516,8 +516,46 @@ operating-system notification with Ghostlight-authored words, best effort. `act`
 open a link or a folder or to pick a file, and the shell answers each with `act_result`. A
 notice, a link, a folder and a file dialog are therefore carried out by the shell, in its own
 process and under its own application id, not by the service. A reader skips a frame kind it does
-not know. While Tauri is still in the service, one route sends each request to the newest attached
-shell and, when none is attached, to the Tauri window; it goes when Tauri leaves the service.
+not know. While Tauri is still in the service, one route sends each request to the attached shell
+and, when none is attached, to the Tauri window; it goes when Tauri leaves the service.
+
+One shell runs at a time, because the service has one desktop place. A shell that attaches while
+another is attached is sent `already_open` in place of the workbench and exits with status 0, and
+the attached shell is sent `show`. There is no lock file.
+
+The shell is started in one of three ways, by its argument. With none, a person started it: it
+opens the window and, when no service answers, shows Starting, starts the service once with reason
+`person` and retries the opening on the relay's backoff for 30 s. A service that answers that it is
+shutting down is waited out first. `--tray` means the service started it to show the tray: it opens
+no window, tries the opening once and, on no answer, a shutting-down answer or a refusal, exits
+with status 0 having started nothing, so a presence start that races a person's Quit cannot undo
+it. `--updating` is the window reopening after an update: it shows Updating, retries the opening
+for 60 s, starts nothing, and then shows Stopped. The no-start rule of the last two holds until
+the shell first attaches. After an attach every shell follows the same rules, and the service's
+quit latch refuses a `recover` start after a person's Quit, so no shell can undo a Quit.
+
+The window shows the workbench or one of four states of the shell's own: Starting, Updating,
+Restarting, and Stopped ("Ghostlight stopped unexpectedly." with Start and Diagnostics). The
+states are one built-in document in `states.rs` that takes the state's words and buttons as
+parameters; it runs no script, and a button is a link to a fixed address that the webview refuses
+and the shell acts on. A new workbench frame, after a service restart, rebuilds the webview with the
+new origin and bearer; the shell never navigates a webview to another origin.
+
+After an attach, a goodbye of quit, uninstall or session end ends the shell. A goodbye of replace is
+the update hand-over. The deploy puts the new shell in `bin` before it asks the service to quit, so
+the shell compares the identity of its own image (length and last-write time, read once at start)
+with the file in `bin`. If they differ and the window is open, it starts `bin`'s shell with
+`--updating` and exits, so the window closes and reopens on the new build; if the window is closed
+it only exits, and presence starts a `--tray` shell. If they are the same, it shows Updating and
+retries for 60 s. A stream that ends with no goodbye shows Restarting and starts the service with
+reason `recover` up to three times. Stopped and a spent Restarting keep retrying the opening at
+the backoff cap and start nothing; the Start button is a person's act. With a tray, the tooltip
+says the state, every item but Open is disabled, Updating and Restarting do not open the window,
+and Stopped does. The rules are a pure state machine in `machine.rs`.
+
+The shell registers with the relay's session listener, the one every Ghostlight binary shares. Its
+callback arms the fallback exit and posts an event to the loop, and nothing starts once the session
+is ending.
 
 ## Chokepoints and unit of work
 

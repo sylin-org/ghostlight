@@ -3,7 +3,8 @@
 //!
 //! [`open_link`] connects to the service of a Ghostlight home, opens it as the desktop shell and
 //! reads the one frame that matters: where the workbench is and the bearer that makes its page
-//! the window's. After that the stream carries a goodbye, a request to show the window, a notice
+//! the window's, or `already_open` when another shell holds the service's one desktop place. After
+//! that the stream carries a goodbye, a request to show the window, a notice
 //! and an act to carry out from the service, and a click on a tray entry and the result of each
 //! act from the shell. A frame this build cannot read is skipped, so a newer service's frame never
 //! ends an older shell during a hand-over.
@@ -20,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::frame::{self, FrameError};
-use ghostlight_relay::protocol::{self, Edge, GoodbyeReason, Opening, Program, Role};
+use ghostlight_relay::protocol::{self, Edge, GoodbyeReason, Opening, Program, RefusalCode, Role};
 use serde::{Deserialize, Serialize};
 
 use crate::tray::TrayModel;
@@ -55,6 +56,9 @@ pub enum DesktopFrame {
         /// The tray to draw, when the service has none of its own.
         tray: Option<TrayModel>,
     },
+    /// From the service, once, in place of the workbench: another shell holds the desktop place.
+    /// The stream ends right after and this shell leaves.
+    AlreadyOpen,
     /// From the service: it is about to close the stream.
     Goodbye {
         /// Why.
@@ -148,6 +152,7 @@ impl fmt::Debug for DesktopFrame {
                 .field("bearer", &REDACTED)
                 .field("tray", tray)
                 .finish(),
+            Self::AlreadyOpen => formatter.write_str("AlreadyOpen"),
             Self::Goodbye { reason } => formatter
                 .debug_struct("Goodbye")
                 .field("reason", reason)
@@ -248,9 +253,17 @@ pub enum LinkError {
     /// The service could not be reached.
     #[error("the Ghostlight service is not reachable: {0}")]
     Connect(#[from] ConnectError),
-    /// The service refused the shell; this is its own sentence.
-    #[error("{0}")]
-    Refused(String),
+    /// The service refused the shell.
+    #[error("{say}")]
+    Refused {
+        /// Why, when the service gave a code this build knows.
+        code: Option<RefusalCode>,
+        /// The service's own sentence.
+        say: String,
+    },
+    /// Another shell holds the service's desktop place.
+    #[error("another Ghostlight window is already open")]
+    AlreadyOpen,
     /// The service sent something the shell cannot use.
     #[error("the service did not hand over the workbench: {reason}")]
     Contract {
@@ -300,6 +313,15 @@ fn well_formed_bearer(bearer: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
+/// How a stream ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkEnd {
+    /// The service said goodbye, for this reason.
+    Goodbye(GoodbyeReason),
+    /// The stream ended or failed with no goodbye.
+    Lost,
+}
+
 /// The shell's end of the stream, after the workbench was handed over.
 pub struct Link {
     connection: Connection,
@@ -318,7 +340,10 @@ pub fn open_link(home: &std::path::Path) -> Result<(Link, Workbench), LinkError>
     );
     let (connection, reply) = protocol::connect(home, &opening, deadline)?;
     if !reply.accepted {
-        return Err(LinkError::Refused(reply.say.unwrap_or_default()));
+        return Err(LinkError::Refused {
+            code: reply.code,
+            say: reply.say.unwrap_or_default(),
+        });
     }
     connection.set_read_timeout(Some(
         deadline
@@ -330,6 +355,7 @@ pub fn open_link(home: &std::path::Path) -> Result<(Link, Workbench), LinkError>
     connection.set_read_timeout(None)?;
     let workbench = match first {
         Ok(Some(DesktopFrame::Workbench { url, bearer, tray })) => Workbench { url, bearer, tray },
+        Ok(Some(DesktopFrame::AlreadyOpen)) => return Err(LinkError::AlreadyOpen),
         Ok(Some(_)) | Ok(None) => {
             return Err(LinkError::Contract {
                 reason: NOT_A_WORKBENCH,
@@ -351,20 +377,20 @@ pub fn open_link(home: &std::path::Path) -> Result<(Link, Workbench), LinkError>
 
 impl Link {
     /// Reads frames on a thread of its own. It hands `on_frame` each frame the service sends that
-    /// the shell acts on, and calls `on_end` once, when the service says goodbye (whatever the
-    /// reason) or the stream ends or fails. A frame this build does not know, and one it cannot
-    /// read, is skipped.
+    /// the shell acts on, and calls `on_end` once, with how the stream ended: a goodbye, or the
+    /// end or failure of the stream. A frame this build does not know, and one it cannot read, is
+    /// skipped.
     pub fn spawn_reader(
         &self,
         on_frame: impl FnMut(DesktopFrame) + Send + 'static,
-        on_end: impl FnOnce() + Send + 'static,
+        on_end: impl FnOnce(LinkEnd) + Send + 'static,
     ) -> Result<(), LinkError> {
         let mut reader = self.connection.try_clone()?;
         thread::Builder::new()
             .name(READER_THREAD_NAME.to_owned())
             .spawn(move || {
-                read_until_end(&mut reader, on_frame);
-                on_end();
+                let end = read_until_end(&mut reader, on_frame);
+                on_end(end);
             })?;
         Ok(())
     }
@@ -388,23 +414,24 @@ impl Link {
     }
 }
 
-/// Reads frames until a goodbye, the end of the stream or a failure of the stream itself, and
-/// hands each frame the shell acts on to `on_frame`.
+/// Reads frames until a goodbye, the end of the stream or a failure of the stream itself, hands
+/// each frame the shell acts on to `on_frame`, and says how the stream ended.
 ///
 /// A frame of a kind this build does not know, and one whose JSON this build cannot decode, are
 /// skipped. A frame the service sends in the wrong direction (a tray click, an act result, a
 /// workbench) is skipped as well.
-fn read_until_end(reader: &mut impl Read, mut on_frame: impl FnMut(DesktopFrame)) {
+fn read_until_end(reader: &mut impl Read, mut on_frame: impl FnMut(DesktopFrame)) -> LinkEnd {
     loop {
         match frame::read_frame::<DesktopFrame>(reader) {
-            Ok(Some(DesktopFrame::Goodbye { .. }) | None) => return,
+            Ok(Some(DesktopFrame::Goodbye { reason })) => return LinkEnd::Goodbye(reason),
+            Ok(None) => return LinkEnd::Lost,
             Ok(Some(
                 request @ (DesktopFrame::Show { .. }
                 | DesktopFrame::Notice { .. }
                 | DesktopFrame::Act { .. }),
             )) => on_frame(request),
             Ok(Some(_)) | Err(FrameError::Json(_)) => {}
-            Err(_) => return,
+            Err(_) => return LinkEnd::Lost,
         }
     }
 }
@@ -454,6 +481,7 @@ mod tests {
         assert_eq!(tray.validate(), Ok(()));
         let ids: Vec<&str> = tray.items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, ["open", "quit"]);
+        assert_eq!(golden("already-open.json"), DesktopFrame::AlreadyOpen);
         assert_eq!(
             golden("goodbye.json"),
             DesktopFrame::Goodbye {
@@ -577,7 +605,11 @@ mod tests {
             tray: None,
         };
         let errors = [
-            LinkError::Refused("no".to_owned()),
+            LinkError::Refused {
+                code: None,
+                say: "no".to_owned(),
+            },
+            LinkError::AlreadyOpen,
             LinkError::Contract { reason: BAD_BEARER },
             LinkError::Connect(ConnectError::NoService),
         ];
@@ -662,16 +694,23 @@ mod tests {
                 frame::write_frame(&mut bytes, &frame).unwrap();
             }
             let mut cursor = Cursor::new(bytes);
-            read_until_end(&mut cursor, |_| {
+            let end = read_until_end(&mut cursor, |_| {
                 panic!("nothing before the goodbye is a request")
             });
+            assert_eq!(end, LinkEnd::Goodbye(reason));
             let rest = frame::read_frame::<DesktopFrame>(&mut cursor).unwrap();
             assert!(rest.is_some(), "the frame after the goodbye is left unread");
         }
-        read_until_end(&mut Cursor::new(Vec::new()), |_| panic!("an empty stream"));
-        read_until_end(&mut Cursor::new(vec![9, 0, 0, 0, 1]), |_| {
-            panic!("a truncated frame")
-        });
+        assert_eq!(
+            read_until_end(&mut Cursor::new(Vec::new()), |_| panic!("an empty stream")),
+            LinkEnd::Lost
+        );
+        assert_eq!(
+            read_until_end(&mut Cursor::new(vec![9, 0, 0, 0, 1]), |_| {
+                panic!("a truncated frame")
+            }),
+            LinkEnd::Lost
+        );
     }
 
     /// Reads `bytes` to the end and gives back the requests the reader handed on.
@@ -822,10 +861,13 @@ mod tests {
         assert_eq!(opening.edge.program, Program::Desktop);
         assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
         let (ended, rx) = mpsc::channel();
-        link.spawn_reader(|_| {}, move || ended.send(()).unwrap())
+        link.spawn_reader(|_| {}, move |end| ended.send(end).unwrap())
             .unwrap();
-        rx.recv_timeout(Duration::from_secs(5))
-            .expect("the goodbye ends the link");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5))
+                .expect("the goodbye ends the link"),
+            LinkEnd::Goodbye(GoodbyeReason::Replace)
+        );
         assert!(
             rx.recv_timeout(Duration::from_millis(200)).is_err(),
             "the end is reported once"
@@ -881,7 +923,7 @@ mod tests {
         });
         let (link, _) = open_link(&home.0).unwrap();
         let (asked, requests) = mpsc::channel();
-        link.spawn_reader(move |request| asked.send(request).unwrap(), || {})
+        link.spawn_reader(move |request| asked.send(request).unwrap(), |_| {})
             .unwrap();
         let request = requests.recv_timeout(Duration::from_secs(5)).unwrap();
         let DesktopFrame::Act { id, .. } = request else {
@@ -905,10 +947,13 @@ mod tests {
         let (link, _) = open_link(&home.0).unwrap();
         drop(service.join().unwrap());
         let (ended, rx) = mpsc::channel();
-        link.spawn_reader(|_| {}, move || ended.send(()).unwrap())
+        link.spawn_reader(|_| {}, move |end| ended.send(end).unwrap())
             .unwrap();
-        rx.recv_timeout(Duration::from_secs(5))
-            .expect("the closed stream ends the link");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5))
+                .expect("the closed stream ends the link"),
+            LinkEnd::Lost
+        );
     }
 
     #[test]
@@ -921,6 +966,15 @@ mod tests {
         );
         let failure = open_link(&home.0).err().expect("the address is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
+        service.join().unwrap();
+    }
+
+    #[test]
+    fn a_first_frame_of_already_open_is_the_already_open_failure() {
+        let home = Home::new();
+        let service = fake_service(&home.0, accepted(), vec![DesktopFrame::AlreadyOpen]);
+        let failure = open_link(&home.0).err().expect("the shell is turned away");
+        assert!(matches!(failure, LinkError::AlreadyOpen), "{failure:?}");
         service.join().unwrap();
     }
 
@@ -961,7 +1015,10 @@ mod tests {
         );
         let failure = open_link(&home.0).err().expect("the opening is refused");
         match failure {
-            LinkError::Refused(say) => assert_eq!(say, "Another window is open."),
+            LinkError::Refused { code, say } => {
+                assert_eq!(code, Some(RefusalCode::Capacity));
+                assert_eq!(say, "Another window is open.");
+            }
             other => panic!("{other:?}"),
         }
         service.join().unwrap();
