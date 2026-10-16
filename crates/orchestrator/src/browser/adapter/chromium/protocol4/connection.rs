@@ -244,11 +244,9 @@ fn validated_hello(hello: Value) -> Result<wire::Hello, BrowserError> {
 fn browser_event(event: wire::Event) -> Option<BrowserEvent> {
     let control = event.control_intent();
     match event {
-        wire::Event::DocumentCommitted { tab_id, url } => Some(BrowserEvent::DocumentCommitted {
-            tab_id,
-            url,
-            correlation: None,
-        }),
+        wire::Event::DocumentCommitted { tab_id, url } => {
+            Some(BrowserEvent::DocumentCommitted { tab_id, url })
+        }
         wire::Event::ReadinessChanged { tab_id, readiness } => {
             Some(BrowserEvent::ReadinessChanged {
                 tab_id,

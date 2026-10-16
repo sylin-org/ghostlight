@@ -249,7 +249,6 @@ fn events_reach_the_sink_and_unknown_frames_are_ignored() {
             BrowserEvent::DocumentCommitted {
                 tab_id: 7,
                 url: "https://example.com/".into(),
-                correlation: None,
             },
             BrowserEvent::ReadinessChanged {
                 tab_id: 7,

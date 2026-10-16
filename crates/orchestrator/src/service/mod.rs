@@ -2012,7 +2012,7 @@ fn reveal_off_thread(
 impl BrowserEventSink for ServiceBrowserEvents {
     fn on_event(&self, browser: &str, event: BrowserEvent) {
         match event {
-            BrowserEvent::DocumentCommitted { tab_id, url, .. } => {
+            BrowserEvent::DocumentCommitted { tab_id, url } => {
                 // A commit is browser state, not proof of a Ghostlight action. Never authorize,
                 // audit, or react to it as work. Only stale our own references; the executor
                 // checks the current destination when an agent actually requests an operation.
@@ -2171,38 +2171,35 @@ mod tests {
 
         let initial_audit = std::fs::read_to_string(&audit_path).unwrap_or_default();
 
-        // Correlation only means a command was watching. It cannot prove who navigated.
-        for correlation in [None, Some("in-flight-command".into())] {
-            for url in [
-                "chrome://version",
-                "https://denied.example/private?secret=1",
-                "https://allowed.example/",
-            ] {
-                sink.on_event(
-                    FAKE_BROWSER,
-                    BrowserEvent::DocumentCommitted {
-                        tab_id: 7,
-                        url: url.into(),
-                        correlation: correlation.clone(),
-                    },
-                );
-                let current = workspaces
-                    .acquire(&workspace)
-                    .unwrap()
-                    .select_tab(Some(selected.handle.as_str()))
-                    .unwrap();
-                assert_eq!(current.url, url);
-                assert!(current.generation > selected.generation);
-                assert_eq!(workspaces.summaries()[0].held_tab_count, 0);
-                assert!(view.snapshot().history.is_empty());
-                assert!(view.snapshot().operations.is_empty());
-                assert!(browser.calls().is_empty());
-                assert!(browser.control_states().is_empty());
-                assert_eq!(
-                    std::fs::read_to_string(&audit_path).unwrap_or_default(),
-                    initial_audit
-                );
-            }
+        // A commit never authorizes, audits or reaches the executor, whoever caused it.
+        for url in [
+            "chrome://version",
+            "https://denied.example/private?secret=1",
+            "https://allowed.example/",
+        ] {
+            sink.on_event(
+                FAKE_BROWSER,
+                BrowserEvent::DocumentCommitted {
+                    tab_id: 7,
+                    url: url.into(),
+                },
+            );
+            let current = workspaces
+                .acquire(&workspace)
+                .unwrap()
+                .select_tab(Some(selected.handle.as_str()))
+                .unwrap();
+            assert_eq!(current.url, url);
+            assert!(current.generation > selected.generation);
+            assert_eq!(workspaces.summaries()[0].held_tab_count, 0);
+            assert!(view.snapshot().history.is_empty());
+            assert!(view.snapshot().operations.is_empty());
+            assert!(browser.calls().is_empty());
+            assert!(browser.control_states().is_empty());
+            assert_eq!(
+                std::fs::read_to_string(&audit_path).unwrap_or_default(),
+                initial_audit
+            );
         }
         // A tab Ghostlight never opened stays entirely unowned when it commits.
         sink.on_event(
@@ -2210,7 +2207,6 @@ mod tests {
             BrowserEvent::DocumentCommitted {
                 tab_id: 8,
                 url: "chrome://version".into(),
-                correlation: None,
             },
         );
         assert!(workspaces.owner_of_physical(FAKE_BROWSER, 8).is_none());
@@ -2226,7 +2222,6 @@ mod tests {
             BrowserEvent::DocumentCommitted {
                 tab_id: 7,
                 url: "chrome://version".into(),
-                correlation: None,
             },
         );
         let result = executor.execute(
@@ -2412,7 +2407,6 @@ mod tests {
         let committed = |tab_id| BrowserEvent::DocumentCommitted {
             tab_id,
             url: "https://example.com/mine".into(),
-            correlation: None,
         };
 
         let released = release_example_tabs(&workspaces, &[1, 2, 3]);

@@ -1204,12 +1204,7 @@ impl BrowserOutcome {
 #[derive(Clone, Debug, PartialEq)]
 pub enum BrowserEvent {
     /// A top-level document committed.
-    DocumentCommitted {
-        tab_id: u64,
-        url: String,
-        /// Active primitive correlation when the commit belongs to dispatched work.
-        correlation: Option<String>,
-    },
+    DocumentCommitted { tab_id: u64, url: String },
     /// Readiness changed.
     ReadinessChanged {
         tab_id: u64,
