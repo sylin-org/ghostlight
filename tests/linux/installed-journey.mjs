@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { RelayMcp } from "../lib/peers.mjs";
 import { templateKind } from "../lib/home.mjs";
+import { invoker } from "./lib/reporting.mjs";
 
 const options = new Map();
 for (let index = 2; index < process.argv.length; index++) {
@@ -99,18 +100,7 @@ function request(method, params = {}) {
     mcp.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
 }
-async function call(name, args) {
-  const reply = await request("tools/call", { name, arguments: args });
-  const result = reply.result?.structuredContent;
-  const reason = result?.facts?.reason;
-  report.invocations.push({ tool: name, status: result?.status, effect: result?.effect,
-    reason: typeof reason === "string" && /^[a-z_]+$/.test(reason) ? reason : null,
-    ...(Number.isInteger(reply.error?.code) ? { protocol_error_code: reply.error.code } : {}) });
-  save();
-  assert.equal(reply.error, undefined, "Unexpected MCP protocol failure");
-  assert.equal(reply.result?.structuredContent?.status, "succeeded", `${name} did not succeed`);
-  return reply.result.structuredContent;
-}
+const call = invoker({ request, report, save });
 function phase(name, started, facts = {}) {
   unchanged(browser);
   report.phases.push({ name, status: "passed", elapsed_ms: Date.now() - started, ...facts });

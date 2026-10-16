@@ -1,20 +1,12 @@
 // Inject MCP replies at the installed driver's reporting boundary without starting any process.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
-
-const source = readFileSync(new URL("./installed-journey.mjs", import.meta.url), "utf8");
-const start = source.indexOf("async function call(name, args) {");
-const end = source.indexOf("\nfunction phase(", start);
-assert.ok(start >= 0 && end > start, "Installed reporting boundary must remain identifiable");
+import { invoker } from "./lib/reporting.mjs";
 
 function injected(reply) {
   const report = { invocations: [] };
   let saved = false;
-  const context = vm.createContext({ assert, report, request: async () => reply,
-    save: () => { saved = true; } });
-  const call = vm.runInContext(source.slice(start, end) + "\ncall", context);
+  const call = invoker({ request: async () => reply, report, save: () => { saved = true; } });
   return { call, report, saved: () => saved };
 }
 
