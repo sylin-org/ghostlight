@@ -102,6 +102,16 @@ arbitrary error description stays in the permitted client result. Deadline metad
 policy fields for rule attribution and `status`/`effect` for the terminal outcome. A missing
 `refusal_facts` is not a success signal: composed and measured outcomes have their own summaries.
 
+A refusal because a target handle went stale has a fixed shape. Its `refusal_facts` is
+`{"reason":"workspace_unusable","cause":{"stale_target":{"reason":"<word>"}}}`, and `<word>` is
+one of four: `removed` (the page no longer has the control), `navigated` (the page moved on),
+`tab_closed` (the tab is gone) and `unknown` (Ghostlight has no record of the handle). The word
+is all the record keeps. The handles the refusal offered, the replacement it named and the
+control names it listed reach the client only and are never audited. The shape is part of the
+audit v2 contract, which freezes at 2.0: a word is not renamed or removed, and a collector
+ignores a word it does not know. A line from an earlier build carries the bare string
+`"stale_target"` as its `cause`; a reader keeps such a line and omits its `refusal_facts`.
+
 H4 adds incremental child records, grouped under one history entry in the workbench. Count actual
 operations using child records where `step.preparation_failed` is false, plus ordinary records
 without `step` or `composition`. Exclude aggregate wrappers and preparation facts from operation

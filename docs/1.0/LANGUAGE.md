@@ -103,8 +103,10 @@ exactly one control that matches role, exact name, credential class and row, and
 link when the row had one, in an unchanged view; and the lookup was not cut short. The summary then
 adds `One control on the page has the same role, name and row.` Otherwise, with candidates, the
 step is `Pick a target from recovery_candidates by its context, or call browser_find for current
-target handles.` The audit and the history keep the stale word only: never a replacement, a
-handle, a row or a candidate. A handle the service never issued, dropped to bound memory, or whose
+target handles.` The candidates are listed in the order of their `nth`, those with none last.
+When `privacy.preserve_target_names` is false a candidate carries only `target`, `role` and `nth`,
+so the step says `by its role and nth` in place of `by its context`. The audit and the history
+keep the stale word only: never a replacement, a handle, a row or a candidate. A handle the service never issued, dropped to bound memory, or whose
 control the page no longer holds in its registry is `unknown`. A control the page still holds under
 a handle but which now sits in a different row, because its list recycled the node, is also
 `removed`.
@@ -862,12 +864,18 @@ The service sends a script that its lexical scan proves to be one expression as 
 so a promise it evaluates to resolves. The scan declines anything it cannot read with certainty:
 statements and declarations, a top-level `;` or `return`, a `/` that is not a comment, unpaired
 brackets, and unterminated strings, templates or comments. If the adapter refuses that form before
-evaluation, the original script is sent instead. Any other script is sent as written. The adapter
+evaluation, the original script is sent instead, once, and only after that refusal as an invalid request
+that came before any evaluation. Any other script is sent as written. The adapter
 parses the source before dispatch and selects the async form for a top-level return. Scripts that
 are not wrapped retain REPL scope, including top-level await and repeated declarations. A local
 syntax rejection sends no page evaluation. Browser evaluation happens at most once: a runtime
 exception or lost reply remains uncertain regardless of its text or exception class, and only a
 refusal before any evaluation allows the original to be sent.
+
+A promise that the script evaluates to, in an awaited form, is waited for. A promise that rejects
+reports an unknown effect with the rejection as its description, as a thrown exception does,
+because the script may already have acted. A promise that never settles holds the call until
+`timeout_ms` ends it.
 
 A `{}` value adds one next step that names what else reads as `{}`: a DOM node, a Map or a class
 instance, and, for a script sent as written, an unawaited promise.

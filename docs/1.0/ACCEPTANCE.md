@@ -139,7 +139,11 @@ quiet terminal history, and the actual bundled workbench shows waiting becoming 
    Unable-to-start and never-run steps remain distinct. Result omission preserves status/effect
    metadata. Recovery respects completed work; human directives and invocation limits beat Continue.
    Safe repetition requires every step to succeed without effects and permit repetition.
-6. Stale tab and target handles fail before browser dispatch and suggest obtaining current handles.
+6. A stale tab handle, and a target handle the service no longer knows, fail before browser
+   dispatch and suggest obtaining current handles. A target handle the page finds removed fails
+   inside the page call before any effect, so nothing was sent, and may offer a trusted repeat
+   step when the page proved one control is the same. Otherwise it offers current handles to pick
+   from.
    A call with no `tab` in a session without tabs says no tab is open yet and points to
    `browser_navigate`; with several plausible tabs it says the call must name one. A policy
    denial points to `policy_explain`.

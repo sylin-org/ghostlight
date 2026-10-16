@@ -2067,7 +2067,7 @@ Abbreviations:
 | 37 | DragPoints | `view`; `call Sequence[viewport_point(T, start), viewport_point(T, end)]`; route both (subjects); `input{drag path 12}` G | 3+ |
 | 38 | UploadFiles | `call(F, upload_files)` G; over 768 KiB uses `command_chunk` | 1 |
 | 39 | DropImageAt | `view`; `call(T, scroll_point)`; route; `call(deepest doc, drop_files{local x, y})` G | 3+depth |
-| 40 | EvaluateScript | `evaluate_main{settle 100}` G; `exception` becomes `EffectUnknown(description)` (today's semantics) | 1 |
+| 40 | EvaluateScript | `evaluate_main{settle 100}` G, with the script sent as `await (S)` when a lexical scan proves it is one expression; when the page refuses that form as `invalid_request` before it evaluates anything, the original script is sent once more as written, so the command takes one or two primitives and the script runs at most once; `exception`, which includes a rejected promise, becomes `EffectUnknown(description)`, and a promise that never settles holds the primitive until its timeout | 1-2 |
 | 41 | Observe | section 4.6 | 1-2 |
 | 42 | InspectDialog | `dialog{status}` becomes `Dialog{present, dialog_type, message, url}`; no inventory; `url` is authorized | 1 |
 | 43 | HandleDialog | `dialog{status}`, authorize `url`, then `dialog{handle}` becomes `DialogHandled`, or `DialogAbsent` when no dialog was showing or `handled:false`; no inventory | 1-2 |
