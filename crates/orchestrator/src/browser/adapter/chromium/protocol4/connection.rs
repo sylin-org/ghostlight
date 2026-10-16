@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use super::link::{Line, RecordingIndex};
 use super::wire;
-use crate::browser::adapter::{BrowserEvent, Family};
+use crate::browser::adapter::BrowserEvent;
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
     end_connection, is_current, lock, refuse_incompatible, valid_opaque_id, validated_browser_name,
@@ -212,12 +212,16 @@ fn offered_protocol(hello: &Value) -> u16 {
         .unwrap_or_default()
 }
 
-/// Decode and check a protocol-4 hello by the identity rules: an opaque browser identity, a
-/// platform this service serves, and a plain engine version.
+/// Decode and check a protocol-4 hello by the identity rules: an opaque browser identity, no
+/// platform or the Chromium [`wire::PLATFORM`], and a plain engine version.
 fn validated_hello(hello: Value) -> Result<wire::Hello, BrowserError> {
     let hello: wire::Hello =
         serde_json::from_value(hello).map_err(|_| BrowserError::Authentication)?;
-    if Family::from_platform(hello.platform.as_deref()).is_none() {
+    if hello
+        .platform
+        .as_deref()
+        .is_some_and(|platform| platform != wire::PLATFORM)
+    {
         return Err(BrowserError::Authentication);
     }
     let engine_version_valid = hello.engine_version.as_deref().is_none_or(|version| {

@@ -188,6 +188,37 @@ fn a_malformed_protocol_four_hello_is_closed_without_an_answer() {
 }
 
 #[test]
+fn a_hello_without_a_platform_or_with_the_chromium_platform_is_accepted() {
+    let mut without_platform = FakeExtension::hello(FOUR);
+    without_platform.as_object_mut().unwrap().remove("platform");
+    let mut chromium = FakeExtension::hello(FOUR);
+    chromium["platform"] = json!(wire::PLATFORM);
+
+    for hello in [without_platform, chromium] {
+        let port = port();
+        let (fake, attached) = attach(&port, &hello);
+        assert_eq!(attached, Ok(()), "{hello}");
+        let seen = fake.wait(|seen| !seen.frames.is_empty());
+        assert_eq!(seen.frames[0]["kind"], "hello_accepted", "{hello}");
+        drop(seen);
+        assert_eq!(port.browsers().len(), 1, "{hello}");
+    }
+}
+
+#[test]
+fn a_hello_naming_another_platform_is_closed_without_an_answer() {
+    let mut gecko = FakeExtension::hello(FOUR);
+    gecko["platform"] = json!("ghostlight/gecko");
+
+    let port = port();
+    let (fake, attached) = attach(&port, &gecko);
+    assert_eq!(attached, Err(BrowserError::Authentication));
+    let seen = fake.wait(|seen| seen.closed);
+    assert!(seen.frames.is_empty());
+    assert!(port.browsers().is_empty());
+}
+
+#[test]
 fn events_reach_the_sink_and_unknown_frames_are_ignored() {
     let port = port();
     let events = Arc::new(Events::default());
