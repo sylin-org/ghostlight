@@ -48,6 +48,12 @@ fs.appendFileSync(process.env.INSTALLER_REQUESTS, url + '\\n');
 let body = '', effective = url;
 if (url.endsWith('/releases/latest')) {
   effective = fixture.latest;
+} else if (url.includes('/releases/tags/')) {
+  // The releases API answers a tag it has with the release and any other tag with 404 (curl -f: 22).
+  const tag = url.split('/').at(-1);
+  if (!fixture.tags.includes(tag)) process.exit(22);
+  body = JSON.stringify({ tag_name: fixture.wrongTag ?? tag, prerelease: tag.includes('-') });
+  effective = url;
 } else if (url.endsWith('/SHA256SUMS')) {
   body = fixture.sums;
   effective = 'https://release-assets.githubusercontent.com/fixture/SHA256SUMS';
@@ -69,7 +75,7 @@ function run(label, changes = {}, version, arguments_ = []) {
   const directory = join(area, label), userDirectory = join(directory, "user");
   mkdirSync(userDirectory, { recursive: true });
   const fixture = join(directory, "fixture.json"), requests = join(directory, "requests.txt"), commands = join(directory, "commands.txt");
-  writeFileSync(fixture, JSON.stringify({ latest: "https://github.com/sylin-org/ghostlight/releases/tag/v1.2.3", sums, bodies, ...changes }));
+  writeFileSync(fixture, JSON.stringify({ latest: "https://github.com/sylin-org/ghostlight/releases/tag/v1.2.3", tags: ["v1.2.3", "v2.0.0-rc.1"], sums, bodies, ...changes }));
   const environment = { ...process.env, HOME: userDirectory, PATH: `${shims}:${process.env.PATH}`,
     INSTALLER_FIXTURE: fixture, INSTALLER_REQUESTS: requests, INSTALLER_COMMANDS: commands };
   delete environment.GHOSTLIGHT_VERSION;
@@ -105,13 +111,35 @@ for (const latest of ["https://example.com/releases/tag/v1.2.3", "https://github
   assert.equal(result.requests.length, 1);
   assert.equal(existsSync(join(result.userDirectory, ".ghostlight")), false);
 }
-const mismatch = run("requested-version", {}, "9.9.9");
-assert.notEqual(mismatch.status, 0);
-assert.equal(mismatch.requests.length, 1);
+// A requested version is found by its own tag, never by what is latest, and never touches the
+// latest page. A prerelease installs this way.
+const pinnedAssets = tag => ["SHA256SUMS", ...names.map(name => `${name}-${target}`)]
+  .map(name => `https://github.com/sylin-org/ghostlight/releases/download/${tag}/${name}`);
+for (const [label, version] of [["pinned-stable", "1.2.3"], ["pinned-prerelease", "2.0.0-rc.1"]]) {
+  const pinned = run(label, {}, version);
+  assert.equal(pinned.status, 0, pinned.stderr);
+  assert.deepEqual(pinned.requests, [`https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v${version}`, ...pinnedAssets(`v${version}`)]);
+  assert.deepEqual(pinned.commands, ["service: deployment install", "edge: install"]);
+  assert.ok(pinned.stdout.includes(`Ghostlight ${version} downloaded`), pinned.stdout);
+}
+const pinnedOlder = run("pinned-older-than-latest", { latest: "https://github.com/sylin-org/ghostlight/releases/tag/v3.0.0" }, "1.2.3");
+assert.equal(pinnedOlder.status, 0, pinnedOlder.stderr);
+assert.equal(pinnedOlder.requests.some(request => request.endsWith("/releases/latest")), false, "a pinned install never resolves latest");
+// A version that does not exist, or a reply for another tag, installs nothing and says so.
+for (const [label, version, changes] of [["absent", "9.9.9", {}], ["absent-prerelease", "2.0.0-rc.2", {}], ["wrong-tag", "1.2.3", { wrongTag: "v1.2.4" }]]) {
+  const missing = run(`requested-${label}`, changes, version);
+  assert.notEqual(missing.status, 0);
+  assert.equal(missing.stderr.trim(), `ghostlight: release v${version} does not exist`);
+  assert.equal(missing.requests.length, 1);
+  assert.equal(existsSync(join(missing.userDirectory, ".ghostlight")), false);
+}
+const malformed = run("requested-malformed", {}, "latest");
+assert.notEqual(malformed.status, 0);
+assert.equal(malformed.requests.length, 0);
 for (const damaged of names) {
   const corrupt = run(`corrupt-${damaged}`, { bodies: { ...bodies, [damaged]: "wrong bytes" } });
   assert.notEqual(corrupt.status, 0);
   assert.equal(existsSync(join(corrupt.userDirectory, ".ghostlight/bin")), false, `a corrupt ${damaged} installs nothing`);
   assert.deepEqual(corrupt.commands, [], "a corrupt download runs nothing");
 }
-console.log(`PASS shell installer: pinned release, CDN delivery, all three images, install in the console, restore, invalid release/version, checksum refusal\nEvidence: ${area}`);
+console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, restore, invalid release, absent or malformed requested version, checksum refusal\nEvidence: ${area}`);

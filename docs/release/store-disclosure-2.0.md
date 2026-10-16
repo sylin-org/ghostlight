@@ -106,24 +106,76 @@ reviewer's answer here and bring it to the owner. The decision is the owner's.
 ## Release order (hard cutover)
 
 A 2.0 service refuses a 1.x extension and a 2.0 extension refuses a 1.x service, so no order
-avoids a gap for 1.x users (ADR-0200 Decision 16). The order:
+avoids a gap for 1.x users once both are public (ADR-0200 Decision 16). The order below keeps that
+gap to the minutes of the cutover and gives reviewers a 2.0 they can install before it
+(ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval").
+Until step 6, the latest release, `main` and every 1.x user are untouched.
 
 1. Build the zip from the approved `dev` commit with `scripts/package-extension.ps1`. The package
    is frozen by `tests/guards/extension-freeze.test.mjs`.
-2. Submit it as `STAGED_PUBLISH`. Do not publish.
-3. Cut over in one sitting (ADR-0200, amendment of 2026-10-16): publish `v2.0.0` as GitHub's latest
-   release, fast-forward `main` to the release commit (the short commands fetch the scripts on
-   `main`), then run the exact frozen strings and the launcher restore commands. Before this step the
-   install was proved with the fork URLs.
-4. Publish the staged item only when all three hold: `v2.0.0` is GitHub's latest release, the
-   command URL (`https://sylin.org/ghostlight/get.ps1`) serves a 2.0 script and the exact frozen
-   strings ran clean, and the public privacy URL carries the new text.
-5. A staged item must be published within 30 days of approval or it returns to draft. Then the
+2. Publish `v2.0.0-rc.1`, the release candidate of that exact commit, as a GitHub prerelease. Never
+   mark it latest: `releases/latest` skips prereleases, so the public one-line command and the
+   scripts on `main` keep serving 1.x.
+3. Prove the install from the rc tag with the pinned commands. The script is read from the rc tag
+   and `GHOSTLIGHT_VERSION` names the release it installs. Run each on a clean machine or profile:
+
+   Windows PowerShell 5.1 (`powershell`) and PowerShell 7 (`pwsh`):
+
+   ```powershell
+   $env:GHOSTLIGHT_VERSION = "2.0.0-rc.1"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.ps1 | iex
+   ```
+
+   A Linux shell:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.sh | GHOSTLIGHT_VERSION=2.0.0-rc.1 sh
+   ```
+
+   Each prints one verify line and the install summary. A version that does not exist prints one
+   sentence and exits non-zero.
+4. Submit the zip as `STAGED_PUBLISH`. Do not publish. Put the text below in the Chrome
+   dashboard's "Notes for certification" and in Partner Center's "Notes for certification" for
+   Edge.
+5. Wait for approval (the item shows ready to publish) and make the public privacy page
+   (`https://sylin.org/ghostlight/privacy/`) carry the 2.0 text. Do not cut over before both hold.
+6. Cut over in one sitting, from the same commit as the rc:
+   1. Publish `v2.0.0` as GitHub's latest release.
+   2. Fast-forward `main` to that commit (the short commands fetch the scripts on `main`).
+   3. Run the exact frozen strings, `irm https://sylin.org/ghostlight/get.ps1 | iex` and
+      `curl -fsSL https://sylin.org/ghostlight/get.sh | sh`, and the launcher restore commands.
+   4. Publish the staged item only when all of these hold: `v2.0.0` is GitHub's latest release,
+      the frozen strings ran clean, and the privacy page carries the new text.
+
+   Keep the minutes between the release and the store publish short. 1.x users see "update" on
+   one side until both sides update, as Decision 16 says.
+7. A staged item must be published within 30 days of approval or it returns to draft. Then the
    same zip is resubmitted.
-6. While a submission is pending, no 1.x extension hotfix can ship without cancelling it. A
+8. While a submission is pending, no 1.x extension hotfix can ship without cancelling it. A
    pending submission is not cancelled to ship one without the owner's decision.
-7. Any change to a packaged file means withdraw and resubmit, and the freeze golden is regenerated
+9. Any change to a packaged file means withdraw and resubmit, and the freeze golden is regenerated
    in the same commit as the change.
+
+### Notes for certification (draft)
+
+The same text goes in both dashboards. Recheck it against the install on the day.
+
+> Ghostlight works with the Ghostlight application installed on the same computer. The extension
+> does nothing useful without it, and it shows a setup page that says so when the application is
+> not found.
+>
+> To try the extension, install the 2.0 application first. The one-line public command
+> (https://sylin.org/ghostlight/get.ps1 and https://sylin.org/ghostlight/get.sh) serves 2.0 only
+> after release, so while this item is in review use the pinned commands, which install the 2.0
+> release candidate:
+>
+> Windows PowerShell or PowerShell 7:
+> `$env:GHOSTLIGHT_VERSION = "2.0.0-rc.1"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.ps1 | iex`
+>
+> Linux shell:
+> `curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.sh | GHOSTLIGHT_VERSION=2.0.0-rc.1 sh`
+>
+> Then open the extension's popup: it reads Ready once the application answers. A safe page to try
+> it on is https://sylin.org/ghostlight/demo/.
 
 ## Assets to recapture
 

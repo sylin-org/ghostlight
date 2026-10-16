@@ -5,6 +5,11 @@
 # The Ghostlight 2.0 extension's setup page prints the one-line command that fetches this file;
 # keep its URL working for 2.x.
 #
+# GHOSTLIGHT_VERSION installs exactly that release instead of the latest one, found by its tag
+# (v<version>) through the GitHub releases API. A prerelease is installable this way and no other:
+# the latest release never is. Reviewers and the owner use it before a cutover:
+#   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.sh | GHOSTLIGHT_VERSION=2.0.0-rc.1 sh
+#
 # --restore installs this release over a development installation (a build the development loop
 # installed), whatever version it is: the one allowed move down. It runs the downloaded service
 # with `deployment install --restore` instead of `deployment install`:
@@ -38,23 +43,44 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 sums="$temporary/SHA256SUMS"
-# Resolve the release page first: asset downloads end at GitHub's signed CDN URL,
-# which does not carry the release tag. Pin one tag for checksums and every binary.
-latest="https://github.com/${repository}/releases/latest"
-resolved=$(curl -fsSIL --proto '=https' --tlsv1.2 -o /dev/null -w '%{url_effective}' "$latest")
-case "$resolved" in
-  "https://github.com/${repository}/releases/tag/"v*) ;;
-  *) echo "ghostlight: latest release resolved to an unexpected URL" >&2; exit 1 ;;
-esac
-tag=${resolved##*/}
-version=${tag#v}
-if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-  echo "ghostlight: latest release tag is not a three-part version" >&2
-  exit 1
-fi
-if [ -n "${GHOSTLIGHT_VERSION:-}" ] && [ "$GHOSTLIGHT_VERSION" != "$version" ]; then
-  echo "ghostlight: latest release is ${version}, not requested ${GHOSTLIGHT_VERSION}" >&2
-  exit 1
+if [ -n "${GHOSTLIGHT_VERSION:-}" ]; then
+  # A requested version is installed exactly, whatever the latest release is, prerelease included.
+  version=$GHOSTLIGHT_VERSION
+  if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+    echo "ghostlight: GHOSTLIGHT_VERSION must look like 2.0.0 or 2.0.0-rc.1" >&2
+    exit 1
+  fi
+  tag="v${version}"
+  release_page="$temporary/release.json"
+  status=0
+  curl -fsSL --proto '=https' --tlsv1.2 -o "$release_page" "https://api.github.com/repos/${repository}/releases/tags/${tag}" || status=$?
+  if [ "$status" -eq 22 ]; then
+    echo "ghostlight: release ${tag} does not exist" >&2
+    exit 1
+  elif [ "$status" -ne 0 ]; then
+    echo "ghostlight: could not look up release ${tag}" >&2
+    exit 1
+  fi
+  found=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$release_page" | head -n 1)
+  if [ "$found" != "$tag" ]; then
+    echo "ghostlight: release ${tag} does not exist" >&2
+    exit 1
+  fi
+else
+  # Resolve the release page first: asset downloads end at GitHub's signed CDN URL,
+  # which does not carry the release tag. Pin one tag for checksums and every binary.
+  latest="https://github.com/${repository}/releases/latest"
+  resolved=$(curl -fsSIL --proto '=https' --tlsv1.2 -o /dev/null -w '%{url_effective}' "$latest")
+  case "$resolved" in
+    "https://github.com/${repository}/releases/tag/"v*) ;;
+    *) echo "ghostlight: latest release resolved to an unexpected URL" >&2; exit 1 ;;
+  esac
+  tag=${resolved##*/}
+  version=${tag#v}
+  if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "ghostlight: latest release tag is not a three-part version" >&2
+    exit 1
+  fi
 fi
 release_root="https://github.com/${repository}/releases/download/${tag}"
 curl -fsSL --proto '=https' --tlsv1.2 -o "$sums" "${release_root}/SHA256SUMS"

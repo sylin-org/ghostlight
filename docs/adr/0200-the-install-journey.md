@@ -244,3 +244,46 @@ Decision 6's precondition is restated to match. Before submission, the install i
 `sylin-org/ghostlight`. The exact frozen strings are proved at step 3, after `main` advances and
 before the extension is published. If step 3 fails, the staged extension stays unpublished and the
 fix goes to `main` and the website before step 4 repeats.
+
+## Amendment (2026-10-16): reviewers install a pinned prerelease, and the cutover waits for approval
+
+Two things in the amendment "the cutover is one step" fail on review.
+
+First, it let the owner publish `v2.0.0` as latest and fast-forward `main` before the staged
+extension is approved and before the public privacy page carries the 2.0 text. A 2.0 service refuses
+a 1.x extension and a 2.0 extension refuses a 1.x service (Decision 16), so every 1.x user would be
+cut off for as long as the review takes.
+
+Second, a store reviewer could not exercise the extension. While it is in review, its setup page
+shows the frozen command, which fetches the installer on `main`, and `main` still serves 1.x until
+the cutover. A reviewer who follows it installs 1.x and sees "update needed". The planned fork test
+could not prove 2.0 either: the scripts named `sylin-org/ghostlight` and always resolved
+`releases/latest`, and `GHOSTLIGHT_VERSION` only checked that latest equalled the requested version.
+
+The rules, which supersede the order in the amendment "the cutover is one step" only where they
+differ:
+
+1. **A requested version installs exactly that release.** When `GHOSTLIGHT_VERSION` is set,
+   `scripts/get.ps1` and `scripts/get.sh` find the release by its tag (`v<version>`) through the
+   GitHub releases API and install it, a prerelease included. Everything after the release is
+   chosen is unchanged: the same assets, the checksum and attestation checks, the install summary
+   and the exit codes. A version with no release is refused in one sentence and exits non-zero. When
+   the variable is not set, the scripts resolve `releases/latest` as before, which skips
+   prereleases and drafts.
+2. **Reviewers and the owner install a pinned prerelease before the cutover.** The release candidate
+   of the frozen commit, `v2.0.0-rc.1`, is published as a GitHub prerelease and never as latest, so
+   1.x users, `releases/latest` and `main` are untouched. The install is proved from the rc tag with
+   the pinned commands (the script read from the tag, `GHOSTLIGHT_VERSION=2.0.0-rc.1`) on Windows
+   PowerShell 5.1, PowerShell 7 and a Linux shell. The same commands go in "Notes for certification"
+   in both stores, with the statement that the public one-line command serves 2.0 only after
+   release.
+3. **The cutover waits for approval.** The cutover is not run until the staged item shows ready to
+   publish and the public privacy page carries the 2.0 text. Then, in one sitting, from the same
+   commit as the rc: publish `v2.0.0` as latest, fast-forward `main` to it, run the exact frozen
+   strings and the launcher restore commands, and publish the staged item. The minutes between the
+   release and the store publish stay short.
+
+This replaces the fork test in Decision 6 and in the amendment "the cutover is one step": the
+pre-submission proof is the pinned prerelease. The exact frozen strings are still proved at the
+cutover, after `main` advances and before the extension is published. The order is written out in
+`docs/release/store-disclosure-2.0.md`.

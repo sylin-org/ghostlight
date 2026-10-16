@@ -31,13 +31,28 @@ $global:fixtureChecksums = @($global:fixtureNames | ForEach-Object {
 }) -join "`n"
 $global:fixtureCorrupt = $false
 $global:fixtureDownloads = [Collections.Generic.List[string]]::new()
-function Invoke-RestMethod {
-    param([string]$Uri)
-    return [pscustomobject]@{ draft = $false; prerelease = $false; tag_name = 'v1.3.12'; assets = @(
+class FixtureHttpError : System.Exception { [object]$Response }
+$global:fixtureTags = @('v1.3.12', 'v2.0.0-rc.1')
+$global:fixtureRequests = [Collections.Generic.List[string]]::new()
+function New-FixtureRelease {
+    param([string]$Tag)
+    [pscustomobject]@{ draft = $false; prerelease = $Tag.Contains('-'); tag_name = $Tag; assets = @(
         @('SHA256SUMS') + @($global:fixtureNames | ForEach-Object { "$_-x86_64-pc-windows-msvc.exe" }) | ForEach-Object {
-            [pscustomobject]@{ name = $_; browser_download_url = "https://github.com/sylin-org/ghostlight/releases/download/v1.3.12/$_" }
+            [pscustomobject]@{ name = $_; browser_download_url = "https://github.com/sylin-org/ghostlight/releases/download/$Tag/$_" }
         }
     ) }
+}
+# The releases API: latest is the stable v1.3.12; a tag it has answers with that release, prerelease
+# or not, and any other tag answers 404.
+function Invoke-RestMethod {
+    param([string]$Uri)
+    $global:fixtureRequests.Add($Uri)
+    if ($Uri.EndsWith('/releases/latest')) { return New-FixtureRelease 'v1.3.12' }
+    $tag = $Uri.Split('/')[-1]
+    if ($Uri -like '*/releases/tags/*' -and $global:fixtureTags -contains $tag) { return New-FixtureRelease $tag }
+    $failure = [FixtureHttpError]::new()
+    $failure.Response = [pscustomobject]@{ StatusCode = 404 }
+    throw $failure
 }
 function Invoke-WebRequest {
     param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
@@ -62,6 +77,27 @@ foreach ($name in $global:fixtureNames) {
     }
 }
 $before = (Get-FileHash (Join-Path $destination 'ghostlight.exe')).Hash
+# A requested version is found by its own tag, prerelease included, and never asks for the latest
+# release. A version that does not exist is refused in one sentence and changes nothing.
+$global:fixtureRequests.Clear()
+$env:GHOSTLIGHT_VERSION = '9.9.9'
+$absent = $null
+try { & $installer } catch { $absent = $_.Exception.Message }
+if ($absent -ne 'Ghostlight release v9.9.9 does not exist.') { throw "Absent requested version: $absent" }
+if ($global:fixtureRequests.Count -ne 1 -or $global:fixtureRequests[0] -ne 'https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v9.9.9') {
+    throw "Absent requested version asked for: $($global:fixtureRequests -join ', ')"
+}
+$env:GHOSTLIGHT_VERSION = 'latest'
+$malformed = $null
+try { & $installer } catch { $malformed = $_.Exception.Message }
+if ($malformed -notmatch '^GHOSTLIGHT_VERSION must look like') { throw "Malformed requested version: $malformed" }
+$global:fixtureRequests.Clear()
+$env:GHOSTLIGHT_VERSION = '2.0.0-rc.1'
+& $installer
+Remove-Item Env:GHOSTLIGHT_VERSION
+if ($global:fixtureRequests.Count -ne 1 -or $global:fixtureRequests[0] -ne 'https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v2.0.0-rc.1') {
+    throw "Pinned prerelease asked for: $($global:fixtureRequests -join ', ')"
+}
 $global:fixtureCorrupt = $true
 $rejected = $false
 try { & $installer } catch {
@@ -79,7 +115,7 @@ $installedFiles = @(Get-ChildItem -LiteralPath $destination -File | ForEach-Obje
 if (($installedFiles -join '|') -ne ($expectedFiles -join '|')) {
     throw "Unexpected installed files: $($installedFiles -join ', ')"
 }
-Write-Output 'PASS PowerShell installer: fixed paths, the three verified images, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
+Write-Output 'PASS PowerShell installer: requested version by tag (prerelease too, absent refused), fixed paths, the three verified images, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
 '@
 [IO.File]::WriteAllText($scenario, $scenarioSource)
 try {

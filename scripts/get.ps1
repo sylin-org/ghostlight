@@ -4,6 +4,11 @@
 # The Ghostlight 2.0 extension's setup page prints the one-line command that fetches this file;
 # keep its URL working for 2.x.
 #
+# GHOSTLIGHT_VERSION installs exactly that release instead of the latest one, found by its tag
+# (v<version>) through the GitHub releases API. A prerelease is installable this way and no other:
+# the latest release never is. Reviewers and the owner use it before a cutover:
+#   $env:GHOSTLIGHT_VERSION = "2.0.0-rc.1"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.ps1 | iex
+#
 # -Restore installs this release over a development installation (a build the development loop
 # installed), whatever version it is: the one allowed move down. It runs the downloaded
 # service with `deployment install --restore` instead of `deployment install`. A piped script
@@ -19,14 +24,32 @@ if (-not [Environment]::Is64BitOperatingSystem) {
     throw "Ghostlight publishes Windows binaries for x64 only."
 }
 
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/latest"
-if ($release.draft -or $release.prerelease -or $release.tag_name -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
-    throw "GitHub did not return a stable three-part Ghostlight release."
-}
-$version = $Matches.version
-if (-not [string]::IsNullOrWhiteSpace($env:GHOSTLIGHT_VERSION) -and
-    $env:GHOSTLIGHT_VERSION -ne $version) {
-    throw "Latest Ghostlight is $version, not requested version $env:GHOSTLIGHT_VERSION."
+$requested = $env:GHOSTLIGHT_VERSION
+if ([string]::IsNullOrWhiteSpace($requested)) {
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/latest"
+    if ($release.draft -or $release.prerelease -or $release.tag_name -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
+        throw "GitHub did not return a stable three-part Ghostlight release."
+    }
+    $version = $Matches.version
+} else {
+    # A requested version is installed exactly, whatever the latest release is, prerelease included.
+    if ($requested -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') {
+        throw "GHOSTLIGHT_VERSION must look like 2.0.0 or 2.0.0-rc.1."
+    }
+    $version = $requested
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/tags/v$version"
+    }
+    catch {
+        $response = $_.Exception.PSObject.Properties['Response']
+        if ($response -and $response.Value -and [int]$response.Value.StatusCode -eq 404) {
+            throw "Ghostlight release v$version does not exist."
+        }
+        throw
+    }
+    if ($release.draft -or $release.tag_name -ne "v$version") {
+        throw "Ghostlight release v$version does not exist."
+    }
 }
 $tag = $release.tag_name
 $releaseRoot = "https://github.com/$repository/releases/download/$tag/"
