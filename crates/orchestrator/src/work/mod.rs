@@ -49,8 +49,8 @@ use crate::language::{
     field_problem::ControlRef,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason,
-        CheckFailure, Observed, Outcome, Refusal, StaleHelp, TargetRole, WorkspaceReason,
-        RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
+        CheckFailure, ExtensionAdvice, Observed, Outcome, Refusal, StaleHelp, TargetRole,
+        WorkspaceReason, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
     },
     Operation, Record, TakeScreenshot,
 };
@@ -166,6 +166,22 @@ pub struct ApplicationExecutor {
     stale_offers: StaleOfferRegistry,
     permissions: Mutex<HashMap<String, crate::governance::evidence::PermissionTrace>>,
     coverage: Mutex<HashMap<String, language::coverage::Coverage>>,
+    /// Whether any browser profile on this computer holds the Ghostlight extension. It is asked
+    /// only while setup is incomplete and a refusal is about to send the person to a browser.
+    extension_probe: ExtensionProbe,
+}
+
+/// Reads, when asked, whether any browser profile on this computer holds the extension.
+type ExtensionProbe = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// Whether any installed browser has the Ghostlight extension in some profile (a local,
+/// read-only scan that writes and sends nothing).
+fn extension_in_a_browser_profile() -> bool {
+    crate::install::browser_profiles::scan(
+        &crate::install::native_host::NativeHostRegistry::discover(),
+    )
+    .iter()
+    .any(|browser| !browser.scan.with_extension.is_empty())
 }
 
 /// What each in-flight invocation has been observed doing at the browser boundary.
@@ -213,7 +229,19 @@ impl ApplicationExecutor {
             stale_offers: Arc::new(Mutex::new(HashMap::new())),
             permissions: Mutex::new(HashMap::new()),
             coverage: Mutex::new(HashMap::new()),
+            extension_probe: Arc::new(extension_in_a_browser_profile),
         }
+    }
+
+    /// Whether a refusal that sends the person to a browser should also say where the extension
+    /// comes from: setup is incomplete and no profile has it. A service with no setup progress
+    /// attached tracks no setup, so it adds nothing.
+    fn extension_advice(&self) -> ExtensionAdvice {
+        let Some(setup) = self.workbench.setup() else {
+            return ExtensionAdvice::Plain;
+        };
+        let complete = setup.is_complete();
+        ExtensionAdvice::resolve(complete, !complete && (self.extension_probe)())
     }
 
     /// Decode, govern, execute, react, audit, and complete one invocation.
@@ -1785,7 +1813,7 @@ impl ApplicationExecutor {
         if let BrowserError::StaleLocator { reason, lookup } = &error {
             return self.stale_locator_failure(context, *reason, lookup.as_ref());
         }
-        if let Some((refusal, facts)) = routing_refusal(&error) {
+        if let Some((refusal, facts)) = routing_refusal(&error, || self.extension_advice()) {
             let summary = refusal.summary();
             return Terminal {
                 result: InvocationResult::new(
@@ -2200,7 +2228,10 @@ fn operation_activity(operation: &Operation) -> PresentationActivity {
 /// Returning candidates rather than a choice is the point: two connected browsers are two
 /// different signed-in contexts, and guessing between them would put the person's work somewhere
 /// they did not ask for.
-fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
+fn routing_refusal(
+    error: &BrowserError,
+    extension: impl FnOnce() -> ExtensionAdvice,
+) -> Option<(Refusal, Value)> {
     match error {
         BrowserError::AmbiguousBrowser(candidates) => Some((
             Refusal::BrowserAmbiguous,
@@ -2221,12 +2252,18 @@ fn routing_refusal(error: &BrowserError) -> Option<(Refusal, Value)> {
         BrowserError::RecoveryManual { browsers } => Some((
             Refusal::BrowserStartupManual {
                 browsers: browsers.clone(),
+                extension: extension(),
             },
             manual_browser_facts(browsers),
         )),
         BrowserError::RecoveryFailed { reason, details } => Some((
             Refusal::BrowserRecoveryFailed {
                 reason: recovery_reason(*reason),
+                extension: if *reason == RecoveryFailure::ExtensionAbsent {
+                    extension()
+                } else {
+                    ExtensionAdvice::Plain
+                },
             },
             json!({"reason":reason.as_str(),"details":details}),
         )),
@@ -2850,7 +2887,7 @@ mod tests {
     use crate::governance::{AuditSink, GovernanceFacade};
     use crate::install::browser_package::BrowserPackage;
     use crate::install::native_host::NativeHostState;
-    use crate::language::outcome::Observed;
+    use crate::language::outcome::{ExtensionAdvice, Observed};
     use crate::presentation::{PresentationError, PresentationPort, PresentationReactor};
     use crate::workbench::WorkbenchProjection;
     use crate::workspace::{StaleReason, WorkspaceStore};

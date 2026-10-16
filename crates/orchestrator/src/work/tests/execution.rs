@@ -6,9 +6,10 @@ use super::*;
 /// detail, instead of falling through to the browser-stopped rendering.
 #[test]
 fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
-    let (refusal, facts) = routing_refusal(&BrowserError::Primitive(
-        "target is not visible for focus".into(),
-    ))
+    let (refusal, facts) = routing_refusal(
+        &BrowserError::Primitive("target is not visible for focus".into()),
+        || ExtensionAdvice::Plain,
+    )
     .expect("primitive errors route to a refusal");
     let crate::language::outcome::Refusal::BrowserPrimitive { detail } = refusal else {
         panic!("primitive errors must route to BrowserPrimitive");
@@ -1486,9 +1487,12 @@ fn recovery_is_requested_from_one_seam_only() {
 
 #[test]
 fn manual_recovery_maps_to_model_directed_summary_and_stable_facts() {
-    let (refusal, facts) = routing_refusal(&BrowserError::RecoveryManual {
-        browsers: vec!["Chromium".into()],
-    })
+    let (refusal, facts) = routing_refusal(
+        &BrowserError::RecoveryManual {
+            browsers: vec!["Chromium".into()],
+        },
+        || ExtensionAdvice::Plain,
+    )
     .expect("manual recovery is a model-facing refusal");
 
     assert_eq!(
@@ -1505,9 +1509,12 @@ fn manual_recovery_maps_to_model_directed_summary_and_stable_facts() {
         );
     assert!(refusal.next_steps().is_empty());
 
-    let (plural, plural_facts) = routing_refusal(&BrowserError::RecoveryManual {
-        browsers: vec!["Google Chrome".into(), "Microsoft Edge".into()],
-    })
+    let (plural, plural_facts) = routing_refusal(
+        &BrowserError::RecoveryManual {
+            browsers: vec!["Google Chrome".into(), "Microsoft Edge".into()],
+        },
+        || ExtensionAdvice::Plain,
+    )
     .expect("plural manual recovery is model-facing");
     assert_eq!(
             plural.summary(),

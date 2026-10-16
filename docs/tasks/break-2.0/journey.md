@@ -99,7 +99,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j11-setup-language has landed. Next: j11b-agent-outcomes. Rule 8 still binds: a packaged extension file changes only with a recorded owner decision to withdraw and resubmit. The release order is unchanged: release candidate as a prerelease, pinned install proof, staged submission, approval, then the one-sitting cutover (ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval"). j12 composes with `language::setup::compose` and j15 prints `language::setup::install_lines`; j12 reads `WorkbenchFacade::setup()` for `is_complete()`, `finished()` and `on_complete()`.
+j11b-agent-outcomes has landed. Next: j12-setup-part. Rule 8 still binds: a packaged extension file changes only with a recorded owner decision to withdraw and resubmit. The release order is unchanged: release candidate as a prerelease, pinned install proof, staged submission, approval, then the one-sitting cutover (ADR-0200, amendment "reviewers install a pinned prerelease, and the cutover waits for approval"). j12 composes with `language::setup::compose` and j15 prints `language::setup::install_lines`; j12 reads `WorkbenchFacade::setup()` for `is_complete()`, `finished()` and `on_complete()`.
 
 ## Landed
 
@@ -119,12 +119,15 @@ j11-setup-language has landed. Next: j11b-agent-outcomes. Rule 8 still binds: a 
 | j09-first-request | Setup is remembered. `state/setup.json` is `{"first_request_ms": <u64>}` (`install/setup_state.rs`: `SetupRecord`, `is_complete`, `read`, `record_if_absent`, written with `record::atomic_replace`; read leniently, and a file that exists but does not parse counts as complete). `workbench/setup.rs` holds `SetupProgress` (`load`, `is_complete`, `finished`, `observe`, `on_complete`): the first non-child record that is on the MCP channel, allowed, `Status::Succeeded.stored_name()` and has a browser writes the record once and remembers the workspace in memory. `WorkbenchProjection::attach_setup` and `record_with_provenance` feed it, the service attaches it from `Layout::setup_record()`, and `WorkbenchFacade::setup()` hands it to j12. `Status::stored_name()` is the one rendering of the stored status, now also used by `work/receipt.rs`. The break migration writes the record (dated at the migration) when it migrates a 1.x home with no record, and the 1.x `extension-handoff-v1` marker is no longer moved but deleted. | see `git log` |
 | j10-profiles | The service can tell "extension added, browser closed" from "extension missing". `install/native_host.rs`: `BrowserSpec` gains `short` (Chrome, Edge, Brave, Chromium); `NativeHostRegistry::user_data_directory(browser_id)` (the vendor path under `LOCALAPPDATA` plus `User Data` on Windows; the XDG config home plus `linux_directory` minus `NativeMessagingHosts` on Linux) and `browser_identities() -> Vec<BrowserIdentity { id, name, short }>` in table order. `install/browser_profiles.rs` (new): `ExtensionProfile { directory, name }`, `ProfileScan { profiles, with_extension }`, `scan_user_data(user_data, extension_id)` (never errors; reads at most 8 MiB of `Local State` `profile.info_cache` in file order, uses only keys of 1 to 64 characters that are one plain path component, shows names cleaned and cut to 40 characters, and falls back to an unnamed `Default`, counted when its directory exists) and `scan(registry)` for every browser whose executable is found, returning `BrowserProfiles { browser, scan }`. Read-only, local, nothing written, logged, stored or sent. Nothing uses the result until j12. | see `git log` |
 | j11-setup-language | `crates/orchestrator/src/language/setup.rs` (new, pure, no I/O, shaped like `readiness.rs`) holds the words of the setup view and of the install summary. `compose(&SetupFacts) -> SetupView` resolves the stage (Done, Retired, Computer, Browser, Agent) and builds the headline, steps, code panels, rows and live lines; `RowAction`, `SetupAction` (tag `kind`: `add_in_browser`, `open_browser`, `get_chrome`, `connect_agent`, `review_agent`) and `Pending` carry the actions and the words the page shows after a click. `install_lines(&InstallFacts)` is the whole success output of a real install, with exactly one Next line while setup is incomplete. `STORE_LISTING_URL`, `PROMPT`, `TAGLINE` and the step names are constants. The module doc classifies which deployment lines print beside the summary and which only in `--dry-run`. Nothing calls it yet (j12 and j15 do). | see `git log` |
+| j11b-agent-outcomes | The agent's answers say where the extension comes from. `language/outcome.rs` gains `ExtensionAdvice` (`Plain`, `AddFromStore`; `resolve(setup_complete, extension_in_a_profile)`), carried by `Refusal::BrowserStartupManual` and `Refusal::BrowserRecoveryFailed`. With `AddFromStore` the no-browser answer gains one next step and the `ExtensionAbsent` step is replaced by it: ask the user to add Ghostlight in Browser from `language::setup::STORE_LISTING_URL`, or to open the Ghostlight window for the setup steps. The executor (`work/mod.rs`) decides when the refusal is built: `WorkbenchProjection::setup()` (new) says whether setup is complete, and only while it is not does `extension_probe` run the j10 `browser_profiles::scan`. No attached setup progress means no advice. The incompatible-extension words are `language::adapter::ADAPTER_INCOMPATIBLE` ("Ghostlight in Browser is out of date. It updates itself within a day; to update now, open chrome://extensions, turn on Developer mode and click Update.") and the agent's next step for the contract refusals, both from `adapter::UPDATE_NOW`. `docs/1.0/LANGUAGE.md` and ADR-0200 Consequences carry the wording. | see `git log` |
+
 
 ## Owed live checks
 
 - j01: none. Docs only.
 - j10: none. Nothing uses the scan until j12; the first live check is the setup part reading a real Chrome, Edge or Brave profile (an extension added from the Chrome Web Store, browser closed) on Windows and Linux.
 - j11: none. Pure words; the first live check is the window's setup view (j14) and the install output (j15).
+- j11b (Demo 2): install through the plugin with no Ghostlight extension and setup incomplete, ask the agent to browse, and see the store link in its answer (no window opens, JQ10). With the extension added in a closed browser, or after the first successful request, the answer carries no link. A 1.x extension connecting to a 2.0 service shows the new update sentence in its own words.
 - j02: none. The page markup that links the kit lands in j04, j06 and j07; the live look is checked there.
 - j03: the unpacked extension's Open Ghostlight brings the window forward on Windows and Linux (live, once j04 lands the button). The button has landed in j04; the check is still owed.
 - j04: the unpacked extension in a fresh profile on a machine with no Ghostlight: the page opens once, the command copies (and `Copied` is announced), the meeting plays once when the service from the development channel answers, and Open Ghostlight shows the window. Also reduced motion, a 390 px window, and the Documentation link opening in a new tab.
@@ -183,6 +186,24 @@ j11-setup-language has landed. Next: j11b-agent-outcomes. Rule 8 still binds: a 
   native one in row order, from the same ordering the setup view uses.
   (8) Sandboxed rows (Snap, Flatpak) show only when no browser is native; each carries Get Google
   Chrome, primary on the first. A browser with the extension counts as native.
+- j11b: ran gate checks (1) fmt, workspace clippy and `cargo test -p ghostlight-service` (1789 pass),
+  (2) both golden updates (the catalog and result goldens did not change: no golden samples these
+  refusals; the next-step vocabulary check in `language/self_check/hints.rs` samples both advice
+  values), and (10) the integrity script. No extension, page asset or script file changed, so (3) to
+  (9) did not apply and the extension freeze held. The tree and the spec differed in these places.
+  (1) JQ10 is answered No, so nothing calls `WorkbenchFacade::reveal`; the agent's answer carries the
+  link. (2) The store step is a next step, not a change to the summary, so the summaries are as before
+  and the goldens did not move. `BrowserRecoveryFailed` carries the advice for every reason but it
+  changes only `ExtensionAbsent`. (3) The incompatible words exist in three places, not a Connections
+  or doctor sentence: the extension's `adapter_incompatible` message, the agent's next step for
+  `IncompatibleReceipt`, `BrowserAdapterOutdated` and `BrowserContract`, and `docs/1.0/LANGUAGE.md`.
+  The hint checker reads `now:` as a field name, so the agent's step puts the procedure in
+  parentheses. (4) The update procedure: Chrome's extension documentation (developer.chrome.com,
+  "Host extensions on Linux"/update pages, read 2026-10-16) says the browser checks installed
+  extensions every few hours and that the Update extensions button on the extensions page forces a
+  check; that page does not mention Developer mode, which is the spec's procedure and is kept. Edge and Brave open `chrome://extensions` on their
+  own extensions pages. "Within a day" is the owner's wording from the spec. (5) Tests set
+  `ApplicationExecutor::extension_probe` directly, so no test scans the machine it runs on.
 - j01: the tree and the spec differed in these places.
   (1) The spec's dashboard line in Decision 15 ("the remote-code answer changes from No to Yes")
   is overridden by the owner ruling of 2026-10-16: the page code is local and never pulled from a

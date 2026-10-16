@@ -243,7 +243,7 @@ Refusals say what is true, and their next steps suggest only what the caller can
   | Not connected, no other browser is | `browser_disconnected` | `The browser this session works in is not connected. Nothing was sent.` | `Ask the user to reopen that browser, then repeat the call.` |
   | Not connected, a different browser is | `browser_wrong_profile` | `This session works in a browser that is not connected; a different browser is.` | `Ask the user to reopen the browser profile this session started in, then repeat the call.` |
   | Connection busy with other work | `browser_busy` | `The browser connection was busy, so nothing was sent.` | `Repeat the call.` |
-  | Bridge contract failure | `browser_contract_failed` | `Ghostlight and the browser extension do not agree on this request.` | `Reload or update the Ghostlight extension in that browser, then repeat the call.` |
+  | Bridge contract failure | `browser_contract_failed` | `Ghostlight and the browser extension do not agree on this request.` | `Ask the user to update Ghostlight in Browser (to update now, open chrome://extensions, turn on Developer mode and click Update), then repeat the call.` |
 
   None of these says "disconnected" for a browser that is still attached, and none tells the
   model to reconnect an adapter it cannot reach (ADR-0196 Decision 12). The contract summary
@@ -282,8 +282,11 @@ where to direct attention -- the refusal addresses the MCP model: ask the user t
 eligible installed browser windows it names, with the Ghostlight extension installed, then repeat
 the call. Facts carry the closed `browser_startup_manual` reason and a `browsers` array; one
 choice also retains the singular `browser` fact. The summary contains the whole recovery
-instruction, so `next_steps` is empty. Stale Ghostlight-owned registrations among several
-installed browsers are repaired silently first, so the named browsers can actually connect; when
+instruction, so `next_steps` is empty, with one exception: while setup is incomplete and no
+browser profile holds the extension, one step asks the user to add Ghostlight in Browser from the
+store listing, or to open the Ghostlight window for the setup steps (ADR-0200). The same step
+replaces the extension-absent recovery step under the same condition. Stale Ghostlight-owned
+registrations among several installed browsers are repaired silently first, so the named browsers can actually connect; when
 no installed browser has a usable registration, the refusal names the browsers found and one
 choice-free remedy instead. No browser refusal ever says that Ghostlight declined to choose.
 When the registration names a connector belonging to a different Ghostlight installation,

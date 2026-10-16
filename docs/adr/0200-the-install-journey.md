@@ -184,7 +184,12 @@ the user?" The owner ruled the store question (JQ2) directly. All were answered 
   opens a vendor page, so the trust pages' claim of no vendor-bound traffic holds for a
   service-first install once the install slice lands.
 - Silent installs (bare `npx`, MCPB, the plugin) open nothing. The agent's no-browser answer
-  carries the store link.
+  carries the store link. The wording is agent-decided under the owner's 2026-10-14 delegation: while
+  setup is incomplete and no browser profile holds the extension, the no-browser and
+  extension-absent answers add one next step naming the store listing and the Ghostlight window;
+  once setup is complete or an extension is found, they are unchanged. The refusal for an extension
+  that speaks an older protocol tells the person how to update now (`chrome://extensions`,
+  Developer mode, Update), in the extension's error frame and in the agent's next step.
 - The second-machine strings in `docs/tasks/reference-experience/S2-second-machine.md` are
   superseded. The record stays.
 - Edge and Brave install from the Chrome listing until their own listings exist.

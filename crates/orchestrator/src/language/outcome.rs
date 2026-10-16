@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::area::{LeftOut, LeftOutKey};
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
-use super::MAX_INSPECT_ITEMS;
+use super::{adapter, setup, MAX_INSPECT_ITEMS};
 use crate::workspace::{StaleReason, WorkspaceError};
 
 /// The most characters a result's summary keeps. Longer summaries are cut at this bound, so a
@@ -1223,9 +1223,57 @@ pub enum CheckFailure {
     BrowserRefused,
 }
 
-/// The one recovery step when the extension and the service disagree about the bridge contract.
-const UPDATE_EXTENSION_THEN_REPEAT: &str =
-    "Reload or update the Ghostlight extension in that browser, then repeat the call.";
+/// The one recovery step when the extension and the service disagree about the bridge contract:
+/// only the person can update the extension, and the way to do it now is the one the extension
+/// itself is told ([`adapter::UPDATE_NOW`]).
+fn update_extension_then_repeat() -> String {
+    format!(
+        "Ask the user to update Ghostlight in Browser (to update now, {}), then repeat the call.",
+        adapter::UPDATE_NOW
+    )
+}
+
+/// Whether a refusal that sends the person to the browser also says where the extension comes
+/// from.
+///
+/// While setup is incomplete and no browser profile holds the extension, an agent that only
+/// asks the user to open a browser leaves them with nothing to open it for. Once the extension
+/// is in some profile, or setup is complete, the refusal is the plain one.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ExtensionAdvice {
+    /// The extension is installed somewhere or setup is done; the refusal adds nothing.
+    #[default]
+    Plain,
+    /// Setup is incomplete and no profile has the extension, so the refusal names the store
+    /// listing and the Ghostlight window.
+    AddFromStore,
+}
+
+impl ExtensionAdvice {
+    /// The advice for the facts the executor read when it built the refusal.
+    ///
+    /// Both facts are read at the moment of the refusal, and the profile scan is only needed
+    /// while setup is incomplete.
+    #[must_use]
+    pub const fn resolve(setup_complete: bool, extension_in_a_profile: bool) -> Self {
+        if setup_complete || extension_in_a_profile {
+            Self::Plain
+        } else {
+            Self::AddFromStore
+        }
+    }
+
+    /// The one safe next step the advice adds, when it adds one.
+    fn step(self) -> Option<String> {
+        match self {
+            Self::Plain => None,
+            Self::AddFromStore => Some(format!(
+                "Ask the user to add Ghostlight in Browser from {}, or to open the Ghostlight window on this computer for the setup steps, then repeat the call.",
+                setup::STORE_LISTING_URL
+            )),
+        }
+    }
+}
 
 /// The one recovery step after an action whose check did not confirm it.
 ///
@@ -1386,9 +1434,18 @@ pub enum Refusal {
     BrowserPinned,
     /// Startup is left to the person: the posture is manual, or more than one browser could
     /// serve and Ghostlight does not choose where to direct attention.
-    BrowserStartupManual { browsers: Vec<String> },
+    BrowserStartupManual {
+        browsers: Vec<String>,
+        /// Whether the person also needs to hear where the extension comes from.
+        extension: ExtensionAdvice,
+    },
     /// Automatic readiness recovery failed before any browser effect.
-    BrowserRecoveryFailed { reason: BrowserRecoveryReason },
+    BrowserRecoveryFailed {
+        reason: BrowserRecoveryReason,
+        /// Whether the person also needs to hear where the extension comes from. It only
+        /// changes the advice for [`BrowserRecoveryReason::ExtensionAbsent`].
+        extension: ExtensionAdvice,
+    },
     /// The connection was lost after dispatch, before a completion receipt.
     ConnectionLost,
     /// Cancellation arrived after dispatch, before a completion receipt.
@@ -1493,13 +1550,13 @@ impl Refusal {
             }
             Self::BrowserUnknown => "That browser is not connected.",
             Self::BrowserPinned => "This session is already working in a different browser.",
-            Self::BrowserStartupManual { browsers } => {
+            Self::BrowserStartupManual { browsers, .. } => {
                 let choices = browser_choices(browsers);
                 return format!(
                     "No browser is connected. Ask the user to open {choices} browser window with the Ghostlight extension installed, then repeat the call."
                 );
             }
-            Self::BrowserRecoveryFailed { reason } => match reason {
+            Self::BrowserRecoveryFailed { reason, .. } => match reason {
                 BrowserRecoveryReason::BrowserAbsent => {
                     "No supported Chromium browser is installed."
                 }
@@ -1583,7 +1640,7 @@ impl Refusal {
             // The extension and the service disagree about the bridge contract, whichever side
             // noticed it; only the person can reload or update the extension.
             Self::IncompatibleReceipt | Self::BrowserAdapterOutdated | Self::BrowserContract => {
-                vec![UPDATE_EXTENSION_THEN_REPEAT.into()]
+                vec![update_extension_then_repeat()]
             }
             Self::BrowserUnavailable { reason } => vec![match reason {
                 BrowserUnavailableReason::NotAnswering => {
@@ -1636,8 +1693,8 @@ impl Refusal {
             Self::BrowserPinned => vec![
                 "Omit browser to continue in the browser this session already works in.".into(),
             ],
-            Self::BrowserStartupManual { .. } => Vec::new(),
-            Self::BrowserRecoveryFailed { reason } => match reason {
+            Self::BrowserStartupManual { extension, .. } => extension.step().into_iter().collect(),
+            Self::BrowserRecoveryFailed { reason, extension } => match reason {
                 BrowserRecoveryReason::BrowserAbsent => vec![
                     "Install Chrome, Edge, Brave, or Chromium as a native package, then run ghostlight install."
                         .into(),
@@ -1653,10 +1710,10 @@ impl Refusal {
                     "Ask the user to run ghostlight install from the Ghostlight installation that should own the browsers, then repeat the call."
                         .into(),
                 ],
-                BrowserRecoveryReason::ExtensionAbsent => vec![
+                BrowserRecoveryReason::ExtensionAbsent => vec![extension.step().unwrap_or_else(|| {
                     "Install Ghostlight in the selected browser profile, then repeat the call."
-                        .into(),
-                ],
+                        .into()
+                })],
                 BrowserRecoveryReason::LaunchFailed | BrowserRecoveryReason::HandshakeTimeout => {
                     vec!["Start the selected browser yourself, then repeat the call.".into()]
                 }
@@ -2213,10 +2270,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ActionSubject, BlockedReason, BrowserUnavailableReason, CaptureKind, CheckFailure,
-        DialogKind, EmptyObject, Observed, Outcome, Refusal, SavedTo, StaleHelp, TargetNoun,
-        TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
-        TARGET_LABEL_MAX_CHARS,
+        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
+        CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Observed, Outcome, Refusal,
+        SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE,
+        HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
     use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::field_problem::ControlRef;
@@ -3258,15 +3315,11 @@ Changes are \"unsaved\".".into()),
         );
         assert_eq!(
             Refusal::IncompatibleReceipt.next_steps(),
-            vec![
-                "Reload or update the Ghostlight extension in that browser, then repeat the call."
-            ]
+            vec![UPDATE_EXTENSION_STEP]
         );
         assert_eq!(
             Refusal::BrowserAdapterOutdated.next_steps(),
-            vec![
-                "Reload or update the Ghostlight extension in that browser, then repeat the call."
-            ]
+            vec![UPDATE_EXTENSION_STEP]
         );
         assert_eq!(
             Refusal::FilesUnreadable.next_steps(),
@@ -3303,9 +3356,7 @@ Changes are \"unsaved\".".into()),
         }
         assert_eq!(
             Refusal::BrowserContract.next_steps(),
-            vec![
-                "Reload or update the Ghostlight extension in that browser, then repeat the call."
-            ]
+            vec![UPDATE_EXTENSION_STEP]
         );
         assert_eq!(
             Refusal::EffectUnknown.next_steps(),
@@ -3881,10 +3932,88 @@ Changes are \"unsaved\".".into()),
         }
     }
 
+    const UPDATE_EXTENSION_STEP: &str = "Ask the user to update Ghostlight in Browser (to update now, open chrome://extensions, turn on Developer mode and click Update), then repeat the call.";
+
+    fn store_step() -> String {
+        format!(
+            "Ask the user to add Ghostlight in Browser from {}, or to open the Ghostlight window on this computer for the setup steps, then repeat the call.",
+            crate::language::setup::STORE_LISTING_URL
+        )
+    }
+
+    #[test]
+    fn advice_is_given_only_while_setup_is_incomplete_and_no_profile_has_the_extension() {
+        assert_eq!(
+            ExtensionAdvice::resolve(false, false),
+            ExtensionAdvice::AddFromStore
+        );
+        for (complete, present) in [(false, true), (true, false), (true, true)] {
+            assert_eq!(
+                ExtensionAdvice::resolve(complete, present),
+                ExtensionAdvice::Plain
+            );
+        }
+    }
+
+    #[test]
+    fn the_no_browser_answer_adds_the_store_step_only_when_advised() {
+        let plain = Refusal::BrowserStartupManual {
+            browsers: vec!["Chrome".into()],
+            extension: ExtensionAdvice::Plain,
+        };
+        let advised = Refusal::BrowserStartupManual {
+            browsers: vec!["Chrome".into()],
+            extension: ExtensionAdvice::AddFromStore,
+        };
+        assert!(plain.next_steps().is_empty());
+        assert_eq!(advised.next_steps(), vec![store_step()]);
+        assert_eq!(plain.summary(), advised.summary());
+    }
+
+    #[test]
+    fn an_absent_extension_sends_the_person_to_the_store_only_when_advised() {
+        let absent = |extension| Refusal::BrowserRecoveryFailed {
+            reason: BrowserRecoveryReason::ExtensionAbsent,
+            extension,
+        };
+        assert_eq!(
+            absent(ExtensionAdvice::Plain).next_steps(),
+            vec!["Install Ghostlight in the selected browser profile, then repeat the call."]
+        );
+        assert_eq!(
+            absent(ExtensionAdvice::AddFromStore).next_steps(),
+            vec![store_step()]
+        );
+        assert_eq!(
+            absent(ExtensionAdvice::Plain).summary(),
+            absent(ExtensionAdvice::AddFromStore).summary()
+        );
+    }
+
+    #[test]
+    fn advice_changes_no_other_recovery_failure() {
+        for reason in [
+            BrowserRecoveryReason::BrowserAbsent,
+            BrowserRecoveryReason::LaunchFailed,
+            BrowserRecoveryReason::SandboxedPackage,
+            BrowserRecoveryReason::NativeHostUnavailable,
+            BrowserRecoveryReason::OwnedElsewhere,
+            BrowserRecoveryReason::HandshakeTimeout,
+        ] {
+            let with =
+                |extension| Refusal::BrowserRecoveryFailed { reason, extension }.next_steps();
+            assert_eq!(
+                with(ExtensionAdvice::Plain),
+                with(ExtensionAdvice::AddFromStore)
+            );
+        }
+    }
+
     #[test]
     fn cross_tree_ownership_refusal_teaches_the_deliberate_install() {
         let refusal = Refusal::BrowserRecoveryFailed {
             reason: super::BrowserRecoveryReason::OwnedElsewhere,
+            extension: ExtensionAdvice::AddFromStore,
         };
         assert_eq!(
             refusal.summary(),

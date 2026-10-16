@@ -224,6 +224,12 @@ impl WorkbenchProjection {
         *lock(&self.setup) = Some(progress);
     }
 
+    /// The attached setup progress, when one was attached.
+    #[must_use]
+    pub fn setup(&self) -> Option<Arc<setup::SetupProgress>> {
+        lock(&self.setup).clone()
+    }
+
     /// Register what runs after a change that can alter the status or connections parts.
     fn set_status_hook(&self, hook: StatusHook) {
         *lock(&self.status_hook) = Some(hook);
@@ -597,7 +603,7 @@ impl WorkbenchFacade {
     /// The attached setup progress, when one was attached.
     #[must_use]
     pub fn setup(&self) -> Option<Arc<setup::SetupProgress>> {
-        lock(&self.projection.setup).clone()
+        self.projection.setup()
     }
 
     /// Attach the adapter that opens links and folders and asks for files on this computer.

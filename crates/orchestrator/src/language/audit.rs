@@ -200,7 +200,7 @@ impl Refusal {
             Self::BrowserUnknown => AuditRefusal::BrowserUnknown,
             Self::BrowserPinned => AuditRefusal::BrowserPinned,
             Self::BrowserStartupManual { .. } => AuditRefusal::BrowserStartupManual,
-            Self::BrowserRecoveryFailed { reason } => {
+            Self::BrowserRecoveryFailed { reason, .. } => {
                 AuditRefusal::BrowserRecoveryFailed { cause: *reason }
             }
             Self::ConnectionLost => AuditRefusal::ConnectionLost,

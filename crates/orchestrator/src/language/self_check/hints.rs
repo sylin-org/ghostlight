@@ -35,8 +35,8 @@ use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-    CheckFailure, DialogKind, EmptyObject, Outcome, Refusal, SavedTo, StaleHelp, TargetNoun,
-    TargetRole, WorkspaceReason,
+    CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Outcome, Refusal, SavedTo, StaleHelp,
+    TargetNoun, TargetRole, WorkspaceReason,
 };
 use crate::workspace::StaleReason;
 
@@ -952,6 +952,11 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::BrowserPinned,
         Refusal::BrowserStartupManual {
             browsers: vec!["Chrome".into(), "Edge".into()],
+            extension: ExtensionAdvice::Plain,
+        },
+        Refusal::BrowserStartupManual {
+            browsers: vec!["Chrome".into()],
+            extension: ExtensionAdvice::AddFromStore,
         },
         Refusal::ConnectionLost,
         Refusal::CancelledAfterDispatch,
@@ -984,7 +989,9 @@ fn refusal_samples() -> Vec<Refusal> {
         });
     }
     for reason in recovery_reasons() {
-        samples.push(Refusal::BrowserRecoveryFailed { reason });
+        for extension in [ExtensionAdvice::Plain, ExtensionAdvice::AddFromStore] {
+            samples.push(Refusal::BrowserRecoveryFailed { reason, extension });
+        }
     }
     for reason in unavailable_reasons() {
         samples.push(Refusal::BrowserUnavailable { reason });

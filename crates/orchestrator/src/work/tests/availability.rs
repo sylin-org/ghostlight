@@ -373,3 +373,57 @@ fn a_returning_browser_that_never_arrives_falls_back_to_recovery() {
     assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
     let _ = fs::remove_file(policy);
 }
+
+/// The refusal a session with no browser hears under manual startup, with the setup record
+/// present or not and the profile scan finding the extension or not.
+fn manual_refusal(
+    setup_complete: bool,
+    extension_in_a_profile: bool,
+) -> crate::work::result::InvocationResult {
+    let scratch = crate::install::scratch::Scratch::new();
+    let record = scratch.path().join("setup.json");
+    if setup_complete {
+        crate::install::setup_state::record_if_absent(
+            &record,
+            &crate::install::setup_state::SetupRecord {
+                first_request_ms: 1,
+            },
+        )
+        .unwrap();
+    }
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
+    let (governance, policy) = manual_startup();
+    let (mut executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
+    executor
+        .workbench
+        .attach_setup(crate::workbench::setup::SetupProgress::load(&record));
+    executor.extension_probe = Arc::new(move || extension_in_a_profile);
+    port.backdate(RETURN_GRACE);
+    let refused = navigate(&executor, &workspace);
+    let _ = fs::remove_file(policy);
+    assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
+    refused
+}
+
+/// While setup is incomplete and no profile has the extension, the no-browser answer says where
+/// the extension comes from. The summary is the one it always was.
+#[test]
+fn the_no_browser_answer_names_the_store_while_setup_is_incomplete_and_no_profile_has_it() {
+    let refused = manual_refusal(false, false);
+    assert!(refused.summary.starts_with("No browser is connected."));
+    assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
+    assert!(
+        refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL),
+        "{}",
+        refused.next_steps[0]
+    );
+    assert!(refused.next_steps[0].contains("Ghostlight window"));
+}
+
+/// An extension in some profile, or a finished setup, leaves the answer as it was.
+#[test]
+fn the_no_browser_answer_is_unchanged_with_an_extension_or_a_finished_setup() {
+    assert!(manual_refusal(false, true).next_steps.is_empty());
+    assert!(manual_refusal(true, false).next_steps.is_empty());
+    assert!(manual_refusal(true, true).next_steps.is_empty());
+}
