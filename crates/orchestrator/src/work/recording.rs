@@ -16,7 +16,7 @@ use crate::language::{
 use crate::workspace::WorkspaceLease;
 
 use super::{
-    bounded, observed_host, permitted, readiness, recording_delivery_name, recording_facts,
+    bounded, observed_host, readiness, recording_delivery_name, recording_facts,
     recording_state_name, ApplicationExecutor, Effect, InvocationContext, Readiness, Terminal,
     RECORDING_FILE_NAME,
 };
@@ -187,7 +187,7 @@ impl ApplicationExecutor {
             Ok(outcome) => Err(Box::new(self.recording_selection_failure(context, outcome))),
             Err(error) => Err(Box::new(self.browser_failure(
                 context,
-                permitted(),
+                Decision::permitted(),
                 error,
                 None,
             ))),
@@ -290,7 +290,7 @@ impl ApplicationExecutor {
             );
             return Err(Box::new(self.browser_failure(
                 context,
-                permitted(),
+                Decision::permitted(),
                 super::BrowserError::DocumentUnavailable,
                 Some(stopped.tab_id),
             )));
@@ -300,7 +300,7 @@ impl ApplicationExecutor {
             let decision = context.snapshot.authorize_landing(Capability::Read, url);
             (!decision.allowed).then_some(decision)
         });
-        let decision = denied.unwrap_or_else(permitted);
+        let decision = denied.unwrap_or_else(Decision::permitted);
         if !decision.allowed {
             let hosts: Vec<String> = stopped
                 .source_urls
@@ -538,15 +538,15 @@ impl ApplicationExecutor {
             BrowserOutcome::RecordingNotFound => {
                 (Refusal::RecordingUnavailable, json!({"reason":"not_found"}))
             }
-            _ => return self.protocol_failure(context, permitted(), None),
+            _ => return self.protocol_failure(context, Decision::permitted(), None),
         };
-        self.failed(context, permitted(), None, refusal, facts)
+        self.failed(context, Decision::permitted(), None, refusal, facts)
     }
 
     fn recording_export_failure(&self, context: &InvocationContext<'_>, reason: &str) -> Terminal {
         self.failed(
             context,
-            permitted(),
+            Decision::permitted(),
             None,
             Refusal::RecordingExportFailed,
             json!({"reason":bounded(reason, 160)}),

@@ -1131,11 +1131,6 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Resolve explicit human control at this request's dispatch boundary.
-    fn runtime_decision(&self, _context: &InvocationContext<'_>) -> Decision {
-        self.governance.runtime_decision()
-    }
-
     fn audit_decision(&self, context: &InvocationContext<'_>) -> Decision {
         if !context.snapshot.requires_audit() {
             return Decision::permitted();
@@ -1147,7 +1142,7 @@ impl ApplicationExecutor {
 
     fn audit_preflight(&self, context: &InvocationContext<'_>) -> Option<Terminal> {
         // Existing human-control paths keep their precedence and language.
-        if !self.runtime_decision(context).allowed {
+        if !self.governance.runtime_decision().allowed {
             return None;
         }
         let decision = self.audit_decision(context);
@@ -1171,7 +1166,7 @@ impl ApplicationExecutor {
     }
 
     fn admit_dispatch(&self, context: &InvocationContext<'_>) -> Result<(), BrowserError> {
-        let mut decision = self.runtime_decision(context);
+        let mut decision = self.governance.runtime_decision();
         if decision.allowed {
             decision = self.audit_decision(context);
         }
@@ -1207,7 +1202,7 @@ impl ApplicationExecutor {
         url: Option<&str>,
     ) -> Decision {
         let requirements = requirements.into();
-        let runtime = self.runtime_decision(context);
+        let runtime = self.governance.runtime_decision();
         let (decision, evidence) = if runtime.allowed {
             context.snapshot.authorize_with_evidence(requirements, url)
         } else {
@@ -2108,10 +2103,6 @@ fn operation_requires_workspace_lease(operation: &Operation) -> bool {
             ..
         }) if matches!(action.as_str(), "status" | "stop" | "save" | "discard")
     ) && !matches!(operation, Operation::ExplainPolicy(_))
-}
-
-fn permitted() -> Decision {
-    Decision::permitted()
 }
 
 fn recording_facts(summary: &PhysicalRecordingSummary) -> Value {
