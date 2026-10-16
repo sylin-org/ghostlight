@@ -77,7 +77,7 @@ pub enum ServiceContent {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum IntakeChannel {
-    /// A model-facing MCP client, through the MCP connector.
+    /// A model-facing MCP client, through the MCP edge.
     #[default]
     Mcp,
     /// A local script or program, through the Ghostlight command line.

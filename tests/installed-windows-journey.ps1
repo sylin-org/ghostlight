@@ -127,8 +127,8 @@ try {
     $report.chrome_pid = $script:chromeProcessId
     $report.chrome_version = (Get-Item -LiteralPath $chromeImage).VersionInfo.ProductVersion
     if ((Get-Doctor).readiness.state -ne 'ready') { throw 'Requires an idle, Ready installation.' }
-    $authorities = @(Get-ExactProcess $serviceImage); $connectors = @(Get-NativeEdge)
-    if ($authorities.Count -ne 1 -or $connectors.Count -ne 1) { throw 'Requires one exact installed service and browser edge.' }
+    $authorities = @(Get-ExactProcess $serviceImage); $browserEdges = @(Get-NativeEdge)
+    if ($authorities.Count -ne 1 -or $browserEdges.Count -ne 1) { throw 'Requires one exact installed service and browser edge.' }
     $authority = $authorities[0]
     $keys = @('Google/Chrome', 'Microsoft/Edge', 'BraveSoftware/Brave-Browser', 'Chromium') |
         ForEach-Object { "HKCU:/Software/$_/NativeMessagingHosts/org.sylin.ghostlight" }
@@ -159,7 +159,7 @@ try {
     $restoreOwed = $true
     $null = Invoke-Product @('native-host', 'uninstall')
     foreach ($key in $keys) { if (Test-Path -LiteralPath $key) { throw 'Registration was not removed.' } }
-    Stop-Exact $connectors[0] $edgeImage
+    Stop-Exact $browserEdges[0] $edgeImage
     Wait-Readiness 'not_connected'
     Start-Sleep -Seconds 5
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -175,18 +175,18 @@ try {
     if ((Get-ExactProcess $serviceImage)[0].Id -ne $authority.Id) { throw 'The service restarted during registration recovery.' }
     Phase 'registration-reinstalled-with-Chrome-running' $timer.ElapsedMilliseconds
 
-    $connector = @(Get-NativeEdge)[0]
-    Stop-Exact $connector $edgeImage
+    $browserEdge = @(Get-NativeEdge)[0]
+    Stop-Exact $browserEdge $edgeImage
     $timer.Restart()
     do {
         Start-Sleep -Milliseconds 250
         $replacement = @(Get-NativeEdge)
-    } while (($replacement.Count -ne 1 -or $replacement[0].Id -eq $connector.Id) -and $timer.Elapsed.TotalSeconds -lt 45)
-    if ($replacement.Count -ne 1 -or $replacement[0].Id -eq $connector.Id) { throw 'Chrome did not replace its crashed browser edge.' }
+    } while (($replacement.Count -ne 1 -or $replacement[0].Id -eq $browserEdge.Id) -and $timer.Elapsed.TotalSeconds -lt 45)
+    if ($replacement.Count -ne 1 -or $replacement[0].Id -eq $browserEdge.Id) { throw 'Chrome did not replace its crashed browser edge.' }
     Wait-Readiness 'ready'
     Phase 'browser-edge-crash-recovers-automatically' $timer.ElapsedMilliseconds
 
-    $connector = $replacement[0]
+    $browserEdge = $replacement[0]
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $edgeImage
     $info.ArgumentList.Add('mcp')
@@ -213,8 +213,8 @@ try {
     do {
         Start-Sleep -Milliseconds 250
         $reconnected = @(Get-NativeEdge)
-    } while (($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $connector.Id) -and $timer.Elapsed.TotalSeconds -lt 45)
-    if ($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $connector.Id) { throw 'Chrome did not start a new browser edge after the service returned.' }
+    } while (($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $browserEdge.Id) -and $timer.Elapsed.TotalSeconds -lt 45)
+    if ($reconnected.Count -ne 1 -or $reconnected[0].Id -eq $browserEdge.Id) { throw 'Chrome did not start a new browser edge after the service returned.' }
     $listed = Invoke-Mcp 4 'tools/call' @{ name = 'browser_tabs'; arguments = @{ action = 'list' } }
     if ($listed.structuredContent.status -ne 'succeeded' -or $script:mcp.HasExited) {
         throw 'Same initialized MCP stream did not complete browser work after recovery.'

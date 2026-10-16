@@ -2,8 +2,8 @@
 //!
 //! Four kinds of words live here: the refusals of a relay opening, the messages of the JSON-RPC
 //! errors the MCP session engine answers itself, the sentences of the failure templates a
-//! connector sends when it cannot reach the service, and the sentence the service answers to work
-//! that arrives during a quit. The connector authors no words, so all of them come from this
+//! MCP edge sends when it cannot reach the service, and the sentence the service answers to work
+//! that arrives during a quit. The MCP edge authors no words, so all of them come from this
 //! module.
 
 /// Longest message a JSON-RPC error carries, in characters.
@@ -114,16 +114,16 @@ impl ProtocolRefusal {
     }
 }
 
-/// Why a connector answers a request without the service.
+/// Why the MCP edge answers a request without the service.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConnectorFailure {
+pub enum EdgeFailure {
     /// The service went away while the request was outstanding.
     CutOff,
     /// The request was held for a service that did not come back in time.
     Expired,
 }
 
-impl ConnectorFailure {
+impl EdgeFailure {
     /// The summary of a tool call answered by this failure.
     #[must_use]
     pub const fn call_summary(self) -> &'static str {
@@ -166,11 +166,11 @@ impl ConnectorFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectorFailure, ProtocolRefusal, SHUTTING_DOWN_MESSAGE};
+    use super::{EdgeFailure, ProtocolRefusal, SHUTTING_DOWN_MESSAGE};
 
     #[test]
     fn every_failure_sentence_is_plain_ascii() {
-        for failure in [ConnectorFailure::CutOff, ConnectorFailure::Expired] {
+        for failure in [EdgeFailure::CutOff, EdgeFailure::Expired] {
             assert!(failure.call_summary().is_ascii());
             assert!(failure.request_message().is_ascii());
             assert!(failure.call_next_steps().iter().all(|step| step.is_ascii()));

@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 use super::server_profile;
 use crate::language::audit_health::Storage;
-use crate::language::intake::{ConnectorFailure, ProtocolRefusal};
+use crate::language::intake::{EdgeFailure, ProtocolRefusal};
 use crate::work::result::{Effect, Readiness, Status};
 
 mod lean;
@@ -191,7 +191,7 @@ pub struct McpSession {
 }
 
 impl McpSession {
-    /// A new session for a client that reached the connector through `channel`.
+    /// A new session for a client that reached the MCP edge through `channel`.
     #[must_use]
     pub fn new(channel: impl Into<String>) -> Self {
         Self {
@@ -222,7 +222,7 @@ impl McpSession {
         session
     }
 
-    /// How the client reached the connector.
+    /// How the client reached the MCP edge.
     #[must_use]
     pub fn channel(&self) -> &str {
         &self.channel
@@ -584,7 +584,7 @@ pub struct OwnedTab {
 
 /// What a session needs to continue after a service restart (ADR-0197 Decision 12).
 ///
-/// It travels as an opaque token: the connector keeps it and hands it back on reconnect.
+/// It travels as an opaque token: the MCP edge keeps it and hands it back on reconnect.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ResumeState {
     /// The negotiated MCP revision.
@@ -592,7 +592,7 @@ pub struct ResumeState {
     /// The client's own name, for attribution and presentation only. A token may omit it.
     #[serde(default)]
     pub client_label: String,
-    /// How the client reached the connector. A token may omit it; the opening names it too.
+    /// How the client reached the MCP edge. A token may omit it; the opening names it too.
     #[serde(default)]
     pub channel: String,
     /// The workspace session key, when the session was bound to one.
@@ -675,12 +675,12 @@ pub fn negotiate(requested: &str) -> &'static str {
 #[must_use]
 pub fn failure_templates() -> Templates {
     Templates {
-        cut_off: failure_entries(ConnectorFailure::CutOff),
-        expired: failure_entries(ConnectorFailure::Expired),
+        cut_off: failure_entries(EdgeFailure::CutOff),
+        expired: failure_entries(EdgeFailure::Expired),
     }
 }
 
-fn failure_entries(failure: ConnectorFailure) -> BTreeMap<String, Value> {
+fn failure_entries(failure: EdgeFailure) -> BTreeMap<String, Value> {
     let mut entries = BTreeMap::new();
     entries.insert(
         method::TOOLS_CALL.into(),
@@ -697,16 +697,16 @@ fn failure_entries(failure: ConnectorFailure) -> BTreeMap<String, Value> {
     entries
 }
 
-fn failure_call_result(failure: ConnectorFailure) -> Value {
+fn failure_call_result(failure: EdgeFailure) -> Value {
     let (status, effect, readiness, repeat_safe, cause) = match failure {
-        ConnectorFailure::CutOff => (
+        EdgeFailure::CutOff => (
             Status::Unknown,
             Effect::Unknown,
             Readiness::Unknown,
             false,
             reason::CUT_OFF,
         ),
-        ConnectorFailure::Expired => (
+        EdgeFailure::Expired => (
             Status::Failed,
             Effect::None,
             Readiness::NotApplicable,
@@ -726,7 +726,7 @@ fn failure_call_result(failure: ConnectorFailure) -> Value {
         "facts": {"reason": cause},
         "next_steps": next_steps,
     });
-    // A template is built before any client negotiates a revision and the connector fills only its
+    // A template is built before any client negotiates a revision and the MCP edge fills only its
     // id, so it is written for the latest revision: structured content only, no text copy.
     call_tool_result(
         LATEST_REVISION,
