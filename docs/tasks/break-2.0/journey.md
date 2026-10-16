@@ -98,7 +98,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j02-kit has landed. Next: j03-show-event.
+j03-show-event has landed. Next: j04-setup-page.
 
 ## Landed
 
@@ -106,11 +106,13 @@ j02-kit has landed. Next: j03-show-event.
 |---|---|---|
 | j01-adr | ADR-0200 is filed and indexed with Decisions 1 to 16 and the owner answers above. The ADR index marks ADR-0070, 0091, 0095, 0126 and 0177 as amended by it. The adapter-protocol-4 note gains a marked amendment superseding the section 7 rows on publishing after services spread and the unchanged level-3 path. This ledger starts; `docs/tasks/README.md` and the seams ledger point here. | see `git log` |
 | j02-kit | `extension/kit.css` is the one stylesheet for the extension pages: the sylin.org night tokens and base rules under `.gl-page`, the kit components, the setup layout, the companion with its two-segment stepper, and the popup. `scripts/package-extension.ps1` ships `kit.css` and `icons/ghostlight-mascot.png` and throws when a staged page names a local file the package lacks. The source-grep test for `setup.html` is deleted. | see `git log` |
+| j03-show-event | Protocol 4 gains one browser-level event, `show_requested`, with no fields: the golden vocabulary and fixture, `extension/lib/protocol.js`, the worker (`show_ghostlight` page message, `requestShow()`, refused while the link is down), `wire::Event::ShowRequested`, `BrowserEvent::ShowRequested`, and `ServiceBrowserEvents` calling `WorkbenchFacade::reveal(None)` and ignoring the answer. The adapter-protocol-4 note carries the row and the browser-level sentence. | see `git log` |
 
 ## Owed live checks
 
 - j01: none. Docs only.
 - j02: none. The page markup that links the kit lands in j04, j06 and j07; the live look is checked there.
+- j03: the unpacked extension's Open Ghostlight brings the window forward on Windows and Linux (live, once j04 lands the button).
 
 ## Owed to the owner
 
@@ -169,3 +171,15 @@ j02-kit has landed. Next: j03-show-event.
   that the shell is complete. Only a change to the service or shell lifecycle (start, stop,
   presence, session end, update) restarts it. Install-time work does not.
 - The owner pushed `dev` on 2026-10-16 (832d1abe..8a21f8d1).
+- j03: ran the gate checks the files require: (1) `cargo fmt --all -- --check`, `cargo clippy
+  --workspace --all-targets -- -D warnings`, `cargo test -p ghostlight-service` (1718 pass), (3)
+  `npm test` in `extension/` (466 pass), (5) the packager to `.tmp/lane-journey/extension.zip`, (8)
+  `node --test tests/guards/*.test.mjs`, (10) the repository integrity script. `git tag --list 'v2*'`
+  was empty. The tree and the spec differed in these places.
+  (1) `ServiceBrowserEvents` already held a `WorkbenchFacade` clone, so no new field was needed;
+  `reveal` reads the presentation when called, so a late attach works.
+  (2) The worker refuses on `!nativePort || !liveState.connected || !liveState.compatible`, as the
+  spec says; `runtime_control` keeps its older `!nativePort` check unchanged.
+  (3) The Rust round trip of the new fixture is covered by `every_event_decodes_and_round_trips`,
+  which walks every fixture and compares the tags with the vocabulary; no per-event test was added.
+

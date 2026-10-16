@@ -127,6 +127,7 @@ Events (extension to service):
 | `tab_closed` | `tab_id` |
 | `attended` | none (browser-level) |
 | `runtime_control_requested` | `intent` |
+| `show_requested` | none (browser-level) |
 
 Removed at protocol 4:
 - the `correlation` field on `document_committed` (commits now ride in receipts);
@@ -296,6 +297,7 @@ pub enum Event {
     TabClosed { tab_id: u64 },
     Attended,
     RuntimeControlRequested { intent: String },          // parsed into RuntimeControlIntent; unknown ignored
+    ShowRequested,
     #[serde(other)] Unknown,
 }
 
@@ -776,7 +778,9 @@ It replaces `topology.js`'s workspace mirror (`topology.js:16`).
 - `document_committed`, `readiness_changed`, `dialog_changed` and `tab_closed` are sent only for tabs in
   `controlled`. Opener relationships, group labels and passive browsing never add a tab (MEMORY "Ghostlight
   manages only its own actions").
-- `attended` and `runtime_control_requested` are browser-level, as today.
+- `attended`, `runtime_control_requested` and `show_requested` are browser-level. `show_requested` is sent when a
+  person in an extension page asks to see Ghostlight; the service answers nothing and a failure to show is never
+  an error.
 
 **Chrome listeners:**
 

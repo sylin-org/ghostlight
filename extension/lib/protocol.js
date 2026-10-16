@@ -33,7 +33,7 @@
     call_failures: ["document_changed", "frame_missing", "owner_missing", "dialog_open", "timeout", "cancelled", "session_lost",
       "page_exception", "unserializable", "other"],
     call_answers: ["returned", "failed", "skipped"],
-    events: ["document_committed", "readiness_changed", "dialog_changed", "tab_closed", "attended", "runtime_control_requested"],
+    events: ["document_committed", "readiness_changed", "dialog_changed", "tab_closed", "attended", "runtime_control_requested", "show_requested"],
     runtime_control_intents: ["toggle_hold", "hold", "resume", "end_session", "start_session"],
     input_steps: ["mouse", "key", "insert_text", "drag", "pause"],
     mouse_actions: ["moved", "pressed", "released", "wheel"],

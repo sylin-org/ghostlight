@@ -204,11 +204,12 @@ fn events_reach_the_sink_and_unknown_frames_are_ignored() {
         json!({"kind": "event", "event": {"event": "runtime_control_requested", "intent": "future_intent"}}),
         json!({"kind": "event", "event": {"event": "runtime_control_requested", "intent": "hold"}}),
         json!({"kind": "error", "code": "anything", "message": "ignored"}),
+        json!({"kind": "event", "event": {"event": "show_requested"}}),
         json!({"kind": "event", "event": {"event": "tab_closed", "tab_id": 7}}),
     ] {
         fake.send(&frame);
     }
-    eventually(|| events.0.lock().unwrap().len() == 5);
+    eventually(|| events.0.lock().unwrap().len() == 6);
     let seen: Vec<_> = events.0.lock().unwrap().clone();
     assert!(seen.iter().all(|(browser, _)| browser == FOUR));
     assert_eq!(
@@ -231,6 +232,7 @@ fn events_reach_the_sink_and_unknown_frames_are_ignored() {
             BrowserEvent::RuntimeControlRequested {
                 intent: RuntimeControlIntent::Hold,
             },
+            BrowserEvent::ShowRequested,
             BrowserEvent::TabClosed { tab_id: 7 },
         ]
     );

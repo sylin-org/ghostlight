@@ -1235,6 +1235,8 @@ pub enum BrowserEvent {
     Attended,
     /// A local human requested a runtime-control change.
     RuntimeControlRequested { intent: RuntimeControlIntent },
+    /// A person in an extension page asked to see Ghostlight.
+    ShowRequested,
     /// A tab closed outside an invocation.
     TabClosed { tab_id: u64 },
     /// The adapter connection ended.

@@ -689,6 +689,27 @@ test("browser-level events: attended and runtime control", async () => {
   } finally { worker.dispose(); }
 });
 
+test("a show request from an extension page becomes one browser-level event", async () => {
+  const worker = await boot();
+  try {
+    await worker.accept();
+    const answer = await worker.ask({ kind: "show_ghostlight" });
+    assert.equal(answer.ok, true);
+    assert.deepEqual(answer.value, { queued: true });
+    assert.deepEqual(worker.events(), [golden("events/show_requested").event]);
+  } finally { worker.dispose(); }
+});
+
+test("a show request with no service link answers an error and posts nothing", async () => {
+  const worker = await boot({ connect: false });
+  try {
+    const answer = await worker.ask({ kind: "show_ghostlight" });
+    assert.equal(answer.ok, false);
+    assert.match(answer.error, /Ghostlight service is disconnected/);
+    assert.equal(worker.ports.length, 0);
+  } finally { worker.dispose(); }
+});
+
 test("with no hello_accepted in 10 s the outdated-service state shows", async () => {
   const worker = await boot();
   try {

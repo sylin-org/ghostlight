@@ -264,6 +264,7 @@ fn browser_event(event: wire::Event) -> Option<BrowserEvent> {
         wire::Event::RuntimeControlRequested { .. } => {
             control.map(|intent| BrowserEvent::RuntimeControlRequested { intent })
         }
+        wire::Event::ShowRequested => Some(BrowserEvent::ShowRequested),
         wire::Event::Attended | wire::Event::Unknown => None,
     }
 }

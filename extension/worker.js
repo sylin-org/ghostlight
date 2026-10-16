@@ -62,13 +62,15 @@ const EVENT = Object.freeze({
   DIALOG_CHANGED: "dialog_changed",
   TAB_CLOSED: "tab_closed",
   ATTENDED: "attended",
-  RUNTIME_CONTROL_REQUESTED: "runtime_control_requested"
+  RUNTIME_CONTROL_REQUESTED: "runtime_control_requested",
+  SHOW_REQUESTED: "show_requested"
 });
 const MESSAGE = Object.freeze({
   UI_SNAPSHOT: "ui_snapshot",
   GET_PREFERENCES: "get_preferences",
   SET_PREFERENCES: "set_preferences",
   RUNTIME_CONTROL: "runtime_control",
+  SHOW_GHOSTLIGHT: "show_ghostlight",
   RELEASE_DEBUGGER_SESSIONS: "release_debugger_sessions",
   CONNECTION_DIAGNOSTICS: "connection_diagnostics",
   UI_STATE_CHANGED: "ui_state_changed"
@@ -670,6 +672,13 @@ function requestRuntimeControl(intent) {
   sendEvent({ event: EVENT.RUNTIME_CONTROL_REQUESTED, intent });
 }
 
+// Asks the service to bring Ghostlight forward for a person in an extension page. Best effort: the
+// service may have nothing to show, and that is never an error.
+function requestShow() {
+  if (!nativePort || !liveState.connected || !liveState.compatible) throw new Error("Ghostlight service is disconnected.");
+  sendEvent({ event: EVENT.SHOW_REQUESTED });
+}
+
 // A purely local, mechanical release: it never touches the native port. If the service is gone for
 // good, nothing else would clear Chrome's "controlled by automated software" banner.
 async function releaseDebuggerSessions() {
@@ -813,6 +822,9 @@ async function handleUiMessage(message, sender) {
       return preferences;
     case MESSAGE.RUNTIME_CONTROL:
       requestRuntimeControl(message.intent);
+      return { queued: true };
+    case MESSAGE.SHOW_GHOSTLIGHT:
+      requestShow();
       return { queued: true };
     case MESSAGE.RELEASE_DEBUGGER_SESSIONS:
       await releaseDebuggerSessions();

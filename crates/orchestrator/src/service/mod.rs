@@ -1915,6 +1915,11 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 self.workbench
                     .apply_runtime_control(intent, RuntimeSource::Browser);
             }
+            // Best effort: with nothing attached to show, or nothing to reveal, the person is no
+            // worse off, so the answer is not read.
+            BrowserEvent::ShowRequested => {
+                let _ = self.workbench.reveal(None);
+            }
             BrowserEvent::TabClosed { tab_id } => {
                 self.workspaces.apply_browser_close(browser, tab_id);
                 self.workbench.refresh_live_parts();
@@ -2430,6 +2435,27 @@ mod tests {
 
         sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::ToggleHold));
         assert_eq!(heard.notes().pop(), Some(None));
+    }
+
+    #[test]
+    fn a_show_request_from_the_browser_reveals_the_workbench_once() {
+        use crate::browser::adapter::BrowserEvent;
+        use crate::browser::BrowserEventSink;
+
+        let workspaces = crate::workspace::WorkspaceStore::default();
+        let workbench = test_workbench(&workspaces);
+        let sink = super::ServiceBrowserEvents {
+            workbench: workbench.clone(),
+            workspaces,
+        };
+
+        // Nothing is attached yet, and that is not an error.
+        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+
+        let reveals = Arc::new(RevealCounter::default());
+        workbench.attach_presentation(reveals.clone());
+        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+        assert_eq!(reveals.0.load(Ordering::SeqCst), 1);
     }
 
     #[test]

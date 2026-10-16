@@ -205,6 +205,8 @@ pub enum Event {
         /// The requested intent, parsed by [`Event::control_intent`].
         intent: String,
     },
+    /// A person in an extension page asked to see Ghostlight.
+    ShowRequested,
     /// An event this service does not know.
     #[serde(other)]
     Unknown,
