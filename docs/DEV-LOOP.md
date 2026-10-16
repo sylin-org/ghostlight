@@ -42,10 +42,10 @@ build into `~/.ghostlight/bin` the way a release install does:
   has one: it is replaced when its file differs.
 - Once the new service publishes, `bin/install.json` is written with `"channel": "development"`.
 
-Nothing is written into `dev` and no marker is written. `ghostlight doctor` and `ghostlight status` print
-`Channel: development` while the installation is a development build. A release package never
-installs over it: its carrier runs the installed service, and `deployment install` from a release
-package refuses and names the restore commands below.
+Nothing is written into `dev` and no marker is written. `ghostlight doctor` and
+`ghostlight status` print `Channel: development` while the installation is a development build.
+A release package never installs over it: its carrier runs the installed service, and
+`deployment install` from a release package refuses and names the restore commands below.
 
 As soon as `bin` holds the executables, and before anything old is stopped, the installer
 reconciles every registration to name `bin`, so a browser or client that relaunches its host
@@ -93,8 +93,8 @@ processes to stop and the files to delete. Nothing changes.
 
 Packages, npm and the get scripts run the same command without `--development`. A release
 refuses an older payload, refuses a development installation, and does nothing for the same
-intact version with an intact edge. It writes `bin/install.json` only after the new service publishes, so a service
-that does not start is installed again on the next launch.
+intact version with an intact edge. It writes `bin/install.json` only after the new service
+publishes, so a service that does not start is installed again on the next launch.
 
 ## What to restart
 

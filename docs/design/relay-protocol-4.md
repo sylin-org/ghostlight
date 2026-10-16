@@ -129,8 +129,8 @@ reason the service was started with) and, when the service has them, `connection
 (`{url, usual_port, watching}`, where the workbench is served and whether other screens on this
 computer may watch; the bearer that opens the window is never part of it), `show` with `{shown}`
 (whether a window came forward) and `quit` with `{quitting: true}`. A reader treats `connections`
-and `workbench` as optional: an older service answers without them. An operation this revision does not know
-is refused as `unsupported`.
+and `workbench` as optional: an older service answers without them. An operation this revision
+does not know is refused as `unsupported`.
 
 **`desktop`** carries the same-build shell contract of ADR-0199 Decision 7 and its 2026-10-15
 amendment. **`command`** is reserved; its stream, when it lands, is defined by the command contract

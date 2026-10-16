@@ -9,6 +9,8 @@ use ghostlight_relay::protocol::StartReason;
 use ghostlight_relay::route::{BROWSER_ORIGIN_PREFIX, MCP_ARGUMENT};
 use ghostlight_relay::spawn::REASON_OPTION;
 
+use crate::install::deployment::{DEVELOPMENT_OPTION, PLAN_OPTION, RESTORE_OPTION};
+
 /// Every subcommand a person is offered, in help order.
 ///
 /// This is the list the shell completions must match. `native-host` is deliberately absent: it is
@@ -116,15 +118,6 @@ fn serve_reason(arguments: &[OsString]) -> anyhow::Result<StartReason> {
         _ => anyhow::bail!("{SERVE_USAGE}"),
     }
 }
-
-/// The option that installs a payload as the development channel.
-pub const DEVELOPMENT_OPTION: &str = "--development";
-
-/// The option that returns a development installation to a release.
-pub const RESTORE_OPTION: &str = "--restore";
-
-/// The option that prints the install plan and changes nothing.
-pub const PLAN_OPTION: &str = "--plan";
 
 /// How `deployment install` is used.
 fn deployment_usage() -> String {

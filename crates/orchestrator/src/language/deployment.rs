@@ -6,7 +6,7 @@
 //! every refusal a person can meet lives here, so the report says only what was observed and the
 //! way back from a development build is named the same way wherever it is needed.
 
-use crate::cli::parse::RESTORE_OPTION;
+use crate::install::deployment::RESTORE_OPTION;
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
 
 /// Where the get scripts are published.

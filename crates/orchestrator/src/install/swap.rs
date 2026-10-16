@@ -16,7 +16,7 @@ use ghostlight_relay::private;
 const NEW_SUFFIX: &str = ".new";
 
 /// Separator between an image name and the number of the swap that moved it aside.
-pub(crate) const OLD_MARKER: &str = ".old-";
+const OLD_MARKER: &str = ".old-";
 
 /// Replace `dir/name` with the file at `source`.
 ///

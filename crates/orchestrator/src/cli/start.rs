@@ -3,9 +3,9 @@
 //! [`start`] gathers the facts [`crate::install::entry::decide`] needs from the Ghostlight home,
 //! asks it, and carries the answer out through a [`Launcher`]: run here, forward to the installed
 //! service, hand the edge's own verbs to the installed edge, install from a carrier package
-//! first, name the way back when a development build's executable is gone, or refuse to serve (ADR-0197 Decisions 10 and 13, ADR-0199 Decision 2 and the
-//! development channel amendment). The launcher is the only part that starts processes, so tests
-//! drive the real rule with a fake one.
+//! first, name the way back when a development build's executable is gone, or refuse to serve
+//! (ADR-0197 Decisions 10 and 13, ADR-0199 Decision 2 and the development channel amendment). The
+//! launcher is the only part that starts processes, so tests drive the real rule with a fake one.
 
 use std::ffi::OsString;
 use std::io;

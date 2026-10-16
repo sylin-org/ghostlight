@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn the_marker_and_the_directory_each_get_their_own_sentence() {
+    fn a_removed_or_kept_directory_and_marker_are_each_named_by_their_own_path() {
         let layout = Layout::new("home");
         let directory = layout.retired_development_directory();
         let marker = layout.retired_development_marker();
@@ -316,9 +316,14 @@ mod tests {
         );
         assert!(kept.iter().all(|line| !line.text.contains("still runs")));
         let shown_directory = directory.display().to_string();
-        assert!(kept
-            .iter()
-            .any(|line| line.stream == Stream::Problem && line.text.contains(&shown_directory)));
+        // The marker's path starts with the directory's, so match the whole sentence.
+        let kept_directory =
+            format!("Could not remove {shown_directory}. The next install tries again.");
+        assert!(
+            kept.iter()
+                .any(|line| line.stream == Stream::Problem && line.text == kept_directory),
+            "{kept:?}"
+        );
     }
 
     #[test]

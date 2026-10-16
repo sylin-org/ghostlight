@@ -86,6 +86,15 @@ const READY_POLL: Duration = Duration::from_millis(100);
 /// and cannot be asked to quit, so the installer stops their exact images instead.
 const EARLIER_DEVELOPMENT_RELAY: &str = "3";
 
+/// The option that installs a payload as the development channel.
+pub const DEVELOPMENT_OPTION: &str = "--development";
+
+/// The option that returns a development installation to a release.
+pub const RESTORE_OPTION: &str = "--restore";
+
+/// The option that prints the install plan and changes nothing.
+pub const PLAN_OPTION: &str = "--plan";
+
 /// What an install puts where.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -161,8 +170,8 @@ pub trait ProcessControl {
     fn stop_image(&self, images: &[PathBuf]) -> anyhow::Result<()>;
     /// Whether any process runs one of `images`.
     fn is_running(&self, images: &[PathBuf]) -> bool;
-    /// The programs of an older installation that still run in `layout`'s home, other than the
-    /// service `service_pid`.
+    /// The programs of an older installation that still run in `layout`'s home. The answering
+    /// service `service_pid` is spared unless it runs from the retired development directory.
     fn strays(&self, layout: &Layout, service_pid: Option<u32>) -> Vec<StrayProcess>;
     /// Stop `strays` and wait for them to exit. Returns the ones that would not stop.
     fn stop_strays(&self, strays: &[StrayProcess]) -> Vec<StrayProcess>;
@@ -817,7 +826,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         }
         // A program that will not stop is reported; it blocks nothing here.
         strays_left = stop_found_strays(context.control, layout, None).stuck;
-        left_behind = remove_retired_development(context.control, layout, &plan);
+        left_behind = remove_retired_development(&plan);
         if migrating {
             migration::retire_state(&copied)?;
             migration::archive_audit(&plan.migration)?;
@@ -1010,21 +1019,11 @@ impl RetiredDevelopment {
     }
 }
 
-/// Stop what runs from the retired development directory and remove what `plan` lists as
-/// deletions. Returns the entries that could not be removed. A stop that fails is not an error
-/// here: the removal that follows names what stayed.
-fn remove_retired_development(
-    control: &dyn ProcessControl,
-    layout: &Layout,
-    plan: &InstallPlan,
-) -> Vec<PathBuf> {
-    if plan.deletions.is_empty() {
-        return Vec::new();
-    }
-    let retired = RetiredDevelopment::find(layout);
-    if !retired.images.is_empty() {
-        let _ = control.stop_image(&retired.images);
-    }
+/// Remove what `plan` lists as deletions: the retired development directory and its marker.
+/// Returns the entries that could not be removed. The programs that ran from there were stopped
+/// by pid with the other strays, and one that would not stop is reported with them, so a removal
+/// that fails here names only what stayed.
+fn remove_retired_development(plan: &InstallPlan) -> Vec<PathBuf> {
     plan.deletions
         .iter()
         .filter(|path| {
@@ -2063,17 +2062,8 @@ mod tests {
         assert!(!marker.exists());
         assert_eq!(fixture.read(fixture.layout.service_executable()), "service");
 
-        let calls = control.calls();
-        let Call::Stop(stopped) = &calls[1] else {
-            panic!("{calls:?}");
-        };
-        let mut stopped = stopped.clone();
-        stopped.sort();
-        let mut expected = images;
-        expected.sort();
-        assert_eq!(stopped, expected);
-        assert_eq!(calls[0], Call::Quit);
-        assert_eq!(calls[2..], [Call::Start, Call::Wait]);
+        // The scan stops what runs from the directory, so no second stop by image follows.
+        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
         for sighting in control.sightings() {
             assert!(
                 sighting.registered,
@@ -2081,6 +2071,48 @@ mod tests {
             );
         }
         assert!(fixture.manifest_names_bin_edge());
+    }
+
+    #[test]
+    fn a_program_running_from_the_retired_directory_is_stopped_once_by_pid() {
+        let fixture = Fixture::new();
+        let images = plant_retired_development(&fixture);
+        let mut control = FakeControl::new();
+        control.strays = vec![StrayProcess {
+            pid: 41,
+            image: images[1].clone(),
+            kind: StrayKind::RetiredDevelopment,
+        }];
+        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+        assert!(outcome.strays_left.is_empty());
+        assert!(outcome.left_behind.is_empty());
+        assert_eq!(
+            control.calls(),
+            [
+                Call::Quit,
+                Call::StopStrays(vec![41]),
+                Call::Start,
+                Call::Wait
+            ]
+        );
+    }
+
+    #[test]
+    fn a_retired_program_that_will_not_stop_is_reported_and_blocks_nothing() {
+        let fixture = Fixture::new();
+        let images = plant_retired_development(&fixture);
+        let stuck = StrayProcess {
+            pid: 41,
+            image: images[1].clone(),
+            kind: StrayKind::RetiredDevelopment,
+        };
+        let mut control = FakeControl::new();
+        control.strays = vec![stuck.clone()];
+        control.strays_stay = true;
+        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(outcome.strays_left, [stuck]);
+        assert!(!fixture.layout.retired_development_directory().exists());
     }
 
     #[test]
@@ -2136,7 +2168,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn an_entry_a_running_program_keeps_is_reported_and_does_not_fail_the_install() {
+    fn an_entry_that_cannot_be_removed_is_reported_and_does_not_fail_the_install() {
         use std::os::windows::fs::OpenOptionsExt;
 
         let fixture = Fixture::new();
@@ -3104,10 +3136,20 @@ mod tests {
     /// How long a test waits for the stand-in to show in the process table.
     const STAND_IN_APPEARS_WITHIN: Duration = Duration::from_secs(20);
 
+    /// How many times starting the stand-in is tried when the kernel reports its file busy.
+    const STAND_IN_START_ATTEMPTS: u32 = 20;
+
+    /// Pause between those tries.
+    const STAND_IN_START_PAUSE: Duration = Duration::from_millis(50);
+
+    /// The name of [`a_stray_stand_in_waits_when_asked`] as the test binary lists it.
+    const STAND_IN_TEST: &str = "install::deployment::tests::a_stray_stand_in_waits_when_asked";
+
     /// The program the real-process tests start under a retired connector's name: this test
-    /// binary, told to run only this test. It returns at once unless [`STAND_IN_VARIABLE`] is set,
-    /// and then exits by itself after [`STAND_IN_LIFETIME`].
+    /// binary, told to run only this test. A normal run skips it. It does nothing unless
+    /// [`STAND_IN_VARIABLE`] is set, and then exits by itself after [`STAND_IN_LIFETIME`].
     #[test]
+    #[ignore = "a stand-in process for the real-process tests, started by them"]
     fn a_stray_stand_in_waits_when_asked() {
         if env::var_os(STAND_IN_VARIABLE).is_some() {
             std::thread::sleep(STAND_IN_LIFETIME);
@@ -3125,18 +3167,33 @@ mod tests {
     }
 
     /// Copy this test binary to `image` and start the copy waiting.
+    ///
+    /// Another test thread may fork between the copy and the start and hand the copy's open
+    /// descriptor to its child for a moment, and then the kernel refuses to execute the file as
+    /// busy. That passes, so the start is tried again a bounded number of times.
     fn start_stand_in(image: &Path) -> StandIn {
         fs::copy(env::current_exe().unwrap(), image).unwrap();
-        let child = std::process::Command::new(image)
-            .args(["--exact", "--test-threads=1"])
-            .arg("install::deployment::tests::a_stray_stand_in_waits_when_asked")
-            .env(STAND_IN_VARIABLE, "1")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-        StandIn(child)
+        let mut attempts = 1;
+        loop {
+            let started = std::process::Command::new(image)
+                .args(["--ignored", "--exact", "--test-threads=1", STAND_IN_TEST])
+                .env(STAND_IN_VARIABLE, "1")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            match started {
+                Ok(child) => return StandIn(child),
+                Err(error)
+                    if error.kind() == io::ErrorKind::ExecutableFileBusy
+                        && attempts < STAND_IN_START_ATTEMPTS =>
+                {
+                    attempts += 1;
+                    std::thread::sleep(STAND_IN_START_PAUSE);
+                }
+                Err(error) => panic!("the stand-in did not start: {error}"),
+            }
+        }
     }
 
     /// The stray of `layout`'s home that runs as process `pid`, once the table shows it.

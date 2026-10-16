@@ -101,7 +101,7 @@ that finds a development record with the executable it would run gone, and `doct
 route. Earlier development
 builds ran from `~/.ghostlight/dev`, selected by the marker `~/.ghostlight/development`. An
 install that finds either stops what runs from there and removes both once `bin` holds the new
-executables; an entry a running program keeps is reported and removed by the next install.
+executables; an entry that cannot be removed is reported and removed by the next install.
 
 As soon as `bin` holds the executables, and before anything old is stopped,
 `install/reconcile.rs` points every registration at `bin`: native-host manifests (reclaiming
