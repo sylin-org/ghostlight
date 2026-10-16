@@ -6,9 +6,9 @@
 //   1. Starts branded Chrome on a scratch profile over the DevTools pipe and loads the repository
 //      extension with Extensions.loadUnpacked (see lib/cdp-pipe.mjs). The pinned manifest key
 //      makes the id cjcmhepmagomefjggkcohdbfemacojoa, which the per-user native host registration
-//      allows, so the extension reaches ~/.ghostlight/bin/ghostlight-browser-connector and
-//      through relay 3 the one installed service.
-//   2. Spawns ~/.ghostlight/bin/ghostlight-mcp-connector as a small MCP stdio client.
+//      allows, so the extension reaches ~/.ghostlight/bin/ghostlight (the browser edge) and,
+//      through relay 4, the one installed service.
+//   2. Spawns `~/.ghostlight/bin/ghostlight mcp` (the MCP edge) as a small MCP stdio client.
 //   3. Runs named checks against local fixtures served on two origins, then (with --live) against
 //      the public demo pages, and prints one line per check.
 //
@@ -20,7 +20,6 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import net from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -28,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { policyRefreshed } from "./lib/policy-refresh.mjs";
 import { createScratch, installScratchNativeHost, launchChrome, removeScratch } from "./lib/cdp-pipe.mjs";
+import { EDGE_NAME, SERVICE_NAME, controlOnce, controlOp, quitReason } from "./lib/home.mjs";
 
 const repository = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -35,8 +35,6 @@ const repository = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const EXTENSION_ID = "cjcmhepmagomefjggkcohdbfemacojoa";
 /** MCP protocol revision the journey speaks. */
 const MCP_PROTOCOL = "2025-11-25";
-/** Relay revision of the control stream the journey opens itself. */
-const RELAY = 3;
 /** Largest image a tool result may carry, in base64 characters (the model API image limit). */
 const IMAGE_BUDGET_CHARS = 5 * 1024 * 1024;
 /** Default wait for one tool call. */
@@ -132,11 +130,9 @@ function defaultChrome() {
 }
 
 const ghostlightHome = join(homedir(), ".ghostlight");
-const exeSuffix = process.platform === "win32" ? ".exe" : "";
 const installed = {
-  runtime: join(ghostlightHome, "ghostlight-runtime.json"),
-  mcpConnector: join(ghostlightHome, "bin", `ghostlight-mcp-connector${exeSuffix}`),
-  service: join(ghostlightHome, "bin", `ghostlight${exeSuffix}`),
+  edge: join(ghostlightHome, "bin", EDGE_NAME),
+  service: join(ghostlightHome, "bin", SERVICE_NAME),
   policy: join(ghostlightHome, "policy", "user-policy.json"),
   diagnostics: join(ghostlightHome, "diagnostics")
 };
@@ -146,7 +142,7 @@ function refuseUnlessInstalled() {
     console.error("Refusing to run: GHOSTLIGHT_TEST_HOME is set. This journey tests the installed service, not a second one.");
     process.exit(2);
   }
-  for (const [what, path] of [["service runtime file", installed.runtime], ["installed MCP connector", installed.mcpConnector]]) {
+  for (const [what, path] of [["installed edge", installed.edge], ["installed service image", installed.service]]) {
     if (!existsSync(path)) {
       console.error(`Refusing to run: the ${what} is missing (${path}). Install Ghostlight first; this journey never starts a service of its own.`);
       process.exit(2);
@@ -158,18 +154,18 @@ function refuseUnlessInstalled() {
 // The MCP client
 // ---------------------------------------------------------------------------------------------
 
-/** A small MCP stdio client over the installed connector. */
+/** A small MCP stdio client over the installed MCP edge. */
 class McpClient {
-  constructor(command) {
+  constructor(command, args = []) {
     this.pending = new Map();
     this.nextId = 0;
     this.stderr = "";
-    this.child = spawn(command, [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: process.env });
+    this.child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: process.env });
     createInterface({ input: this.child.stdout }).on("line", (line) => this.#line(line));
     this.child.stderr.on("data", (chunk) => { this.stderr = (this.stderr + chunk).slice(-4000); });
     this.child.stdin.on("error", () => {});
     this.child.on("error", (error) => this.#fail(error));
-    this.child.on("exit", (code, signal) => this.#fail(new Error(`MCP connector exited (${code ?? signal})${this.stderr ? `: ${this.stderr.trim()}` : ""}`)));
+    this.child.on("exit", (code, signal) => this.#fail(new Error(`MCP edge exited (${code ?? signal})${this.stderr ? `: ${this.stderr.trim()}` : ""}`)));
   }
 
   #line(line) {
@@ -213,7 +209,7 @@ class McpClient {
     return response.result;
   }
 
-  /** End stdin and wait for the connector to leave; kill only this child when it will not. */
+  /** End stdin and wait for the edge to leave; kill only this child when it will not. */
   async close() {
     this.child.stdin.end();
     const exited = await Promise.race([new Promise((done) => this.child.once("exit", () => done(true))), sleep(5000).then(() => false)]);
@@ -222,64 +218,29 @@ class McpClient {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The relay control stream (the journey opens a quit by itself)
+// The relay control stream (the journey asks the installed service to quit by itself)
 // ---------------------------------------------------------------------------------------------
 
-function readRuntime() {
-  const runtime = JSON.parse(readFileSync(installed.runtime, "utf8"));
-  assert.equal(runtime.relay, RELAY, `runtime file speaks relay ${runtime.relay}, expected ${RELAY}`);
-  return runtime;
-}
-
-/** Open a relay-3 control stream, send its opening, and return every frame the service answers. */
-function relayControl(op, runtime = readRuntime()) {
-  return new Promise((done, reject) => {
-    const frames = [];
-    let buffer = Buffer.alloc(0);
-    const socket = net.connect({ host: "127.0.0.1", port: runtime.port });
-    const timer = setTimeout(() => { socket.destroy(); reject(new Error(`Timed out on the control ${op} stream`)); }, 20000);
-    socket.on("error", (error) => { clearTimeout(timer); reject(error); });
-    socket.on("data", (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32LE(0)) {
-        const size = buffer.readUInt32LE(0);
-        frames.push(JSON.parse(buffer.subarray(4, 4 + size).toString("utf8")));
-        buffer = buffer.subarray(4 + size);
-      }
-    });
-    socket.on("close", () => { clearTimeout(timer); done(frames); });
-    const opening = Buffer.from(JSON.stringify({ relay: RELAY, token: runtime.token, stream: { kind: "control", op } }));
-    const header = Buffer.alloc(4);
-    header.writeUInt32LE(opening.length);
-    socket.write(Buffer.concat([header, opening]));
-  });
+/** The installed service's answer to `status`, or null when none is running. */
+async function serviceStatus() {
+  const answer = await controlOnce(ghostlightHome, { op: controlOp.status });
+  return answer?.reply.accepted ? answer.value : null;
 }
 
 async function quitService() {
-  const frames = await relayControl("quit");
-  assert.equal(frames[0]?.kind, "accepted", `quit refused: ${JSON.stringify(frames)}`);
-  return frames;
+  const answer = await controlOnce(ghostlightHome, { op: controlOp.quit, reason: quitReason.quit });
+  assert.equal(answer?.reply.accepted, true, `quit refused: ${JSON.stringify(answer?.reply)}`);
+  return answer.value;
 }
 
-function runInstalled(args, timeoutMs = 30000) {
-  return new Promise((done) => {
-    execFile(installed.service, args, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => done({ error, stdout, stderr }));
-  });
-}
-
-async function serviceStatus() {
-  const { stdout } = await runInstalled(["status", "--json"]);
-  let parsed = null;
-  try { parsed = JSON.parse(stdout); } catch { /* fall through to text */ }
-  if (typeof parsed?.running === "boolean") return { running: parsed.running, raw: stdout };
-  return { running: !/not running|"running"\s*:\s*false/i.test(stdout), raw: stdout };
-}
+/** The service image's process name; its command line is `<name> serve ...`. */
+const SERVICE_PROCESS = "ghostlight-service";
 
 function processCount(name) {
   return new Promise((done) => {
     const [command, args] = process.platform === "win32"
       ? ["tasklist", ["/FI", `IMAGENAME eq ${name}.exe`, "/FO", "CSV", "/NH"]]
-      : ["pgrep", ["-x", name]];
+      : ["pgrep", ["-f", `/${name} serve`]];
     execFile(command, args, { windowsHide: true }, (error, stdout) => {
       const lines = String(stdout).split(/\r?\n/).filter((line) => line.trim() && !/^INFO:/i.test(line));
       done(process.platform === "win32" ? lines.filter((line) => line.toLowerCase().includes(`${name}.exe`)).length : lines.length);
@@ -1096,13 +1057,14 @@ check("policy", "(25) policy_explain, and a user policy refusing the second orig
   }
 });
 
-check("restart-continuity", "(26) a relay-3 quit: the next call is held, the service restarts, the earlier tab works, the extension reconnects", async (t) => {
+check("restart-continuity", "(26) a quit: the next call starts the service, the earlier tab works, the extension reconnects", async (t) => {
   const tab = await t.openFixture("/home");
-  const before = readRuntime();
+  const before = await serviceStatus();
+  assert.ok(before, "a service is running before the quit");
   await quitService();
-  await until(async () => !(await portOpen(before.port)), "the old listener to close", 30000, 250);
+  await until(async () => !(await serviceStatus()), "the old service to stop", 30000, 250);
   const started = Date.now();
-  // One call, held by the connector until the service is back. Only a browser that has not yet
+  // One call, which starts the service again. Only a browser that has not yet
   // reconnected may need a repeat; a cut-off or expired answer is a failure of the hold.
   let outcome = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
   let retries = 0;
@@ -1112,30 +1074,27 @@ check("restart-continuity", "(26) a relay-3 quit: the next call is held, the ser
     outcome = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
   }
   assert.equal(outcome.status, "succeeded", `the held call did not succeed with the earlier tab handle: ${JSON.stringify(outcome)}`);
-  const after = readRuntime();
-  assert.notEqual(after.token, before.token, "the runtime file is unchanged, so no restart happened");
-  assert.equal(after.service_version, before.service_version);
+  const after = await serviceStatus();
+  assert.notEqual(after?.instance, before.instance, "the service instance is unchanged, so no restart happened");
+  assert.equal(after.service, before.service);
   await t.popupText();
   return `restarted in ${Date.now() - started} ms after ${retries} reconnect retries`;
 });
 
 check("quit-holds", "(27) after a quit with nothing calling, the service stays down; a call starts it", async (t) => {
-  const before = readRuntime();
+  assert.ok(await serviceStatus(), "a service is running before the quit");
   await quitService();
-  await until(async () => !(await portOpen(before.port)), "the old listener to close", 30000, 250);
+  await until(async () => !(await serviceStatus()), "the old service to stop", 30000, 250);
   await sleep(QUIT_HOLD_MS);
-  const idle = await serviceStatus();
-  assert.equal(idle.running, false, `status says the service is running after a quit: ${idle.raw}`);
-  assert.equal(await portOpen(before.port), false, "something is listening again after a quit");
+  assert.equal(await serviceStatus(), null, "a service is running again after a quit");
   const outcome = await t.call("browser_tabs", { action: "list" }, { timeoutMs: RESTART_TIMEOUT_MS });
   assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
-  const running = await serviceStatus();
-  assert.equal(running.running, true, `a call did not start the service: ${running.raw}`);
+  assert.ok(await serviceStatus(), "a call did not start the service");
 });
 
 check("one-service", "exactly one service process and no protocol errors in the diagnostics", async (t, run) => {
-  const services = await processCount("ghostlight");
-  assert.equal(services, 1, `${services} ghostlight processes are running`);
+  const services = await processCount(SERVICE_PROCESS);
+  assert.equal(services, 1, `${services} ghostlight-service processes are running`);
   if (!existsSync(installed.diagnostics)) return "diagnostics are off; nothing to scan";
   const recent = readdirSync(installed.diagnostics).filter((name) => name.endsWith(".jsonl"))
     .map((name) => join(installed.diagnostics, name)).filter((path) => statSync(path).mtimeMs >= run.startedAt);
@@ -1144,14 +1103,6 @@ check("one-service", "exactly one service process and no protocol errors in the 
   assert.deepEqual(bad, [], "protocol errors in the diagnostics");
   return `${recent.length} diagnostics files scanned`;
 });
-
-function portOpen(port) {
-  return new Promise((done) => {
-    const socket = net.connect({ host: "127.0.0.1", port });
-    socket.once("connect", () => { socket.destroy(); done(true); });
-    socket.once("error", () => done(false));
-  });
-}
 
 // ---------------------------------------------------------------------------------------------
 // Live demo pages (--live). The public pages are not served by this repository, so these checks
@@ -1375,7 +1326,7 @@ async function main() {
     assert.equal(extensionId, EXTENSION_ID, `the extension loaded as ${extensionId}; the pinned key should give ${EXTENSION_ID}`);
     console.log(`Extension ${extensionId} loaded from ${options.extension}`);
 
-    mcp = new McpClient(installed.mcpConnector);
+    mcp = new McpClient(installed.edge, ["mcp"]);
     await mcp.initialize();
     const t = new Context({ mcp, pipe: browser.pipe, fixtures, scratch });
     t.browser = await pickScratchBrowser(t);

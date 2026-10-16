@@ -1,5 +1,6 @@
 // Repeatable H1-H8, C1 reporting, and editor regression gates. Each journey retains its own
 // isolation and cleanup. This runner builds the exact binaries it passes to every process test.
+// It is the only list of journeys and lanes: CI runs `--lane=process` and `--lane=browser`.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -57,6 +58,45 @@ async function run(name, command, commandArgs, cwd = root, onLine) {
 function blocked(name, reason) { report.results.push({ name, status: "blocked", reason }); save(); }
 const node = (name, path) => run(name, process.execPath, [path]);
 
+// The journeys, by lane. `file` is under tests/. A journey runs with `node` unless its kind says
+// otherwise, only on its `platform` when it names one, and needs the fresh build unless
+// `needsBuild` is false. A `test` entry runs the node test runner over its `files`.
+const PROCESS_JOURNEYS = [
+  { name: "journey-helpers", kind: "test", files: ["lib/home.test.mjs", "lib/browser.test.mjs"], needsBuild: false },
+  { name: "shell-installer", file: "installer-shell.mjs", platform: "linux" },
+  { name: "edge-parent", file: "edge-parent-lifecycle.mjs" },
+  { name: "fixed-installation", file: "fixed-installation-journey.mjs", platform: "linux" },
+  { name: "process", file: "process-journey.mjs" },
+  { name: "continuity", file: "local-resilience-journey.mjs" },
+  { name: "history-compatibility", file: "history-compatibility.mjs" },
+  { name: "provenance", file: "provenance-journey.mjs" },
+  { name: "cli", file: "cli-journey.mjs" },
+  { name: "cli-powershell", file: "cli-powershell-journey.mjs" },
+  { name: "workbench", file: "workbench-surface.mjs" },
+  { name: "powershell-installer", kind: "pwsh", file: "installer-powershell.ps1", platform: "win32" },
+  { name: "desktop-windows", kind: "pwsh", file: "windows-desktop-journey.ps1", platform: "win32" }
+];
+const BROWSER_JOURNEYS = [
+  { name: "browser-harness", kind: "test", files: ["chromium-harness.test.mjs", "linux/installed-reporting.test.mjs"], needsBuild: false, needsBrowser: false },
+  { name: "script-browser", file: "script-browser-journey.mjs", needsBrowser: true },
+  { name: "frame-browser", file: "frame-browser-journey.mjs", needsBrowser: true },
+  { name: "keyboard-browser", file: "keyboard-browser-journey.mjs", needsBrowser: true },
+  { name: "history-browser", file: "workbench-history-browser.mjs", needsBrowser: true }
+];
+function launch({ name, file, kind = "node", files = [] }) {
+  if (kind === "pwsh") return run(name, "pwsh", ["-NoProfile", "-File", `tests/${file}`]);
+  if (kind === "test") return run(name, process.execPath, ["--test", ...files.map((path) => `tests/${path}`)]);
+  return node(name, `tests/${file}`);
+}
+async function runJourneys(journeys) {
+  for (const journey of journeys) {
+    if (journey.platform && journey.platform !== process.platform) continue;
+    if (journey.needsBuild !== false && !built) blocked(journey.name, "Current-source build failed.");
+    else if (journey.needsBrowser && !existsSync(browser)) blocked(journey.name, "Set GHOSTLIGHT_TEST_BROWSER to Chrome for Testing with unpacked-extension support.");
+    else await launch(journey);
+  }
+}
+
 if (lane === "all") {
   await run("format", "cargo", ["fmt", "--all", "--", "--check"]);
   await run("clippy", "cargo", ["clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"]);
@@ -66,9 +106,7 @@ if (lane === "all") {
   await node("npm-launcher", "packaging/npm/test/launcher.test.js");
   await node("mcpb-launcher", "packaging/mcpb/test/launcher.test.js");
   await run("winget-archive", "pwsh", ["-NoProfile", "-File", "tests/winget-archive.ps1"]);
-  if (process.platform === "linux") await node("shell-installer", "tests/installer-shell.mjs");
   await node("policy-grammar", "tests/policy-grammar.mjs");
-  await run("journey-helpers", process.execPath, ["--test", "tests/lib/home.test.mjs"]);
 }
 const artifacts = new Map();
 const executables = ["ghostlight", "ghostlight-service"];
@@ -88,35 +126,8 @@ if (built) {
   }
   save();
 }
-if (lane !== "browser") {
-  for (const [name, file] of [
-    ["edge-parent", "edge-parent-lifecycle.mjs"],
-    ["fixed-installation", "fixed-installation-journey.mjs"],
-    ["process", "process-journey.mjs"], ["continuity", "local-resilience-journey.mjs"],
-    ["history-compatibility", "history-compatibility.mjs"],
-    ["provenance", "provenance-journey.mjs"], ["cli", "cli-journey.mjs"],
-    ["cli-powershell", "cli-powershell-journey.mjs"], ["workbench", "workbench-surface.mjs"]
-  ]) {
-    if (built) await node(name, `tests/${file}`); else blocked(name, "Current-source build failed.");
-  }
-  if (process.platform === "win32") {
-    if (built) await run("powershell-installer", "pwsh", ["-NoProfile", "-File", "tests/installer-powershell.ps1"]);
-    else blocked("powershell-installer", "Current-source build failed.");
-    if (built) await run("desktop-windows", "pwsh", ["-NoProfile", "-File", "tests/windows-desktop-journey.ps1"]);
-    else blocked("desktop-windows", "Current-source build failed.");
-  }
-}
-if (lane !== "process") {
-  await run("browser-harness", process.execPath, ["--test", "tests/chromium-harness.test.mjs", "tests/linux/installed-reporting.test.mjs"]);
-  for (const [name, file] of [
-    ["script-browser", "script-browser-journey.mjs"], ["frame-browser", "frame-browser-journey.mjs"],
-    ["history-browser", "workbench-history-browser.mjs"]
-  ]) {
-    if (!built) blocked(name, "Current-source build failed.");
-    else if (!existsSync(browser)) blocked(name, "Set GHOSTLIGHT_TEST_BROWSER to Chrome for Testing with unpacked-extension support.");
-    else await node(name, `tests/${file}`);
-  }
-}
+if (lane !== "browser") await runJourneys(PROCESS_JOURNEYS);
+if (lane !== "process") await runJourneys(BROWSER_JOURNEYS);
 report.finished_at = new Date().toISOString();
 report.source_sha256_end = source();
 report.source_unchanged = report.source_sha256 === report.source_sha256_end;

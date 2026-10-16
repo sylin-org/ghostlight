@@ -36,7 +36,7 @@ Run the moved helpers through this runner, rather than invoking them without con
 | `GHOSTLIGHT_LINUX_AREA` | `.tmp/linux-local`; dedicated local fixture and report root |
 | `GHOSTLIGHT_LINUX_INSTALLED_AREA` | `.tmp/linux-installed`; installed desktop/worker fixture and new `recovery/` reports |
 | `GHOSTLIGHT_LINUX_VERSION` | Workspace version in `Cargo.toml`; expected candidate version |
-| `GHOSTLIGHT_LINUX_BIN_DIR` | `$AREA/portable-a/ghostlight-v$VERSION-x86_64-unknown-linux-gnu`; extracted siblings for setup |
+| `GHOSTLIGHT_LINUX_BIN_DIR` | `$AREA/portable-a/ghostlight-v$VERSION-x86_64-unknown-linux-gnu`; extracted carrier (`ghostlight` and `ghostlight-service`) for setup |
 | `GHOSTLIGHT_LINUX_PORTABLE_ARCHIVE` | `$AREA/portable-fixed-a/ghostlight-v$VERSION-x86_64-unknown-linux-gnu.tar.gz` |
 | `GHOSTLIGHT_LINUX_CHROMIUM` | `/usr/lib/chromium/chromium`; native Chromium executable |
 | `GHOSTLIGHT_LINUX_BRAVE` | `$AREA/brave/opt/brave.com/brave/brave`; native Brave executable |
@@ -65,11 +65,11 @@ by the runner.
 | `installed-journey.mjs` | Opt-in real registration/native-pipe/authority/worker recovery. Requires explicit CLI arguments below. |
 | `installed/desktop-check.py` | Exact-PID visible KWin Open/minimize/close/concurrent Open checks. Requires siblings under `$INSTALLED_AREA/bin` and their dedicated XDG environment. |
 | `installed/worker.mjs` | Inspect the development adapter worker using `$INSTALLED_AREA/context/config/chromium/DevToolsActivePort`; optional argument is a JavaScript expression. |
-| `acceptance/start.mjs` | Install extracted siblings into dedicated XDG state, launch Chromium, and write `$AREA/context.json` and `browser.json`. |
+| `acceptance/start.mjs` | Install the extracted carrier into a test home at `$AREA/ghostlight` (`GHOSTLIGHT_TEST_HOME`) with dedicated XDG browser state, launch Chromium, and write `$AREA/context.json` and `browser.json`. |
 | `acceptance/governance.mjs` | Installed RAWX, frame coverage/masking, popup human controls, and audit privacy; requires `start.mjs`. |
 | `acceptance/plural.mjs` | Chromium, Brave, second profile, draft retention, reload, and pinned-browser recovery; requires the shared context plus an already connected Brave and `$AREA/brave.json` containing its exact `pid`. Enable the source adapter in both browsers and the second ordinary Chromium profile first. |
-| `acceptance/cold.mjs` | Extension-first install with awake/stopped worker; creates fresh contexts from the portable archive. |
-| `acceptance/managed/run.mjs` | Signed managed-policy admission/cache/restart/rollback in a disposable `/etc/ghostlight` mount; creates fresh contexts from the portable archive. |
+| `acceptance/cold.mjs` | Extension-first install with awake/stopped worker; creates a fresh test home and XDG state per case from the portable archive. |
+| `acceptance/managed/run.mjs` | Signed managed-policy admission/cache/restart/rollback in a disposable `/etc/ghostlight` mount; creates a fresh test home from the portable archive and kills the service to prove the restart. |
 | `acceptance/startup-check.py` | Missing-display failure followed by valid Open; extracts the portable archive under `$AREA/startup`. |
 | `acceptance/no-tray/check.py` | Start `$AREA/no-tray/bin/ghostlight` on a private session bus; write its context and keep the bus alive until `$AREA/no-tray/stop` exists. Extract siblings there first and create its XDG directories. |
 | `acceptance/no-tray/desktop-check.py` | KWin lifecycle, exact descendant renderer failure, and Applications launch using the private-bus context. |
@@ -100,4 +100,4 @@ results do not establish store-adapter, provenance-bound package, or GNOME accep
 ## Fixture lessons
 
 - **Guest PIDs.** procfs can show outer-namespace PIDs. Match the PID namespace to the caller, record procfs and NSpid identities with start time, and signal only the exact guest process. An ESRCH from a mismatched PID is not authority death. Helpers that scan /proc and signal by PID today: tests/linux/acceptance/cleanup.py, acceptance/no-tray/desktop-check.py, acceptance/managed/run.mjs, installed-journey.mjs. See docs/testing/linux-combined-packaging-2026-09-09.md.
-- **Candidate state.** Give every candidate and journey a fresh test home, because a retained runtime file can satisfy a readiness wait for the wrong candidate. Pass the effective Cargo target directory explicitly when packaging. See docs/testing/linux-container-evidence-2026-08-15.md.
+- **Candidate state.** Give every candidate and journey a fresh test home, because a service left running by another candidate can satisfy a readiness wait for the wrong one. Pass the effective Cargo target directory explicitly when packaging. See docs/testing/linux-container-evidence-2026-08-15.md.

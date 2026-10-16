@@ -1,74 +1,77 @@
-// H6 acceptance with the shipped MV3 worker, content scripts, Chrome document APIs and CDP.
-// Only native-port discovery is replaced by a loopback test pipe to the real browser connector.
-// No existing profile, native-host registration, or installed extension is changed.
+// H6 acceptance with the shipped Manifest V3 worker, page code, Chrome document APIs and CDP.
+// Every call crosses the real MCP edge, the service of a test home and the real browser edge into
+// the extension (tests/lib/browser.mjs replaces only native-port discovery). The pages are read
+// through the journey's own DevTools session. No existing profile, native-host registration or
+// installed extension is changed.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { join } from "node:path";
+import { BrowserRig, SCRATCH_ROOT } from "./lib/browser.mjs";
+import { createHome, delay, repository, until as pollUntil } from "./lib/home.mjs";
+import { structured } from "./lib/peers.mjs";
 import { policyRefreshed } from "./lib/policy-refresh.mjs";
-import { readDevToolsPort, removeBrowserScratch, waitForChromiumExit } from "./lib/chromium.mjs";
 
-const repository = resolve(import.meta.dirname, "..");
-const binDir = resolve(process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0/debug"));
-const browser = process.env.GHOSTLIGHT_TEST_BROWSER || join(repository, ".tmp/chrome-testing/chrome-win64/chrome.exe");
-assert.ok(existsSync(browser), "Set GHOSTLIGHT_TEST_BROWSER to Chrome for Testing (unpacked extensions required).");
-const scratchRoot = join(repository, ".tmp");
-mkdirSync(scratchRoot, { recursive: true });
-const scratch = mkdtempSync(join(scratchRoot, "frame-browser-"));
-const runtimeFile = join(binDir, `.ghostlight-frame-runtime-${process.pid}.json`);
-const environment = { ...process.env, GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
-  GHOSTLIGHT_AUDIT_FILE: join(scratch, "audit.jsonl"), GHOSTLIGHT_POLICY_FILE: join(scratch, "policy.json"),
-  GHOSTLIGHT_DIAGNOSTICS_DIR: join(scratch, "diagnostics"), GHOSTLIGHT_NATIVE_HOST_DIR: join(scratch, "native-host") };
-const children = [];
-const delay = (ms) => new Promise((done) => setTimeout(done, ms));
-async function until(check, label, timeout = 30000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) { const value = await check(); if (value) return value; await delay(50); }
-  throw new Error(`Timed out: ${label}`);
-}
-function start(path, args = []) {
-  const child = spawn(path, args, { env: environment, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-  child.stderr.on("data", (data) => { child.logs = (child.logs || "").slice(-4000) + data; });
-  child.on("error", (error) => { child.startError = error; });
-  children.push(child);
-  return child;
-}
-function executable(name) { return join(binDir, name + (process.platform === "win32" ? ".exe" : "")); }
-function channel(write) {
-  let next = 0;
-  const pending = new Map();
-  const begin = (method, params = {}, sessionId) => {
-    const id = ++next;
-    const promise = new Promise((done, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Timed out: ${method}`)); }, 45000);
-      pending.set(id, { done, reject, timer });
-      write({ id, method, params, ...(sessionId ? { sessionId } : {}) });
-    });
-    return { id, promise };
-  };
-  return {
-    begin,
-    send(method, params = {}, sessionId) { return begin(method, params, sessionId).promise; },
-    notify(method, params = {}) { write({ method, params }); },
-    receive(message) {
-      const item = pending.get(message.id);
-      if (!item) return;
-      pending.delete(message.id); clearTimeout(item.timer);
-      if (message.error) item.reject(new Error(JSON.stringify(message.error))); else item.done(message.result);
-    }
-  };
-}
+const scratchRoot = SCRATCH_ROOT;
+const until = (check, label, timeout = 30000) => pollUntil(check, label, timeout);
+// The primitives and world calls that change a page or type into it; none may be sent for a call
+// the policy refuses.
+const WRITING_WORK = new Set(["input", "call:prepare_fill", "call:fill_local", "call:submit_fill", "call:type_text", "call:clear_focused"]);
+const HOST_RULES = "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1";
+const policyFor = (child = "denied", screenshots = true) => ({
+  schema: 4, name: "H6 isolated Sylin journey", version: randomUUID(),
+  grants: [{ id: "parent", hosts: { allow: child === "unrestricted" ? ["*"] : ["sylin.org", "localhost"] }, allowed: ["read", "action", "write", "execute"] },
+    ...(["denied", "unrestricted"].includes(child) ? [] : [{ id: "child", hosts: { allow: ["127.0.0.1"] }, allowed: child === "read" ? ["read"] : ["read", "action", "write", "execute"] }])],
+  config: [{ key: "browser.startup", value: "manual", level: "mandatory" },
+    { key: "browser.screenshots.enabled", value: screenshots, level: "mandatory" }]
+});
+const home = createHome({ label: "frame", policy: policyFor() });
 async function policy(child = "denied", screenshots = true) {
-  writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify({ schema: 4, name: "H6 isolated Sylin journey", version: randomUUID(),
-    grants: [{ id: "parent", hosts: { allow: child === "unrestricted" ? ["*"] : ["sylin.org", "localhost"] }, allowed: ["read", "action", "write", "execute"] },
-      ...(["denied", "unrestricted"].includes(child) ? [] : [{ id: "child", hosts: { allow: ["127.0.0.1"] }, allowed: child === "read" ? ["read"] : ["read", "action", "write", "execute"] }])],
-    config: [{ key: "browser.startup", value: "manual", level: "mandatory" },
-      { key: "browser.screenshots.enabled", value: screenshots, level: "mandatory" }]
-  }));
+  writeFileSync(home.policyFile, JSON.stringify(policyFor(child, screenshots)));
   await policyRefreshed();
+}
+function attributesOf(node) {
+  const pairs = new Map();
+  for (let index = 0; index + 1 < (node.attributes?.length ?? 0); index += 2) pairs.set(node.attributes[index], node.attributes[index + 1]);
+  return pairs;
+}
+function descendants(node) {
+  return [...(node.children ?? []), ...(node.shadowRoots ?? []), ...(node.contentDocument ? [node.contentDocument] : []),
+    ...(node.pseudoElements ?? [])].flatMap((child) => [child, ...descendants(child)]);
+}
+// The runtime object's type in every ghostlight isolated world of a page, its out-of-process
+// frames included. DevTools sees the worlds the extension created; the page's own code cannot.
+const WORLD = "ghostlight";
+async function isolatedRuntimeKinds(page) {
+  const attached = [];
+  rig.cdp.onEvent((message) => {
+    if (message.sessionId === page.sessionId && message.method === "Target.attachedToTarget" && message.params.targetInfo.type === "iframe") {
+      attached.push(message.params.sessionId);
+    }
+  });
+  await page.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  await delay(500);
+  const kinds = [];
+  for (const sessionId of [page.sessionId, ...attached]) {
+    const created = [];
+    const destroyed = new Set();
+    rig.cdp.onEvent((message) => {
+      if (message.sessionId !== sessionId) return;
+      if (message.method === "Runtime.executionContextCreated") created.push(message.params.context);
+      if (message.method === "Runtime.executionContextDestroyed") destroyed.add(message.params.executionContextId);
+    });
+    await rig.cdp.send("Runtime.enable", {}, sessionId);
+    await delay(300);
+    for (const context of created.filter((item) => item.name === WORLD && !destroyed.has(item.id))) {
+      const reply = await rig.cdp.send("Runtime.evaluate",
+        { expression: "typeof globalThis.__ghostlightRuntime", contextId: context.id, returnByValue: true }, sessionId);
+      kinds.push(reply.result.value);
+    }
+    await rig.cdp.send("Runtime.disable", {}, sessionId);
+  }
+  await page.send("Target.setAutoAttach", { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
+  return kinds;
 }
 const sourceUrls = ["https://sylin.org/ghostlight/demo/iframe/", "https://sylin.org/ghostlight/demo/iframe/form/"];
 const liveSylin = process.env.GHOSTLIGHT_TEST_LIVE_SYLIN === "1";
@@ -80,25 +83,8 @@ const source = liveSylin
     assert.equal(createHash("sha256").update(page.body).digest("hex"), page.sha256);
     return page.body;
   });
-const sourceEvidence = source.map((html, index) => ({ url: sourceUrls[index], sha256: createHash("sha256").update(html).digest("hex") }));
-const token = randomUUID();
-const queue = [];
-const commands = [];
-let poll, nativeReady = false, relay, port;
-function nativeSend(frame) {
-  const data = Buffer.from(JSON.stringify(frame)); const header = Buffer.alloc(4); header.writeUInt32LE(data.length);
-  relay.stdin.write(Buffer.concat([header, data]));
-}
-function flush() { if (poll && queue.length) { poll.end(JSON.stringify(queue.splice(0))); poll = null; } }
+let port;
 const server = createServer(async (request, response) => {
-  response.setHeader("access-control-allow-origin", "*");
-  if (request.url === `/${token}`) {
-    if (request.method === "POST") {
-      let body = ""; for await (const chunk of request) body += chunk;
-      nativeSend(JSON.parse(body)); response.end("ok");
-    } else { poll = response; flush(); }
-    return;
-  }
   response.setHeader("content-type", "text/html");
   const asset = snapshot.assets.find((item) => item.path.split("?")[0] === request.url.split("?")[0]);
   if (asset) {
@@ -113,87 +99,30 @@ const server = createServer(async (request, response) => {
   const child = request.url.startsWith("/form");
   let html = source[child ? 1 : 0].replace("<head>", `<head><base href="http://localhost:${port}/">`);
   if (child && request.url.includes("readonly-fixture")) html = html.replace("</body>", '<label>Embedded read only draft<input readonly aria-label="Embedded read only draft" value="Protected embedded input"></label></body>');
+  if (child && request.url.includes("capture-pixel")) html = html.replace("</body>", '<div id="capture-pixel-fixture" style="position:fixed;left:0;top:0;width:100px;height:100px;background:rgb(255,0,255);z-index:2147483647;pointer-events:none"></div></body>');
   if (!child) html = html.replace('src="./form/"', `src="http://${request.url === "/same-origin" ? "localhost" : "127.0.0.1"}:${port}/form"`)
     .replace("</body>", '<label>Parent note<input aria-label="Parent note" id="h6-parent"></label></body>');
   response.end(html);
 });
-let socket, cdp, chromium;
+let rig;
 try {
   await new Promise((done) => server.listen(0, "127.0.0.1", done)); port = server.address().port;
-  await policy(); const authority = start(executable("ghostlight"));
-  await until(() => {
-    if (authority.startError) throw authority.startError;
-    assert.equal(authority.exitCode, null, `Authority exited before readiness: ${authority.logs || ""}`);
-    assert.equal(authority.signalCode, null, `Authority was terminated before readiness: ${authority.logs || ""}`);
-    return existsSync(runtimeFile);
-  }, "service startup");
-  relay = start(executable("ghostlight-browser-connector"));
-  let buffer = Buffer.alloc(0);
-  relay.stdout.on("data", (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-    while (buffer.length >= 4) {
-      const size = buffer.readUInt32LE(); if (buffer.length < size + 4) break;
-      const frame = JSON.parse(buffer.subarray(4, size + 4)); buffer = buffer.subarray(size + 4);
-      if (frame.kind === "hello_accepted") nativeReady = true;
-      if (frame.kind === "request") commands.push(frame.request.command);
-      queue.push(frame); flush();
-    }
-  });
-  const extension = join(scratch, "extension"); cpSync(join(repository, "extension"), extension, { recursive: true });
-  const worker = join(extension, "service-worker.js");
-  // The substitute only carries native port messages. Every browser mechanism remains shipped code.
-  const shim = `chrome.runtime.connectNative = () => {
-    const listeners = [], closed = []; let live = true;
-    const endpoint = ${JSON.stringify(`http://127.0.0.1:${port}/${token}`)};
-    const port = { onMessage: { addListener(fn) { listeners.push(fn); } }, onDisconnect: { addListener(fn) { closed.push(fn); } },
-      postMessage(frame) { fetch(endpoint, { method: "POST", body: JSON.stringify(frame) }).catch(() => {}); },
-      disconnect() { live = false; } };
-    (async () => { while (live) { try { for (const frame of await (await fetch(endpoint)).json()) for (const fn of listeners) fn(frame); }
-      catch (_) { await new Promise(done => setTimeout(done, 100)); } } })(); return port;
-  };\n`;
-  writeFileSync(worker, shim + readFileSync(worker, "utf8"));
-  const profile = join(scratch, "profile");
-  chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
-    ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
-    ...(!liveSylin ? ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"] : []),
-    `--load-extension=${extension}`, "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
-    "--disable-component-update", "--disable-sync", "--window-size=1280,900", "about:blank"]);
-  const [debugPort, endpoint] = await readDevToolsPort(profile, chromium);
-  socket = new WebSocket(`ws://127.0.0.1:${debugPort}${endpoint}`);
-  await new Promise((done, reject) => { socket.onopen = done; socket.onerror = reject; });
-  cdp = channel((message) => socket.send(JSON.stringify(message)));
-  socket.onmessage = ({ data }) => cdp.receive(JSON.parse(data));
-  const version = await cdp.send("Browser.getVersion");
-  const workerTarget = await until(async () => (await cdp.send("Target.getTargets")).targetInfos.find((target) => target.type === "service_worker" && target.url.includes("service-worker.js")), "MV3 worker");
-  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: workerTarget.targetId, flatten: true });
-  const rawWorker = async (expression) => {
-    const result = await cdp.send("Runtime.evaluate", { expression: `await (${expression})`, returnByValue: true, awaitPromise: true, replMode: true }, sessionId);
-    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result.value;
-  };
-  await until(() => nativeReady, "real connector negotiation");
-  const connector = start(executable("ghostlight-mcp-connector"));
-  let mcp = channel((message) => connector.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"));
-  const initialMcp = mcp;
-  createInterface({ input: connector.stdout }).on("line", (line) => initialMcp.receive(JSON.parse(line)));
-  await mcp.send("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "h6-browser-journey", version: "1" } });
-  connector.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+  rig = await BrowserRig.start({ home, label: "frame-browser", hostRules: liveSylin ? null : HOST_RULES });
+  const version = { product: rig.version };
+  const rawWorker = (expression) => rig.worker(expression);
+  let mcp = await rig.mcp("h6-browser-journey");
   let lastResponse;
   const call = async (name, args) => {
-    lastResponse = await mcp.send("tools/call", { name, arguments: args });
-    assert.ok(lastResponse.structuredContent, JSON.stringify(lastResponse)); return lastResponse.structuredContent;
+    const response = await mcp.call(name, args);
+    lastResponse = response.result;
+    assert.ok(lastResponse?.structuredContent, JSON.stringify(response));
+    return lastResponse.structuredContent;
   };
-  const newSession = async () => {
-    const next = start(executable("ghostlight-mcp-connector"));
-    const peer = channel((message) => next.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n"));
-    createInterface({ input: next.stdout }).on("line", (line) => peer.receive(JSON.parse(line)));
-    await peer.send("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "h6-case", version: "1" } });
-    next.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-    mcp = peer;
-  };
+  const newSession = async () => { mcp = await rig.mcp("h6-case"); };
+  const dispatchedSince = (index) => rig.bridge.sentSince(index);
+  const refusedWork = (index) => dispatchedSince(index).filter((name) => WRITING_WORK.has(name));
   const passed = [];
   const check = (name) => { passed.push(name); console.log(`PASS ${name}`); };
-  const dispatchedSince = (index) => commands.slice(index).map((command) =>
-    command.command === "in_documents" ? command.primitive.command : command.command);
   const live = await call("browser_navigate", { url: liveSylin ? sourceUrls[0] : `http://localhost:${port}/same-origin`, new_tab: true });
   assert.equal(live.status, "succeeded", JSON.stringify(live));
   let result = await call("browser_read", { tab: live.facts.tab, mode: "visible", max_chars: 20000 });
@@ -202,17 +131,17 @@ try {
   assert.match(JSON.stringify(result), /Project name/); check(`${liveSylin ? "live" : "snapshot"} Sylin composed document read`);
   const opened = await call("browser_navigate", { url: `http://localhost:${port}/`, new_tab: true });
   assert.equal(opened.status, "succeeded", JSON.stringify(opened)); let tab = opened.facts.tab;
-  let physical = await rawWorker(`(await chrome.tabs.query({})).find(tab => tab.url === 'http://localhost:${port}/').id`);
+  let physical = await rig.physicalTab(`http://localhost:${port}/`);
   const freshFixture = async () => {
     await newSession();
     const next = await call("browser_navigate", { url: `http://localhost:${port}/`, new_tab: true });
     assert.equal(next.status, "succeeded", JSON.stringify(next)); tab = next.facts.tab;
-    physical = await rawWorker(`(await chrome.tabs.query({})).filter(tab => tab.url === 'http://localhost:${port}/').at(-1).id`);
+    physical = await rig.physicalTab(`http://localhost:${port}/`);
   };
-  const rawPage = async (expression) => rawWorker(`(await chrome.debugger.sendCommand({tabId:${physical}}, 'Runtime.evaluate', {expression:${JSON.stringify(expression)}, returnByValue:true, awaitPromise:true})).result.value`);
+  const rawPage = async (expression) => (await rig.page(physical)).evaluate(expression);
   await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).length >= 2, "fixture frame")
     .catch(async (error) => { console.error(await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`));
-      console.error(await rawWorker(`chrome.debugger.sendCommand({tabId:${physical}}, 'Page.getFrameTree')`)); throw error; });
+      console.error(await (await rig.page(physical)).send("Page.getFrameTree")); throw error; });
   await policy("denied");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
@@ -221,18 +150,17 @@ try {
   check("excluded child never extracted");
   await policy();
   await freshFixture();
-  const beforeBlockedScript = commands.length;
+  const beforeBlockedScript = rig.bridge.sent.length;
   result = await call("browser_execute", { tab, script: "document.title = 'must not execute'" });
   assert.equal(result.status, "blocked", JSON.stringify(result));
-  assert.ok(!dispatchedSince(beforeBlockedScript).includes("evaluate_script"));
+  assert.ok(!dispatchedSince(beforeBlockedScript).includes("evaluate_main"));
   assert.notEqual(await rawPage("document.title"), "must not execute"); check("script refused before execution");
-  await rawWorker(`chrome.scripting.executeScript({ target: { tabId: ${physical}, allFrames: true },
-    world: "MAIN", func: () => {
-      if (window === window.top) return;
-      const marker = document.createElement("div"); marker.id = "capture-pixel-fixture";
-      marker.style.cssText = "position:fixed;left:0;top:0;width:100px;height:100px;background:rgb(255,0,255);z-index:2147483647;pointer-events:none";
-      document.documentElement.append(marker);
-    } })`);
+  const embedAt = async (path) => {
+    await rawPage(`document.querySelector('iframe').src = 'http://127.0.0.1:${port}/${path}'; true`);
+    await delay(200);
+    await until(async () => (await rawWorker(`chrome.webNavigation.getAllFrames({tabId:${physical}})`)).some((frame) => frame.url.endsWith(`/${path}`)), `embedded ${path}`);
+  };
+  await embedAt("form?capture-pixel");
   result = await call("browser_screenshot", { tab, full_page: true });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.coverage, undefined);
@@ -250,26 +178,24 @@ try {
   })()`);
   assert.ok(embeddedPixel[0] > 200 && embeddedPixel[1] < 40 && embeddedPixel[2] > 200,
     `Complete capture must contain the actual embedded pixels: ${embeddedPixel}`);
-  await rawWorker(`chrome.scripting.executeScript({ target: { tabId: ${physical}, allFrames: true },
-    world: "MAIN", func: () => document.getElementById("capture-pixel-fixture")?.remove() })`);
+  await embedAt("form");
   assert.equal(await rawPage("getComputedStyle(document.querySelector('iframe')).visibility"), "visible");
   check("complete screenshot remains available with embedded text access excluded");
   await policy("denied", false);
-  const beforeDeniedCapture = commands.length;
+  const beforeDeniedCapture = rig.bridge.sent.length;
   for (const full_page of [false, true]) {
     result = await call("browser_screenshot", { tab, full_page });
     assert.equal(result.status, "blocked", JSON.stringify(result));
     assert.ok(!lastResponse.content.some(item => item.type === "image"));
   }
-  assert.ok(!dispatchedSince(beforeDeniedCapture).some(command => command.startsWith("screenshot")));
+  assert.ok(!dispatchedSince(beforeDeniedCapture).includes("capture"));
   check("binary screenshot refusal dispatches no capture and returns no image");
   await policy("all");
   result = await call("browser_read", { tab, mode: "visible", max_chars: 20000 });
-  const runtimeCoverage = await rawWorker(`chrome.scripting.executeScript({
-    target: { tabId: ${physical}, allFrames: true }, world: "MAIN",
-    func: () => typeof window.__ghostlight_dispatch__
-  }).then(items => items.map(item => item.result))`);
-  assert.ok(runtimeCoverage.length >= 2 && runtimeCoverage.every((kind) => kind === "function"), JSON.stringify(runtimeCoverage));
+  const hidden = await rawPage("[typeof globalThis.__ghostlightRuntime, typeof window.__ghostlight_dispatch__, typeof window.__ghostlight_runtime__]");
+  assert.deepEqual(hidden, ["undefined", "undefined", "undefined"], "the page cannot see Ghostlight's runtime");
+  const worlds = await isolatedRuntimeKinds(await rig.page(physical));
+  assert.ok(worlds.length >= 2 && worlds.every((kind) => kind === "object"), `every document has the runtime in its own world: ${JSON.stringify(worlds)}`);
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.match(JSON.stringify(result), /Project name/);
   check("same Sylin content fully available when allowed");
   await policy("all");
@@ -351,21 +277,21 @@ try {
   assert.equal(result.status, "failed", JSON.stringify(result)); assert.equal(result.effect, "none");
   check("navigation cannot revive a stale embedded target");
   result = await call("browser_record", { action: "start", tab });
-  assert.equal(result.status, "succeeded", JSON.stringify(result)); const recording = result.facts.recording;
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.ok(result.facts.frame_count > 0, JSON.stringify(result));
   await rawPage(`document.querySelector('iframe').src = 'http://127.0.0.1:${port}/form?recording-boundary'; true`);
   await delay(300);
-  result = await call("browser_record", { action: "status", recording });
+  result = await call("browser_record", { action: "status" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.stop_reason, "document_boundary", JSON.stringify(result));
   assert.ok(result.facts.frame_count > 0); const frozen = result.facts.frame_count;
   await delay(200);
-  result = await call("browser_record", { action: "status", recording }); assert.equal(result.facts.frame_count, frozen);
-  result = await call("browser_record", { action: "save", recording });
+  result = await call("browser_record", { action: "status" }); assert.equal(result.facts.frame_count, frozen);
+  result = await call("browser_record", { action: "save" });
   assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.ok(lastResponse.content.some((item) => item.type === "image"));
   check("recording stops at its admitted document boundary and prior frames remain exportable");
   await policy();
-  result = await call("browser_record", { action: "save", recording });
+  result = await call("browser_record", { action: "save" });
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.ok(!lastResponse.content.some((item) => item.type === "image"));
   check("replay export rechecks its captured embedded sources against current policy");
@@ -417,33 +343,35 @@ try {
   assert.equal(result.facts.value, "AVAILABLE");
   assert.equal(await rawPage("document.body.dataset.allOpen"), "AVAILABLE");
   check("unrestricted scripts remain usable when an opaque embed is present");
+  result = await call("browser_record", { action: "discard" });
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
   result = await call("browser_record", { action: "start", tab });
-  assert.equal(result.status, "succeeded", JSON.stringify(result)); const unrestrictedRecording = result.facts.recording;
+  assert.equal(result.status, "succeeded", JSON.stringify(result));
   await rawPage(`document.querySelector('iframe').src = 'http://127.0.0.1:${port}/form?unrestricted-recording'; true`);
   await delay(300);
-  result = await call("browser_record", { action: "status", recording: unrestrictedRecording });
+  result = await call("browser_record", { action: "status" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.equal(result.facts.state, "recording", JSON.stringify(result));
   assert.equal(result.facts.stop_reason, null);
-  result = await call("browser_record", { action: "stop", recording: unrestrictedRecording });
+  result = await call("browser_record", { action: "stop" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
-  result = await call("browser_record", { action: "save", recording: unrestrictedRecording });
+  result = await call("browser_record", { action: "save" });
   assert.equal(result.status, "succeeded", JSON.stringify(result));
   assert.ok(lastResponse.content.some((item) => item.type === "image"));
   check("unrestricted recording survives document navigation and exports its retained replay");
   await policy("all");
-  result = await call("browser_record", { action: "save", recording: unrestrictedRecording });
+  result = await call("browser_record", { action: "save" });
   assert.equal(result.status, "failed", JSON.stringify(result));
   assert.equal(result.facts.reason, "document_unavailable");
   assert.equal(result.facts.coverage.unavailable_documents, 1);
   assert.ok(!lastResponse.content.some((item) => item.type === "image"));
   check("incomplete recorded source evidence cannot later be exported under host restrictions");
   await policy(); await freshFixture();
-  const beforeBlockedRecording = commands.length;
+  const beforeBlockedRecording = rig.bridge.sent.length;
   result = await call("browser_record", { action: "start", tab });
   assert.equal(result.status, "blocked", JSON.stringify(result));
   assert.equal(result.effect, "none");
-  assert.ok(!dispatchedSince(beforeBlockedRecording).includes("start_recording"));
+  assert.ok(!dispatchedSince(beforeBlockedRecording).includes("recording"));
   assert.ok(!lastResponse.content.some((item) => item.type === "image"));
   check("recording cannot start across an excluded document boundary");
   await newSession();
@@ -625,20 +553,20 @@ try {
   assert.equal(result.effect, "unknown"); assert.equal(result.repeat_safe, false);
   await rawPage("document.querySelector('#multiline').readOnly=false; true");
   check("a page change after the first edit preserves the partial draft and refuses replay");
-  const editorPolicy = readFileSync(environment.GHOSTLIGHT_POLICY_FILE, "utf8");
+  const editorPolicy = readFileSync(home.policyFile, "utf8");
   for (const capabilities of [["read"], ["write"], ["read", "write"]]) {
     const configured = JSON.parse(editorPolicy);
     for (const grant of configured.grants) grant.allowed = capabilities;
-    writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, JSON.stringify(configured));
+    writeFileSync(home.policyFile, JSON.stringify(configured));
     await policyRefreshed();
     const before = await rawPage("editorEvidence()");
-    const beforeDispatch = commands.length;
+    const beforeDispatch = rig.bridge.sent.length;
     result = await call("browser_fill_form", { tab,
       fields: [{ target: replyTarget, value: "Complete allowlist draft" }] });
     if (capabilities.length === 1) {
       assert.equal(result.status, "blocked", JSON.stringify(result)); assert.equal(result.effect, "none");
       assert.equal(result.facts.policy_rule, "capability");
-      assert.ok(!dispatchedSince(beforeDispatch).some((command) => ["fill_form", "type_text"].includes(command)));
+      assert.equal(refusedWork(beforeDispatch).length, 0);
       assert.deepEqual(await rawPage("editorEvidence()"), before);
     } else {
       assert.equal(result.status, "succeeded", JSON.stringify(result)); assert.equal(result.facts.submitted, false);
@@ -649,8 +577,9 @@ try {
     }
     check(`${capabilities.join("+")}: draft fill enforces the configured capability grant`);
   }
-  writeFileSync(environment.GHOSTLIGHT_POLICY_FILE, editorPolicy);
+  writeFileSync(home.policyFile, editorPolicy);
   await policyRefreshed();
+  // Exercise the shipped renderer in its closed shadow tree. Holding an observation or script
   // Exercise the shipped renderer in its closed shadow tree. Holding an observation or script
   // gives us time to inspect the actual live elements while another controlled tab is active.
   await policy("all"); await newSession();
@@ -658,46 +587,41 @@ try {
     const url = `http://localhost:${port}/editor#${name}`;
     const opened = await call("browser_navigate", { url, new_tab: true });
     assert.equal(opened.status, "succeeded", JSON.stringify(opened));
-    const physical = await rawWorker(`(await chrome.tabs.query({})).find(tab => tab.url === ${JSON.stringify(url)}).id`);
-    return { handle: opened.facts.tab, physical };
+    const physical = await rig.physicalTab(url);
+    return { handle: opened.facts.tab, physical, page: await rig.page(physical) };
   };
   const targetVisual = await openVisualTab("visual-target");
   const unrelatedVisual = await openVisualTab("visual-unrelated");
   const firstVisualPeer = mcp;
   await rawWorker(`chrome.tabs.update(${unrelatedVisual.physical}, {active:true})`);
-  const visualState = async tabId => rawWorker(`(async () => {
-    const {root} = await chrome.debugger.sendCommand({tabId:${tabId}}, 'DOM.getDocument', {depth:-1,pierce:true});
-    const pending = [root], counts = {wheel:0,read:0,signature:0};
-    while(pending.length) {
-      const node = pending.pop(), attributes = node.attributes || [];
-      const classes = String(attributes[attributes.indexOf('class')+1] || '').split(/\\s+/);
-      if(classes.includes('workwheel')) counts.wheel++;
-      if(classes.includes('read-scan')) counts.read++;
-      if(classes.includes('signature')) counts.signature++;
-      pending.push(...(node.children||[]),...(node.shadowRoots||[]),...(node.pseudoElements||[]));
-      if(node.contentDocument) pending.push(node.contentDocument);
+  const visualState = async target => {
+    const { root } = await target.page.send("DOM.getDocument", { depth: -1, pierce: true });
+    const counts = { wheel: 0, read: 0, signature: 0 };
+    for (const node of descendants(root)) {
+      const classes = String(attributesOf(node).get("class") ?? "").split(/\s+/);
+      if (classes.includes("workwheel")) counts.wheel++;
+      if (classes.includes("read-scan")) counts.read++;
+      if (classes.includes("signature")) counts.signature++;
     }
     return counts;
-  })()`);
-  const visualPage = (target, expression) => rawWorker(`(await chrome.debugger.sendCommand({tabId:${target.physical}},
-    'Runtime.evaluate', {expression:${JSON.stringify(expression)},returnByValue:true,awaitPromise:true})).result.value`);
+  };
+  const visualPage = (target, expression) => target.page.evaluate(expression);
   const captureVisual = async (target, name) => {
     // The product screenshot path intentionally hides presentation. This test observes the
     // actual Chrome surface directly, retaining the wheel for human comparison with cleanup.
-    const data = await rawWorker(`(await chrome.debugger.sendCommand({tabId:${target.physical}},
-      'Page.captureScreenshot', {format:'png'})).data`);
+    const { data } = await target.page.send("Page.captureScreenshot", { format: "png" });
     writeFileSync(join(scratchRoot, `h6-visual-${name}.png`), Buffer.from(data, "base64"));
   };
+  // The worker holds the page call that reads one tab's text until the journey releases it. The
+  // held work shows the presentation of work in flight.
   await rawWorker(`(() => {
-    globalThis.visualOriginalExecuteScript=chrome.scripting.executeScript.bind(chrome.scripting);
-    globalThis.visualPresentations=[]; globalThis.visualReadTarget=${targetVisual.physical};
-    chrome.scripting.executeScript=async function(details) {
-      const message=details?.args?.[0]; const tabId=details?.target?.tabId;
-      if(message?.kind==='present') visualPresentations.push({tabId,signal:message.signal});
-      if(message?.kind==='read_text' && tabId===visualReadTarget) {
-        await new Promise(resolve=>{globalThis.visualReleaseRead=resolve;});
+    globalThis.visualReadTarget = ${targetVisual.physical};
+    globalThis.__journeyBeforeCommand = async function (target, method, params) {
+      const message = params?.arguments?.[1]?.value;
+      if (method === 'Runtime.callFunctionOn' && params.functionDeclaration.includes('rt.call(') && message?.kind === 'read_text'
+        && target.tabId === visualReadTarget) {
+        await new Promise(resolve => { globalThis.visualReleaseRead = resolve; });
       }
-      return visualOriginalExecuteScript(details);
     };
     return true;
   })()`);
@@ -708,14 +632,17 @@ try {
     visualRequests.push({ peer, ...request });
     return request;
   };
+  const resultOf = async request => (await request.promise).result.structuredContent;
   try {
+    const noticesBeforeRead = rig.bridge.notices.length;
     const reading = beginVisual(firstVisualPeer, "browser_read", { tab: targetVisual.handle });
-    await until(async () => (await visualState(targetVisual.physical)).read > 0, "read scan on its background target", 5000);
-    assert.equal((await visualState(unrelatedVisual.physical)).read, 0);
+    await until(async () => (await visualState(targetVisual)).read > 0, "read scan on its background target", 5000);
+    assert.equal((await visualState(unrelatedVisual)).read, 0);
     await until(() => rawWorker("typeof globalThis.visualReleaseRead==='function'"), "blocked visual read", 5000);
     await rawWorker("(visualReadTarget=null,visualReleaseRead(),true)");
-    assert.equal((await reading.promise).structuredContent.status, "succeeded");
-    const readDeliveries = await rawWorker("visualPresentations.filter(item=>item.signal.activity==='read' && item.signal.signal==='start').map(item=>item.tabId)");
+    assert.equal((await resultOf(reading)).status, "succeeded");
+    const readDeliveries = rig.bridge.notices.slice(noticesBeforeRead)
+      .filter(item => item.signal.activity === "read" && item.signal.signal === "start").map(item => item.tab_id);
     assert.ok(readDeliveries.length > 0); assert.ok(readDeliveries.every(id => id === targetVisual.physical));
     check("read animation renders only on the requested background tab");
 
@@ -724,39 +651,39 @@ try {
       script: `await new Promise(resolve=>{globalThis.__visualRelease=resolve;}); ${finish}`
     });
     const firstScript = heldScript(firstVisualPeer, targetVisual, "return 'visual success';");
-    await until(async () => (await visualState(targetVisual.physical)).wheel === 1, "script wheel on its background target", 5000);
-    assert.equal((await visualState(unrelatedVisual.physical)).wheel, 0);
+    await until(async () => (await visualState(targetVisual)).wheel === 1, "script wheel on its background target", 5000);
+    assert.equal((await visualState(unrelatedVisual)).wheel, 0);
     await until(() => visualPage(targetVisual, "typeof globalThis.__visualRelease==='function'"), "first held script");
     await captureVisual(targetVisual, "script-running");
     await newSession();
     const secondVisual = await openVisualTab("visual-overlap");
     const secondScript = heldScript(mcp, secondVisual, "throw new Error('visual failure');");
-    await until(async () => (await visualState(secondVisual.physical)).wheel === 1, "independent overlapping script wheel", 5000);
+    await until(async () => (await visualState(secondVisual)).wheel === 1, "independent overlapping script wheel", 5000);
     await until(() => visualPage(secondVisual, "typeof globalThis.__visualRelease==='function'"), "second held script");
-    assert.equal((await visualState(targetVisual.physical)).wheel, 1);
+    assert.equal((await visualState(targetVisual)).wheel, 1);
     await visualPage(targetVisual, "(__visualRelease(),true)");
-    assert.equal((await firstScript.promise).structuredContent.status, "succeeded");
-    await until(async () => (await visualState(targetVisual.physical)).wheel === 0, "successful script wheel cleanup", 3000);
+    assert.equal((await resultOf(firstScript)).status, "succeeded");
+    await until(async () => (await visualState(targetVisual)).wheel === 0, "successful script wheel cleanup", 3000);
     await captureVisual(targetVisual, "script-complete");
-    assert.equal((await visualState(secondVisual.physical)).wheel, 1);
-    assert.equal((await visualState(unrelatedVisual.physical)).wheel, 0);
+    assert.equal((await visualState(secondVisual)).wheel, 1);
+    assert.equal((await visualState(unrelatedVisual)).wheel, 0);
     check("overlapping script wheels stay on their own tabs and success cleans only its invocation");
     await visualPage(secondVisual, "(__visualRelease(),true)");
-    const failedScript = (await secondScript.promise).structuredContent;
+    const failedScript = await resultOf(secondScript);
     assert.equal(failedScript.status, "unknown"); assert.equal(failedScript.repeat_safe, false);
-    await until(async () => (await visualState(secondVisual.physical)).wheel === 0, "failed script wheel cleanup", 3000);
+    await until(async () => (await visualState(secondVisual)).wheel === 0, "failed script wheel cleanup", 3000);
     check("runtime script failure clears the actual work wheel");
 
     await rawWorker(`chrome.tabs.update(${unrelatedVisual.physical},{active:true})`);
     await visualPage(targetVisual, "(delete globalThis.__visualRelease,true)");
     const cancelledScript = heldScript(firstVisualPeer, targetVisual, "return 'cancelled script completed physically';");
-    await until(async () => (await visualState(targetVisual.physical)).wheel === 1, "cancelled script starts its wheel", 5000);
+    await until(async () => (await visualState(targetVisual)).wheel === 1, "cancelled script starts its wheel", 5000);
     await until(() => visualPage(targetVisual, "typeof globalThis.__visualRelease==='function'"), "script ready to cancel");
     firstVisualPeer.notify("notifications/cancelled", { requestId: cancelledScript.id, reason: "visual acceptance cancellation" });
-    const cancelled = (await cancelledScript.promise).structuredContent;
+    const cancelled = await resultOf(cancelledScript);
     assert.equal(cancelled.status, "unknown"); assert.equal(cancelled.repeat_safe, false);
-    await until(async () => (await visualState(targetVisual.physical)).wheel === 0, "cancelled script wheel cleanup", 3000);
-    assert.equal((await visualState(unrelatedVisual.physical)).wheel, 0);
+    await until(async () => (await visualState(targetVisual)).wheel === 0, "cancelled script wheel cleanup", 3000);
+    assert.equal((await visualState(unrelatedVisual)).wheel, 0);
     await visualPage(targetVisual, "(__visualRelease(),true)");
     check("cancellation clears its work wheel without leaving a spinner on another tab");
 
@@ -774,41 +701,36 @@ try {
         return visualOriginalFrames(details);
       }; return true;
     })()`);
-    const beforeDeniedVisual = commands.length;
+    const beforeDeniedVisual = rig.bridge.sent.length;
     const deniedVisual = beginVisual(firstVisualPeer, "browser_execute", {
       tab: targetVisual.handle, script: "document.title='MUST_NOT_EXECUTE_VISUAL_DENIED';"
     });
-    await until(async () => (await visualState(targetVisual.physical)).wheel === 1, "script wheel before document admission", 5000);
-    assert.equal((await visualState(unrelatedVisual.physical)).wheel, 0);
+    await until(async () => (await visualState(targetVisual)).wheel === 1, "script wheel before document admission", 5000);
+    assert.equal((await visualState(unrelatedVisual)).wheel, 0);
     await until(() => rawWorker("typeof visualReleaseInventory==='function'"), "held document discovery");
     await rawWorker("(visualInventoryTarget=null,visualReleaseInventory(),true)");
-    const deniedResult = (await deniedVisual.promise).structuredContent;
+    const deniedResult = await resultOf(deniedVisual);
     assert.equal(deniedResult.status, "blocked", JSON.stringify(deniedResult)); assert.equal(deniedResult.effect, "none");
-    assert.ok(!dispatchedSince(beforeDeniedVisual).includes("evaluate_script"));
-    await until(async () => (await visualState(targetVisual.physical)).wheel === 0, "hidden denied script wheel cleanup", 3000);
+    assert.ok(!dispatchedSince(beforeDeniedVisual).includes("evaluate_main"));
+    await until(async () => (await visualState(targetVisual)).wheel === 0, "hidden denied script wheel cleanup", 3000);
     const queuedDenials = await rawWorker("(await chrome.storage.session.get('ghostlight.presentations'))['ghostlight.presentations'] || []");
     assert.ok(queuedDenials.some(item => item.tabId === targetVisual.physical && item.signal.invocation === deniedResult.invocation && item.signal.signal === "denial"));
-    assert.equal((await visualState(unrelatedVisual.physical)).wheel, 0);
+    assert.equal((await visualState(unrelatedVisual)).wheel, 0);
     check("hidden denied script clears its wheel while preserving its queued human notice");
   } finally {
-    await rawWorker("(()=>{chrome.scripting.executeScript=visualOriginalExecuteScript;globalThis.visualReleaseRead?.();if(globalThis.visualOriginalFrames)chrome.webNavigation.getAllFrames=visualOriginalFrames;globalThis.visualReleaseInventory?.();return true;})()");
+    await rawWorker("(()=>{globalThis.__journeyBeforeCommand=undefined;globalThis.visualReleaseRead?.();if(globalThis.visualOriginalFrames)chrome.webNavigation.getAllFrames=visualOriginalFrames;globalThis.visualReleaseInventory?.();return true;})()");
     for (const request of visualRequests) request.peer.notify("notifications/cancelled", { requestId: request.id, reason: "visual fixture cleanup" });
     await Promise.allSettled(visualRequests.map(request => request.promise));
   }
-  const audit = readFileSync(environment.GHOSTLIGHT_AUDIT_FILE, "utf8");
+  const audit = readFileSync(home.auditFile, "utf8");
   assert.doesNotMatch(audit, /127\.0\.0\.1|h6@example\.invalid|Ghostlight H6 fixture|ifxf-project|Draft line one|Shadow draft|Replacement draft|action draft|Complete allowlist draft|Ordinary replacement|MUST_NOT_CHANGE_|PARTIAL_DRAFT_EFFECT|Standalone semantic|Standalone handle|standalone-upload\.txt|SYNTHETIC_UPLOAD_/);
   check("durable audit excludes embedded origins, values, and selectors");
   writeFileSync(join(scratchRoot, "h6-browser-evidence.json"), JSON.stringify({ browser: version.product,
     source_kind: liveSylin ? "live_html" : "checked_in_snapshot", source: sourceEvidence, passed,
-    transport: "MV3 native-port shim -> real browser connector -> orchestrator -> real MCP connector" }, null, 2));
+    transport: "MV3 native-port bridge -> real browser edge -> service -> real MCP edge" }, null, 2));
   console.log(`H6 browser journey: ${passed.length} checks passed with ${version.product}.`);
 } finally {
-  if (cdp && socket?.readyState === WebSocket.OPEN) { try { await cdp.send("Browser.close"); } catch {} }
-  socket?.close(); poll?.end("[]");
-  await waitForChromiumExit(chromium);
-  for (const child of children.toReversed()) if (child.exitCode === null && child.signalCode === null) child.kill();
-  await until(() => children.every((child) => child.exitCode !== null || child.signalCode !== null || child.startError), "owned children exit");
+  await rig?.stop();
   server.closeAllConnections(); await new Promise((done) => server.close(done));
-  await removeBrowserScratch(scratch, scratchRoot, "frame-browser-");
-  for (const path of [runtimeFile, runtimeFile.replace(/\.json$/, ".lock")]) { assert.equal(dirname(resolve(path)), binDir); rmSync(path, { force: true }); }
+  await home.cleanup();
 }

@@ -291,9 +291,10 @@ workbench shows waiting becoming running once.
       each follow one synthetic effect; neither repeats it or reports a known no-effect failure.
     - Supported bare returns, top-level await, repeated REPL declarations, and resource
       declarations retain their useful results. Invalid syntax sends no page evaluation.
-    - `tests/script-browser-journey.mjs` verifies the evaluator in real Chromium and its receipts
-      through the real relays, service, and MCP edge. Its native framing is a test adapter; it
-      does not substitute for installed-extension/native-host acceptance.
+    - `tests/script-browser-journey.mjs` verifies the shipped extension's evaluation in real Chromium
+      and its receipts through the real browser edge, service, and MCP edge in a test home. Its
+      native-port discovery is a loopback test bridge (`tests/lib/browser.mjs`); it does not
+      substitute for installed-extension/native-host acceptance.
 15. Manually navigate a controlled tab to a prohibited destination. No activity, audit record,
     policy response, or tab hold is produced. The next agent request checks the current URL and
     refuses prohibited work. Opening a child tab from a controlled page does not adopt, group,
@@ -631,8 +632,9 @@ workbench shows waiting becoming running once.
 5. Scripts refuse when document exclusions or unavailable evidence prevent bounded admission.
    All-open scripts keep browser behavior without an inferred sandbox or website network filter.
 6. `tests/frame-browser-journey.mjs` passes its Chrome/MV3 checks on Windows using independently
-   checked Sylin iframe demo snapshots and form content on distinct local hosts, with real orchestrator and
-   connector processes.
+   checked Sylin iframe demo snapshots and form content on distinct local hosts, with the real service,
+   browser edge and MCP edge in a test home. The page cannot see Ghostlight's runtime; only the
+   extension's isolated worlds hold it.
    Native-port discovery alone is a test pipe; installed registration and other platforms are
    separate lanes. See the H6 verification record for source hashes, artifacts, and limitations.
 

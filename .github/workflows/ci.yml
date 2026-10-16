@@ -104,14 +104,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.target-ci
-      GHOSTLIGHT_BIN_DIR: ${{ github.workspace }}/.target-ci/debug
+      JOURNEY_WRAP: ${{ matrix.os == 'ubuntu-latest' && 'dbus-run-session -- xvfb-run -a ' || '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux desktop build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
@@ -119,31 +119,17 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - run: cargo build --workspace --locked
-      - name: Verify the shell installer
-        if: runner.os == 'Linux'
-        run: node tests/installer-shell.mjs
-      - run: node tests/edge-parent-lifecycle.mjs
-      - name: Verify the fixed installation
-        if: runner.os == 'Linux'
-        run: node tests/fixed-installation-journey.mjs
-      - run: node --test tests/lib/home.test.mjs
-      - run: node tests/process-journey.mjs
-      - run: node tests/local-resilience-journey.mjs
-      - run: node tests/provenance-journey.mjs
-      - run: node tests/history-compatibility.mjs
-      - run: node tests/cli-journey.mjs
-      - run: node tests/cli-powershell-journey.mjs
-      - run: node tests/workbench-surface.mjs
-      - name: Verify native Windows desktop lifecycle
-        if: runner.os == 'Windows'
-        run: pwsh -NoProfile -File tests/windows-desktop-journey.ps1
-      - name: Keep native Windows desktop evidence
-        if: always() && runner.os == 'Windows'
+      - name: Run the process journeys on fresh binaries
+        run: ${{ env.JOURNEY_WRAP }}node tests/hardening-suite.mjs --lane=process
+      - name: Keep process test evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: native-desktop-windows
-          path: .tmp/native-desktop-*/results.json
+          name: hardening-process-${{ matrix.os }}
+          include-hidden-files: true
+          path: |
+            .tmp/hardening-suite/
+            .tmp/native-desktop-*/results.json
           retention-days: 14
 
   browser-journeys:
@@ -197,7 +183,7 @@ jobs:
           path: |
             .tmp/hardening-suite/
             .tmp/h6-browser-evidence.json
-            .tmp/h6-masked-sylin.jpg
+            .tmp/h6-complete-sylin.jpg
             .tmp/h6-visual-*.png
             .tmp/h4-*.png
           retention-days: 14

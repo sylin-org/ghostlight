@@ -8,7 +8,7 @@ ws.onmessage=({data})=>{const m=JSON.parse(data);const p=pending.get(m.id);if(p)
 function send(method,params={},sessionId){return new Promise((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});ws.send(JSON.stringify({id:n,method,params,...(sessionId?{sessionId}:{})}))})}
 try {
 const {targetInfos}=await send('Target.getTargets');
-const worker=targetInfos.find(t=>t.type==='service_worker'&&t.url==='chrome-extension://cjcmhepmagomefjggkcohdbfemacojoa/service-worker.js');
+const worker=targetInfos.find(t=>t.type==='service_worker'&&t.url==='chrome-extension://cjcmhepmagomefjggkcohdbfemacojoa/worker.js');
 if(!worker)throw new Error('No acceptance adapter worker');
 const {sessionId}=await send('Target.attachToTarget',{targetId:worker.targetId,flatten:true});
 const r=await send('Runtime.evaluate',{expression:process.argv[2]||'JSON.stringify(uiSnapshot())',awaitPromise:true,returnByValue:true},sessionId);

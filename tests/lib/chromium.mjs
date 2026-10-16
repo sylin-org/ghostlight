@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 
 const READ_RETRY_CODES = new Set(["ENOENT", "EBUSY", "EACCES", "EPERM"]);
 const REMOVE_RETRY_CODES = new Set([...READ_RETRY_CODES, "ENOTEMPTY"]);
-const PROFILE_PREFIXES = new Set(["frame-browser-", "script-browser-", "history-browser-"]);
+const PROFILE_PREFIXES = new Set(["frame-browser-", "script-browser-", "keyboard-browser-", "history-browser-"]);
 const POLL_MS = 50;
 const delay = (ms) => new Promise(done => setTimeout(done, ms));
 const exited = child => !child || child.startError || child.exitCode !== null || child.signalCode !== null;
