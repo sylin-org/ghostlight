@@ -355,10 +355,10 @@ impl ServiceHost {
             audit.clone(),
             Arc::clone(&diagnostics),
         ));
-        browser.set_event_sink(Arc::new(ServiceBrowserEvents {
-            workbench: workbench.clone(),
-            workspaces: workspaces.clone(),
-        }));
+        browser.set_event_sink(Arc::new(ServiceBrowserEvents::new(
+            workbench.clone(),
+            workspaces.clone(),
+        )));
 
         let stop = Arc::new(AtomicBool::new(false));
         let quit = Quit::new(
@@ -1892,11 +1892,49 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// The name of the short-lived thread that carries out a browser's request to be shown.
+const SHOW_REQUEST_THREAD: &str = "ghostlight-show-request";
+
 /// Applies what a connected browser reports: its tabs, its dialogs and its toolbar's pause, and
 /// tells the workbench when who is connected may have changed.
 struct ServiceBrowserEvents {
     workbench: WorkbenchFacade,
     workspaces: WorkspaceStore,
+    /// Whether a show request is being carried out. One request in flight absorbs the presses
+    /// that arrive meanwhile.
+    showing: Arc<AtomicBool>,
+}
+
+impl ServiceBrowserEvents {
+    fn new(workbench: WorkbenchFacade, workspaces: WorkspaceStore) -> Self {
+        Self {
+            workbench,
+            workspaces,
+            showing: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Carry out the browser's request to be shown without holding the browser's reader.
+    ///
+    /// Revealing can wait for a shell to start and attach, and the reader that delivered the
+    /// request also delivers the receipts of work in flight on that browser. The answer is not
+    /// read: with nothing to show, or nothing to show it, the person is no worse off.
+    fn request_show(&self) {
+        if self.showing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let workbench = self.workbench.clone();
+        let showing = Arc::clone(&self.showing);
+        let spawned = thread::Builder::new()
+            .name(SHOW_REQUEST_THREAD.into())
+            .spawn(move || {
+                let _ = workbench.reveal(None);
+                showing.store(false, Ordering::SeqCst);
+            });
+        if spawned.is_err() {
+            self.showing.store(false, Ordering::SeqCst);
+        }
+    }
 }
 
 impl BrowserEventSink for ServiceBrowserEvents {
@@ -1915,11 +1953,7 @@ impl BrowserEventSink for ServiceBrowserEvents {
                 self.workbench
                     .apply_runtime_control(intent, RuntimeSource::Browser);
             }
-            // Best effort: with nothing attached to show, or nothing to reveal, the person is no
-            // worse off, so the answer is not read.
-            BrowserEvent::ShowRequested => {
-                let _ = self.workbench.reveal(None);
-            }
+            BrowserEvent::ShowRequested => self.request_show(),
             BrowserEvent::TabClosed { tab_id } => {
                 self.workspaces.apply_browser_close(browser, tab_id);
                 self.workbench.refresh_live_parts();
@@ -1948,7 +1982,7 @@ impl BrowserEventSink for ServiceBrowserEvents {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
@@ -2061,10 +2095,7 @@ mod tests {
             )),
             diagnostics,
         );
-        let sink = super::ServiceBrowserEvents {
-            workbench: view.clone(),
-            workspaces: workspaces.clone(),
-        };
+        let sink = super::ServiceBrowserEvents::new(view.clone(), workspaces.clone());
 
         let initial_audit = std::fs::read_to_string(&audit_path).unwrap_or_default();
 
@@ -2269,10 +2300,8 @@ mod tests {
             })
             .unwrap();
         drop(lease);
-        let sink = super::ServiceBrowserEvents {
-            workbench: test_workbench(&workspaces),
-            workspaces: workspaces.clone(),
-        };
+        let sink =
+            super::ServiceBrowserEvents::new(test_workbench(&workspaces), workspaces.clone());
         let dialog = |tab_id, present, dialog_type: &str| BrowserEvent::DialogChanged {
             tab_id,
             present,
@@ -2304,10 +2333,8 @@ mod tests {
         use crate::workspace::WorkspaceStore;
 
         let workspaces = WorkspaceStore::default();
-        let sink = super::ServiceBrowserEvents {
-            workbench: test_workbench(&workspaces),
-            workspaces: workspaces.clone(),
-        };
+        let sink =
+            super::ServiceBrowserEvents::new(test_workbench(&workspaces), workspaces.clone());
         let closed = |tab_id| BrowserEvent::TabClosed { tab_id };
         // The person loaded a page in a tab Ghostlight left open: it is theirs again.
         let committed = |tab_id| BrowserEvent::DocumentCommitted {
@@ -2405,10 +2432,7 @@ mod tests {
         let workbench = test_workbench(&workspaces);
         let heard = Arc::new(HeardChanges::default());
         workbench.attach_events(heard.clone());
-        let sink = super::ServiceBrowserEvents {
-            workbench: workbench.clone(),
-            workspaces,
-        };
+        let sink = super::ServiceBrowserEvents::new(workbench.clone(), workspaces);
         let request = |intent| BrowserEvent::RuntimeControlRequested { intent };
 
         sink.on_event(FAKE_BROWSER, request(RuntimeControlIntent::ToggleHold));
@@ -2444,18 +2468,48 @@ mod tests {
 
         let workspaces = crate::workspace::WorkspaceStore::default();
         let workbench = test_workbench(&workspaces);
-        let sink = super::ServiceBrowserEvents {
-            workbench: workbench.clone(),
-            workspaces,
-        };
+        let sink = super::ServiceBrowserEvents::new(workbench.clone(), workspaces);
 
         // Nothing is attached yet, and that is not an error.
         sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+        eventually(|| !sink.showing.load(Ordering::SeqCst));
 
         let reveals = Arc::new(RevealCounter::default());
         workbench.attach_presentation(reveals.clone());
         sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
-        assert_eq!(reveals.0.load(Ordering::SeqCst), 1);
+        eventually(|| reveals.0.load(Ordering::SeqCst) == 1);
+    }
+
+    #[test]
+    fn a_show_request_that_waits_does_not_hold_the_browser_link() {
+        use crate::browser::adapter::{BrowserEvent, RuntimeControlIntent};
+        use crate::browser::BrowserEventSink;
+        use crate::language::workbench::PAUSED_FROM_BROWSER;
+
+        let workspaces = crate::workspace::WorkspaceStore::default();
+        let workbench = test_workbench(&workspaces);
+        let heard = Arc::new(HeardChanges::default());
+        workbench.attach_events(heard.clone());
+        let held = Arc::new(HeldReveal::default());
+        workbench.attach_presentation(held.clone());
+        let sink = super::ServiceBrowserEvents::new(workbench, workspaces);
+
+        // The reveal waits, and the sink still returns and applies the next event.
+        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+        eventually(|| held.started.load(Ordering::SeqCst) == 1);
+        sink.on_event(FAKE_BROWSER, BrowserEvent::ShowRequested);
+        sink.on_event(
+            FAKE_BROWSER,
+            BrowserEvent::RuntimeControlRequested {
+                intent: RuntimeControlIntent::Hold,
+            },
+        );
+        assert_eq!(heard.notes().pop(), Some(Some(PAUSED_FROM_BROWSER.into())));
+
+        // The press that arrived while one was waiting was absorbed by it.
+        held.release.store(true, Ordering::SeqCst);
+        eventually(|| !sink.showing.load(Ordering::SeqCst));
+        assert_eq!(held.started.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -3506,6 +3560,32 @@ mod tests {
         assert!(started.is_ok());
         drop(started);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A presentation port whose reveal waits until it is released, as one does while a shell
+    /// starts.
+    #[derive(Default)]
+    struct HeldReveal {
+        started: AtomicUsize,
+        release: AtomicBool,
+    }
+
+    impl WorkbenchPresentationPort for HeldReveal {
+        fn reveal(&self, _address: Option<PageAddress>) -> Result<(), WorkbenchPresentationError> {
+            self.started.fetch_add(1, Ordering::SeqCst);
+            let until = Instant::now() + PATIENCE;
+            while !self.release.load(Ordering::SeqCst) && Instant::now() < until {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Ok(())
+        }
+
+        fn notify(
+            &self,
+            _notification: WorkbenchNotification,
+        ) -> Result<(), WorkbenchPresentationError> {
+            Ok(())
+        }
     }
 
     #[derive(Default)]
