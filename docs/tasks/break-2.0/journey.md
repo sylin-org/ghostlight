@@ -98,7 +98,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-j03-show-event has landed. Next: j04-setup-page.
+j04-setup-page has landed. Next: j06-popup.
 
 ## Landed
 
@@ -107,12 +107,16 @@ j03-show-event has landed. Next: j04-setup-page.
 | j01-adr | ADR-0200 is filed and indexed with Decisions 1 to 16 and the owner answers above. The ADR index marks ADR-0070, 0091, 0095, 0126 and 0177 as amended by it. The adapter-protocol-4 note gains a marked amendment superseding the section 7 rows on publishing after services spread and the unchanged level-3 path. This ledger starts; `docs/tasks/README.md` and the seams ledger point here. | see `git log` |
 | j02-kit | `extension/kit.css` is the one stylesheet for the extension pages: the sylin.org night tokens and base rules under `.gl-page`, the kit components, the setup layout, the companion with its two-segment stepper, and the popup. `scripts/package-extension.ps1` ships `kit.css` and `icons/ghostlight-mascot.png` and throws when a staged page names a local file the package lacks. The source-grep test for `setup.html` is deleted. | see `git log` |
 | j03-show-event | Protocol 4 gains one browser-level event, `show_requested`, with no fields: the golden vocabulary and fixture, `extension/lib/protocol.js`, the worker (`show_ghostlight` page message, `requestShow()`, refused while the link is down), `wire::Event::ShowRequested`, `BrowserEvent::ShowRequested`, and `ServiceBrowserEvents` calling `WorkbenchFacade::reveal(None)` and ignoring the answer. The adapter-protocol-4 note carries the row and the browser-level sentence. | see `git log` |
+| j04-setup-page | `extension/setup.html` is the kit page: the top bar with the wordmark and the Documentation link, the companion (ghost, lantern, stepper, step names) and the one column of eyebrow, heading, command, live line and fallback. `extension/lib/setup-view.js` (new, pure) holds every word and command and `view()` and `fallbackDue()`; `extension/setup.js` (new) places them, polls `ui_snapshot` every 1500 ms, plays the meeting once (`ghostlight.setup_met`) and sends `show_ghostlight`. The popup and options setup routes always open the bundled page and both remote URL literals are gone. The packager ships `setup.js`. The tests that pinned `setup.html` text are deleted; `extension/tests/setup-view.test.js` covers the pure module. | see `git log` |
 
 ## Owed live checks
 
 - j01: none. Docs only.
 - j02: none. The page markup that links the kit lands in j04, j06 and j07; the live look is checked there.
-- j03: the unpacked extension's Open Ghostlight brings the window forward on Windows and Linux (live, once j04 lands the button).
+- j03: the unpacked extension's Open Ghostlight brings the window forward on Windows and Linux (live, once j04 lands the button). The button has landed in j04; the check is still owed.
+- j04: the unpacked extension in a fresh profile on a machine with no Ghostlight: the page opens once, the command copies (and `Copied` is announced), the meeting plays once when the service from the development channel answers, and Open Ghostlight shows the window. Also reduced motion, a 390 px window, and the Documentation link opening in a new tab.
+- j04: measure a cold get-script run on test-01 after c02 and tune `FALLBACK_AFTER_COPY_MS` (90000) and `FALLBACK_AFTER_OPEN_MS` (120000) in `extension/lib/setup-view.js` before x01.
+- j04: the coordinator's check that the JQ4 one-liners run in Windows PowerShell 5.1, PowerShell 7 and `curl | sh` is not recorded in this ledger yet.
 
 ## Owed to the owner
 
@@ -182,4 +186,27 @@ j03-show-event has landed. Next: j04-setup-page.
   spec says; `runtime_control` keeps its older `!nativePort` check unchanged.
   (3) The Rust round trip of the new fixture is covered by `every_event_decodes_and_round_trips`,
   which walks every fixture and compares the tags with the vocabulary; no per-event test was added.
-
+- j04: ran the gate checks the files require: (3) `npm test` in `extension/` (481 pass), (5) the
+  packager to `.tmp/lane-journey/extension.zip` (its page check passed with `setup.js`,
+  `lib/setup-view.js`, `kit.css` and the mascot named by `setup.html`), (8) `node --test
+  tests/guards/*.test.mjs`, (9) `node --check extension/setup.js` and a PowerShell parse of the
+  packager, (10) the repository integrity script. `git tag --list 'v2*'` was empty. The tree and the
+  spec differed in these places.
+  (1) The unsupported state puts `Not supported` on step 01, as the slice spec says; the mockup put
+  it on 02. All three discs are `off`.
+  (2) `view()` also returns `fallback` ({ title, text, command }) for the computer and update
+  states, and null elsewhere, so the page script holds no words. `lead` is null in those states.
+  (3) `kit.css` gains one rule, `.gl-setup__doc`, which pushes the quiet Documentation link to the
+  right of the top bar. The service copy of the kit (`ui/kit/kit.css`) is a different file and is
+  not touched.
+  (4) The link classification comes from `lib/shared.js` (`LINK_HOST_ABSENT`, `LINK_SERVICE_OUTDATED`);
+  `lib/setup-view.js` reads it, so `setup.html` loads `shared.js` first. A connected but
+  incompatible link that is not outdated shows the start words.
+  (5) The meeting plays only when the page sees the change from not met to met while open and
+  `ghostlight.setup_met` is not true. A page that opens already connected renders at rest and does
+  not set the flag. The fallback, once shown, stays until Ghostlight answers.
+  (6) JQ4 is the short sylin.org one-liners from the owner-delegated decisions, not the raw GitHub
+  or release-attached forms in the slice spec. `Open Ghostlight` ignores a refusal from the worker
+  (the link is down), because the page already shows the waiting words.
+  (7) The step names and the Documentation link text are placed by `setup.js` from `WORDS` and
+  `LINKS`, not written in `setup.html`, so each string has one home.

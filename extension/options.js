@@ -30,10 +30,7 @@
   });
 
   setupRoute.addEventListener("click", () => {
-    const destination = navigator.onLine
-      ? "https://sylin.org/ghostlight/chromium-extension/post-install/"
-      : chrome.runtime.getURL("setup.html");
-    chrome.tabs.create({ url: destination }).catch(() => {});
+    chrome.tabs.create({ url: chrome.runtime.getURL("setup.html") }).catch(() => {});
   });
 
   async function request(message) {

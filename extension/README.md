@@ -29,9 +29,12 @@ copied. See [../docs/adr/](../docs/adr/) for the decisions behind it.
   console and network evidence, and plural bounded recordings.
 - `lib/connection-log.js`, `lib/state.js`, `lib/shared.js`: local connection evidence, stored
   preferences, and the small helpers the worker and the other modules share.
+- `lib/setup-view.js`: the setup page's words, commands and three steps as a pure function of the
+  connection snapshot and the computer.
 - `popup.html`, `options.html`, `setup.html` and their scripts: the extension's own pages. On
   install, the worker opens `setup.html` once, and only when the first connection finds the
-  Ghostlight service absent.
+  Ghostlight service absent. The page shows the step for this computer and follows the connection
+  live. It fetches nothing.
 - `offscreen.html` and `offscreen.js`: bundled browser-local GIF encoding that closes after use.
 
 The page code that runs inside tabs is not in this directory. The service ships it in the hello

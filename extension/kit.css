@@ -332,6 +332,8 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-setup.gl-stage { min-height: 100vh; overflow: visible; }
 .gl-setup__top { display: flex; align-items: center; padding: 18px 32px; border-bottom: 1px solid var(--line); }
 .gl-wordmark { font: 500 15px/1 var(--sans); letter-spacing: .01em; color: var(--ink); }
+/* The quiet link at the right of the top bar. */
+.gl-setup__doc { margin-left: auto; font-size: var(--fs-small); color: var(--ink-4); }
 .gl-setup__main { flex: 1; display: grid; grid-template-columns: 352px minmax(0, 1fr); gap: 64px; align-items: center;
   width: 100%; max-width: 1080px; margin: 0 auto; padding: 32px 48px 40px; }
 .gl-setup__main--window { grid-template-columns: 296px minmax(0, 1fr); gap: 44px; max-width: none; padding: 28px 40px 32px; }

@@ -48,6 +48,7 @@ try {
         "popup.html",
         "popup.js",
         "setup.html",
+        "setup.js",
         "ui.css",
         "worker.js"
     )

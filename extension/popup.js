@@ -165,14 +165,8 @@
       sessionStatus.textContent = String(error?.message ?? error);
     }
   });
-  // Online, the canonical walkthrough is the better page and stays the one ADR-0070 owns. Offline,
-  // a tab that cannot load is worse than no tab, so the bundled page carries the same instructions
-  // with no network at all.
   setupRoute.addEventListener("click", () => {
-    const destination = navigator.onLine
-      ? "https://sylin.org/ghostlight/chromium-extension/post-install/"
-      : chrome.runtime.getURL("setup.html");
-    chrome.tabs.create({ url: destination }).catch(() => {});
+    chrome.tabs.create({ url: chrome.runtime.getURL("setup.html") }).catch(() => {});
   });
   document.getElementById("open-options").addEventListener("click", () => chrome.runtime.openOptionsPage());
   chrome.runtime.onMessage.addListener((message) => { if (message?.kind === "ui_state_changed") refresh(); });

@@ -85,18 +85,6 @@ test("the developer diagnostics card describes only the connection log", () => {
   assert.doesNotMatch(markup, /form[- ](reset|trac)/i);
 });
 
-test("the bundled setup page needs no network and contains no product state", () => {
-  const markup = read("setup.html");
-  assert.ok(markup.includes(NOT_INSTALLED_HERE));
-  assert.ok(markup.includes("npx -y ghostlight install"));
-  assert.ok(markup.includes("ghostlight doctor"));
-  assert.doesNotMatch(markup, /apt install|\.deb|background/i);
-  // One outbound link is allowed, to the canonical walkthrough. Nothing may be fetched to render.
-  assert.doesNotMatch(markup, /<script/);
-  assert.doesNotMatch(markup, /<img[^>]+src="https?:/);
-  assert.doesNotMatch(markup, /<link[^>]+href="https?:/);
-});
-
 test("an outdated service outranks every disconnect reason, and a connected link is never reclassified", () => {
   assert.equal(
     shared.linkState({ connected: false, compatible: false, outdated: true, lastError: "Specified native messaging host not found." }),

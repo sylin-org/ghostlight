@@ -1,48 +1,42 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="gl-page">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Set up Ghostlight on this computer</title>
-    <link rel="stylesheet" href="ui.css">
+    <title>Set up Ghostlight</title>
+    <link rel="stylesheet" href="kit.css">
   </head>
-  <body class="popup-shell">
-    <main>
-      <header id="brand">
-        <img src="icons/icon48.png" alt="" width="22" height="22">
-        <h1>Set up Ghostlight on this computer</h1>
-      </header>
-
-      <p>Ghostlight is not installed on this computer yet. The extension came with your Chrome
-      profile. Install Ghostlight here to connect it.</p>
-
-      <p>The extension is one half of Ghostlight. The other half is a local program that runs on
-      this computer and talks to the extension directly. Chrome cannot install it for you, which is
-      why this step is yours.</p>
-
-      <hr>
-      <h2>Install it</h2>
-      <p>In a terminal:</p>
-      <pre><code>npx -y ghostlight install</code></pre>
-      <p>This installs Ghostlight on this computer and registers this browser and the MCP clients it
-      finds.</p>
-
-      <hr>
-      <h2>Then check it</h2>
-      <p>Run <code>ghostlight doctor</code>. It reports this computer's side: the browser
-      registrations, the MCP clients and whether Ghostlight is running. When this computer is
-      ready, this extension connects on its own.</p>
-
-      <hr>
-      <h2>If your browser came from Snap or Flatpak</h2>
-      <p>A sandboxed browser package cannot start a program on your computer, so native messaging
-      will not work no matter what you install. Use a native Chrome, Edge, Brave, or Chromium
-      package instead.</p>
-
-      <hr>
-      <p>This page is bundled with the extension and needs no network. The full walkthrough,
-      with screenshots and platform detail, is at
-      <a href="https://sylin.org/ghostlight/chromium-extension/post-install/">sylin.org/ghostlight</a>.</p>
+  <body class="gl-stage gl-setup">
+    <header class="gl-setup__top">
+      <span class="gl-wordmark">Ghostlight</span>
+      <a class="gl-setup__doc" id="doc-link" href="#" target="_blank" rel="noopener" hidden></a>
+    </header>
+    <main class="gl-setup__main">
+      <section class="gl-companion" id="companion" data-light="waiting" aria-label="Setup progress">
+        <div class="gl-companion__art">
+          <span class="gl-mascot gl-companion__mascot">
+            <span class="gl-mascot__halo"></span>
+            <img class="gl-px gl-mascot__img" src="icons/ghostlight-mascot.png" alt="" width="200" height="200">
+            <span class="gl-lantern" aria-hidden="true"><span class="gl-lantern__ember"></span><span class="gl-lantern__ring"></span><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i><i class="gl-lantern__mote"></i></span>
+          </span>
+        </div>
+        <div class="gl-stepper" aria-hidden="true">
+          <span class="gl-stepper__seg gl-stepper__seg--1"><i></i></span><span class="gl-stepper__seg gl-stepper__seg--2"><i></i></span>
+          <span class="gl-stepper__disc gl-stepper__disc--0"></span><span class="gl-stepper__disc gl-stepper__disc--1"></span><span class="gl-stepper__disc gl-stepper__disc--2"></span>
+        </div>
+        <ol class="gl-stepper__names">
+          <li><span class="gl-stepper__t"></span><span class="gl-sr"></span><span class="gl-stepper__w"></span></li><li><span class="gl-stepper__t"></span><span class="gl-sr"></span><span class="gl-stepper__w"></span></li><li><span class="gl-stepper__t"></span><span class="gl-sr"></span><span class="gl-stepper__w"></span></li>
+        </ol>
+      </section>
+      <div class="gl-setup__col">
+        <div class="gl-setup__part" id="main"></div>
+        <p class="gl-live" id="live" role="status" aria-live="polite"></p>
+        <div class="gl-setup__part" id="after"></div>
+      </div>
     </main>
+    <div class="gl-sr" id="announce" aria-live="polite" aria-atomic="true"></div>
+    <script src="lib/shared.js"></script>
+    <script src="lib/setup-view.js"></script>
+    <script src="setup.js"></script>
   </body>
 </html>
