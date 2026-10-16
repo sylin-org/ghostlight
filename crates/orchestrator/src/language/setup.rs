@@ -896,8 +896,12 @@ pub fn install_lines(facts: &InstallFacts) -> Vec<String> {
         ));
     } else if !with_entry.is_empty() {
         let note = if restart_first {
-            let pronoun = if changed.len() == 1 { "it" } else { "them" };
-            format!(" (restart {pronoun} before you ask)")
+            let target = if changed.len() == with_entry.len() {
+                (if changed.len() == 1 { "it" } else { "them" }).to_owned()
+            } else {
+                join_list(&changed)
+            };
+            format!(" (restart {target} before you ask)")
         } else {
             String::new()
         };
@@ -1552,6 +1556,18 @@ mod tests {
                 "Agents: Claude Code and Codex (restart them before you ask).",
                 "Next: add Ghostlight to Chrome in the Ghostlight window.",
             ]
+        );
+    }
+
+    #[test]
+    fn the_restart_note_names_only_the_agents_that_changed() {
+        let lines = install_lines(&install(
+            vec![chrome(BrowserForm::Native)],
+            agents_with_entries(&[("Claude Code", false), ("Codex", true)]),
+        ));
+        assert_eq!(
+            lines[2],
+            "Agents: Claude Code and Codex (restart Codex before you ask)."
         );
     }
 
