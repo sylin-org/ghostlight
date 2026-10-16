@@ -677,3 +677,19 @@ Owner-approved plan, 2026-10-15. These lines settle what the second shell milest
 - The first-close hint follows only a person closing the window, never an update or a crash. Its
   marker, `state/tray-hint`, is a service-private state file like `state/watch.off`, outside what
   the frozen edge and extension read.
+
+## Amendment (2026-10-16): a start outlasts a service that is leaving on idle
+
+Found in the shell milestone 2 review (m2-06) and settled by the owner-approved tidy-04b spec.
+
+A service that decides to leave on idle keeps `run/service.lock` and the endpoint until its
+teardown ends, and says nothing to a start that arrives in that window. Under Decision 9 step 4
+that start exited 0 at once, the old service then exited, and the caller (`ghostlight call`, an MCP
+edge) reported that Ghostlight did not become ready in time.
+
+This amends Decision 9 step 4. A start that finds the lock held waits for it: an `update` start up
+to 30 s, as before, and any other start up to 5 s. When the wait ends the start exits 0, because a
+service that stays is the answer to the starter's own connection. A `browser` or `recover` start
+that waited looks at the quit latch again once it holds the lock, so a Quit that arrived while it
+waited still holds. Decision 10's table and the frozen start reasons are unchanged; only the wait
+for a held lock changed, and it is not a relay contract.

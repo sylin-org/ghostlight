@@ -170,9 +170,10 @@ Every start of the service carries a reason: `agent`, `browser`, `command`, `per
 error. The service writes `state/quit` when a person quits (the tray, the workbench, or control
 `quit` with reason `quit`), before it exits. In order, a starting service refuses a wrong image
 and an elevated token, then, for a `browser` or `recover` start, exits 0 at once while that file
-exists. It then takes `run/service.lock`: a start that finds the lock held exits 0 at once, except
-`update`, which waits up to 30 s. Only after it holds the lock does any other start delete the
-file and open state. A service that is not accepting openings within 30 s of taking the lock
+exists. It then takes `run/service.lock`: a start that finds the lock held waits for it, an
+`update` up to 30 s and any other start up to 5 s, and then exits 0. Only after it holds the lock
+does any other start delete the file and open state; a `browser` or `recover` start that waited
+looks at the file again first. A service that is not accepting openings within 30 s of taking the lock
 exits with a nonzero status.
 
 | Reason | Who uses it | After a quit |

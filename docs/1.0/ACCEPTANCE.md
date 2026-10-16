@@ -44,8 +44,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
      the MCP connector, `browser` for the browser connector) and continues its existing reconnect
      loop. The MCP connector starts it again for each held request; the browser connector starts
      it once, at its own start, and never while waiting. `serve` without a reason is a usage
-     error, a start that finds the lock held exits 0 at once, and only an `update` start waits for
-     it. Quit holds until an agent request, a command that needs Ghostlight, or a person starts
+     error, and a start that finds the lock held waits for it (an `update` start up to 30 s, any
+     other start up to 5 s) and then exits 0. Quit holds until an agent request, a command that needs Ghostlight, or a person starts
      it; a browser restart does not bring it back. Before it closes its streams the service says
      goodbye (`quit`, `replace` or `uninstall`), and each connector acts on the reason.
 14. A fresh deployment lock suppresses demand-start. A stale deployment lock cannot suppress it
