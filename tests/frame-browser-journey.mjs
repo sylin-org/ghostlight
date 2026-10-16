@@ -83,6 +83,7 @@ const source = liveSylin
     assert.equal(createHash("sha256").update(page.body).digest("hex"), page.sha256);
     return page.body;
   });
+const sourceEvidence = source.map((html, index) => ({ url: sourceUrls[index], sha256: createHash("sha256").update(html).digest("hex") }));
 let port;
 const server = createServer(async (request, response) => {
   response.setHeader("content-type", "text/html");
@@ -423,7 +424,7 @@ try {
   assert.equal(afterHandleShadow.submissions, 0);
   check("open-shadow rich editors outside forms support equivalent semantic-selector and handle fills");
   await rawPage("(()=>{const input=document.createElement('input');input.type='file';input.id='standalone-upload';input.setAttribute('aria-label','Standalone upload');document.body.append(input);return true;})()");
-  const uploadPath = join(scratch, "standalone-upload.txt");
+  const uploadPath = join(rig.scratch, "standalone-upload.txt");
   const uploadedFile = () => rawPage("(async()=>{const files=document.getElementById('standalone-upload').files;return {count:files.length,name:files[0]?.name,text:await files[0]?.text()};})()");
   writeFileSync(uploadPath, "SYNTHETIC_UPLOAD_BY_SELECTOR");
   result = await call("browser_upload", { tab,
