@@ -1482,7 +1482,8 @@ impl ApplicationExecutor {
     /// Report a denial the caller can act on, naming the host when the work named an address.
     ///
     /// `blocked_url` is the address the refused work asked for or landed on. Only its host is
-    /// kept for the audit; its origin is kept for the one refusal whose sentence names it.
+    /// kept for the audit; its origin is kept for the one refusal whose sentence names it, and
+    /// that sentence reaches the caller only: the audit names the refusal without the address.
     #[allow(clippy::too_many_arguments)]
     fn blocked_at(
         &self,

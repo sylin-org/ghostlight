@@ -250,6 +250,18 @@ impl Refusal {
                 Self::CredentialAuthorization { .. } => {
                     "Refused credential input that the user had not authorized.".into()
                 }
+                // The control page is named without its address: history keeps the reason, and the
+                // host the refusal already records, never the scheme or the port.
+                Self::AuthorityBlocked {
+                    reason: BlockedReason::OwnWorkbench,
+                    host,
+                    ..
+                } => Self::AuthorityBlocked {
+                    reason: BlockedReason::OwnWorkbench,
+                    host: host.clone(),
+                    origin: None,
+                }
+                .summary(),
                 _ => self.summary(),
             },
             refusal: Some(refusal),

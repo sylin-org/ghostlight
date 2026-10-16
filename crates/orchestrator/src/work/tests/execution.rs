@@ -2434,6 +2434,8 @@ fn the_workbench_origin_is_refused_by_name_and_other_loopback_ports_are_not() {
     assert!(encoded.contains("own_workbench"));
     assert!(!encoded.contains("/app"));
     assert!(!encoded.contains("secret"));
+    assert!(!encoded.contains(":41259"));
+    assert!(!encoded.contains("http://"));
     drop(records);
 
     let other = executor.execute(

@@ -219,6 +219,10 @@ Refusals say what is true, and their next steps suggest only what the caller can
 - A policy denial (host, protected host, capability, tab close, screenshot, client kind, or an
   unspecified policy reason) points to `policy_explain`. Pause, Stop, a required-history outage,
   and an unreadable policy keep no next step.
+- A refusal of Ghostlight's own control page names the origin as the caller wrote it (scheme,
+  host and port, never a path) and says other ports on this computer are not affected. It keeps
+  no next step, because no policy lifts it. History records the reason and the host, never the
+  origin. `policy_explain` lists the control page among the ceilings no policy can lift.
 - The preserve-tabs veto says the tab stays open because the user chose to keep Ghostlight's
   tabs, and to continue without closing it.
 - A workspace refusal found after the browser already acted, such as a tab the browser opened

@@ -1225,8 +1225,8 @@ pub enum Refusal {
     ///
     /// The origin is the address as the caller wrote it, scheme and port included, and never a
     /// path, query or fragment. Only the refusal of Ghostlight's own control page says it,
-    /// because the rest of that sentence is about which port is refused. The observed facts keep
-    /// the host alone.
+    /// because the rest of that sentence is about which port is refused. The observed facts and
+    /// the audit summary never carry it: they keep the host alone.
     AuthorityBlocked {
         reason: BlockedReason,
         host: Option<String>,
