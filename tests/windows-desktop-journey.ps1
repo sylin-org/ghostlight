@@ -1,4 +1,5 @@
-# Exercise the real Windows workbench lifetime, including Open racing the service's startup.
+# Exercise the real Windows workbench lifetime, including Open racing the service's startup, and
+# the end-session messages reaching the edge, the service and the shell each on its own.
 # The journey runs in a test home under .tmp holding its own copies of the edge, the service and
 # the shell. Every window and process operation addresses only exact images of that home.
 param(
@@ -123,6 +124,11 @@ $script:launch = 0
 $servePattern = '\sserve(\s|$)'
 $LeavingLockWaitSeconds = 5
 $LeavingLockMarginSeconds = 10
+# How long each binary may take to leave once it hears the end of the session. The shell has no
+# budget of its own and leaves within the service's.
+$EdgeEndSessionMs = 4000
+$ServiceEndSessionMs = 6000
+$ShellEndSessionMs = $ServiceEndSessionMs
 $failure = $null
 
 function Start-OwnedProcess([string] $FilePath, [string[]] $Arguments = @()) {
@@ -307,10 +313,35 @@ function Assert-EdgeShutdown([string[]] $Arguments, [string] $Label) {
         Start-Sleep -Milliseconds 25
     } while ([DateTime]::UtcNow -lt $deadline)
     if (-not $listenerReady) { throw "The $Label edge did not create its session listener." }
-    if (-not $edge.WaitForExit(4000)) { throw "The $Label edge ignored WM_ENDSESSION." }
+    if (-not $edge.WaitForExit($EdgeEndSessionMs)) { throw "The $Label edge ignored WM_ENDSESSION." }
     if ($edge.ExitCode -ne 0) { throw "The $Label edge ended session with status $($edge.ExitCode)." }
     $observations.Add(@{ round=0; state='edge-shutdown-exit'; process=$Label; pid=$edge.Id; windows=@() })
     Write-Output "PASS process=$Label system-shutdown-exit"
+}
+
+# Opens the window, delivers the end-session sequence to the shell's own listener and requires it
+# to leave within its budget with no process started after the messages. Only the shell heard the
+# end, so the service lives on; its session is ended next, before presence can bring up another
+# shell, and any shell still attached leaves with its goodbye.
+function Assert-ShellShutdown {
+    Wait-OpenBurst @((Start-OwnedProcess $serviceImage @('open')))
+    $null = Wait-ServiceRunning
+    $service = Wait-SingleService
+    $window = @(Wait-WindowState 'restored')[0]
+    $shell = Get-Process -Id $window.Owner
+    $sentAt = [DateTime]::Now
+    [GhostlightNativeJourney]::EndSession($shell.Id)
+    if (-not $shell.WaitForExit($ShellEndSessionMs)) { throw "Shell $($shell.Id) ignored WM_ENDSESSION." }
+    [GhostlightNativeJourney]::EndSession($service.Id)
+    if (-not $service.WaitForExit($ServiceEndSessionMs)) { throw "Service $($service.Id) ignored WM_ENDSESSION." }
+    $started = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $($shell.Id)" |
+        Where-Object { $_.CreationDate -ge $sentAt })
+    if ($started.Count) { throw "The shell started $(@($started.Name) -join ', ') once the session was ending." }
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($ShellEndSessionMs)
+    while (@(Get-ImageProcesses $shellImage).Count -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
+    if (@(Get-ImageProcesses $shellImage).Count -or @(Get-ImageProcesses $serviceImage).Count) { throw 'A shell or the service outlived the end of the session.' }
+    $observations.Add(@{ round=0; state='shell-shutdown-exit'; pid=$shell.Id; windows=@() })
+    Write-Output 'PASS process=shell system-shutdown-exit'
 }
 
 try {
@@ -323,8 +354,8 @@ try {
     $agentService = Wait-SingleService
     # End that session so round 1 races a cold start; the service says goodbye to any shell.
     [GhostlightNativeJourney]::EndSession($agentService.Id)
-    if (-not $agentService.WaitForExit(6000)) { throw "Service $($agentService.Id) ignored WM_ENDSESSION." }
-    $deadline = [DateTime]::UtcNow.AddSeconds(6)
+    if (-not $agentService.WaitForExit($ServiceEndSessionMs)) { throw "Service $($agentService.Id) ignored WM_ENDSESSION." }
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($ShellEndSessionMs)
     while ((@(Get-ImageProcesses $shellImage).Count -or @(Get-ImageProcesses $serviceImage).Count) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
     if (@(Get-ImageProcesses $serviceImage).Count -or @(Get-ImageProcesses $shellImage).Count) { throw 'The agent-started service or its shell outlived the end of the session.' }
     $observations.Add(@{ round=0; state='mcp-edge-agent-start'; pid=$agentService.Id; windows=@() })
@@ -365,13 +396,14 @@ try {
 
         # The end of the session reaches the service, which says goodbye to the shell; both leave.
         [GhostlightNativeJourney]::EndSession($service.Id)
-        if (-not $service.WaitForExit(6000)) { throw "Service $($service.Id) ignored WM_ENDSESSION." }
-        $deadline = [DateTime]::UtcNow.AddSeconds(6)
+        if (-not $service.WaitForExit($ServiceEndSessionMs)) { throw "Service $($service.Id) ignored WM_ENDSESSION." }
+        $deadline = [DateTime]::UtcNow.AddMilliseconds($ShellEndSessionMs)
         while (@(Get-ImageProcesses $shellImage).Count -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
         if (@(Get-ImageProcesses $shellImage).Count) { throw 'The shell outlived the end of the session.' }
         $observations.Add(@{ round=$round; state='system-shutdown-exit'; pid=$service.Id; windows=@() })
         Write-Output "PASS round=$round system-shutdown-exit"
     }
+    Assert-ShellShutdown
     Write-Output "Windows native desktop journey passed: $($observations.Count) lifecycle checks."
 } catch {
     $failure = $_.Exception.Message

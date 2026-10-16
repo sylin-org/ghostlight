@@ -1,15 +1,17 @@
 // The real executables on relay protocol 4: an MCP session through `ghostlight mcp`, a synthetic
 // browser through `ghostlight chrome-extension://<id>/`, a service killed and restarted under
-// both, Quit holding the next browser start back, and ten racing starts leaving one service.
+// both, Quit holding the next browser start back, ten racing starts leaving one service, and, on
+// Linux, the edge and the service each leaving on SIGTERM, the session's end there.
 // Every process runs in a fresh test home under the temp directory; nothing touches the real one.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { constants } from "node:os";
 import { join } from "node:path";
 import {
-  QUIT_LATCH, buildVersion, controlOp, createHome, delay, openPolicy, quitReason, repository, startReason, templateKind,
-  until, vocabulary, within
+  QUIT_LATCH, buildVersion, controlOp, createHome, delay, imagePath, openPolicy, quitReason, repository, samePath,
+  startReason, templateKind, until, vocabulary, within
 } from "./lib/home.mjs";
-import { COLD_REQUEST_MS, McpEdge, RelayMcp, SyntheticBrowser, World, structured } from "./lib/peers.mjs";
+import { COLD_REQUEST_MS, EXTENSION_ORIGIN, McpEdge, RelayMcp, SyntheticBrowser, World, structured } from "./lib/peers.mjs";
 
 // docs/1.0/catalog.json is written on Windows. The catalog advertises an upload example path in the
 // service's own platform form (EXAMPLE_UPLOAD_PATH in crates/orchestrator/src/language/catalog.rs),
@@ -23,6 +25,17 @@ const catalog = JSON.parse(process.platform === "win32"
 const DENIED_HOST = "blocked.localhost";
 const BROWSER_ABSENT = (frame) => frame.kind === "backend_unavailable" && frame.service === "absent";
 const CONTENDERS = 10;
+// How long each binary may take to leave once it hears the end of the session, the budgets of
+// tests/windows-desktop-journey.ps1.
+const EDGE_END_SESSION_MS = 4_000;
+const SERVICE_END_SESSION_MS = 6_000;
+// The signal that ends the session for a Ghostlight process on Linux.
+const SESSION_END_SIGNAL = "SIGTERM";
+// How long a process may take to install its session listener after it starts.
+const LISTENER_READY_MS = 10_000;
+// How long nothing of the home may start after the last process left: longer than the 2 s fallback
+// exit and the 2 s presence launch delay, so a restart would show.
+const RESTART_SETTLE_MS = 3_000;
 
 async function racingStarts() {
   const race = createHome({ label: "race" });
@@ -167,7 +180,76 @@ async function mainFlow() {
   }
 }
 
+/** Whether the process `pid` has a handler of its own for `signal`, as its SigCgt mask says. Linux only. */
+function catchesSignal(pid, signal) {
+  try {
+    const mask = readFileSync(`/proc/${Number(pid)}/status`, "utf8").match(/^SigCgt:\s*([0-9a-f]+)$/m)?.[1];
+    return mask !== undefined && ((BigInt(`0x${mask}`) >> BigInt(signal - 1)) & 1n) === 1n;
+  } catch {
+    return false;
+  }
+}
+
+/** The ids of the running processes whose image is the edge or the service of `home`. Linux only. */
+function homeProcesses(home) {
+  return readdirSync("/proc").filter((name) => /^\d+$/.test(name)).map(Number).filter((pid) => {
+    const image = imagePath(pid);
+    return image !== null && [home.edge, home.service].some((own) => samePath(own, image));
+  });
+}
+
+/**
+ * Send SIGTERM to `pid` once its session listener is installed. A signal sent earlier would meet
+ * the default action and prove nothing.
+ */
+async function signalSessionEnd(pid, label) {
+  await until(() => catchesSignal(pid, constants.signals[SESSION_END_SIGNAL]), `${label} installs its session listener`, LISTENER_READY_MS);
+  process.kill(pid, SESSION_END_SIGNAL);
+}
+
+// SIGTERM is the end of the session on Linux (ADR-0199 Decision 21); Windows sends the end-session
+// messages instead, and tests/windows-desktop-journey.ps1 checks them. The home holds no shell, so
+// the shell's own SIGTERM is checked live.
+async function sessionEnd() {
+  const home = createHome({ label: "session-end" });
+  try {
+    const edgeLeaves = async (edge, label) => {
+      await signalSessionEnd(edge.pid, label);
+      const ended = await within(edge.exited, EDGE_END_SESSION_MS, `${label} leaves on SIGTERM`);
+      assert.deepEqual(ended, { code: 0, signal: null }, `${label} leaves cleanly on SIGTERM: ${edge.output}`);
+    };
+
+    // A browser relay starts the service only after the extension's hello, so nothing is left.
+    await edgeLeaves(home.start(home.edge, [EXTENSION_ORIGIN]), "the browser edge");
+    await delay(RESTART_SETTLE_MS);
+    assert.deepEqual(homeProcesses(home), [], "the browser edge starts nothing once the session ends");
+    console.log("PASS the browser edge leaves on SIGTERM and starts nothing");
+
+    // The MCP relay starts the service at its own start; its end leaves that service as it was.
+    const mcp = home.start(home.edge, ["mcp"]);
+    const status = await home.serviceUp();
+    await edgeLeaves(mcp, "the MCP edge");
+    await delay(RESTART_SETTLE_MS);
+    assert.deepEqual(homeProcesses(home), [status.pid], "the MCP edge restarts nothing once the session ends");
+    assert.equal((await home.status())?.instance, status.instance, "the service the MCP edge started runs on");
+    console.log("PASS the MCP edge leaves on SIGTERM and restarts nothing");
+
+    // The service hears SIGTERM itself and leaves, and nothing of the home starts again.
+    const image = imagePath(status.pid);
+    assert.ok(image && samePath(home.service, image), `process ${status.pid} is this home's service, not ${image}`);
+    await signalSessionEnd(status.pid, "the service");
+    await until(() => !homeProcesses(home).includes(status.pid), "the service leaves on SIGTERM", SERVICE_END_SESSION_MS);
+    await delay(RESTART_SETTLE_MS);
+    assert.deepEqual(homeProcesses(home), [], "the service restarts nothing once the session ends");
+    assert.equal(await home.status(), null, "no service answers after the session ended");
+    console.log("PASS the service leaves on SIGTERM and nothing starts again");
+  } finally {
+    await home.cleanup();
+  }
+}
+
 assert.equal(vocabulary.relay, 4);
 await racingStarts();
 await mainFlow();
-console.log("process journey ok: relay 4, the edge, restart continuity, Quit and racing starts");
+if (process.platform === "linux") await sessionEnd();
+console.log("process journey ok: relay 4, the edge, restart continuity, Quit, racing starts and the session's end");
