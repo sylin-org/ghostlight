@@ -1,14 +1,9 @@
 // The workbench surface, actually executed.
 //
-// Every other guard over this window reads its source as text, which can only ever check that the
-// right strings are present. None of them could tell that the window did not start: one missing
-// element id threw at module scope and silently abandoned the snapshot, the change subscription
-// and the first snapshot behind it, and the guards stayed green.
-//
 // This runs the real modules against a minimal DOM with one panel deliberately broken, and
 // asserts what a person would check by looking: the window still comes up, the failure is
 // visible, the rest of the pass continues, and the broken panel is retried rather than
-// remembered as finished.
+// remembered as finished. Every check reads what the page drew, never the page's source.
 //
 // Run with: node tests/workbench-surface.mjs
 import assert from "node:assert/strict";
@@ -49,6 +44,20 @@ const node = (id) => ({
   insertBefore() {}, contains: () => false, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 })
 });
 const nodes = new Map(ids.map((id) => [id, node(id)]));
+// Every element the page creates, so a row the view builds can be read back.
+const created = [];
+
+// Break exactly one panel, every time it is asked to render, and count the attempts. About writes
+// its version disc first, so a disc that refuses every write fails the whole panel. A panel that
+// is retried is attempted again on the next snapshot; one memoised as finished never is.
+let aboutAttempts = 0;
+Object.defineProperty(nodes.get("about-version"), "textContent", {
+  get: () => "",
+  set: () => {
+    aboutAttempts += 1;
+    throw new Error("deliberate About failure");
+  }
+});
 const confirmAccept = node("confirm-accept");
 confirmAccept.dataset.confirm = "accept";
 confirmAccept.closest = (selector) => selector === "[data-confirm]" ? confirmAccept : null;
@@ -184,8 +193,8 @@ const snapshot = () => ({
     managed_authority_active: false,
     managed_authority_valid: true,
     managed_policy: { configured: false },
-    // The tab's state is authored by the orchestrator now. The surface must render exactly what
-    // it is handed, so this fixture carries a sentence no local computation could have produced.
+    // The orchestrator authors the tab's state; the surface renders exactly what it is handed, so
+    // this fixture carries a sentence no local computation could have produced.
     policy: {
       situation: "layered",
       detail: "Example Org sets the rules, and you have narrowed them further.",
@@ -253,7 +262,12 @@ const sandbox = {
     },
     removeEventListener() {},
     hidden: false, body: node("body"),
-    createElement: () => node("x"), createDocumentFragment: () => node("f")
+    createElement: () => {
+      const made = node("x");
+      created.push(made);
+      return made;
+    },
+    createDocumentFragment: () => node("f")
   },
   window: {
     addEventListener: (kind) => listeners.push(`window:${kind}`),
@@ -313,27 +327,9 @@ sandbox.globalThis = sandbox;
 sandbox.window.document = sandbox.document;
 vm.createContext(sandbox);
 
-// Break exactly one panel, every time it is asked to render, and count the attempts. A panel that
-// is retried is attempted again on the next snapshot; one memoised as finished never is.
-const sources = ORDER.map((name) => {
-  let text = readFileSync(join(ui, name), "utf8");
-  if (name.endsWith("view.js")) {
-    text = text.replace(
-      "    function about({ version, license, counts }) {",
-      "    function about({ version, license, counts }) { globalThis.__aboutAttempts = (globalThis.__aboutAttempts || 0) + 1;"
-        + " throw new Error('deliberate About failure');"
-    );
-  }
-  return text;
-});
-if (!sources.some((text) => text.includes("deliberate About failure"))) {
-  console.log("FAIL  the harness could not break a panel; its injection point moved");
-  process.exit(1);
-}
-
 let bootThrew = null;
 try {
-  vm.runInContext(sources.join("\n"), sandbox);
+  vm.runInContext(ORDER.map((name) => readFileSync(join(ui, name), "utf8")).join("\n"), sandbox);
 } catch (error) {
   bootThrew = error.message;
 }
@@ -354,8 +350,7 @@ dispatchDocument("click", {
 await new Promise((r) => setTimeout(r, 0));
 // A second snapshot: whatever the first pass did with the broken panel, this is where a memo
 // would show itself by never trying again.
-sandbox.globalThis.__second = true;
-const before = sandbox.__aboutAttempts ?? 0;
+const before = aboutAttempts;
 await new Promise((r) => setTimeout(r, 60));
 
 // Settings as the first snapshot drew it, read before anything below repaints it.
@@ -707,12 +702,8 @@ const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
   && nodes.get("policy-blocked-reason").textContent.includes("Example Org");
 
 /*
- * A real browser nulls Event.currentTarget once dispatch finishes, which is at the first `await`
- * in an async listener -- well before an awaited call settles. `withButton` used to read
- * `event.currentTarget` a second time in its `finally` block, after that point, which threw on
- * every use of Re-check or Send test and left the button stuck disabled. The synthetic `node()`
- * stub above is a plain object and cannot reproduce that expiry, so this checks the one function
- * where it matters against an event shaped like the real one: valid once, synchronously, then gone.
+ * A real browser nulls Event.currentTarget at the first await, so withButton must capture the
+ * button before it awaits; this checks it against an event that expires the same way.
  */
 const reCheckButton = node("refresh-integrations");
 let dispatchEnded = false;
@@ -725,13 +716,26 @@ try {
   withButtonThrew = error.message;
 }
 
-// The never-settled treatment: the predicate lives beside the readiness words, the row applies
-// it on the duration cell, and the stylesheet carries the amber tone. The stub DOM cannot
-// accumulate row markup, so the row and stylesheet halves are pinned against their sources --
-// the same text-guard practice every other window guard uses.
+// The never-settled treatment: the predicate lives beside the readiness words, and a row the
+// view builds for a doubtful readiness marks its duration cell. It uses the view above, since a
+// new view would take over the document listeners the checks below dispatch to.
 const wordsApi = sandbox.globalThis.GhostlightWords;
-const viewSource = readFileSync(join(ui, "lib", "view.js"), "utf8");
-const stylesheet = readFileSync(join(ui, "styles.css"), "utf8");
+const durationCellOf = (readiness) => {
+  const record = {
+    invocation: `duration-${readiness}`, workspace: "w", tool: "browser_read", capability: "read",
+    status: "succeeded", effect: "none", allowed: true, complete: true, summary: "Read 5 words.",
+    timestamp_ms: 1, duration_ms: 10, observed: { readiness }
+  };
+  const entries = sandbox.globalThis.GhostlightEntries;
+  view.rebuildFeed([
+    entries.entryFromRecord({ ...record, invocation: "duration-newest" }, null),
+    entries.entryFromRecord(record, null)
+  ]);
+  const row = created.filter((made) => String(made.className).startsWith("row ")).at(-1);
+  return /<div class="row-dur[^"]*">/.exec(row?.innerHTML ?? "")?.[0] ?? "";
+};
+const loadingDuration = durationCellOf("loading");
+const interactiveDuration = durationCellOf("interactive");
 
 // The ADR-0145 status card: rendered from the orchestrator-owned state, with both person acts.
 view.collections({
@@ -1664,14 +1668,9 @@ const checks = [
       && sheetAfterPush.diagnosticsToggle === "Turn on" && sheetAfterPush.chip === "Full control"
       && sheetAfterPush.chipTitle === SHEET_PRIVATE && sheetAfterPush.snapshots === 0,
     JSON.stringify(sheetAfterPush)],
-  ["the Status page holds neither End session nor Send test",
-    (() => {
-      const status = markup.slice(markup.indexOf('id="view-status"'), markup.indexOf('id="view-policy"'));
-      return !status.includes("end_session") && !status.includes("test-notification")
-        && !status.includes("runtime-strip") && !status.includes("notifications-strip")
-        && !nodes.get("diagnostic-grid").innerHTML.includes("Process diagnostics");
-    })(),
-    "the Status page still carries a control that moved to Settings"],
+  ["the Status page draws no process diagnostics, which moved to Settings",
+    !nodes.get("diagnostic-grid").innerHTML.includes("Process diagnostics"),
+    nodes.get("diagnostic-grid").innerHTML],
   ["a pushed status changes the word, the sentence behind it and the wheel with no snapshot",
     wordBeforePush === "Ready" && wordAfterPush === "Paused"
       && wordTitleAfterPush === "Paused from the tray."
@@ -1734,8 +1733,7 @@ const checks = [
   ["only a fixable foreign entry offers the explicit Fix action",
     rosterCard("Junie")?.html.includes('data-harness-action="fix"')
       && rosterCard("Junie")?.html.includes(">Fix</button>")
-      && !rosterCard("Cline")?.html.includes('data-harness-action="fix"')
-      && sources.join("\n").includes('view.confirmFix(name, target)'),
+      && !rosterCard("Cline")?.html.includes('data-harness-action="fix"'),
     `junie: ${JSON.stringify(rosterCard("Junie")?.html)}`],
   ["Fix confirms the backup before dispatching the closed action",
     fixConfirmationShown && fixWasManaged,
@@ -1773,20 +1771,29 @@ const checks = [
       && nodes.get("state-word").title === "Connected and idle. Agents can work when they ask."
       && sandbox.document.body.className === "runtime-quiet",
     `readiness: ${JSON.stringify({ word: nodes.get("state-word").textContent, tone: sandbox.document.body.className })}`],
-  ["the window contains no readiness vocabulary of its own",
+  ["the band says the readiness word it is handed, and none when it is handed none",
     (() => {
-      const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
-      // Every word belongs to crates/orchestrator/src/language/readiness.rs. A literal here would
-      // be a second source of truth for the one answer the front door exists to give.
-      return !["Not connected", "Session ended", "Working", "Quiet"]
-        .some((word) => source.includes(`"${word}"`));
+      // Every word belongs to crates/orchestrator/src/language/readiness.rs. A word the window
+      // made up would be a second source of truth for the one answer the front door gives.
+      const bare = { sessions: [], browsers: [], history: [] };
+      const told = { ...bare, readiness: { state: "ready", word: "Lantern lit", detail: "Said by the service.", tone: "quiet", invites_control: true } };
+      view.band({ connected: true, snapshot: told, runtime: "active", running: 0 });
+      const handed = nodes.get("state-word").textContent;
+      view.band({ connected: true, snapshot: bare, runtime: "active", running: 0 });
+      const none = nodes.get("state-word").textContent;
+      return handed === "Lantern lit" && none === "";
     })(),
-    "view.js authors a readiness word"],
+    "the band authors a readiness word"],
   ["control follows the projection rather than a locally derived connection",
     (() => {
-      const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
-      return source.includes("readiness?.invites_control")
-        && !source.includes("el.wheel.disabled = !facts.connected");
+      const wheel = nodes.get("wheel");
+      const readiness = { state: "ready", word: "Ready", detail: "Connected.", tone: "quiet" };
+      const snapshot = (invites) => ({ sessions: [], browsers: [], history: [], readiness: { ...readiness, ...invites } });
+      view.band({ connected: true, snapshot: snapshot({}), runtime: "active", running: 0 });
+      const withheld = wheel.disabled;
+      view.band({ connected: true, snapshot: snapshot({ invites_control: true }), runtime: "active", running: 0 });
+      const invited = !wheel.disabled;
+      return withheld && invited;
     })(),
     "the wheel derives its own availability"],
   ["Pause and Resume stay available while the authority answers without a browser",
@@ -1815,10 +1822,8 @@ const checks = [
         && lost && neverReached && regained;
     })(),
     "the wheel follows a lost authority, or is disabled while a reachable authority offers control"],
-  ["the policy tab is a tab, keeps its name, and carries the authored state behind it",
-    markup.includes('class="tab policy-state"')
-      && !ids.includes("policy-state-label")
-      && policy.dataset.tone === "applied"
+  ["the policy tab carries the authored state behind it",
+    policy.dataset.tone === "applied"
       && policy.title === "Example Org sets the rules, and you have narrowed them further.",
     `policy: ${JSON.stringify({ tone: policy.dataset.tone, title: policy.title })}`],
   ["a refusal names the rule, the handle, and who to ask",
@@ -1832,12 +1837,9 @@ const checks = [
       && wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "interactive" } }) === false
       && wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "complete" } }) === false
       && wordsApi.readinessNeedsAttention({ settled: false, observed: { readiness: "loading" } }) === false
-      && viewSource.includes('readinessNeedsAttention(entry)')
-      && stylesheet.includes(".row-dur.unsettled"),
-    `attention: ${JSON.stringify({
-      loading: wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "loading" } }),
-      interactive: wordsApi.readinessNeedsAttention({ settled: true, observed: { readiness: "interactive" } })
-    })}`],
+      && loadingDuration === '<div class="row-dur unsettled">'
+      && interactiveDuration === '<div class="row-dur">',
+    `duration cells: ${JSON.stringify({ loading: loadingDuration, interactive: interactiveDuration })}`],
   ["the policy destination opens with the orchestrator's sentence",
     nodes.get("policy-headline").textContent
       === "Example Org sets the rules, and you have narrowed them further.",

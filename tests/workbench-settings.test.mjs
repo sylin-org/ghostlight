@@ -297,6 +297,59 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 const said = (shown, id) => shown.el(id).textContent;
 
+/* ------------------------------- stylesheet rules ------------------------------ */
+
+/**
+ * The rules of a stylesheet, each with the media condition it sits under (null at the top level),
+ * its selectors and its declarations by property. Comments are dropped.
+ */
+function rulesOf(sheet) {
+  const rules = [];
+  const walk = (text, media) => {
+    let at = 0;
+    while (at < text.length) {
+      const open = text.indexOf("{", at);
+      if (open < 0) return;
+      const prelude = text.slice(at, open).trim();
+      let depth = 1;
+      let close = open + 1;
+      for (; depth > 0; close += 1) {
+        if (text[close] === "{") depth += 1;
+        if (text[close] === "}") depth -= 1;
+      }
+      const body = text.slice(open + 1, close - 1);
+      if (prelude.startsWith("@media")) {
+        walk(body, prelude.slice("@media".length).trim());
+      } else if (!prelude.startsWith("@")) {
+        const declarations = {};
+        for (const line of body.split(";")) {
+          const colon = line.indexOf(":");
+          if (colon > 0) declarations[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+        }
+        rules.push({ media, selectors: prelude.split(",").map((selector) => selector.trim()), declarations });
+      }
+      at = close;
+    }
+  };
+  walk(sheet.replace(/\/\*[\s\S]*?\*\//g, ""), null);
+  return rules;
+}
+
+const RULES = rulesOf(styles);
+
+/** The rules that name `selector` exactly. */
+const naming = (selector, rules = RULES) => rules.filter((rule) => rule.selectors.includes(selector));
+
+/** The widest width a media condition applies up to, or null when it is not a width at all. */
+const widthOf = (media) => Number(/^\(max-width: (\d+)px\)$/.exec(media ?? "")?.[1] ?? NaN) || null;
+
+/** The rules that apply at `width`: the top level, and every width query that reaches down to it. */
+const applyingAt = (width) => RULES.filter((rule) => rule.media === null
+  || (widthOf(rule.media) !== null && width <= widthOf(rule.media)));
+
+/** How many tracks a grid-template-columns value declares; minmax(0, 1fr) is one. */
+const tracksIn = (value) => value.replace(/\([^)]*\)/g, "()").split(/\s+/).filter(Boolean).length;
+
 /* --------------------------------- the markup -------------------------------- */
 
 test("Settings is a tab before About, and the Controls button and sheet are gone", () => {
@@ -308,9 +361,6 @@ test("Settings is a tab before About, and the Controls button and sheet are gone
   for (const gone of ["controls-open", "controls-sheet", "controls-screen", "controls-computer", "controls-service"]) {
     assert.equal(shown.document.getElementById(gone), null, `#${gone} is still in the markup`);
   }
-  assert.ok(!/controls-sheet|controls-open|Controls sheet/.test(markup));
-  assert.ok(!/\.controls-(sheet|open)/.test(styles), "the sheet's styles are still in the stylesheets");
-  assert.ok(!/role="dialog"[^>]*controls/.test(markup));
 });
 
 test("the rail has five entries, each with a state word, and each opens a section of its own", () => {
@@ -348,7 +398,22 @@ test("the markup holds the ids and attributes the guards and the surface look fo
   assert.deepEqual(attribute("diagnostics-operation").sort(), ["reveal", "toggle"]);
   assert.deepEqual(attribute("quit"), ["ask", "yes", "no"]);
   assert.equal(shown.document.querySelectorAll("[data-settings-continue]").length, 4);
-  assert.ok(!/role="dialog" aria-modal="true"[^>]*aria-labelledby="controls/.test(markup));
+});
+
+test("the Policy tab is a tab that opens Policy, with no label beside it", () => {
+  const shown = page();
+  const tab = shown.el("policy-state");
+  assert.equal(tab.classes.has("tab"), true);
+  assert.equal(tab.dataset.view, "policy");
+  assert.equal(shown.document.getElementById("policy-state-label"), null);
+});
+
+test("the Status page holds no control that moved to Settings", () => {
+  const shown = page();
+  const status = [...shown.el("view-status").descendants()];
+  assert.deepEqual(status.filter((node) => "intent" in node.dataset).map((node) => node.id), []);
+  assert.equal(status.some((node) => node.id === "test-notification"), false);
+  assert.deepEqual(status.filter((node) => node.classes.has("runtime-strip") || node.classes.has("notifications-strip")), []);
 });
 
 /* ---------------------------------- addresses ---------------------------------- */
@@ -1168,6 +1233,7 @@ test("every readiness the service reports reads beside the row's sentence, and t
     assert.equal(cells.wearing("row-dur")[0].classes.has("unsettled"), readiness === "loading" || readiness === "unknown",
       readiness);
   }
+  assert.ok(naming(".row-dur.unsettled").length > 0, "the stylesheet gives the marked duration no treatment");
 });
 
 test("a managed policy's passport shows every signed fact", () => {
@@ -1239,57 +1305,6 @@ test("each catalog tool wears the medallion chosen for it", () => {
 });
 
 /* -------------------------------- the stylesheets -------------------------------- */
-
-/**
- * The rules of a stylesheet, each with the media condition it sits under (null at the top level),
- * its selectors and its declarations by property. Comments are dropped.
- */
-function rulesOf(sheet) {
-  const rules = [];
-  const walk = (text, media) => {
-    let at = 0;
-    while (at < text.length) {
-      const open = text.indexOf("{", at);
-      if (open < 0) return;
-      const prelude = text.slice(at, open).trim();
-      let depth = 1;
-      let close = open + 1;
-      for (; depth > 0; close += 1) {
-        if (text[close] === "{") depth += 1;
-        if (text[close] === "}") depth -= 1;
-      }
-      const body = text.slice(open + 1, close - 1);
-      if (prelude.startsWith("@media")) {
-        walk(body, prelude.slice("@media".length).trim());
-      } else if (!prelude.startsWith("@")) {
-        const declarations = {};
-        for (const line of body.split(";")) {
-          const colon = line.indexOf(":");
-          if (colon > 0) declarations[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
-        }
-        rules.push({ media, selectors: prelude.split(",").map((selector) => selector.trim()), declarations });
-      }
-      at = close;
-    }
-  };
-  walk(sheet.replace(/\/\*[\s\S]*?\*\//g, ""), null);
-  return rules;
-}
-
-const RULES = rulesOf(styles);
-
-/** The rules that name `selector` exactly. */
-const naming = (selector, rules = RULES) => rules.filter((rule) => rule.selectors.includes(selector));
-
-/** The widest width a media condition applies up to, or null when it is not a width at all. */
-const widthOf = (media) => Number(/^\(max-width: (\d+)px\)$/.exec(media ?? "")?.[1] ?? NaN) || null;
-
-/** The rules that apply at `width`: the top level, and every width query that reaches down to it. */
-const applyingAt = (width) => RULES.filter((rule) => rule.media === null
-  || (widthOf(rule.media) !== null && width <= widthOf(rule.media)));
-
-/** How many tracks a grid-template-columns value declares; minmax(0, 1fr) is one. */
-const tracksIn = (value) => value.replace(/\([^)]*\)/g, "()").split(/\s+/).filter(Boolean).length;
 
 test("every cell of a row has a column at every width, and the details span the row below them", () => {
   const shown = drawing();
