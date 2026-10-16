@@ -4,8 +4,8 @@
 //   1. the crate names in the normal dependency tree of the edge on each supported
 //      target (tests/golden/cargo-tree/<crate>.<target>.txt), with no network crate among
 //      them (ADR-0028, never phone home);
-//   2. the edge and relay source equals the last published tag at the same
-//      relay revision, so a published revision never changes underneath users;
+//   2. everything in crates/relay and crates/edge except test files equals the last published
+//      tag at the same relay revision, so a published revision never changes underneath users;
 //   3. the service links no UI toolkit and no async network stack (ADR-0199 D1 and D21): the
 //      window, the tray and the notices belong to ghostlight-desktop.
 //
@@ -29,8 +29,12 @@ const UPDATE = process.env.GHOSTLIGHT_GUARD_UPDATE === "1";
 const EDGES = ["ghostlight"];
 const TARGETS = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
 
-/** Source paths locked to the published relay revision; tests directories are excluded. */
-const LOCKED = ["crates/relay", "crates/edge", ":(exclude)crates/*/tests/**"];
+/**
+ * Paths locked to the published relay revision: everything in the two crates except test files,
+ * which are every file named tests.rs and every file under a directory named tests. A pathspec
+ * `*` also matches `/`, so each exclude reaches any depth.
+ */
+const LOCKED = ["crates/relay", "crates/edge", ":(exclude)crates/*/tests/**", ":(exclude)crates/*/tests.rs"];
 
 /** Crates the edge must never link: any network stack would break the never-phone-home promise (ADR-0028). */
 const NETWORK_CRATES = /^(hyper|reqwest|ureq|h2|http|rustls|native-tls|openssl|curl|isahc|tokio|socket2|mio)$/;
