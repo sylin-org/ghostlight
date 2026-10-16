@@ -68,6 +68,7 @@ if (lane === "all") {
   await run("winget-archive", "pwsh", ["-NoProfile", "-File", "tests/winget-archive.ps1"]);
   if (process.platform === "linux") await node("shell-installer", "tests/installer-shell.mjs");
   await node("policy-grammar", "tests/policy-grammar.mjs");
+  await run("journey-helpers", process.execPath, ["--test", "tests/lib/home.test.mjs"]);
 }
 const artifacts = new Map();
 const executables = ["ghostlight", "ghostlight-service"];
@@ -89,7 +90,7 @@ if (built) {
 }
 if (lane !== "browser") {
   for (const [name, file] of [
-    ["connector-parent", "connector-parent-lifecycle.mjs"],
+    ["edge-parent", "edge-parent-lifecycle.mjs"],
     ["fixed-installation", "fixed-installation-journey.mjs"],
     ["process", "process-journey.mjs"], ["continuity", "local-resilience-journey.mjs"],
     ["history-compatibility", "history-compatibility.mjs"],

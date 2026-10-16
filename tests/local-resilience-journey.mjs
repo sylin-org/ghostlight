@@ -1,247 +1,120 @@
-// Isolated real-service H8 journey. Synthetic adapters and clients; never the installed runtime.
+// Local resilience of the real service on relay protocol 4, in a test home: a private endpoint,
+// peers that are silent, torn, malformed or oversized, an ordinary burst, human Pause, Resume and
+// Stop from the browser, and a client that stops reading. Synthetic clients and a synthetic
+// browser speak bare relay 4 streams; nothing here touches the installed Ghostlight.
 import assert from "node:assert/strict";
-import { spawn, execFileSync } from "node:child_process";
-import { createConnection } from "node:net";
-import { readFileSync, writeFileSync, statSync, mkdirSync, rmSync } from "node:fs";
-import { resolve, join, dirname } from "node:path";
+import { statSync } from "node:fs";
+import { createHome, connectRelay, delay, opening, refusalCode, role, startReason, until, vocabulary, within } from "./lib/home.mjs";
+import { RelayMcp, SyntheticBrowser, World } from "./lib/peers.mjs";
 
-const root = resolve(import.meta.dirname, "..");
-const binaries = resolve(process.env.GHOSTLIGHT_BIN_DIR ?? join(root, ".target-ghostlight-1.0/debug"));
-const scratch = join(root, ".tmp", `h8-${process.pid}`);
-const runtime = join(binaries, `.h8-runtime-${process.pid}.json`);
-assert.equal(dirname(scratch), join(root, ".tmp"));
-assert.equal(dirname(runtime), binaries);
-mkdirSync(scratch, { recursive: true });
-const policy = join(scratch, "policy.json");
-writeFileSync(policy, JSON.stringify({ schema: 4, name: "H8 fixture", version: "1", grants: [{ id: "all", hosts: { allow: ["*"] }, allowed: ["read", "action", "write", "execute"] }],
-  config: [{ key: "browser.startup", value: "manual", level: "mandatory" }] }));
-const sockets = [];
-const delay = ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms));
-async function until(test, label, timeout = 8000) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) { if (test()) return; await delay(20); }
-  throw new Error(`Timed out: ${label}`);
-}
-function socket(port) {
-  const peer = createConnection({ host: "127.0.0.1", port });
-  peer.on("error", () => {});
-  sockets.push(peer); peer.resume();
-  return peer;
-}
-class Peer {
-  constructor(port, native = false) {
-    this.socket = socket(port); this.native = native; this.buffer = Buffer.alloc(0); this.messages = []; this.nextId = 0;
-    this.socket.on("data", bytes => {
-      this.buffer = Buffer.concat([this.buffer, bytes]);
-      for (;;) {
-        const length = native ? (this.buffer.length >= 4 ? this.buffer.readUInt32LE() : -1) : this.buffer.indexOf(10);
-        const header = native ? 4 : 0;
-        const consumed = length + (native ? 4 : 1);
-        if (length < 0 || this.buffer.length < consumed) return;
-        const value = JSON.parse(this.buffer.subarray(header, length + header));
-        this.buffer = this.buffer.subarray(consumed);
-        this.messages.push(value); this.onMessage?.(value);
-      }
-    });
-  }
-  encode(value) {
-    const bytes = Buffer.from(JSON.stringify(value));
-    if (!this.native) return Buffer.concat([bytes, Buffer.from("\n")]);
-    const header = Buffer.alloc(4); header.writeUInt32LE(bytes.length); return Buffer.concat([header, bytes]);
-  }
-  send(value) { this.socket.write(this.encode(value)); }
-  async take(test, label, timeout) {
-    await until(() => this.messages.some(test), label, timeout);
-    return this.messages.splice(this.messages.findIndex(test), 1)[0];
-  }
-  invoke(tool, input = {}, id = `call-${++this.nextId}`, deadline_ms) {
-    this.send({ kind: "invoke", id, tool, input, deadline_ms }); return id;
-  }
-  async result(id, timeout) { return (await this.take(value => value.kind === "result" && value.id === id, id, timeout)).result; }
-}
-let child;
-let output = "";
+const RETIRE_LIMIT_MS = vocabulary.opening_deadline_ms + 3_000;
+const BURST = 12;
+const STALL_LIMIT_MS = 30_000;
+const UNIX_RUN_MODE = 0o700;
+const UNIX_SOCKET_MODE = 0o600;
+const MODE_MASK = 0o777;
+
+const home = createHome({ label: "resilience" });
+const world = new World();
+const strangers = [];
 try {
-  writeFileSync(runtime, "{}"); // Existing inherited-access discovery must be replaced privately.
-  child = spawn(join(binaries, process.platform === "win32" ? "ghostlight.exe" : "ghostlight"), [], {
-    windowsHide: true, stdio: ["ignore", "ignore", "pipe"], env: { ...process.env,
-      GHOSTLIGHT_RUNTIME_FILE: runtime, GHOSTLIGHT_POLICY_FILE: policy,
-      GHOSTLIGHT_AUDIT_FILE: join(scratch, "audit.jsonl"), GHOSTLIGHT_DIAGNOSTICS_DIR: join(scratch, "diagnostics"),
-      GHOSTLIGHT_NATIVE_HOST_DIR: join(scratch, "native-host") }
-  });
-  child.stderr.on("data", bytes => { output = (output + bytes).slice(-6000); });
-  await until(() => { try { return JSON.parse(readFileSync(runtime)).service_port; } catch { return false; } }, "isolated service starts");
-  const endpoint = JSON.parse(readFileSync(runtime));
-  if (process.platform === "win32") {
-    const script = `$ErrorActionPreference = 'Stop'; $a = [System.IO.File]::GetAccessControl('${runtime.replaceAll("'", "''")}'); $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; [PSCustomObject]@{Protected=$a.AreAccessRulesProtected;Owner=$a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;CurrentUser=$currentUser;Rules=@($a.Access | ForEach-Object { [PSCustomObject]@{Sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value;Type=$_.AccessControlType.ToString();Inherited=$_.IsInherited;Rights=$_.FileSystemRights.ToString()} })} | ConvertTo-Json -Compress -Depth 4`;
-    const acl = JSON.parse(execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, encoding: "utf8" }));
-    assert.equal(acl.Protected, true);
-    assert.equal(acl.Owner, acl.CurrentUser);
-    assert.deepEqual(acl.Rules.map(rule => rule.Sid).sort(), [acl.CurrentUser, "S-1-5-18"].sort());
-    for (const rule of acl.Rules) {
-      assert.equal(rule.Type, "Allow"); assert.equal(rule.Inherited, false); assert.equal(rule.Rights, "FullControl");
-    }
-  } else {
-    assert.equal(statSync(runtime).mode & 0o777, 0o600, "replacement discovery is readable only by its owner");
+  home.start(home.service, ["serve", "--reason", startReason.agent], { stdio: ["ignore", "ignore", "pipe"] });
+  await home.serviceUp();
+  if (process.platform !== "win32") {
+    assert.equal(statSync(home.file(vocabulary.files.run_directory)).mode & MODE_MASK, UNIX_RUN_MODE, "the run directory is private");
+    assert.equal(statSync(home.file(vocabulary.files.run_directory, vocabulary.files.relay_socket)).mode & MODE_MASK, UNIX_SOCKET_MODE,
+      "the socket is private");
+    console.log("PASS the endpoint is private to its owner");
   }
-  console.log("PASS private runtime publication");
-  async function client(label) {
-    const peer = new Peer(endpoint.service_port);
-    peer.send({ kind: "hello", major: 2, token: endpoint.token, client_label: label });
-    peer.session = (await peer.take(value => value.kind === "hello_accepted", "authenticated client")).session;
-    return peer;
+
+  const a = await RelayMcp.open(home);
+  const b = await RelayMcp.open(home);
+  await a.initialize("resilience a");
+  await b.initialize("resilience b");
+  const browser = await SyntheticBrowser.viaRelay(home, world);
+  await browser.connect();
+  const opened = await a.facts("browser_navigate", { url: "https://example.com/" });
+  assert.equal(opened.status, "succeeded", JSON.stringify(opened));
+  const handle = opened.facts.tab;
+
+  // Peers that never finish an opening, or send what is not one, are retired.
+  const silent = await connectRelay(home.path);
+  const torn = await connectRelay(home.path);
+  torn.sendRaw(Buffer.from([0x20, 0x00]));
+  const partial = await connectRelay(home.path);
+  partial.sendRaw(Buffer.concat([Buffer.from([0x64, 0x00, 0x00, 0x00]), Buffer.from("{\"relay\"")]));
+  const malformed = await connectRelay(home.path);
+  malformed.sendRaw(Buffer.concat([Buffer.from([0x07, 0x00, 0x00, 0x00]), Buffer.from("{broken")]));
+  const oversized = await connectRelay(home.path);
+  const tooLarge = Buffer.alloc(4);
+  tooLarge.writeUInt32LE(vocabulary.frame.max_bytes + 1);
+  oversized.sendRaw(tooLarge);
+  const newer = await connectRelay(home.path);
+  newer.send({ ...opening(role.mcp), relay: vocabulary.relay + 1 });
+  strangers.push(silent, torn, partial, malformed, oversized, newer);
+  const refusal = await newer.next((frame) => "accepted" in frame, RETIRE_LIMIT_MS, "the refusal of a newer relay");
+  assert.equal(refusal.accepted, false);
+  assert.equal(refusal.code, refusalCode.unsupported);
+  assert.ok(refusal.say, "a refusal says why");
+  assert.equal((await b.facts("browser_read", { tab: handle })).status, "succeeded");
+  await within(Promise.all(strangers.map((stranger) => stranger.ended)), RETIRE_LIMIT_MS, "abandoned, torn, malformed and oversized peers retire");
+  assert.equal((await a.facts("policy_explain")).status, "succeeded");
+  console.log("PASS abandoned, torn, malformed and oversized peers retire; healthy clients stay served");
+
+  const burst = await Promise.all(Array.from({ length: BURST }, () => a.facts("browser_read", { tab: handle })));
+  assert.equal(burst.every((result) => result.status === "succeeded"), true);
+  console.log("PASS an ordinary burst completes without intervention");
+
+  // The person's controls reach the service through the browser.
+  async function control(intent, state) {
+    const seen = browser.controlStates().length;
+    browser.requestControl(intent);
+    await until(() => browser.controlStates().length > seen && browser.controlStates().at(-1) === state, `${intent} reaches ${state}`, 5_000);
   }
-  const a = await client("H8 A"), b = await client("H8 B");
-  const browser = new Peer(endpoint.browser_port, true);
-  const adapterHello = { kind: "hello", major: 3, adapter_version: "1.0.0", browser_id: "browser_h8",
-    adapter_epoch: "adapter_h8", capabilities: ["document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "presentation", "adapter_liveness"]
-      .map(name => ({ name, revision: { document_scope: 2, navigation: 2, semantic_document: 4 }[name] ?? 1 })) };
-  // Both hellos in one write pin preservation of buffered bytes across transport authentication.
-  browser.socket.write(Buffer.concat([browser.encode({ kind: "hello", major: 1, token: endpoint.token }), browser.encode(adapterHello)]));
-  await browser.take(value => value.kind === "hello_accepted", "adapter negotiation");
-  let nextTab = 0, hold = null, readDelay = 0;
-  const tabs = new Map(), requests = [], held = [];
-  browser.onMessage = frame => {
-    if (frame.kind === "heartbeat") { browser.send({ kind: "heartbeat_ack", sequence: frame.sequence }); return; }
-    if (frame.kind !== "request") return;
-    const request = frame.request, scope = request.command.scope;
-    const command = request.command.primitive ?? request.command;
-    requests.push({ ...request, command });
-    function reply(result) {
-      if (scope) result = { outcome: "in_documents", result, observation: { visited: scope.allowed, unavailable: [], limited_by_size: false } };
-      browser.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
-    }
-    if (command.command === "present") reply({ outcome: "presented", rendered: true });
-    else if (command.command === "list_tabs") reply({ outcome: "tabs", tabs: [] });
-    else if (command.command === "open_tab") {
-      const tab = { tab_id: ++nextTab, title: "H8 page", url: command.url, readiness: "complete", active: true };
-      tabs.set(tab.tab_id, tab); reply({ outcome: "tab_opened", tab, committed_urls: [tab.url] });
-    } else if (command.command === "describe_documents") reply({ outcome: "documents", tab_id: command.tab_id, inventory: {
-      documents: [{ id: "document-h8", url: tabs.get(command.tab_id).url, parent: null, supported: true }], subjects: [], unresolved: false, incomplete: false } });
-    else if (command.command === "read_document" || command.command === "read_text") {
-      const complete = () => reply({ outcome: "text", tab_id: command.tab_id, text: "H8 allowed content", title: "H8 page", url: tabs.get(command.tab_id).url, truncated: false });
-      if (hold === request.workspace) held.push(request); else setTimeout(complete, readDelay);
-    } else if (command.command === "cancel") reply({ outcome: "cancelled" });
-    else if (command.command === "clear_diagnostics") reply({ outcome: "diagnostics_cleared" });
-    else if (command.command === "close_tab") reply({ outcome: "tab_closed", tab_id: command.tab_id });
-    else throw new Error(`Unexpected H8 primitive ${command.command}`);
-  };
-  for (const peer of [a, b]) {
-    const result = await peer.result(peer.invoke("browser_navigate", { url: "https://sylin.org/" }));
-    assert.equal(result.status, "succeeded", JSON.stringify(result));
+  async function refused(label) {
+    const calls = browser.requested("call").length;
+    const result = await b.facts("browser_read", { tab: handle });
+    assert.notEqual(result.status, "succeeded", `${label}: work does not run`);
+    assert.equal(result.effect, "none", `${label}: nothing happened`);
+    assert.equal(browser.requested("call").length, calls, `${label}: nothing reached the browser`);
+    return result;
   }
-  // Small bounded abandoned-peer fixture, alongside two admitted clients and the adapter.
-  const abandoned = Array.from({ length: 4 }, () => socket(endpoint.service_port));
-  abandoned[1].write("{"); abandoned[2].write("{\"kind\":");
-  const nativeAbandoned = socket(endpoint.browser_port); nativeAbandoned.write(Buffer.from([10]));
-  const malformed = socket(endpoint.service_port); malformed.write("{broken\n");
-  const oversized = socket(endpoint.service_port); oversized.write(Buffer.alloc(8 * 1024 * 1024 + 8192, 32));
-  assert.equal((await b.result(b.invoke("browser_read"))).status, "succeeded");
-  await until(() => [...abandoned, nativeAbandoned, malformed, oversized].every(peer => peer.destroyed), "abandoned and malformed peers retired", 7500);
-  assert.equal((await a.result(a.invoke("policy_explain"))).status, "succeeded");
-  console.log("PASS abandoned, malformed, oversized peers; healthy idle clients survive");
+  await control("hold", "held");
+  await refused("held");
+  await control("resume", "active");
+  assert.equal((await b.facts("browser_read", { tab: handle })).status, "succeeded");
+  console.log("PASS Pause stops dispatch and Resume restores it");
 
-  hold = a.session;
-  a.invoke("browser_read", {}, "original");
-  await until(() => held.length === 1, "original dispatched");
-  a.invoke("browser_read", {}, "original");
-  await a.take(value => value.kind === "error" && value.code === "duplicate_request", "duplicate rejected");
-  a.send({ kind: "cancel", id: "original" });
-  const uncertain = await a.result("original", 2000);
-  assert.equal(uncertain.effect, "unknown"); assert.equal(uncertain.repeat_safe, false);
-  assert.equal(held.length, 1);
-  console.log("PASS duplicate rejection preserves original cancellation; uncertain work is not replayed");
+  await control("end_session", "ended");
+  const stopped = await refused("stopped");
+  assert.equal(stopped.status, "blocked");
+  await control("resume", "ended");
+  await refused("resumed after Stop");
+  assert.equal((await a.facts("policy_explain")).status, "succeeded", "diagnostics stay available after Stop");
+  await control("start_session", "active");
+  assert.equal((await b.facts("browser_read", { tab: handle })).status, "succeeded");
+  console.log("PASS Stop is terminal until an explicit new session, and nothing is replayed");
 
-  hold = null; readDelay = 65;
-  const burst = Array.from({ length: 12 }, (_, i) => a.invoke("browser_read", {}, `burst-${i}`));
-  for (const id of burst) assert.equal((await a.result(id)).status, "succeeded");
-  console.log("PASS ordinary 12-request burst completes without intervention");
-
-  readDelay = 0; hold = a.session;
-  a.invoke("browser_read", {}, "held");
-  await until(() => held.length === 2, "capacity fixture dispatched");
-  for (let i = 0; i < 31; i++) a.invoke("browser_read", {}, `queued-${i}`, i === 1 ? 100 : 8000);
-  a.invoke("browser_read", {}, "overflow");
-  const overflow = await a.result("overflow", 2000);
-  assert.equal(overflow.facts.reason, "capacity"); assert.equal(overflow.effect, "none"); assert.equal(overflow.repeat_safe, true);
-  assert.equal((await a.result(a.invoke("policy_explain"), 2000)).status, "succeeded");
-  assert.equal((await b.result(b.invoke("browser_read"), 2000)).status, "succeeded");
-  a.send({ kind: "cancel", id: "queued-0" });
-  const cancelled = await a.result("queued-0", 2000);
-  assert.equal(cancelled.status, "cancelled"); assert.equal(cancelled.effect, "none");
-  const expired = await a.result("queued-1", 2000);
-  assert.equal(expired.facts.reason, "deadline"); assert.equal(expired.effect, "none");
-  const pauseAt = Date.now();
-  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
-  await browser.take(value => value.kind === "control_state" && value.state === "held", "human pause", 1500);
-  assert.ok(Date.now() - pauseAt < 1500);
-  a.send({ kind: "cancel", id: "held" });
-  assert.equal((await a.result("held", 2000)).effect, "unknown");
-  for (let i = 2; i < 31; i++) assert.equal((await a.result(`queued-${i}`)).effect, "none");
-  assert.equal(held.length, 2, "pause and cancellation prevent queued dispatch");
-  hold = null;
-  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  await browser.take(value => value.kind === "control_state" && value.state === "active", "human resume");
-  assert.equal((await a.result(a.invoke("browser_read"))).status, "succeeded");
-  console.log("PASS capacity isolation, independent controls, queued cancellation/expiry, Pause/Resume and recovery");
-
-  // Stop is terminal: queued jobs settle without effects, and ordinary Resume cannot undo it.
-  hold = a.session;
-  a.invoke("browser_read", {}, "stop-in-flight");
-  await until(() => held.length === 3, "Stop fixture dispatched");
-  const stoppedIds = Array.from({ length: 5 }, (_, index) => a.invoke("browser_read", {}, `stop-queued-${index}`));
-  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "end_session" } });
-  await browser.take(value => value.kind === "control_state" && value.state === "ended", "human Stop", 1500);
-  a.send({ kind: "cancel", id: "stop-in-flight" });
-  const stoppedInFlight = await a.result("stop-in-flight", 2000);
-  assert.equal(stoppedInFlight.effect, "unknown"); assert.equal(stoppedInFlight.repeat_safe, false);
-  for (const id of stoppedIds) {
-    const result = await a.result(id, 2000);
-    assert.equal(result.status, "blocked"); assert.equal(result.effect, "none");
-    assert.equal(result.summary, "The user asked to interrupt the process. Wait for further instructions.");
-    assert.deepEqual(result.next_steps ?? [], [], "Stop never suggests automatic retry");
-  }
-  assert.equal(held.length, 3, "Stop prevents every queued browser dispatch");
-  assert.equal((await a.result(a.invoke("policy_explain"), 2000)).status, "succeeded", "diagnostics remain available after Stop");
-  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  await browser.take(value => value.kind === "control_state" && value.state === "ended", "Resume preserves Stop");
-  const stillStopped = await b.result(b.invoke("browser_read"), 2000);
-  assert.equal(stillStopped.status, "blocked"); assert.equal(stillStopped.effect, "none");
-  assert.equal(held.length, 3);
-  const beforeNewSession = requests.filter(request => ["read_document", "read_text"].includes(request.command.command)).length;
-  hold = null;
-  browser.send({ kind: "event", event: { event: "runtime_control_requested", intent: "start_session" } });
-  await browser.take(value => value.kind === "control_state" && value.state === "active", "explicit new session");
-  assert.equal((await a.result(a.invoke("browser_read"))).status, "succeeded");
-  assert.equal(requests.filter(request => ["read_document", "read_text"].includes(request.command.command)).length,
-    beforeNewSession + 1, "new session permits the new request without replaying stopped or uncertain work");
-  console.log("PASS Stop drains queued work, preserves in-flight uncertainty, keeps diagnostics usable, and requires explicit new-session recovery without replay");
-
-  const nonreader = await client("H8 stopped reading");
-  nonreader.socket.pause();
-  for (let i = 0; i < 256; i++) nonreader.send({ kind: "catalog" });
-  await delay(3000);
-  assert.equal((await b.result(b.invoke("browser_read"), 2000)).status, "succeeded");
-  // Keep the peer unread until retirement. Resuming after a fixed sleep can relieve
-  // backpressure before the writer has stalled on a slower host. A bounded stream
-  // of small requests fills platform-specific receive buffers and observes the
-  // server's shutdown through a subsequent write, without draining its responses.
+  // A client that stops reading is retired alone.
+  const slow = await RelayMcp.open(home);
+  await slow.initialize("resilience slow");
+  slow.stream.socket.pause();
+  const listRequest = { kind: "message", line: JSON.stringify({ jsonrpc: "2.0", id: 1000, method: "tools/list" }) };
   await until(() => {
-    if (nonreader.socket.destroyed) return true;
-    nonreader.send({ kind: "catalog" });
+    if (slow.stream.closed) return true;
+    slow.stream.send(listRequest);
     return false;
-  }, "stalled response peer retired while unread", 15000);
-  const fresh = await client("H8 recovered connection");
-  assert.equal((await fresh.result(fresh.invoke("policy_explain"))).status, "succeeded");
-  console.log("PASS stalled response delivery retires only its connection; future work succeeds");
-} catch (error) {
-  process.stderr.write(output); throw error;
+  }, "a stalled reader is retired", STALL_LIMIT_MS);
+  await delay(100);
+  assert.equal((await b.facts("browser_read", { tab: handle })).status, "succeeded");
+  const fresh = await RelayMcp.open(home);
+  await fresh.initialize("resilience fresh");
+  assert.equal((await fresh.facts("policy_explain")).status, "succeeded");
+  console.log("PASS a stalled reader is retired alone and later work succeeds");
+  for (const peer of [a, b, fresh]) peer.close();
+  browser.close();
+  console.log("local resilience journey ok: relay 4, one service, synthetic peers");
 } finally {
-  for (const peer of sockets) peer.destroy();
-  if (child && child.exitCode === null) {
-    const exited = new Promise(resolvePromise => child.once("exit", resolvePromise)); child.kill(); await exited;
-  }
-  rmSync(runtime, { force: true });
-  rmSync(runtime.replace(/\.json$/, ".lock"), { force: true });
-  rmSync(scratch, { recursive: true, force: true });
+  for (const stranger of strangers) stranger.close();
+  await home.cleanup();
 }

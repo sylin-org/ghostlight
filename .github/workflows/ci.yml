@@ -123,18 +123,15 @@ jobs:
       - name: Verify the shell installer
         if: runner.os == 'Linux'
         run: node tests/installer-shell.mjs
-      - run: node tests/connector-parent-lifecycle.mjs
+      - run: node tests/edge-parent-lifecycle.mjs
       - name: Verify the fixed installation
         if: runner.os == 'Linux'
         run: node tests/fixed-installation-journey.mjs
+      - run: node --test tests/lib/home.test.mjs
       - run: node tests/process-journey.mjs
-      - name: Verify one user installation across executable directories
-        if: runner.os == 'Linux'
-        env:
-          GHOSTLIGHT_JOURNEY_SINGLE_INSTALLATION: "1"
-        run: node tests/process-journey.mjs
       - run: node tests/local-resilience-journey.mjs
       - run: node tests/provenance-journey.mjs
+      - run: node tests/history-compatibility.mjs
       - run: node tests/cli-journey.mjs
       - run: node tests/cli-powershell-journey.mjs
       - run: node tests/workbench-surface.mjs

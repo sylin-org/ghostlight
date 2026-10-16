@@ -1,1311 +1,165 @@
+// The real executables on relay protocol 4: an MCP session through `ghostlight mcp`, a synthetic
+// browser through `ghostlight chrome-extension://<id>/`, a service killed and restarted under
+// both, Quit holding the next browser start back, and ten racing starts leaving one service.
+// Every process runs in a fresh test home under the temp directory; nothing touches the real one.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync, renameSync, rmdirSync, linkSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { spawn, spawnSync } from "node:child_process";
-import { createInterface } from "node:readline";
-import { policyRefreshed } from "./lib/policy-refresh.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  QUIT_LATCH, buildVersion, controlOp, createHome, delay, openPolicy, quitReason, repository, startReason, templateKind,
+  until, vocabulary, within
+} from "./lib/home.mjs";
+import { COLD_REQUEST_MS, McpEdge, RelayMcp, SyntheticBrowser, World, structured } from "./lib/peers.mjs";
 
-const repository = resolve(import.meta.dirname, "..");
-const executableSuffix = process.platform === "win32" ? ".exe" : "";
-const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, ".target-ghostlight-1.0", "debug");
-const singleInstallation = process.env.GHOSTLIGHT_JOURNEY_SINGLE_INSTALLATION === "1";
-const installationFixture = join(repository, ".tmp", `single-installation-${process.pid}`);
-const selectedBinDir = singleInstallation ? join(installationFixture, "development") : binDir;
-const packageBinDir = singleInstallation ? join(installationFixture, "package") : binDir;
-// ADR-0150: the runtime override elects the authority directory, so it points inside the build
-// under test and the deploy.lock beside it keeps quiescing demand-start.
-const runtimeFile = singleInstallation
-  ? join(installationFixture, "home", ".ghostlight", "ghostlight-runtime.json")
-  : join(binDir, `.ghostlight-journey-runtime-${process.pid}.json`);
-const runtimeLease = `${runtimeFile.replace(/\.json$/, "")}.lock`;
-const auditBackup = join(repository, `tests/.ghostlight-audit-backup-${process.pid}.jsonl`);
-const auditFile = join(repository, `tests/.ghostlight-audit-${process.pid}.jsonl`);
-const auditFailureScript = "throw new Error('PRIVATE_AUDIT_EXCEPTION')";
-const auditInvalidScript = "PRIVATE_INVALID_SCRIPT";
-const auditException = "PRIVATE_AUDIT_EXCEPTION";
-const policyFile = join(repository, `tests/.ghostlight-policy-${process.pid}.json`);
-const diagnosticsDir = join(repository, `tests/.ghostlight-diagnostics-${process.pid}`);
-const nativeHostDir = join(repository, `tests/.ghostlight-native-host-${process.pid}`);
-const deployLock = join(selectedBinDir, "deploy.lock");
-const EXPECTED_TOOLS = [
-  "browser_tabs", "browser_navigate", "browser_history", "browser_window",
-  "browser_read", "browser_inspect", "browser_find", "browser_screenshot",
-  "browser_click", "browser_scroll", "browser_hover", "browser_fill_form",
-  "browser_type_text", "browser_press_key", "browser_drag", "browser_wait",
-  "browser_dialog", "browser_upload", "browser_execute", "browser_flow",
-  "browser_record", "browser_diagnose", "policy_explain"
-];
-const environment = {
-  ...process.env,
-  GHOSTLIGHT_RUNTIME_FILE: runtimeFile,
-  GHOSTLIGHT_AUDIT_FILE: auditFile,
-  GHOSTLIGHT_POLICY_FILE: policyFile,
-  GHOSTLIGHT_DIAGNOSTICS_DIR: diagnosticsDir,
-  // No process this journey spawns may touch the machine's real native-host registration
-  // (ADR-0149 makes recovery repair owned registrations toward the running tree).
-  GHOSTLIGHT_NATIVE_HOST_DIR: nativeHostDir
-};
-if (singleInstallation) {
-  delete environment.GHOSTLIGHT_RUNTIME_FILE;
-  Object.assign(environment, {
-    HOME: join(installationFixture, "home"), USERPROFILE: join(installationFixture, "home"),
-    APPDATA: join(installationFixture, "roaming"), LOCALAPPDATA: join(installationFixture, "local"),
-    XDG_CONFIG_HOME: join(installationFixture, "config"), XDG_STATE_HOME: join(installationFixture, "state"),
-    CODEX_HOME: join(installationFixture, "codex")
-  });
-}
-for (const generated of [auditFile, auditBackup, nativeHostDir, diagnosticsDir]) {
-  assert.equal(dirname(resolve(generated)), join(repository, "tests"));
-}
-const children = [];
-const physicalCommands = [];
-let queryCount = 0;
-let pauseBeforeFocusedReceipt = false;
-let failAuditAfterNextOpen = false;
-const physicalRequests = [];
-const installedRuntimes = [];
-let createdDeployLock = false;
-// A real one-pixel GIF89a, the shape the extension now hands over already finished.
-const ONE_PIXEL_GIF = "R0lGODlhAQABAPAAAAwiOAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAZAAAACwAAAAAAQABAAAIBAABBAQAOw==";
-const ONE_PIXEL_JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
-const PROCESS_BROWSER = "browser_processjourney";
-// The service publishes readiness once its relay route exists, never after the window. A cold CI
-// machine can still be slow to start it, so the first wait is generous without making the process
-// journey flaky; later protocol waits retain their tighter five-second default.
-const SERVICE_STARTUP_TIMEOUT_MS = 30_000;
-const MCP_COLD_START_TIMEOUT_MS = SERVICE_STARTUP_TIMEOUT_MS + 10_000;
+const catalog = JSON.parse(readFileSync(join(repository, "docs", "1.0", "catalog.json"), "utf8"));
+const DENIED_HOST = "blocked.localhost";
+const BROWSER_ABSENT = (frame) => frame.kind === "backend_unavailable" && frame.service === "absent";
+const CONTENDERS = 10;
 
-function acknowledgeRuntime(peer, request) {
-  const command = request.command;
-  assert.equal(command.command, "install_page_runtime");
-  assert.equal(createHash("sha256").update(command.script).digest("hex"), command.sha256);
-  installedRuntimes.push(command.sha256);
-  peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: {
-    outcome: "page_runtime_installed", revision: command.revision, sha256: command.sha256
-  } } });
-}
-
-function executable(name) {
-  const path = join(name === "ghostlight" ? selectedBinDir : packageBinDir, `${name}${executableSuffix}`);
-  if (!existsSync(path)) throw new Error(`Missing ${path}; build the workspace first.`);
-  return path;
-}
-
-function start(command, args = [], options = {}) {
-  const child = spawn(command, args, { env: environment, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, ...options });
-  child.stderr.on("data", (chunk) => process.stderr.write(`[${command.split(/[\\/]/).at(-1)}] ${chunk}`));
-  child.on("exit", (code, signal) => {
-    if (code && code !== 0) process.stderr.write(`[${command.split(/[\\/]/).at(-1)}] exited code=${code} signal=${signal}\n`);
-  });
-  children.push(child);
-  return child;
-}
-
-function waitForExit(child, timeoutMs = 5000) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  return new Promise((resolvePromise, reject) => {
-    const timer = setTimeout(() => reject(new Error("Timed out waiting for child process exit")), timeoutMs);
-    child.once("exit", () => { clearTimeout(timer); resolvePromise(); });
-  });
-}
-
-async function waitForFile(path, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (existsSync(path)) return;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
-  }
-  throw new Error(`Timed out waiting for ${path}`);
-}
-
-class NativePeer {
-  constructor(child) {
-    this.child = child;
-    this.buffer = Buffer.alloc(0);
-    this.queue = [];
-    this.waiters = [];
-    this.observers = [];
-    child.stdout.on("data", (chunk) => this.receive(chunk));
-  }
-
-  send(value) {
-    const payload = Buffer.from(JSON.stringify(value));
-    const header = Buffer.alloc(4);
-    header.writeUInt32LE(payload.length);
-    this.child.stdin.write(Buffer.concat([header, payload]));
-  }
-
-  receive(chunk) {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    while (this.buffer.length >= 4) {
-      const length = this.buffer.readUInt32LE(0);
-      if (this.buffer.length < length + 4) return;
-      const value = JSON.parse(this.buffer.subarray(4, length + 4).toString("utf8"));
-      this.buffer = this.buffer.subarray(length + 4);
-      for (const observer of [...this.observers]) {
-        if (!observer.predicate(value)) continue;
-        this.observers.splice(this.observers.indexOf(observer), 1);
-        clearTimeout(observer.timer);
-        observer.resolve(value);
-      }
-      const waiter = this.waiters.shift();
-      if (waiter) waiter(value); else this.queue.push(value);
+async function racingStarts() {
+  const race = createHome({ label: "race" });
+  try {
+    const contenders = Array.from({ length: CONTENDERS }, () =>
+      race.start(race.service, ["serve", "--reason", startReason.agent], { stdio: ["ignore", "ignore", "pipe"] }));
+    const first = await race.serviceUp();
+    await until(() => contenders.filter((child) => child.exitCode === null && child.signalCode === null).length === 1,
+      "all but one contender exits", 40_000);
+    const survivors = contenders.filter((child) => child.exitCode === null && child.signalCode === null);
+    for (const child of contenders.filter((candidate) => !survivors.includes(candidate))) {
+      assert.equal(child.exitCode, 0, `a losing start exits quietly: ${child.output}`);
     }
-  }
-
-  next(timeoutMs = 5000) {
-    const queued = this.queue.shift();
-    if (queued) return Promise.resolve(queued);
-    if (timeoutMs <= 0) return new Promise((resolvePromise) => this.waiters.push(resolvePromise));
-    return new Promise((resolvePromise, reject) => {
-      const timer = setTimeout(() => reject(new Error("Timed out waiting for native frame")), timeoutMs);
-      this.waiters.push((value) => { clearTimeout(timer); resolvePromise(value); });
-    });
-  }
-
-
-  waitFor(predicate, timeoutMs = 5000) {
-    return new Promise((resolvePromise, reject) => {
-      const observer = { predicate, resolve: resolvePromise, timer: null };
-      observer.timer = setTimeout(() => {
-        this.observers.splice(this.observers.indexOf(observer), 1);
-        reject(new Error("Timed out waiting for matching native frame"));
-      }, timeoutMs);
-      this.observers.push(observer);
-    });
+    await delay(1500);
+    const later = await race.status();
+    assert.equal(later.instance, first.instance, "the instance is stable");
+    assert.equal(later.pid, survivors[0].pid, "the survivor is the service");
+    await race.quit();
+    await within(survivors[0].exited, 10_000, "the surviving contender exits after quit");
+    console.log("PASS ten racing starts leave exactly one service");
+  } finally {
+    await race.cleanup();
   }
 }
 
-class McpPeer {
-  constructor(child) {
-    this.child = child;
-    this.nextId = 1;
-    this.pending = new Map();
-    createInterface({ input: child.stdout }).on("line", (line) => {
-      const message = JSON.parse(line);
-      const waiter = this.pending.get(JSON.stringify(message.id));
-      if (waiter) {
-        this.pending.delete(JSON.stringify(message.id));
-        waiter(message);
-      }
-    });
-  }
+async function mainFlow() {
+  const home = createHome({ policy: openPolicy([DENIED_HOST]), label: "process" });
+  const world = new World();
+  const browsers = [];
+  try {
+    // An MCP session starts the service as an agent start.
+    const mcp = new McpEdge(home.start(home.edge, ["mcp"]));
+    const initialized = await mcp.initialize("process journey");
+    assert.equal(initialized.serverInfo.name, "ghostlight");
+    const status = await home.serviceUp();
+    assert.equal(status.started_by, startReason.agent);
+    assert.equal(status.service, buildVersion());
+    const listed = await mcp.request("tools/list");
+    assert.deepEqual(listed.result.tools, catalog, "tools/list is the catalog of docs/1.0/catalog.json");
+    const explained = await mcp.facts("policy_explain");
+    assert.equal(explained.status, "succeeded");
+    const denied = await mcp.facts("browser_navigate", { url: `http://${DENIED_HOST}:3000/` });
+    assert.equal(denied.status, "blocked");
+    assert.equal(denied.effect, "none");
+    console.log("PASS an MCP session through the edge lists the catalog and calls policy_explain");
 
-  request(method, params = {}) {
-    return this.beginRequest(method, params).promise;
-  }
+    // A synthetic browser through the browser edge.
+    const browser = SyntheticBrowser.viaEdge(home, world);
+    browsers.push(browser);
+    const accepted = await browser.connect();
+    assert.equal(accepted.control_state, "active");
+    assert.ok(accepted.service_epoch);
+    const tabs = await mcp.facts("browser_tabs", { action: "list" });
+    assert.equal(tabs.status, "succeeded");
+    assert.equal(browser.requested("list_tabs").length >= 1, true);
+    const opened = await mcp.facts("browser_navigate", { url: "https://example.com/" });
+    assert.equal(opened.status, "succeeded");
+    const handle = opened.facts.tab;
+    assert.match(handle, /^tab_/);
+    assert.equal(world.tabs.length, 1);
+    assert.equal(browser.requested("open_tab").some((request) => request.primitive.args.url.includes(DENIED_HOST)), false);
+    const moved = await mcp.facts("browser_navigate", { tab: handle, url: "https://example.com/second" });
+    assert.equal(moved.status, "succeeded");
+    assert.equal(browser.requested("navigate").length, 1);
+    const read = await mcp.facts("browser_read", { tab: handle });
+    assert.equal(read.status, "succeeded");
+    assert.equal(read.facts.text, "Example Domain");
+    const shot = await mcp.call("browser_screenshot", { tab: handle });
+    assert.equal(structured(shot).status, "succeeded");
+    assert.match(structured(shot).facts.view, /^view_/);
+    assert.equal(shot.result.content.some((item) => item.type === "image"), true);
+    assert.equal(browser.requested("capture").length, 1);
+    console.log("PASS a synthetic browser serves list_tabs, navigate, a call and a capture");
 
-  beginRequest(method, params = {}, timeoutMs = 10_000) {
-    const id = this.nextId++;
-    const promise = new Promise((resolvePromise, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Timed out waiting for MCP ${method}`)), timeoutMs);
-      this.pending.set(JSON.stringify(id), (value) => { clearTimeout(timer); resolvePromise(value); });
-    });
-    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    return { id, promise };
-  }
+    // The service is killed under a call in flight.
+    const probe = await RelayMcp.open(home);
+    const cutOff = probe.reply.templates[templateKind.cut_off]["tools/call"].result.content;
+    probe.close();
+    browser.holdNext("call");
+    const inFlight = mcp.begin("tools/call", { name: "browser_read", arguments: { tab: handle } });
+    await until(() => browser.held.length === 1, "the read reaches the browser");
+    const before = await home.status();
+    await home.killService();
+    const interrupted = await within(inFlight.promise, COLD_REQUEST_MS, "the interrupted call answers");
+    assert.equal(interrupted.result.isError, true);
+    assert.deepEqual(interrupted.result.content, cutOff, "the cut-off call answers with the service's own words");
+    await browser.waitFor(BROWSER_ABSENT, 15_000, "the browser edge reports the service absent");
+    console.log("PASS a call cut off by a killed service says it may have happened");
 
-  notify(method, params = {}) {
-    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
-  }
-}
+    // The next call starts a service, resumes the session, and the tab handle survives.
+    const relisted = await mcp.request("tools/list");
+    assert.equal(relisted.result.tools.length, catalog.length);
+    await within(browser.ended, 20_000, "the browser edge exits when a service accepts again");
+    const reborn = SyntheticBrowser.viaEdge(home, world);
+    browsers.push(reborn);
+    const again = await reborn.connect();
+    assert.notEqual(again.service_epoch, accepted.service_epoch, "the new service has a new epoch");
+    const after = await home.status();
+    assert.notEqual(after.instance, before.instance);
+    assert.equal(after.started_by, startReason.agent);
+    const reread = await mcp.facts("browser_read", { tab: handle });
+    assert.equal(reread.status, "succeeded");
+    assert.equal(reread.facts.text, "Example Domain");
+    console.log("PASS the next call resumes by token, the tab handle survives and the browser reconnects");
 
-async function runAdapter(peer) {
-  let tab = { tab_id: 41, title: "", url: "about:blank", active: true, readiness: "complete" };
-  const recordings = new Map();
-  function selectedRecording(request) {
-    const requested = (request.command.primitive ?? request.command).recording_id;
-    if (requested) return recordings.get(requested)?.workspace === request.workspace ? recordings.get(requested) : null;
-    const owned = Array.from(recordings.values()).filter((recording) => recording.workspace === request.workspace);
-    return owned.length === 1 ? owned[0] : null;
-  }
-  function recordingSummary(recording) {
-    return {
-      recording_id: recording.id,
-      tab_id: tab.tab_id,
-      state: recording.state,
-      frame_count: recording.frames.length,
-      bytes_held: recording.frames.length ? 166 : 0,
-      duration_ms: 1000,
-      ...(recording.state === "recording"
-        ? { hard_expires_unix_ms: Date.now() + 120000 }
-        : { retention_expires_unix_ms: Date.now() + 300000, stop_reason: "explicit" }),
-      source_urls: [tab.url], source_urls_complete: true
-    };
-  }
-  for (;;) {
-    const frame = await peer.next(0);
-    if (frame.kind === "heartbeat") {
-      peer.send({ kind: "heartbeat_ack", sequence: frame.sequence });
-      continue;
-    }
-    if (frame.kind !== "request") continue;
-    const request = frame.request;
-    const scope = request.command.command === "in_documents" ? request.command.scope : null;
-    const command = scope ? request.command.primitive : request.command;
-    if (command.command === "install_page_runtime") {
-      acknowledgeRuntime(peer, request);
-      continue;
-    }
-    if (command.command === "describe_documents") {
-      peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: {
-        outcome: "documents", tab_id: command.tab_id, inventory: {
-          documents: [{ id: "process-document", url: tab.url, parent: null, supported: true }],
-          subjects: command.locators.length || command.points.length || command.focused ? ["process-document"] : [],
-          unresolved: false, incomplete: false
-        }
-      } } });
-      continue;
-    }
-    physicalCommands.push(command.command);
-    physicalRequests.push(command);
-    let result;
-    if (command.command === "present") result = { outcome: "presented", rendered: true };
-    else if (command.command === "open_tab") {
-      tab = { ...tab, title: "Example Domain", url: new URL(command.url).href, readiness: "complete" };
-      result = { outcome: "tab_opened", tab, committed_urls: [tab.url] };
-      if (failAuditAfterNextOpen) {
-        failAuditAfterNextOpen = false;
-        renameSync(auditFile, auditBackup);
-        mkdirSync(auditFile);
-      }
-    } else if (command.command === "read_text") {
-      result = { outcome: "text", tab_id: tab.tab_id, text: "Example Domain", truncated: false, title: tab.title, url: tab.url };
-    } else if (command.command === "find") {
-      result = {
-        outcome: "targets",
-        tab_id: tab.tab_id,
-        targets: [{ locator: "heading-1", role: "heading", name: "Example Domain", state: [], credential_class: false }]
-      };
-    } else if (command.command === "evaluate_script") {
-      if (command.script === auditFailureScript || command.script === auditInvalidScript) {
-        peer.send({ kind: "error", correlation: request.correlation, code: "primitive_failed",
-          message: auditException, effect_unknown: command.script === auditFailureScript });
-        continue;
-      }
-      result = {
-        outcome: "script_evaluated",
-        tab,
-        value: JSON.stringify({ title: "Example Domain", visible: true }),
-        truncated: false,
-        committed_urls: []
-      };
-    } else if (command.command === "screenshot") {
-      result = {
-        outcome: "screenshot",
-        tab_id: tab.tab_id,
-        mime_type: "image/jpeg",
-        data: ONE_PIXEL_JPEG,
-        width: 400,
-        height: 300,
-        viewport: {
-          scope: "viewport",
-          page_x: 10,
-          page_y: 20,
-          css_width: 800,
-          css_height: 600,
-          visual_page_x: 10,
-          visual_page_y: 20,
-          visual_css_width: 800,
-          visual_css_height: 600,
-          device_scale: 1,
-          zoom: 1,
-          output_scale: 0.5
-        }
-      };
-    } else if (command.command === "screenshot_region") {
-      const { region, expected_viewport: expected } = command;
-      const scale = Math.min(
-        2400 / region.width,
-        2400 / region.height,
-        Math.sqrt(4_000_000 / (region.width * region.height))
-      );
-      result = {
-        outcome: "screenshot",
-        tab_id: tab.tab_id,
-        mime_type: "image/jpeg",
-        data: ONE_PIXEL_JPEG,
-        width: Math.round(region.width * scale),
-        height: Math.round(region.height * scale),
-        viewport: {
-          scope: "region",
-          page_x: region.x,
-          page_y: region.y,
-          css_width: region.width,
-          css_height: region.height,
-          visual_page_x: expected.visual_page_x,
-          visual_page_y: expected.visual_page_y,
-          visual_css_width: expected.visual_css_width,
-          visual_css_height: expected.visual_css_height,
-          device_scale: expected.device_scale,
-          zoom: expected.zoom,
-          output_scale: scale
-        }
-      };
-    } else if (command.command === "observe") {
-      setTimeout(() => {
-        let observed = { outcome: "observed", tab_id: command.tab_id, satisfied: true, elapsed_ms: 1000, readiness: "complete" };
-        if (scope) observed = { outcome: "in_documents", result: observed,
-          observation: { visited: scope.allowed, unavailable: [], limited_by_size: false } };
-        peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result: observed } });
-      }, 1000);
-      continue;
-    } else if (command.command === "start_recording") {
-      const recording = { id: `recording_${recordings.size + 1}`, workspace: request.workspace, state: "recording", frames: [] };
-      recordings.set(recording.id, recording);
-      result = { outcome: "recording_started", summary: recordingSummary(recording), existing: false };
-    } else if (command.command === "stop_recording") {
-      const recording = selectedRecording(request);
-      if (!recording) result = { outcome: "recording_not_found" };
-      else {
-        const changed = recording.state === "recording";
-        recording.state = "frozen";
-        if (recording.frames.length === 0) {
-          recording.frames.push({ frame_kind: "final", duration_ms: 1_000, mime_type: "image/jpeg", data: ONE_PIXEL_JPEG });
-        }
-        result = { outcome: "recording_stopped", summary: recordingSummary(recording), changed };
-      }
-    } else if (command.command === "export_recording") {
-      // The browser encodes and delivers. Only a client return carries bytes back; a target or
-      // download save finishes here, exactly as the extension does it.
-      const recording = selectedRecording(request);
-      if (!recording) result = { outcome: "recording_not_found" };
-      else {
-        const kind = command.destination.destination;
-        result = {
-          outcome: "recording_exported",
-          summary: recordingSummary(recording),
-          encoded: {
-            frame_count: recording.frames.length,
-            captured_frame_count: recording.frames.length,
-            duration_ms: 1_000,
-            width: 1,
-            height: 1,
-            byte_count: 69
-          },
-          delivery: kind === "client"
-            ? { delivery: "returned", mime_type: "image/gif", data: ONE_PIXEL_GIF }
-            : kind === "download"
-              ? { delivery: "downloaded" }
-              : { delivery: "attached", tab_id: command.destination.tab_id }
-        };
-      }
-    } else if (command.command === "discard_recording") {
-      const recording = selectedRecording(request);
-      if (!recording) result = { outcome: "recording_not_found" };
-      else {
-        recordings.delete(recording.id);
-        result = { outcome: "recording_discarded", recording_id: recording.id, released_bytes: 166 };
-      }
-    } else if (command.command === "close_tab") result = { outcome: "tab_closed", tab_id: command.tab_id };
-    else if (command.command === "cancel") result = { outcome: "cancelled" };
-    else if (command.command === "clear_diagnostics") result = { outcome: "diagnostics_cleared", cleared_count: 0 };
-    else if (command.command === "read_document") {
-      result = {
-        outcome: "text",
-        tab_id: command.tab_id,
-        text: command.mode === "article"
-          ? "Article body describing Example Domain and its purpose in depth."
-          : "Example Domain",
-        truncated: false,
-        title: "Example Domain",
-        url: tab.url
-      };
-    } else if (command.command === "inspect_tree") {
-      result = { outcome: "document_tree", tab_id: command.tab_id, tree: JSON.stringify({ kind: "container", label: "Example Domain", children: [{ kind: "heading", label: "Example Domain", children: [] }] }), truncated: false };
-    } else if (command.command === "query_semantic") {
-      queryCount += 1;
-      const one = [{ locator: `locator_${queryCount}`, role: "link", name: "More information...", state: [], credential_class: false }];
-      result = { outcome: "targets", tab_id: command.tab_id, targets: queryCount === 2 ? [...one, { ...one[0], locator: `${one[0].locator}b` }] : one };
-    } else if (command.command === "list_tabs") {
-      result = { outcome: "tabs", tabs: [] };
-    } else if (command.command === "describe_focused") {
-      if (pauseBeforeFocusedReceipt) {
-        pauseBeforeFocusedReceipt = false;
-        const held = peer.waitFor((frame) => frame.kind === "control_state" && frame.state === "held");
-        peer.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
-        await held;
-        peer.send({ kind: "event", event: { event: "document_committed", tab_id: command.tab_id, url: "https://example.com/" } });
-      }
-      result = { outcome: "targets_described", tab_id: command.tab_id, targets: [{ locator: "focused", role: "textbox", name: "Notes", state: [], credential_class: false }] };
-    } else if (command.command === "describe_targets") {
-      result = { outcome: "targets_described", tab_id: command.tab_id, targets: command.locators.map((locator) => ({ locator, role: "textbox", name: "Notes", state: [], credential_class: false })) };
-    } else if (command.command === "activate" || command.command === "activate_modified") {
-      tab = { ...tab, title: "Example Domain", url: "https://example.com/", readiness: "complete" };
-      result = { outcome: "activated", tab, subject: { role: "link", name: "More information..." }, committed_urls: [] };
-    } else if (command.command === "press_key") {
-      tab = { ...tab, readiness: "complete" };
-      result = { outcome: "key_pressed", tab, key: command.key, subject: null, committed_urls: [] };
-    } else if (command.command === "wheel_at") {
-      result = { outcome: "scrolled", tab_id: command.tab_id, x: 100, y: 50, subject: null };
-    } else if (command.command === "navigate_discarding_before_unload") {
-      tab = { ...tab, title: "Submitted", url: "https://example.com/submitted", readiness: "complete" };
-      result = { outcome: "navigated", tab, committed_urls: ["https://example.com/submitted"] };
-    } else if (command.command === "upload_files" || command.command === "drop_image_at") {
-      const files = command.files ?? [command.file];
-      result = { outcome: "files_uploaded", tab_id: command.tab_id, uploaded_count: files.length, uploaded_bytes: files.reduce((sum, file) => sum + file.size, 0), subject: null };
-    }
-    else throw new Error(`Unexpected physical primitive ${command.command}`);
-    if (scope) result = { outcome: "in_documents", result, observation: {
-      visited: scope.allowed, unavailable: [], limited_by_size: Boolean(result.truncated)
-    } };
-    peer.send({ kind: "receipt", receipt: { correlation: request.correlation, result } });
+    // Quit holds.
+    const quitting = await home.control({ op: controlOp.quit, reason: quitReason.quit });
+    assert.deepEqual(quitting.value, { quitting: true });
+    await until(async () => !(await home.status()), "the service is gone after quit", 20_000);
+    assert.equal(existsSync(home.file(...QUIT_LATCH)), true, "quit leaves its latch");
+    await reborn.waitFor(BROWSER_ABSENT, 15_000, "the browser edge reports the quit");
+    const afterQuit = SyntheticBrowser.viaEdge(home, world);
+    browsers.push(afterQuit);
+    afterQuit.send(afterQuit.helloFrame());
+    await afterQuit.waitFor(BROWSER_ABSENT, 20_000, "a new browser start is told the service is absent");
+    await delay(1500);
+    assert.equal(await home.status(), null, "a browser start after quit starts no service");
+    afterQuit.close();
+    const restarted = await mcp.request("tools/list");
+    assert.equal(restarted.result.tools.length, catalog.length, "the next MCP request starts the service");
+    const revived = await home.serviceUp();
+    assert.equal(revived.started_by, startReason.agent);
+    assert.equal(existsSync(home.file(...QUIT_LATCH)), false, "an agent start clears the latch");
+    await within(reborn.ended, 20_000, "the browser edge that heard the quit exits when a service accepts");
+    console.log("PASS Quit holds a browser start back and the next MCP request starts the service");
+
+    // A browser and a heartbeat on the revived service.
+    const last = SyntheticBrowser.viaEdge(home, world);
+    browsers.push(last);
+    await last.connect();
+    const listedAgain = await mcp.facts("browser_tabs", { action: "list" });
+    assert.equal(listedAgain.status, "succeeded");
+    await until(() => last.heartbeats > 0, "the service sends a heartbeat", 40_000);
+    const records = home.auditRecords();
+    assert.equal(records.some((record) => record.tool === "browser_read" && record.allowed === true), true, "a read is in the audit");
+    assert.equal(records.some((record) => record.tool === "browser_navigate" && record.allowed === false), true, "the refusal is in the audit");
+    console.log("PASS a heartbeat is answered and the audit holds the work");
+    mcp.child.stdin.end();
+  } finally {
+    for (const browser of browsers) browser.close();
+    await home.cleanup();
   }
 }
 
-function structured(response) {
-  assert.equal(response.error, undefined, JSON.stringify(response.error));
-  return response.result.structuredContent;
-}
-
-function textual(response) {
-  assert.equal(response.error, undefined, JSON.stringify(response.error));
-  const item = response.result.content.find((content) => content.type === "text");
-  assert.equal(typeof item?.text, "string");
-  return item.text;
-}
-
-async function waitForMcpReady(mcp, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const response = await mcp.request("tools/list");
-    if (!response.error) return response;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
-  }
-  throw new Error("Timed out waiting for MCP service reconnection");
-}
-
-async function waitForNoBrowsers(mcp, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastSeen = "no response";
-  while (Date.now() < deadline) {
-    const listed = structured(await mcp.request("tools/call", {
-      name: "browser_tabs",
-      arguments: { action: "list" }
-    }));
-    // Listing reads live state through the adapter, so once the adapter is disconnected the
-    // read refuses -- and that refusal is exactly the registry-empty signal.
-    lastSeen = listed.facts?.browsers
-      ? `tabs=${JSON.stringify(listed.facts.browsers)}`
-      : `${listed.status}: ${listed.summary ?? ""}`;
-    if (listed.status === "failed") return;
-    if (Array.isArray(listed.facts?.browsers) && listed.facts.browsers.length === 0) return;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
-  }
-  throw new Error(`Timed out waiting for the browser registry to empty: ${lastSeen}`);
-}
-
-try {
-  if (singleInstallation) {
-    for (const directory of [selectedBinDir, packageBinDir]) {
-      mkdirSync(directory, { recursive: true });
-      for (const name of ["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"]) {
-        linkSync(join(binDir, `${name}${executableSuffix}`), join(directory, `${name}${executableSuffix}`));
-      }
-    }
-    const lifecycle = (directory, ...args) => {
-      const result = spawnSync(join(directory, `ghostlight${executableSuffix}`), args, { env: environment, encoding: "utf8", windowsHide: true, timeout: 15000 });
-      assert.equal(result.status, 0, result.stderr || result.error?.message);
-      return JSON.parse(result.stdout);
-    };
-    const dev = lifecycle(selectedBinDir, "deployment", "development");
-    const release = lifecycle(packageBinDir, "deployment", "release");
-    assert.equal(release.serving_directory, dev.serving_directory);
-    assert.equal(release.policy_directory, dev.policy_directory);
-    const restored = lifecycle(selectedBinDir, "deployment", "restore");
-    assert.equal(restored.serving_directory, release.release_directory);
-    assert.equal(restored.state_directory, dev.state_directory);
-    assert.equal(restored.policy_directory, dev.policy_directory);
-    lifecycle(selectedBinDir, "deployment", "development");
-    // Inactive removal must stop before consulting any registration IO. Do not install into
-    // Windows' shared isolated registry namespace from a parallel process fixture.
-    mkdirSync(nativeHostDir, { recursive: true });
-    writeFileSync(join(nativeHostDir, "registration-sentinel.json"), JSON.stringify({ path: executable("ghostlight-browser-connector") }));
-    const manifests = readdirSync(nativeHostDir, { recursive: true }).filter((name) => name.endsWith(".json"));
-    assert.ok(manifests.length > 0);
-    const before = manifests.map((name) => readFileSync(join(nativeHostDir, name), "utf8"));
-    const inactiveRemoval = spawnSync(join(packageBinDir, `ghostlight${executableSuffix}`), ["native-host", "uninstall"], { env: environment, encoding: "utf8", windowsHide: true, timeout: 15000 });
-    assert.equal(inactiveRemoval.status, 0, inactiveRemoval.stderr);
-    assert.deepEqual(manifests.map((name) => readFileSync(join(nativeHostDir, name), "utf8")), before);
-    const packageDoctor = lifecycle(packageBinDir, "doctor", "--json");
-    assert.equal(packageDoctor.installation.source, "development");
-    assert.equal(resolve(packageDoctor.installation.runtime_file), resolve(runtimeFile));
-    assert.equal(packageDoctor.installation.selection.serving_directory, dev.serving_directory);
-    console.log("single installation: package CLI and both foreign connectors select development without a runtime override");
-  }
-  rmSync(runtimeFile, { force: true });
-  rmSync(auditFile, { force: true, recursive: true });
-  rmSync(auditBackup, { force: true });
-  rmSync(policyFile, { force: true });
-  writeFileSync(policyFile, JSON.stringify({
-    schema: 4,
-    name: "Process journey",
-    version: "1",
-    grants: [{
-      id: "ordinary-web",
-      hosts: { allow: ["*"], deny: ["blocked.localhost"] },
-      allowed: ["read", "action", "write", "execute"]
-    }],
-    config: [{ key: "browser.startup", value: "manual", level: "mandatory" }]
-  }));
-  if (existsSync(deployLock)) throw new Error(`Refusing to replace existing deploy lock ${deployLock}`);
-  writeFileSync(deployLock, "process journey quiesce", { flag: "wx" });
-  createdDeployLock = true;
-  const browserConnector = start(executable("ghostlight-browser-connector"));
-  const native = new NativePeer(browserConnector);
-  native.send({
-    kind: "hello",
-    major: 3,
-    adapter_version: "1.0.0",
-    browser_id: PROCESS_BROWSER,
-    adapter_epoch: "adapter_processjourney",
-    capabilities: [
-      "document_scope", "tabs", "atomic_tab_open", "navigation", "semantic_document", "capture", "pointer_input",
-      "keyboard_input", "files", "script", "observation", "dialogs",
-      "operation_recovery", "presentation", "window_geometry", "diagnostics", "recording",
-      "chunked_commands", "adapter_liveness", "page_runtime"
-    ].map((name) => ({ name, revision: { document_scope: 2, script: 2, pointer_input: 3, keyboard_input: 2, semantic_document: 4, capture: 2, navigation: 2, files: 3, observation: 2 }[name] ?? 1 }))
-  });
-  assert.deepEqual(await native.next(), { kind: "backend_unavailable", service: "absent" });
-
-  const connector = start(executable("ghostlight-mcp-connector"));
-  const mcp = new McpPeer(connector);
-  const discovery = mcp.beginRequest("server/discover", {
-    _meta: {
-      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-      "io.modelcontextprotocol/clientInfo": { name: "acceptance", version: "1" },
-      "io.modelcontextprotocol/clientCapabilities": {}
-    }
-  }, MCP_COLD_START_TIMEOUT_MS);
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
-  assert.equal(connector.exitCode, null);
-  assert.equal(browserConnector.exitCode, null);
-
-  let service = start(executable("ghostlight"));
-  await waitForFile(runtimeFile, SERVICE_STARTUP_TIMEOUT_MS);
-  const endpoint = JSON.parse(readFileSync(runtimeFile, "utf8"));
-  assert.equal(endpoint.service_bridge_major, 2);
-  assert.equal(endpoint.browser_relay_major, 1);
-  const browserHello = await native.next();
-  assert.equal(browserHello.kind, "hello_accepted");
-  assert.equal(browserHello.control_state, "active");
-  const runtimeRequest = await native.next();
-  assert.equal(runtimeRequest.kind, "request");
-  acknowledgeRuntime(native, runtimeRequest.request);
-  void runAdapter(native);
-  if (singleInstallation) {
-    const concurrentLaunches = Array.from({ length: 3 }, () => start(join(packageBinDir, `ghostlight${executableSuffix}`)));
-    await Promise.all(concurrentLaunches.map((child) => waitForExit(child, 20000)));
-    assert.equal(JSON.parse(readFileSync(runtimeFile, "utf8")).token, endpoint.token);
-    assert.equal(existsSync(join(packageBinDir, "ghostlight-runtime.json")), false);
-    console.log("single installation: restore preserves state; inactive uninstall preserves native registration; concurrent foreign desktop launches reuse the authority");
-  }
-  const held = native.waitFor(frame => frame.kind === "control_state" && frame.state === "held");
-  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
-  assert.deepEqual(await held, { kind: "control_state", state: "held", diagnostics: { layer: "explicit" } });
-  const resumed = native.waitFor(frame => frame.kind === "control_state" && frame.state === "active");
-  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  assert.deepEqual(await resumed, { kind: "control_state", state: "active", diagnostics: { layer: "explicit" } });
-
-  const discovered = await discovery.promise;
-  assert.equal(discovered.result.resultType, "complete");
-  assert.deepEqual(discovered.result.supportedVersions,
-    ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]);
-  assert.equal(discovered.result._meta["io.modelcontextprotocol/serverInfo"].name, "ghostlight");
-  assert.equal(discovered.result.cacheScope, "private");
-  assert.equal(discovered.result.ttlMs, 0);
-
-  const initialize = mcp.beginRequest("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "acceptance", version: "1" } });
-  const initialized = await initialize.promise;
-  assert.equal(initialized.result.serverInfo.name, "ghostlight");
-  assert.equal(initialized.result.protocolVersion, "2025-11-25");
-  assert.equal(initialized.result.capabilities.tools.listChanged, true);
-  mcp.notify("notifications/initialized");
-
-  const listed = await mcp.request("tools/list");
-  assert.equal(listed.result.tools.length, EXPECTED_TOOLS.length);
-  assert.equal(listed.result.tools.every((tool) => tool.outputSchema === undefined && tool.annotations), true);
-  assert.equal(listed.result.tools.some((tool) => tool.name === "browser_execute"), true);
-  assert.equal(listed.result.tools.some((tool) => tool.name === "browser_workspace"), false);
-  assert.equal(listed.result.tools.some((tool) => tool.name === "browser_evaluate"), false);
-
-  // Local destinations use the same policy path as remote sites, across the real executables.
-  const deniedLocal = structured(await mcp.request("tools/call", {
-    name: "browser_navigate", arguments: { url: "http://blocked.localhost:3000/" }
-  }));
-  assert.equal(deniedLocal.status, "blocked");
-  assert.equal(deniedLocal.facts.reason, "host_denied");
-  assert.equal(physicalCommands.includes("open_tab"), false);
-
-  const explained = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
-  assert.deepEqual(explained.facts.ceilings, [
-    "Anything that is not an ordinary http or https address.",
-    "Ghostlight's own control page on this computer is never automated."
-  ]);
-
-  const opened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "http://localhost:3000/" } }));
-  assert.equal(opened.status, "succeeded");
-  const handle = opened.facts.tab;
-  assert.match(handle, /^tab_/);
-  assert.equal(physicalCommands.filter((command) => command === "open_tab").length, 1);
-  assert.equal(physicalCommands.includes("create_tab"), false);
-  const localRead = structured(await mcp.request("tools/call", {
-    name: "browser_read", arguments: { tab: handle }
-  }));
-  assert.equal(localRead.status, "succeeded");
-  assert.equal(localRead.summary, "Read 2 words from localhost.");
-
-  const observedDispatch = native.waitFor(
-    (frame) => frame.kind === "request" && (frame.request.command.primitive ?? frame.request.command).command === "observe",
-    10000
-  );
-  const interrupted = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: handle, condition: "load_ready" } });
-  await observedDispatch;
-  const unavailable = native.waitFor((frame) => frame.kind === "backend_unavailable", 10000);
-  service.kill();
-  await waitForExit(service);
-  assert.deepEqual(await unavailable, { kind: "backend_unavailable", service: "absent" });
-  const interruptedResult = await interrupted.promise;
-  assert.match(interruptedResult.error.message, /outcome is unavailable/);
-
-  const reconnected = native.waitFor((frame) => frame.kind === "hello_accepted", 10000);
-  service = start(executable("ghostlight"));
-  await waitForFile(runtimeFile, SERVICE_STARTUP_TIMEOUT_MS);
-  const secondBrowserHello = await reconnected;
-  assert.equal(secondBrowserHello.kind, "hello_accepted");
-  assert.notEqual(secondBrowserHello.service_epoch, browserHello.service_epoch);
-  assert.equal(connector.exitCode, null);
-  assert.equal(browserConnector.exitCode, null);
-  const relisted = await waitForMcpReady(mcp);
-  assert.equal(relisted.result.tools.length, EXPECTED_TOOLS.length);
-
-  const reopened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com" } }));
-  assert.equal(reopened.status, "succeeded");
-  const restartedHandle = reopened.facts.tab;
-
-  const read = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: restartedHandle } }));
-  assert.equal(read.status, "succeeded");
-  assert.equal(read.facts.text, "Example Domain");
-  assert.equal(installedRuntimes.length, 2, "one unchanged native peer acknowledges the service runtime after each startup");
-  assert.equal(read.summary, "Read 2 words from example.com.");
-  assert.equal(physicalRequests.findLast((command) => command.command === "read_document").mode, "visible");
-
-  const foundResponse = await mcp.request("tools/call", {
-    name: "browser_find",
-    arguments: { tab: restartedHandle, text: "Example Domain", max_results: 3 }
-  });
-  const found = structured(foundResponse);
-  assert.equal(found.status, "succeeded");
-  assert.equal(found.facts.matches[0].name, "Example Domain");
-  assert.match(textual(foundResponse), /\"matches\":\[\{[^\n]*\"name\":\"Example Domain\"/);
-
-  const executedResponse = await mcp.request("tools/call", {
-    name: "browser_execute",
-    arguments: { tab: restartedHandle, script: "({ title: document.title, visible: true })" }
-  });
-  const executed = structured(executedResponse);
-  assert.deepEqual(executed.facts.value, { title: "Example Domain", visible: true });
-  assert.match(textual(executedResponse), /\"value\":\{\"title\":\"Example Domain\",\"visible\":true\}/);
-
-  const screenshotResponse = await mcp.request("tools/call", {
-    name: "browser_screenshot",
-    arguments: { tab: restartedHandle }
-  });
-  const screenshot = structured(screenshotResponse);
-  assert.equal(screenshot.status, "succeeded");
-  assert.match(screenshot.facts.view, /^view_/);
-  assert.equal(screenshotResponse.result.content.some((item) => item.type === "image"), true);
-
-  const firstRegion = structured(await mcp.request("tools/call", {
-    name: "browser_screenshot",
-    arguments: { view: screenshot.facts.view, x: 100, y: 50, width: 100, height: 50 }
-  }));
-  assert.equal(firstRegion.status, "succeeded");
-  assert.equal(firstRegion.summary, "Captured the magnified region at 2400x1200.");
-  const firstRegionCommand = physicalRequests.findLast((command) => command.command === "screenshot_region");
-  assert.deepEqual(firstRegionCommand.region, { x: 210, y: 120, width: 200, height: 100 });
-  assert.equal(firstRegionCommand.expected_viewport.output_scale, 0.5);
-
-  const secondRegion = structured(await mcp.request("tools/call", {
-    name: "browser_screenshot",
-    arguments: { view: firstRegion.facts.view, x: 1200, y: 600, width: 600, height: 300 }
-  }));
-  assert.equal(secondRegion.status, "succeeded");
-  const secondRegionCommand = physicalRequests.findLast((command) => command.command === "screenshot_region");
-  assert.deepEqual(secondRegionCommand.region, { x: 310, y: 170, width: 50, height: 25 });
-  assert.equal(secondRegionCommand.expected_viewport.scope, "region");
-
-  // R4: explicit article reading and document-tree snapshots with a diff.
-  const article = structured(await mcp.request("tools/call", {
-    name: "browser_read",
-    arguments: { mode: "article", max_chars: 5000 }
-  }));
-  assert.equal(article.status, "succeeded");
-  assert.match(article.facts.text, /Article body/);
-  const treeFirst = structured(await mcp.request("tools/call", {
-    name: "browser_inspect",
-    arguments: { scope: "document", max_depth: 4 }
-  }));
-  assert.equal(treeFirst.status, "succeeded");
-  assert.match(treeFirst.facts.snapshot, /^snapshot_/);
-  assert.equal(treeFirst.facts.tree.children[0].label, "Example Domain");
-  const treeSecond = structured(await mcp.request("tools/call", {
-    name: "browser_inspect",
-    arguments: { scope: "document", max_depth: 4 }
-  }));
-  assert.deepEqual(treeSecond.facts.diff, { added: 0, removed: 0, changed: 0, paths: [] });
-
-  // R3: semantic selector click, ambiguity refusal without effect, modified click.
-  queryCount = 0;
-  const selectorClick = structured(await mcp.request("tools/call", {
-    name: "browser_click",
-    arguments: { tab: restartedHandle, selector: { name: "More information..." } }
-  }));
-  if (selectorClick.status !== "succeeded") console.log("SELECTOR_CLICK", JSON.stringify(selectorClick));
-  assert.equal(selectorClick.status, "succeeded");
-  const ambiguous = structured(await mcp.request("tools/call", {
-    name: "browser_click",
-    arguments: { tab: restartedHandle, selector: { name: "More information..." } }
-  }));
-  assert.equal(ambiguous.status, "failed");
-  assert.match(ambiguous.summary, /none was chosen/);
-  assert.equal(ambiguous.facts.selector_matched, 2);
-  const modifiedClick = structured(await mcp.request("tools/call", {
-    name: "browser_click",
-    arguments: { tab: restartedHandle, selector: { name: "More information..." }, modifiers: ["Control"] }
-  }));
-  assert.equal(modifiedClick.status, "succeeded");
-  assert.equal(physicalCommands.findLast((command) => command.startsWith("activate")), "activate_modified");
-
-  // R2: stroke sequences with repeats and a duration wait.
-  const strokes = structured(await mcp.request("tools/call", {
-    name: "browser_press_key",
-    arguments: { tab: restartedHandle, strokes: ["a", "b"], repeat: 2 }
-  }));
-  assert.equal(strokes.status, "succeeded");
-  assert.equal(physicalCommands.filter((command) => command === "press_key").length >= 4, true);
-  const durationWait = structured(await mcp.request("tools/call", {
-    name: "browser_wait",
-    arguments: { condition: "duration", value: "50" }
-  }));
-  assert.equal(durationWait.status, "succeeded");
-
-  // R5: inline upload to a found target; captured-image attach and view drop.
-  const inlineUpload = structured(await mcp.request("tools/call", {
-    name: "browser_upload",
-    arguments: {
-      target: found.facts.matches[0].target,
-      files: [{ name: "notes.txt", media_type: "text/plain", data_base64: Buffer.from("hello").toString("base64") }]
-    }
-  }));
-  if (inlineUpload.status !== "succeeded") console.log("UPLOAD", JSON.stringify(inlineUpload));
-  assert.equal(inlineUpload.status, "succeeded");
-  assert.equal(inlineUpload.facts.uploaded_bytes, 5);
-  const freshShot = structured(await mcp.request("tools/call", {
-    name: "browser_screenshot",
-    arguments: { tab: restartedHandle }
-  }));
-  assert.match(freshShot.facts.image, /^image_/);
-  const imageAttach = structured(await mcp.request("tools/call", {
-    name: "browser_upload",
-    arguments: { target: found.facts.matches[0].target, source_image: freshShot.facts.image }
-  }));
-  assert.equal(imageAttach.status, "succeeded");
-  const imageDrop = structured(await mcp.request("tools/call", {
-    name: "browser_upload",
-    arguments: { source_image: freshShot.facts.image, view: freshShot.facts.view, x: 100, y: 50 }
-  }));
-  if (imageDrop.status !== "succeeded") console.log("DROP", JSON.stringify(imageDrop));
-  assert.equal(imageDrop.status, "succeeded");
-
-  // R2 coordinate wheel through the governed view transform.
-  const wheel = structured(await mcp.request("tools/call", {
-    name: "browser_scroll",
-    arguments: { view: freshShot.facts.view, x: 100, y: 50, direction: "down", ticks: 2 }
-  }));
-  assert.equal(wheel.status, "succeeded");
-
-  // R7: guarded navigation discarding only its own beforeunload prompt.
-  const guarded = structured(await mcp.request("tools/call", {
-    name: "browser_navigate",
-    arguments: { url: "https://example.com/submitted", beforeunload: "discard" }
-  }));
-  assert.equal(guarded.status, "succeeded");
-
-  // Retired simulation is rejected; actual flows use ordinary results.
-  const beforeRetiredFlow = physicalCommands.length;
-  const flowDry = structured(await mcp.request("tools/call", {
-    name: "browser_flow",
-    arguments: {
-      dry_run: true,
-      steps: [
-        { id: "list", tool: "browser_tabs", arguments: { action: "list" } },
-        { id: "read", tool: "browser_read", arguments: { mode: "article" } }
-      ]
-    }
-  }));
-  assert.equal(flowDry.status, "failed");
-  assert.equal(flowDry.effect, "none");
-  assert.ok(flowDry.next_steps.some(step => step.includes("removed")));
-  assert.deepEqual(physicalCommands.slice(beforeRetiredFlow).filter(command => ["list_tabs", "read_document"].includes(command)), [],
-    "retired flow inputs dispatch neither requested child; prior landing observations may finish independently");
-  const flowResponse = await mcp.request("tools/call", {
-    name: "browser_flow",
-    arguments: {
-      steps: [
-        { id: "find", tool: "browser_find", arguments: { text: "More information...", max_results: 1 } },
-        { id: "click", tool: "browser_click", arguments: { target: { flow_ref: { step: "find", pointer: "/facts/matches/0/target" } } } },
-        { id: "read", tool: "browser_read", arguments: { max_chars: 500 } }
-      ]
-    }
-  });
-  const flow = structured(flowResponse);
-  if (flow.status !== "succeeded") console.log("FLOW", JSON.stringify(flow));
-  assert.equal(flow.status, "succeeded");
-  assert.equal(flow.facts.completed, 3);
-  assert.match(textual(flowResponse), /Completed all 3 steps\./);
-
-  // H1: a failed composition still returns permitted child content to its caller, while
-  // the actual durable file below must contain neither that content nor the browser error.
-  const failedFlowResponse = await mcp.request("tools/call", {
-    name: "browser_flow",
-    arguments: { steps: [
-      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
-      { id: "fail", tool: "browser_execute", arguments: { script: auditFailureScript } }
-    ] }
-  });
-  const failedFlow = structured(failedFlowResponse);
-  assert.equal(failedFlow.status, "unknown");
-  assert.equal(failedFlow.facts.steps[0].result.facts.text, "Example Domain");
-  assert.equal(failedFlow.facts.steps[1].result.facts.detail, auditException);
-  assert.equal(textual(failedFlowResponse).includes(auditException), true);
-  const primitiveFailure = structured(await mcp.request("tools/call", {
-    name: "browser_execute", arguments: { script: auditInvalidScript }
-  }));
-  assert.equal(primitiveFailure.status, "failed");
-  assert.equal(primitiveFailure.facts.detail, auditException);
-
-  // H2b: Continue preserves success at later work and still signals an MCP error.
-  const mixedResponse = await mcp.request("tools/call", {
-    name: "browser_flow",
-    arguments: { on_error: "continue", steps: [
-      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
-      { id: "fail", tool: "browser_execute", arguments: { script: auditInvalidScript } },
-      { id: "later", tool: "browser_read", arguments: { max_chars: 500 } }
-    ] }
-  });
-  const mixed = structured(mixedResponse);
-  assert.equal(mixedResponse.result.isError, true);
-  assert.equal(mixed.status, "failed");
-  assert.equal(mixed.effect, "none");
-  assert.equal(mixed.facts.completed, 2);
-  assert.equal(mixed.facts.stopped, false);
-  assert.equal(mixed.summary, "Completed 2 of 3 steps. 1 failed.");
-  assert.equal(mixed.facts.steps[2].status, "succeeded");
-  assert.equal(mixed.repeat_safe, false);
-
-  const ordinaryPolicy = readFileSync(policyFile, "utf8");
-  const readPolicy = JSON.parse(ordinaryPolicy);
-  readPolicy.grants[0].allowed = ["read"];
-  writeFileSync(policyFile, JSON.stringify(readPolicy));
-  await policyRefreshed();
-  const blockedResponse = await mcp.request("tools/call", {
-    name: "browser_flow", arguments: { steps: [
-      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
-      { id: "blocked", tool: "browser_execute", arguments: { script: "PRIVATE_BLOCKED_SCRIPT" } },
-      { id: "unreached", tool: "browser_read", arguments: { max_chars: 500 } }
-    ] }
-  });
-  const blockedFlow = structured(blockedResponse);
-  assert.equal(blockedResponse.result.isError, true);
-  assert.equal(blockedFlow.status, "blocked");
-  assert.equal(blockedFlow.facts.completed, 1);
-  assert.equal(blockedFlow.facts.steps[2].status, "not_run");
-  assert.equal(blockedFlow.summary, "Completed 1 of 3 steps. Step 2 blocked by policy.");
-
-  writeFileSync(policyFile, ordinaryPolicy);
-  await policyRefreshed();
-  const invalidResponse = await mcp.request("tools/call", {
-    name: "browser_flow", arguments: { steps: [
-      { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
-      { id: "invalid", tool: "browser_read", arguments: { max_chars: { flow_ref: { step: "read", pointer: "/facts/text" } } } },
-      { id: "unreached", tool: "browser_read", arguments: { max_chars: 500 } }
-    ] }
-  });
-  const invalidFlow = structured(invalidResponse);
-  assert.equal(invalidResponse.result.isError, true);
-  assert.equal(invalidFlow.status, "failed");
-  assert.equal(invalidFlow.facts.steps[1].status, "not_started");
-  assert.equal(invalidFlow.facts.steps[1].cause, "invalid_arguments");
-  assert.equal(invalidFlow.facts.steps[2].status, "not_run");
-  assert.equal(invalidFlow.summary, "Completed 1 of 3 steps. Step 2 could not start.");
-
-  const startedRecording = structured(await mcp.request("tools/call", {
-    name: "browser_record",
-    arguments: { action: "start", tab: restartedHandle }
-  }));
-  assert.equal(startedRecording.status, "succeeded");
-  assert.match(startedRecording.facts.recording, /^recording_/);
-  const savedRecordingResponse = await mcp.request("tools/call", {
-    name: "browser_record",
-    arguments: { action: "save", recording: startedRecording.facts.recording }
-  });
-  const savedRecording = structured(savedRecordingResponse);
-  assert.equal(savedRecording.status, "succeeded");
-  assert.equal(savedRecording.facts.delivery, "returned_to_client");
-  assert.equal(savedRecording.summary, "Saved a replay of 1 second of page changes.");
-  assert.equal(
-    savedRecordingResponse.result.content.some((item) => item.type === "image" && item.mimeType === "image/gif"),
-    true
-  );
-
-  // The same recording saved to a file. This is the claim ADR-0109 exists for: a replay that
-  // stays inside the browser reaches the user without one byte crossing back through here.
-  const downloadedResponse = await mcp.request("tools/call", {
-    name: "browser_record",
-    arguments: { action: "save", recording: startedRecording.facts.recording, download: true }
-  });
-  const downloaded = structured(downloadedResponse);
-  assert.equal(downloaded.status, "succeeded");
-  assert.equal(downloaded.facts.delivery, "downloaded_by_browser");
-  assert.equal(downloaded.summary, "Downloaded a replay of 1 second of page changes.");
-  assert.deepEqual(downloadedResponse.result.content.filter((item) => item.type === "image"), []);
-  const discardedRecording = structured(await mcp.request("tools/call", {
-    name: "browser_record",
-    arguments: { action: "discard", recording: startedRecording.facts.recording }
-  }));
-  assert.equal(discardedRecording.status, "succeeded");
-
-  // A receipt must reach disk before a later, still-running child lets the parent finish.
-  const childWaitDispatch = native.waitFor((frame) => frame.kind === "request" && (frame.request.command.primitive ?? frame.request.command).command === "observe");
-  const incrementalRequest = mcp.beginRequest("tools/call", { name: "browser_flow", arguments: { steps: [
-    { id: "read", tool: "browser_read", arguments: { max_chars: 500 } },
-    { id: "wait", tool: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } }
-  ] } });
-  await childWaitDispatch;
-  const during = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
-  const firstReceipt = during.at(-1);
-  assert.equal(firstReceipt.step.position, 1);
-  assert.equal(firstReceipt.tool, "browser_read");
-  assert.equal(during.some((record) => record.invocation === firstReceipt.invocation && !record.step), false);
-  const incremental = structured(await incrementalRequest.promise);
-  assert.equal(incremental.invocation, firstReceipt.invocation);
-  assert.equal(incremental.status, "succeeded", JSON.stringify(incremental));
-
-  const delayed = mcp.beginRequest("tools/call", { name: "browser_wait", arguments: { tab: restartedHandle, condition: "load_ready" } });
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-  mcp.notify("notifications/cancelled", { requestId: delayed.id, reason: "acceptance cancellation" });
-  const cancelled = structured(await delayed.promise);
-  assert.equal(cancelled.status, "unknown");
-  assert.equal(cancelled.effect, "unknown");
-  assert.equal(cancelled.repeat_safe, false);
-  // An effect whose fate is unknown names the open-dialog hypothesis and the observation
-  // route (d5a8c5de); it never suggests replaying the interrupted call.
-  assert.deepEqual(cancelled.next_steps, [
-    "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly.",
-    "Then observe the page with browser_read or browser_inspect to learn what happened.",
-  ]);
-
-  const closed = structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: restartedHandle } }));
-  assert.equal(closed.status, "succeeded");
-  assert.equal(closed.facts.closed, true);
-  assert.equal(existsSync(auditFile), true);
-
-  // The real executable's audit file, not a fixture: what an action did, and none of what it saw.
-  const records = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-  const readRecord = records.findLast((record) => record.tool === "browser_read" && !record.step);
-  assert.equal(readRecord.observed.host, "example.com");
-  // The last direct read is the article-mode read. Composed reads now have separate receipts.
-  assert.equal(readRecord.observed.count, 10);
-  assert.equal(readRecord.observed.readiness, null);
-  const openRecord = records.findLast((record) => record.tool === "browser_navigate");
-  assert.equal(openRecord.observed.host, "example.com");
-  assert.equal(openRecord.observed.readiness, "complete");
-  assert.equal(records.some((record) => JSON.stringify(record).includes("Example Domain")), false);
-  assert.equal(records.some((record) => JSON.stringify(record).includes("PRIVATE_")), false);
-  const flowFailureRecord = records.find((record) => record.invocation === failedFlow.invocation && !record.step);
-  assert.equal(flowFailureRecord.status, "unknown");
-  assert.equal(flowFailureRecord.summary, failedFlow.summary);
-  assert.equal(flowFailureRecord.refusal_facts, undefined);
-  for (const result of [flow, failedFlow, mixed, blockedFlow, invalidFlow]) {
-    const record = records.find((item) => item.invocation === result.invocation && !item.step);
-    assert.deepEqual(record.composition, result.facts.progress);
-    assert.equal(record.observed.count, result.facts.completed);
-  }
-  assert.equal(records.find((item) => item.invocation === blockedFlow.invocation && !item.step).allowed, false);
-  // H4: child receipts precede the parent and carry their own actual permission evidence.
-  for (const [result, count] of [[flow, 3], [failedFlow, 2], [mixed, 3], [blockedFlow, 2], [invalidFlow, 2]]) {
-    const group = records.filter((item) => item.invocation === result.invocation);
-    assert.equal(group.length, count + 1);
-    assert.equal(group.at(-1).step, undefined);
-    assert.deepEqual(group.slice(0, -1).map((item) => item.step.position), Array.from({ length: count }, (_, index) => index + 1));
-    assert.equal(group.every((item) => item.authority === group[0].authority), true);
-    for (const item of group.slice(0, -1).filter((item) => !item.step.preparation_failed)) {
-      assert.equal(item.permissions.checks.length > 0, true);
-      assert.equal(item.capabilities.length > 0, true);
-    }
-  }
-  const prepared = records.find((item) => item.invocation === invalidFlow.invocation && item.step?.position === 2);
-  assert.equal(prepared.status, "not_started");
-  assert.equal(prepared.step.preparation_failed, true);
-  assert.deepEqual(prepared.capabilities, []);
-  const primitiveRecord = records.find((record) => record.invocation === primitiveFailure.invocation);
-  assert.equal(primitiveRecord.summary, "The browser could not complete this operation.");
-  assert.deepEqual(primitiveRecord.refusal_facts, { reason: "browser_primitive_failed" });
-
-  // ADR-0145: the explicit layer pinned every process at birth, so all three wrote bounded,
-  // content-free operational logs into the one journey directory.
-  const diagnosticNames = readdirSync(diagnosticsDir).filter((name) => name.endsWith(".jsonl"));
-  assert.equal(diagnosticNames.some((name) => name.includes("-orchestrator-")), true);
-  assert.equal(diagnosticNames.some((name) => name.includes("-mcp-connector-")), true);
-  assert.equal(diagnosticNames.some((name) => name.includes("-browser-connector-")), true);
-  const diagnosticRecords = diagnosticNames
-    .flatMap((name) => readFileSync(join(diagnosticsDir, name), "utf8").trim().split("\n"))
-    .map((line) => JSON.parse(line))
-    .filter((record) => record.event !== undefined);
-  for (const name of diagnosticNames) {
-    const header = JSON.parse(readFileSync(join(diagnosticsDir, name), "utf8").split("\n")[0]);
-    assert.equal(header.schema, "ghostlight-diagnostics-1");
-  }
-  const readOperation = diagnosticRecords.findLast(
-    (record) => record.event === "operation_completed" && record.detail.includes("browser_read")
-  );
-  assert.equal(readOperation.component, "orchestrator");
-  assert.equal(typeof readOperation.op, "string");
-  assert.match(readOperation.detail, /browser_read succeeded/);
-  assert.equal(diagnosticRecords.some((record) => JSON.stringify(record).includes("Example Domain")), false);
-  const attached = diagnosticRecords.filter((record) => record.event === "harness_attached");
-  assert.ok(attached.length > 0);
-  for (const record of attached) assert.match(record.detail, /^connection_[a-f0-9]{32} via mcp$/);
-  assert.equal(diagnosticRecords.some((record) => JSON.stringify(record).includes("acceptance")), false);
-  assert.equal(diagnosticRecords.some((record) => record.event === "adapter_attached" && record.detail.includes(PROCESS_BROWSER)), true);
-  assert.equal(diagnosticRecords.some((record) => record.component === "mcp-connector" && record.event === "service_connected"), true);
-  assert.equal(diagnosticRecords.some((record) => record.component === "browser-connector" && record.event === "service_connected"), true);
-
-  const runDiagnosticsCli = (args) =>
-    new Promise((resolvePromise, reject) => {
-      const child = spawn(executable("ghostlight"), ["diagnostics", ...args], { env: environment, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-      let out = "";
-      child.stdout.on("data", (chunk) => { out += chunk; });
-      child.on("exit", (code) => (code === 0 ? resolvePromise(out) : reject(new Error(`diagnostics ${args.join(" ")} exited ${code}`))));
-    });
-  const shown = JSON.parse(await runDiagnosticsCli(["show", "--json"]));
-  assert.equal(shown.some((record) => record.event === "operation_completed" && record.detail.includes("browser_read")), true);
-  assert.match(await runDiagnosticsCli(["path"]), /explicit/);
-  await runDiagnosticsCli(["on"]);
-  assert.equal(existsSync(join(dirname(runtimeFile), "diagnostics.on")), true, "on creates the marker");
-  await runDiagnosticsCli(["off"]);
-  assert.equal(existsSync(join(dirname(runtimeFile), "diagnostics.on")), false, "off removes the marker");
-
-  // Policy refusals remain per request, including repeated work in the same MCP session.
-  const troubledConnector = start(executable("ghostlight-mcp-connector"));
-  const troubled = new McpPeer(troubledConnector);
-  await troubled.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "Independent policy session", version: "1" } });
-  troubled.notify("notifications/initialized");
-  const sitePolicy = JSON.parse(ordinaryPolicy);
-  sitePolicy.grants[0].hosts = { allow: ["example.com"] };
-  writeFileSync(policyFile, JSON.stringify(sitePolicy));
-  await policyRefreshed();
-  const beforeRefusals = physicalCommands.length;
-  const deniedResponse = await troubled.request("tools/call", { name: "browser_flow", arguments: {
-    on_error: "continue", steps: Array.from({ length: 6 }, (_, index) => ({
-      id: `denied_${index}`, tool: "browser_navigate", arguments: { url: "https://denied.example/" }
-    }))
-  }});
-  const denied = structured(deniedResponse);
-  assert.equal(deniedResponse.result.isError, true);
-  assert.equal(denied.status, "blocked");
-  assert.equal(denied.facts.steps.length, 6);
-  assert.ok(denied.facts.steps.every((step) => step.status === "blocked"));
-  assert.equal(physicalCommands.length, beforeRefusals);
-  const explanation = structured(await troubled.request("tools/call", { name: "policy_explain", arguments: {} }));
-  assert.equal(explanation.status, "succeeded");
-  const stillDenied = structured(await troubled.request("tools/call", { name: "browser_navigate", arguments: { url: "https://denied.example/" } }));
-  assert.equal(stillDenied.status, "blocked", "a later refusal still reports policy, with no session hold");
-  const permitted = structured(await troubled.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/", new_tab: true } }));
-  assert.equal(permitted.status, "succeeded", "permitted work needs no resume after repeated refusals");
-  writeFileSync(policyFile, ordinaryPolicy);
-  await policyRefreshed();
-  assert.equal(structured(await troubled.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
-  assert.equal(structured(await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "list" } })).status, "succeeded");
-  const deniedRecords = readFileSync(auditFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
-    .filter((record) => record.invocation === denied.invocation);
-  assert.equal(deniedRecords.filter((record) => record.step).length, 6);
-  assert.equal(deniedRecords.find((record) => !record.step).status, "blocked");
-  troubledConnector.kill();
-  await waitForExit(troubledConnector);
-
-  const controlTab = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/", new_tab: true } }));
-  pauseBeforeFocusedReceipt = true;
-  const beforeTyping = physicalCommands.length;
-  const pausedTypingResponse = await mcp.request("tools/call", { name: "browser_type_text", arguments: { tab: controlTab.facts.tab, focused: true, text: "PRIVATE_NOT_SENT" } });
-  const pausedTyping = structured(pausedTypingResponse);
-  assert.equal(pausedTypingResponse.result.isError, true);
-  assert.equal(pausedTyping.status, "blocked");
-  assert.equal(pausedTyping.effect, "none");
-  assert.equal(pausedTyping.summary, "The user paused Ghostlight. Wait for further instructions.");
-  assert.deepEqual(physicalCommands.slice(beforeTyping).filter((command) => command !== "present"), ["describe_focused"], "only the preparation may dispatch");
-  const unpaused = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "active");
-  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  await unpaused;
-  assert.equal(structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: controlTab.facts.tab } })).status, "succeeded", "a permitted landing during Pause must not strand the resumed tab");
-  await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: controlTab.facts.tab } });
-
-
-  // H7: the real service sees a repaired path, never replays browser work, and keeps gap evidence.
-  renameSync(auditFile, auditBackup);
-  mkdirSync(auditFile);
-  const unrecorded = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/h7", new_tab: true } }));
-  assert.equal(unrecorded.status, "succeeded");
-  assert.equal(unrecorded.effect, "applied");
-  assert.equal(unrecorded.repeat_safe, false);
-  assert.equal(unrecorded.history_storage, "unconfirmed");
-  assert.match(unrecorded.summary, /History could not be saved\.$/);
-  const unrecordedRead = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: unrecorded.facts.tab } }));
-  assert.equal(unrecordedRead.status, "succeeded", "default policy keeps useful work available");
-  const requireAuditPolicy = JSON.parse(readFileSync(policyFile, "utf8"));
-  requireAuditPolicy.config.push({ key: "audit.availability", value: "require_audit", level: "mandatory" });
-  writeFileSync(policyFile, JSON.stringify(requireAuditPolicy));
-  await policyRefreshed();
-  const explainedHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
-  assert.equal(explainedHealth.status, "succeeded");
-  assert.equal(explainedHealth.facts.audit.mode, "require_audit");
-  assert.notEqual(explainedHealth.facts.audit_health.failure, null);
-  const commandsBeforeAuditBlock = physicalCommands.length;
-  const auditBlocked = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/h7-blocked", new_tab: true } }));
-  assert.equal(auditBlocked.status, "blocked");
-  assert.equal(auditBlocked.effect, "none");
-  assert.equal(auditBlocked.facts.reason, "audit_unavailable");
-  assert.equal(physicalCommands.slice(commandsBeforeAuditBlock).filter((command) => command !== "present").length, 0);
-  const auditHeld = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "held");
-  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "hold" } });
-  await auditHeld;
-  const auditResumed = native.waitFor((frame) => frame.kind === "control_state" && frame.state === "active");
-  native.send({ kind: "event", event: { event: "runtime_control_requested", intent: "resume" } });
-  await auditResumed;
-  rmdirSync(auditFile);
-  renameSync(auditBackup, auditFile);
-  let recoveredHealth;
-  const recoveryDeadline = Date.now() + 15000;
-  do {
-    await new Promise((done) => setTimeout(done, 250));
-    recoveredHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
-  } while (recoveredHealth.facts.audit_health.failure !== null && Date.now() < recoveryDeadline);
-  assert.equal(recoveredHealth.facts.audit_health.failure, null);
-  assert.equal(recoveredHealth.history_storage ?? "saved", "saved");
-  assert.ok(recoveredHealth.facts.audit_health.unconfirmed_receipts >= 4);
-  assert.equal(physicalCommands.slice(commandsBeforeAuditBlock).filter((command) => command !== "present").length, 0, "repair must never repeat browser work");
-  const afterRepair = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: unrecorded.facts.tab } }));
-  assert.equal(afterRepair.status, "succeeded");
-  assert.equal(afterRepair.history_storage ?? "saved", "saved");
-  const repairedRecords = readFileSync(auditFile, "utf8").split("\n").filter(Boolean).map(JSON.parse);
-  assert.ok(repairedRecords.some((record) => record.audit_gap?.unconfirmed_receipts >= 4));
-  assert.equal(repairedRecords.some((record) => record.invocation === unrecorded.invocation), false, "no delayed receipt backfill");
-  assert.equal(JSON.stringify(repairedRecords.filter((record) => record.audit_gap)).includes("example.com"), false);
-  await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: unrecorded.facts.tab } });
-  console.log("audit health ok: real write failure -> default continuation -> strict stop -> human controls -> automatic repair -> explicit gap, no replay");
-
-  // A real sink failure first becomes known at an acknowledged child's completion. Continue
-  // cannot cross the next audit boundary, and recovery cannot manufacture the missing receipts.
-  failAuditAfterNextOpen = true;
-  const beforeStrictFlow = physicalCommands.filter(command => command === "open_tab").length;
-  const strictFlow = structured(await mcp.request("tools/call", { name: "browser_flow", arguments: {
-    on_error: "continue", steps: ["first", "second", "third"].map(id => ({ id,
-      tool: "browser_navigate", arguments: { url: `https://example.com/h7-${id}`, new_tab: true } }))
-  } }));
-  assert.equal(strictFlow.status, "blocked"); assert.equal(strictFlow.effect, "partial");
-  assert.equal(strictFlow.repeat_safe, false); assert.equal(strictFlow.history_storage, "unconfirmed");
-  assert.equal(strictFlow.facts.progress.counts.succeeded, 1);
-  assert.equal(strictFlow.facts.progress.counts.not_run, 1);
-  assert.equal(strictFlow.facts.progress.issue.cause, "audit_unavailable");
-  assert.equal(strictFlow.facts.unconfirmed_history_steps, 2);
-  assert.equal(strictFlow.facts.steps[0].result.effect, "applied");
-  assert.equal(strictFlow.facts.steps[0].result.history_storage, "unconfirmed");
-  assert.equal(strictFlow.facts.steps[1].result.effect, "none");
-  assert.equal(strictFlow.facts.steps[1].result.facts.reason, "audit_unavailable");
-  assert.equal(strictFlow.facts.steps[2].status, "not_run");
-  assert.equal(physicalCommands.filter(command => command === "open_tab").length, beforeStrictFlow + 1);
-  rmdirSync(auditFile);
-  renameSync(auditBackup, auditFile);
-  const flowRecoveryDeadline = Date.now() + 15000;
-  do {
-    await new Promise(done => setTimeout(done, 250));
-    recoveredHealth = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
-  } while (recoveredHealth.facts.audit_health.failure !== null && Date.now() < flowRecoveryDeadline);
-  assert.equal(recoveredHealth.facts.audit_health.failure, null);
-  assert.equal(physicalCommands.filter(command => command === "open_tab").length, beforeStrictFlow + 1,
-    "storage recovery cannot repeat the first child or run later children");
-  assert.equal(readFileSync(auditFile, "utf8").split("\n").filter(Boolean).map(JSON.parse)
-    .some(record => record.invocation === strictFlow.invocation), false, "no parent or child receipt is backfilled");
-  const newWork = structured(await mcp.request("tools/call", { name: "browser_read", arguments: { tab: strictFlow.facts.steps[0].result.facts.tab } }));
-  assert.equal(newWork.status, "succeeded"); assert.equal(newWork.history_storage ?? "saved", "saved");
-  await mcp.request("tools/call", { name: "browser_tabs", arguments: { action: "close", tab: strictFlow.facts.steps[0].result.facts.tab } });
-  console.log("audit composition ok: an acknowledged effect survives failed child history; Continue stops; parent and children stay unconfirmed; repair admits only new work");
-
-  // This workspace stays pinned to the fake browser after its last tab closes. Once that adapter
-  // disconnects, the call waits a bounded grace for that same browser (capped here by a short
-  // timeout_ms), never reaches recovery, repair, launch, or adapter dispatch, and then says the
-  // session's browser is not connected (ADR-0196 Decision 12). Injected Rust tests own the exact
-  // availability and unpinned startup behavior matrix.
-  const physicalCommandCountBeforeRecovery = physicalCommands.length;
-  browserConnector.kill();
-  await waitForExit(browserConnector);
-  await waitForNoBrowsers(mcp);
-  const disconnected = structured(await mcp.request("tools/call", {
-    name: "browser_navigate",
-    arguments: {
-      url: "https://example.com",
-      new_tab: true,
-      timeout_ms: 2000
-    }
-  }));
-  assert.equal(disconnected.status, "failed");
-  assert.equal(disconnected.effect, "none");
-  assert.equal(disconnected.repeat_safe, true);
-  assert.equal(disconnected.facts.reason, "browser_disconnected");
-  assert.equal(physicalCommands.length, physicalCommandCountBeforeRecovery);
-  assert.deepEqual(disconnected.next_steps, ["Ask the user to reopen that browser, then repeat the call."]);
-
-
-  // A cold audit failure must not prevent service startup or access to human/diagnostic controls.
-  service.kill();
-  await waitForExit(service);
-  rmSync(runtimeFile, { force: true });
-  renameSync(auditFile, auditBackup);
-  mkdirSync(auditFile);
-  service = start(executable("ghostlight"));
-  await waitForFile(runtimeFile, SERVICE_STARTUP_TIMEOUT_MS);
-  const coldConnector = start(executable("ghostlight-mcp-connector"));
-  const coldMcp = new McpPeer(coldConnector);
-  await coldMcp.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "H7 cold failure", version: "1" } });
-  coldMcp.notify("notifications/initialized");
-  const cold = structured(await coldMcp.request("tools/call", { name: "policy_explain", arguments: {} }));
-  assert.equal(cold.status, "succeeded");
-  assert.notEqual(cold.facts.audit_health.failure, null);
-  assert.equal(cold.facts.audit_health.history_unavailable, true);
-  const coldBlocked = structured(await coldMcp.request("tools/call", { name: "browser_navigate", arguments: { url: "https://example.com/cold", new_tab: true } }));
-  assert.equal(coldBlocked.facts.reason, "audit_unavailable");
-  assert.equal(coldBlocked.effect, "none");
-  rmdirSync(auditFile);
-  renameSync(auditBackup, auditFile);
-  console.log("audit cold start ok: service and policy explanation remain available, browser work stops before recovery or launch");
-  console.log("process journey ok: reconnect -> open/read/find/flow(execute/article/tree/wheel/upload/drop/guarded) -> screenshot/region/chain -> recording -> close -> pinned no-adapter refusal");
-} finally {
-  for (const child of children.reverse()) {
-    if (!child.killed) child.kill();
-  }
-  await Promise.all(children.map((child) => waitForExit(child)));
-  rmSync(runtimeFile, { force: true });
-  rmSync(nativeHostDir, { force: true, recursive: true });
-  rmSync(auditFile, { force: true, recursive: true });
-  rmSync(auditBackup, { force: true });
-  rmSync(policyFile, { force: true });
-  rmSync(diagnosticsDir, { recursive: true, force: true });
-  if (createdDeployLock) rmSync(deployLock, { force: true });
-  rmSync(runtimeLease, { force: true });
-  // Retain the isolated installation as evidence, like the other installed lanes. Windows
-  // WebView profile cleanup is not a reliable synchronous operation after desktop termination.
-  // Child exit above is mandatory; retaining files must never conceal a live test authority.
-  if (singleInstallation) console.log(`single-installation evidence retained: ${installationFixture}`);
-}
+assert.equal(vocabulary.relay, 4);
+await racingStarts();
+await mainFlow();
+console.log("process journey ok: relay 4, the edge, restart continuity, Quit and racing starts");
