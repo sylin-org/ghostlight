@@ -753,3 +753,75 @@ fn a_problem_for_a_place_the_document_does_not_have_is_an_invalid_plan() {
         BrowserError::Primitive("content primitive returned an invalid fill plan".into())
     );
 }
+
+/// A world answer that followed `locators` through a re-render, as the page reports it.
+fn returned_following(value: Value, locators: &[&str]) -> Value {
+    json!({"status": "returned",
+        "envelope": {"ok": true, "value": value, "rebound": locators}})
+}
+
+#[test]
+fn a_fill_whose_preparation_followed_a_handle_says_so_without_naming_it() {
+    for (followed, expected) in [(true, true), (false, false)] {
+        let (port, _fake) = rig(move |world| {
+            if world.message["kind"] == "prepare_fill" && followed {
+                let prepared = plan(&world.message);
+                return returned_following(
+                    prepared["envelope"]["value"].clone(),
+                    &["locator_a1_1"],
+                );
+            }
+            answer(world)
+        });
+        let (_, result) = unwrap_scoped(
+            call(
+                &port,
+                scoped(
+                    all_open(),
+                    fill(vec![field("T:t1:locator_a1_1", TEXT_VALUE)], None, 10_000),
+                ),
+            )
+            .unwrap(),
+        );
+        let BrowserOutcome::Filled { rebound, .. } = result else {
+            panic!("a fill");
+        };
+        assert_eq!(rebound, expected);
+    }
+}
+
+#[test]
+fn describing_reports_a_followed_handle_as_a_fact() {
+    for (followed, expected) in [(true, true), (false, false)] {
+        let (port, _fake) = rig(move |_| {
+            let targets = json!({"targets": [{"locator": "locator_a1_1", "role": "textbox",
+                "name": "Name", "state": [], "credential_class": false}]});
+            if followed {
+                returned_following(targets, &["locator_a1_1"])
+            } else {
+                returned(targets)
+            }
+        });
+        let (_, result) = unwrap_scoped(
+            call(
+                &port,
+                scoped(
+                    all_open(),
+                    BrowserCommand::DescribeTargets {
+                        tab_id: 12,
+                        locators: vec!["T:t1:locator_a1_1".into()],
+                    },
+                ),
+            )
+            .unwrap(),
+        );
+        let BrowserOutcome::TargetsDescribed {
+            targets, rebound, ..
+        } = result
+        else {
+            panic!("a description");
+        };
+        assert_eq!(targets.len(), 1);
+        assert_eq!(rebound, expected);
+    }
+}

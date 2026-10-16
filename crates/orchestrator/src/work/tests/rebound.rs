@@ -4,12 +4,13 @@
 
 use super::*;
 
-/// The click of a workspace's one target, answered with a subject that is or is not rebound.
-fn click_with(
-    rebound: bool,
-) -> (
-    crate::work::result::InvocationResult,
+/// A workspace with one tab open and one found target, ready for the next browser reply.
+fn found_target() -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    crate::workspace::WorkspaceId,
     Arc<MemoryAudit>,
+    String,
     String,
 ) {
     let (executor, browser, _, workspace, audit) = fixture();
@@ -49,6 +50,18 @@ fn click_with(
         .as_str()
         .unwrap()
         .to_owned();
+    (executor, browser, workspace, audit, tab_handle, target)
+}
+
+/// The click of a workspace's one target, answered with a subject that is or is not rebound.
+fn click_with(
+    rebound: bool,
+) -> (
+    crate::work::result::InvocationResult,
+    Arc<MemoryAudit>,
+    String,
+) {
+    let (executor, browser, workspace, audit, tab_handle, target) = found_target();
     browser.push(Ok(BrowserOutcome::Activated {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],
@@ -66,6 +79,52 @@ fn click_with(
         &CancellationToken::default(),
     );
     (clicked, audit, target)
+}
+
+/// What describing the target answers before an action that describes first.
+fn described(rebound: bool) -> BrowserOutcome {
+    BrowserOutcome::TargetsDescribed {
+        tab_id: 7,
+        targets: vec![ObservedTarget {
+            locator: "more-options".into(),
+            role: "button".into(),
+            name: "More options".into(),
+            ..Default::default()
+        }],
+        rebound,
+    }
+}
+
+/// One action that describes its target first, run twice: once when describing followed the
+/// handle and once when it did not. The action's own call finds the control live both times.
+/// Returns the followed run and the plain run.
+fn after_describing(
+    tool: &str,
+    arguments: impl Fn(&str, &str) -> serde_json::Value,
+    answers: impl Fn() -> Vec<BrowserOutcome>,
+) -> (
+    crate::work::result::InvocationResult,
+    crate::work::result::InvocationResult,
+    Arc<MemoryAudit>,
+) {
+    let run = |rebound: bool| {
+        let (executor, browser, workspace, audit, tab_handle, target) = found_target();
+        browser.push(Ok(described(rebound)));
+        for answer in answers() {
+            browser.push(Ok(answer));
+        }
+        let result = executor.execute(
+            &workspace,
+            tool,
+            arguments(&tab_handle, &target),
+            None,
+            &CancellationToken::default(),
+        );
+        (result, audit)
+    };
+    let (followed, audit) = run(true);
+    let (plain, _) = run(false);
+    (followed, plain, audit)
 }
 
 #[test]
@@ -120,4 +179,105 @@ fn the_history_sentence_holds_no_handle_or_context() {
     assert_eq!(summary, &followed.summary);
     assert!(!summary.contains(&target));
     assert!(!summary.contains("Neon Rain"));
+}
+
+fn typed() -> Vec<BrowserOutcome> {
+    vec![BrowserOutcome::Typed {
+        tab: tab(7, "https://example.com/"),
+        character_count: 2,
+        subject: Some(PhysicalActionSubject {
+            role: "button".into(),
+            name: "More options".into(),
+            rebound: false,
+        }),
+        committed_urls: vec![],
+    }]
+}
+
+#[test]
+fn typing_after_a_followed_describe_reports_rebound_with_its_usual_sentence() {
+    let (followed, plain, audit) = after_describing(
+        "browser_type_text",
+        |tab, target| json!({"tab":tab,"target":target,"text":"hi"}),
+        typed,
+    );
+
+    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+    assert_eq!(followed.facts["rebound"], true);
+    assert_eq!(followed.summary, plain.summary);
+    assert!(plain.facts.get("rebound").is_none());
+    let records = audit.0.lock().unwrap();
+    assert!(records.last().unwrap().observed.rebound);
+}
+
+#[test]
+fn uploading_after_a_followed_describe_reports_rebound_with_its_usual_sentence() {
+    let (followed, plain, audit) = after_describing(
+        "browser_upload",
+        |tab, target| json!({"tab":tab,"target":target,"files":[{"name":"a.txt","data_base64":"eA=="}]}),
+        || {
+            vec![BrowserOutcome::FilesUploaded {
+                tab_id: 7,
+                uploaded_count: 1,
+                uploaded_bytes: 1,
+                subject: Some(PhysicalActionSubject {
+                    role: "button".into(),
+                    name: "More options".into(),
+                    rebound: false,
+                }),
+            }]
+        },
+    );
+
+    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+    assert_eq!(followed.facts["rebound"], true);
+    assert_eq!(followed.summary, plain.summary);
+    assert!(plain.facts.get("rebound").is_none());
+    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
+}
+
+fn filled(rebound: bool) -> Vec<BrowserOutcome> {
+    vec![BrowserOutcome::Filled {
+        tab: tab(7, "https://example.com/"),
+        filled_count: 1,
+        held: Vec::new(),
+        submitted: false,
+        rebound,
+        committed_urls: vec![],
+    }]
+}
+
+#[test]
+fn filling_after_a_followed_describe_reports_rebound_with_its_usual_sentence() {
+    let (followed, plain, audit) = after_describing(
+        "browser_fill_form",
+        |tab, target| json!({"tab":tab,"fields":[{"target":target,"value":"x"}]}),
+        || filled(false),
+    );
+
+    assert_eq!(followed.status, Status::Succeeded, "{followed:?}");
+    assert_eq!(followed.facts["rebound"], true);
+    assert_eq!(followed.summary, plain.summary);
+    assert!(plain.facts.get("rebound").is_none());
+    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
+}
+
+#[test]
+fn a_fill_that_followed_a_handle_while_preparing_reports_rebound() {
+    let (executor, browser, workspace, audit, tab_handle, target) = found_target();
+    browser.push(Ok(described(false)));
+    for answer in filled(true) {
+        browser.push(Ok(answer));
+    }
+
+    let result = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"tab":tab_handle,"fields":[{"target":target,"value":"x"}]}),
+        None,
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(result.facts["rebound"], true);
+    assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
 }

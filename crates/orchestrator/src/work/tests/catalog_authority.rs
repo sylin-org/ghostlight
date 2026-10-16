@@ -50,6 +50,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
         } else {
             vec![field("draft", "textbox")]
         },
+        rebound: false,
     };
     let observed = || BrowserOutcome::Observed {
         tab_id: 7,
@@ -252,6 +253,7 @@ fn cases(target: &Value, button: &Value, tab_handle: &Value) -> Vec<Case> {
             vec![
                 describe(submit),
                 BrowserOutcome::Filled {
+                    rebound: false,
                     tab: tab(7, PAGE),
                     filled_count: 1,
                     held: Vec::new(),

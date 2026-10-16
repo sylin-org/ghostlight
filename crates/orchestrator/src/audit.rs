@@ -698,6 +698,7 @@ mod tests {
                 submitted: false,
                 host: Some("example.com".into()),
                 held: Vec::new(),
+                rebound: false,
             }
             .audit(),
             1,

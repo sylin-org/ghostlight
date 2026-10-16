@@ -100,6 +100,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
             browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
             if expected != Status::Blocked || credential {
                 browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                    rebound: false,
                     tab_id: 7,
                     targets: if submit {
                         vec![field, button]
@@ -109,6 +110,7 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 }));
                 if !credential {
                     browser.push(Ok(BrowserOutcome::Filled {
+                        rebound: false,
                         tab: tab(7, "https://example.com/"),
                         filled_count: 1,
                         held: Vec::new(),
@@ -227,6 +229,7 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
             };
             browser.push(Ok(BrowserOutcome::targets(7, vec![input.clone()])));
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                rebound: false,
                 tab_id: 7,
                 targets: vec![input],
             }));
@@ -351,6 +354,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                     browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
                 }
                 browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                    rebound: false,
                     tab_id: 7,
                     targets: vec![field],
                 }));
@@ -472,6 +476,7 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                 browser.push(Ok(BrowserOutcome::targets(7, vec![field.clone()])));
             }
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                rebound: false,
                 tab_id: 7,
                 targets: vec![field],
             }));
@@ -612,10 +617,12 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
         let permitted = restriction.as_array().unwrap().len() == 2;
         if permitted {
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                rebound: false,
                 tab_id: 7,
                 targets: vec![field],
             }));
             browser.push(Ok(BrowserOutcome::Filled {
+                rebound: false,
                 tab: tab(7, "https://example.com/"),
                 filled_count: 1,
                 held: Vec::new(),

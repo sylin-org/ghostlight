@@ -1046,6 +1046,9 @@ pub enum BrowserOutcome {
     TargetsDescribed {
         tab_id: u64,
         targets: Vec<ObservedTarget>,
+        /// Whether describing followed a handle through a re-render the page proved. The action
+        /// that comes next reports it (ADR-0198 Decision 17); no handle crosses the seam.
+        rebound: bool,
     },
     /// Target activation receipt.
     Activated {
@@ -1082,6 +1085,8 @@ pub enum BrowserOutcome {
         /// What the page holds in the fields it reports, in the call's field order.
         held: Vec<FieldNow>,
         submitted: bool,
+        /// Whether preparing the fill followed a handle through a re-render the page proved.
+        rebound: bool,
         committed_urls: Vec<String>,
     },
     /// Text typing receipt.

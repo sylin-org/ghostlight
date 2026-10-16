@@ -22,9 +22,9 @@ use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::result::Readiness;
 use super::{
-    action_subject, adapter_budget_ms, bounded, load_physical_files, named_key, observed_host,
-    readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult, ResolvedLocation,
-    Status, Terminal,
+    action_subject, adapter_budget_ms, bounded, followed, load_physical_files, named_key,
+    observed_host, readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult,
+    ResolvedLocation, Status, Terminal,
 };
 use crate::browser::adapter::PhysicalFile;
 
@@ -134,16 +134,18 @@ impl ApplicationExecutor {
         if let Some(target) = &submit {
             locators.push(target.locator.clone());
         }
-        let described = match self.dispatch(
+        let (described, described_rebound) = match self.dispatch(
             context,
             BrowserCommand::DescribeTargets {
                 tab_id: selected.physical_id,
                 locators: locators.clone(),
             },
         ) {
-            Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                if tab_id == selected.physical_id =>
-            {
+            Ok(BrowserOutcome::TargetsDescribed {
+                tab_id,
+                targets,
+                rebound,
+            }) if tab_id == selected.physical_id => {
                 if targets.len() != locators.len() {
                     return self.protocol_failure(context, decision, Some(tab_id));
                 }
@@ -157,7 +159,7 @@ impl ApplicationExecutor {
                         return self.credential_guidance(context, decision, &selected, control);
                     }
                 }
-                targets
+                (targets, rebound)
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
@@ -189,6 +191,7 @@ impl ApplicationExecutor {
                 filled_count,
                 held,
                 submitted,
+                rebound,
                 committed_urls,
             }) => {
                 let Some(held) = held_fields(context, &held, &given, &described) else {
@@ -211,6 +214,7 @@ impl ApplicationExecutor {
                         submitted,
                         host: observed_host(&tab.url),
                         held,
+                        rebound: rebound || described_rebound,
                     },
                     facts,
                     value.expect.as_ref(),
@@ -340,27 +344,30 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
-        match self.dispatch(
+        let described_rebound = match self.dispatch(
             context,
             BrowserCommand::DescribeTargets {
                 tab_id: selected.physical_id,
                 locators: vec![target.locator.clone()],
             },
         ) {
-            Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                if tab_id == selected.physical_id && targets.len() == 1 =>
-            {
+            Ok(BrowserOutcome::TargetsDescribed {
+                tab_id,
+                targets,
+                rebound,
+            }) if tab_id == selected.physical_id && targets.len() == 1 => {
                 if targets[0].credential_class && !value.user_authorized_credentials {
                     let control =
                         credential_control(context, &targets[0], Some(target.handle.as_str()));
                     return self.credential_guidance(context, decision, &selected, control);
                 }
+                rebound
             }
             Ok(_) => return self.protocol_failure(context, decision, Some(selected.physical_id)),
             Err(error) => {
                 return self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
-        }
+        };
         self.emit(DomainEvent::TargetIndicated {
             invocation: context.invocation.into(),
             workspace: context.workspace.as_str().into(),
@@ -386,8 +393,11 @@ impl ApplicationExecutor {
             }) => {
                 let outcome = Outcome::TextTyped {
                     host: observed_host(&tab.url),
-                    subject: action_subject(context, subject, Some(typed_role))
-                        .expect("typing has a fallback subject"),
+                    subject: followed(
+                        action_subject(context, subject, Some(typed_role)),
+                        described_rebound,
+                    )
+                    .expect("typing has a fallback subject"),
                     characters: character_count,
                 };
                 self.finish_with_expectation(
@@ -473,6 +483,7 @@ impl ApplicationExecutor {
                 json!({"reason":decision.reason.as_str()}),
             );
         }
+        let mut described_rebound = false;
         if !dropping {
             match self.dispatch(
                 context,
@@ -481,8 +492,13 @@ impl ApplicationExecutor {
                     locators: vec![target_locator.clone().expect("attach has a locator")],
                 },
             ) {
-                Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                    if tab_id == selected.physical_id && targets.len() == 1 => {}
+                Ok(BrowserOutcome::TargetsDescribed {
+                    tab_id,
+                    targets,
+                    rebound,
+                }) if tab_id == selected.physical_id && targets.len() == 1 => {
+                    described_rebound = rebound;
+                }
                 Ok(_) => {
                     return self.protocol_failure(context, decision, Some(selected.physical_id))
                 }
@@ -587,7 +603,10 @@ impl ApplicationExecutor {
                     Outcome::FilesUploaded {
                         count: uploaded_count,
                         host: observed_host(&selected.url),
-                        subject: action_subject(context, subject, target_role),
+                        subject: followed(
+                            action_subject(context, subject, target_role),
+                            described_rebound,
+                        ),
                     },
                     json!({"tab":selected.handle.as_str(),"dropped":dropping,"uploaded_count":uploaded_count,"uploaded_bytes":uploaded_bytes}),
                 )
@@ -1159,9 +1178,9 @@ impl ApplicationExecutor {
                         tab_id: selected.physical_id,
                     },
                 ) {
-                    Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                        if tab_id == selected.physical_id && targets.len() == 1 =>
-                    {
+                    Ok(BrowserOutcome::TargetsDescribed {
+                        tab_id, targets, ..
+                    }) if tab_id == selected.physical_id && targets.len() == 1 => {
                         if targets[0].credential_class && !value.user_authorized_credentials {
                             let control = credential_control(context, &targets[0], None);
                             return self.credential_guidance(context, decision, selected, control);

@@ -4979,3 +4979,39 @@ test("rebound appears in the envelope only when non-empty", async () => {
   assert.equal("rebound" in await harness.send({ kind: "describe", locators: [locator] }), false);
   assert.equal("rebound" in await harness.send({ kind: "describe", locators: ["locator_1"] }), false, "a refusal carries none");
 });
+
+test("the presentation anchor neither follows nor adopts, so the action still reports rebound", async () => {
+  const harness = contentHarness();
+  const local = { preferences: { effects: true, captions: false } };
+  sunoLibrary(harness, sunoEntries(), { render: 1 });
+  const before = await optionHandles(harness);
+  detach(harness.document.body);
+  sunoLibrary(harness, sunoEntries(), { render: 2 });
+
+  const drawn = harness.runtime.present({ signal: "target", activity: "click", locator: before[3], invocation: "i-1" }, local);
+  const reply = await activated(harness, before[3]);
+
+  assert.equal(drawn, false, "a detached node draws nothing");
+  assert.deepEqual(reply.rebound, [before[3]]);
+  assert.equal(reply.value.subject.rebound, true);
+});
+
+test("a fill step after the first call is never followed", async () => {
+  const steps = (locator) => [
+    { kind: "fill_local", field: { locator, value: "x" }, allow_credentials: false },
+    { kind: "focus_text_field", field: { locator, value: "x" }, allow_credentials: false },
+    { kind: "submit_fill", fields: [{ locator, value: "x" }], submit_locator: locator, allow_credentials: false },
+  ];
+  for (let step = 0; step < steps("").length; step += 1) {
+    const harness = contentHarness();
+    libraryRows(harness, [["Alpha", 1]]);
+    const [locator] = await optionHandles(harness);
+    detach(harness.document.body);
+    libraryRows(harness, [["Alpha", 1]]);
+
+    const refused = await harness.send(steps(locator)[step]);
+
+    assert.equal(refused.error.detail.stale, "removed", steps(locator)[step].kind);
+    assert.equal("rebound" in refused, false);
+  }
+});

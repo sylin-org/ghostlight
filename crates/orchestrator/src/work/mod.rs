@@ -2402,6 +2402,15 @@ fn action_subject(
         .or_else(|| fallback_role.map(ActionSubject::unnamed))
 }
 
+/// Say the action reached its subject by a handle that followed its control, when the call that
+/// described the target before the action did.
+///
+/// Describing comes first, so the action's own call finds the control live and reports nothing;
+/// the description's fact is the one that survives (ADR-0198 Decision 17).
+fn followed(subject: Option<ActionSubject>, described_rebound: bool) -> Option<ActionSubject> {
+    subject.map(|subject| subject.also_rebound(described_rebound))
+}
+
 /// Name a key only when it is one of the catalog's named keys.
 ///
 /// A single literal character is the caller's own text. The audit keeps the caller's intent, not

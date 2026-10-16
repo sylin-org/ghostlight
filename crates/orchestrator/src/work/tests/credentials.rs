@@ -55,11 +55,13 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 ),
             };
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                rebound: false,
                 tab_id: 7,
                 targets: vec![credential()],
             }));
             browser.push(Ok(if mode == "fill" {
                 BrowserOutcome::Filled {
+                    rebound: false,
                     tab: tab(7, "https://example.com/"),
                     filled_count: 1,
                     held: Vec::new(),
@@ -112,6 +114,7 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
 
             // An earlier acknowledgement does not authorize a later credential request.
             browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                rebound: false,
                 tab_id: 7,
                 targets: vec![credential()],
             }));
@@ -148,6 +151,7 @@ fn credential_guidance_obeys_flow_continue_without_pausing_later_work() {
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
         tab_id: 7,
         targets: vec![credential()],
     }));
@@ -252,6 +256,7 @@ fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forwar
         .unwrap()
         .to_owned();
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
         tab_id: 7,
         targets: vec![credential()],
     }));

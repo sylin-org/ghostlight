@@ -194,6 +194,14 @@ impl ActionSubject {
         self
     }
 
+    /// Add that an earlier call of the same operation followed this element's handle. Never
+    /// clears a fact the action already holds.
+    #[must_use]
+    pub const fn also_rebound(mut self, rebound: bool) -> Self {
+        self.rebound = self.rebound || rebound;
+        self
+    }
+
     /// Name an already narrowed role. The name is kept only when the governed snapshot
     /// preserves target names.
     #[must_use]
@@ -456,6 +464,9 @@ pub enum Outcome {
         host: Option<String>,
         /// What the page holds in the fields worth reading back. Audit never holds it.
         held: Vec<HeldField>,
+        /// Whether a field or the submit control was reached by a handle that followed its
+        /// control through a re-render (ADR-0198 Decision 17).
+        rebound: bool,
     },
     /// Ordinary text was typed through browser input events.
     TextTyped {
@@ -721,6 +732,7 @@ impl Outcome {
                 submitted,
                 host,
                 held,
+                ..
             } => {
                 let readings = field_echo::readings(held);
                 let mut summary = format!(
@@ -994,6 +1006,7 @@ impl Outcome {
             Self::TargetClicked { subject, .. }
             | Self::TargetRevealed { subject, .. }
             | Self::TextTyped { subject, .. } => subject.rebound,
+            Self::FormFilled { rebound, .. } => *rebound,
             Self::PointClicked { subject, .. }
             | Self::Hovered { subject, .. }
             | Self::KeyboardSent { subject, .. }
@@ -2414,6 +2427,7 @@ mod tests {
                     submitted: false,
                     host: Some("example.com".into()),
                     held: Vec::new(),
+                    rebound: false,
                 },
                 "Filled 1 field on example.com.",
             ),
@@ -2423,6 +2437,7 @@ mod tests {
                     submitted: true,
                     host: Some("example.com".into()),
                     held: Vec::new(),
+                    rebound: false,
                 },
                 "Filled 3 fields on example.com and submitted the form.",
             ),
@@ -2861,6 +2876,7 @@ Changes are \"unsaved\".".into()),
                     submitted: false,
                     host: Some("example.com".into()),
                     held: Vec::new(),
+                    rebound: false,
                 },
                 3,
             ),

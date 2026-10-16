@@ -140,12 +140,14 @@ impl Outcome {
                 fields,
                 submitted,
                 host,
+                rebound,
                 ..
             } => Self::FormFilled {
                 fields: *fields,
                 submitted: *submitted,
                 host: host.clone(),
                 held: Vec::new(),
+                rebound: *rebound,
             }
             .summary(),
             _ => self.summary(),

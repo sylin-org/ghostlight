@@ -374,6 +374,7 @@ fn human_controls_after_preparation_prevent_the_effect_in_direct_and_composed_wo
                     before,
                 });
                 browser.push(Ok(BrowserOutcome::TargetsDescribed {
+                    rebound: false,
                     tab_id: 7,
                     targets: vec![ObservedTarget {
                         locator: "textbox".into(),
@@ -479,6 +480,7 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
         before: true,
     }));
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
         tab_id: 7,
         targets: vec![ObservedTarget {
             locator: "textbox".into(),

@@ -34,6 +34,7 @@ fn credential_guidance_finishes_visuals_without_a_denial_notice() {
         assert_eq!(opened.status, Status::Succeeded);
         signals.0.lock().unwrap().clear();
         browser.push(Ok(BrowserOutcome::TargetsDescribed {
+            rebound: false,
             tab_id: 7,
             targets: vec![ObservedTarget {
                 locator: "password".into(),

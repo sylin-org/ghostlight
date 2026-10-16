@@ -46,6 +46,9 @@ const VISUAL_SETTLE_FIELD: &str = "visual_settle";
 const OK_FIELD: &str = "ok";
 /// The envelope member that carries a successful value.
 const VALUE_FIELD: &str = "value";
+/// The envelope member that lists the locators the call followed through a re-render. It is
+/// absent unless the call followed one.
+const REBOUND_FIELD: &str = "rebound";
 /// The envelope member that carries a failure.
 const ERROR_FIELD: &str = "error";
 /// The failure member that names its code.
@@ -771,6 +774,28 @@ pub fn decode_envelope(envelope: &Value) -> Result<Value, AssetError> {
             })
         }
         None => Err(AssetError::malformed()),
+    }
+}
+
+/// Whether one envelope says the call followed a handle through a re-render.
+///
+/// The envelope lists the page-private locators it followed. Only the fact leaves the adapter:
+/// the locators themselves never do (ADR-0198 Decision 17).
+#[must_use]
+pub fn envelope_rebound(envelope: &Value) -> bool {
+    envelope
+        .get(REBOUND_FIELD)
+        .and_then(Value::as_array)
+        .is_some_and(|followed| !followed.is_empty())
+}
+
+/// Whether one call answer says the call followed a handle through a re-render. Only an answer
+/// the asset gave has an envelope to say so.
+#[must_use]
+pub fn answer_rebound(answer: &CallAnswer) -> bool {
+    match answer {
+        CallAnswer::Returned { envelope } => envelope_rebound(envelope),
+        CallAnswer::Failed { .. } | CallAnswer::Skipped | CallAnswer::Unknown => false,
     }
 }
 

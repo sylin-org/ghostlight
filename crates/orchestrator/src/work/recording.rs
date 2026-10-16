@@ -340,8 +340,9 @@ impl ApplicationExecutor {
                     locators: vec![target.locator.clone()],
                 },
             ) {
-                Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
-                    if tab_id == selected.physical_id && targets.len() == 1 => {}
+                Ok(BrowserOutcome::TargetsDescribed {
+                    tab_id, targets, ..
+                }) if tab_id == selected.physical_id && targets.len() == 1 => {}
                 Ok(_) => {
                     return Err(Box::new(self.protocol_failure(
                         context,

@@ -802,6 +802,7 @@ fn outcome_samples() -> Vec<Outcome> {
                 false,
                 true,
             )],
+            rebound: false,
         },
         Outcome::TextTyped {
             host: host(),

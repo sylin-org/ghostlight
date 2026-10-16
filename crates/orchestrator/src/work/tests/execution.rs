@@ -1356,6 +1356,7 @@ fn focused_typing_names_the_control_it_described_and_settles() {
     // no subject. The receipt must name the described control instead of panicking
     // after the effect has already landed.
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
         tab_id: 7,
         targets: vec![ObservedTarget {
             locator: "0:locator_1".into(),
@@ -2950,6 +2951,7 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         .unwrap()
         .to_owned();
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
         tab_id: 7,
         targets: vec![credential],
     }));
@@ -4016,6 +4018,7 @@ fn typed_with_expectation(
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
         tab_id: 7,
         targets: vec![ObservedTarget {
             locator: "textbox".into(),

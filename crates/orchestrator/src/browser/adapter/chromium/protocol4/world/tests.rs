@@ -653,6 +653,28 @@ fn only_a_returned_answer_has_an_envelope() {
     assert_eq!(decode_answer(&failed), None);
 }
 
+/// An envelope says a call followed a handle only by a non-empty `rebound` list, and the list
+/// itself never leaves the decoder.
+#[test]
+fn an_envelope_reports_a_followed_handle_as_a_fact() {
+    let followed = json!({"ok": true, "value": {}, "rebound": ["locator_a1b2c3d4_1"]});
+    assert!(envelope_rebound(&followed));
+    assert!(answer_rebound(&CallAnswer::Returned {
+        envelope: followed.clone()
+    }));
+    assert_eq!(
+        decode_envelope(&followed),
+        Ok(json!({})),
+        "the value is unchanged"
+    );
+    assert!(!envelope_rebound(&json!({"ok": true, "value": {}})));
+    assert!(!envelope_rebound(
+        &json!({"ok": true, "value": {}, "rebound": []})
+    ));
+    assert!(!answer_rebound(&CallAnswer::Skipped));
+    assert!(!answer_rebound(&CallAnswer::Unknown));
+}
+
 /// A subject says it was rebound only when the page followed the handle, and a bare subject from
 /// a page that never followed anything still decodes.
 #[test]

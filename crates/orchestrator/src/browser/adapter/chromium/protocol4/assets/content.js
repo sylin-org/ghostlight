@@ -346,6 +346,15 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return locators.get(locator)?.element ?? undefined;
   }
 
+  // The element a locator names right now, for drawing only: connected, and still in the row its
+  // record describes. Nothing is retired, followed or re-pointed, so a node that was re-rendered
+  // draws nothing and the next call that uses the locator still follows it.
+  function presentedElement(locator) {
+    const entry = locators.get(locator);
+    if (!entry || entry.gone || !entry.element.isConnected || recycled(entry)) return null;
+    return entry.element;
+  }
+
   function cancelledError() {
     return new AssetError("cancelled", "operation cancelled");
   }
@@ -2469,12 +2478,12 @@ ${line}` : line;
     if (!IS_TOP && !signal?.locator) return false;
     let rectangle = null;
     if (signal.locator) {
-      try {
-        const box = viewportRectangle(resolve(signal.locator));
-        // An anchored effect without a live box (stale, hidden, zero-size) renders
-        // nowhere instead of collapsing onto the frame origin.
-        rectangle = box.width > 0 && box.height > 0 ? box : null;
-      } catch (_error) { /* target is optional presentation */ }
+      // The anchor only looks: it never retires, follows or adopts a locator, so drawing one
+      // cannot decide what a later call finds. An anchored effect without a live box (gone,
+      // hidden, zero-size) renders nowhere instead of collapsing onto the frame origin.
+      const element = presentedElement(signal.locator);
+      const box = element ? viewportRectangle(element) : null;
+      rectangle = box && box.width > 0 && box.height > 0 ? box : null;
       if (!rectangle) return false;
     }
     return presentation.render(signal, preferences, rectangle);
@@ -2599,7 +2608,7 @@ ${line}` : line;
     // Form submission follows the same rule as activation: the submit click is the dispatch
     // tail, and a handler that opens a page-blocking dialog would freeze this thread mid-click.
     if (message.kind === "submit_fill") {
-      const { submitElement } = prepareFill(message, ctx);
+      const { submitElement } = prepareFill(message);
       if (!submitElement) throw new AssetError("invalid_request", "submit control is required");
       setTimeout(() => submitElement.click(), 0);
       return { submitted: true };
@@ -2612,14 +2621,14 @@ ${line}` : line;
     // Focus the exact text control for the browser's trusted input and prove it kept focus. The
     // value is typed by the extension afterwards, never by this call.
     if (message.kind === "focus_text_field") {
-      const element = resolve(message.field.locator, ctx);
+      const element = resolve(message.field.locator);
       validateFillElement(element, message.field.value, message.allow_credentials);
       if (!isTextual(element)) throw new AssetError("not_editable", "target does not use browser text input");
       const { subject } = prepareBrowserText(element, message.allow_credentials, ctx);
       return { focused: true, subject };
     }
     if (message.kind === "fill_local") {
-      const element = resolve(message.field.locator, ctx);
+      const element = resolve(message.field.locator);
       fillLocalElement(element, message.field.value, message.allow_credentials);
       return { filled: true };
     }

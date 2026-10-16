@@ -427,6 +427,7 @@ mod tests {
                     preserve,
                 ),
             ],
+            rebound: false,
         }
     }
 

@@ -198,6 +198,9 @@ pub fn fill(
         },
     )?;
     let kinds = field_kinds(&plans, &groups)?;
+    // Preparing is the one call of a fill that may follow a handle (ADR-0198 Decision 17); the
+    // calls after it refuse a control that left the page.
+    let rebound = plans.iter().any(world::answer_rebound);
     let mut filled = 0;
     for (group, kinds) in groups.iter().zip(kinds) {
         let mut run = Vec::new();
@@ -298,6 +301,7 @@ pub fn fill(
         filled_count: filled,
         held,
         submitted,
+        rebound,
         committed_urls: l.committed(),
     })
 }

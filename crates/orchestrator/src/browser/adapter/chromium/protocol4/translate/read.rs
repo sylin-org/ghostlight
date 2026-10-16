@@ -331,6 +331,7 @@ pub fn describe_targets(
         return Ok(BrowserOutcome::TargetsDescribed {
             tab_id,
             targets: Vec::new(),
+            rebound: false,
         });
     }
     let mut reach = reach(l, scope, tab_id)?;
@@ -343,7 +344,12 @@ pub fn describe_targets(
     for ((doc, _), answer) in groups.iter().zip(&answers) {
         targets.extend(rescope(doc, value::<Targets>(answer)?.targets));
     }
-    Ok(BrowserOutcome::TargetsDescribed { tab_id, targets })
+    let rebound = answers.iter().any(world::answer_rebound);
+    Ok(BrowserOutcome::TargetsDescribed {
+        tab_id,
+        targets,
+        rebound,
+    })
 }
 
 /// Describe the focused control: ask the request's subject documents, or every readable one,
@@ -369,6 +375,7 @@ pub fn describe_focused(
                 return Ok(BrowserOutcome::TargetsDescribed {
                     tab_id,
                     targets: rescope(doc, found.targets),
+                    rebound: false,
                 })
             }
             Err(error) => {

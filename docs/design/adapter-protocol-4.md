@@ -1609,9 +1609,11 @@ globalThis.__ghostlightRuntime = Object.freeze({
 
 `rebound` appears on a success only when the call followed at least one locator to the node the page
 proved is its control (section 3.4, ADR-0198 Decision 17), and lists those locators. An action
-subject (`{role, name}`) carries `rebound: true` when its own locator was followed in that call;
-the service reads that flag and turns it into one structural `rebound` fact. A failure never
-carries it.
+subject (`{role, name}`) carries `rebound: true` when its own locator was followed in that call.
+The adapter also reads the list itself, as a fact and never as locators: a describe that followed
+a handle and a fill whose preparation followed one say so, because the action that comes next finds
+the control live and cannot. The service turns the subject flag and these facts into one structural
+`rebound` fact. A failure never carries it.
 
 `detail` is optional and says what the code and message do not. The extension relays an envelope
 without reading it, so a detail needs no extension release. Only a fill carries one: a refused fill
@@ -1740,8 +1742,10 @@ The level-4 `content.js` is a copy of today's `content.js` with these edits. The
   locator yet, sits outside every dialog and is in an unchanged view. Position alone, a page id, a
   data attribute or a name alone is never proof, and nothing watches the page between calls. A
   call follows at the start only: a node that vanishes while the call waits is refused as
-  `removed`, and `fillStanding`, the presentation anchor and every `isConnected` recheck never
-  follow. A read that meets a node with no locator gives it the gone locator that proves it, once
+  `removed`. Within a fill only the preparing call follows; `fill_local`, `focus_text_field`,
+  `submit_fill`, `fillStanding`, every `isConnected` recheck and the presentation anchor never
+  follow. The anchor draws only for a connected node in its recorded row and changes nothing, so
+  drawing never decides what the next call finds. A read that meets a node with no locator gives it the gone locator that proves it, once
   per read, oldest first, so `find` after a re-render returns the old locators. A followed locator
   is live again and joins the call's `rebound` list.
 - **Cancel tokens.** Every page loop checks `ctx.signal.cancelled` and throws `cancelled`:
