@@ -1048,8 +1048,14 @@ fn every_destination_has_its_name_and_points_at_the_products_own_surfaces() {
         .collect();
     assert_eq!(
         branches,
-        std::collections::BTreeSet::from([documentation_branch!()]),
-        "Documentation links name the published branch and never dev"
+        std::collections::BTreeSet::from(["main"]),
+        "Documentation links name the published branch"
+    );
+    assert!(
+        WorkbenchDestination::all()
+            .into_iter()
+            .all(|destination| !destination.url().contains("/dev/")),
+        "no documentation link names the dev branch"
     );
 }
 

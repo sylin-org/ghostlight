@@ -6,8 +6,6 @@ small executable is the front door for every agent and browser, and the Chromium
 frozen at its 2.0 form. It is a breaking release: the service and the extension must be updated
 together, and 1.x installs move once.
 
-This is a draft for the owner. Nothing has been published, tagged or posted.
-
 ### What changes for you
 
 - **Three steps.** Install Ghostlight, add Ghostlight in Browser, then ask your agent to do
@@ -25,7 +23,8 @@ This is a draft for the owner. Nothing has been published, tagged or posted.
 - **One home.** Everything lives under `~/.ghostlight`. Three executables sit in
   `~/.ghostlight/bin`: `ghostlight` (the edge), `ghostlight-service` and `ghostlight-desktop` (the
   window). An update replaces them as one tested set. There is no startup ritual: launching a
-  registered MCP client or browser starts Ghostlight if it is not running.
+  registered MCP client or browser starts Ghostlight if it is not running. After you Quit, only an
+  agent, a command or opening Ghostlight starts it again.
 - **The edge.** `ghostlight` is the one executable an MCP client or a browser starts. It relays
   and starts the service when it is missing, and it decides nothing. The service owns the MCP
   server, the tools and their words, governance, the audit trail and every state change. The
@@ -93,9 +92,11 @@ this order:
    Ghostlight version mismatch.
 3. If you wrote policy files yourself, run `ghostlight policy migrate` on each (see Governance).
 
-If you installed with the Windows setup program, the Debian package, Scoop or the portable archive,
-install 2.0 with one of the routes above and then remove the old package with its own uninstaller
-(Installed apps on Windows, `sudo apt remove` on Debian), so that it cannot shadow the new command.
+The install replaces the Windows setup program's Start-menu shortcut and its Installed apps entry
+with Ghostlight 2.0's own, so there is no old uninstaller to run afterwards. A Debian package
+leaves `/usr/bin/ghostlight` behind; remove it with `sudo apt remove` so that it cannot shadow the
+new command. Scoop and the portable archive are not cleaned up either: remove them with
+`scoop uninstall` or by deleting their folder.
 
 For the short time between updating one side and the other, Ghostlight tells you which side to
 update instead of working half-way.
