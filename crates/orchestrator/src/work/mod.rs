@@ -851,10 +851,13 @@ impl ApplicationExecutor {
             return;
         }
         let preserve = context.snapshot.preserves_target_names();
-        let candidates = registered
+        let mut candidates: Vec<Value> = registered
             .iter()
             .map(|(handle, target)| candidate_item(handle.as_str(), target, preserve))
             .collect();
+        // Repeats are listed in the order the page has them. The replacement is found by its
+        // position in `registered`, which stays as it was, so the order shown does not move it.
+        candidates.sort_by_key(|item| item["nth"].as_u64().unwrap_or(u64::MAX));
         let replacement = proven
             .and_then(|index| registered.get(index))
             .map(|(handle, _)| handle.as_str().to_owned());
@@ -2349,7 +2352,9 @@ fn stale_help(
                 target: target.clone(),
             }
         }
-        _ => StaleHelp::Candidates,
+        _ => StaleHelp::Candidates {
+            named: context.snapshot.preserves_target_names(),
+        },
     }
 }
 

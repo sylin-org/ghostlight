@@ -371,7 +371,8 @@ mod tests {
     #[test]
     fn a_stale_target_audits_no_replacement_and_no_handle() {
         for help in [
-            StaleHelp::Candidates,
+            StaleHelp::Candidates { named: true },
+            StaleHelp::Candidates { named: false },
             StaleHelp::Replacement {
                 tool: "browser_click",
                 target: "target_7k2nb5xe".into(),

@@ -251,6 +251,55 @@ fn the_nth_of_a_repeated_row_reaches_the_model() {
 }
 
 #[test]
+fn candidates_are_listed_in_the_order_of_their_nth() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(removed(StaleLookup {
+        matched: 3,
+        same_count: 0,
+        truncated: false,
+        candidates: vec![
+            candidate("two", "Neon Rain", Some(2), false),
+            candidate("none", "Other", None, false),
+            candidate("one", "Neon Rain", Some(1), false),
+        ],
+    })));
+
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+
+    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
+    assert_eq!(candidates[0]["nth"], 1);
+    assert_eq!(candidates[1]["nth"], 2);
+    assert!(
+        candidates[2].get("nth").is_none(),
+        "a candidate with no place among repeats comes last"
+    );
+}
+
+#[test]
+fn a_replacement_stays_the_proven_control_when_the_candidates_are_listed_by_nth() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(removed(StaleLookup {
+        matched: 2,
+        same_count: 1,
+        truncated: false,
+        candidates: vec![
+            candidate("two", "Neon Rain", Some(2), true),
+            candidate("one", "Neon Rain", Some(1), false),
+        ],
+    })));
+
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+
+    let replacement = refused.facts["replacement"].as_str().unwrap();
+    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
+    let named = candidates
+        .iter()
+        .find(|entry| entry["target"] == replacement)
+        .expect("the replacement is among the candidates");
+    assert_eq!(named["nth"], 2, "the proven control is the one with nth 2");
+}
+
+#[test]
 fn a_lookup_with_nothing_found_leaves_the_plain_refusal() {
     let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
     browser.push(Err(removed(StaleLookup::default())));
@@ -399,9 +448,19 @@ fn after_a_navigation_the_step_is_browser_inspect_with_candidates_as_handles() {
     );
 }
 
-#[test]
-fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_or_contexts() {
-    let policy = temporary_policy("replacement-no-names");
+/// A workspace under a policy that withholds target names, holding one inspected button, with
+/// the policy file the test removes.
+fn workspace_without_target_names(
+    name: &str,
+) -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    crate::workspace::WorkspaceId,
+    String,
+    String,
+    std::path::PathBuf,
+) {
+    let policy = temporary_policy(name);
     fs::write(
         &policy,
         all_open_policy_with(
@@ -444,6 +503,13 @@ fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_o
         .as_str()
         .unwrap()
         .to_owned();
+    (executor, browser, workspace, tab_handle, target, policy)
+}
+
+#[test]
+fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_or_contexts() {
+    let (executor, browser, workspace, tab_handle, target, policy) =
+        workspace_without_target_names("replacement-no-names");
     let mut lookup = one_same();
     for entry in &mut lookup.candidates {
         entry.target.name = "Delete patient".into();
@@ -476,6 +542,36 @@ fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_o
         !shown.contains("Delete patient") && !shown.contains("Beta"),
         "{shown}"
     );
+    let _ = fs::remove_file(policy);
+}
+
+#[test]
+fn without_target_names_the_pick_step_does_not_ask_for_a_context_nobody_sent() {
+    let (executor, browser, workspace, tab_handle, target, policy) =
+        workspace_without_target_names("pick-no-names");
+    browser.push(Err(removed(StaleLookup {
+        matched: 2,
+        same_count: 0,
+        truncated: false,
+        candidates: vec![
+            candidate("two", "Neon Rain", Some(2), false),
+            candidate("one", "Neon Rain", Some(1), false),
+        ],
+    })));
+
+    let refused = click(&executor, &workspace, &tab_handle, &target);
+
+    assert!(refused.facts.get("replacement").is_none());
+    assert_eq!(
+        refused.next_steps,
+        vec!["Pick a target from recovery_candidates by its role and nth, or call browser_find for current target handles."]
+    );
+    let candidates = refused.facts["recovery_candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    for entry in candidates {
+        assert!(entry.get("name").is_none(), "{entry}");
+        assert!(entry.get("context").is_none(), "{entry}");
+    }
     let _ = fs::remove_file(policy);
 }
 

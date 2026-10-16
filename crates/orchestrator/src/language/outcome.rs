@@ -1723,7 +1723,12 @@ pub enum StaleHelp {
     #[default]
     None,
     /// The facts list candidate controls, each with a handle, for the model to pick from.
-    Candidates,
+    /// `named` is whether each carries its name and row context, which governance can withhold:
+    /// without them a candidate is told apart by its role and place alone.
+    Candidates {
+        /// Whether the candidates carry their name and row context.
+        named: bool,
+    },
     /// Exactly one control on the page is the one the handle named, and the call can be repeated
     /// with it because nothing was sent.
     Replacement {
@@ -1829,8 +1834,12 @@ impl WorkspaceReason {
                 (StaleReason::Removed, StaleHelp::Replacement { tool, target }) => {
                     format!("Repeat {tool} with target {target}.")
                 }
-                (StaleReason::Removed, StaleHelp::Candidates) => {
+                (StaleReason::Removed, StaleHelp::Candidates { named: true }) => {
                     "Pick a target from recovery_candidates by its context, or call browser_find for current target handles."
+                        .into()
+                }
+                (StaleReason::Removed, StaleHelp::Candidates { named: false }) => {
+                    "Pick a target from recovery_candidates by its role and nth, or call browser_find for current target handles."
                         .into()
                 }
                 (StaleReason::Removed | StaleReason::Unknown, _) => {
@@ -3763,7 +3772,7 @@ Changes are \"unsaved\".".into()),
         );
         let candidates = WorkspaceReason::StaleTarget {
             reason: StaleReason::Removed,
-            help: StaleHelp::Candidates,
+            help: StaleHelp::Candidates { named: true },
         };
         assert_eq!(
             candidates.summary(),
@@ -3781,7 +3790,7 @@ Changes are \"unsaved\".".into()),
         ] {
             let offered = WorkspaceReason::StaleTarget {
                 reason,
-                help: StaleHelp::Candidates,
+                help: StaleHelp::Candidates { named: true },
             };
             let bare = WorkspaceReason::StaleTarget {
                 reason,
@@ -3790,6 +3799,19 @@ Changes are \"unsaved\".".into()),
             assert_eq!(offered.summary(), bare.summary());
             assert_eq!(offered.next_steps(), bare.next_steps());
         }
+    }
+
+    #[test]
+    fn candidates_without_names_are_picked_by_role_and_nth_not_by_context() {
+        let unnamed = WorkspaceReason::StaleTarget {
+            reason: StaleReason::Removed,
+            help: StaleHelp::Candidates { named: false },
+        };
+        assert_eq!(unnamed.summary(), "That target is no longer on the page.");
+        assert_eq!(
+            unnamed.next_steps(),
+            vec!["Pick a target from recovery_candidates by its role and nth, or call browser_find for current target handles."]
+        );
     }
 
     #[test]

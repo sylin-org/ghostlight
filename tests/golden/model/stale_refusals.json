@@ -63,14 +63,14 @@
           {
             "context": "Neon Rain",
             "name": "Delete",
-            "nth": 2,
+            "nth": 1,
             "role": "button",
             "target": "<volatile>"
           },
           {
             "context": "Neon Rain",
             "name": "Delete",
-            "nth": 1,
+            "nth": 2,
             "role": "button",
             "target": "<volatile>"
           }
@@ -103,14 +103,14 @@
           {
             "context": "Neon Rain",
             "name": "Delete",
-            "nth": 2,
+            "nth": 1,
             "role": "button",
             "target": "<volatile>"
           },
           {
             "context": "Neon Rain",
             "name": "Delete",
-            "nth": 1,
+            "nth": 2,
             "role": "button",
             "target": "<volatile>"
           }

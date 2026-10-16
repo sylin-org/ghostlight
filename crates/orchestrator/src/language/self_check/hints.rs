@@ -565,10 +565,12 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
                 help: StaleHelp::None,
             }),
     );
-    all.push(WorkspaceReason::StaleTarget {
-        reason: StaleReason::Removed,
-        help: StaleHelp::Candidates,
-    });
+    for named in [true, false] {
+        all.push(WorkspaceReason::StaleTarget {
+            reason: StaleReason::Removed,
+            help: StaleHelp::Candidates { named },
+        });
+    }
     for tool in [
         "browser_click",
         "browser_hover",
