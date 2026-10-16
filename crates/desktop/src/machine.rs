@@ -402,7 +402,9 @@ impl Machine {
                     };
                     self.try_start(StartReason::Recover, outside);
                 }
-                self.schedule(now, Some(try_until));
+                // A try window that has already closed bounds nothing: while the service is
+                // still shutting down the backoff alone spaces the openings.
+                self.schedule(now, (try_until > now).then_some(try_until));
             }
             Stage::Watch => self.schedule(now, None),
             Stage::Attached | Stage::Done => {}
@@ -942,6 +944,8 @@ mod tests {
         for _ in 0..5 {
             rig.after(11);
             assert!(rig.retry_and_answer(Answer::ShuttingDown).is_empty());
+            let wake = rig.machine.wake_at().expect("the opening is retried");
+            assert!(wake > rig.now, "no busy loop while the service quits");
         }
         assert_eq!(rig.world.started, [StartReason::Recover]);
     }
