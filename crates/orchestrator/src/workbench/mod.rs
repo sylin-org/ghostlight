@@ -6,6 +6,7 @@ mod history;
 mod input;
 mod live;
 pub mod parts;
+pub mod setup;
 #[cfg(test)]
 mod surface_tests;
 mod watching;
@@ -84,6 +85,7 @@ pub struct WorkbenchProjection {
     presentation: Arc<Mutex<Option<Arc<dyn WorkbenchPresentationPort>>>>,
     events: Arc<Mutex<Vec<Arc<dyn WorkbenchEventSink>>>>,
     status_hook: Arc<Mutex<Option<StatusHook>>>,
+    setup: Arc<Mutex<Option<Arc<setup::SetupProgress>>>>,
     /// Held while a change takes its sequence number and reaches every sink, so every sink sees
     /// the changes in sequence order.
     delivery: Arc<Mutex<()>>,
@@ -215,6 +217,11 @@ impl WorkbenchProjection {
     /// in sequence order.
     pub fn attach_events(&self, sink: Arc<dyn WorkbenchEventSink>) {
         lock(&self.events).push(sink);
+    }
+
+    /// Attach the progress that every non-child audit record is shown to.
+    pub fn attach_setup(&self, progress: Arc<setup::SetupProgress>) {
+        *lock(&self.setup) = Some(progress);
     }
 
     /// Register what runs after a change that can alter the status or connections parts.
@@ -376,6 +383,12 @@ impl WorkbenchProjection {
                 record: Box::new(item),
             }
         });
+        if !child {
+            let progress = lock(&self.setup).clone();
+            if let Some(progress) = progress {
+                progress.observe(record);
+            }
+        }
     }
 
     fn operations(&self) -> Vec<OperationSummary> {
@@ -573,6 +586,18 @@ impl WorkbenchFacade {
     /// Attach the best-effort operating-system presentation adapter.
     pub fn attach_presentation(&self, port: Arc<dyn WorkbenchPresentationPort>) {
         self.projection.attach_presentation(port);
+    }
+
+    /// Attach the setup progress that watches the service's audit records for the first agent
+    /// request that reaches a browser.
+    pub fn attach_setup(&self, progress: Arc<setup::SetupProgress>) {
+        self.projection.attach_setup(progress);
+    }
+
+    /// The attached setup progress, when one was attached.
+    #[must_use]
+    pub fn setup(&self) -> Option<Arc<setup::SetupProgress>> {
+        lock(&self.projection.setup).clone()
     }
 
     /// Attach the adapter that opens links and folders and asks for files on this computer.

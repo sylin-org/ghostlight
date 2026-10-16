@@ -23,6 +23,17 @@ pub enum Status {
     Unknown,
 }
 
+impl Status {
+    /// The name an audit record stores for this status.
+    #[must_use]
+    pub fn stored_name(self) -> String {
+        serde_json::to_value(self)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "unknown".into())
+    }
+}
+
 /// Terminal physical effect classification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

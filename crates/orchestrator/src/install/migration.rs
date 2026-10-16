@@ -9,8 +9,8 @@
 //!
 //! 1. [`prepare`] makes every destination and refuses a destination that holds other content, so
 //!    a conflict is found before anything has changed;
-//! 2. [`copy_state`] copies the policy, the managed-policy files, the walkthrough marker and the
-//!    client locations to where 2.0 keeps them, before the new executables are swapped in and
+//! 2. [`copy_state`] copies the policy, the managed-policy files and the client locations to where
+//!    2.0 keeps them, writes the setup record for a home that was in use, before the new executables are swapped in and
 //!    registered, and leaves every original in place: a 1.x service is still running and reads
 //!    the user's policy from its original on every decision, and a 2.0 service that a browser or
 //!    client starts the moment the registrations change must find the same files at their new
@@ -58,6 +58,7 @@ use super::entry;
 use super::layout::{retired_connector_names, Layout, INSTALL_RECORD_NAME};
 use super::native_host::{self, NativeHostRegistry};
 use super::record::{self, InstallRecord, Version};
+use super::setup_state::{self, SetupRecord};
 use super::{HarnessRegistry, HarnessState};
 
 /// Largest installation record the migration reads.
@@ -90,7 +91,8 @@ const MANAGED_CACHE_FILE_NAME: &str = "managed-policy.bundle";
 /// The managed-policy status file, in the 1.x policy directory and again in `home/policy`.
 const MANAGED_STATUS_FILE_NAME: &str = "managed-status.json";
 
-/// The extension walkthrough marker, in the 1.x policy directory and again in `home/state`.
+/// The 1.x extension walkthrough marker, in the 1.x policy directory. 2.0 records setup in
+/// `state/setup.json` instead, so the migration deletes the marker.
 const HANDOFF_MARKER_NAME: &str = "extension-handoff-v1";
 
 /// The MCP client location file, in the 1.x configuration directory and again in `home/state`.
@@ -184,6 +186,15 @@ pub enum MigrationError {
         destination: PathBuf,
         /// What became of the original.
         disposition: Disposition,
+    },
+    /// The setup record of a home that was in use could not be written.
+    #[error("Could not write {path}: {source}. Nothing else was changed")]
+    SetupRecord {
+        /// The record file.
+        path: PathBuf,
+        /// The failure.
+        #[source]
+        source: io::Error,
     },
     /// A file could not be moved. The source is intact.
     #[error("Could not move {from} to {to}: {source}. The original is still in place")]
@@ -530,8 +541,12 @@ pub struct MigrationPlan {
     pub moves: Vec<Move>,
     /// The old audit log, moved to a file of its own in `home/state` so 2.0 starts a new log.
     pub audit_archive: Option<Move>,
-    /// Old lifecycle files deleted, the installation record last.
+    /// Old lifecycle files deleted, the installation record last. The 1.x walkthrough marker is
+    /// among them.
     pub deletions: Vec<PathBuf>,
+    /// Where to write the setup record: a home that was in use has already finished setup. It is
+    /// set only when a 1.x installation is being migrated and no record exists yet.
+    pub setup_record: Option<PathBuf>,
     /// Old executables stopped before their files move.
     pub images_to_stop: Vec<PathBuf>,
     /// Registrations to rewrite to the fixed paths.
@@ -648,6 +663,7 @@ impl MigrationPlan {
         !(self.moves.is_empty()
             && self.audit_archive.is_none()
             && self.deletions.is_empty()
+            && self.setup_record.is_none()
             && self.images_to_stop.is_empty()
             && self.registrations_to_reclaim.is_empty())
     }
@@ -673,7 +689,7 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
     let policy_sources = legacy.policy_sources();
     let state_sources = legacy.state_sources(home);
     let location_sources = [legacy.roots.harness_locations_directory()];
-    let placements: [(&str, &[PathBuf], PathBuf); 5] = [
+    let placements: [(&str, &[PathBuf], PathBuf); 4] = [
         (
             USER_POLICY_FILE_NAME,
             policy_sources.as_slice(),
@@ -688,11 +704,6 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
             MANAGED_STATUS_FILE_NAME,
             policy_sources.as_slice(),
             layout.policy(),
-        ),
-        (
-            HANDOFF_MARKER_NAME,
-            policy_sources.as_slice(),
-            layout.state(),
         ),
         (
             HARNESS_LOCATIONS_NAME,
@@ -723,6 +734,10 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
             to: layout.state().join(format!("audit-{label}.jsonl")),
         });
     }
+    let marker = holding(&policy_sources, HANDOFF_MARKER_NAME).map(|directory| {
+        note_virtualized(&mut virtualized, directory);
+        directory.join(HANDOFF_MARKER_NAME)
+    });
     plan.virtualized_sources = virtualized;
 
     let serving = legacy
@@ -741,6 +756,7 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
             .map(|directory| directory.join(LEGACY_DEPLOY_LOCK_NAME)),
     );
     deletions.push(home.join(LEGACY_INSTALLATION_LOCK_NAME));
+    deletions.extend(marker.iter().cloned());
     deletions.extend(retired_connectors(&layout));
     // The record decides the next run's plan, so it goes last.
     deletions.push(home.join(LEGACY_RECORD_NAME));
@@ -769,6 +785,12 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
     {
         push_unique(&mut plan.images_to_stop, image);
     }
+    let was_in_use = legacy.installation.is_some()
+        || marker.is_some()
+        || !plan.moves.is_empty()
+        || plan.audit_archive.is_some();
+    plan.setup_record = (was_in_use && !setup_state::is_complete(&layout.setup_record()))
+        .then(|| layout.setup_record());
     plan.registrations_to_reclaim = legacy.registrations.clone();
     plan.flatpak =
         Some(FlatpakLeftovers::below(&legacy.roots.user_home)).filter(FlatpakLeftovers::present);
@@ -822,8 +844,9 @@ pub struct Copied {
     sha256: String,
 }
 
-/// Copy the policy, managed-policy, marker and client-location files of `plan` to where 2.0
-/// keeps them, and leave every original in place.
+/// Copy the policy, managed-policy and client-location files of `plan` to where 2.0 keeps them,
+/// and leave every original in place. A home that was in use also gets its setup record, dated
+/// now: a person who used 1.x has finished setup.
 ///
 /// A 1.x service is still running and reads the user policy from its original on every decision,
 /// so the originals stay until [`retire_state`] runs after the last 1.x program has stopped. A
@@ -831,6 +854,14 @@ pub struct Copied {
 /// there. A copy an earlier run made, and a program has changed since, is adopted: the record
 /// beside it names the content that was copied.
 pub fn copy_state(plan: &MigrationPlan) -> Result<Vec<Copied>, MigrationError> {
+    if let Some(path) = &plan.setup_record {
+        setup_state::record_if_absent(path, &SetupRecord::now()).map_err(|source| {
+            MigrationError::SetupRecord {
+                path: path.clone(),
+                source,
+            }
+        })?;
+    }
     let mut copied = Vec::new();
     for transfer in &plan.moves {
         if let Some(done) = copy_transfer(transfer)? {
@@ -1679,7 +1710,6 @@ mod tests {
                     MANAGED_STATUS_FILE_NAME,
                     &fixture.home.join("policy")
                 ),
-                moves(&policy, HANDOFF_MARKER_NAME, &state),
                 moves(
                     &fixture.path("user/AppData/Roaming/ghostlight"),
                     HARNESS_LOCATIONS_NAME,
@@ -1694,6 +1724,7 @@ mod tests {
                 to: state.join("audit-pre-2.0.jsonl"),
             })
         );
+        assert_eq!(plan.setup_record, Some(state.join("setup.json")));
         assert_eq!(
             plan.deletions,
             vec![
@@ -1703,6 +1734,9 @@ mod tests {
                     .path("repo/target/release")
                     .join(LEGACY_DEPLOY_LOCK_NAME),
                 fixture.home.join(LEGACY_INSTALLATION_LOCK_NAME),
+                fixture
+                    .path("user/AppData/Local/Ghostlight")
+                    .join(HANDOFF_MARKER_NAME),
                 fixture.home.join("bin").join(&retired_connector_names()[0]),
                 fixture.home.join("bin").join(&retired_connector_names()[1]),
                 fixture.home.join(LEGACY_RECORD_NAME),
@@ -1906,7 +1940,10 @@ mod tests {
             fs::read_to_string(policy.join(MANAGED_CACHE_FILE_NAME)).unwrap(),
             "cache"
         );
-        assert!(state.join(HANDOFF_MARKER_NAME).is_file());
+        assert!(!state.join(HANDOFF_MARKER_NAME).exists());
+        let record = state.join("setup.json");
+        let recorded = setup_state::read(&record).expect("the migration wrote the setup record");
+        assert!(recorded.first_request_ms > 0);
         assert!(state.join(HARNESS_LOCATIONS_NAME).is_file());
         assert_eq!(
             fs::read_to_string(state.join("audit-pre-2.0.jsonl")).unwrap(),
@@ -1924,6 +1961,9 @@ mod tests {
             fixture
                 .path("user/AppData/Local/Ghostlight")
                 .join(USER_POLICY_FILE_NAME),
+            fixture
+                .path("user/AppData/Local/Ghostlight")
+                .join(HANDOFF_MARKER_NAME),
         ] {
             assert!(!gone.exists(), "{}", gone.display());
         }
@@ -1935,6 +1975,30 @@ mod tests {
             fs::read_to_string(policy.join(USER_POLICY_FILE_NAME)).unwrap(),
             "user policy"
         );
+    }
+
+    #[test]
+    fn an_existing_setup_record_is_left_untouched() {
+        let fixture = development_custody();
+        let record = fixture.home.join("state").join("setup.json");
+        fixture.write(&record, r#"{"first_request_ms":5}"#);
+        let plan = fixture.plan();
+        assert_eq!(plan.setup_record, None);
+        execute(&plan).unwrap();
+        assert_eq!(
+            setup_state::read(&record),
+            Some(SetupRecord {
+                first_request_ms: 5
+            })
+        );
+    }
+
+    #[test]
+    fn a_home_with_no_earlier_installation_gets_no_setup_record() {
+        let fixture = Fixture::new(true);
+        let plan = fixture.plan();
+        assert!(plan.is_empty(), "{plan:?}");
+        assert_eq!(plan.setup_record, None);
     }
 
     #[test]
@@ -2298,6 +2362,7 @@ mod tests {
                 "images_to_stop",
                 "moves",
                 "registrations_to_reclaim",
+                "setup_record",
                 "virtualized_sources"
             ]
         );

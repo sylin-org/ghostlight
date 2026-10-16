@@ -14,6 +14,7 @@ pub mod reconcile;
 pub mod record;
 #[cfg(test)]
 pub(crate) mod scratch;
+pub mod setup_state;
 pub mod swap;
 pub mod user_assets;
 pub mod user_path;

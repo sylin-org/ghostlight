@@ -73,6 +73,7 @@ use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
+use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{
     RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection, WorkbenchQuitPort,
@@ -374,6 +375,7 @@ impl ServiceHost {
         let route = Arc::new(ShellRoute::new(quit.shells(), Arc::clone(&presence)));
         workbench.attach_presentation(route.clone());
         workbench.attach_native_acts(route);
+        workbench.attach_setup(SetupProgress::load(&layout.setup_record()));
         let tray_relay = TrayRelay::spawn(quit.shells(), Arc::clone(&stop))?;
         workbench.attach_tray(tray_relay.0);
         let presence_thread = presence.spawn(Arc::clone(&stop))?;

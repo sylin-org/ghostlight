@@ -41,7 +41,8 @@ pub const INSTALL_RECORD_NAME: &str = "install.json";
 /// Lock file held by whichever process is installing.
 pub const INSTALL_LOCK_NAME: &str = "install.lock";
 
-/// Directory of the service's own state: audit log, harness locations, handoff marker.
+/// Directory of the service's own state: audit log, harness locations, setup record, handoff
+/// marker.
 pub const STATE_DIRECTORY_NAME: &str = "state";
 
 /// The quit latch under the state directory: a person's Quit writes it, and a browser or recover
@@ -54,6 +55,10 @@ pub const WATCH_OFF_MARKER_NAME: &str = "watch.off";
 /// The marker under the state directory that exists once the first close of the window has been
 /// explained. It is service-private.
 pub const TRAY_HINT_NAME: &str = "tray-hint";
+
+/// The record under the state directory that exists once setup is complete: the first agent
+/// request that reached a browser.
+pub const SETUP_RECORD_NAME: &str = "setup.json";
 
 /// Directory of the user's policy.
 pub const POLICY_DIRECTORY_NAME: &str = "policy";
@@ -189,6 +194,12 @@ impl Layout {
         self.state().join(TRAY_HINT_NAME)
     }
 
+    /// The setup record: `home/state/setup.json`. It exists once setup is complete.
+    #[must_use]
+    pub fn setup_record(&self) -> PathBuf {
+        self.state().join(SETUP_RECORD_NAME)
+    }
+
     /// The user policy directory: `home/policy`.
     #[must_use]
     pub fn policy(&self) -> PathBuf {
@@ -241,6 +252,7 @@ mod tests {
             home.join("state").join("watch.off")
         );
         assert_eq!(layout.tray_hint(), home.join("state").join("tray-hint"));
+        assert_eq!(layout.setup_record(), home.join("state").join("setup.json"));
         assert_eq!(layout.policy(), home.join("policy"));
         assert_eq!(layout.manifests(), home.join("manifests"));
     }

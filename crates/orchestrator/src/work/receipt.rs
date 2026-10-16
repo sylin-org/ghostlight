@@ -73,10 +73,7 @@ impl ApplicationExecutor {
                 physical_id: terminal.physical_id,
             });
         }
-        let status = serde_json::to_value(terminal.result.status)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "unknown".into());
+        let status = terminal.result.status.stored_name();
         let effect = serde_json::to_value(terminal.result.effect)
             .ok()
             .and_then(|value| value.as_str().map(str::to_owned))

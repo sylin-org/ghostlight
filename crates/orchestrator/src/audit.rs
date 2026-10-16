@@ -481,7 +481,8 @@ fn category(error: &io::Error) -> StorageFailure {
     }
 }
 
-fn unix_ms() -> u64 {
+/// Wall-clock time now, in Unix milliseconds.
+pub(crate) fn unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
