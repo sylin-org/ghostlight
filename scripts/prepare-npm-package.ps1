@@ -32,7 +32,7 @@ if (-not [string]::IsNullOrWhiteSpace($CandidateDirectory)) {
         [ordered]@{ name = "x86_64-pc-windows-msvc"; extension = ".exe" },
         [ordered]@{ name = "x86_64-unknown-linux-gnu"; extension = "" }
     )) {
-        foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
+        foreach ($component in @("ghostlight", "ghostlight-service", "ghostlight-desktop")) {
             $name = "$component-$($target.name)$($target.extension)"
             $found = @(Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -File -Filter $name)
             if ($found.Count -ne 1) { throw "Expected one raw artifact $name, found $($found.Count)" }

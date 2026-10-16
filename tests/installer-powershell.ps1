@@ -1,8 +1,9 @@
 #Requires -Version 7
-# Offline exercise of the shipped downloader and the real package installation seam: both images
-# are verified and installed by the downloaded service, and a corrupt image installs nothing. The
-# fixture sets GHOSTLIGHT_NO_REGISTER so the final `ghostlight install` never writes the machine's
-# Start-menu shortcut or Uninstall key; the console output of that step is an owed live check.
+# Offline exercise of the shipped downloader and the real package installation seam: the edge, the
+# service and the shell are verified and installed by the downloaded service, and a corrupt image
+# installs nothing. The fixture sets GHOSTLIGHT_NO_REGISTER so the final `ghostlight install` never
+# writes the machine's Start-menu shortcut or Uninstall key; the console output of that step is an
+# owed live check.
 param([string]$BinaryDirectory = $env:GHOSTLIGHT_BIN_DIR)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -22,7 +23,7 @@ $env:CODEX_HOME = Join-Path $UserDirectory 'codex'
 $env:GHOSTLIGHT_NATIVE_HOST_DIR = Join-Path $UserDirectory 'native-host'
 $env:GHOSTLIGHT_NO_REGISTER = '1'
 Remove-Item Env:GHOSTLIGHT_TEST_HOME -ErrorAction SilentlyContinue
-$global:fixtureNames = @('ghostlight', 'ghostlight-service')
+$global:fixtureNames = @('ghostlight', 'ghostlight-service', 'ghostlight-desktop')
 $global:fixtureBinaries = $Binaries
 $global:fixtureChecksums = @($global:fixtureNames | ForEach-Object {
     $hash = (Get-FileHash -LiteralPath (Join-Path $global:fixtureBinaries "$_.exe") -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -73,8 +74,8 @@ if (-not $rejected -or (Get-FileHash (Join-Path $destination 'ghostlight.exe')).
 foreach ($download in $global:fixtureDownloads) {
     if (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName($download))) { throw 'Temporary download was retained' }
 }
-if ((Get-ChildItem -LiteralPath $destination).Count -ne $global:fixtureNames.Count) { throw 'Unexpected installed copies' }
-Write-Output 'PASS PowerShell installer: fixed paths, both verified images, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
+if (@(Get-ChildItem -LiteralPath $destination -Filter '*.exe').Count -ne $global:fixtureNames.Count) { throw 'Unexpected installed copies' }
+Write-Output 'PASS PowerShell installer: fixed paths, the three verified images, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
 '@
 [IO.File]::WriteAllText($scenario, $scenarioSource)
 try {

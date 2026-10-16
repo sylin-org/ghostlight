@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Build the Windows zip that the WinGet manifest installs from (ADR-0197 Decision 16). It is a
-# carrier for `ghostlight install`, not a separate download channel, and it is deterministic:
-# fixed entry order, fixed timestamps, one compression level.
+# carrier for `ghostlight install`, not a separate download channel: the edge, the service and the
+# shell sit side by side, and the edge hands every command to the service beside it. It is
+# deterministic: fixed entry order, fixed timestamps, one compression level.
 
 param(
     [Parameter(Mandatory = $true)]
@@ -36,7 +37,7 @@ $tempRoot = Join-Path $tempBase ("ghostlight-winget-archive-" + [guid]::NewGuid(
 $stage = Join-Path $tempRoot $baseName
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 try {
-    foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
+    foreach ($component in @("ghostlight", "ghostlight-service", "ghostlight-desktop")) {
         $source = Join-Path $BinaryDirectory "$component.exe"
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
             throw "WinGet archive is missing sibling binary: $source"

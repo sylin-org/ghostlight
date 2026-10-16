@@ -46,7 +46,7 @@ $installDirectory = Join-Path $env:USERPROFILE ".ghostlight/bin"
 $downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ghostlight-download-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $downloadDirectory | Out-Null
 try {
-    foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
+    foreach ($component in @("ghostlight", "ghostlight-service", "ghostlight-desktop")) {
         $assetName = "$component-x86_64-pc-windows-msvc.exe"
         if (-not $assets.ContainsKey($assetName)) {
             throw "Release $tag is missing $assetName."
@@ -85,9 +85,10 @@ try {
         }
     }
 
-    # The verified download installs the whole set into ~/.ghostlight/bin from its own directory.
-    # ghostlight.exe is a console program; a hidden, waited process keeps the install from flashing a window.
-    $candidate = Join-Path $downloadDirectory "ghostlight.exe"
+    # The verified service installs the whole set (the edge, the service and the shell) into
+    # ~/.ghostlight/bin from its own directory. A hidden, waited process keeps the install from
+    # flashing a window.
+    $candidate = Join-Path $downloadDirectory "ghostlight-service.exe"
     $deployment = @("deployment", "install")
     if ($Restore) { $deployment += "--restore" }
     $deploy = Start-Process -FilePath $candidate -ArgumentList $deployment -WindowStyle Hidden -Wait -PassThru

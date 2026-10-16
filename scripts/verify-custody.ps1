@@ -87,11 +87,11 @@ if ($IncludeProvenance) {
         $assets = Join-Path $candidateDirectory "assets"
         foreach ($name in @(
             "ghostlight-x86_64-pc-windows-msvc.exe",
-            "ghostlight-mcp-connector-x86_64-pc-windows-msvc.exe",
-            "ghostlight-browser-connector-x86_64-pc-windows-msvc.exe",
+            "ghostlight-service-x86_64-pc-windows-msvc.exe",
+            "ghostlight-desktop-x86_64-pc-windows-msvc.exe",
             "ghostlight-x86_64-unknown-linux-gnu",
-            "ghostlight-mcp-connector-x86_64-unknown-linux-gnu",
-            "ghostlight-browser-connector-x86_64-unknown-linux-gnu"
+            "ghostlight-service-x86_64-unknown-linux-gnu",
+            "ghostlight-desktop-x86_64-unknown-linux-gnu"
         )) {
             gh attestation verify (Join-Path $assets $name) -R sylin-org/ghostlight --source-digest $script:expectedRevision
             if ($LASTEXITCODE -ne 0) { throw "provenance failed for $name" }

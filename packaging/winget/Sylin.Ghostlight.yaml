@@ -15,10 +15,6 @@ NestedInstallerType: portable
 NestedInstallerFiles:
   - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight.exe
     PortableCommandAlias: ghostlight
-  - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight-mcp-connector.exe
-    PortableCommandAlias: ghostlight-mcp-connector
-  - RelativeFilePath: ghostlight-v__VERSION__-x86_64-pc-windows-msvc\ghostlight-browser-connector.exe
-    PortableCommandAlias: ghostlight-browser-connector
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/sylin-org/ghostlight/releases/download/v__VERSION__/ghostlight-v__VERSION__-x86_64-pc-windows-msvc.zip

@@ -8,7 +8,7 @@ $area = Join-Path $repo (".tmp/winget-archive/" + [guid]::NewGuid().ToString("N"
 $inputDirectory = Join-Path $area "input"
 New-Item -ItemType Directory -Path $inputDirectory -Force | Out-Null
 $expected = @{}
-foreach ($name in @("ghostlight", "ghostlight-service")) {
+foreach ($name in @("ghostlight", "ghostlight-service", "ghostlight-desktop")) {
     $bytes = [System.Text.Encoding]::ASCII.GetBytes("archive fixture: $name`n")
     [System.IO.File]::WriteAllBytes((Join-Path $inputDirectory "$name.exe"), $bytes)
     $expected["$name.exe"] = $bytes

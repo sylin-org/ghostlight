@@ -82,7 +82,7 @@ jobs:
           $extension = if ('${{ runner.os }}' -eq 'Windows') { '.exe' } else { '' }
           $output = "dist/raw-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $output -Force | Out-Null
-          foreach ($name in @('ghostlight', 'ghostlight-mcp-connector', 'ghostlight-browser-connector')) {
+          foreach ($name in @('ghostlight', 'ghostlight-service', 'ghostlight-desktop')) {
             Copy-Item -LiteralPath "target/${{ matrix.target }}/release/$name$extension" -Destination "$output/$name-${{ matrix.target }}$extension"
           }
       - name: Build the WinGet archive

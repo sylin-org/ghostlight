@@ -1,7 +1,7 @@
 // Exercise the shipped shell installer with deterministic release/CDN replies and a fresh home.
-// The release carries two images: the edge `ghostlight` and the service `ghostlight-service`. The
-// installer verifies both, runs the downloaded service's `deployment install`, then runs the
-// installed edge's `install` in the person's own console.
+// The release carries three images: the edge `ghostlight`, the service `ghostlight-service` and the
+// shell `ghostlight-desktop`. The installer verifies all three, runs the downloaded service's
+// `deployment install`, then runs the installed edge's `install` in the person's own console.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -14,7 +14,7 @@ mkdirSync(join(root, ".tmp/installer-shell"), { recursive: true });
 const area = mkdtempSync(join(root, ".tmp/installer-shell/run-"));
 const shims = join(area, "shims");
 mkdirSync(shims);
-const names = ["ghostlight", "ghostlight-service"];
+const names = ["ghostlight", "ghostlight-service", "ghostlight-desktop"];
 const target = "x86_64-unknown-linux-gnu";
 const bodies = {
   // The edge records that it ran and says so in the console it runs in.
@@ -22,17 +22,21 @@ const bodies = {
 echo "fixture edge: $*"
 echo "edge: $*" >> "$INSTALLER_COMMANDS"
 `,
-  // The service installs both images from the directory it runs in.
+  // The service installs every image from the directory it runs in.
   "ghostlight-service": `#!/bin/sh
 if [ "$1" = deployment ] && [ "$2" = install ]; then
   echo "service: $*" >> "$INSTALLER_COMMANDS"
   mkdir -p "$HOME/.ghostlight/bin"
-  for name in ghostlight ghostlight-service; do
+  for name in ghostlight ghostlight-service ghostlight-desktop; do
     cp "$(dirname "$0")/$name" "$HOME/.ghostlight/bin/$name"
   done
 else
   exit 1
 fi
+`,
+  // The shell is only ever installed, never run, by the installer.
+  "ghostlight-desktop": `#!/bin/sh
+exit 1
 `
 };
 const sums = names.map(name => `${createHash("sha256").update(bodies[name]).digest("hex")}  ${name}-${target}`).join("\n") + "\n";
@@ -85,7 +89,7 @@ assert.deepEqual(success.requests, [
     .map(name => `https://github.com/sylin-org/ghostlight/releases/download/v1.2.3/${name}`)
 ]);
 const installed = join(success.userDirectory, ".ghostlight/bin");
-assert.deepEqual(readdirSync(installed).sort(), [...names].sort(), "both images and nothing else are installed");
+assert.deepEqual(readdirSync(installed).sort(), [...names].sort(), "all three images and nothing else are installed");
 for (const name of names) {
   assert.equal(readFileSync(join(installed, name), "utf8"), bodies[name]);
   assert.equal(statSync(join(installed, name)).mode & 0o777, 0o755);
@@ -110,4 +114,4 @@ for (const damaged of names) {
   assert.equal(existsSync(join(corrupt.userDirectory, ".ghostlight/bin")), false, `a corrupt ${damaged} installs nothing`);
   assert.deepEqual(corrupt.commands, [], "a corrupt download runs nothing");
 }
-console.log(`PASS shell installer: pinned release, CDN delivery, both images, install in the console, restore, invalid release/version, checksum refusal\nEvidence: ${area}`);
+console.log(`PASS shell installer: pinned release, CDN delivery, all three images, install in the console, restore, invalid release/version, checksum refusal\nEvidence: ${area}`);

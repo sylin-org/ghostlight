@@ -65,7 +65,7 @@ try {
     )) {
         $targetDirectory = Join-Path $stage "server/bin/$($target.name)"
         New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
-        foreach ($component in @("ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector")) {
+        foreach ($component in @("ghostlight", "ghostlight-service", "ghostlight-desktop")) {
             $asset = "$component-$($target.name)$($target.extension)"
             $sourcePath = if ($artifactMode) {
                 $found = @(Get-ChildItem -LiteralPath $ArtifactRoot -Recurse -File -Filter $asset)
@@ -111,6 +111,8 @@ try {
             "manifest.json",
             "server/launch.js",
             "server/bin/x86_64-pc-windows-msvc/ghostlight.exe",
+            "server/bin/x86_64-pc-windows-msvc/ghostlight-service.exe",
+            "server/bin/x86_64-pc-windows-msvc/ghostlight-desktop.exe",
             "LICENSE",
             "MIT.txt",
             "LICENSING.md"

@@ -68,7 +68,7 @@ sha256_file() {
 }
 
 install_directory="${HOME}/.ghostlight/bin"
-for component in ghostlight ghostlight-mcp-connector ghostlight-browser-connector; do
+for component in ghostlight ghostlight-service ghostlight-desktop; do
   asset="${component}-${target}"
   expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$sums")
   case "$expected" in
@@ -96,9 +96,10 @@ for component in ghostlight ghostlight-mcp-connector ghostlight-browser-connecto
   chmod 0755 "$downloaded"
 done
 
-# The verified download installs the whole set into ~/.ghostlight/bin from its own directory.
-# A failed download cannot partially replace a working installation.
-"$temporary/ghostlight" deployment install $restore
+# The verified service installs the whole set (the edge, the service and the shell) into
+# ~/.ghostlight/bin from its own directory. A failed download cannot partially replace a working
+# installation.
+"$temporary/ghostlight-service" deployment install $restore
 
 ghostlight="$install_directory/ghostlight"
 echo "Ghostlight ${version} installed at ${install_directory}"

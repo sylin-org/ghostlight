@@ -133,8 +133,8 @@ $rawTargets = @(
 foreach ($rawTarget in $rawTargets) {
     foreach ($component in @(
         "ghostlight",
-        "ghostlight-mcp-connector",
-        "ghostlight-browser-connector"
+        "ghostlight-service",
+        "ghostlight-desktop"
     )) {
         $name = "$component-$($rawTarget.target)$($rawTarget.extension)"
         $specifications += [ordered]@{
