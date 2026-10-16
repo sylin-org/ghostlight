@@ -3,6 +3,7 @@ use serde_json::json;
 use super::*;
 use crate::browser::adapter::chromium::protocol4::wire::CallFailure;
 use crate::browser::adapter::documents::PhysicalDocument;
+use crate::workspace::StaleReason;
 
 fn physical(id: &str, parent: Option<&str>, url: &str) -> PhysicalDocument {
     PhysicalDocument {
@@ -456,7 +457,9 @@ fn a_locator_names_its_document_and_without_one_the_top_is_used() {
         Ok(doc("C", "c1"))
     );
     assert_eq!(scope.doc_or_top(None), Ok(doc("T", "t1")));
-    let stale = Err(BrowserError::Primitive("stale browser locator".into()));
+    let stale = Err(BrowserError::StaleLocator {
+        reason: StaleReason::Unknown,
+    });
     assert_eq!(scope.doc_of(None), stale);
     assert_eq!(scope.doc_or_top(Some("locator_3")), stale);
 }

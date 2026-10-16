@@ -31,7 +31,7 @@ use super::wire::{
     CallAnswer, CallFailure, CallMode, DocumentGuard, FrameRef, Input, InputDone, InputStep,
     InputStop, Point,
 };
-use super::world::{self, EffectClass, Hit, OwnerProbe};
+use super::world::{self, AssetDetail, EffectClass, Hit, OwnerProbe};
 use crate::browser::adapter::PhysicalActionSubject;
 use crate::browser::BrowserError;
 
@@ -163,18 +163,19 @@ pub fn frame_tree(l: &mut Link<'_>, tab_id: u64) -> Result<FrameTree, BrowserErr
 ///
 /// # Errors
 ///
-/// Returns the asset's own failure as a plain failure, or as [`BrowserError::FieldsRejected`]
-/// when it named the fields a fill could not take, [`BrowserError::DocumentUnavailable`]
-/// when the document was gone or replaced, [`BrowserError::DialogOpen`] when a JavaScript dialog
-/// blocks the page, and [`BrowserError::Protocol`] for a value that
-/// does not have the kind's shape.
+/// Returns the asset's own failure as a plain failure, as [`BrowserError::FieldsRejected`]
+/// when it named the fields a fill could not take, or as [`BrowserError::StaleLocator`] for a
+/// locator that names no control. Returns [`BrowserError::DocumentUnavailable`] when the
+/// document was gone or replaced, [`BrowserError::DialogOpen`] when a JavaScript dialog blocks
+/// the page, and [`BrowserError::Protocol`] for a value that does not have the kind's shape.
 pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError> {
     match answer {
         CallAnswer::Returned { .. } => match world::decode_answer(answer) {
             Some(Ok(value)) => serde_json::from_value(value)
                 .map_err(|error| BrowserError::Protocol(error.to_string())),
             Some(Err(error)) => Err(match error.detail {
-                Some(detail) => BrowserError::FieldsRejected {
+                Some(AssetDetail::Stale(reason)) => BrowserError::StaleLocator { reason },
+                Some(AssetDetail::Fields(detail)) => BrowserError::FieldsRejected {
                     problems: detail.problems,
                 },
                 None => BrowserError::Primitive(if error.message.is_empty() {

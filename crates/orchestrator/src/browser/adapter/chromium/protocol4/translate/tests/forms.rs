@@ -645,7 +645,9 @@ fn malformed_locators_are_plain_failures_before_anything_is_sent() {
             )
         )
         .unwrap_err(),
-        BrowserError::Primitive("stale browser locator".into())
+        BrowserError::StaleLocator {
+            reason: StaleReason::Unknown
+        }
     );
     assert!(fake.wait(|_| true).requests.is_empty());
 }

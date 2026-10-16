@@ -295,6 +295,7 @@ pub fn tool_name(requested: &str) -> &'static str {
 mod tests {
     use super::*;
     use crate::language::outcome::{ActionSubject, TargetRole};
+    use crate::workspace::StaleReason;
 
     #[test]
     fn retained_language_preserves_useful_context_and_governed_names() {
@@ -342,6 +343,24 @@ mod tests {
             serde_json::to_value(refusal.audit().refusal()).unwrap(),
             serde_json::json!({"reason":"browser_primitive_failed"})
         );
+    }
+
+    #[test]
+    fn a_stale_target_audits_its_word_and_the_history_holds_the_sentence_only() {
+        for reason in StaleReason::ALL {
+            let refusal = Refusal::WorkspaceUnusable {
+                reason: WorkspaceReason::StaleTarget { reason },
+            };
+            let audit = refusal.audit();
+            assert_eq!(audit.summary(), refusal.summary());
+            assert_eq!(
+                serde_json::to_value(audit.refusal()).unwrap(),
+                serde_json::json!({
+                    "reason": "workspace_unusable",
+                    "cause": {"stale_target": {"reason": reason.word()}}
+                })
+            );
+        }
     }
 
     #[test]

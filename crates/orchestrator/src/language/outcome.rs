@@ -6,7 +6,7 @@ use super::area::{LeftOut, LeftOutKey};
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
 use super::MAX_INSPECT_ITEMS;
-use crate::workspace::WorkspaceError;
+use crate::workspace::{StaleReason, WorkspaceError};
 
 /// The most characters a result's summary keeps. Longer summaries are cut at this bound, so a
 /// summary that lists many things measures itself against it.
@@ -1638,6 +1638,9 @@ impl Refusal {
     }
 }
 
+/// The fact that carries the word of a stale target handle, beside the reason `stale_target`.
+pub const STALE_FACT: &str = "stale";
+
 /// Stable language reason for an unusable workspace resource.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1648,8 +1651,8 @@ pub enum WorkspaceReason {
     AmbiguousTab,
     /// The named tab handle is closed or no longer known.
     TabUnavailable,
-    /// The target belongs to an old or unknown document.
-    StaleTarget,
+    /// The target handle no longer names a control, for the reason given.
+    StaleTarget { reason: StaleReason },
     /// The view no longer matches current rendered coordinates.
     StaleView,
     /// Runtime governance holds the selected tab.
@@ -1672,7 +1675,13 @@ impl WorkspaceReason {
                 "More than one tab is open in this session, so the call must name one.".into()
             }
             Self::TabUnavailable => "That tab is no longer open.".into(),
-            Self::StaleTarget => "That target belongs to an older version of the page.".into(),
+            Self::StaleTarget { reason } => match reason {
+                StaleReason::Removed => "That target is no longer on the page.",
+                StaleReason::Navigated => "That target belongs to an older version of the page.",
+                StaleReason::TabClosed => "That target's tab is closed.",
+                StaleReason::Unknown => "Ghostlight does not know that target handle.",
+            }
+            .into(),
             Self::StaleView => "The page has moved since that screenshot was taken.".into(),
             Self::TabHeld => "Ghostlight is paused on that tab.".into(),
             Self::WorkspaceBusy => {
@@ -1695,7 +1704,7 @@ impl WorkspaceReason {
             Self::NoTab => "no_tab",
             Self::AmbiguousTab => "ambiguous_tab",
             Self::TabUnavailable => "tab_unavailable",
-            Self::StaleTarget => "stale_target",
+            Self::StaleTarget { .. } => "stale_target",
             Self::StaleView => "stale_view",
             Self::TabHeld => "tab_held",
             Self::WorkspaceBusy => "workspace_busy",
@@ -1716,9 +1725,14 @@ impl WorkspaceReason {
             Self::TabUnavailable => {
                 vec!["Call browser_tabs with action list to obtain current tab handles.".into()]
             }
-            Self::StaleTarget => vec![
-                "Call browser_inspect or browser_find to obtain current target handles.".into(),
-            ],
+            Self::StaleTarget { reason } => vec![match reason {
+                StaleReason::Removed | StaleReason::Unknown => {
+                    "Call browser_find or browser_inspect to obtain current target handles."
+                }
+                StaleReason::Navigated => "Call browser_inspect to obtain current target handles.",
+                StaleReason::TabClosed => "Call browser_tabs to choose an open tab.",
+            }
+            .into()],
             Self::StaleView => {
                 vec!["Call browser_screenshot to obtain a current view handle.".into()]
             }
@@ -1749,7 +1763,7 @@ impl From<WorkspaceError> for WorkspaceReason {
             WorkspaceError::NoTab => Self::NoTab,
             WorkspaceError::AmbiguousTab => Self::AmbiguousTab,
             WorkspaceError::StaleTab => Self::TabUnavailable,
-            WorkspaceError::StaleTarget => Self::StaleTarget,
+            WorkspaceError::StaleTarget { reason } => Self::StaleTarget { reason },
             WorkspaceError::StaleView
             | WorkspaceError::ViewPointOutOfBounds
             | WorkspaceError::ViewRegionOutOfBounds => Self::StaleView,
@@ -2080,7 +2094,7 @@ mod tests {
     };
     use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::field_problem::ControlRef;
-    use crate::workspace::WorkspaceError;
+    use crate::workspace::{StaleReason, WorkspaceError};
 
     #[test]
     fn outcome_summaries_transcribe_the_product_oracles() {
@@ -3274,10 +3288,29 @@ Changes are \"unsaved\".".into()),
             WorkspaceReason::TabUnavailable.next_steps(),
             vec!["Call browser_tabs with action list to obtain current tab handles."]
         );
-        assert_eq!(
-            WorkspaceReason::StaleTarget.next_steps(),
-            vec!["Call browser_inspect or browser_find to obtain current target handles."]
-        );
+        for (reason, step) in [
+            (
+                StaleReason::Removed,
+                "Call browser_find or browser_inspect to obtain current target handles.",
+            ),
+            (
+                StaleReason::Navigated,
+                "Call browser_inspect to obtain current target handles.",
+            ),
+            (
+                StaleReason::TabClosed,
+                "Call browser_tabs to choose an open tab.",
+            ),
+            (
+                StaleReason::Unknown,
+                "Call browser_find or browser_inspect to obtain current target handles.",
+            ),
+        ] {
+            assert_eq!(
+                WorkspaceReason::StaleTarget { reason }.next_steps(),
+                vec![step]
+            );
+        }
         assert_eq!(
             WorkspaceReason::StaleView.next_steps(),
             vec!["Call browser_screenshot to obtain a current view handle."]
@@ -3468,12 +3501,47 @@ Changes are \"unsaved\".".into()),
     }
 
     #[test]
+    fn a_stale_handle_says_why_in_one_sentence_per_word() {
+        for (reason, summary) in [
+            (
+                StaleReason::Removed,
+                "That target is no longer on the page.",
+            ),
+            (
+                StaleReason::Navigated,
+                "That target belongs to an older version of the page.",
+            ),
+            (StaleReason::TabClosed, "That target's tab is closed."),
+            (
+                StaleReason::Unknown,
+                "Ghostlight does not know that target handle.",
+            ),
+        ] {
+            let stale = WorkspaceReason::StaleTarget { reason };
+            assert_eq!(stale.summary(), summary);
+            assert_eq!(stale.as_fact(), "stale_target");
+            assert_eq!(stale.next_steps().len(), 1);
+            assert_eq!(
+                Refusal::WorkspaceUnusable { reason: stale }.summary(),
+                summary
+            );
+        }
+    }
+
+    #[test]
     fn workspace_errors_map_to_the_language_reason_oracle() {
         let examples = [
             (WorkspaceError::StaleTab, WorkspaceReason::TabUnavailable),
             (WorkspaceError::NoTab, WorkspaceReason::NoTab),
             (WorkspaceError::AmbiguousTab, WorkspaceReason::AmbiguousTab),
-            (WorkspaceError::StaleTarget, WorkspaceReason::StaleTarget),
+            (
+                WorkspaceError::StaleTarget {
+                    reason: StaleReason::Removed,
+                },
+                WorkspaceReason::StaleTarget {
+                    reason: StaleReason::Removed,
+                },
+            ),
             (WorkspaceError::StaleView, WorkspaceReason::StaleView),
             (
                 WorkspaceError::ViewPointOutOfBounds,

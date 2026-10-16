@@ -1,0 +1,98 @@
+{
+  "navigated": {
+    "content": [
+      {
+        "text": "That target belongs to an older version of the page. Next: Call browser_inspect to obtain current target handles.",
+        "type": "text"
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "effect": "none",
+      "facts": {
+        "reason": "stale_target",
+        "stale": "navigated"
+      },
+      "invocation": "<volatile>",
+      "next_steps": [
+        "Call browser_inspect to obtain current target handles."
+      ],
+      "readiness": "unknown",
+      "repeat_safe": true,
+      "status": "failed",
+      "summary": "That target belongs to an older version of the page."
+    }
+  },
+  "removed": {
+    "content": [
+      {
+        "text": "That target is no longer on the page. Next: Call browser_find or browser_inspect to obtain current target handles.",
+        "type": "text"
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "effect": "none",
+      "facts": {
+        "reason": "stale_target",
+        "stale": "removed"
+      },
+      "invocation": "<volatile>",
+      "next_steps": [
+        "Call browser_find or browser_inspect to obtain current target handles."
+      ],
+      "readiness": "unknown",
+      "repeat_safe": true,
+      "status": "failed",
+      "summary": "That target is no longer on the page."
+    }
+  },
+  "tab_closed": {
+    "content": [
+      {
+        "text": "That target's tab is closed. Next: Call browser_tabs to choose an open tab.",
+        "type": "text"
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "effect": "none",
+      "facts": {
+        "reason": "stale_target",
+        "stale": "tab_closed"
+      },
+      "invocation": "<volatile>",
+      "next_steps": [
+        "Call browser_tabs to choose an open tab."
+      ],
+      "readiness": "unknown",
+      "repeat_safe": true,
+      "status": "failed",
+      "summary": "That target's tab is closed."
+    }
+  },
+  "unknown": {
+    "content": [
+      {
+        "text": "Ghostlight does not know that target handle. Next: Call browser_find or browser_inspect to obtain current target handles.",
+        "type": "text"
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "effect": "none",
+      "facts": {
+        "reason": "stale_target",
+        "stale": "unknown"
+      },
+      "invocation": "<volatile>",
+      "next_steps": [
+        "Call browser_find or browser_inspect to obtain current target handles."
+      ],
+      "readiness": "unknown",
+      "repeat_safe": true,
+      "status": "failed",
+      "summary": "Ghostlight does not know that target handle."
+    }
+  }
+}

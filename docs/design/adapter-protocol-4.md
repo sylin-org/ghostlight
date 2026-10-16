@@ -1702,6 +1702,12 @@ The level-4 `content.js` is a copy of today's `content.js` with these edits. The
   - unknown kind: `unknown_kind`.
 - **Locator epochs.** Locators are `locator_${EPOCH}_${n}`. `resolve` rejects a foreign epoch as
   `stale_locator`, so a rebuilt world never aliases an old handle to a new element.
+- **Stale locators say why.** A `stale_locator` failure carries the detail `{stale: word}`, and
+  the word is `removed` when the element left the document and `unknown` for a locator this page
+  does not hold (a foreign epoch, never minted, or dropped from the registry). A service reads any
+  other or missing word as `unknown`. The registry keeps live locators and gone ones apart, 500
+  of each at most; a gone entry holds no element, and entries whose element left the document are
+  released at the start of every `find`, `inspect`, `query_semantic` and `describe`.
 - **Cancel tokens.** Every page loop checks `ctx.signal.cancelled` and throws `cancelled`:
   - `observe` (`:708-757`);
   - `prepareStableFill` (`:581-603`);
@@ -2162,7 +2168,7 @@ fn fill(l: &mut Link, s: &mut Scope, tab: u64, fields: &[PhysicalField], submit:
         timeout_ms: u64, creds: bool) -> Result<BrowserOutcome, BrowserError> {
     let budget = l.deadline().min(Instant::now() + Duration::from_millis(timeout_ms));
     let groups = forms::group_by_document(fields)?;          // first-appearance order; "field target is not frame-scoped"
-    let submit = submit.map(Locator::decode).transpose()?;   // malformed: "stale browser locator"
+    let submit = submit.map(Locator::decode).transpose()?;   // malformed: StaleLocator{unknown}
     if submit.as_ref().is_some_and(|x| !groups.iter().any(|g| g.doc == x.doc)) {
         return Err(BrowserError::Primitive("submit control is not contained in the resolved form".into()));
     }
@@ -2368,7 +2374,7 @@ fn find(l: &mut Link, s: &mut Scope, tab: u64, text: &str, kind: &str, max_resul
 
   A signal with no tab is dropped. The port returns `Presented{rendered:false}` without waiting.
 - **Stale locators.** A level-3 locator that reaches a level-4 connection, for example after the browser
-  updated mid-session, fails `Locator::decode` as "stale browser locator", which is a plain failure.
+  updated mid-session, fails `Locator::decode` as `StaleLocator` with the reason `unknown`, before anything is sent.
 
 ---
 

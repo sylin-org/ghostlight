@@ -70,6 +70,24 @@ browser. Target handles are different by design -- they are perception, not iden
 handle is tied to one tab and document generation, a committed navigation makes prior target
 handles stale, and acting on one forces re-inspection of a page the model has actually seen.
 Reading the same control again in the same document returns the same handle.
+A stale target handle refuses with `reason: stale_target`, no effect and `repeat_safe: true`, and
+a `stale` fact that says why in one of four words, whoever noticed. The service notices a closed
+tab or a left document; the page notices a control that left it. A handle of a closed tab, of a
+document the tab left, or of a control the page reported removed refuses at once, before anything
+is sent to the browser. The sentence and the step depend on the word only, and never quote page
+text:
+
+| `stale` | Summary | Next step |
+| --- | --- | --- |
+| `removed` | `That target is no longer on the page.` | `browser_find` or `browser_inspect` |
+| `navigated` | `That target belongs to an older version of the page.` | `browser_inspect` |
+| `tab_closed` | `That target's tab is closed.` | `browser_tabs` |
+| `unknown` | `Ghostlight does not know that target handle.` | `browser_find` or `browser_inspect` |
+
+Candidates the live page still has under the control's old name are listed in
+`recovery_candidates` only when the tab's address is readable under the session's authority. A
+handle the service never issued, dropped to bound memory, or whose control the page no longer
+holds in its registry is `unknown`.
 A same-document change is not a committed navigation. When an action moves the address within the
 same origin and no document commits, as an anchor link or a `history.pushState` route does, the
 generation and target handles stay valid. The tab's governed URL follows the page, landing

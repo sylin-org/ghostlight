@@ -8,6 +8,7 @@
 use super::wire::FrameRef;
 use crate::browser::adapter::ObservedTarget;
 use crate::browser::BrowserError;
+use crate::workspace::StaleReason;
 
 /// The separator between the parts of an encoded locator.
 const SEPARATOR: char = ':';
@@ -15,8 +16,6 @@ const SEPARATOR: char = ':';
 const LOCAL_PREFIX: &str = "locator_";
 /// The separator between a local locator's world epoch and its counter.
 const LOCAL_SEPARATOR: char = '_';
-/// The failure for a locator that names no live element.
-const STALE_LOCATOR: &str = "stale browser locator";
 
 /// An element locator bound to the document that minted it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,8 +49,8 @@ impl Locator {
     ///
     /// # Errors
     ///
-    /// Returns a plain primitive failure for a locator that is malformed or was not minted by a
-    /// protocol 4 asset: nothing was sent, so nothing happened.
+    /// Returns [`BrowserError::StaleLocator`] with the reason `unknown` for a locator that is
+    /// malformed or was not minted by a protocol 4 asset: nothing was sent, so nothing happened.
     pub fn decode(text: &str) -> Result<Self, BrowserError> {
         let mut parts = text.splitn(3, SEPARATOR);
         match (parts.next(), parts.next(), parts.next()) {
@@ -66,7 +65,9 @@ impl Locator {
                     local,
                 ))
             }
-            _ => Err(BrowserError::Primitive(STALE_LOCATOR.to_owned())),
+            _ => Err(BrowserError::StaleLocator {
+                reason: StaleReason::Unknown,
+            }),
         }
     }
 }
@@ -142,7 +143,9 @@ mod tests {
         ] {
             assert_eq!(
                 Locator::decode(text),
-                Err(BrowserError::Primitive("stale browser locator".into())),
+                Err(BrowserError::StaleLocator {
+                    reason: StaleReason::Unknown
+                }),
                 "{text:?}"
             );
         }

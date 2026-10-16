@@ -36,6 +36,12 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
         ("deadline_after", BrowserError::DeadlineAfterDispatch),
         ("primitive", BrowserError::Primitive("x".into())),
         ("stale_view", BrowserError::StaleView),
+        (
+            "stale_locator",
+            BrowserError::StaleLocator {
+                reason: StaleReason::Removed,
+            },
+        ),
         ("interlock", BrowserError::LocalInterlock("x".into())),
         ("effect_unknown", BrowserError::EffectUnknown("x".into())),
         ("protocol", BrowserError::Protocol("x".into())),
@@ -4119,7 +4125,7 @@ fn unconfirmed_expectations_keep_the_applied_action_in_every_account() {
 }
 
 /// A workspace with one open tab and one current target, ready for an action.
-fn workspace_with_a_target() -> (
+pub(super) fn workspace_with_a_target() -> (
     ApplicationExecutor,
     Arc<FakeBrowser>,
     WorkspaceStore,
@@ -4432,4 +4438,215 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         &CancellationToken::default(),
     );
     assert_eq!(dialog_open(), None);
+}
+
+/// The refusal of a handle whose control the page found gone, as the model reads it.
+fn assert_stale_removed(result: &crate::work::result::InvocationResult) {
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.effect, Effect::None);
+    assert!(result.repeat_safe);
+    assert_eq!(result.summary, "That target is no longer on the page.");
+    assert_eq!(result.facts["reason"], "stale_target");
+    assert_eq!(result.facts["stale"], "removed");
+    assert_eq!(
+        result.next_steps,
+        vec!["Call browser_find or browser_inspect to obtain current target handles."]
+    );
+}
+
+/// A page-side stale handle refuses the way a generation change does, with the page's word, the
+/// per-word step and the candidates the live page still has. Whoever noticed, the answer is one.
+#[test]
+fn a_page_side_stale_handle_refuses_as_stale_target_with_its_word() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(BrowserError::StaleLocator {
+        reason: StaleReason::Removed,
+    }));
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
+            locator: "delete-2".into(),
+            role: "button".into(),
+            name: "Delete".into(),
+            state: vec![],
+            credential_class: false,
+            ..Default::default()
+        }],
+    )));
+    let clicked = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_stale_removed(&clicked);
+    let candidates = clicked.facts["recovery_candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["name"], "Delete");
+}
+
+/// The second use of a handle the page reported removed never reaches the browser: the tombstone
+/// refuses at once, and only the read-authorized candidate search crosses.
+#[test]
+fn a_tombstoned_handle_refuses_before_dispatch() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(BrowserError::StaleLocator {
+        reason: StaleReason::Removed,
+    }));
+    executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+    let before = browser.calls().len();
+    let again = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_stale_removed(&again);
+    assert!(browser.calls()[before..]
+        .iter()
+        .all(|call| matches!(call, BrowserCommand::QuerySemantic { .. })));
+}
+
+/// A page that does not know the handle (evicted, or from another world) says unknown, and that
+/// word retires nothing: the handle is tried again at the page.
+#[test]
+fn an_unknown_page_side_word_is_not_remembered() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    for _ in 0..2 {
+        let before = browser.calls().len();
+        browser.push(Err(BrowserError::StaleLocator {
+            reason: StaleReason::Unknown,
+        }));
+        let clicked = executor.execute(
+            &workspace,
+            "browser_click",
+            json!({"tab":tab_handle,"target":target}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(clicked.facts["reason"], "stale_target");
+        assert_eq!(clicked.facts["stale"], "unknown");
+        assert_eq!(
+            clicked.summary,
+            "Ghostlight does not know that target handle."
+        );
+        assert!(
+            browser.calls().len() > before,
+            "the click reached the browser"
+        );
+    }
+}
+
+/// A closed tab's handle and a left document's handle each say their own word.
+#[test]
+fn a_closed_tab_and_a_left_document_say_tab_closed_and_navigated() {
+    let (executor, browser, workspaces, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Ok(BrowserOutcome::Navigated {
+        tab: tab(7, "https://example.com/next"),
+        committed_urls: vec![],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/next","tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    let navigated = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(navigated.facts["stale"], "navigated");
+    assert_eq!(
+        navigated.summary,
+        "That target belongs to an older version of the page."
+    );
+    assert_eq!(
+        navigated.next_steps,
+        vec!["Call browser_inspect to obtain current target handles."]
+    );
+
+    workspaces.apply_browser_close(FAKE_BROWSER, 7);
+    let closed = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(closed.facts["reason"], "stale_target");
+    assert_eq!(closed.facts["stale"], "tab_closed");
+    assert_eq!(closed.summary, "That target's tab is closed.");
+    assert_eq!(
+        closed.next_steps,
+        vec!["Call browser_tabs to choose an open tab."]
+    );
+}
+
+/// The audit and the history keep the word and nothing the page or the model supplied: not the
+/// handle, not the control's name.
+#[test]
+fn a_stale_refusal_audits_the_word_only() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com"}),
+        None,
+        &CancellationToken::default(),
+    );
+    let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![ObservedTarget {
+            locator: "private".into(),
+            role: "button".into(),
+            name: "private patient action".into(),
+            state: vec![],
+            credential_class: false,
+            ..Default::default()
+        }],
+    )));
+    let inspected = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({"tab":tab_handle}),
+        None,
+        &CancellationToken::default(),
+    );
+    let target = inspected.facts["items"][0]["target"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    browser.push(Err(BrowserError::StaleLocator {
+        reason: StaleReason::Removed,
+    }));
+    executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+    let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
+    assert!(encoded.contains("removed"), "{encoded}");
+    assert!(!encoded.contains(&target), "{encoded}");
+    assert!(!encoded.contains("private patient action"), "{encoded}");
 }

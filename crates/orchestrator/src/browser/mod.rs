@@ -1123,6 +1123,12 @@ pub enum BrowserError {
     /// Adapter decisively rejected a primitive without an effect.
     #[error("browser primitive failed: {0}")]
     Primitive(String),
+    /// The page holds no control for a locator, and says why. Raised before any effect.
+    #[error("stale browser locator: {}", reason.word())]
+    StaleLocator {
+        /// Why the locator names nothing.
+        reason: crate::workspace::StaleReason,
+    },
     /// The page refused a fill before any edit because fields cannot take their values.
     #[error("form fields cannot take their values")]
     FieldsRejected {

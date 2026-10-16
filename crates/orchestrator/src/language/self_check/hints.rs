@@ -38,6 +38,7 @@ use crate::language::outcome::{
     CheckFailure, DialogKind, EmptyObject, Outcome, Refusal, SavedTo, TargetNoun, TargetRole,
     WorkspaceReason,
 };
+use crate::workspace::StaleReason;
 
 /// Words a hint may put between `with` and the field it names.
 const ARTICLES: &[&str] = &["a", "an", "the"];
@@ -543,11 +544,10 @@ fn unavailable_reasons() -> Vec<BrowserUnavailableReason> {
 
 /// Every workspace reason, with the same compile-time tripwire.
 fn workspace_reasons() -> Vec<WorkspaceReason> {
-    let all = vec![
+    let mut all = vec![
         WorkspaceReason::NoTab,
         WorkspaceReason::AmbiguousTab,
         WorkspaceReason::TabUnavailable,
-        WorkspaceReason::StaleTarget,
         WorkspaceReason::StaleView,
         WorkspaceReason::TabHeld,
         WorkspaceReason::WorkspaceBusy,
@@ -557,12 +557,17 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
         WorkspaceReason::OwnershipMismatch { owner: None },
         WorkspaceReason::WorkspaceClosed,
     ];
+    all.extend(
+        StaleReason::ALL
+            .into_iter()
+            .map(|reason| WorkspaceReason::StaleTarget { reason }),
+    );
     for reason in &all {
         match reason {
             WorkspaceReason::NoTab
             | WorkspaceReason::AmbiguousTab
             | WorkspaceReason::TabUnavailable
-            | WorkspaceReason::StaleTarget
+            | WorkspaceReason::StaleTarget { .. }
             | WorkspaceReason::StaleView
             | WorkspaceReason::TabHeld
             | WorkspaceReason::WorkspaceBusy

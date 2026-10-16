@@ -449,9 +449,43 @@ fn an_envelope_carries_a_value_or_a_coded_failure() {
         Err(AssetError {
             code: AssetErrorCode::StaleLocator,
             message: "stale browser locator".into(),
-            detail: None,
+            detail: Some(AssetDetail::Stale(StaleReason::Unknown)),
         })
     );
+}
+
+/// The envelope of a stale locator whose detail is `detail`, or that has none.
+fn stale_locator(detail: Option<Value>) -> Value {
+    let mut error = json!({"code": "stale_locator", "message": "stale browser locator"});
+    if let Some(detail) = detail {
+        error["detail"] = detail;
+    }
+    json!({"ok": false, "error": error})
+}
+
+#[test]
+fn a_stale_locator_carries_the_word_the_page_gave() {
+    for (detail, expected) in [
+        (json!({"stale": "removed"}), StaleReason::Removed),
+        (json!({"stale": "unknown"}), StaleReason::Unknown),
+        (json!({"stale": "replaced"}), StaleReason::Unknown),
+        (json!({"stale": 7}), StaleReason::Unknown),
+        (json!({"problems": []}), StaleReason::Unknown),
+        (json!("removed"), StaleReason::Unknown),
+    ] {
+        let error = decode_envelope(&stale_locator(Some(detail.clone()))).unwrap_err();
+        assert_eq!(error.code, AssetErrorCode::StaleLocator, "{detail}");
+        assert_eq!(error.detail, Some(AssetDetail::Stale(expected)), "{detail}");
+    }
+    let bare = decode_envelope(&stale_locator(None)).unwrap_err();
+    assert_eq!(bare.detail, Some(AssetDetail::Stale(StaleReason::Unknown)));
+}
+
+#[test]
+fn a_stale_word_on_another_code_is_not_a_reason() {
+    let envelope = json!({"ok": false, "error": {
+        "code": "not_visible", "message": "x", "detail": {"stale": "removed"}}});
+    assert_eq!(decode_envelope(&envelope).unwrap_err().detail, None);
 }
 
 /// The envelope of a refused fill that names `problem` for its first field.
@@ -471,7 +505,9 @@ fn a_refused_fill_carries_the_fields_it_could_not_take() {
     let error = decode_envelope(&refused_fill("option_missing")).unwrap_err();
     assert_eq!(error.code, AssetErrorCode::OptionMissing);
     assert_eq!(error.message, "select option not found");
-    let detail = error.detail.expect("the detail decodes");
+    let Some(AssetDetail::Fields(detail)) = error.detail else {
+        panic!("the detail decodes as fields");
+    };
     assert_eq!(detail.problems.len(), 2);
     assert_eq!(detail.problems[0].field, 0);
     assert_eq!(detail.problems[0].kind, FieldProblemKind::OptionMissing);

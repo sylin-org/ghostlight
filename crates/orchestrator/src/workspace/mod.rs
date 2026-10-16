@@ -1,6 +1,6 @@
 //! The workspace aggregate, opaque handles, ownership, document generations, and leases.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,10 @@ use crate::provenance::{ConnectionDetails, ConnectionEvidence};
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
+
+mod stale;
+
+pub use stale::StaleReason;
 
 /// How many random characters follow the prefix of a handle Ghostlight issues.
 ///
@@ -32,11 +36,12 @@ const HANDLE_ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 /// context, so the agent is told what replaced it. Older records add memory and no information.
 const TARGET_GENERATIONS_KEPT_BEHIND: u64 = 2;
 
-/// The most target records one workspace holds.
+/// The most target records one workspace holds, and the most tombstones it keeps.
 ///
 /// Reads mint records as fast as pages show controls, so memory needs a hard bound. Records of
-/// earlier generations go first, oldest first; current-generation records are what the agent can
-/// act on and are never evicted, so a page with more controls than this still works.
+/// earlier generations go first, oldest first. Only when current-generation records alone are
+/// over the limit does the least recently registered one go, so a page that re-renders its
+/// controls within one document stays bounded too.
 const TARGET_RECORD_LIMIT: usize = 2000;
 
 /// Mint a short handle with `prefix` that `taken` does not already name.
@@ -308,16 +313,26 @@ struct TargetState {
     role_page: String,
     /// Bounded accessible name, retained for the same re-query purpose.
     name: String,
+    /// When the control was last registered, on the book's clock, so the least recently seen
+    /// current-generation record is the one a full book drops.
+    registered_at: u64,
 }
 
 /// A workspace's target records, with an index so a control keeps one handle per document.
 ///
 /// The index maps a tab, a document generation and a locator to the handle that names that
 /// control. Every insert and removal goes through this type, so the two maps cannot disagree.
+///
+/// A handle that stops working leaves a tombstone: the word that says why, kept so the next use
+/// refuses at once and says it. Tombstones are bounded, oldest dropped first, and a handle whose
+/// tombstone is gone reads as unknown.
 #[derive(Debug, Default)]
 struct TargetBook {
     records: HashMap<TargetHandle, TargetState>,
     index: HashMap<(TabHandle, u64, String), TargetHandle>,
+    retired: HashMap<TargetHandle, StaleReason>,
+    retired_order: VecDeque<TargetHandle>,
+    clock: u64,
 }
 
 impl TargetBook {
@@ -329,24 +344,35 @@ impl TargetBook {
         self.records.get(handle)
     }
 
+    /// Why a handle was retired, if it was and the tombstone is still kept.
+    fn retired_reason(&self, handle: &TargetHandle) -> Option<StaleReason> {
+        self.retired.get(handle).copied()
+    }
+
     /// Record one observed control and return its handle.
     ///
     /// A control already recorded for the same tab, generation and locator keeps its handle and
-    /// takes the new observation's role, name and credential class. Otherwise a fresh handle is
-    /// minted.
+    /// takes the new observation's role, name and credential class. A handle the page reported
+    /// removed lives again when its control is read again. Otherwise a fresh handle is minted.
     fn register(&mut self, tab: &SelectedTab, target: &ObservedTarget) -> TargetHandle {
+        self.clock += 1;
+        let registered_at = self.clock;
         let key = (tab.handle.clone(), tab.generation, target.locator.clone());
         // A page authors its own role attribute, so it is narrowed here, at the one door
         // observed targets come through. The page's own string is never stored in the narrowed
         // role and so can never reach a sentence written to the audit.
         let role = TargetRole::classify(&target.role);
-        if let Some(handle) = self.index.get(&key) {
-            if let Some(record) = self.records.get_mut(handle) {
+        if let Some(handle) = self.index.get(&key).cloned() {
+            if let Some(record) = self.records.get_mut(&handle) {
                 record.credential_class = target.credential_class;
                 record.role = role;
                 record.role_page.clone_from(&target.role);
                 record.name.clone_from(&target.name);
-                return handle.clone();
+                record.registered_at = registered_at;
+                if self.retired_reason(&handle) == Some(StaleReason::Removed) {
+                    self.revive(&handle);
+                }
+                return handle;
             }
         }
         let handle = TargetHandle(short_handle("target_", |candidate| {
@@ -362,53 +388,112 @@ impl TargetBook {
                 role,
                 role_page: target.role.clone(),
                 name: target.name.clone(),
+                registered_at,
             },
         );
         self.index.insert(key, handle.clone());
         handle
     }
 
-    /// Remove every record that `doomed` selects, keeping the index in step.
-    fn remove_where(&mut self, doomed: impl Fn(&TargetHandle, &TargetState) -> bool) {
-        self.records
-            .retain(|handle, record| !doomed(handle, record));
+    /// Leave a tombstone for a handle. The first reason a handle is given stays.
+    fn retire(&mut self, handle: TargetHandle, reason: StaleReason) {
+        if self.retired.contains_key(&handle) {
+            return;
+        }
+        self.retired.insert(handle.clone(), reason);
+        self.retired_order.push_back(handle);
+        while self.retired_order.len() > TARGET_RECORD_LIMIT {
+            if let Some(oldest) = self.retired_order.pop_front() {
+                self.retired.remove(&oldest);
+            }
+        }
+    }
+
+    /// Take a handle's tombstone back, because its control is on the page again.
+    fn revive(&mut self, handle: &TargetHandle) {
+        self.retired.remove(handle);
+        self.retired_order.retain(|kept| kept != handle);
+    }
+
+    /// Retire a handle the page reported removed. The record stays, so the handle can be
+    /// revived and a refusal can still search for what it named.
+    fn mark_removed(&mut self, handle: &TargetHandle) {
+        if self.records.contains_key(handle) {
+            self.retire(handle.clone(), StaleReason::Removed);
+        }
+    }
+
+    /// Remove every record that `doomed` selects, leaving each a tombstone with `reason` and
+    /// keeping the index in step.
+    fn retire_where(
+        &mut self,
+        reason: StaleReason,
+        doomed: impl Fn(&TargetHandle, &TargetState) -> bool,
+    ) {
+        let handles: Vec<TargetHandle> = self
+            .records
+            .iter()
+            .filter(|(handle, record)| doomed(handle, record))
+            .map(|(handle, _)| handle.clone())
+            .collect();
+        for handle in handles {
+            self.records.remove(&handle);
+            self.retire(handle, reason);
+        }
         let records = &self.records;
         self.index.retain(|_, handle| records.contains_key(handle));
     }
 
-    /// Drop all records of one tab.
+    /// Retire all records of a closed tab.
     fn remove_tab(&mut self, tab: &TabHandle) {
-        self.remove_where(|_, record| &record.tab == tab);
+        self.retire_where(StaleReason::TabClosed, |_, record| &record.tab == tab);
     }
 
-    /// Drop a tab's records older than the generations kept behind its current one.
+    /// Retire a tab's records older than the generations kept behind its current one.
     fn prune_tab(&mut self, tab: &TabHandle, current: u64) {
         let oldest_kept = current.saturating_sub(TARGET_GENERATIONS_KEPT_BEHIND);
-        self.remove_where(|_, record| &record.tab == tab && record.generation < oldest_kept);
+        self.retire_where(StaleReason::Navigated, |_, record| {
+            &record.tab == tab && record.generation < oldest_kept
+        });
     }
 
-    /// Bring the book under the record limit by evicting non-current records, oldest first.
+    /// Bring the book under the record limit.
     ///
-    /// A record is current when its generation is its tab's present generation. If only current
-    /// records remain, the limit is exceeded rather than break a handle the agent can use.
+    /// A record is current when its generation is its tab's present generation. Records of
+    /// earlier generations go first, oldest first, and read as navigated. If current records
+    /// alone are still over the limit, the least recently registered go and read as unknown.
     fn enforce_limit(&mut self, tabs: &HashMap<TabHandle, TabState>) {
         let Some(excess) = self.records.len().checked_sub(TARGET_RECORD_LIMIT) else {
             return;
         };
-        let mut evictable: Vec<(u64, TargetHandle)> = self
+        let mut evictable: Vec<(u64, u64, TargetHandle)> = self
             .records
             .iter()
             .filter(|(_, record)| {
                 tabs.get(&record.tab)
                     .is_some_and(|tab| record.generation != tab.generation)
             })
-            .map(|(handle, record)| (record.generation, handle.clone()))
+            .map(|(handle, record)| (record.generation, record.registered_at, handle.clone()))
             .collect();
-        evictable.sort_unstable_by_key(|(generation, _)| *generation);
+        evictable
+            .sort_unstable_by_key(|(generation, registered_at, _)| (*generation, *registered_at));
         evictable.truncate(excess);
         let evicted: std::collections::HashSet<TargetHandle> =
-            evictable.into_iter().map(|(_, handle)| handle).collect();
-        self.remove_where(|handle, _| evicted.contains(handle));
+            evictable.into_iter().map(|(_, _, handle)| handle).collect();
+        self.retire_where(StaleReason::Navigated, |handle, _| evicted.contains(handle));
+        let Some(excess) = self.records.len().checked_sub(TARGET_RECORD_LIMIT) else {
+            return;
+        };
+        let mut by_age: Vec<(u64, TargetHandle)> = self
+            .records
+            .iter()
+            .map(|(handle, record)| (record.registered_at, handle.clone()))
+            .collect();
+        by_age.sort_unstable_by_key(|(registered_at, _)| *registered_at);
+        by_age.truncate(excess);
+        let evicted: std::collections::HashSet<TargetHandle> =
+            by_age.into_iter().map(|(_, handle)| handle).collect();
+        self.retire_where(StaleReason::Unknown, |handle, _| evicted.contains(handle));
     }
 }
 
@@ -912,6 +997,40 @@ impl WorkspaceStore {
     pub fn target_owner(&self, current: &WorkspaceId, requested: &str) -> Option<String> {
         let handle = TargetHandle(requested.into());
         self.labeled_owner(current, |workspace| workspace.targets.contains(&handle))
+    }
+
+    /// Last-known context for a target handle that no longer resolves, so a refusal can offer
+    /// fresh candidates from the live page. `None` when the handle never belonged to this
+    /// workspace, its record is gone, or its whole tab is gone.
+    ///
+    /// The context is deliberately narrow: the physical tab to re-query, the governed URL it
+    /// last had, and what the page itself called the control. No page content travels.
+    #[must_use]
+    pub fn stale_target_context(
+        &self,
+        workspace: &WorkspaceId,
+        requested: &str,
+    ) -> Option<StaleTargetContext> {
+        let state = self.lock();
+        let workspace = state.workspaces.get(workspace)?;
+        let target = workspace.targets.get(&TargetHandle(requested.into()))?;
+        let tab = workspace.tabs.get(&target.tab)?;
+        Some(StaleTargetContext {
+            physical_id: tab.physical_id,
+            url: tab.url.clone(),
+            name: target.name.clone(),
+            role_page: target.role_page.clone(),
+        })
+    }
+
+    /// Record that the page reported a handle's control removed, so the handle refuses at once
+    /// from now on. A handle this workspace never issued is left alone.
+    pub fn mark_target_removed(&self, workspace: &WorkspaceId, requested: &str) {
+        if let Some(workspace) = self.lock().workspaces.get_mut(workspace) {
+            workspace
+                .targets
+                .mark_removed(&TargetHandle(requested.into()));
+        }
     }
 
     /// Name the other workspace that holds a handle, by its client label only.
@@ -1614,6 +1733,9 @@ impl WorkspaceLease {
             .get(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
         let handle = TargetHandle(requested.into());
+        if let Some(reason) = workspace.targets.retired_reason(&handle) {
+            return Err(WorkspaceError::StaleTarget { reason });
+        }
         let Some(target) = workspace.targets.get(&handle) else {
             let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
                 id != &self.workspace && candidate.targets.contains(&handle)
@@ -1621,15 +1743,21 @@ impl WorkspaceLease {
             return Err(if owned_elsewhere {
                 WorkspaceError::NotOwnedTarget
             } else {
-                WorkspaceError::StaleTarget
+                WorkspaceError::StaleTarget {
+                    reason: StaleReason::Unknown,
+                }
             });
         };
         let tab = workspace
             .tabs
             .get(&target.tab)
-            .ok_or(WorkspaceError::StaleTarget)?;
+            .ok_or(WorkspaceError::StaleTarget {
+                reason: StaleReason::TabClosed,
+            })?;
         if target.generation != tab.generation {
-            return Err(WorkspaceError::StaleTarget);
+            return Err(WorkspaceError::StaleTarget {
+                reason: StaleReason::Navigated,
+            });
         }
         if let Some(selected) = selected_tab {
             if selected.handle != target.tab {
@@ -1645,25 +1773,6 @@ impl WorkspaceLease {
             locator: target.locator.clone(),
             credential_class: target.credential_class,
             role: target.role,
-        })
-    }
-
-    /// Last-known context for a target handle that no longer resolves, so a refusal can offer
-    /// fresh candidates from the live page. `None` when the handle never belonged to this
-    /// workspace or its whole tab is gone.
-    ///
-    /// The context is deliberately narrow: the physical tab to re-query, the governed URL it
-    /// last had, and what the page itself called the control. No page content travels.
-    pub fn stale_target_context(&self, requested: &str) -> Option<StaleTargetContext> {
-        let state = self.store.lock();
-        let workspace = state.workspaces.get(&self.workspace)?;
-        let target = workspace.targets.get(&TargetHandle(requested.into()))?;
-        let tab = workspace.tabs.get(&target.tab)?;
-        Some(StaleTargetContext {
-            physical_id: tab.physical_id,
-            url: tab.url.clone(),
-            name: target.name.clone(),
-            role_page: target.role_page.clone(),
         })
     }
 
@@ -1928,9 +2037,12 @@ pub enum WorkspaceError {
     /// The workspace already works in a different browser.
     #[error("workspace is already working in another browser")]
     BrowserPinned,
-    /// Target handle belongs to an old document or is unknown.
+    /// Target handle no longer names a control, and says why.
     #[error("target handle is stale")]
-    StaleTarget,
+    StaleTarget {
+        /// Why the handle stopped working.
+        reason: StaleReason,
+    },
     /// Target belongs to another admitted workspace.
     #[error("target is owned by another workspace")]
     NotOwnedTarget,
@@ -1970,8 +2082,8 @@ mod tests {
     use crate::language::outcome::TargetRole;
 
     use super::{
-        short_handle, ReleasedTabs, SnapshotScope, WorkspaceError, WorkspaceId, WorkspaceStore,
-        HANDLE_ALPHABET, HANDLE_SUFFIX_CHARS,
+        short_handle, ReleasedTabs, SnapshotScope, StaleReason, TargetBook, TargetHandle,
+        WorkspaceError, WorkspaceId, WorkspaceStore, HANDLE_ALPHABET, HANDLE_SUFFIX_CHARS,
     };
     use crate::language::outcome::DialogKind;
 
@@ -2451,8 +2563,8 @@ mod tests {
             .unwrap();
         assert_eq!(first[0].0, second[0].0);
         assert_eq!(second[0].0, second[1].0);
-        let context = lease
-            .stale_target_context(first[0].0.as_str())
+        let context = store
+            .stale_target_context(&workspace, first[0].0.as_str())
             .expect("the record is kept");
         assert_eq!(context.name, "Work email");
         assert_eq!(store.lock().workspaces[&workspace].targets.records.len(), 1);
@@ -2490,21 +2602,29 @@ mod tests {
         // Three advances later the first generation's record is gone; the two before the
         // current one are still known.
         assert_eq!(store.lock().workspaces[&workspace].targets.records.len(), 3);
-        assert!(lease.stale_target_context(handles[0].as_str()).is_none());
-        assert!(lease.stale_target_context(handles[1].as_str()).is_some());
+        assert!(store
+            .stale_target_context(&workspace, handles[0].as_str())
+            .is_none());
+        assert!(store
+            .stale_target_context(&workspace, handles[1].as_str())
+            .is_some());
+        // The forgotten handle is told apart from the two kept: both left the document.
         for old in &handles[..3] {
             assert_eq!(
                 lease.resolve_target(old.as_str(), None).unwrap_err(),
-                WorkspaceError::StaleTarget
+                WorkspaceError::StaleTarget {
+                    reason: StaleReason::Navigated
+                }
             );
         }
         assert!(lease.resolve_target(handles[3].as_str(), None).is_ok());
     }
 
-    /// Past the record limit, earlier generations are evicted oldest first and the current
-    /// generation is never touched, even when it alone exceeds the limit.
+    /// Past the record limit, earlier generations are evicted oldest first. The current
+    /// generation is touched only when it alone exceeds the limit, and then the least recently
+    /// registered records go and read as unknown.
     #[test]
-    fn the_record_limit_evicts_earlier_generations_and_never_the_current_one() {
+    fn the_record_limit_evicts_earlier_generations_before_the_current_one() {
         let store = WorkspaceStore::default();
         let workspace = admit_in_browser(&store);
         let lease = store.acquire(&workspace).unwrap();
@@ -2525,7 +2645,11 @@ mod tests {
             .all(|(handle, _)| lease.resolve_target(handle.as_str(), None).is_ok()));
         let survivors = earlier
             .iter()
-            .filter(|(handle, _)| lease.stale_target_context(handle.as_str()).is_some())
+            .filter(|(handle, _)| {
+                store
+                    .stale_target_context(&workspace, handle.as_str())
+                    .is_some()
+            })
             .count();
         assert_eq!(survivors, super::TARGET_RECORD_LIMIT - 1500);
         let index_len = store.lock().workspaces[&workspace].targets.index.len();
@@ -2535,10 +2659,147 @@ mod tests {
             .apply_landing(&tab.handle, &physical(1, "https://example.com/3"))
             .unwrap();
         let crowded = lease.register_targets(&third, &controls(2500)).unwrap();
-        assert_eq!(records(&store), 2500);
-        assert!(crowded
-            .iter()
-            .all(|(handle, _)| lease.resolve_target(handle.as_str(), None).is_ok()));
+        assert_eq!(records(&store), super::TARGET_RECORD_LIMIT);
+        let dropped = 2500 - super::TARGET_RECORD_LIMIT;
+        for (position, (handle, _)) in crowded.iter().enumerate() {
+            let resolved = lease.resolve_target(handle.as_str(), None);
+            if position < dropped {
+                assert_eq!(
+                    resolved.unwrap_err(),
+                    WorkspaceError::StaleTarget {
+                        reason: StaleReason::Unknown
+                    }
+                );
+            } else {
+                assert!(resolved.is_ok());
+            }
+        }
+    }
+
+    /// A tab that went on to another document, a tab that closed, and a control the page
+    /// reported removed each leave their handle refusing at once with their own word.
+    #[test]
+    fn a_retired_handle_refuses_with_the_word_that_says_why() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let mut current = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com/0"))
+            .unwrap();
+        let removed = lease
+            .register_targets(&current, &[control("#gone", "Gone")])
+            .unwrap()[0]
+            .0
+            .clone();
+        store.mark_target_removed(&workspace, removed.as_str());
+        let refused = |handle: &TargetHandle| lease.resolve_target(handle.as_str(), None);
+        assert_eq!(
+            refused(&removed).unwrap_err(),
+            WorkspaceError::StaleTarget {
+                reason: StaleReason::Removed
+            }
+        );
+        let context = store
+            .stale_target_context(&workspace, removed.as_str())
+            .expect("a removed control keeps its record for the recovery search");
+        assert_eq!(context.name, "Gone");
+
+        let navigated = lease
+            .register_targets(&current, &[control("#old", "Old")])
+            .unwrap()[0]
+            .0
+            .clone();
+        for generation in 1..=3 {
+            current = lease
+                .apply_landing(
+                    &tab.handle,
+                    &physical(1, &format!("https://example.com/{generation}")),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            refused(&navigated).unwrap_err(),
+            WorkspaceError::StaleTarget {
+                reason: StaleReason::Navigated
+            }
+        );
+
+        let closed = lease
+            .register_targets(&current, &[control("#open", "Open")])
+            .unwrap()[0]
+            .0
+            .clone();
+        lease.confirm_tab_closed(&tab.handle).unwrap();
+        assert_eq!(
+            refused(&closed).unwrap_err(),
+            WorkspaceError::StaleTarget {
+                reason: StaleReason::TabClosed
+            }
+        );
+        assert_eq!(
+            lease
+                .resolve_target("target_neverissued", None)
+                .unwrap_err(),
+            WorkspaceError::StaleTarget {
+                reason: StaleReason::Unknown
+            }
+        );
+    }
+
+    /// Reading a removed control again brings its handle back, and a handle the page never
+    /// reported removed is not retired by asking.
+    #[test]
+    fn reading_a_removed_control_again_revives_its_handle() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com"))
+            .unwrap();
+        let handle = lease
+            .register_targets(&tab, &[control("#save", "Save")])
+            .unwrap()[0]
+            .0
+            .clone();
+        store.mark_target_removed(&workspace, "target_neverissued");
+        assert!(lease.resolve_target(handle.as_str(), None).is_ok());
+        store.mark_target_removed(&workspace, handle.as_str());
+        assert!(lease.resolve_target(handle.as_str(), None).is_err());
+        let again = lease
+            .register_targets(&tab, &[control("#save", "Save")])
+            .unwrap()[0]
+            .0
+            .clone();
+        assert_eq!(again, handle);
+        assert!(lease.resolve_target(handle.as_str(), None).is_ok());
+        let book = &store.lock().workspaces[&workspace].targets;
+        assert!(book.retired.is_empty() && book.retired_order.is_empty());
+    }
+
+    /// Tombstones are bounded: the oldest are dropped, and a dropped one has no reason left.
+    #[test]
+    fn tombstones_are_bounded_and_the_oldest_are_dropped() {
+        let mut book = TargetBook::default();
+        let handle = |position: usize| TargetHandle(format!("target_{position}"));
+        for position in 0..super::TARGET_RECORD_LIMIT + 10 {
+            book.retire(handle(position), StaleReason::Navigated);
+        }
+        assert_eq!(book.retired.len(), super::TARGET_RECORD_LIMIT);
+        assert_eq!(book.retired_order.len(), super::TARGET_RECORD_LIMIT);
+        assert_eq!(book.retired_reason(&handle(0)), None);
+        assert_eq!(book.retired_reason(&handle(9)), None);
+        assert_eq!(
+            book.retired_reason(&handle(10)),
+            Some(StaleReason::Navigated)
+        );
+        // The first reason a handle is given stays.
+        book.retire(handle(10), StaleReason::Unknown);
+        assert_eq!(
+            book.retired_reason(&handle(10)),
+            Some(StaleReason::Navigated)
+        );
     }
 
     /// Every handle Ghostlight issues is its prefix and eight base32 characters, however many a
@@ -2674,7 +2935,9 @@ mod tests {
             .unwrap();
         assert_eq!(
             lease.resolve_target(&handle, None).unwrap_err(),
-            WorkspaceError::StaleTarget
+            WorkspaceError::StaleTarget {
+                reason: StaleReason::Navigated
+            }
         );
         drop(lease);
         let other = store.acquire(&second).unwrap();

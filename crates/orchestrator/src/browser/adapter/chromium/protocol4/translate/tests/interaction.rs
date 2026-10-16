@@ -316,10 +316,14 @@ fn a_preparation_failure_is_a_plain_failure_and_sends_no_input() {
             finished,
         );
         let error = call(&port, scoped(all_open(), activate(NESTED))).unwrap_err();
-        assert!(
-            matches!(error, BrowserError::Primitive(_)),
-            "{code} is a plain failure, not {error:?}"
-        );
+        let expected = if code == "stale_locator" {
+            BrowserError::StaleLocator {
+                reason: StaleReason::Unknown,
+            }
+        } else {
+            BrowserError::Primitive(code.into())
+        };
+        assert_eq!(error, expected, "{code}");
         assert!(inputs_seen(&fake).is_empty());
     }
 }
@@ -536,9 +540,23 @@ fn a_lost_focus_refuses_the_key_press_with_nothing_sent() {
 
 #[test]
 fn a_stale_locator_refuses_the_key_press_with_nothing_sent() {
-    let (port, _fake) = rig(page(), precondition_refused("stale_locator"));
+    let (port, _fake) = rig(page(), move |_| {
+        Out::Effect(json!({"completed_steps": 0, "precondition": {
+            "status": "returned",
+            "envelope": {"ok": false, "error": {
+                "code": "stale_locator",
+                "message": "stale browser locator",
+                "detail": {"stale": "removed"}
+            }}
+        }}))
+    });
     let error = call(&port, scoped(all_open(), press(Some(NESTED), "Enter", &[]))).unwrap_err();
-    assert_eq!(error, BrowserError::Primitive("stale_locator".into()));
+    assert_eq!(
+        error,
+        BrowserError::StaleLocator {
+            reason: StaleReason::Removed
+        }
+    );
 }
 
 #[test]

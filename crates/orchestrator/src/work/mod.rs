@@ -49,7 +49,7 @@ use crate::language::{
     field_problem::ControlRef,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason,
-        CheckFailure, Observed, Outcome, Refusal, TargetRole, WorkspaceReason,
+        CheckFailure, Observed, Outcome, Refusal, TargetRole, WorkspaceReason, STALE_FACT,
     },
     Operation, Record, TakeScreenshot,
 };
@@ -57,8 +57,8 @@ use crate::presentation::PresentationReactor;
 use crate::provenance::ConnectionEvidence;
 use crate::workbench::WorkbenchProjection;
 use crate::workspace::{
-    SelectedTab, SelectedTarget, SelectedView, WorkspaceError, WorkspaceId, WorkspaceLease,
-    WorkspaceStore,
+    SelectedTab, SelectedTarget, SelectedView, StaleReason, WorkspaceError, WorkspaceId,
+    WorkspaceLease, WorkspaceStore,
 };
 use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
 
@@ -779,21 +779,19 @@ impl ApplicationExecutor {
         // A stale handle is where recovery is cheapest: the page still has controls matching
         // what that handle used to be called. Offer up to three of them so the refusal
         // arrives pre-recovered instead of sending the driver back to inspect.
-        if matches!(&result, Err(WorkspaceError::StaleTarget)) {
-            self.record_stale_candidates(context, lease, target);
+        if matches!(&result, Err(WorkspaceError::StaleTarget { .. })) {
+            self.record_stale_candidates(context, target);
         }
         result
     }
 
     /// Best-effort fresh candidates for a stale target handle. Silence on any failure or
     /// governance denial is deliberate -- the refusal stays truthful without them.
-    fn record_stale_candidates(
-        &self,
-        context: &InvocationContext<'_>,
-        lease: &WorkspaceLease,
-        target_handle: &str,
-    ) {
-        let Some(info) = lease.stale_target_context(target_handle) else {
+    fn record_stale_candidates(&self, context: &InvocationContext<'_>, target_handle: &str) {
+        let Some(info) = self
+            .workspaces
+            .stale_target_context(context.workspace, target_handle)
+        else {
             return;
         };
         if info.name.trim().is_empty() {
@@ -1599,6 +1597,24 @@ impl ApplicationExecutor {
         }
     }
 
+    /// The page found a handle's control gone or unknown, which a stale handle says the same way
+    /// whoever noticed. A control the page reported removed is remembered, so the handle refuses
+    /// at once from now on.
+    fn stale_locator_failure(
+        &self,
+        context: &InvocationContext<'_>,
+        reason: StaleReason,
+    ) -> Terminal {
+        if let Some(handle) = context.requested_target {
+            if reason == StaleReason::Removed {
+                self.workspaces
+                    .mark_target_removed(context.workspace, handle);
+            }
+            self.record_stale_candidates(context, handle);
+        }
+        self.workspace_failure(context, WorkspaceError::StaleTarget { reason })
+    }
+
     fn protocol_failure(
         &self,
         context: &InvocationContext<'_>,
@@ -1685,6 +1701,9 @@ impl ApplicationExecutor {
         // Routing refusals are decisive and physical-effect-free: nothing was dispatched, because
         // nothing could be dispatched anywhere in particular. They name the browsers the caller
         // can choose between rather than picking one on the caller's behalf.
+        if let BrowserError::StaleLocator { reason } = error {
+            return self.stale_locator_failure(context, reason);
+        }
         if let Some((refusal, facts)) = routing_refusal(&error) {
             let summary = refusal.summary();
             return Terminal {
@@ -1851,6 +1870,9 @@ impl ApplicationExecutor {
             Status::Failed
         };
         let mut facts = json!({"reason":reason.as_fact()});
+        if let WorkspaceReason::StaleTarget { reason } = &reason {
+            facts[STALE_FACT] = Value::String(reason.word().into());
+        }
         if let Some(owner) = owner {
             facts["owner_workspace"] = Value::String(owner);
         }
@@ -2291,6 +2313,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::RecoveryManual { .. }
         | BrowserError::RecoveryFailed { .. } => (CheckFailure::BrowserUnavailable, admitted),
         BrowserError::Primitive(_)
+        | BrowserError::StaleLocator { .. }
         | BrowserError::FieldsRejected { .. }
         | BrowserError::FieldsReverted { .. }
         | BrowserError::StaleView
@@ -2656,7 +2679,7 @@ mod tests {
     use crate::language::outcome::Observed;
     use crate::presentation::{PresentationError, PresentationPort, PresentationReactor};
     use crate::workbench::WorkbenchProjection;
-    use crate::workspace::WorkspaceStore;
+    use crate::workspace::{StaleReason, WorkspaceStore};
 
     use super::{
         adapter_budget_ms, browser_reason, observed_from, readiness_name, routing_refusal,

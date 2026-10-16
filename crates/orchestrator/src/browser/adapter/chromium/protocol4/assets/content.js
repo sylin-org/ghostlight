@@ -194,41 +194,83 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   const FILL_SETTLE_POLL_MS = 50;
   const LOCATOR_PREFIX = `locator_${world.EPOCH}_`;
   const EMBED_TAGS = new Set(["iframe", "frame"]);
+  // How many live locators, and how many remembered gone ones, the registry keeps. Past the live
+  // limit the oldest locator is dropped and later reads as unknown. Past the gone limit the oldest
+  // removed locator is dropped the same way.
   const MAX_LOCATORS = 500;
+  // locator -> { element, gone }. A gone entry holds no element, so a removed node is never pinned.
+  // The Map keeps mint order, so the first entry of a kind is the oldest.
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
+  let liveCount = 0;
+  let goneCount = 0;
 
-  function pruneDisconnectedLocators() {
-    for (const [loc, el] of locators) {
-      if (!el.isConnected) locators.delete(loc);
+  // Drop the oldest entries of one kind until at most `limit` of them remain.
+  function trimLocators(gone, limit) {
+    let count = gone ? goneCount : liveCount;
+    for (const [locator, entry] of locators) {
+      if (count <= limit) break;
+      if (entry.gone !== gone) continue;
+      if (!gone) reverse.delete(entry.element);
+      locators.delete(locator);
+      count -= 1;
+    }
+    if (gone) goneCount = count; else liveCount = count;
+  }
+
+  // A live entry whose element left the document keeps its locator and loses the element.
+  function retireLocator(entry) {
+    reverse.delete(entry.element);
+    entry.element = null;
+    entry.gone = true;
+    liveCount -= 1;
+    goneCount += 1;
+    trimLocators(true, MAX_LOCATORS);
+  }
+
+  // Run at the start of every read that mints or describes locators, so a detached node is held
+  // no longer than the next read.
+  function releaseGoneLocators() {
+    for (const entry of locators.values()) {
+      if (!entry.gone && !entry.element.isConnected) retireLocator(entry);
     }
   }
 
   function locatorFor(element) {
     let locator = reverse.get(element);
     if (!locator) {
-      if (locators.size >= MAX_LOCATORS) pruneDisconnectedLocators();
       locator = `${LOCATOR_PREFIX}${nextLocator++}`;
       reverse.set(element, locator);
-      locators.set(locator, element);
+      locators.set(locator, { element, gone: false });
+      liveCount += 1;
+      trimLocators(false, MAX_LOCATORS);
     }
     return locator;
   }
 
-  function staleLocator() {
-    return new AssetError("stale_locator", "stale browser locator");
+  // The two words a page can give: the element left the document, or the locator is not one this
+  // page holds (another world, never minted, or dropped from the registry).
+  function staleLocator(word) {
+    return new AssetError("stale_locator", "stale browser locator", { stale: word });
   }
 
   // A locator minted by another world (a rebuilt page runtime) never aliases a new element.
   function resolve(locator) {
-    if (typeof locator !== "string" || !locator.startsWith(LOCATOR_PREFIX)) throw staleLocator();
-    const element = locators.get(locator);
-    if (!element || !element.isConnected) {
-      if (element) locators.delete(locator);
-      throw staleLocator();
+    if (typeof locator !== "string" || !locator.startsWith(LOCATOR_PREFIX)) throw staleLocator("unknown");
+    const entry = locators.get(locator);
+    if (!entry) throw staleLocator("unknown");
+    if (entry.gone) throw staleLocator("removed");
+    if (!entry.element.isConnected) {
+      retireLocator(entry);
+      throw staleLocator("removed");
     }
-    return element;
+    return entry.element;
+  }
+
+  // The element a locator still holds, connected or not. A gone or unknown locator holds none.
+  function heldElement(locator) {
+    return locators.get(locator)?.element ?? undefined;
   }
 
   function cancelledError() {
@@ -1919,7 +1961,7 @@ ${line}` : line;
   }
 
   function requireActionable(element, intent) {
-    if (!element.isConnected) throw staleLocator();
+    if (!element.isConnected) throw staleLocator("removed");
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     if (style.display === "none" || element.getAttribute("aria-hidden") === "true" || style.visibility === "hidden" || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) {
@@ -2008,7 +2050,7 @@ ${line}` : line;
   }
 
   function requireUploadTarget(element) {
-    if (!element.isConnected) throw staleLocator();
+    if (!element.isConnected) throw staleLocator("removed");
     if (!(element instanceof HTMLInputElement) || element.type !== "file") {
       throw new AssetError("not_file_input", "target is not a file input");
     }
@@ -2049,7 +2091,7 @@ ${line}` : line;
     });
 
     if (message.condition === "visual_settle") {
-      const targetElement = message.locator ? locators.get(message.locator) : document;
+      const targetElement = message.locator ? heldElement(message.locator) : document;
       const visual = await sensor.settleVisual(targetElement, settleOptions(message.timeout_ms));
       if (!visual.settled) return unmet(readiness());
       return { satisfied: true, elapsed_ms: elapsed(), readiness: readiness() };
@@ -2062,11 +2104,11 @@ ${line}` : line;
       if (message.condition === "url_contains") satisfied = location.href.includes(message.value);
       if (message.condition === "text_present") satisfied = pageHasText(needle);
       if (message.condition === "text_absent") satisfied = !pageHasText(needle);
-      if (message.condition === "target_present") satisfied = Boolean(locators.get(message.locator)?.isConnected);
-      if (message.condition === "target_absent") satisfied = !locators.get(message.locator)?.isConnected;
+      if (message.condition === "target_present") satisfied = Boolean(heldElement(message.locator)?.isConnected);
+      if (message.condition === "target_absent") satisfied = !heldElement(message.locator)?.isConnected;
       if (satisfied) {
         if (message.visual_settle === true) {
-          const targetElement = message.locator ? locators.get(message.locator) : document;
+          const targetElement = message.locator ? heldElement(message.locator) : document;
           const visual = await sensor.settleVisual(targetElement, settleOptions(Math.max(0, deadline - performance.now())));
           if (!visual.settled) return unmet(readiness());
         }
@@ -2152,18 +2194,22 @@ ${line}` : line;
       return sampled(message, ctx, extract, (res) => Boolean(res?.tree && Array.isArray(res.tree.children) && res.tree.children.length > 0));
     }
     if (message.kind === "inspect") {
+      releaseGoneLocators();
       const extract = () => inspect(message.inspect_kind, message.max_items);
       return sampled(message, ctx, extract, (res) => res.targets.length > 0);
     }
     if (message.kind === "find") {
+      releaseGoneLocators();
       const extract = () => findTargets(message.text, message.find_kind, message.max_results);
       return sampled(message, ctx, extract, (res) => res.targets.length > 0);
     }
     if (message.kind === "describe") {
+      releaseGoneLocators();
       const view = observationView();
       return { targets: message.locators.map((locator) => observation(resolve(locator), view)) };
     }
     if (message.kind === "query_semantic") {
+      releaseGoneLocators();
       const extract = () => querySemanticTargets(message);
       return sampled(message, ctx, extract, (res) => res.targets.length > 0);
     }
@@ -2269,7 +2315,11 @@ ${line}` : line;
     throw new AssetError("unknown_kind", "unknown content primitive");
   }
 
-  world.onDispose(() => locators.clear());
+  world.onDispose(() => {
+    locators.clear();
+    liveCount = 0;
+    goneCount = 0;
+  });
 
   return { dispatch, applyAmbient, renderPresentation };
 })();

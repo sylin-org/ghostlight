@@ -16,6 +16,7 @@ use crate::browser::adapter::{
     PhysicalPoint,
 };
 use crate::browser::{BrowserError, BrowserPort, RelayBrowserPort};
+use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
 const WORKSPACE: &str = "workspace_translate";

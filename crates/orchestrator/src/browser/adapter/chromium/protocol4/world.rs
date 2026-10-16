@@ -22,6 +22,7 @@ use crate::browser::adapter::{
 };
 use crate::language::area::LeftOut;
 use crate::language::field_problem::FieldProblems;
+use crate::workspace::StaleReason;
 use EffectClass::{Effect, Prepare, Read};
 use ScopeClass::{Content, Metadata};
 
@@ -53,6 +54,8 @@ const CODE_FIELD: &str = "code";
 const MESSAGE_FIELD: &str = "message";
 /// The failure member that carries the optional detail a code does not say.
 const DETAIL_FIELD: &str = "detail";
+/// The detail member of a stale locator that names why.
+const STALE_FIELD: &str = "stale";
 /// Longest description of a failure kept from the asset.
 const MESSAGE_MAX_CHARS: usize = 500;
 /// The description of an answer that is not an envelope.
@@ -665,6 +668,36 @@ impl AssetErrorCode {
     }
 }
 
+/// What a failure says beyond its code and message, decoded by the code that carried it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AssetDetail {
+    /// The fields a refused fill could not take.
+    Fields(FieldProblems),
+    /// Why a locator no longer names a control.
+    Stale(StaleReason),
+}
+
+impl AssetDetail {
+    /// Decode the detail a failure with `code` carried. A fill refusal's detail is read as its
+    /// fields and is absent when this build does not know every word it used. A stale locator
+    /// always has a reason: the page's word `removed`, and any other or missing word as
+    /// `unknown`. Other codes carry fields or nothing.
+    fn decode(code: AssetErrorCode, detail: Option<&Value>) -> Option<Self> {
+        if code == AssetErrorCode::StaleLocator {
+            let removed = detail
+                .and_then(|detail| detail.get(STALE_FIELD))
+                .and_then(Value::as_str)
+                .is_some_and(|word| word == StaleReason::Removed.word());
+            return Some(Self::Stale(if removed {
+                StaleReason::Removed
+            } else {
+                StaleReason::Unknown
+            }));
+        }
+        detail.and_then(FieldProblems::decode).map(Self::Fields)
+    }
+}
+
 /// A failure a page asset reported.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[error("{message}")]
@@ -673,9 +706,9 @@ pub struct AssetError {
     pub code: AssetErrorCode,
     /// The asset's bounded description, which may reach the model.
     pub message: String,
-    /// The fields a refused fill could not take, when the asset reported them and this build
-    /// knows every word it used. An unknown word leaves the failure as its code and message.
-    pub detail: Option<FieldProblems>,
+    /// What the failure says beyond its code, when the asset reported it and this build knows
+    /// every word it used. An unknown word leaves the failure as its code and message.
+    pub detail: Option<AssetDetail>,
 }
 
 impl AssetError {
@@ -713,9 +746,7 @@ pub fn decode_envelope(envelope: &Value) -> Result<Value, AssetError> {
                 .chars()
                 .take(MESSAGE_MAX_CHARS)
                 .collect();
-            let detail = error
-                .and_then(|error| error.get(DETAIL_FIELD))
-                .and_then(FieldProblems::decode);
+            let detail = AssetDetail::decode(code, error.and_then(|error| error.get(DETAIL_FIELD)));
             Err(AssetError {
                 code,
                 message,

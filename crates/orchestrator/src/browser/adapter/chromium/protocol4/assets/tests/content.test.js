@@ -1957,6 +1957,14 @@ test("locators carry the world's epoch and are minted in order", async () => {
   assert.deepEqual(numbers, numbers.map((_, index) => numbers[0] + index));
 });
 
+/** The detail a refused call carries, or null when the call succeeded. */
+async function detailOf(harness, message) {
+  const reply = await harness.send(message);
+  assert.equal(reply.ok, false);
+  assert.equal(reply.error.code, "stale_locator");
+  return reply.error.detail;
+}
+
 test("a locator from another world or an unminted one is stale_locator", async () => {
   const first = contentHarness();
   const second = contentHarness();
@@ -1966,10 +1974,11 @@ test("a locator from another world or an unminted one is stale_locator", async (
 
   for (const kind of ["describe", "box", "activate", "focus", "hover", "scroll"]) {
     const message = kind === "describe" ? { kind, locators: [foreign] } : { kind, locator: foreign };
-    assert.equal(await second.codeOf(message), "stale_locator", kind);
+    assert.deepEqual(await detailOf(second, message), { stale: "unknown" }, kind);
   }
-  assert.equal(await second.codeOf({ kind: "describe", locators: ["locator_1"] }), "stale_locator");
-  assert.equal(await second.codeOf({ kind: "describe", locators: [`locator_${own.split("_")[1]}_999`] }), "stale_locator");
+  assert.deepEqual(await detailOf(second, { kind: "describe", locators: ["locator_1"] }), { stale: "unknown" });
+  const unminted = { kind: "describe", locators: [`locator_${own.split("_")[1]}_999`] };
+  assert.deepEqual(await detailOf(second, unminted), { stale: "unknown" });
   assert.equal(await second.codeOf({ kind: "describe", locators: [own] }), null);
 });
 
@@ -1977,8 +1986,79 @@ test("a locator for a removed element is stale_locator", async () => {
   const harness = contentHarness();
   const locator = (await harness.targets())[0].locator;
   harness.input.isConnected = false;
-  assert.equal(await harness.codeOf({ kind: "describe", locators: [locator] }), "stale_locator");
-  assert.equal(await harness.codeOf({ kind: "box", locator }), "stale_locator");
+  assert.deepEqual(await detailOf(harness, { kind: "describe", locators: [locator] }), { stale: "removed" });
+  assert.deepEqual(await detailOf(harness, { kind: "box", locator }), { stale: "removed" });
+});
+
+test("a removed locator says removed again on a second use", async () => {
+  const harness = contentHarness();
+  const locator = (await harness.targets())[0].locator;
+  harness.input.isConnected = false;
+  for (let use = 0; use < 3; use += 1) {
+    assert.deepEqual(await detailOf(harness, { kind: "activate", locator }), { stale: "removed" }, `use ${use}`);
+  }
+});
+
+test("an evicted locator says unknown", async () => {
+  const harness = contentHarness();
+  const first = (await harness.targets())[0].locator;
+  const body = harness.element("body");
+  for (let index = 0; index < 520; index += 1) {
+    const item = harness.element("button");
+    item.setAttribute("aria-label", `Item ${index}`);
+    body.append(item);
+  }
+  harness.setBody(body);
+  const reply = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 520, visual_settle: false });
+  assert.ok(reply.value.targets.length >= 500);
+  assert.deepEqual(await detailOf(harness, { kind: "describe", locators: [first] }), { stale: "unknown" });
+});
+
+test("a detached element is released at the next read", async () => {
+  const harness = contentHarness();
+  const locator = (await harness.targets())[0].locator;
+  harness.input.isConnected = false;
+  await harness.send({ kind: "find", text: "anything", find_kind: "any", max_results: 5, visual_settle: false });
+  harness.input.isConnected = true;
+  assert.deepEqual(
+    await detailOf(harness, { kind: "describe", locators: [locator] }),
+    { stale: "removed" },
+    "the registry no longer holds the node, so reattaching it does not revive the locator"
+  );
+});
+
+test("live locators never exceed 500", async () => {
+  const harness = contentHarness();
+  const minted = [];
+  for (let batch = 0; batch < 3; batch += 1) {
+    const body = harness.element("body");
+    for (let index = 0; index < 300; index += 1) {
+      const item = harness.element("button");
+      item.setAttribute("aria-label", `Item ${batch}-${index}`);
+      body.append(item);
+    }
+    harness.setBody(body);
+    const reply = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 300, visual_settle: false });
+    minted.push(...reply.value.targets.map((target) => target.locator));
+  }
+  let live = 0;
+  for (const locator of minted) {
+    const reply = await harness.send({ kind: "describe", locators: [locator] });
+    if (reply.ok) live += 1;
+  }
+  assert.ok(live > 0 && live <= 500, `${live} live locators`);
+});
+
+test("requireActionable says removed when the node vanishes mid-action", async () => {
+  const harness = contentHarness();
+  harness.input.hidden = false;
+  harness.input.type = "submit";
+  harness.input.setAttribute("value", "Save changes");
+  const locator = (await harness.targets())[0].locator;
+  harness.input.scrollIntoView = () => {
+    harness.input.isConnected = false;
+  };
+  assert.deepEqual(await detailOf(harness, { kind: "activate", locator }), { stale: "removed" });
 });
 
 // ---- a refused fill lists what would succeed ----------------------------------------------------

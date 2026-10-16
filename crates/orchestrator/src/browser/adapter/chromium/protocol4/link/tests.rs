@@ -18,6 +18,7 @@ use crate::browser::adapter::{
 };
 use crate::browser::{lock, BrowserDispatch, BrowserError, BrowserPort, RelayBrowserPort};
 use crate::governance::ReasonCode;
+use crate::workspace::StaleReason;
 
 const FOUR: &str = "browser_four";
 const WORKSPACE: &str = "workspace_link";
@@ -416,6 +417,50 @@ fn receipt_failures_map_to_plain_or_local_failures_before_any_effect() {
             "Kept open by the preserve-tabs setting.".into()
         ))
     );
+}
+
+#[test]
+fn a_stale_locator_after_a_started_effect_settles_as_an_unknown_effect() {
+    let next = Arc::new(Mutex::new(answer(Value::Null)));
+    let (port, _fake) = port(scripted(&next));
+    let cancelled = AtomicBool::new(false);
+    let admit = || Ok(());
+    let stale = || BrowserError::StaleLocator {
+        reason: StaleReason::Removed,
+    };
+    let mut link = Link::new(
+        line(&port),
+        WORKSPACE,
+        BrowserDispatch {
+            deadline: Instant::now() + PATIENCE,
+            cancelled: &cancelled,
+            admit: &admit,
+        },
+    );
+    assert_eq!(link.settle(stale()), stale(), "before any effect it stands");
+    *next.lock().unwrap() = wire::Receipt {
+        dispatched: true,
+        ..FakeExtension::ok(
+            "",
+            json!({"answers": [{"status": "returned", "envelope": {"ok": true, "value": null}}]}),
+        )
+    };
+    let scroll = PlannedCall::top(world::scroll(None, Some("down"), None));
+    link.call(
+        12,
+        &[scroll],
+        wire::CallMode::Sequence,
+        None,
+        0,
+        1_000,
+        None,
+    )
+    .unwrap();
+    assert!(link.effect_started());
+    assert!(matches!(
+        link.settle(stale()),
+        BrowserError::EffectUnknown(_)
+    ));
 }
 
 #[test]
@@ -879,7 +924,7 @@ fn a_notice_is_written_once_and_never_awaited() {
                 )
             }
         ),
-        Err(BrowserError::Primitive(_))
+        Err(BrowserError::StaleLocator { .. })
     ));
     let seen = fake.wait(|seen| seen.notices.len() == 2);
     assert_eq!(

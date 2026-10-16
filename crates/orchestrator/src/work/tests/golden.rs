@@ -4,11 +4,13 @@
 //! rendered by a real MCP session, so the goldens hold what the product sends and not a rebuilt
 //! copy of it.
 
+use super::execution::workspace_with_a_target;
 use super::*;
 use crate::language::self_check::golden::{
     check_golden, golden_text, rendered_result, REFUSAL_GOLDEN, REPEATED_FIND_GOLDEN,
-    SUCCESS_GOLDEN,
+    STALE_REFUSALS_GOLDEN, SUCCESS_GOLDEN,
 };
+use crate::workspace::StaleReason;
 
 #[test]
 fn a_listed_tab_matches_the_success_golden() {
@@ -170,4 +172,56 @@ fn a_navigate_receipt_matches_the_audit_success_golden() {
             "the audit golden drifted on {key}"
         );
     }
+}
+
+/// What a click on a handle that went stale reads as, for each of the four words, rendered the way
+/// a client receives it.
+#[test]
+fn a_stale_handle_matches_its_golden_for_each_word() {
+    let mut rendered = serde_json::Map::new();
+    for reason in StaleReason::ALL {
+        let (executor, browser, workspaces, workspace, tab_handle, target) =
+            workspace_with_a_target();
+        match reason {
+            StaleReason::Removed | StaleReason::Unknown => {
+                browser.push(Err(BrowserError::StaleLocator { reason }));
+            }
+            StaleReason::Navigated => {
+                browser.push(Ok(BrowserOutcome::Navigated {
+                    tab: tab(7, "https://example.com/next"),
+                    committed_urls: vec![],
+                }));
+                executor.execute(
+                    &workspace,
+                    "browser_navigate",
+                    json!({"url":"https://example.com/next","tab":tab_handle}),
+                    None,
+                    &CancellationToken::default(),
+                );
+            }
+            StaleReason::TabClosed => workspaces.apply_browser_close(FAKE_BROWSER, 7),
+        }
+        // A closed tab's own handle would refuse first, so that call names only the target.
+        let arguments = if reason == StaleReason::TabClosed {
+            json!({"target":target})
+        } else {
+            json!({"tab":tab_handle,"target":target})
+        };
+        let result = executor.execute(
+            &workspace,
+            "browser_click",
+            arguments.clone(),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.facts["stale"], reason.word(), "{result:?}");
+        rendered.insert(
+            reason.word().into(),
+            rendered_result("browser_click", arguments, &result),
+        );
+    }
+    check_golden(
+        STALE_REFUSALS_GOLDEN,
+        &golden_text(&serde_json::Value::Object(rendered)),
+    );
 }
