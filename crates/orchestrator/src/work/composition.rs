@@ -417,6 +417,7 @@ mod tests {
                 Refusal::AuthorityBlocked {
                     reason: BlockedReason::Hold,
                     host: None,
+                    origin: None,
                 },
                 StepCause::Paused,
                 HUMAN_PAUSE_DIRECTIVE,
@@ -425,6 +426,7 @@ mod tests {
                 Refusal::AuthorityBlocked {
                     reason: BlockedReason::SessionEnded,
                     host: None,
+                    origin: None,
                 },
                 StepCause::SessionEnded,
                 HUMAN_STOP_DIRECTIVE,

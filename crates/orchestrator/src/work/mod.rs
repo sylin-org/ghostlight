@@ -589,7 +589,7 @@ impl ApplicationExecutor {
                 workspace: context.workspace.as_str().into(),
                 physical_id: selected.physical_id,
             });
-            return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), observed_host(&physical.url));
+            return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), Some(&physical.url));
         }
         let change = DocumentChange::between(&selected.url, physical, commits);
         let resulting = match change {
@@ -1479,7 +1479,10 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Report a denial the caller can act on, naming the host when the work named one.
+    /// Report a denial the caller can act on, naming the host when the work named an address.
+    ///
+    /// `blocked_url` is the address the refused work asked for or landed on. Only its host is
+    /// kept for the audit; its origin is kept for the one refusal whose sentence names it.
     #[allow(clippy::too_many_arguments)]
     fn blocked_at(
         &self,
@@ -1489,12 +1492,16 @@ impl ApplicationExecutor {
         effect: Effect,
         repeat_safe: bool,
         facts: Value,
-        blocked_host: Option<String>,
+        blocked_url: Option<&str>,
     ) -> Terminal {
         let facts = with_denial_facts(decision, facts);
+        let reason = blocked_reason(decision.reason);
         let refusal = Refusal::AuthorityBlocked {
-            reason: blocked_reason(decision.reason),
-            host: blocked_host,
+            reason,
+            host: blocked_url.and_then(observed_host),
+            origin: blocked_url
+                .filter(|_| reason == BlockedReason::OwnWorkbench)
+                .and_then(observed_origin),
         };
         let observed = refusal.observed();
         let summary = refusal.summary();
@@ -2227,6 +2234,7 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
     match reason {
         ReasonCode::HostDenied => BlockedReason::Host,
         ReasonCode::ProtectedHost => BlockedReason::ProtectedHost,
+        ReasonCode::OwnWorkbench => BlockedReason::OwnWorkbench,
         ReasonCode::CapabilityDenied => BlockedReason::Capability,
         ReasonCode::TabCloseDenied => BlockedReason::TabClose,
         ReasonCode::ScreenshotDenied => BlockedReason::Screenshot,
@@ -2519,6 +2527,13 @@ fn observed_host(url: &str) -> Option<String> {
         .ok()?
         .host_str()
         .map(str::to_ascii_lowercase)
+}
+
+/// The scheme, host and port of a URL as the caller wrote them, and never anything after.
+fn observed_origin(url: &str) -> Option<String> {
+    let url = Url::parse(url).ok()?;
+    let origin = url.origin();
+    origin.is_tuple().then(|| origin.ascii_serialization())
 }
 
 /// What an action's receipt says happened to its tab's document.

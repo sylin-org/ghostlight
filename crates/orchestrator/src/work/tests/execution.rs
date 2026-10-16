@@ -2389,6 +2389,65 @@ fn refused_navigation_audits_only_the_attempted_host() {
 }
 
 #[test]
+fn the_workbench_origin_is_refused_by_name_and_other_loopback_ports_are_not() {
+    let governance = GovernanceFacade::new(None, None);
+    governance.protect_workbench_port(41259);
+    let (executor, browser, _, workspace, audit) = fixture_with_governance(governance);
+    for (url, origin) in [
+        ("http://127.0.0.1:41259/", "http://127.0.0.1:41259"),
+        (
+            "http://localhost:41259/app?token=secret",
+            "http://localhost:41259",
+        ),
+        ("http://[::1]:41259/", "http://[::1]:41259"),
+    ] {
+        let result = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":url}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.status, Status::Blocked, "{url}");
+        assert_eq!(result.facts["reason"], "own_workbench");
+        assert_eq!(
+            result.summary,
+            format!(
+                "Blocked: {origin} is Ghostlight's own control page and is never automated. Other ports on this computer are not affected."
+            )
+        );
+        assert!(
+            result
+                .next_steps
+                .iter()
+                .all(|step| !step.contains("policy")),
+            "{:?}",
+            result.next_steps
+        );
+    }
+    assert!(browser.calls().is_empty());
+
+    let records = audit.0.lock().unwrap();
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0].observed.host.as_deref(), Some("127.0.0.1"));
+    let encoded = serde_json::to_string(&*records).unwrap();
+    assert!(encoded.contains("own_workbench"));
+    assert!(!encoded.contains("/app"));
+    assert!(!encoded.contains("secret"));
+    drop(records);
+
+    let other = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"http://127.0.0.1:41258/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_ne!(other.facts["reason"], "own_workbench", "{other:?}");
+    assert!(!other.summary.contains("control page"), "{other:?}");
+}
+
+#[test]
 fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capability_alone() {
     // Acquiring a tab does not grant destination authority. Until a known landing has
     // been checked, an empty URL must fail closed rather than union host-specific grants.

@@ -43,8 +43,8 @@ Rules:
 Milestone 1 is complete and deployed in place on the owner's machine (a537043b, channel
 development). The coordinator ran demo parts 0 to 2 (see Live demo results); the owner runs the
 steps that change live state: Controls in the window, a Chrome bookmark, watching off and on, Quit
-and come back. Next: the follow-ups agent-refusal-own-origin and tidy-03, then the shell track is
-planned again. Owner answer Q5 is closed: `ghostlight install` stops strays, and doctor's stray
+and come back. Next: the follow-up tidy-03 (agent-refusal-own-origin has landed), then the shell
+track is planned again. Owner answer Q5 is closed: `ghostlight install` stops strays, and doctor's stray
 sentence names it (polish-02-strays).
 
 ## Landed
@@ -53,7 +53,7 @@ sentence names it (polish-02-strays).
 |---|---|---|
 | m1-01-adr-amendment | The owner-approved amendment of 2026-10-15 is appended to ADR-0199 (the Ghostlight web apps over loopback), with its README row, this ledger, and the pointers from the shell-spike ledger and the task index. Docs only. | see `git log` |
 | m1-02-harness-evidence | Harness evidence names a foreign program and its argument count, never its arguments; a configuration that cannot be parsed carries no evidence (owner answers Q3 and Q8). | see `git log` |
-| m1-03-own-origin | Agents can never open or read the workbench's own loopback origin: `GovernanceFacade::protect_workbench_port` shares the port with every snapshot, and the landing decision refuses a loopback address on that port with `ProtectedHost` whatever the policy says. The authority id does not depend on the port. | see `git log` |
+| m1-03-own-origin | Agents can never open or read the workbench's own loopback origin: `GovernanceFacade::protect_workbench_port` shares the port with every snapshot, and the landing decision refuses a loopback address on that port with `ProtectedHost` whatever the policy says (the code became `OwnWorkbench` in agent-refusal-own-origin). The authority id does not depend on the port. | see `git log` |
 | m1-04-loopback-server | The service serves the workbench on 127.0.0.1 with access decided per route in three contexts (Control, Watch, Closed), each part projected for its audience, guards on Host, Origin and framing, and the bearer made at each start. `protect_workbench_port` runs between binding and answering. The Tauri window is unchanged. | see `git log` |
 | m1-05-live-stream | One live stream, pushed to every screen. `GET /api/events` is served from an `EventHub` every screen subscribes to; the sequence advances whether or not anyone listens; a snapshot reads it first; `status_changed`, `connections_changed` and `part_changed` events keep the band, the sessions and the hinted parts current; the tray, the window, a watching screen and the browser toolbar change the runtime through `apply_runtime_control(intent, source)`, and the status says where a pause came from. Acts answer with `Ghostlight-Seq`. | see `git log` |
 | m1-06-native-acts | The acts that need the operating system are service actions the window asks for over loopback: `WorkbenchNativeActs` (open a link, open a folder, pick a file) attached beside the presentation port, four facade methods on top of it, three Control-only routes, and a table of links in `/api/context` for every context. The Tauri window behaves as before; its four commands call the facade. | see `git log` |
@@ -63,6 +63,7 @@ sentence names it (polish-02-strays).
 | m1-10-shell-webview | `ghostlight-desktop` is the Ghostlight window: a webview on the service's loopback workbench. It opens the relay `desktop` stream (`link.rs`), takes the address, the bearer and the tray from the `workbench` frame, hands the bearer to that origin's page only (`webview::access_script`) and keeps its web storage in `state/desktop-webview` under the home. The private scheme, the in-memory bundle, the page bridge and the spike page are gone; the shell depends on `ghostlight-relay` and nothing else in the workspace. | see `git log` |
 | m1-11-status-and-doctor | `ghostlight status` counts connections and names the workbench; `doctor` names what an older installation left running and `doctor --fix` stops it. The control `status` answer gains `connections` and `workbench` (never the bearer); the text and `--json` forms say the same; the endpoint moves to doctor's `Endpoint:` line. `install::deployment` owns the stray scan (`stray_processes`, `classify`, `stop_strays`); a restart deploy stops strays after the old service quits and before the new one starts. | see `git log` |
 | m1-12-honest-names | The edge carries a version resource: FileDescription "Ghostlight connection", ProductName "Ghostlight", CompanyName "Sylin", FileVersion and ProductVersion 4.0.0 (the relay revision). `embed-resource` becomes a Windows build dependency of the edge. The window keeps "Ghostlight". | see `git log` |
+| agent-refusal-own-origin (follow-up from the live demo) | Ghostlight's own control page has its own refusal: `ReasonCode::OwnWorkbench` (`own_workbench`) and `BlockedReason::OwnWorkbench`, produced wherever the landing decision covers the workbench origin. The sentence names the origin as the caller wrote it and says other ports are not affected; it carries no next step, since no policy lifts it. `ProtectedHost` keeps the never-touch hosts and non-HTTP schemes and its sentence. `policy_explain` adds one line to its ceilings. | see `git log` |
 | polish-02-strays (Q5 closed) | `ghostlight install` stops what an older installation left running through the same `install::deployment::stop_found_strays` the deploy uses, and says what it stopped and what would not stop; doctor's stray sentence names `ghostlight install`, and `doctor --fix` stops them by running the install repairs. A deploy reports strays that would not stop in `Outcome::strays_left` and prints one sentence for each. A program still running from the retired development directory is a stray of its own kind (`retired_development`). One vocabulary: `swap::moved_aside` and `swap::OLD_MARKER` serve the swap and the scan, and `layout::retired_connector_names` serves the migration and the scan. A real-process test starts a copy of the test binary under a retired connector name, finds it, leaves a pid that runs another image alone, and stops it by its exact pid. `relay-protocol-4.md` section 5 lists `connections` and `workbench` in the `status` answer. | see `git log` |
 
 ## Route table
@@ -216,7 +217,7 @@ Deploy a537043b in place, Windows 11 build 26300, channel development, one servi
   as state, one Continue line). Agents asking for `http://127.0.0.1:41259/` and
   `http://localhost:41259/` were refused and `http://127.0.0.1:41258/` opened. The refusal said
   "127.0.0.1 is protected" and pointed at policy_explain, which misleads an agent about other local
-  ports; the follow-up agent-refusal-own-origin fixes the sentence.
+  ports; the follow-up agent-refusal-own-origin fixed the sentence.
 - m1-04 port check, pass: after a redeploy the service took 41259 again.
 - Part 5: the service reads "Ghostlight", the window "Ghostlight" and every edge "Ghostlight
   connection" (five: four MCP clients and Chrome).

@@ -63,7 +63,7 @@ impl ApplicationExecutor {
                                 Effect::None,
                                 false,
                                 json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
-                                observed_host(&url),
+                                Some(&url),
                             );
                         }
                         let words = word_count(&text);

@@ -212,6 +212,8 @@ pub enum ReasonCode {
     HostDenied,
     /// Host or scheme is independently protected.
     ProtectedHost,
+    /// The address is Ghostlight's own workbench origin on this computer.
+    OwnWorkbench,
     /// Configured policy could not be validated.
     InvalidAuthority,
     /// Model-facing input did not match the catalog contract.
@@ -238,6 +240,7 @@ impl ReasonCode {
             Self::ScreenshotDenied => "screenshot_denied",
             Self::HostDenied => "host_denied",
             Self::ProtectedHost => "protected_host",
+            Self::OwnWorkbench => "own_workbench",
             Self::InvalidAuthority => "invalid_authority",
             Self::InvalidRequest => "invalid_request",
             Self::RuntimeHold => "runtime_hold",
@@ -564,9 +567,11 @@ impl AuthoritySnapshot {
         };
         if !matches!(parsed.scheme(), "http" | "https")
             || protected_by_policy(&parsed, &self.sacred_hosts)
-            || self.own_origin.covers(&parsed)
         {
             return (Decision::deny(ReasonCode::ProtectedHost), vec![]);
+        }
+        if self.own_origin.covers(&parsed) {
+            return (Decision::deny(ReasonCode::OwnWorkbench), vec![]);
         }
         let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
             return (Decision::deny(ReasonCode::HostDenied), vec![]);

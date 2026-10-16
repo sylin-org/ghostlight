@@ -67,6 +67,10 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
         assert_eq!(result.effect, Effect::None);
         assert!(result.repeat_safe);
         assert_eq!(result.facts["layers"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            result.facts["ceilings"].as_array().unwrap().last().unwrap(),
+            "Ghostlight's own control page on this computer is never automated."
+        );
         assert!(browser.calls().is_empty());
         assert_eq!(executor.governance.runtime_state(), control);
         let records = audit.0.lock().unwrap();

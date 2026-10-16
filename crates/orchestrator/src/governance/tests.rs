@@ -201,7 +201,7 @@ fn the_workbench_origin_is_denied_to_agents_under_all_open() {
         for capability in [Capability::Read, Capability::Action] {
             assert_eq!(
                 snapshot.authorize_landing(capability, url).reason,
-                ReasonCode::ProtectedHost,
+                ReasonCode::OwnWorkbench,
                 "{capability:?} at {url} must be refused"
             );
         }
@@ -239,7 +239,7 @@ fn a_policy_grant_cannot_open_the_workbench_origin() {
         snapshot
             .authorize_landing(Capability::Read, "http://127.0.0.1:41234/")
             .reason,
-        ReasonCode::ProtectedHost
+        ReasonCode::OwnWorkbench
     );
 }
 
@@ -253,7 +253,7 @@ fn a_snapshot_taken_before_the_port_is_known_sees_it_once_set() {
     facade.protect_workbench_port(WORKBENCH_PORT);
     assert_eq!(
         snapshot.authorize_landing(Capability::Read, url).reason,
-        ReasonCode::ProtectedHost
+        ReasonCode::OwnWorkbench
     );
     assert_eq!(snapshot.id, id);
     assert_eq!(facade.snapshot().id, id);
@@ -584,6 +584,7 @@ fn first_applicable_denial_is_stably_attributed() {
         &crate::language::outcome::Refusal::AuthorityBlocked {
             reason: crate::language::outcome::BlockedReason::Capability,
             host: None,
+            origin: None,
         }
         .audit(),
         0,

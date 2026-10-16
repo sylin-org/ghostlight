@@ -26,6 +26,18 @@ pub const HUMAN_PAUSE_DIRECTIVE: &str =
 pub const HUMAN_STOP_DIRECTIVE: &str =
     "The user asked to interrupt the process. Wait for further instructions.";
 
+/// Why Ghostlight's own control page is refused, after the address that was asked for.
+///
+/// The rule covers one origin, not the machine: a model testing a local server must not conclude
+/// that every loopback address is closed, and no policy lifts this refusal (ADR-0199 amendment of
+/// 2026-10-15).
+const OWN_CONTROL_PAGE_REFUSED: &str =
+    "Ghostlight's own control page and is never automated. Other ports on this computer are not affected.";
+
+/// The line `policy_explain` adds to the boundaries no policy can lift.
+pub const OWN_CONTROL_PAGE_CEILING: &str =
+    "Ghostlight's own control page on this computer is never automated.";
+
 /// The one way to give an empty session its first page, shared by every result that finds none.
 const OPEN_FIRST_TAB: &str = "Call browser_navigate with url to open a page.";
 
@@ -217,6 +229,8 @@ pub enum BlockedReason {
     Host,
     /// The host or scheme is independently protected.
     ProtectedHost,
+    /// The address is Ghostlight's own control page on this computer.
+    OwnWorkbench,
     /// The capability was not granted by every authority layer.
     Capability,
     /// Model-driven tab closure was refused.
@@ -1138,7 +1152,7 @@ fn unconfirmed_summary(action: &Outcome, cause: CheckFailure) -> String {
             format!("{HUMAN_STOP_DIRECTIVE} {done} {CHECK_NOT_RUN}.")
         }
         CheckFailure::Blocked(reason) => {
-            format!("{done} {CHECK_NOT_RUN}. {}", blocked(reason, &None))
+            format!("{done} {CHECK_NOT_RUN}. {}", blocked(reason, &None, &None))
         }
         CheckFailure::Cancelled => {
             format!("{done} {CHECK_NOT_RUN} because the call was cancelled.")
@@ -1173,9 +1187,12 @@ fn unconfirmed_next_steps(cause: CheckFailure) -> Vec<String> {
             | BlockedReason::AuditUnavailable
             | BlockedReason::InvalidAuthority,
         ) => vec![],
-        CheckFailure::Blocked(reason) => {
-            Refusal::AuthorityBlocked { reason, host: None }.next_steps()
+        CheckFailure::Blocked(reason) => Refusal::AuthorityBlocked {
+            reason,
+            host: None,
+            origin: None,
         }
+        .next_steps(),
         CheckFailure::Unmet
         | CheckFailure::Cancelled
         | CheckFailure::DeadlineExpired
@@ -1205,9 +1222,15 @@ pub enum Refusal {
     /// The host is present whenever the refused work named one. It is the same deliberate
     /// exception the audit already makes for a governed host: it answers "where was the agent
     /// trying to go", and the identifying detail of a URL lives after it.
+    ///
+    /// The origin is the address as the caller wrote it, scheme and port included, and never a
+    /// path, query or fragment. Only the refusal of Ghostlight's own control page says it,
+    /// because the rest of that sentence is about which port is refused. The observed facts keep
+    /// the host alone.
     AuthorityBlocked {
         reason: BlockedReason,
         host: Option<String>,
+        origin: Option<String>,
     },
     /// The browser-local physical safety setting refused the action.
     LocalInterlock,
@@ -1312,7 +1335,11 @@ impl Refusal {
             Self::DeadlineBeforeStart => {
                 "The browser job deadline expired while waiting for the workspace."
             }
-            Self::AuthorityBlocked { reason, host } => return blocked(*reason, host),
+            Self::AuthorityBlocked {
+                reason,
+                host,
+                origin,
+            } => return blocked(*reason, host, origin),
             Self::LocalInterlock => "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
             Self::CredentialAuthorization { control } => {
                 return format!("Nothing was typed. {} is credential-class.", control.phrase());
@@ -1437,7 +1464,9 @@ impl Refusal {
                 | BlockedReason::Unspecified => {
                     vec!["Call policy_explain to see what this session may do.".into()]
                 }
-                BlockedReason::AuditUnavailable
+                // No policy lifts it, and the sentence already says other ports are open.
+                BlockedReason::OwnWorkbench
+                | BlockedReason::AuditUnavailable
                 | BlockedReason::InvalidAuthority
                 | BlockedReason::Hold
                 | BlockedReason::SessionEnded => vec![],
@@ -1793,7 +1822,7 @@ fn place<'a>(host: &'a Option<String>, fallback: &'static str) -> &'a str {
 ///
 /// "Authority blocked the browser job" is true of every denial there is, which makes it useless
 /// to the person reading it. The reason code and the attempted host were both already on hand.
-fn blocked(reason: BlockedReason, host: &Option<String>) -> String {
+fn blocked(reason: BlockedReason, host: &Option<String>, origin: &Option<String>) -> String {
     match (reason, host.as_deref()) {
         (BlockedReason::AuditUnavailable, _) => "Browser work stopped because policy requires saved history. Ghostlight will check storage automatically; no action will be replayed.".into(),
         (BlockedReason::Host, Some(host)) => format!("Blocked: {host} is not an allowed host."),
@@ -1804,6 +1833,10 @@ fn blocked(reason: BlockedReason, host: &Option<String>) -> String {
         (BlockedReason::ProtectedHost, None) => {
             "Blocked: that host is protected and is never automated.".into()
         }
+        (BlockedReason::OwnWorkbench, _) => match origin {
+            Some(origin) => format!("Blocked: {origin} is {OWN_CONTROL_PAGE_REFUSED}"),
+            None => format!("Blocked: that address is {OWN_CONTROL_PAGE_REFUSED}"),
+        },
         (BlockedReason::Capability, _) => {
             "Blocked: this session may not take that kind of action.".into()
         }
@@ -2647,6 +2680,7 @@ Changes are \"unsaved\".".into()),
         let refusal = Refusal::AuthorityBlocked {
             reason: BlockedReason::SessionEnded,
             host: None,
+            origin: None,
         };
         assert_eq!(
             refusal.summary(),
@@ -2663,6 +2697,7 @@ Changes are \"unsaved\".".into()),
         let refusal = Refusal::AuthorityBlocked {
             reason: BlockedReason::Hold,
             host: None,
+            origin: None,
         };
         assert_eq!(
             refusal.summary(),
@@ -2675,7 +2710,11 @@ Changes are \"unsaved\".".into()),
     #[test]
     fn stop_recommends_no_automatic_retry() {
         for reason in [BlockedReason::SessionEnded, BlockedReason::Hold] {
-            let refusal = Refusal::AuthorityBlocked { reason, host: None };
+            let refusal = Refusal::AuthorityBlocked {
+                reason,
+                host: None,
+                origin: None,
+            };
             assert!(
                 refusal.next_steps().is_empty(),
                 "{reason:?} suggested a next step"
@@ -2799,6 +2838,7 @@ Changes are \"unsaved\".".into()),
                 Refusal::AuthorityBlocked {
                     reason: BlockedReason::Host,
                     host: Some("example.com".into()),
+                    origin: None,
                 },
                 "Blocked: example.com is not an allowed host.",
             ),
@@ -2806,6 +2846,7 @@ Changes are \"unsaved\".".into()),
                 Refusal::AuthorityBlocked {
                     reason: BlockedReason::Hold,
                     host: None,
+                    origin: None,
                 },
                 HUMAN_PAUSE_DIRECTIVE,
             ),
@@ -2813,6 +2854,7 @@ Changes are \"unsaved\".".into()),
                 Refusal::AuthorityBlocked {
                     reason: BlockedReason::SessionEnded,
                     host: None,
+                    origin: None,
                 },
                 HUMAN_STOP_DIRECTIVE,
             ),
@@ -3009,6 +3051,7 @@ Changes are \"unsaved\".".into()),
         let refusal = Refusal::AuthorityBlocked {
             reason: BlockedReason::ProtectedHost,
             host: Some("localhost".into()),
+            origin: None,
         };
         assert_eq!(
             refusal.summary(),
@@ -3070,6 +3113,47 @@ Changes are \"unsaved\".".into()),
         }
     }
 
+    /// Ghostlight's own control page is named by the address the caller wrote, says other ports
+    /// are untouched, and sends no one to policy, which cannot lift it.
+    #[test]
+    fn the_own_control_page_refusal_names_the_address_and_no_policy_call() {
+        for origin in [
+            "http://127.0.0.1:41259",
+            "http://localhost:41259",
+            "http://[::1]:41259",
+        ] {
+            let refusal = Refusal::AuthorityBlocked {
+                reason: BlockedReason::OwnWorkbench,
+                host: Some("127.0.0.1".into()),
+                origin: Some(origin.into()),
+            };
+            assert_eq!(
+                refusal.summary(),
+                format!("Blocked: {origin} is Ghostlight's own control page and is never automated. Other ports on this computer are not affected.")
+            );
+            assert!(refusal.next_steps().is_empty());
+            assert_eq!(refusal.observed().host.as_deref(), Some("127.0.0.1"));
+        }
+        let unnamed = Refusal::AuthorityBlocked {
+            reason: BlockedReason::OwnWorkbench,
+            host: None,
+            origin: None,
+        };
+        assert_eq!(
+            unnamed.summary(),
+            "Blocked: that address is Ghostlight's own control page and is never automated. Other ports on this computer are not affected."
+        );
+        let protected = Refusal::AuthorityBlocked {
+            reason: BlockedReason::ProtectedHost,
+            host: Some("localhost".into()),
+            origin: None,
+        };
+        assert_eq!(
+            protected.summary(),
+            "Blocked: localhost is protected and is never automated."
+        );
+    }
+
     /// A policy denial points to the one tool that explains policy. The human controls stay
     /// step-free (ADR-0126), and so do the outages Ghostlight resolves without the caller.
     #[test]
@@ -3086,6 +3170,7 @@ Changes are \"unsaved\".".into()),
             let refusal = Refusal::AuthorityBlocked {
                 reason,
                 host: Some("example.com".into()),
+                origin: None,
             };
             assert_eq!(refusal.next_steps(), explain, "{reason:?}");
         }
@@ -3095,7 +3180,11 @@ Changes are \"unsaved\".".into()),
             BlockedReason::Hold,
             BlockedReason::SessionEnded,
         ] {
-            let refusal = Refusal::AuthorityBlocked { reason, host: None };
+            let refusal = Refusal::AuthorityBlocked {
+                reason,
+                host: None,
+                origin: None,
+            };
             assert!(refusal.next_steps().is_empty(), "{reason:?}");
         }
     }
@@ -3114,6 +3203,7 @@ Changes are \"unsaved\".".into()),
             Refusal::AuthorityBlocked {
                 reason: BlockedReason::Screenshot,
                 host: None,
+                origin: None,
             }
             .summary(),
         ];

@@ -639,7 +639,10 @@ try {
   assert.equal(physicalCommands.includes("open_tab"), false);
 
   const explained = structured(await mcp.request("tools/call", { name: "policy_explain", arguments: {} }));
-  assert.deepEqual(explained.facts.ceilings, ["Anything that is not an ordinary http or https address."]);
+  assert.deepEqual(explained.facts.ceilings, [
+    "Anything that is not an ordinary http or https address.",
+    "Ghostlight's own control page on this computer is never automated."
+  ]);
 
   const opened = structured(await mcp.request("tools/call", { name: "browser_navigate", arguments: { url: "http://localhost:3000/" } }));
   assert.equal(opened.status, "succeeded");

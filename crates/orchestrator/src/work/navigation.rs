@@ -178,7 +178,7 @@ impl ApplicationExecutor {
                 Effect::None,
                 true,
                 json!({"reason":decision.reason.as_str()}),
-                observed_host(url),
+                Some(url),
             );
         }
         let client_label = match self.workspaces.client_label(context.workspace) {
@@ -332,7 +332,7 @@ impl ApplicationExecutor {
                     Effect::None,
                     true,
                     json!({"reason":landing.reason.as_str(),"compensated":true}),
-                    observed_host(&controlled.url),
+                    Some(&controlled.url),
                 ),
                 CloseCompensation::Retained => self.blocked_at(
                     context,
@@ -341,7 +341,7 @@ impl ApplicationExecutor {
                     Effect::Applied,
                     false,
                     json!({"reason":landing.reason.as_str(),"compensated":false,"retained":true}),
-                    observed_host(&controlled.url),
+                    Some(&controlled.url),
                 ),
                 CloseCompensation::Unknown => self.unknown(
                     context,
@@ -396,7 +396,7 @@ impl ApplicationExecutor {
                 Effect::None,
                 true,
                 json!({"reason":decision.reason.as_str()}),
-                observed_host(url),
+                Some(url),
             );
         }
         let selected = match lease.select_tab(requested_tab) {
@@ -421,7 +421,7 @@ impl ApplicationExecutor {
                         Effect::None,
                         true,
                         json!({"reason":decision.reason.as_str()}),
-                        observed_host(url),
+                        Some(url),
                     );
                 }
                 let (tab, commits) = match self.dispatch(
@@ -497,7 +497,7 @@ impl ApplicationExecutor {
                         workspace: context.workspace.as_str().into(),
                         physical_id: selected.physical_id,
                     });
-                    return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), observed_host(&tab.url));
+                    return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), Some(&tab.url));
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
                     Ok(tab) => tab,
@@ -628,7 +628,7 @@ impl ApplicationExecutor {
                         Effect::Applied,
                         false,
                         json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
-                        observed_host(&tab.url),
+                        Some(&tab.url),
                     );
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {

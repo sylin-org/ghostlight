@@ -469,6 +469,7 @@ fn blocked_reasons() -> Vec<BlockedReason> {
         BlockedReason::AuditUnavailable,
         BlockedReason::Host,
         BlockedReason::ProtectedHost,
+        BlockedReason::OwnWorkbench,
         BlockedReason::Capability,
         BlockedReason::TabClose,
         BlockedReason::Screenshot,
@@ -482,6 +483,7 @@ fn blocked_reasons() -> Vec<BlockedReason> {
             BlockedReason::AuditUnavailable
             | BlockedReason::Host
             | BlockedReason::ProtectedHost
+            | BlockedReason::OwnWorkbench
             | BlockedReason::Capability
             | BlockedReason::TabClose
             | BlockedReason::Screenshot
@@ -932,6 +934,8 @@ fn refusal_samples() -> Vec<Refusal> {
         samples.push(Refusal::AuthorityBlocked {
             reason,
             host: Some("example.com".into()),
+            origin: (reason == BlockedReason::OwnWorkbench)
+                .then(|| "http://example.com:8080".into()),
         });
     }
     for reason in recovery_reasons() {
