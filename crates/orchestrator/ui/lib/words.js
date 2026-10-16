@@ -505,11 +505,9 @@
     browser_dialog: "wait",
     browser_upload: "workwheel",
     browser_execute: "workwheel",
-    browser_sequence: "workwheel",
     browser_flow: "workwheel",
     browser_record: "camera",
     browser_diagnose: "scan",
-    browser_workspace: "scan",
     policy_explain: "scan"
   };
 
@@ -590,8 +588,7 @@
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
-    GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
-    READINESS_ATTENTION, readinessNeedsAttention,
+    GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,
