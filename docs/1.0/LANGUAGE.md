@@ -710,8 +710,9 @@ supplied.
 Facts: `tab`, `key`, `pressed`, and any governed committed landing.
 
 The optional `expect` on click, fill, type, and key calls is checked after the action for at most
-2 seconds. Lookup and postcondition Read requirements are admitted with the complete request before
-an effect. Text conditions match page text, not field values.
+2 seconds. Rules: `load_ready` takes no `value`; `url_contains`, `text_present` and `text_absent`
+require a non-empty `value`. Lookup and postcondition Read requirements are admitted with the
+complete request before an effect. Text conditions match page text, not field values.
 
 When the check does not confirm the expectation, the action still happened. The result keeps
 `effect: applied`, `repeat_safe: false`, and the action's own facts, and adds a `reason`. The
