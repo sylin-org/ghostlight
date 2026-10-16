@@ -1227,7 +1227,6 @@ impl ApplicationExecutor {
     }
 }
 
-/// The control a credential refusal names, from what the page last reported about it.
 /// What `{}` means for a script's result. Only a value that is exactly `{}` and was not cut can
 /// be anything JSON shows as empty, and what the agent should try depends on whether the script
 /// was awaited.
@@ -1239,6 +1238,7 @@ fn empty_object(value: &str, truncated: bool, form: ScriptForm) -> EmptyObject {
     }
 }
 
+/// The control a credential refusal names, from what the page last reported about it.
 fn credential_control(
     context: &InvocationContext<'_>,
     observed: &ObservedTarget,
