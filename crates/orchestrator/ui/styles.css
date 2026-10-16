@@ -466,7 +466,7 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .about-link:hover .about-link-title { color: var(--a); }
 .about-link-blurb { display: block; margin-top: 1px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
 
-/* The card is a button now, so it needs a button's affordances and none of its chrome. */
+/* The card is a button: a button's affordances, none of its chrome. */
 .tcg { padding: 0; text-align: left; cursor: pointer; }
 .tcg:focus-visible { outline: 2px solid var(--a); outline-offset: 3px; }
 

@@ -88,7 +88,7 @@ pub enum Platform {
 /// How a browser family is installed on this computer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BrowserForm {
-    /// An ordinary installation that can start Ghostlight's connector.
+    /// An ordinary installation that can start the Ghostlight edge.
     Native,
     /// A Snap package, which cannot.
     Snap,
@@ -641,7 +641,7 @@ fn ordered_browsers(browsers: &[BrowserFact]) -> Vec<&BrowserFact> {
     installed
 }
 
-/// Whether the browser can run Ghostlight's connector: it is connected, holds the extension, or is
+/// Whether the browser can run the Ghostlight edge: it is connected, holds the extension, or is
 /// an ordinary installation.
 fn is_native(browser: &BrowserFact) -> bool {
     browser.connected || browser.extension.is_some() || browser.form == BrowserForm::Native

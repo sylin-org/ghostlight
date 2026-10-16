@@ -223,8 +223,8 @@ try {
   assert.equal(await evaluate("document.querySelector('#hero-body .hero-meta').textContent.includes('Codex')"), true);
   assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
   await capture("connection-details");
-  // Restored receipts have no retained application claim. Neither a current session nor a legacy
-  // basename can silently supply missing evidence, and even live claims remain plain text.
+  // Restored receipts have no retained application claim. Neither the current session nor an
+  // executable name can supply missing evidence, and even live claims remain plain text.
   await evaluate(`(() => {
     const record = { invocation: 'c1-restored', workspace: 'workspace_codex', tool: 'browser_read',
       capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',

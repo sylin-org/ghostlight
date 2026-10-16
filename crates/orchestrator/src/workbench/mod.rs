@@ -1114,10 +1114,8 @@ impl WorkbenchFacade {
         }
         refused.sort_by_key(|entry| std::cmp::Reverse(entry.count));
         let refused_total: usize = refused.iter().map(|entry| entry.count).sum();
-        // Every sentence here is explicitly about the draft, in the conditional. An earlier
-        // wording stated the count on its own, which read as a claim that this machine's recorded
-        // work had been refused -- the opposite of what it means, and alarming to anyone who had
-        // just watched that work succeed.
+        // Every sentence is about the draft, in the conditional, so the count never reads as a
+        // claim that recorded work was refused.
         let summary = if candidate.rules == 0 {
             "These rules allow nothing yet, because there are none. Add at least one rule; \
              until then this policy would refuse everything."

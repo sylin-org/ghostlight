@@ -598,10 +598,7 @@ async function openDestination(destination) {
 }
 
 async function withButton(event, work, done) {
-  // event.currentTarget is only live during synchronous dispatch: the browser nulls it once the
-  // listener returns, and an async listener returns at its first await, long before work()
-  // settles. Reading it again in finally threw on a null, uncaught, and left the button stuck
-  // disabled. A captured element reference has no such expiry.
+  // Capture the button: event.currentTarget is null once an async listener awaits.
   const button = event.currentTarget;
   button.disabled = true;
   try {
@@ -792,9 +789,8 @@ function openAddress(hash, loading) {
 /**
  * Attach every listener the surface needs.
  *
- * These ran as loose top-level statements, which put them ahead of boot: one listener failing to
- * attach took the first snapshot, the change subscription and the heartbeat down with it, because
- * nothing after the throw ever ran. They are one isolated step now.
+ * Attach every listener in one isolated step, so a listener that fails to attach cannot stop the
+ * first snapshot, the change subscription or the heartbeat.
  */
 function wire() {
   const el = view.el;
@@ -965,12 +961,8 @@ let stopStream = null;
 /*
  * Start the window, in the order that matters.
  *
- * These were loose top-level statements, so a throw in any one of them silently abandoned every
- * statement after it -- which is how one missing element id left the band reading "Starting"
- * forever with no snapshot, no change subscription, and no heartbeat to recover with.
- *
- * The rule now: the live surface is brought up first, and anything decorative goes last, where
- * failing cannot cost the window its connection to the truth.
+ * The live surface starts first and decorative parts last, so a failure in a decorative part
+ * cannot cost the window its connection.
  */
 async function start() {
   try {

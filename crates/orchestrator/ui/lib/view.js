@@ -34,13 +34,7 @@
   ]);
 
   function create({ sessionFor = () => null, coverageFor = () => null, onFailure = () => {} } = {}) {
-    /*
-     * Every element with an id, looked up once.
-     *
-     * This was a hand-maintained list, and a node added to the markup without being added here
-     * read as undefined and threw on first use. Deriving it from the document means a new id
-     * cannot be forgotten, because there is nothing left to remember.
-     */
+    // Every element with an id, looked up once from the document, so a new id needs no list.
     const el = Object.create(null);
     for (const node of document.querySelectorAll("[id]")) el[node.id] = node;
 
@@ -102,9 +96,8 @@
     /**
      * Paint one panel when its facts changed, and never record a paint that did not happen.
      *
-     * The signature used to be stored before the paint ran, and this memo is never cleared, so a
-     * panel that threw was remembered as finished and stayed blank for the life of the window.
-     * Recording afterwards turns a failure into something the next change retries.
+     * The signature is recorded after the paint succeeds, so a panel that threw is painted again
+     * on the next change.
      */
     function ifChanged(key, facts, paint) {
       const signature = JSON.stringify(facts);
@@ -300,7 +293,7 @@
     }
 
     function heroMarkup(entry) {
-      // The sentence names the host itself now, so the hero carries no host chip: it would say the
+      // The sentence names the host itself, so the hero carries no host chip: it would say the
       // same thing twice. Readiness is the one observed fact no sentence states.
       const observed = entry.settled ? entry.observed : null;
       const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
@@ -329,10 +322,8 @@
     /**
      * Where a refusal leads.
      *
-     * A blocked row used to end at the reason code, which tells a person that something stopped
-     * them and nothing about what to do next. The deciding layer and rule are already recorded on
-     * every enforced denial, and an organization that supplied contacts supplied them for exactly
-     * this moment, so both belong here rather than on a page nobody had a reason to open.
+     * A refusal row names the deciding layer and rule and the organization's contacts, so the
+     * person knows what to do next.
      */
     function refusalMarkup(entry) {
       if (!entry.policyTier && !entry.grantId && !entry.denialId) return "";

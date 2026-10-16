@@ -1331,7 +1331,7 @@ impl McpWire {
         }
     }
 
-    /// Hand the connector a fresh resume token when what it would restore has changed.
+    /// Hand the edge a fresh resume token when what it would restore has changed.
     fn publish_resume(&self, workspaces: &WorkspaceStore, workspace: &WorkspaceId) {
         let browser = workspaces.browser_of(workspace.as_str());
         let mut owned_tabs: Vec<OwnedTab> = browser

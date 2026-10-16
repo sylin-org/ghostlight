@@ -54,11 +54,11 @@ pub enum NativeHostPlatform {
 pub enum NativeHostState {
     /// No registration is present.
     Missing,
-    /// The registration exactly names this sibling connector and the fixed origins.
+    /// The registration exactly names this sibling edge and the fixed origins.
     Current,
     /// A Ghostlight-owned registration of this installation carries stale details.
     Updatable,
-    /// A Ghostlight-owned registration names a connector outside this installation.
+    /// A Ghostlight-owned registration names an edge outside this installation.
     ///
     /// Recovery must not adopt it: silent cross-tree repair is how a scratch build rewrites the
     /// machine's real registration (ADR-0149 amendment). Only a deliberate install adopts it.
@@ -101,7 +101,7 @@ pub struct BrowserRegistration {
 /// Complete native-host inspection result.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct NativeHostReport {
-    /// Exact connector path the current installation expects.
+    /// Exact edge path the current installation expects.
     pub connector: PathBuf,
     /// One result for every supported browser.
     pub browsers: Vec<BrowserRegistration>,
@@ -163,7 +163,7 @@ impl NativeHostRegistry {
         inspect(&self.context, &SystemRegistrationIo)
     }
 
-    /// The connector each browser's Ghostlight-owned registration names, by browser id.
+    /// The edge each browser's Ghostlight-owned registration names, by browser id.
     ///
     /// Browsers without an owned registration are left out. Nothing is changed.
     pub fn registered_connectors(&self) -> Result<Vec<(String, PathBuf)>, NativeHostError> {
@@ -251,7 +251,7 @@ impl NativeHostRegistry {
         apply_uninstall_for(&self.context, &SystemRegistrationIo, &browsers)
     }
 
-    /// Register every browser that has no Ghostlight registration and can start the connector.
+    /// Register every browser that has no Ghostlight registration and can start the edge.
     ///
     /// Registrations that exist are left as they are, whoever owns them; reclaiming those is the
     /// installer's deliberate act. Returns `None` when nothing was missing.
@@ -272,8 +272,8 @@ impl NativeHostRegistry {
         self.install_selected(&missing).map(Some)
     }
 
-    /// A registry over Linux-style manifests below `root`, naming `connector`, for tests that
-    /// must not touch the machine.
+    /// A registry over Linux-style manifests below `root`, naming the edge at `connector`, for
+    /// tests that must not touch the machine.
     #[cfg(test)]
     pub(crate) fn isolated(root: &Path, connector: &Path) -> Self {
         Self {
@@ -651,7 +651,7 @@ trait RegistrationIo {
     fn read_registry(&self, key: &str) -> Result<Option<String>, NativeHostError>;
     fn write_registry(&self, key: &str, value: &str) -> Result<(), NativeHostError>;
     fn remove_registry(&self, key: &str) -> Result<(), NativeHostError>;
-    /// Whether one path names an existing file, for dead-connector diagnosis.
+    /// Whether one path names an existing file, for dead-edge diagnosis.
     fn path_exists(&self, path: &Path) -> bool;
 }
 
@@ -795,8 +795,8 @@ fn inspect_browser(
     }
 }
 
-/// Classify one registration and, when a Ghostlight-owned manifest named a connector, return
-/// that connector path so the owning installation can be named in the diagnosis.
+/// Classify one registration and, when a Ghostlight-owned manifest named an edge, return
+/// that edge path so the owning installation can be named in the diagnosis.
 fn classify_manifest(
     contents: Option<&str>,
     expected: &HostManifest,
@@ -1437,7 +1437,7 @@ pub enum NativeHostError {
     /// A command named a browser outside the closed supported set.
     #[error("unknown browser '{0}'; expected chrome, edge, brave, or chromium")]
     UnknownBrowser(String),
-    /// The packaged sibling browser connector is unavailable.
+    /// The packaged sibling Ghostlight edge is unavailable.
     #[error("the sibling Ghostlight browser connector is missing: {0}")]
     ConnectorMissing(PathBuf),
     /// A registration file could not be read.
@@ -2102,7 +2102,7 @@ mod tests {
         );
         assert!(!registration_io.files().contains_key(&current_manifest));
 
-        // Same-tree stale details are the state recovery may silently repair; a connector in
+        // Same-tree stale details are the state recovery may silently repair; an edge in
         // another installation is OwnedElsewhere and is pinned by its own test.
         let stale_connector = context.connector.with_file_name("ghostlight-old.exe");
         registration_io.files().insert(

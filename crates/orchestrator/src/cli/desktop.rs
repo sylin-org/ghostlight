@@ -475,7 +475,7 @@ mod tests {
         let delayed_presentation = presentation.clone();
         let workbench = host.workbench.clone();
         let ready = std::thread::spawn(move || {
-            // A cold shell can attach after the old one-second activation budget.
+            // A cold shell can take more than a second to attach.
             std::thread::sleep(Duration::from_secs(2));
             workbench.attach_presentation(delayed_presentation);
         });
