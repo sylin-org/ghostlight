@@ -43,6 +43,10 @@ CI is green on the 2.0 tree for the first time (run 38931431333 on dev b88f3d3c,
 the extension, page assets, supply chain and every process and real-browser journey on Linux and
 Windows.
 
+1.3.15 is withdrawn (owner, 2026-10-16), in line with no 1.x patch releases. Its private GitHub
+draft is deleted; the `v1.3.15` tag stays as history. Owed by the owner: cancel the 1.3.15 item in
+the Chrome Web Store dashboard, so the listing is clear for the 2.0 staged submission.
+
 Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
 journey offers an Add step for Chrome only.
 
