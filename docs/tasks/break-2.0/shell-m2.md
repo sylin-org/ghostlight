@@ -67,10 +67,11 @@ Rules:
 
 ## RESUME HERE
 
-m2-01 to m2-08 have landed (see Landed): shell milestone 2 is complete, pending the owner's live
-demo. A service with no stream of any role for 10 minutes exits (`service/idle.rs`); an attached
-shell is a stream, so only a headless service idles out. Next: the coordinator deploys m2-06 and
-m2-08 and runs their live checks with the owner (below), then the install journey track starts.
+Shell milestone 2 is complete and deployed in place on the owner's machine (9836b6ff, channel
+development, run from outside Claude's app container so the service and the shell run outside it).
+The coordinator's live results are under Live results (2026-10-16). Next: the owner's checkpoint 2
+(the shell's tray icon and its state dot, the first-close hint, a Start-menu launch, Quit in Settings,
+Continue at a section from a watch tab), then the install journey track.
 
 ## Landed
 
@@ -284,6 +285,27 @@ After the coordinator deploys m2-01, with the owner:
 - m2-01, with Windows High Contrast on (Windows): the tabs, the selected tab, the rail entries,
   the selected rail entry and the state words stay visible, and the selected tab and entry use
   the system highlight.
+
+## Live results (2026-10-16)
+
+Windows 11 build 26300, the owner's machine, one live Ghostlight replaced in place by each deploy.
+
+- m2-01 (ebb0153d): Settings in a watch tab opened at `#settings/sharing`, with the rail's state
+  words and one Continue line per section. Seen: the Notifications entry shows a description instead
+  of a state word, and the band reads "1 browsers". Owed polish.
+- m2-02 (ebbbcf49): a watcher's Continue on Settings > Diagnostics left the open shell on At a glance
+  at the first press; a direct POST /api/window with `settings/sharing` moved it. m2-04 traced it to a
+  hash script lost while the page loads and now navigates to `<origin>/#<section>`. The live re-test is
+  owed at checkpoint 2.
+- m2-03 (d0cea694): a person's launch opened one window; a second launch exited by itself and left no
+  second window or process. Pass.
+- m2-04 to m2-06 (50f8a0cb): Task Manager reads "Ghostlight service", "Ghostlight" and "Ghostlight
+  connection" for each client. One service and one shell; the running m2-03 shell handed over to the
+  new build, and later reconnected through a service restart without relaunching. Pass. The tray icon
+  was not visible to UI Automation outside the hidden overflow; owed to checkpoint 2.
+- Start-menu shortcut: a deploy inside the app container kept it private, and `ghostlight install`
+  then did not write it (fixed in tidy-04a); a dev loop run outside the container wrote it, and it
+  targets `bin\ghostlight-desktop.exe`.
 
 ## Blockers
 

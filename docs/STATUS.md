@@ -27,11 +27,13 @@ Development deploys now install into `bin` as a channel; `~/.ghostlight/dev` and
 gone (ADR-0199 amendment of 2026-10-15). Typed `ghostlight` commands print in a Windows console,
 and `ghostlight` is on the user PATH.
 
-Shell milestone 2 is complete, pending the owner's live demo (ledger
+Shell milestone 2 is complete and deployed on the owner's machine (9836b6ff; the coordinator's
+live results are in the ledger, the owner's checkpoint 2 is next) (ledger
 [shell-m2.md](tasks/break-2.0/shell-m2.md)): Settings with a rail and addresses, the shell carrying
 the desktop jobs and its own life, the service-owned tray drawn by the shell, Tauri out of the
-service, and idle exit (a service with no stream of any role for 10 minutes exits). Next: the
-install journey track.
+service, and idle exit (a service with no stream of any role for 10 minutes exits). Agent handles
+follow their control through a proven re-render, and a stale handle says why (ADR-0198 amendment
+of 2026-10-15). Next: the install journey track and the rest of the seams track.
 
 Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
 journey offers an Add step for Chrome only.

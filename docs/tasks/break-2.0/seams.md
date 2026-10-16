@@ -221,6 +221,11 @@ them.
 
 ## Notes
 
+- Live, 2026-10-16 (deploy d0cea694): h02 pass, `browser_execute` of
+  `fetch(location.href, {method: 'HEAD'}).then(r => r.status)` on the sylin.org foundry stage returned 200
+  (it returned {} before). h03 partial: repeated unnamed links there carry nth 1 to 12; row context
+  still owes a page with named rows (the Suno library), with the h04 to h06 Suno checks.
+
 - Owner question Q1 (the install-time page), answered 2026-10-15 by the coordinator under the
   owner-approved summary of blueprint decision 3: the frozen extension opens its own bundled
   `setup.html` (`chrome.runtime.getURL('setup.html')`), not the sylin.org post-install page, when
