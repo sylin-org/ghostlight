@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { installedBinDirectory, installedEdge, installedImages } from "./lib/installed.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const run = randomUUID();
@@ -47,9 +48,9 @@ const server = createServer((req, res) => {
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}/${run}`;
 report.url = url;
-const connector = join(root, "target", "release", `ghostlight-mcp-connector${process.platform === "win32" ? ".exe" : ""}`);
-report.authority_sha256 = createHash("sha256").update(readFileSync(join(root, "target/release/ghostlight.exe"))).digest("hex");
-const child = spawn(connector, [], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+const binDir = installedBinDirectory();
+report.binaries = installedImages(binDir);
+const child = spawn(installedEdge(binDir), ["mcp"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
 let next = 0, stderr = "";
 const pending = new Map();
 child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-2000); });

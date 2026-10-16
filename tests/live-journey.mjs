@@ -5,11 +5,9 @@ import { dirname, join, resolve } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createServer } from "node:http";
+import { installedBinDirectory, installedEdge, installedImages } from "./lib/installed.mjs";
 
 const repository = resolve(import.meta.dirname, "..");
-const executableSuffix = process.platform === "win32" ? ".exe" : "";
-const binDir = process.env.GHOSTLIGHT_BIN_DIR || join(repository, "target", "release");
-const connectorPath = join(binDir, `ghostlight-mcp-connector${executableSuffix}`);
 const evidencePath = resolve(process.env.GHOSTLIGHT_LIVE_EVIDENCE || join(repository,
   `.tmp/installed-browser/${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}.json`));
 const MAX_INVOCATION_RECORDS = 256;
@@ -170,13 +168,11 @@ const localFixture = createServer((incoming, response) => {
 });
 
 try {
-  if (!existsSync(connectorPath)) throw Object.assign(new Error(`Repo-built MCP connector is missing ${connectorPath}`), { code: "ENOENT" });
-  report.binaries = Object.fromEntries(["ghostlight", "ghostlight-mcp-connector", "ghostlight-browser-connector"].map(name => {
-    const path = join(binDir, name + executableSuffix);
-    return [name, { path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }];
-  }));
+  const binDir = installedBinDirectory();
+  const edgePath = installedEdge(binDir);
+  report.binaries = installedImages(binDir);
   writeEvidence();
-  child = spawn(connectorPath, [], { env: process.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  child = spawn(edgePath, ["mcp"], { env: process.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   child.on("error", rejectPending);
   child.stdin.on("error", rejectPending);
   child.stderr.on("data", chunk => { stderr = (stderr + chunk.toString("utf8")).slice(-4000); });

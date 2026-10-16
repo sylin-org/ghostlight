@@ -62,7 +62,7 @@ const node = (name, path) => run(name, process.execPath, [path]);
 // otherwise, only on its `platform` when it names one, and needs the fresh build unless
 // `needsBuild` is false. A `test` entry runs the node test runner over its `files`.
 const PROCESS_JOURNEYS = [
-  { name: "journey-helpers", kind: "test", files: ["lib/home.test.mjs", "lib/browser.test.mjs"], needsBuild: false },
+  { name: "journey-helpers", kind: "test", files: ["lib/home.test.mjs", "lib/installed.test.mjs", "lib/browser.test.mjs"], needsBuild: false },
   { name: "shell-installer", file: "installer-shell.mjs", platform: "linux" },
   { name: "edge-parent", file: "edge-parent-lifecycle.mjs" },
   { name: "fixed-installation", file: "fixed-installation-journey.mjs", platform: "linux" },

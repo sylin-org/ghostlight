@@ -169,7 +169,11 @@ Set `GHOSTLIGHT_TEST_BROWSER` to Chrome for Testing. The runner builds into the 
 It includes the omitted real-browser and continuity lanes, writes per-gate evidence, and fails if
 a required lane cannot run or source changes during execution. See the
 [feature coverage guide](tasks/security-hardening/regression-suite.md). Installed validation uses
-`node tests/live-journey.mjs` separately after the changed components are active.
+`node tests/live-journey.mjs` separately after the changed components are active. It runs the
+installed `~/.ghostlight/bin/ghostlight mcp` (an edge outside the home's `bin` is a carrier and
+does not serve `mcp`), records the SHA-256 of the installed edge, service and shell, and needs
+all-open authority. `GHOSTLIGHT_BIN_DIR` may name that `bin` directory; it must be the home's own.
+`tests/settlement-live-journey.mjs` drives the installed stack the same way.
 
 On Windows, the full and process lanes include the `desktop-windows` gate. It requires
 PowerShell 7 and a Windows desktop. The journey copies the edge, the service and the shell from
