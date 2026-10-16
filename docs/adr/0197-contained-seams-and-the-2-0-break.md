@@ -308,3 +308,10 @@ versions, so a routine `cargo update` needs no refresh. The guard also fails if 
 contains a network crate (hyper, reqwest, ureq, h2, http, rustls, native-tls, openssl, curl,
 isahc, tokio, socket2 or mio), which keeps ADR-0028 (never phone home) true by construction. In CI
 an unresolvable tree fails; outside CI it is skipped.
+
+## Amendment 2026-10-16: the JavaScript lint is withdrawn
+
+Decision 25's JavaScript lint for unused variables and undefined names is withdrawn. Nothing ran
+it, and it would report on frozen extension files that cannot change without a store
+resubmission (ADR-0200 Decision 16). The 2.0 guard set is the one ADR-0199 Decision 21 lists.
+`node --check` over runtime JavaScript and the page-asset tests stay.
