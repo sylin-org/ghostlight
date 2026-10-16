@@ -18,7 +18,7 @@ use thiserror::Error;
 use super::wire::{CallAnswer, Point};
 use crate::browser::adapter::{
     BrowserOutcome, BrowserReadiness, FieldNow, ObservedTarget, PhysicalActionSubject,
-    PhysicalField, PhysicalFile,
+    PhysicalField, PhysicalFile, StaleLookup,
 };
 use crate::language::area::LeftOut;
 use crate::language::field_problem::FieldProblems;
@@ -56,6 +56,9 @@ const MESSAGE_FIELD: &str = "message";
 const DETAIL_FIELD: &str = "detail";
 /// The detail member of a stale locator that names why.
 const STALE_FIELD: &str = "stale";
+/// The detail member that tells a page looked again for the control. A stale detail without it
+/// carries no lookup.
+const LOOKUP_MARKER_FIELD: &str = "matched";
 /// Longest description of a failure kept from the asset.
 const MESSAGE_MAX_CHARS: usize = 500;
 /// The description of an answer that is not an envelope.
@@ -673,26 +676,40 @@ impl AssetErrorCode {
 pub enum AssetDetail {
     /// The fields a refused fill could not take.
     Fields(FieldProblems),
-    /// Why a locator no longer names a control.
-    Stale(StaleReason),
+    /// Why a locator no longer names a control, and what the page found when it looked again.
+    Stale {
+        /// The page's word, or unknown for any other.
+        reason: StaleReason,
+        /// The page's lookup, when it made one and this build reads all of it.
+        lookup: Option<StaleLookup>,
+    },
 }
 
 impl AssetDetail {
     /// Decode the detail a failure with `code` carried. A fill refusal's detail is read as its
     /// fields and is absent when this build does not know every word it used. A stale locator
     /// always has a reason: the page's word `removed`, and any other or missing word as
-    /// `unknown`. Other codes carry fields or nothing.
+    /// `unknown`. A removed one also carries the page's lookup when the detail holds one that
+    /// decodes whole. Other codes carry fields or nothing.
     fn decode(code: AssetErrorCode, detail: Option<&Value>) -> Option<Self> {
         if code == AssetErrorCode::StaleLocator {
             let removed = detail
                 .and_then(|detail| detail.get(STALE_FIELD))
                 .and_then(Value::as_str)
                 .is_some_and(|word| word == StaleReason::Removed.word());
-            return Some(Self::Stale(if removed {
-                StaleReason::Removed
-            } else {
-                StaleReason::Unknown
-            }));
+            if !removed {
+                return Some(Self::Stale {
+                    reason: StaleReason::Unknown,
+                    lookup: None,
+                });
+            }
+            let lookup = detail
+                .filter(|detail| detail.get(LOOKUP_MARKER_FIELD).is_some())
+                .and_then(|detail| serde_json::from_value(detail.clone()).ok());
+            return Some(Self::Stale {
+                reason: StaleReason::Removed,
+                lookup,
+            });
         }
         detail.and_then(FieldProblems::decode).map(Self::Fields)
     }

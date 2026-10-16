@@ -174,7 +174,9 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
             Some(Ok(value)) => serde_json::from_value(value)
                 .map_err(|error| BrowserError::Protocol(error.to_string())),
             Some(Err(error)) => Err(match error.detail {
-                Some(AssetDetail::Stale(reason)) => BrowserError::StaleLocator { reason },
+                Some(AssetDetail::Stale { reason, lookup }) => {
+                    BrowserError::StaleLocator { reason, lookup }
+                }
                 Some(AssetDetail::Fields(detail)) => BrowserError::FieldsRejected {
                     problems: detail.problems,
                 },

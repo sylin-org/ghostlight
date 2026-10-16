@@ -47,6 +47,87 @@
       "summary": "That target is no longer on the page."
     }
   },
+  "removed_with_candidates": {
+    "content": [
+      {
+        "text": "That target is no longer on the page. Next: Pick a target from recovery_candidates by its context, or call browser_find for current target handles.",
+        "type": "text"
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "effect": "none",
+      "facts": {
+        "reason": "stale_target",
+        "recovery_candidates": [
+          {
+            "context": "Neon Rain",
+            "name": "Delete",
+            "nth": 2,
+            "role": "button",
+            "target": "<volatile>"
+          },
+          {
+            "context": "Neon Rain",
+            "name": "Delete",
+            "nth": 1,
+            "role": "button",
+            "target": "<volatile>"
+          }
+        ],
+        "stale": "removed"
+      },
+      "invocation": "<volatile>",
+      "next_steps": [
+        "Pick a target from recovery_candidates by its context, or call browser_find for current target handles."
+      ],
+      "readiness": "unknown",
+      "repeat_safe": true,
+      "status": "failed",
+      "summary": "That target is no longer on the page."
+    }
+  },
+  "removed_with_replacement": {
+    "content": [
+      {
+        "text": "That target is no longer on the page. One control on the page has the same role, name and row. Next: Repeat browser_click with target <volatile>.",
+        "type": "text"
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "effect": "none",
+      "facts": {
+        "reason": "stale_target",
+        "recovery_candidates": [
+          {
+            "context": "Neon Rain",
+            "name": "Delete",
+            "nth": 2,
+            "role": "button",
+            "target": "<volatile>"
+          },
+          {
+            "context": "Neon Rain",
+            "name": "Delete",
+            "nth": 1,
+            "role": "button",
+            "target": "<volatile>"
+          }
+        ],
+        "replacement": "<volatile>",
+        "stale": "removed"
+      },
+      "invocation": "<volatile>",
+      "next_steps": [
+        "Repeat browser_click with target <volatile>."
+      ],
+      "readiness": "unknown",
+      "repeat_safe": true,
+      "status": "failed",
+      "summary": "That target is no longer on the page. One control on the page has the same role, name and row."
+    }
+  },
   "tab_closed": {
     "content": [
       {

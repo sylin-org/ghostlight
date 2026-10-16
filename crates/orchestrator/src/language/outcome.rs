@@ -1640,6 +1640,31 @@ impl Refusal {
 
 /// The fact that carries the word of a stale target handle, beside the reason `stale_target`.
 pub const STALE_FACT: &str = "stale";
+/// The fact that lists the controls a stale-target refusal offers, each with a fresh handle.
+pub const RECOVERY_CANDIDATES_FACT: &str = "recovery_candidates";
+/// The fact that names the one control the page proved is the stale handle's control.
+pub const REPLACEMENT_FACT: &str = "replacement";
+
+/// What a stale-target refusal offers beyond the word (ADR-0198 Decision 28).
+///
+/// It is recovery help for the model and never reaches the audit: the serialized reason keeps
+/// only the stale word.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum StaleHelp {
+    /// Nothing the page found is worth naming.
+    #[default]
+    None,
+    /// The facts list candidate controls, each with a handle, for the model to pick from.
+    Candidates,
+    /// Exactly one control on the page is the one the handle named, and the call can be repeated
+    /// with it because nothing was sent.
+    Replacement {
+        /// The catalog tool the refused call used.
+        tool: &'static str,
+        /// The handle of the replacement control.
+        target: String,
+    },
+}
 
 /// Stable language reason for an unusable workspace resource.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1652,7 +1677,11 @@ pub enum WorkspaceReason {
     /// The named tab handle is closed or no longer known.
     TabUnavailable,
     /// The target handle no longer names a control, for the reason given.
-    StaleTarget { reason: StaleReason },
+    StaleTarget {
+        reason: StaleReason,
+        #[serde(skip)]
+        help: StaleHelp,
+    },
     /// The view no longer matches current rendered coordinates.
     StaleView,
     /// Runtime governance holds the selected tab.
@@ -1675,11 +1704,14 @@ impl WorkspaceReason {
                 "More than one tab is open in this session, so the call must name one.".into()
             }
             Self::TabUnavailable => "That tab is no longer open.".into(),
-            Self::StaleTarget { reason } => match reason {
-                StaleReason::Removed => "That target is no longer on the page.",
-                StaleReason::Navigated => "That target belongs to an older version of the page.",
-                StaleReason::TabClosed => "That target's tab is closed.",
-                StaleReason::Unknown => "Ghostlight does not know that target handle.",
+            Self::StaleTarget { reason, help } => match (reason, help) {
+                (StaleReason::Removed, StaleHelp::Replacement { .. }) => {
+                    "That target is no longer on the page. One control on the page has the same role, name and row."
+                }
+                (StaleReason::Removed, _) => "That target is no longer on the page.",
+                (StaleReason::Navigated, _) => "That target belongs to an older version of the page.",
+                (StaleReason::TabClosed, _) => "That target's tab is closed.",
+                (StaleReason::Unknown, _) => "Ghostlight does not know that target handle.",
             }
             .into(),
             Self::StaleView => "The page has moved since that screenshot was taken.".into(),
@@ -1725,14 +1757,22 @@ impl WorkspaceReason {
             Self::TabUnavailable => {
                 vec!["Call browser_tabs with action list to obtain current tab handles.".into()]
             }
-            Self::StaleTarget { reason } => vec![match reason {
-                StaleReason::Removed | StaleReason::Unknown => {
-                    "Call browser_find or browser_inspect to obtain current target handles."
+            Self::StaleTarget { reason, help } => vec![match (reason, help) {
+                (StaleReason::Removed, StaleHelp::Replacement { tool, target }) => {
+                    format!("Repeat {tool} with target {target}.")
                 }
-                StaleReason::Navigated => "Call browser_inspect to obtain current target handles.",
-                StaleReason::TabClosed => "Call browser_tabs to choose an open tab.",
-            }
-            .into()],
+                (StaleReason::Removed, StaleHelp::Candidates) => {
+                    "Pick a target from recovery_candidates by its context, or call browser_find for current target handles."
+                        .into()
+                }
+                (StaleReason::Removed | StaleReason::Unknown, _) => {
+                    "Call browser_find or browser_inspect to obtain current target handles.".into()
+                }
+                (StaleReason::Navigated, _) => {
+                    "Call browser_inspect to obtain current target handles.".into()
+                }
+                (StaleReason::TabClosed, _) => "Call browser_tabs to choose an open tab.".into(),
+            }],
             Self::StaleView => {
                 vec!["Call browser_screenshot to obtain a current view handle.".into()]
             }
@@ -1763,7 +1803,10 @@ impl From<WorkspaceError> for WorkspaceReason {
             WorkspaceError::NoTab => Self::NoTab,
             WorkspaceError::AmbiguousTab => Self::AmbiguousTab,
             WorkspaceError::StaleTab => Self::TabUnavailable,
-            WorkspaceError::StaleTarget { reason } => Self::StaleTarget { reason },
+            WorkspaceError::StaleTarget { reason } => Self::StaleTarget {
+                reason,
+                help: StaleHelp::None,
+            },
             WorkspaceError::StaleView
             | WorkspaceError::ViewPointOutOfBounds
             | WorkspaceError::ViewRegionOutOfBounds => Self::StaleView,
@@ -2089,8 +2132,9 @@ mod tests {
 
     use super::{
         ActionSubject, BlockedReason, BrowserUnavailableReason, CaptureKind, CheckFailure,
-        DialogKind, EmptyObject, Observed, Outcome, Refusal, SavedTo, TargetNoun, TargetRole,
-        WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
+        DialogKind, EmptyObject, Observed, Outcome, Refusal, SavedTo, StaleHelp, TargetNoun,
+        TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
+        TARGET_LABEL_MAX_CHARS,
     };
     use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::field_problem::ControlRef;
@@ -3307,7 +3351,11 @@ Changes are \"unsaved\".".into()),
             ),
         ] {
             assert_eq!(
-                WorkspaceReason::StaleTarget { reason }.next_steps(),
+                WorkspaceReason::StaleTarget {
+                    reason,
+                    help: StaleHelp::None,
+                }
+                .next_steps(),
                 vec![step]
             );
         }
@@ -3517,7 +3565,10 @@ Changes are \"unsaved\".".into()),
                 "Ghostlight does not know that target handle.",
             ),
         ] {
-            let stale = WorkspaceReason::StaleTarget { reason };
+            let stale = WorkspaceReason::StaleTarget {
+                reason,
+                help: StaleHelp::None,
+            };
             assert_eq!(stale.summary(), summary);
             assert_eq!(stale.as_fact(), "stale_target");
             assert_eq!(stale.next_steps().len(), 1);
@@ -3525,6 +3576,54 @@ Changes are \"unsaved\".".into()),
                 Refusal::WorkspaceUnusable { reason: stale }.summary(),
                 summary
             );
+        }
+    }
+
+    #[test]
+    fn a_removed_handle_names_its_replacement_or_asks_for_a_pick() {
+        let replacement = WorkspaceReason::StaleTarget {
+            reason: StaleReason::Removed,
+            help: StaleHelp::Replacement {
+                tool: "browser_click",
+                target: "target_7k2nb5xe".into(),
+            },
+        };
+        assert_eq!(
+            replacement.summary(),
+            "That target is no longer on the page. One control on the page has the same role, name and row."
+        );
+        assert_eq!(
+            replacement.next_steps(),
+            vec!["Repeat browser_click with target target_7k2nb5xe."]
+        );
+        let candidates = WorkspaceReason::StaleTarget {
+            reason: StaleReason::Removed,
+            help: StaleHelp::Candidates,
+        };
+        assert_eq!(
+            candidates.summary(),
+            "That target is no longer on the page."
+        );
+        assert_eq!(
+            candidates.next_steps(),
+            vec!["Pick a target from recovery_candidates by its context, or call browser_find for current target handles."]
+        );
+        // Only a removed control has a replacement: every other word keeps its own sentence.
+        for reason in [
+            StaleReason::Navigated,
+            StaleReason::TabClosed,
+            StaleReason::Unknown,
+        ] {
+            let offered = WorkspaceReason::StaleTarget {
+                reason,
+                help: StaleHelp::Candidates,
+            };
+            let bare = WorkspaceReason::StaleTarget {
+                reason,
+                help: StaleHelp::None,
+            };
+            assert_eq!(offered.summary(), bare.summary());
+            assert_eq!(offered.next_steps(), bare.next_steps());
         }
     }
 
@@ -3540,6 +3639,7 @@ Changes are \"unsaved\".".into()),
                 },
                 WorkspaceReason::StaleTarget {
                     reason: StaleReason::Removed,
+                    help: StaleHelp::None,
                 },
             ),
             (WorkspaceError::StaleView, WorkspaceReason::StaleView),

@@ -1033,6 +1033,45 @@ impl WorkspaceStore {
         }
     }
 
+    /// Hand out handles for controls found while recovering from a stale handle, on the tab that
+    /// handle belonged to. The controls were read from the tab's current document, so they take
+    /// its current generation. With `same_document` the controls came from the stale handle's own
+    /// document, and none is registered if the tab has since moved to another. Empty when the
+    /// handle has no record or its tab is gone.
+    pub fn register_recovered(
+        &self,
+        workspace: &WorkspaceId,
+        stale: &str,
+        same_document: bool,
+        targets: &[ObservedTarget],
+    ) -> Vec<(TargetHandle, ObservedTarget)> {
+        let mut state = self.lock();
+        let Some(workspace) = state.workspaces.get_mut(workspace) else {
+            return Vec::new();
+        };
+        let Some(record) = workspace.targets.get(&TargetHandle(stale.into())) else {
+            return Vec::new();
+        };
+        let Some(tab) = workspace.tabs.get(&record.tab) else {
+            return Vec::new();
+        };
+        if same_document && tab.generation != record.generation {
+            return Vec::new();
+        }
+        let selected = selected(&record.tab, tab);
+        let mapped = targets
+            .iter()
+            .map(|target| {
+                (
+                    workspace.targets.register(&selected, target),
+                    target.clone(),
+                )
+            })
+            .collect();
+        workspace.targets.enforce_limit(&workspace.tabs);
+        mapped
+    }
+
     /// Name the other workspace that holds a handle, by its client label only.
     ///
     /// A workspace id is an internal key. No tool takes one, so naming it would only tell the
@@ -2745,6 +2784,55 @@ mod tests {
                 reason: StaleReason::Unknown
             }
         );
+    }
+
+    /// Controls found while recovering from a stale handle get handles on that handle's tab, in
+    /// the document the controls were read from.
+    #[test]
+    fn recovered_controls_get_handles_on_the_stale_handles_tab() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com"))
+            .unwrap();
+        let stale = lease
+            .register_targets(&tab, &[control("#old", "Old")])
+            .unwrap()[0]
+            .0
+            .clone();
+        let found = [control("#new", "Old"), control("#other", "Old")];
+
+        let same = store.register_recovered(&workspace, stale.as_str(), true, &found);
+
+        assert_eq!(same.len(), 2);
+        let again = store.register_recovered(&workspace, stale.as_str(), true, &found[..1]);
+        assert_eq!(
+            again[0].0, same[0].0,
+            "a control keeps its handle in one document"
+        );
+        for (handle, _) in &same {
+            assert!(lease.resolve_target(handle.as_str(), Some(&tab)).is_ok());
+        }
+        assert!(store
+            .register_recovered(&workspace, "target_neverissued", true, &found)
+            .is_empty());
+
+        let moved = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com/next"))
+            .unwrap();
+        assert!(
+            store
+                .register_recovered(&workspace, stale.as_str(), true, &found)
+                .is_empty(),
+            "controls of the old document are not registered on the new one"
+        );
+        let current = store.register_recovered(&workspace, stale.as_str(), false, &found);
+        assert_eq!(current.len(), 2);
+        assert!(lease
+            .resolve_target(current[0].0.as_str(), Some(&moved))
+            .is_ok());
     }
 
     /// Reading a removed control again brings its handle back, and a handle the page never

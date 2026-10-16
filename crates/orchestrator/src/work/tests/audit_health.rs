@@ -167,6 +167,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         requested_browser: None,
         requested_tab: None,
         requested_target: None,
+        repeat_tool: None,
         snapshot: &snapshot,
         requirements: CapabilitySet::READ,
         deadline: Instant::now() + Duration::from_secs(1),

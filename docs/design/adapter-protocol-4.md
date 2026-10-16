@@ -1708,6 +1708,20 @@ The level-4 `content.js` is a copy of today's `content.js` with these edits. The
   other or missing word as `unknown`. The registry keeps live locators and gone ones apart, 500
   of each at most; a gone entry holds no element, and entries whose element left the document are
   released at the start of every `find`, `inspect`, `query_semantic` and `describe`.
+- **Identity records and the stale lookup (ADR-0198 Decision 28).** Every observation of a control
+  refreshes a page-private record under its locator: role, exact name, credential class, the row's
+  label and declared name, the row's own link (a same-origin `http(s)` link that occurs in that one
+  row and nowhere else on the page, indexed once per read from at most 2000 links), the view (the
+  address without its fragment, the title and the nearest named region), whether a dialog holds
+  it, and its place among the row's same-named controls. The record never leaves the page. A
+  connected element whose row lost the recorded link or declared name is treated as removed. When
+  a `stale_locator` says `removed`, its detail also carries the lookup the page made in that same
+  call, unpainted and within 50 ms: `matched` (up to 50 connected controls with the same role,
+  exact name and credential class), `same_count` (how many of them also match the recorded row,
+  view and dialog), `truncated`, and up to three `candidates`, each `{target, same}` with a fresh
+  locator and its `context` and `nth`. `unknown` carries the word only. The service binds the
+  candidate locators to the document of the one locator the command named, and drops the lookup
+  for a command that names none or several.
 - **Cancel tokens.** Every page loop checks `ctx.signal.cancelled` and throws `cancelled`:
   - `observe` (`:708-757`);
   - `prepareStableFill` (`:581-603`);

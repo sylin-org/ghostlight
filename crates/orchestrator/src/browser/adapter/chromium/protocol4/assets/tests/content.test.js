@@ -1965,6 +1965,11 @@ async function detailOf(harness, message) {
   return reply.error.detail;
 }
 
+/** The stale word a refused call carries. */
+async function staleWordOf(harness, message) {
+  return (await detailOf(harness, message)).stale;
+}
+
 test("a locator from another world or an unminted one is stale_locator", async () => {
   const first = contentHarness();
   const second = contentHarness();
@@ -1986,8 +1991,8 @@ test("a locator for a removed element is stale_locator", async () => {
   const harness = contentHarness();
   const locator = (await harness.targets())[0].locator;
   harness.input.isConnected = false;
-  assert.deepEqual(await detailOf(harness, { kind: "describe", locators: [locator] }), { stale: "removed" });
-  assert.deepEqual(await detailOf(harness, { kind: "box", locator }), { stale: "removed" });
+  assert.equal(await staleWordOf(harness, { kind: "describe", locators: [locator] }), "removed");
+  assert.equal(await staleWordOf(harness, { kind: "box", locator }), "removed");
 });
 
 test("a removed locator says removed again on a second use", async () => {
@@ -1995,7 +2000,7 @@ test("a removed locator says removed again on a second use", async () => {
   const locator = (await harness.targets())[0].locator;
   harness.input.isConnected = false;
   for (let use = 0; use < 3; use += 1) {
-    assert.deepEqual(await detailOf(harness, { kind: "activate", locator }), { stale: "removed" }, `use ${use}`);
+    assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed", `use ${use}`);
   }
 });
 
@@ -2020,9 +2025,9 @@ test("a detached element is released at the next read", async () => {
   harness.input.isConnected = false;
   await harness.send({ kind: "find", text: "anything", find_kind: "any", max_results: 5, visual_settle: false });
   harness.input.isConnected = true;
-  assert.deepEqual(
-    await detailOf(harness, { kind: "describe", locators: [locator] }),
-    { stale: "removed" },
+  assert.equal(
+    await staleWordOf(harness, { kind: "describe", locators: [locator] }),
+    "removed",
     "the registry no longer holds the node, so reattaching it does not revive the locator"
   );
 });
@@ -2058,7 +2063,7 @@ test("requireActionable says removed when the node vanishes mid-action", async (
   harness.input.scrollIntoView = () => {
     harness.input.isConnected = false;
   };
-  assert.deepEqual(await detailOf(harness, { kind: "activate", locator }), { stale: "removed" });
+  assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed");
 });
 
 // ---- a refused fill lists what would succeed ----------------------------------------------------
@@ -4312,4 +4317,329 @@ test("find, inspect and the semantic query agree on context", async () => {
   assert.deepEqual(found, [["Alpha", 1], ["Alpha", 2], ["Beta", null]]);
   assert.deepEqual(placesOf(inspected.value.targets, "More options"), found);
   assert.deepEqual(placesOf(queried.value.targets, "More options"), found);
+});
+
+// ---- a stale handle's lookup: the one trusted replacement --------------------------------------
+
+/** Mark a subtree as left the document, the way a re-render drops the old nodes. */
+function detach(element) {
+  element.isConnected = false;
+  for (const child of element.childNodes ?? []) detach(child);
+}
+
+/** A song library: one named group per [title, id], each with its own song link and a menu button. */
+function libraryRows(harness, entries, { before = [], region = null } = {}) {
+  const body = harness.element("body");
+  for (const extra of before) body.append(extra);
+  const rows = entries.map(([title, id]) => node(harness, "div", { role: "group", "aria-label": title },
+    node(harness, "a", { href: `/song/${id}` }, title),
+    node(harness, "button", { "aria-label": "More options", "aria-expanded": "false" })));
+  if (region) body.append(node(harness, "main", { "aria-label": region }, ...rows));
+  else for (const row of rows) body.append(row);
+  harness.setBody(body);
+  return body;
+}
+
+/** Observe the named buttons, drop the old page the way a re-render does, and build the new one. */
+async function rerendered(harness, build, name = "More options") {
+  const handles = (await findControls(harness, name)).filter((target) => target.name === name);
+  detach(harness.document.body);
+  build();
+  return handles.map((target) => target.locator);
+}
+
+/** The lookup a stale locator carries. */
+async function lookupOf(harness, locator) {
+  const detail = await detailOf(harness, { kind: "activate", locator });
+  assert.equal(detail.stale, "removed");
+  return detail;
+}
+
+test("a re-rendered row button is the one same match when role, name, credential class, row label and row link agree", async () => {
+  const harness = contentHarness();
+  const rows = [["Alpha", 1], ["Beta", 2], ["Gamma", 3]];
+  libraryRows(harness, rows);
+  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+
+  const lookup = await lookupOf(harness, handles[1]);
+
+  assert.equal(lookup.matched, 3);
+  assert.equal(lookup.same_count, 1);
+  assert.equal(lookup.truncated, false);
+  assert.deepEqual(lookup.candidates.map((candidate) => [candidate.same, candidate.target.context]), [
+    [true, "Beta"], [false, "Alpha"], [false, "Gamma"]
+  ]);
+  const replacement = lookup.candidates[0].target;
+  assert.equal(await harness.codeOf({ kind: "describe", locators: [replacement.locator] }), null);
+  assert.equal(JSON.stringify(lookup).includes("/song/"), false, "no link leaves the page");
+});
+
+test("two same-title takes give same only to the take whose link matches", async () => {
+  const harness = contentHarness();
+  const rows = [["Neon Rain", 11], ["Neon Rain", 12]];
+  libraryRows(harness, rows);
+  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+
+  const second = await lookupOf(harness, handles[1]);
+
+  assert.equal(second.same_count, 1);
+  assert.deepEqual(second.candidates.map((candidate) => [candidate.same, candidate.target.context, candidate.target.nth]), [
+    [true, "Neon Rain", 2], [false, "Neon Rain", 1]
+  ]);
+  const first = await lookupOf(harness, handles[0]);
+  assert.equal(first.candidates[0].same, true);
+  assert.equal(first.candidates[0].target.nth, 1);
+});
+
+test("a deleted take leaves the other take not same", async () => {
+  const harness = contentHarness();
+  libraryRows(harness, [["Neon Rain", 11], ["Neon Rain", 12]]);
+  const handles = await rerendered(harness, () => libraryRows(harness, [["Neon Rain", 11]]));
+
+  const lookup = await lookupOf(harness, handles[1]);
+
+  assert.equal(lookup.matched, 1);
+  assert.equal(lookup.same_count, 0);
+  assert.deepEqual(lookup.candidates.map((candidate) => [candidate.same, candidate.target.context]), [[false, "Neon Rain"]]);
+});
+
+test("a row link that also appears outside the row is not an anchor", async () => {
+  const harness = contentHarness();
+  const rows = [["Neon Rain", 11], ["Neon Rain", 12]];
+  const nowPlaying = () => [node(harness, "a", { href: "/song/11" }, "Now playing")];
+  libraryRows(harness, rows, { before: nowPlaying() });
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { before: nowPlaying() }));
+
+  assert.equal((await lookupOf(harness, handles[0])).same_count, 0, "the shared link proves nothing, and the title repeats");
+  assert.equal((await lookupOf(harness, handles[1])).same_count, 1, "the other take still has a link of its own");
+});
+
+test("a link past the 2000-link cap gives no anchor", async () => {
+  const harness = contentHarness();
+  const rows = [["Neon Rain", 11], ["Neon Rain", 12]];
+  const filler = () => Array.from({ length: 2001 }, (_, index) => node(harness, "a", { href: `/page/${index}` }, `Page ${index}`));
+  libraryRows(harness, rows, { before: filler() });
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { before: filler() }));
+
+  assert.equal((await lookupOf(harness, handles[1])).same_count, 0);
+});
+
+test("without a link a row label counts only if it was unique at mint", async () => {
+  const harness = contentHarness();
+  const headed = (titles) => {
+    const body = harness.element("body");
+    for (const title of titles) {
+      body.append(node(harness, "li", {}, node(harness, "h3", {}, title), node(harness, "button", { "aria-label": "More options" })));
+    }
+    harness.setBody(body);
+  };
+
+  headed(["Alpha", "Beta"]);
+  let handles = await rerendered(harness, () => headed(["Alpha", "Beta"]));
+  assert.equal((await lookupOf(harness, handles[1])).same_count, 1, "unique when minted and unique now");
+
+  headed(["Alpha", "Beta"]);
+  handles = await rerendered(harness, () => headed(["Alpha", "Alpha"]));
+  assert.equal((await lookupOf(harness, handles[0])).same_count, 0, "unique when minted, repeated now");
+
+  headed(["Alpha", "Alpha"]);
+  handles = await rerendered(harness, () => headed(["Alpha", "Alpha"]));
+  assert.equal((await lookupOf(harness, handles[0])).same_count, 0, "repeated when minted");
+
+  const linked = () => {
+    const body = harness.element("body");
+    body.append(node(harness, "li", {}, node(harness, "a", { href: "/one" }, "Link one"), node(harness, "button", { "aria-label": "More options" })));
+    body.append(node(harness, "li", {}, node(harness, "a", { href: "/two" }, "Link two"), node(harness, "button", { "aria-label": "More options" })));
+    harness.setBody(body);
+  };
+  linked();
+  handles = await rerendered(harness, linked);
+  assert.equal((await lookupOf(harness, handles[0])).same_count, 1, "a row's own link is proof even when its name is link text");
+});
+
+test("a control that sat in no row is the same only for a node in no row", async () => {
+  const harness = contentHarness();
+  const toolbar = (inRow) => {
+    const body = harness.element("body");
+    const save = node(harness, "button", { "aria-label": "Save" });
+    body.append(inRow ? node(harness, "li", {}, node(harness, "h3", {}, "Row"), save) : save);
+    harness.setBody(body);
+  };
+
+  toolbar(false);
+  let handles = await rerendered(harness, () => toolbar(false), "Save");
+  assert.equal((await lookupOf(harness, handles[0])).same_count, 1);
+
+  toolbar(false);
+  handles = await rerendered(harness, () => toolbar(true), "Save");
+  assert.equal((await lookupOf(harness, handles[0])).same_count, 0);
+});
+
+test("a changed view (URL, title or region) gives no same", async () => {
+  const rows = [["Alpha", 1], ["Beta", 2]];
+  const cases = {
+    "the title": (harness) => { harness.document.title = "Playlists"; },
+    "the address": (harness) => { harness.dom.context.location.href = "https://example.test/playlists"; },
+    "the region": () => {}
+  };
+  for (const [what, change] of Object.entries(cases)) {
+    const harness = contentHarness();
+    libraryRows(harness, rows, { region: "Songs" });
+    const handles = await rerendered(harness, () => {
+      change(harness);
+      libraryRows(harness, rows, { region: what === "the region" ? "Playlists" : "Songs" });
+    });
+    const lookup = await lookupOf(harness, handles[1]);
+    assert.equal(lookup.matched, 2, what);
+    assert.equal(lookup.same_count, 0, what);
+  }
+
+  const harness = contentHarness();
+  libraryRows(harness, rows);
+  const handles = await rerendered(harness, () => {
+    harness.dom.context.location.href = "https://example.test/#details";
+    libraryRows(harness, rows);
+  });
+  assert.equal((await lookupOf(harness, handles[1])).same_count, 1, "a fragment is not a different view");
+});
+
+test("the latest view the agent saw is the one a handle is held to", async () => {
+  const harness = contentHarness();
+  const rows = [["Alpha", 1], ["Beta", 2]];
+  libraryRows(harness, rows);
+  await findControls(harness, "More options");
+  harness.document.title = "Library, page two";
+  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+  assert.equal((await lookupOf(harness, handles[1])).same_count, 1);
+});
+
+test("a credential field is never same with a plain one", async () => {
+  const harness = contentHarness();
+  const field = (type) => {
+    const body = harness.element("body");
+    body.append(node(harness, "li", {}, node(harness, "h3", {}, "Account"), node(harness, "input", { type, "aria-label": "Code" })));
+    harness.setBody(body);
+  };
+
+  field("password");
+  let handles = await rerendered(harness, () => field("text"), "Code");
+  let lookup = await lookupOf(harness, handles[0]);
+  assert.equal(lookup.matched, 0, "a plain field is not a candidate for a credential field");
+
+  field("text");
+  handles = await rerendered(harness, () => field("password"), "Code");
+  lookup = await lookupOf(harness, handles[0]);
+  assert.equal(lookup.matched, 0, "nor the other way round");
+
+  field("password");
+  handles = await rerendered(harness, () => field("password"), "Code");
+  lookup = await lookupOf(harness, handles[0]);
+  assert.equal(lookup.matched, 1);
+  assert.equal(lookup.same_count, 0, "a credential field is named but never trusted");
+  assert.equal("context" in lookup.candidates[0].target, false);
+});
+
+test("a recycled connected row whose link changed refuses as removed", async () => {
+  const harness = contentHarness();
+  const body = libraryRows(harness, [["Alpha", 1], ["Beta", 2]]);
+  const [alpha, beta] = (await findControls(harness, "More options")).map((target) => target.locator);
+
+  body.children[0].children[0].setAttribute("href", "/song/99");
+
+  assert.equal(await staleWordOf(harness, { kind: "activate", locator: alpha }), "removed");
+  assert.equal(await staleWordOf(harness, { kind: "describe", locators: [alpha] }), "removed", "and it stays removed");
+  assert.equal(await harness.codeOf({ kind: "describe", locators: [beta] }), null, "the other row is untouched");
+
+  body.children[1].setAttribute("aria-label", "Renamed");
+  assert.equal(await staleWordOf(harness, { kind: "describe", locators: [beta] }), "removed", "a changed row name recycles it too");
+});
+
+test("a row without a recorded link or declared name never reads as recycled", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  body.append(node(harness, "li", {}, node(harness, "span", {}, "text"), node(harness, "button", { "aria-label": "Play" })));
+  harness.setBody(body);
+  const [play] = (await findControls(harness, "Play")).map((target) => target.locator);
+  body.children[0].append(node(harness, "a", { href: "/elsewhere" }, "Elsewhere"));
+  assert.equal(await harness.codeOf({ kind: "describe", locators: [play] }), null);
+});
+
+test("candidates are at most 3, same first, and carry context", async () => {
+  const harness = contentHarness();
+  const rows = [["One", 1], ["Two", 2], ["Three", 3], ["Four", 4], ["Five", 5]];
+  libraryRows(harness, rows);
+  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+
+  const lookup = await lookupOf(harness, handles[3]);
+
+  assert.equal(lookup.matched, 5);
+  assert.equal(lookup.same_count, 1);
+  assert.equal(lookup.candidates.length, 3);
+  assert.deepEqual(lookup.candidates.map((candidate) => [candidate.same, candidate.target.context]), [
+    [true, "Four"], [false, "One"], [false, "Two"]
+  ]);
+  const locators = new Set(lookup.candidates.map((candidate) => candidate.target.locator));
+  assert.equal(locators.size, 3);
+  for (const candidate of lookup.candidates) {
+    assert.equal(candidate.target.role, "button");
+    assert.equal(candidate.target.name, "More options");
+    assert.deepEqual(Object.keys(candidate).sort(), ["same", "target"]);
+  }
+});
+
+test("the lookup counts at most 50 matches and says it was cut", async () => {
+  const harness = contentHarness();
+  const many = () => {
+    const body = harness.element("body");
+    for (let index = 0; index < 60; index += 1) body.append(node(harness, "button", { "aria-label": "More options" }));
+    harness.setBody(body);
+  };
+  many();
+  const handles = await rerendered(harness, many);
+  const lookup = await lookupOf(harness, handles[0]);
+  assert.equal(lookup.matched, 50);
+  assert.equal(lookup.truncated, true);
+});
+
+test("the stale detail is computed without painting", async () => {
+  const harness = contentHarness();
+  const rows = [["Alpha", 1], ["Beta", 2]];
+  libraryRows(harness, rows);
+  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+  let created = 0;
+  const counting = (make) => (...args) => {
+    created += 1;
+    return make(...args);
+  };
+  harness.document.createElement = counting(harness.document.createElement);
+  harness.document.createElementNS = counting(harness.document.createElementNS);
+  const timers = harness.dom.pendingTimers();
+
+  await lookupOf(harness, handles[0]);
+
+  assert.equal(created, 0, "no element is made");
+  assert.equal(harness.dom.pendingTimers(), timers, "nothing is scheduled");
+  assert.deepEqual(harness.scrolls, []);
+});
+
+test("a vanished element in the middle of an action carries the same lookup", async () => {
+  const harness = contentHarness();
+  const rows = [["Alpha", 1], ["Beta", 2]];
+  const body = libraryRows(harness, rows);
+  const [alpha] = (await findControls(harness, "More options")).map((target) => target.locator);
+  const button = body.children[0].children[1];
+  button.scrollIntoView = () => {
+    detach(button);
+    libraryRows(harness, rows);
+  };
+  const detail = await detailOf(harness, { kind: "activate", locator: alpha });
+  assert.equal(detail.stale, "removed");
+  assert.equal(detail.same_count, 1);
+  assert.equal(detail.candidates[0].target.context, "Alpha");
+});
+
+test("an unknown locator carries no lookup", async () => {
+  const harness = contentHarness();
+  libraryRows(harness, [["Alpha", 1]]);
+  assert.deepEqual(await detailOf(harness, { kind: "describe", locators: ["locator_1"] }), { stale: "unknown" });
 });

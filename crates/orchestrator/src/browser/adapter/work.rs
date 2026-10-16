@@ -49,7 +49,7 @@ pub struct PhysicalTab {
 /// The five identity keys are always present. The rest describe a control and appear only when
 /// they apply, so an absent key means the page offered nothing of that kind. A credential-class
 /// control carries `value` (masked) and none of the others.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservedTarget {
     /// Browser-local locator, never exposed to the model.
@@ -105,6 +105,37 @@ pub struct ObservedTarget {
     /// The ordinal of the form that owns the item, counted from 1 in the document it belongs to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub form: Option<u32>,
+}
+
+/// One control a page found when it looked again for the control a stale locator named.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+pub struct StaleCandidate {
+    /// The control, with a fresh locator of the page that found it.
+    pub target: ObservedTarget,
+    /// Whether the page proved this control is the one the locator named: the same role, exact
+    /// name, credential class and row, and the row's own link when the locator had one, in an
+    /// unchanged view. The proof stays in the page; only its verdict travels.
+    pub same: bool,
+}
+
+/// What a page found when it looked again for the control a stale locator named, in the same
+/// call that failed (ADR-0198 Decision 28).
+///
+/// The page looks only in its own document, does no painting and stops after a fixed time.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+pub struct StaleLookup {
+    /// How many connected controls share the role, exact name and credential class, up to a cap.
+    #[serde(default)]
+    pub matched: usize,
+    /// How many of those the page proved are the same control.
+    #[serde(default)]
+    pub same_count: usize,
+    /// Whether a cap or the time limit cut the lookup short, so the counts may be low.
+    #[serde(default)]
+    pub truncated: bool,
+    /// Up to three of the matches, the same ones first and then in document order.
+    #[serde(default)]
+    pub candidates: Vec<StaleCandidate>,
 }
 
 /// The browser-observed identity of the element an action actually used.
@@ -900,6 +931,31 @@ impl BrowserCommand {
             self
         }
     }
+
+    /// The one locator this command acts on or reads, when it names exactly one. A command with
+    /// no locator, or with several (a fill, a drag), has none, so a failure of one of them cannot
+    /// be attributed to a single document.
+    #[must_use]
+    pub fn sole_locator(&self) -> Option<&str> {
+        match self.primitive() {
+            Self::ReadText { locator, .. }
+            | Self::InspectTree { locator, .. }
+            | Self::Screenshot { locator, .. }
+            | Self::Scroll { locator, .. }
+            | Self::PressKey { locator, .. }
+            | Self::Observe { locator, .. } => locator.as_deref(),
+            Self::Activate { locator, .. }
+            | Self::ActivateModified { locator, .. }
+            | Self::Hover { locator, .. }
+            | Self::TypeText { locator, .. }
+            | Self::UploadFiles { locator, .. } => Some(locator),
+            Self::DescribeTargets { locators, .. } => match locators.as_slice() {
+                [only] => Some(only),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 /// Per-call facts about a target listing, carried beside its items.
@@ -1180,6 +1236,51 @@ pub enum BrowserEvent {
 mod tests {
     use super::{RecordingDelivery, RECORDING_LOCAL_MAX_BYTES, RECORDING_TRANSFER_MAX_BYTES};
     use crate::browser::adapter::chromium::protocol4::wire::TRANSFER_MAX_BYTES;
+
+    #[test]
+    fn a_command_names_one_locator_only_when_it_acts_on_exactly_one() {
+        use crate::browser::adapter::documents::DocumentScope;
+        use crate::browser::adapter::BrowserCommand;
+        let click = BrowserCommand::Activate {
+            tab_id: 1,
+            locator: "F:L:locator_a_1".into(),
+            button: "left".into(),
+            click_count: 1,
+        };
+        assert_eq!(click.sole_locator(), Some("F:L:locator_a_1"));
+        let scoped = BrowserCommand::InDocuments {
+            scope: DocumentScope {
+                documents: vec![],
+                allowed: vec![],
+                subjects: vec![],
+                mask: None,
+                watch_changes: false,
+                strict_tree: false,
+                settle_ms: 0,
+                settle_requested: true,
+            },
+            primitive: Box::new(click),
+        };
+        assert_eq!(scoped.sole_locator(), Some("F:L:locator_a_1"));
+        let page_scroll = BrowserCommand::Scroll {
+            tab_id: 1,
+            locator: None,
+            direction: Some("down".into()),
+            amount: None,
+        };
+        assert_eq!(page_scroll.sole_locator(), None);
+        let two = BrowserCommand::DescribeTargets {
+            tab_id: 1,
+            locators: vec!["a".into(), "b".into()],
+        };
+        assert_eq!(two.sole_locator(), None);
+        let drag = BrowserCommand::Drag {
+            tab_id: 1,
+            source_locator: "a".into(),
+            destination_locator: "b".into(),
+        };
+        assert_eq!(drag.sole_locator(), None);
+    }
 
     #[test]
     fn only_a_client_return_can_carry_recording_bytes() {

@@ -457,9 +457,7 @@ fn a_locator_names_its_document_and_without_one_the_top_is_used() {
         Ok(doc("C", "c1"))
     );
     assert_eq!(scope.doc_or_top(None), Ok(doc("T", "t1")));
-    let stale = Err(BrowserError::StaleLocator {
-        reason: StaleReason::Unknown,
-    });
+    let stale = Err(BrowserError::stale(StaleReason::Unknown));
     assert_eq!(scope.doc_of(None), stale);
     assert_eq!(scope.doc_or_top(Some("locator_3")), stale);
 }

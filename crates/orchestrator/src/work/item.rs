@@ -104,6 +104,28 @@ pub(super) fn control_item(handle: &str, target: &ObservedTarget) -> Value {
     Value::Object(item)
 }
 
+/// The item a stale-target refusal lists for one candidate control (ADR-0198 Decision 28): its
+/// handle and role always, its place among repeats when it has one, and its name and row context
+/// only when governance preserves target names. A credential-class control carries neither
+/// context nor place. The page's verdict on whether the candidate is the same control never
+/// appears here.
+pub(super) fn candidate_item(handle: &str, target: &ObservedTarget, preserve_names: bool) -> Value {
+    let mut item = Map::new();
+    item.insert("target".into(), json!(handle));
+    item.insert("role".into(), json!(bounded(&target.role, ROLE_MAX)));
+    if preserve_names {
+        insert_text(&mut item, "name", Some(&target.name), NAME_MAX);
+        if !target.credential_class {
+            let context = target.context.as_deref().map(one_line);
+            insert_text(&mut item, "context", context.as_deref(), CONTEXT_MAX);
+        }
+    }
+    if let Some(nth) = target.nth.filter(|_| !target.credential_class) {
+        item.insert("nth".into(), json!(nth));
+    }
+    Value::Object(item)
+}
+
 /// The text on one line: every run of whitespace, line breaks included, becomes a single space.
 fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")

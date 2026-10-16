@@ -317,15 +317,60 @@ fn a_preparation_failure_is_a_plain_failure_and_sends_no_input() {
         );
         let error = call(&port, scoped(all_open(), activate(NESTED))).unwrap_err();
         let expected = if code == "stale_locator" {
-            BrowserError::StaleLocator {
-                reason: StaleReason::Unknown,
-            }
+            BrowserError::stale(StaleReason::Unknown)
         } else {
             BrowserError::Primitive(code.into())
         };
         assert_eq!(error, expected, "{code}");
         assert!(inputs_seen(&fake).is_empty());
     }
+}
+
+/// The lookup a page makes in a failing click is bound to the document of the locator that
+/// went stale, so its candidates are handles the service can act on.
+#[test]
+fn a_click_on_a_removed_control_returns_the_page_lookup_bound_to_its_document() {
+    let (port, fake) = rig(
+        Box::new(|call| {
+            call.calls
+                .iter()
+                .map(|_| {
+                    json!({"status": "returned", "envelope": {"ok": false, "error": {
+                        "code": "stale_locator",
+                        "message": "stale browser locator",
+                        "detail": {
+                            "stale": "removed",
+                            "matched": 2,
+                            "same_count": 1,
+                            "truncated": false,
+                            "candidates": [{
+                                "target": {"locator": "locator_a1_9", "role": "button",
+                                    "name": "More options", "state": [], "credential_class": false,
+                                    "context": "Neon Rain", "nth": 2},
+                                "same": true
+                            }]
+                        }
+                    }}})
+                })
+                .collect()
+        }),
+        finished,
+    );
+
+    let error = call(&port, scoped(all_open(), activate(NESTED))).unwrap_err();
+
+    let BrowserError::StaleLocator {
+        reason,
+        lookup: Some(lookup),
+    } = error
+    else {
+        panic!("the click was refused as stale, with a lookup: {error:?}");
+    };
+    assert_eq!(reason, StaleReason::Removed);
+    assert_eq!((lookup.matched, lookup.same_count), (2, 1));
+    assert_eq!(lookup.candidates[0].target.locator, "C:c1:locator_a1_9");
+    assert!(lookup.candidates[0].same);
+    assert!(inputs_seen(&fake).is_empty(), "nothing was sent");
 }
 
 #[test]
@@ -551,12 +596,7 @@ fn a_stale_locator_refuses_the_key_press_with_nothing_sent() {
         }}))
     });
     let error = call(&port, scoped(all_open(), press(Some(NESTED), "Enter", &[]))).unwrap_err();
-    assert_eq!(
-        error,
-        BrowserError::StaleLocator {
-            reason: StaleReason::Removed
-        }
-    );
+    assert_eq!(error, BrowserError::stale(StaleReason::Removed));
 }
 
 #[test]

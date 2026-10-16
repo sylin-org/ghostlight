@@ -35,8 +35,8 @@ use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-    CheckFailure, DialogKind, EmptyObject, Outcome, Refusal, SavedTo, TargetNoun, TargetRole,
-    WorkspaceReason,
+    CheckFailure, DialogKind, EmptyObject, Outcome, Refusal, SavedTo, StaleHelp, TargetNoun,
+    TargetRole, WorkspaceReason,
 };
 use crate::workspace::StaleReason;
 
@@ -560,8 +560,32 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
     all.extend(
         StaleReason::ALL
             .into_iter()
-            .map(|reason| WorkspaceReason::StaleTarget { reason }),
+            .map(|reason| WorkspaceReason::StaleTarget {
+                reason,
+                help: StaleHelp::None,
+            }),
     );
+    all.push(WorkspaceReason::StaleTarget {
+        reason: StaleReason::Removed,
+        help: StaleHelp::Candidates,
+    });
+    for tool in [
+        "browser_click",
+        "browser_hover",
+        "browser_type_text",
+        "browser_press_key",
+        "browser_scroll",
+        "browser_upload",
+        "browser_wait",
+    ] {
+        all.push(WorkspaceReason::StaleTarget {
+            reason: StaleReason::Removed,
+            help: StaleHelp::Replacement {
+                tool,
+                target: "target_7k2nb5xe".into(),
+            },
+        });
+    }
     for reason in &all {
         match reason {
             WorkspaceReason::NoTab

@@ -84,10 +84,26 @@ text:
 | `tab_closed` | `That target's tab is closed.` | `browser_tabs` |
 | `unknown` | `Ghostlight does not know that target handle.` | `browser_find` or `browser_inspect` |
 
-Candidates the live page still has under the control's old name are listed in
-`recovery_candidates` only when the tab's address is readable under the session's authority. A
-handle the service never issued, dropped to bound memory, or whose control the page no longer
-holds in its registry is `unknown`.
+Candidates the live page still has are listed in `recovery_candidates` only when the tab's address
+is readable under the session's authority. Each carries a fresh handle (`target`), its `role`, its
+`nth` among controls that share its row, and, only when the session preserves target names, its
+`name` and its row `context`. For a control the page found removed, the candidates are the page's
+own lookup in the failing call: up to three controls with the same role, exact name and credential
+class, in that document. For a left document they come from a separate unpainted query, and the
+step stays `browser_inspect`. The refusal names one control as `replacement`, and its step is
+`Repeat <tool> with target <handle>.`, only when all of these hold: the word is `removed`; nothing
+was sent; the tool takes exactly one target (`browser_click`, `browser_hover`,
+`browser_type_text`, `browser_press_key` and `browser_scroll` with a target, `browser_upload`,
+`browser_wait` with a target; never `browser_fill_form` fields or `browser_drag`); the page found
+exactly one control that matches role, exact name, credential class and row, and the row's own
+link when the row had one, in an unchanged view; and the lookup was not cut short. The summary then
+adds `One control on the page has the same role, name and row.` Otherwise, with candidates, the
+step is `Pick a target from recovery_candidates by its context, or call browser_find for current
+target handles.` The audit and the history keep the stale word only: never a replacement, a
+handle, a row or a candidate. A handle the service never issued, dropped to bound memory, or whose
+control the page no longer holds in its registry is `unknown`. A control the page still holds under
+a handle but which now sits in a different row, because its list recycled the node, is also
+`removed`.
 A same-document change is not a committed navigation. When an action moves the address within the
 same origin and no document commits, as an anchor link or a `history.pushState` route does, the
 generation and target handles stay valid. The tab's governed URL follows the page, landing

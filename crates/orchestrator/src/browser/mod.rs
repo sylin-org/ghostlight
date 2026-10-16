@@ -1128,6 +1128,9 @@ pub enum BrowserError {
     StaleLocator {
         /// Why the locator names nothing.
         reason: crate::workspace::StaleReason,
+        /// What the page found when it looked again for the control, when it did. Only a
+        /// control the page found removed is looked for.
+        lookup: Option<crate::browser::adapter::StaleLookup>,
     },
     /// The page refused a fill before any edit because fields cannot take their values.
     #[error("form fields cannot take their values")]
@@ -1201,6 +1204,15 @@ pub enum BrowserError {
 }
 
 impl BrowserError {
+    /// A stale locator for a reason, with nothing found by looking again.
+    #[must_use]
+    pub const fn stale(reason: crate::workspace::StaleReason) -> Self {
+        Self::StaleLocator {
+            reason,
+            lookup: None,
+        }
+    }
+
     /// Whether dispatch could have caused a physical effect.
     #[must_use]
     pub const fn effect_unknown(&self) -> bool {

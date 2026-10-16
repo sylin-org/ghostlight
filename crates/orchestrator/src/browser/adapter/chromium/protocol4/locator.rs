@@ -6,7 +6,7 @@
 //! document does: a replaced document has a new loader, and its old locators name nothing.
 
 use super::wire::FrameRef;
-use crate::browser::adapter::ObservedTarget;
+use crate::browser::adapter::{ObservedTarget, StaleCandidate, StaleLookup};
 use crate::browser::BrowserError;
 use crate::workspace::StaleReason;
 
@@ -65,9 +65,7 @@ impl Locator {
                     local,
                 ))
             }
-            _ => Err(BrowserError::StaleLocator {
-                reason: StaleReason::Unknown,
-            }),
+            _ => Err(BrowserError::stale(StaleReason::Unknown)),
         }
     }
 }
@@ -82,6 +80,42 @@ pub fn rescope(doc: &FrameRef, targets: Vec<ObservedTarget>) -> Vec<ObservedTarg
             ..target
         })
         .collect()
+}
+
+/// Bind the candidates of a stale locator's lookup to the document of that locator.
+///
+/// A page looks only in its own document, so the controls it found belong to the document the
+/// failed locator named. `subject` is the one locator the failed command named. A command with
+/// no single locator cannot say which document looked, so its lookup is dropped. Any other
+/// error passes through.
+#[must_use]
+pub fn bind_lookup(error: BrowserError, subject: Option<&str>) -> BrowserError {
+    match error {
+        BrowserError::StaleLocator {
+            reason,
+            lookup: Some(lookup),
+        } => {
+            let doc = subject
+                .and_then(|text| Locator::decode(text).ok())
+                .map(|locator| locator.doc);
+            let lookup = doc.map(|doc| StaleLookup {
+                candidates: lookup
+                    .candidates
+                    .into_iter()
+                    .map(|candidate| StaleCandidate {
+                        target: ObservedTarget {
+                            locator: Locator::new(doc.clone(), candidate.target.locator).encode(),
+                            ..candidate.target
+                        },
+                        same: candidate.same,
+                    })
+                    .collect(),
+                ..lookup
+            });
+            BrowserError::StaleLocator { reason, lookup }
+        }
+        other => other,
+    }
 }
 
 /// Whether text is a frame or loader identity: letters, digits and hyphens.
@@ -143,9 +177,7 @@ mod tests {
         ] {
             assert_eq!(
                 Locator::decode(text),
-                Err(BrowserError::StaleLocator {
-                    reason: StaleReason::Unknown
-                }),
+                Err(BrowserError::stale(StaleReason::Unknown)),
                 "{text:?}"
             );
         }
@@ -173,6 +205,80 @@ mod tests {
             ["F1:L1:locator_a1b2c3d4_1", "F1:L1:locator_a1b2c3d4_2"]
         );
         assert!(scoped.iter().all(|t| t.name == "Save"));
+    }
+
+    fn lookup_of(locators: &[&str]) -> StaleLookup {
+        StaleLookup {
+            matched: locators.len(),
+            same_count: 1,
+            truncated: false,
+            candidates: locators
+                .iter()
+                .enumerate()
+                .map(|(index, locator)| StaleCandidate {
+                    target: ObservedTarget {
+                        locator: (*locator).into(),
+                        role: "button".into(),
+                        name: "More options".into(),
+                        ..Default::default()
+                    },
+                    same: index == 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_stale_lookup_is_bound_to_the_document_of_the_locator_that_went_stale() {
+        let stale = |lookup| BrowserError::StaleLocator {
+            reason: StaleReason::Removed,
+            lookup: Some(lookup),
+        };
+        let bound = bind_lookup(
+            stale(lookup_of(&["locator_a1b2c3d4_8", "locator_a1b2c3d4_9"])),
+            Some("F1:L1:locator_a1b2c3d4_1"),
+        );
+        let BrowserError::StaleLocator {
+            reason,
+            lookup: Some(lookup),
+        } = bound
+        else {
+            panic!("the stale locator keeps its lookup");
+        };
+        assert_eq!(reason, StaleReason::Removed);
+        assert_eq!(lookup.same_count, 1);
+        assert_eq!(
+            lookup
+                .candidates
+                .iter()
+                .map(|candidate| (candidate.target.locator.as_str(), candidate.same))
+                .collect::<Vec<_>>(),
+            [
+                ("F1:L1:locator_a1b2c3d4_8", true),
+                ("F1:L1:locator_a1b2c3d4_9", false)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stale_lookup_with_no_single_document_to_bind_is_dropped() {
+        for subject in [None, Some("not a locator")] {
+            assert_eq!(
+                bind_lookup(
+                    BrowserError::StaleLocator {
+                        reason: StaleReason::Removed,
+                        lookup: Some(lookup_of(&["locator_a1b2c3d4_8"])),
+                    },
+                    subject
+                ),
+                BrowserError::stale(StaleReason::Removed),
+                "{subject:?}"
+            );
+        }
+        assert_eq!(
+            bind_lookup(BrowserError::DialogOpen, Some("F1:L1:locator_a1b2c3d4_1")),
+            BrowserError::DialogOpen
+        );
     }
 
     #[test]

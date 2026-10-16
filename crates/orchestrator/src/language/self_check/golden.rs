@@ -32,7 +32,19 @@ pub(crate) const STALE_REFUSALS_GOLDEN: &str = "tests/golden/model/stale_refusal
 const VOLATILE_PLACEHOLDER: &str = "<volatile>";
 
 /// Keys whose values are minted per run: handles, times and the resume token.
-const VOLATILE_KEYS: [&str; 6] = ["invocation", "tab", "target", "resume", "at", "timestamp"];
+const VOLATILE_KEYS: [&str; 7] = [
+    "invocation",
+    "tab",
+    "target",
+    "replacement",
+    "resume",
+    "at",
+    "timestamp",
+];
+
+/// The prefix of a target handle, and how many characters of base32 follow it.
+const TARGET_HANDLE_PREFIX: &str = "target_";
+const TARGET_HANDLE_SUFFIX_LEN: usize = 8;
 
 /// A path relative to the repository root, resolved from this crate.
 pub(crate) fn repository_path(relative: &str) -> std::path::PathBuf {
@@ -61,8 +73,33 @@ fn normalize(value: &mut Value) {
             }
         }
         Value::Array(items) => items.iter_mut().for_each(normalize),
+        Value::String(text) => *text = mask_target_handles(text),
         _ => {}
     }
+}
+
+/// The text with every target handle a sentence or a step quotes replaced by the placeholder.
+fn mask_target_handles(text: &str) -> String {
+    let mut masked = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(TARGET_HANDLE_PREFIX) {
+        let (before, found) = rest.split_at(at);
+        masked.push_str(before);
+        let suffix = &found[TARGET_HANDLE_PREFIX.len()..];
+        let length = suffix
+            .bytes()
+            .take_while(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(byte))
+            .count();
+        if length == TARGET_HANDLE_SUFFIX_LEN {
+            masked.push_str(VOLATILE_PLACEHOLDER);
+            rest = &suffix[length..];
+        } else {
+            masked.push_str(TARGET_HANDLE_PREFIX);
+            rest = suffix;
+        }
+    }
+    masked.push_str(rest);
+    masked
 }
 
 /// Compare `actual` with the golden file, or rewrite the file when the update variable is set.

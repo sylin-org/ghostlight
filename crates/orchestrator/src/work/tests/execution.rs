@@ -36,12 +36,7 @@ fn error_reasons_stay_truthful_about_disconnection_and_unknown_effects() {
         ("deadline_after", BrowserError::DeadlineAfterDispatch),
         ("primitive", BrowserError::Primitive("x".into())),
         ("stale_view", BrowserError::StaleView),
-        (
-            "stale_locator",
-            BrowserError::StaleLocator {
-                reason: StaleReason::Removed,
-            },
-        ),
+        ("stale_locator", BrowserError::stale(StaleReason::Removed)),
         ("interlock", BrowserError::LocalInterlock("x".into())),
         ("effect_unknown", BrowserError::EffectUnknown("x".into())),
         ("protocol", BrowserError::Protocol("x".into())),
@@ -4440,18 +4435,22 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
     assert_eq!(dialog_open(), None);
 }
 
-/// The refusal of a handle whose control the page found gone, as the model reads it.
-fn assert_stale_removed(result: &crate::work::result::InvocationResult) {
+/// The step of a removed handle's refusal that has no candidates to pick from.
+pub(super) const REMOVED_STEP: &str =
+    "Call browser_find or browser_inspect to obtain current target handles.";
+/// The step of a removed handle's refusal that lists candidates.
+pub(super) const PICK_STEP: &str = "Pick a target from recovery_candidates by its context, or call browser_find for current target handles.";
+
+/// The refusal of a handle whose control the page found gone, as the model reads it, with the
+/// step it gives.
+fn assert_stale_removed(result: &crate::work::result::InvocationResult, step: &str) {
     assert_eq!(result.status, Status::Failed);
     assert_eq!(result.effect, Effect::None);
     assert!(result.repeat_safe);
     assert_eq!(result.summary, "That target is no longer on the page.");
     assert_eq!(result.facts["reason"], "stale_target");
     assert_eq!(result.facts["stale"], "removed");
-    assert_eq!(
-        result.next_steps,
-        vec!["Call browser_find or browser_inspect to obtain current target handles."]
-    );
+    assert_eq!(result.next_steps, vec![step]);
 }
 
 /// A page-side stale handle refuses the way a generation change does, with the page's word, the
@@ -4459,9 +4458,7 @@ fn assert_stale_removed(result: &crate::work::result::InvocationResult) {
 #[test]
 fn a_page_side_stale_handle_refuses_as_stale_target_with_its_word() {
     let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(BrowserError::StaleLocator {
-        reason: StaleReason::Removed,
-    }));
+    browser.push(Err(BrowserError::stale(StaleReason::Removed)));
     browser.push(Ok(BrowserOutcome::targets(
         7,
         vec![ObservedTarget {
@@ -4480,7 +4477,7 @@ fn a_page_side_stale_handle_refuses_as_stale_target_with_its_word() {
         None,
         &CancellationToken::default(),
     );
-    assert_stale_removed(&clicked);
+    assert_stale_removed(&clicked, PICK_STEP);
     let candidates = clicked.facts["recovery_candidates"].as_array().unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0]["name"], "Delete");
@@ -4491,9 +4488,7 @@ fn a_page_side_stale_handle_refuses_as_stale_target_with_its_word() {
 #[test]
 fn a_tombstoned_handle_refuses_before_dispatch() {
     let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(BrowserError::StaleLocator {
-        reason: StaleReason::Removed,
-    }));
+    browser.push(Err(BrowserError::stale(StaleReason::Removed)));
     executor.execute(
         &workspace,
         "browser_click",
@@ -4509,7 +4504,7 @@ fn a_tombstoned_handle_refuses_before_dispatch() {
         None,
         &CancellationToken::default(),
     );
-    assert_stale_removed(&again);
+    assert_stale_removed(&again, REMOVED_STEP);
     assert!(browser.calls()[before..]
         .iter()
         .all(|call| matches!(call, BrowserCommand::QuerySemantic { .. })));
@@ -4520,9 +4515,7 @@ fn a_tombstoned_handle_refuses_before_dispatch() {
 #[test]
 fn a_typed_into_handle_the_page_removed_is_tombstoned() {
     let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
-    browser.push(Err(BrowserError::StaleLocator {
-        reason: StaleReason::Removed,
-    }));
+    browser.push(Err(BrowserError::stale(StaleReason::Removed)));
     let typed = executor.execute(
         &workspace,
         "browser_type_text",
@@ -4530,7 +4523,7 @@ fn a_typed_into_handle_the_page_removed_is_tombstoned() {
         None,
         &CancellationToken::default(),
     );
-    assert_stale_removed(&typed);
+    assert_stale_removed(&typed, REMOVED_STEP);
     let before = browser.calls().len();
     let again = executor.execute(
         &workspace,
@@ -4539,7 +4532,7 @@ fn a_typed_into_handle_the_page_removed_is_tombstoned() {
         None,
         &CancellationToken::default(),
     );
-    assert_stale_removed(&again);
+    assert_stale_removed(&again, REMOVED_STEP);
     assert!(browser.calls()[before..]
         .iter()
         .all(|call| matches!(call, BrowserCommand::QuerySemantic { .. })));
@@ -4552,9 +4545,7 @@ fn an_unknown_page_side_word_is_not_remembered() {
     let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
     for _ in 0..2 {
         let before = browser.calls().len();
-        browser.push(Err(BrowserError::StaleLocator {
-            reason: StaleReason::Unknown,
-        }));
+        browser.push(Err(BrowserError::stale(StaleReason::Unknown)));
         let clicked = executor.execute(
             &workspace,
             "browser_click",
@@ -4665,9 +4656,7 @@ fn a_stale_refusal_audits_the_word_only() {
         .as_str()
         .unwrap()
         .to_owned();
-    browser.push(Err(BrowserError::StaleLocator {
-        reason: StaleReason::Removed,
-    }));
+    browser.push(Err(BrowserError::stale(StaleReason::Removed)));
     executor.execute(
         &workspace,
         "browser_click",

@@ -184,7 +184,7 @@ fn a_stale_handle_matches_its_golden_for_each_word() {
             workspace_with_a_target();
         match reason {
             StaleReason::Removed | StaleReason::Unknown => {
-                browser.push(Err(BrowserError::StaleLocator { reason }));
+                browser.push(Err(BrowserError::stale(reason)));
             }
             StaleReason::Navigated => {
                 browser.push(Ok(BrowserOutcome::Navigated {
@@ -220,8 +220,54 @@ fn a_stale_handle_matches_its_golden_for_each_word() {
             rendered_result("browser_click", arguments, &result),
         );
     }
+    for (case, proven) in [
+        ("removed_with_replacement", true),
+        ("removed_with_candidates", false),
+    ] {
+        let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+        browser.push(Err(BrowserError::StaleLocator {
+            reason: StaleReason::Removed,
+            lookup: Some(row_lookup(proven)),
+        }));
+        let arguments = json!({"tab":tab_handle,"target":target});
+        let result = executor.execute(
+            &workspace,
+            "browser_click",
+            arguments.clone(),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(result.facts["stale"], "removed", "{result:?}");
+        rendered.insert(
+            case.into(),
+            rendered_result("browser_click", arguments, &result),
+        );
+    }
     check_golden(
         STALE_REFUSALS_GOLDEN,
         &golden_text(&serde_json::Value::Object(rendered)),
     );
+}
+
+/// What a page finds when it looks again for a removed menu button of a song row: the take of
+/// the same title in the same row, which it proves or not, and the other take.
+fn row_lookup(proven: bool) -> crate::browser::adapter::StaleLookup {
+    use crate::browser::adapter::{StaleCandidate, StaleLookup};
+    let take = |locator: &str, nth: u32, same: bool| StaleCandidate {
+        target: ObservedTarget {
+            locator: locator.into(),
+            role: "button".into(),
+            name: "Delete".into(),
+            context: Some("Neon Rain".into()),
+            nth: Some(nth),
+            ..Default::default()
+        },
+        same,
+    };
+    StaleLookup {
+        matched: 2,
+        same_count: usize::from(proven),
+        truncated: false,
+        candidates: vec![take("take-two", 2, proven), take("take-one", 1, false)],
+    }
 }

@@ -294,7 +294,7 @@ pub fn tool_name(requested: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::language::outcome::{ActionSubject, TargetRole};
+    use crate::language::outcome::{ActionSubject, StaleHelp, TargetRole};
     use crate::workspace::StaleReason;
 
     #[test]
@@ -349,7 +349,10 @@ mod tests {
     fn a_stale_target_audits_its_word_and_the_history_holds_the_sentence_only() {
         for reason in StaleReason::ALL {
             let refusal = Refusal::WorkspaceUnusable {
-                reason: WorkspaceReason::StaleTarget { reason },
+                reason: WorkspaceReason::StaleTarget {
+                    reason,
+                    help: StaleHelp::None,
+                },
             };
             let audit = refusal.audit();
             assert_eq!(audit.summary(), refusal.summary());
@@ -360,6 +363,37 @@ mod tests {
                     "cause": {"stale_target": {"reason": reason.word()}}
                 })
             );
+        }
+    }
+
+    #[test]
+    fn a_stale_target_audits_no_replacement_and_no_handle() {
+        for help in [
+            StaleHelp::Candidates,
+            StaleHelp::Replacement {
+                tool: "browser_click",
+                target: "target_7k2nb5xe".into(),
+            },
+        ] {
+            let refusal = Refusal::WorkspaceUnusable {
+                reason: WorkspaceReason::StaleTarget {
+                    reason: StaleReason::Removed,
+                    help,
+                },
+            };
+            let audit = refusal.audit();
+            assert_eq!(
+                serde_json::to_value(audit.refusal()).unwrap(),
+                serde_json::json!({
+                    "reason": "workspace_unusable",
+                    "cause": {"stale_target": {"reason": "removed"}}
+                })
+            );
+            assert!(!serde_json::to_value(audit.refusal())
+                .unwrap()
+                .to_string()
+                .contains("target_"));
+            assert!(!audit.summary().contains("target_"));
         }
     }
 

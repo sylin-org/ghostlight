@@ -428,6 +428,7 @@ function createFakeDom({ top = true } = {}) {
     document,
     window,
     location: { href: "https://example.test/" },
+    URL,
     HTMLElement,
     HTMLInputElement,
     HTMLTextAreaElement,

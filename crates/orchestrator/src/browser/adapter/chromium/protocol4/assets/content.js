@@ -38,6 +38,23 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // is searched for its heading or first link.
   const ITEM_DEPTH_MAX = 25;
   const ITEM_VISIT_MAX = 200;
+  // The identity record and the stale lookup (ADR-0198 decision 28). One read indexes at most
+  // LINK_INDEX_MAX links and past that finds no row link. A row tries its first OWN_LINK_TRIES
+  // links as its own link, and one read counts at most ITEM_COUNT_MAX rows to tell whether a row
+  // label is unique. A stale lookup scans at most STALE_SCAN_MAX controls, counts at most
+  // STALE_MATCH_MAX matches, names at most STALE_CANDIDATES_MAX of them, and stops after
+  // STALE_LOOKUP_MS milliseconds.
+  const LINK_INDEX_MAX = 2000;
+  const OWN_LINK_TRIES = 8;
+  const ITEM_COUNT_MAX = 1000;
+  const STALE_SCAN_MAX = 3000;
+  const STALE_MATCH_MAX = 50;
+  const STALE_CANDIDATES_MAX = 3;
+  const STALE_LOOKUP_MS = 50;
+  // Every element that can be a row, before isItem decides which are.
+  const ITEM_SELECTOR = "li,tr,article,fieldset,[role]";
+  // Stands for "outside every row" in the index of where a link occurs.
+  const OUTSIDE_ROW = Symbol("outside every row");
   const ERROR_MAX = 120;
   const LIMIT_MAX = 120;
   // The page areas an item can belong to (ADR-0198 decision 19). The service decodes the same closed
@@ -198,8 +215,9 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   // limit the oldest locator is dropped and later reads as unknown. Past the gone limit the oldest
   // removed locator is dropped the same way.
   const MAX_LOCATORS = 500;
-  // locator -> { element, gone }. A gone entry holds no element, so a removed node is never pinned.
-  // The Map keeps mint order, so the first entry of a kind is the oldest.
+  // locator -> { element, gone, record }. A gone entry holds no element, so a removed node is never
+  // pinned, and keeps the identity record of the control it named. The record never leaves the
+  // page. The Map keeps mint order, so the first entry of a kind is the oldest.
   const locators = new Map();
   const reverse = new WeakMap();
   let nextLocator = 1;
@@ -237,33 +255,52 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     }
   }
 
-  function locatorFor(element) {
+  // The locator of an element, minted when it has none. Every observation refreshes the identity
+  // record, so the latest view the agent saw is the one the record describes.
+  function locatorFor(element, view, role, name) {
     let locator = reverse.get(element);
     if (!locator) {
       locator = `${LOCATOR_PREFIX}${nextLocator++}`;
       reverse.set(element, locator);
-      locators.set(locator, { element, gone: false });
+      locators.set(locator, { element, gone: false, record: null });
       liveCount += 1;
       trimLocators(false, MAX_LOCATORS);
     }
+    const entry = locators.get(locator);
+    if (entry) entry.record = identityOf(element, view, role, name);
     return locator;
   }
 
   // The two words a page can give: the element left the document, or the locator is not one this
-  // page holds (another world, never minted, or dropped from the registry).
-  function staleLocator(word) {
-    return new AssetError("stale_locator", "stale browser locator", { stale: word });
+  // page holds (another world, never minted, or dropped from the registry). A removed locator
+  // also carries what the page found when it looked for the control again.
+  function staleLocator(word, lookup) {
+    return new AssetError("stale_locator", "stale browser locator", lookup ? { stale: word, ...lookup } : { stale: word });
   }
 
-  // A locator minted by another world (a rebuilt page runtime) never aliases a new element.
+  // The refusal for a locator whose control left the page, with the lookup its record allows.
+  function removedError(record) {
+    return staleLocator("removed", record ? staleLookup(record) : undefined);
+  }
+
+  // The refusal for a held element that left the document while an action used it.
+  function removedElementError(element) {
+    const entry = locators.get(reverse.get(element));
+    if (entry && !entry.gone) retireLocator(entry);
+    return removedError(entry?.record);
+  }
+
+  // A locator minted by another world (a rebuilt page runtime) never aliases a new element. A
+  // connected element whose row no longer holds the recorded link or declared name was recycled
+  // for another row, so its locator is removed too.
   function resolve(locator) {
     if (typeof locator !== "string" || !locator.startsWith(LOCATOR_PREFIX)) throw staleLocator("unknown");
     const entry = locators.get(locator);
     if (!entry) throw staleLocator("unknown");
-    if (entry.gone) throw staleLocator("removed");
-    if (!entry.element.isConnected) {
+    if (entry.gone) throw removedError(entry.record);
+    if (!entry.element.isConnected || recycled(entry)) {
       retireLocator(entry);
-      throw staleLocator("removed");
+      throw removedError(entry.record);
     }
     return entry.element;
   }
@@ -413,14 +450,21 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   }
 
   // What one read remembers about the page so each element is placed once: the area of every
-  // element already walked, and the ordinal of each form, counted on first use.
+  // element already walked, the ordinal of each form, the label of each row, the controls of each
+  // row, and the document's links and row-label counts. The forms, links and counts are built on
+  // first use.
   function observationView() {
-    return { areas: new Map(), forms: null };
+    return { areas: new Map(), forms: null, labels: new Map(), links: undefined, itemCounts: undefined, controls: new Map() };
   }
 
   function observation(element, view = observationView()) {
+    const described = describeControl(element, view);
+    return { locator: locatorFor(element, view, described.role, described.name), ...described };
+  }
+
+  // What the page tells about one control, without minting its locator.
+  function describeControl(element, view) {
     const observed = {
-      locator: locatorFor(element),
       role: roleFor(element),
       name: accessibleName(element),
       state: stateFor(element),
@@ -833,15 +877,24 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return "";
   }
 
+  // What a row calls itself, read once per row: `labels` keeps the label of each row already read.
+  function labelOf(item, labels) {
+    if (!labels.has(item)) labels.set(item, itemLabel(item));
+    return labels.get(item);
+  }
+
   // Where a control sits, in the page's own words: its row's label, else its group, else the
-  // region around it, else an empty string. `labels` keeps the label of each row already read. A
-  // credential-class control has no context.
+  // region around it, else an empty string. A credential-class control has no context.
   function contextOf(element, labels = new Map()) {
     if (credentialClass(element)) return "";
-    const item = itemOf(element);
+    return contextWithin(element, itemOf(element), labels);
+  }
+
+  // The context of a control whose row, or none, is already known.
+  function contextWithin(element, item, labels) {
     if (item) {
-      if (!labels.has(item)) labels.set(item, itemLabel(item).text);
-      if (labels.get(item)) return labels.get(item);
+      const text = labelOf(item, labels).text;
+      if (text) return text;
     }
     return controlGroup(element) || regionName(element);
   }
@@ -876,6 +929,284 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       }
     }
     return observed;
+  }
+
+  // ---- identity records and the stale lookup (ADR-0198 decision 28) ----
+  //
+  // Every routine here is value-free: names come from declaredLabel or plainText, never from a
+  // field's value, and walks cross open shadow roots through composedParent. What a record holds
+  // never leaves the page.
+
+  // The document's own address without its fragment, as links are compared, and its origin.
+  function documentBase() {
+    const own = new URL(location.href);
+    own.hash = "";
+    return { href: location.href, self: own.href, origin: own.origin };
+  }
+
+  // The address a link points to without its fragment, or null when it cannot name a row: not
+  // http or https, another origin, the site root, or the document itself.
+  function linkAddress(link, base) {
+    let url;
+    try {
+      url = new URL(link.getAttribute("href") ?? "", base.href);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.origin !== base.origin || url.pathname === "/") return null;
+    url.hash = "";
+    return url.href === base.self ? null : url.href;
+  }
+
+  // The links in a row's composed subtree, in document order, at most `maximum` of them. The
+  // search stops after ITEM_VISIT_MAX nodes.
+  function linksWithin(item, maximum) {
+    const links = [];
+    const stack = composedChildren(item).slice().reverse();
+    for (let visits = 0; stack.length && links.length < maximum && visits < ITEM_VISIT_MAX; visits += 1) {
+      const node = stack.pop();
+      if (node.nodeType !== 1) continue;
+      if (isLink(node)) links.push(node);
+      stack.push(...composedChildren(node).slice().reverse());
+    }
+    return links;
+  }
+
+  // Where each usable link address occurs in the document: the set of rows that hold it, with
+  // OUTSIDE_ROW standing for an occurrence in no row. Built once per read. Null when the document
+  // holds more than LINK_INDEX_MAX links, so no row has a link of its own in that read.
+  function linkIndex(view) {
+    if (view.links !== undefined) return view.links;
+    const links = queryAll("a[href]");
+    if (links.length > LINK_INDEX_MAX) {
+      view.links = null;
+      return null;
+    }
+    const base = documentBase();
+    const index = new Map();
+    for (const link of links) {
+      const address = linkAddress(link, base);
+      if (!address) continue;
+      if (!index.has(address)) index.set(address, new Set());
+      index.get(address).add(itemOf(link) ?? OUTSIDE_ROW);
+    }
+    view.links = index;
+    return index;
+  }
+
+  // The address of the first of a row's first links that occurs in this row and nowhere else on
+  // the page: the row's own link, which a now-playing bar or a sidebar copy can never be. Null
+  // when the row has none.
+  function ownLink(item, view) {
+    const index = linkIndex(view);
+    if (!index) return null;
+    const base = documentBase();
+    for (const link of linksWithin(item, OWN_LINK_TRIES)) {
+      const address = linkAddress(link, base);
+      const holders = address ? index.get(address) : undefined;
+      if (holders && holders.size === 1 && holders.has(item)) return address;
+    }
+    return null;
+  }
+
+  // How many rows of the document carry each declared label, counted once per read. Null when the
+  // document holds more than ITEM_COUNT_MAX rows, so no label counts as unique in that read.
+  function itemLabelCounts(view) {
+    if (view.itemCounts !== undefined) return view.itemCounts;
+    const counts = new Map();
+    let rows = 0;
+    for (const node of queryAll(ITEM_SELECTOR)) {
+      if (!isItem(node)) continue;
+      rows += 1;
+      if (rows > ITEM_COUNT_MAX) {
+        view.itemCounts = null;
+        return null;
+      }
+      const label = labelOf(node, view.labels);
+      if (label.declared && label.text) counts.set(label.text, (counts.get(label.text) ?? 0) + 1);
+    }
+    view.itemCounts = counts;
+    return counts;
+  }
+
+  // Whether exactly one row of the document carries this declared label.
+  function labelIsUnique(text, view) {
+    return itemLabelCounts(view)?.get(text) === 1;
+  }
+
+  // The controls inside a row, in document order, each with its role and name, read once per row
+  // per read. The search stops after ITEM_VISIT_MAX nodes.
+  function controlsWithin(item, view) {
+    if (view.controls.has(item)) return view.controls.get(item);
+    const found = [];
+    const stack = composedChildren(item).slice().reverse();
+    for (let visits = 0; stack.length && visits < ITEM_VISIT_MAX; visits += 1) {
+      const node = stack.pop();
+      if (node.nodeType !== 1) continue;
+      if (node.matches(ACTIONABLE_SELECTOR) && !isHiddenInput(node)) found.push({ element: node, role: roleFor(node), name: accessibleName(node) });
+      stack.push(...composedChildren(node).slice().reverse());
+    }
+    view.controls.set(item, found);
+    return found;
+  }
+
+  // Where an element sits on the page: the key of the nearest landmark, region, tab panel or
+  // dialog around it, and whether any dialog holds it.
+  function placeOf(element) {
+    let regionKey = null;
+    let inDialog = false;
+    for (let node = composedParent(element); node; node = composedParent(node)) {
+      if (node.nodeType !== 1) continue;
+      if (landmarkRole(node) === "dialog") inDialog = true;
+      if (regionKey === null && (bordersRegion(node) || explicitRole(node) === "tabpanel")) {
+        regionKey = `${roleFor(node)}\n${declaredLabel(node) ?? ""}`;
+      }
+    }
+    return { regionKey: regionKey ?? "", inDialog };
+  }
+
+  // The view an agent saw a control in: the document's address without its fragment, its title
+  // and the region around the control. Compared only inside the page.
+  function viewKey(regionKey) {
+    return `${location.href.split("#")[0]}\n${document.title}\n${regionKey}`;
+  }
+
+  // What the page remembers about a control so it can later say whether a node is the same
+  // control: its role, exact name and credential class, where it sat (the label of its row, else
+  // its group, else its region), the row's declared name, whether that name was unique among
+  // rows when no link was recorded, the row's own link, the view, whether a dialog held it, and
+  // its place among the row's controls of the same role and name. A credential-class control
+  // records no place, because it is never followed or named as a replacement.
+  function identityOf(element, view, role, name) {
+    const credential = credentialClass(element);
+    const place = placeOf(element);
+    const record = {
+      role,
+      name,
+      credential,
+      context: "",
+      hasItem: false,
+      itemDeclared: null,
+      itemUnique: false,
+      anchor: null,
+      view: viewKey(place.regionKey),
+      inDialog: place.inDialog,
+      nth: null,
+      count: null
+    };
+    if (credential) return record;
+    const item = itemOf(element);
+    record.context = contextWithin(element, item, view.labels);
+    if (!item) return record;
+    record.hasItem = true;
+    const label = labelOf(item, view.labels);
+    if (label.declared && label.text) record.itemDeclared = label.text;
+    record.anchor = ownLink(item, view);
+    if (record.anchor === null && record.itemDeclared !== null) record.itemUnique = labelIsUnique(record.itemDeclared, view);
+    const same = controlsWithin(item, view).filter((control) => control.role === role && control.name === name);
+    const position = same.findIndex((control) => control.element === element);
+    if (position >= 0) {
+      record.nth = position + 1;
+      record.count = same.length;
+    }
+    return record;
+  }
+
+  // Whether a connected element no longer sits in the row its record describes: the row lost the
+  // recorded link, or its declared name changed. A list that recycles its nodes for other rows
+  // does this, and acting on such a node would act on another row. A record with neither a link
+  // nor a declared row name says nothing about the row.
+  function recycled(entry) {
+    const record = entry.record;
+    if (!record || (record.anchor === null && record.itemDeclared === null)) return false;
+    const item = itemOf(entry.element);
+    if (!item) return true;
+    if (record.itemDeclared !== null) {
+      const label = itemLabel(item);
+      if (!label.declared || label.text !== record.itemDeclared) return true;
+    }
+    if (record.anchor !== null) {
+      const base = documentBase();
+      return !linksWithin(item, OWN_LINK_TRIES).some((link) => linkAddress(link, base) === record.anchor);
+    }
+    return false;
+  }
+
+  // Whether a node is the control a record describes, by one conjunction: its context equals the
+  // recorded one, the view and the dialog are unchanged, and the row proves itself. A row proves
+  // itself by its own link when the record has one, else by its declared name when that was
+  // unique when recorded and is unique now. A control that sat in no row needs a node in no row.
+  // Position is never part of the test. The caller has already matched role, name and class.
+  function matchesRecord(record, element, view) {
+    if (record.credential) return false;
+    const place = placeOf(element);
+    if (place.inDialog !== record.inDialog || viewKey(place.regionKey) !== record.view) return false;
+    const item = itemOf(element);
+    if (contextWithin(element, item, view.labels) !== record.context) return false;
+    if (record.anchor !== null) return item !== null && ownLink(item, view) === record.anchor;
+    if (!record.hasItem) return item === null;
+    if (!item || record.itemDeclared === null || !record.itemUnique) return false;
+    const label = labelOf(item, view.labels);
+    return label.declared && label.text === record.itemDeclared && labelIsUnique(label.text, view);
+  }
+
+  // Look in this document for the control a record describes, in the failing call itself: no
+  // painting, no effect, at most STALE_LOOKUP_MS of work. Counts the connected controls with the
+  // same role, exact name and credential class (`matched`, up to STALE_MATCH_MAX), how many of
+  // them are the same control by the conjunction (`same_count`), and names up to
+  // STALE_CANDIDATES_MAX of them, the same ones first and then in document order, each with a
+  // fresh locator, its context, and its nth when its context repeats. `truncated` says a cap or
+  // the time limit cut the lookup short.
+  function staleLookup(record) {
+    const started = performance.now();
+    const late = () => performance.now() - started > STALE_LOOKUP_MS;
+    const view = observationView();
+    const pool = candidates("controls");
+    let truncated = pool.length > STALE_SCAN_MAX;
+    const matches = [];
+    for (const element of pool.slice(0, STALE_SCAN_MAX)) {
+      if (late()) {
+        truncated = true;
+        break;
+      }
+      if (!element.isConnected || roleFor(element) !== record.role) continue;
+      if (credentialClass(element) !== record.credential || accessibleName(element) !== record.name) continue;
+      if (matches.length === STALE_MATCH_MAX) {
+        truncated = true;
+        break;
+      }
+      matches.push(element);
+    }
+    const described = [];
+    const same = [];
+    for (const element of matches) {
+      if (late()) {
+        truncated = true;
+        break;
+      }
+      described.push(describeControl(element, view));
+      same.push(matchesRecord(record, element, view));
+    }
+    const counted = matches.slice(0, described.length);
+    annotateRepeats(described, counted);
+    // A candidate says where it sits even when it is the only one left, because the agent picks
+    // among candidates by their rows.
+    described.forEach((entry, index) => {
+      if (entry.credential_class || entry.context) return;
+      const context = contextOf(counted[index], view.labels);
+      if (context && context !== entry.group) entry.context = context;
+    });
+    const order = counted.map((_, index) => index).sort((a, b) => Number(same[b]) - Number(same[a]) || a - b);
+    return {
+      matched: matches.length,
+      same_count: same.filter(Boolean).length,
+      truncated,
+      candidates: order.slice(0, STALE_CANDIDATES_MAX).map((index) => ({
+        target: { locator: locatorFor(counted[index], view, described[index].role, described[index].name), ...described[index] },
+        same: same[index]
+      }))
+    };
   }
 
   // Why the control is invalid, in words Ghostlight chooses. The browser's own message is read
@@ -1961,7 +2292,7 @@ ${line}` : line;
   }
 
   function requireActionable(element, intent) {
-    if (!element.isConnected) throw staleLocator("removed");
+    if (!element.isConnected) throw removedElementError(element);
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     if (style.display === "none" || element.getAttribute("aria-hidden") === "true" || style.visibility === "hidden" || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) {
@@ -2050,7 +2381,7 @@ ${line}` : line;
   }
 
   function requireUploadTarget(element) {
-    if (!element.isConnected) throw staleLocator("removed");
+    if (!element.isConnected) throw removedElementError(element);
     if (!(element instanceof HTMLInputElement) || element.type !== "file") {
       throw new AssetError("not_file_input", "target is not a file input");
     }

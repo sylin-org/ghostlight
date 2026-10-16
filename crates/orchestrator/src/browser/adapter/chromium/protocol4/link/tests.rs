@@ -425,9 +425,7 @@ fn a_stale_locator_after_a_started_effect_settles_as_an_unknown_effect() {
     let (port, _fake) = port(scripted(&next));
     let cancelled = AtomicBool::new(false);
     let admit = || Ok(());
-    let stale = || BrowserError::StaleLocator {
-        reason: StaleReason::Removed,
-    };
+    let stale = || BrowserError::stale(StaleReason::Removed);
     let mut link = Link::new(
         line(&port),
         WORKSPACE,

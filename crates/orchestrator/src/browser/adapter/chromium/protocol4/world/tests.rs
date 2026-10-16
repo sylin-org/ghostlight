@@ -449,7 +449,10 @@ fn an_envelope_carries_a_value_or_a_coded_failure() {
         Err(AssetError {
             code: AssetErrorCode::StaleLocator,
             message: "stale browser locator".into(),
-            detail: Some(AssetDetail::Stale(StaleReason::Unknown)),
+            detail: Some(AssetDetail::Stale {
+                reason: StaleReason::Unknown,
+                lookup: None,
+            }),
         })
     );
 }
@@ -475,10 +478,78 @@ fn a_stale_locator_carries_the_word_the_page_gave() {
     ] {
         let error = decode_envelope(&stale_locator(Some(detail.clone()))).unwrap_err();
         assert_eq!(error.code, AssetErrorCode::StaleLocator, "{detail}");
-        assert_eq!(error.detail, Some(AssetDetail::Stale(expected)), "{detail}");
+        assert_eq!(
+            error.detail,
+            Some(AssetDetail::Stale {
+                reason: expected,
+                lookup: None
+            }),
+            "{detail}"
+        );
     }
     let bare = decode_envelope(&stale_locator(None)).unwrap_err();
-    assert_eq!(bare.detail, Some(AssetDetail::Stale(StaleReason::Unknown)));
+    assert_eq!(
+        bare.detail,
+        Some(AssetDetail::Stale {
+            reason: StaleReason::Unknown,
+            lookup: None
+        })
+    );
+}
+
+#[test]
+fn a_removed_locator_carries_the_lookup_the_page_made() {
+    let detail = json!({
+        "stale": "removed",
+        "matched": 3,
+        "same_count": 1,
+        "truncated": false,
+        "candidates": [
+            {"target": {"locator": "locator_a1b2c3d4_8", "role": "button", "name": "More options",
+                "state": ["collapsed"], "credential_class": false, "context": "Neon Rain", "nth": 2},
+             "same": true},
+            {"target": {"locator": "locator_a1b2c3d4_9", "role": "button", "name": "More options",
+                "state": [], "credential_class": false}, "same": false}
+        ]
+    });
+
+    let error = decode_envelope(&stale_locator(Some(detail))).unwrap_err();
+
+    let Some(AssetDetail::Stale {
+        reason,
+        lookup: Some(lookup),
+    }) = error.detail
+    else {
+        panic!("the removed locator carries its lookup");
+    };
+    assert_eq!(reason, StaleReason::Removed);
+    assert_eq!(
+        (lookup.matched, lookup.same_count, lookup.truncated),
+        (3, 1, false)
+    );
+    assert_eq!(lookup.candidates.len(), 2);
+    assert!(lookup.candidates[0].same && !lookup.candidates[1].same);
+    assert_eq!(
+        lookup.candidates[0].target.context.as_deref(),
+        Some("Neon Rain")
+    );
+    assert_eq!(lookup.candidates[0].target.nth, Some(2));
+}
+
+#[test]
+fn a_lookup_this_build_cannot_read_whole_is_no_lookup() {
+    for detail in [
+        json!({"stale": "removed"}),
+        json!({"stale": "removed", "matched": "many"}),
+        json!({"stale": "removed", "matched": 1, "candidates": [{"target": {"unheard_of": 1}, "same": true}]}),
+        json!({"stale": "unknown", "matched": 1, "same_count": 1}),
+    ] {
+        let error = decode_envelope(&stale_locator(Some(detail.clone()))).unwrap_err();
+        let Some(AssetDetail::Stale { lookup, .. }) = error.detail else {
+            panic!("a stale locator always has a reason");
+        };
+        assert_eq!(lookup, None, "{detail}");
+    }
 }
 
 #[test]

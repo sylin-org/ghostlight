@@ -27,6 +27,7 @@ pub mod wire;
 pub mod world;
 
 use self::link::Link;
+use self::locator::bind_lookup;
 use self::scope::Scope;
 use self::translate::forms::{self, Fill};
 use self::translate::keyboard::{PressKey, TypeFocused, TypeText};
@@ -45,12 +46,19 @@ const NESTED_DOCUMENTS: &str = "nested document execution is invalid";
 /// Carry one unit of browser work over a protocol-4 connection.
 ///
 /// Work inside a document scope runs with that scope admitted, and answers with what it read
-/// alongside what the scope reached.
+/// alongside what the scope reached. A stale locator's lookup is bound to the document of the one
+/// locator the command named.
 ///
 /// # Errors
 ///
 /// Returns the failure of the first primitive that failed, as the [`Link`] maps it.
 pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
+    let subject = command.sole_locator().map(str::to_owned);
+    carry(command, l).map_err(|error| bind_lookup(error, subject.as_deref()))
+}
+
+/// Carry one unit of browser work, scoped or not.
+fn carry(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
     match command {
         BrowserCommand::InDocuments { scope, primitive } => {
             if matches!(

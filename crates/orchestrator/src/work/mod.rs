@@ -23,9 +23,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::browser::adapter::{
-    BrowserCommand, BrowserOutcome, BrowserReadiness, PhysicalActionSubject, PhysicalFile,
-    PhysicalPoint, PhysicalRecordingSummary, PhysicalTab, PresentationActivity, RecordingDelivery,
-    RecordingState, RecordingStopReason,
+    BrowserCommand, BrowserOutcome, BrowserReadiness, ObservedTarget, PhysicalActionSubject,
+    PhysicalFile, PhysicalPoint, PhysicalRecordingSummary, PhysicalTab, PresentationActivity,
+    RecordingDelivery, RecordingState, RecordingStopReason, StaleLookup,
 };
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -49,7 +49,8 @@ use crate::language::{
     field_problem::ControlRef,
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason,
-        CheckFailure, Observed, Outcome, Refusal, TargetRole, WorkspaceReason, STALE_FACT,
+        CheckFailure, Observed, Outcome, Refusal, StaleHelp, TargetRole, WorkspaceReason,
+        RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
     },
     Operation, Record, TakeScreenshot,
 };
@@ -57,10 +58,14 @@ use crate::presentation::PresentationReactor;
 use crate::provenance::ConnectionEvidence;
 use crate::workbench::WorkbenchProjection;
 use crate::workspace::{
-    SelectedTab, SelectedTarget, SelectedView, StaleReason, WorkspaceError, WorkspaceId,
-    WorkspaceLease, WorkspaceStore,
+    SelectedTab, SelectedTarget, SelectedView, StaleReason, StaleTargetContext, WorkspaceError,
+    WorkspaceId, WorkspaceLease, WorkspaceStore,
 };
+use item::candidate_item;
 use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
+
+/// How many controls a stale-target refusal offers.
+const STALE_CANDIDATES_MAX: usize = 3;
 
 /// Cloneable cancellation state forwarded from the MCP edge to physical dispatch.
 #[derive(Clone, Debug, Default)]
@@ -158,7 +163,7 @@ pub struct ApplicationExecutor {
     audit: Arc<crate::audit::AuditRecorder>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     observations: ObservationRegistry,
-    stale_candidates: StaleCandidateRegistry,
+    stale_offers: StaleOfferRegistry,
     permissions: Mutex<HashMap<String, crate::governance::evidence::PermissionTrace>>,
     coverage: Mutex<HashMap<String, language::coverage::Coverage>>,
 }
@@ -169,9 +174,18 @@ pub struct ApplicationExecutor {
 /// which happens exactly once per invocation.
 type ObservationRegistry = Arc<Mutex<HashMap<String, Observed>>>;
 
-/// Fresh candidate controls attached to one invocation's stale-target refusal, consumed by the
-/// completion path exactly once. Values are language-authored {role,name} objects.
-type StaleCandidateRegistry = Arc<Mutex<HashMap<String, Vec<Value>>>>;
+/// What one invocation's stale-target refusal offers, consumed by the completion path exactly once.
+type StaleOfferRegistry = Arc<Mutex<HashMap<String, StaleOffer>>>;
+
+/// The recovery a stale-target refusal offers (ADR-0198 Decision 28): controls the page found,
+/// each already registered as a handle, and the one of them the page proved is the control the
+/// stale handle named, when it did and the call can safely be repeated with it.
+struct StaleOffer {
+    /// The facts for each candidate, as the model sees them.
+    candidates: Vec<Value>,
+    /// The handle of the proven replacement.
+    replacement: Option<String>,
+}
 
 impl ApplicationExecutor {
     /// Construct the orchestrator's only model-requested mutation entry point.
@@ -196,7 +210,7 @@ impl ApplicationExecutor {
             audit,
             diagnostics,
             observations: Arc::new(Mutex::new(HashMap::new())),
-            stale_candidates: Arc::new(Mutex::new(HashMap::new())),
+            stale_offers: Arc::new(Mutex::new(HashMap::new())),
             permissions: Mutex::new(HashMap::new()),
             coverage: Mutex::new(HashMap::new()),
         }
@@ -329,6 +343,7 @@ impl ApplicationExecutor {
             requested_browser: operation_browser(operation),
             requested_tab: operation_tab(operation),
             requested_target: operation_target(operation),
+            repeat_tool: repeatable_tool(operation),
             snapshot: &snapshot,
             deadline,
             deadline_adjustable: prepared.deadline_adjustable,
@@ -779,29 +794,93 @@ impl ApplicationExecutor {
         // A stale handle is where recovery is cheapest: the page still has controls matching
         // what that handle used to be called. Offer up to three of them so the refusal
         // arrives pre-recovered instead of sending the driver back to inspect.
-        if matches!(&result, Err(WorkspaceError::StaleTarget { .. })) {
-            self.record_stale_candidates(context, target);
+        if let Err(WorkspaceError::StaleTarget { reason }) = &result {
+            self.recover_stale(context, target, *reason, None);
         }
         result
     }
 
-    /// Best-effort fresh candidates for a stale target handle. Silence on any failure or
-    /// governance denial is deliberate -- the refusal stays truthful without them.
-    fn record_stale_candidates(&self, context: &InvocationContext<'_>, target_handle: &str) {
+    /// Best-effort recovery for a stale target handle (ADR-0198 Decision 28). Silence on any
+    /// failure or governance denial is deliberate: the refusal stays truthful without it.
+    ///
+    /// Controls are offered only after a read authorization on the tab's URL, and each is
+    /// registered as a handle. A control the page reported removed brings the lookup the page
+    /// made in the failing call, which proves at most one candidate is the same control. Any
+    /// other stale handle is looked up by what the page called it, in a separate unpainted read.
+    /// The proven replacement is named only for a reason `removed`, for a call that takes the
+    /// stale handle as its one target, and from a lookup no cap cut short. A stale-locator
+    /// failure is raised before any effect, so nothing was sent.
+    fn recover_stale(
+        &self,
+        context: &InvocationContext<'_>,
+        target_handle: &str,
+        reason: StaleReason,
+        lookup: Option<&StaleLookup>,
+    ) {
         let Some(info) = self
             .workspaces
             .stale_target_context(context.workspace, target_handle)
         else {
             return;
         };
+        if !self
+            .authorize(context, Capability::Read, Some(info.url.as_str()))
+            .allowed
+        {
+            return;
+        }
+        let lookup = lookup.filter(|_| reason == StaleReason::Removed);
+        let (found, proven) = match lookup {
+            Some(lookup) => (
+                lookup
+                    .candidates
+                    .iter()
+                    .map(|candidate| candidate.target.clone())
+                    .collect(),
+                proven_candidate(context, target_handle, lookup),
+            ),
+            None => (self.query_stale_candidates(context, &info), None),
+        };
+        let registered = self.workspaces.register_recovered(
+            context.workspace,
+            target_handle,
+            lookup.is_some(),
+            &found,
+        );
+        if registered.is_empty() {
+            return;
+        }
+        let preserve = context.snapshot.preserves_target_names();
+        let candidates = registered
+            .iter()
+            .map(|(handle, target)| candidate_item(handle.as_str(), target, preserve))
+            .collect();
+        let replacement = proven
+            .and_then(|index| registered.get(index))
+            .map(|(handle, _)| handle.as_str().to_owned());
+        self.stale_offers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                context.invocation.to_owned(),
+                StaleOffer {
+                    candidates,
+                    replacement,
+                },
+            );
+    }
+
+    /// Up to three controls the page names like a stale handle's control, from a separate
+    /// unpainted semantic query. Empty on any failure.
+    fn query_stale_candidates(
+        &self,
+        context: &InvocationContext<'_>,
+        info: &StaleTargetContext,
+    ) -> Vec<ObservedTarget> {
         if info.name.trim().is_empty() {
-            return;
+            return Vec::new();
         }
-        let decision = self.authorize(context, Capability::Read, Some(info.url.as_str()));
-        if !decision.allowed {
-            return;
-        }
-        if let Ok(BrowserOutcome::Targets { targets, .. }) = self.dispatch(
+        match self.dispatch(
             context,
             BrowserCommand::QuerySemantic {
                 tab_id: info.physical_id,
@@ -811,17 +890,10 @@ impl ApplicationExecutor {
                 form_scope: false,
             },
         ) {
-            let candidates: Vec<Value> = targets
-                .iter()
-                .take(3)
-                .map(|target| json!({"role":target.role,"name":target.name}))
-                .collect();
-            if !candidates.is_empty() {
-                self.stale_candidates
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(context.invocation.to_owned(), candidates);
+            Ok(BrowserOutcome::Targets { targets, .. }) => {
+                targets.into_iter().take(STALE_CANDIDATES_MAX).collect()
             }
+            _ => Vec::new(),
         }
     }
 
@@ -1379,9 +1451,9 @@ impl ApplicationExecutor {
         self.observations().remove(invocation).unwrap_or_default()
     }
 
-    /// Consume any candidates recorded for this invocation's stale-target refusal.
-    fn take_stale_candidates(&self, invocation: &str) -> Option<Vec<Value>> {
-        self.stale_candidates
+    /// Consume any recovery recorded for this invocation's stale-target refusal.
+    fn take_stale_offer(&self, invocation: &str) -> Option<StaleOffer> {
+        self.stale_offers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(invocation)
@@ -1604,13 +1676,14 @@ impl ApplicationExecutor {
         &self,
         context: &InvocationContext<'_>,
         reason: StaleReason,
+        lookup: Option<&StaleLookup>,
     ) -> Terminal {
         if let Some(handle) = context.requested_target {
             if reason == StaleReason::Removed {
                 self.workspaces
                     .mark_target_removed(context.workspace, handle);
             }
-            self.record_stale_candidates(context, handle);
+            self.recover_stale(context, handle, reason, lookup);
         }
         self.workspace_failure(context, WorkspaceError::StaleTarget { reason })
     }
@@ -1701,8 +1774,8 @@ impl ApplicationExecutor {
         // Routing refusals are decisive and physical-effect-free: nothing was dispatched, because
         // nothing could be dispatched anywhere in particular. They name the browsers the caller
         // can choose between rather than picking one on the caller's behalf.
-        if let BrowserError::StaleLocator { reason } = error {
-            return self.stale_locator_failure(context, reason);
+        if let BrowserError::StaleLocator { reason, lookup } = &error {
+            return self.stale_locator_failure(context, *reason, lookup.as_ref());
         }
         if let Some((refusal, facts)) = routing_refusal(&error) {
             let summary = refusal.summary();
@@ -1852,7 +1925,8 @@ impl ApplicationExecutor {
                 .and_then(|target| self.workspaces.target_owner(context.workspace, target)),
             _ => None,
         };
-        let reason = match error {
+        let offer = self.take_stale_offer(context.invocation);
+        let mut reason = match error {
             WorkspaceError::NotOwnedTab
             | WorkspaceError::NotOwnedTarget
             | WorkspaceError::NotOwnedView => WorkspaceReason::OwnershipMismatch {
@@ -1860,6 +1934,9 @@ impl ApplicationExecutor {
             },
             _ => WorkspaceReason::from(error),
         };
+        if let WorkspaceReason::StaleTarget { reason, help } = &mut reason {
+            *help = stale_help(context, *reason, offer.as_ref(), acted_on);
+        }
         let refusal = Refusal::WorkspaceUnusable {
             reason: reason.clone(),
         };
@@ -1870,14 +1947,21 @@ impl ApplicationExecutor {
             Status::Failed
         };
         let mut facts = json!({"reason":reason.as_fact()});
-        if let WorkspaceReason::StaleTarget { reason } = &reason {
+        if let WorkspaceReason::StaleTarget { reason, .. } = &reason {
             facts[STALE_FACT] = Value::String(reason.word().into());
         }
         if let Some(owner) = owner {
             facts["owner_workspace"] = Value::String(owner);
         }
-        if let Some(candidates) = self.take_stale_candidates(context.invocation) {
-            facts["recovery_candidates"] = Value::Array(candidates);
+        if let Some(offer) = offer {
+            facts[RECOVERY_CANDIDATES_FACT] = Value::Array(offer.candidates);
+            if let WorkspaceReason::StaleTarget {
+                help: StaleHelp::Replacement { target, .. },
+                ..
+            } = &reason
+            {
+                facts[REPLACEMENT_FACT] = Value::String(target.clone());
+            }
         }
         let effect = if acted_on.is_some() {
             Effect::Applied
@@ -1962,6 +2046,9 @@ struct InvocationContext<'a> {
     requested_browser: Option<&'a str>,
     requested_tab: Option<&'a str>,
     requested_target: Option<&'a str>,
+    /// The catalog tool of this call when it takes `requested_target` as its one target and can
+    /// be repeated with another handle in its place.
+    repeat_tool: Option<&'static str>,
     snapshot: &'a AuthoritySnapshot,
     deadline: Instant,
     /// Whether the top-level call that set `deadline` could be repeated with a longer
@@ -2222,6 +2309,64 @@ fn operation_target(operation: &Operation) -> Option<&str> {
         Operation::Record(value) => value.target.as_deref(),
         _ => None,
     }
+}
+
+/// The catalog tool of a call that takes exactly one target and can be repeated with another
+/// handle in its place. A fill's fields and a drag's ends name several targets, so they have none.
+const fn repeatable_tool(operation: &Operation) -> Option<&'static str> {
+    match operation {
+        Operation::Click(_)
+        | Operation::Hover(_)
+        | Operation::TypeText(_)
+        | Operation::PressKey(_)
+        | Operation::ScrollPage(_)
+        | Operation::UploadFiles(_)
+        | Operation::Wait(_) => Some(operation.name()),
+        _ => None,
+    }
+}
+
+/// What a stale-target refusal tells the model about the controls it found. A replacement is named
+/// only for a removed control, in a call that sent nothing and that can be repeated with it.
+fn stale_help(
+    context: &InvocationContext<'_>,
+    reason: StaleReason,
+    offer: Option<&StaleOffer>,
+    acted_on: Option<u64>,
+) -> StaleHelp {
+    let Some(offer) = offer else {
+        return StaleHelp::None;
+    };
+    match (reason, &offer.replacement, context.repeat_tool) {
+        (StaleReason::Removed, Some(target), Some(tool)) if acted_on.is_none() => {
+            StaleHelp::Replacement {
+                tool,
+                target: target.clone(),
+            }
+        }
+        _ => StaleHelp::Candidates,
+    }
+}
+
+/// The position among a lookup's candidates of the one control the page proved is the control
+/// the stale handle named, when the call can be repeated with it: the tool takes the handle as
+/// its one target, no cap cut the lookup short, and exactly one control passed every test.
+fn proven_candidate(
+    context: &InvocationContext<'_>,
+    stale_handle: &str,
+    lookup: &StaleLookup,
+) -> Option<usize> {
+    if context.repeat_tool.is_none()
+        || context.requested_target != Some(stale_handle)
+        || lookup.truncated
+        || lookup.same_count != 1
+    {
+        return None;
+    }
+    lookup
+        .candidates
+        .iter()
+        .position(|candidate| candidate.same)
 }
 
 /// What a click landed on, so the completed sentence can say which it was.
@@ -2658,6 +2803,7 @@ mod tests {
     mod presentation;
     mod protocol4;
     mod provenance;
+    mod replacement;
     mod tabs;
     use std::fs;
     use std::io;
