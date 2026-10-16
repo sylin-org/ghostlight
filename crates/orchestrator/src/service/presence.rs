@@ -208,9 +208,11 @@ impl Presence {
         self.changed.notify_all();
     }
 
-    /// The shell cannot show what it was started to show. Nothing launches until a person acts.
+    /// The shell cannot show what it was started to show. Nothing launches until a person acts,
+    /// and while the shell stays attached its reason is the window's reason.
     pub fn unavailable(&self, reason: WindowReason) {
         let mut state = lock(&self.state);
+        state.window_open = false;
         state.latched = Some(reason);
         state.due = None;
     }
@@ -226,7 +228,8 @@ impl Presence {
         }
     }
 
-    /// The window was shown on the attached shell.
+    /// The window was shown on the attached shell, or the person opened it from the tray. The
+    /// shell sends `unavailable` if it cannot build the window, which replaces this.
     pub fn window_shown(&self) {
         lock(&self.state).window_open = true;
     }
@@ -302,15 +305,16 @@ impl Presence {
     }
 
     /// Why there is, or is not, a window: from the shell that is attached, or from what keeps
-    /// one from being brought up. `None` while presence has nothing to say yet.
+    /// one from being brought up. A reason the attached shell gave for having no window comes
+    /// first. `None` while presence has nothing to say yet.
     #[must_use]
     pub fn window_reason(&self) -> Option<WindowReason> {
         let state = lock(&self.state);
         if state.attached {
-            return Some(if state.window_open {
-                WindowReason::Shown
-            } else {
-                WindowReason::Tray
+            return Some(match state.latched {
+                Some(reason) => reason,
+                None if state.window_open => WindowReason::Shown,
+                None => WindowReason::Tray,
             });
         }
         state.latched.or(state.refusal)
@@ -750,6 +754,18 @@ mod tests {
         assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
         presence.closed(true);
         assert_eq!(presence.window_reason(), Some(WindowReason::Tray));
+    }
+
+    #[test]
+    fn a_reason_the_attached_shell_gave_is_the_window_reason_until_a_person_acts() {
+        let (presence, _fake) = presence();
+        presence.attached();
+        presence.window_shown();
+        presence.unavailable(WindowReason::NoWebview);
+        assert_eq!(presence.window_reason(), Some(WindowReason::NoWebview));
+        presence.person_acted();
+        presence.window_shown();
+        assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
     }
 
     #[test]

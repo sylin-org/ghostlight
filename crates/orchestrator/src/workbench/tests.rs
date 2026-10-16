@@ -864,7 +864,8 @@ fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_no
     let events = Arc::new(Events::default());
     facade.attach_events(events.clone());
 
-    facade.apply_user_policy(READ_ONLY_POLICY).unwrap();
+    let tag = super::parts::policy_etag(&facade.policy());
+    facade.apply_user_policy_if(READ_ONLY_POLICY, &tag).unwrap();
     let hints = |events: &[WorkbenchEvent]| -> Vec<(super::parts::HintedPart, String)> {
         events
             .iter()
@@ -903,7 +904,8 @@ fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_no
     facade.authority_refreshed();
     assert_eq!(hints(&heard(&events)).len(), 2);
 
-    facade.remove_user_policy().unwrap();
+    let tag = super::parts::policy_etag(&facade.policy());
+    facade.remove_user_policy_if(&tag).unwrap();
     assert_eq!(hints(&heard(&events)).len(), 3);
     let _ = std::fs::remove_file(path);
 }

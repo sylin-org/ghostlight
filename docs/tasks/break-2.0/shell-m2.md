@@ -466,8 +466,11 @@ After the coordinator deploys m2-01, with the owner:
   a window, `tray` after a close that stays or for a `--tray` shell no window was ever asked of,
   and otherwise the latched or last-refused reason. It is absent while presence has nothing to say
   (before the first launch is due). `shown` is the service's knowledge: a shell started by a person
-  counts as showing its window, and every Show frame the service sends marks it shown; the shell
-  sends no frame when it opens a window by itself.
+  counts as showing its window, every Show frame the service sends marks it shown, and so does a
+  tray `open` click, which is how a person opens the window of a shell that opens it by itself.
+  A reason the attached shell gave through `unavailable` (a Show it could not build, no web view)
+  is the window's reason while the shell stays attached, ahead of `shown` and `tray`, until a
+  person's next Show or `open` click.
 - m2-04: a shell's `closed {stays:false}` is recorded as `no_tray`, since that is the only reason a
   shell leaves when its window closes. `did_not_stay` is only the launch budget.
 - m2-04: spec deviation, `unavailable` for no display and for no web view applies to every launch,

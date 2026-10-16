@@ -873,9 +873,9 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
 /// goodbye to it, and presence knows a shell is there. If a request to show the window was waiting
 /// for a shell, the shell is asked to show it. What the shell sends is a click on a tray entry, the
 /// result of each act, that it cannot show a window, and that the person closed the window; the
-/// first close that stays is explained once. The shell opens its own window, so an `open` click and
-/// a frame kind this build does not know are skipped. A frame that does not decode ends the
-/// stream, and the shell is detached.
+/// first close that stays is explained once. The shell opens its own window, so an `open` click
+/// only tells presence that a person has it open; a frame kind this build does not know is
+/// skipped. A frame that does not decode ends the stream, and the shell is detached.
 fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let Some(server) = intake.workbench_server.get() else {
         listener::refuse(&connection, OpeningRefusal::Unsupported);
@@ -945,7 +945,10 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
                     .apply_runtime_control(RuntimeControlIntent::Resume, RuntimeSource::Tray);
             }
             TrayItemId::Quit => intake.quit.begin(QuitReason::Quit, QUIT_GRACE),
-            TrayItemId::Open => {}
+            TrayItemId::Open => {
+                intake.presence.person_acted();
+                intake.presence.window_shown();
+            }
         }
     }
     Ok(())
@@ -4519,6 +4522,72 @@ mod tests {
         while !matches!(next_frame(&mut stream), DesktopFrame::TrayModel { .. }) {}
         drop(stream);
         eventually(|| window() == Some(WindowReason::NoWebview));
+        drop(host);
+    }
+
+    #[test]
+    fn a_tray_open_after_an_agent_started_shell_or_a_close_that_stays_reads_shown() {
+        use crate::language::workbench::WindowReason;
+
+        let home = TestHome::new("status-open");
+        let fake = Arc::new(Fake::default());
+        let host = ServiceHost::start_in_world(home.path(), {
+            let fake = Arc::clone(&fake);
+            move |_, _| fake.world()
+        })
+        .unwrap();
+        host.publish_ready().unwrap();
+        let window = || cli_client::status_at(home.path()).unwrap().window;
+        let open = |stream: &mut _| {
+            frame::write_frame(
+                stream,
+                &DesktopFrame::Tray {
+                    item: TrayItemId::Open,
+                },
+            )
+            .unwrap();
+        };
+
+        // Presence's own tray launch attaches with the icon only.
+        host.intake.presence.published();
+        fake.advance(super::presence::LAUNCH_DELAY);
+        host.intake.presence.tick();
+        assert_eq!(fake.launches(), [true]);
+        let (mut stream, _) = open_desktop();
+        eventually(|| window() == Some(WindowReason::Tray));
+        open(&mut stream);
+        eventually(|| window() == Some(WindowReason::Shown));
+
+        frame::write_frame(&mut stream, &DesktopFrame::Closed { stays: true }).unwrap();
+        eventually(|| window() == Some(WindowReason::Tray));
+        open(&mut stream);
+        eventually(|| window() == Some(WindowReason::Shown));
+        drop(host);
+    }
+
+    #[test]
+    fn a_show_the_shell_cannot_build_reads_as_the_reason_while_the_shell_is_attached() {
+        use crate::intake::desktop::UnavailableReason;
+        use crate::language::workbench::WindowReason;
+
+        let home = TestHome::new("status-show-fails");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let window = || cli_client::status_at(home.path()).unwrap().window;
+        let (mut stream, _) = open_desktop();
+        eventually(|| window() == Some(WindowReason::Shown));
+
+        host.workbench.reveal(Some(PageAddress::About)).unwrap();
+        assert!(matches!(next_frame(&mut stream), DesktopFrame::Show { .. }));
+        frame::write_frame(
+            &mut stream,
+            &DesktopFrame::Unavailable {
+                reason: UnavailableReason::NoWebview,
+            },
+        )
+        .unwrap();
+        eventually(|| window() == Some(WindowReason::NoWebview));
+        assert_eq!(host.quit.shells().attached(), 1, "the shell is still there");
         drop(host);
     }
 

@@ -38,8 +38,8 @@ use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport};
 use crate::install::{
-    HarnessAction, HarnessActionResult, HarnessCopyKind, HarnessError, HarnessRegistry,
-    HarnessSetupResult, HarnessSummary,
+    HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSetupResult,
+    HarnessSummary,
 };
 use crate::language::outcome::Observed;
 use crate::language::readiness;
@@ -1061,15 +1061,6 @@ impl WorkbenchFacade {
         })
     }
 
-    /// Apply one locally authored user policy through the authority that owns policy.
-    pub fn apply_user_policy(
-        &self,
-        document: &str,
-    ) -> Result<WorkbenchIntentResult, AuthoringError> {
-        let _writing = lock(&self.policy_writes);
-        self.apply_policy_unguarded(document)
-    }
-
     /// Apply a user policy only if the rules on disk still have the tag the caller read.
     ///
     /// The check and the write happen under one lock.
@@ -1093,12 +1084,6 @@ impl WorkbenchFacade {
             "Your rules are applied: {} {}.",
             policy.name, policy.version
         )))
-    }
-
-    /// Remove this machine's user policy and return authority to whatever remains above it.
-    pub fn remove_user_policy(&self) -> Result<WorkbenchIntentResult, AuthoringError> {
-        let _writing = lock(&self.policy_writes);
-        self.remove_policy_unguarded()
     }
 
     /// Remove the user policy only if the rules on disk still have the tag the caller read.
@@ -1184,31 +1169,11 @@ impl WorkbenchFacade {
         Ok(result)
     }
 
-    /// Apply one explicit, ownership-checked development-harness registration intent.
-    pub fn manage_harness(
-        &self,
-        id: &str,
-        action: HarnessAction,
-    ) -> Result<HarnessActionResult, HarnessError> {
-        let result = self.harnesses.apply(id, action)?;
-        self.roster_changed();
-        Ok(result)
-    }
-
     /// Set up and update every detected harness target Ghostlight can change safely.
     pub fn setup_detected_harnesses(&self) -> Result<HarnessSetupResult, HarnessError> {
         let result = self.harnesses.setup_detected()?;
         self.roster_changed();
         Ok(result)
-    }
-
-    /// Resolve product-owned manual setup text for one supported harness target.
-    pub fn harness_copy_text(
-        &self,
-        id: &str,
-        kind: HarnessCopyKind,
-    ) -> Result<String, HarnessError> {
-        self.harnesses.copy_text(id, kind)
     }
 
     /// Resolve one supported product's closed official download destination.

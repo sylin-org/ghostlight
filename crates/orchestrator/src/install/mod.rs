@@ -221,15 +221,6 @@ impl HarnessRegistry {
         })
     }
 
-    /// Return product-owned text for the desktop clipboard boundary.
-    pub fn copy_text(&self, id: &str, kind: HarnessCopyKind) -> Result<String, HarnessError> {
-        let definition = definition(&self.inner.context, id)?;
-        Ok(match kind {
-            HarnessCopyKind::Command => mcp_command_line(&self.inner.context.edge),
-            HarnessCopyKind::Setup => manual_setup(&self.inner.context, &definition)?,
-        })
-    }
-
     /// Return the closed official download destination for one supported product.
     pub fn download_url(&self, product_id: &str) -> Result<&'static str, HarnessError> {
         definitions(&self.inner.context)
@@ -314,17 +305,6 @@ pub enum HarnessAction {
     Fix,
     /// Remove only Ghostlight's owned registration.
     Uninstall,
-}
-
-/// Product-owned clipboard material exposed by the desktop adapter.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum HarnessCopyKind {
-    /// The installed edge's command line for a local stdio MCP server: its absolute path and
-    /// the `mcp` argument.
-    Command,
-    /// The smallest complete target-specific configuration document.
-    Setup,
 }
 
 /// Current state of one supported harness integration.
@@ -2243,9 +2223,8 @@ mod tests {
         expected_json_entry, fix_toml, harness_roots, inspect, inspect_json, inspect_toml,
         json_entry_args, json_entry_command, jsonc_options, manual_json_setup, mcp_command_line,
         replace_with_backup, resolve_through_symlink, AppContainer, ForeignCommand, HarnessAction,
-        HarnessContext, HarnessCopyKind, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
-        HarnessSummary, JsonDialect, PrivateView, RegistrationState, EDGE_COMMAND_NAME,
-        RETIRED_MCP_CONNECTOR_NAME,
+        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
+        JsonDialect, PrivateView, RegistrationState, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -3557,13 +3536,12 @@ mod tests {
     }
 
     #[test]
-    fn the_copied_command_is_the_edge_and_its_argument() {
+    fn the_command_line_is_the_edge_and_its_argument() {
         let directory = temporary("copy-command");
         let registry = HarnessRegistry::with_context(context(&directory));
         let path = edge(&directory);
-        let id = registry.summaries()[0].id.clone();
         assert_eq!(
-            registry.copy_text(&id, HarnessCopyKind::Command).unwrap(),
+            registry.summaries()[0].connector_command,
             format!("{} mcp", path.display())
         );
         assert_eq!(
