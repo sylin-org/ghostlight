@@ -1054,6 +1054,126 @@ fn every_destination_has_its_name_and_points_at_the_products_own_surfaces() {
 }
 
 #[test]
+fn every_change_the_orchestrator_publishes_carries_the_kind_the_window_reads() {
+    use super::parts::{ConnectionsPart, HintedPart, StatusPart};
+    use super::{OperationPhase, OperationSummary};
+
+    // Exhaustive on purpose: a new change does not compile until it is named here and given a
+    // sample below.
+    let named = |change: &WorkbenchChange| match change {
+        WorkbenchChange::AuditHealthChanged { .. } => "audit_health_changed",
+        WorkbenchChange::DocumentCoverageChanged { .. } => "document_coverage_changed",
+        WorkbenchChange::OperationStarted { .. } => "operation_started",
+        WorkbenchChange::OperationChanged { .. } => "operation_changed",
+        WorkbenchChange::OperationSettled { .. } => "operation_settled",
+        WorkbenchChange::CompositionChanged { .. } => "composition_changed",
+        WorkbenchChange::RuntimeChanged { .. } => "runtime_changed",
+        WorkbenchChange::StatusChanged { .. } => "status_changed",
+        WorkbenchChange::ConnectionsChanged { .. } => "connections_changed",
+        WorkbenchChange::ControlsChanged { .. } => "controls_changed",
+        WorkbenchChange::PartChanged { .. } => "part_changed",
+    };
+
+    let snapshot = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+    )
+    .snapshot();
+    let operation = |phase| OperationSummary {
+        invocation: "invocation_1".into(),
+        workspace: "workspace_1".into(),
+        tool: "browser_read".into(),
+        activity: "reading".into(),
+        capability: "read".into(),
+        started_at_ms: Some(1),
+        phase,
+        provenance: None,
+    };
+    let record = || {
+        Box::new(HistoryItem::from(AuditRecord::now(
+            "invocation_1",
+            "workspace_1",
+            "browser_read",
+            Capability::Read,
+            "authority_1",
+            Decision::permitted(),
+            "succeeded",
+            "read",
+            &crate::language::outcome::Outcome::TextRead {
+                words: 3,
+                host: None,
+            }
+            .audit(),
+            10,
+        )))
+    };
+    let samples = [
+        WorkbenchChange::AuditHealthChanged {
+            health: crate::language::audit_health::AuditHealth::default(),
+        },
+        WorkbenchChange::DocumentCoverageChanged {
+            details: crate::language::coverage::HumanCoverage {
+                summary: "Read the page.".into(),
+                explanation: "Nothing was excluded.".into(),
+                invocation: "invocation_1".into(),
+                coverage: crate::language::coverage::Coverage::default(),
+                excluded_hosts: Vec::new(),
+                proactive: false,
+            },
+        },
+        WorkbenchChange::OperationStarted {
+            operation: operation(OperationPhase::Running),
+        },
+        WorkbenchChange::OperationChanged {
+            operation: operation(OperationPhase::Waiting),
+        },
+        WorkbenchChange::OperationSettled { record: record() },
+        WorkbenchChange::CompositionChanged { record: record() },
+        WorkbenchChange::RuntimeChanged {
+            runtime_state: crate::browser::adapter::RuntimeControlState::Held,
+        },
+        WorkbenchChange::StatusChanged {
+            status: StatusPart::of(&snapshot),
+        },
+        WorkbenchChange::ConnectionsChanged {
+            connections: ConnectionsPart::of(&snapshot),
+        },
+        WorkbenchChange::ControlsChanged {
+            controls: Box::new(snapshot.controls.clone()),
+        },
+        WorkbenchChange::PartChanged {
+            part: HintedPart::Integrations,
+            etag: "e1".into(),
+        },
+    ];
+
+    // The kinds the window folds in. PUBLISHED in tests/workbench-store.test.mjs pins the
+    // window's copy: a kind renamed here and not there reads as ignored and draws nothing.
+    let kinds = [
+        "audit_health_changed",
+        "document_coverage_changed",
+        "operation_started",
+        "operation_changed",
+        "operation_settled",
+        "composition_changed",
+        "runtime_changed",
+        "status_changed",
+        "connections_changed",
+        "controls_changed",
+        "part_changed",
+    ];
+    assert_eq!(samples.each_ref().map(named), kinds);
+    assert_eq!(
+        samples.each_ref().map(|change| {
+            serde_json::to_value(change).unwrap()["kind"]
+                .as_str()
+                .map(str::to_owned)
+        }),
+        kinds.map(|kind| Some(kind.to_owned()))
+    );
+}
+
+#[test]
 fn every_runtime_intent_reads_from_the_name_the_page_sends() {
     use super::WorkbenchRuntimeIntent;
 

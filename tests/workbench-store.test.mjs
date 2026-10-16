@@ -87,7 +87,8 @@ const status = {
 
 // Every kind of change the service publishes (WorkbenchChange in workbench/mod.rs), each with the
 // payload it carries. A kind the store does not fold in reads as ignored, and the window would
-// draw nothing for it.
+// draw nothing for it. The service's copy of these kinds is pinned by
+// every_change_the_orchestrator_publishes_carries_the_kind_the_window_reads in workbench/tests.rs.
 const PUBLISHED = [
   { kind: "audit_health_changed", health: { state: "saved" } },
   { kind: "document_coverage_changed", details: { invocation: "one", summary: "Read the page." } },
