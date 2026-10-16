@@ -98,7 +98,7 @@ ruled JQ2 directly. The full wording is in ADR-0200.
 
 ## RESUME HERE
 
-c01-carriers has landed. Next: c02-get-scripts.
+c02-get-scripts has landed. Next: x01-store-submission, which waits for the owed live checks of c02 and for both sylin.org redirects to answer.
 
 ## Landed
 
@@ -111,6 +111,7 @@ c01-carriers has landed. Next: c02-get-scripts.
 | j06-popup | `extension/lib/popup-view.js` (new, pure) holds every popup word, `popupView()` and `connection()`. `popup.html` is the kit page (mascot at 100 px, status block, actions, Settings link) and `popup.js` places the view, redrawing only when it changes. The captions switch, the notes, the setup paragraph, the debugger line and the version are gone. The held badge is the accent `#5eead4`, and `worker.js` sets the badge text colour `#08110f`. `kit.css` gains the popup note, quiet-button and problem rules. The tests that pinned popup text are deleted; `popup-view.test.js` and `state.test.js` are new. | see `git log` |
 | j07-options | `extension/options.html` is a kit page (`<html class="gl-page">`, `<body class="gl-stage options-page">`) linking `kit.css` then the new `extension/options.css`, which holds the cards, rows, switches and footer on kit tokens. The connection card's pill and line come from `GhostlightPopupView.connection()`: `gl-pill--ok` when connected, else `gl-pill--warn`; the setup button shows whenever `needsSetup` is true, is labelled `setupLabel` and opens the bundled `setup.html`. The words pass is done (strings under Owed to the owner). `extension/ui.css` is deleted and the packager ships `options.css` instead. The options source-text pins in `onboarding.test.js` and `shared.test.js` are deleted; `popup-view.test.js` gains two connection cases. | see `git log` |
 | c01-carriers | The carriers ship and run the three 2.0 images (`ghostlight`, `ghostlight-service`, `ghostlight-desktop`). Most of the slice had landed in earlier carrier fixes (see Notes); this commit finishes it. The npm never-install commands (`doctor`, `status`, `help`, `--version`, `install --help`) with nothing installed now stage and run `ghostlight-service` itself instead of a staged edge beside a staged service, so they download one image, not two. The WinGet template lists `ghostlight-service.exe` and `ghostlight-desktop.exe` as nested installer files with no alias, beside `ghostlight.exe` with the alias `ghostlight`; `winget validate` accepts it. The npm README says `npx -y ghostlight` is the MCP server and `npx -y ghostlight install` installs. | see `git log` |
+| c02-get-scripts | `scripts/get.ps1` and `scripts/get.sh` download the three 2.0 images and verify them as before (checksums, and `gh attestation` when `gh` is present). They print one line after verification, `Ghostlight <version> downloaded. Checksums verified.`, or `... Checksums and build provenance verified.` when every file passed attestation. The service's `deployment install` runs with stdout discarded and errors shown, then the installed `ghostlight install` runs in the same console so its summary prints and its exit code is checked. `get.ps1` uses the call operator and `$LASTEXITCODE` for both, with no `Start-Process`. The trailing doctor line is gone; the doctor hint stays inside the two failure messages. `GHOSTLIGHT_NO_REGISTER=1` prints `Ghostlight <version> is installed in <dir>. Run 'ghostlight install' to connect your browsers and agents.` Each header carries the frozen-URL sentence and the short sylin.org one-liner. The WinGet `InstallationNotes` say to run `ghostlight install` once and again after `winget upgrade`. | see `git log` |
 
 ## Owed live checks
 
@@ -122,6 +123,7 @@ c01-carriers has landed. Next: c02-get-scripts.
 - j06: the popup in each state (Ready, Paused, Session ended, Not connected with the install and the start words, Update needed, recording, debugger release) on Chrome and Edge, on Windows and Linux. The key cap and `aria-keyshortcuts` follow a changed shortcut. The mascot looks right at 100 px in the lit and waiting lights. The badge text is readable on the accent.
 - j04: the coordinator's check that the JQ4 one-liners run in Windows PowerShell 5.1, PowerShell 7 and `curl | sh` is not recorded in this ledger yet.
 - j07: the options page on Chrome and Edge, on Windows and Linux: it scrolls (the stage no longer clips), every switch still saves and survives a reload, the captions switch dims while effects are off, Save developer diagnostics still downloads, the connection card reads right in each state (Connected, Not connected with and without the setup button, Update needed), and the setup button opens the bundled setup page. The kit look is right at 390 px and with reduced motion.
+- c02: the exact JQ4 one-liners, `irm https://sylin.org/ghostlight/get.ps1 | iex` in Windows PowerShell 5.1 and in PowerShell 7, and `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` in a Linux shell, against a 2.0 test release made as JQ4 says (a fork, or a non-prerelease test tag: `releases/latest` skips prereleases and drafts; the fork test uses the fork URLs directly). Each shows one verify line, then the install summary. A failure (a development install present) shows its reason and the failing command's own output. The install summary prints in the console on Windows now that nothing is hidden. A cold-run time on test-01 for j04's fallback constants (`FALLBACK_AFTER_COPY_MS`, `FALLBACK_AFTER_OPEN_MS`). All of these are needed before x01.
 - c01: `npx -y ghostlight install` on test-01 (Windows) and on a Linux machine; then an MCP client with `npx -y ghostlight` connects. `npx -y ghostlight --version` on a machine with nothing installed downloads and runs only the service. The WinGet alias `ghostlight` finds `ghostlight-service` beside its target (the portable zip extracts all three to one folder). The Claude Desktop MCPB on Windows. The window and tray appear after each.
 
 ## Owed to the owner
@@ -309,3 +311,31 @@ c01-carriers has landed. Next: c02-get-scripts.
   and CHANGELOG history; j17 owns the docs.
   (5) The MCPB README and manifest needed no edit: they carry no connector names. The WinGet
   `InstallationNotes` are c02's and are unchanged.
+- c02: ran the gate checks the files require: (9) `sh -n scripts/get.sh` and a parse-only check of
+  `scripts/get.ps1`, (10) the repository integrity script. No Rust, extension, packaging code or
+  test file changed, so checks (1) to (8) did not apply (the WinGet change is a template text
+  line; `winget validate` was not rerun). The scripts were never run. The tree and the spec
+  differed in these places.
+  (1) The scripts already named the three images (c01 note 1), so the spec's connector-name
+  problem did not exist; only the output and the process handling changed.
+  (2) The spec asks for a message that keeps today's wording plus the failing command's own
+  output. `get.ps1` keeps both messages. `get.sh` had no failure messages (`set -e` exited
+  silently), so it gains `ghostlight: installation failed` and `ghostlight: installation did not
+  complete. Run '<path>/ghostlight doctor' for details.`, both on stderr.
+  (3) JQ4 is main raw: `sylin.org/ghostlight/get.ps1` and `get.sh` redirect to the files on
+  `main`. `main` must therefore carry these scripts when v2.0.0 becomes the latest release
+  (ADR-0200 Decision 16). Until then the one-liners fetch the 1.x scripts from `main`.
+  (4) The `-Restore` and `--restore` header comments and the `RESTORE_ROUTE` text in
+  `language/deployment.rs` keep the raw.githubusercontent URLs, as c01 note 3 says.
+  (5) Assertions the change breaks for the test-rewrite lane (the tests were read, not edited):
+  none fails. `tests/installer-shell.mjs` asserts the request list, the installed files and modes,
+  the command order `service: deployment install`, `edge: install` and that the edge's output
+  reaches stdout; all still hold, and no assertion reads the old `installed at`, per-file
+  checksum or trailing doctor lines. `tests/installer-powershell.ps1` sets `GHOSTLIGHT_NO_REGISTER`,
+  replaces `Invoke-RestMethod`, `Invoke-WebRequest` and `Get-Command` (no `gh`), runs the script
+  twice, and asserts the installed bytes, the `Checksum verification failed` message, the
+  preserved installation, the removed temporary directories and the installed file set; all still
+  hold. Stale wording only: the PowerShell test's PASS line says "waited native install" and its
+  header says the console output of `ghostlight install` is an owed live check. The fixtures do not
+  assert the new verify line, the `GHOSTLIGHT_NO_REGISTER` sentence, the provenance variant or the
+  failure messages; add them.

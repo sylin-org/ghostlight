@@ -1,6 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | sh
+# curl -fsSL https://sylin.org/ghostlight/get.sh | sh
+#
+# The Ghostlight 2.0 extension's setup page prints the one-line command that fetches this file;
+# keep its URL working for 2.x.
 #
 # --restore installs this release over a development installation (a build the development loop
 # installed), whatever version it is: the one allowed move down. It runs the downloaded service
@@ -68,6 +71,7 @@ sha256_file() {
 }
 
 install_directory="${HOME}/.ghostlight/bin"
+provenance_for_all=1
 for component in ghostlight ghostlight-service ghostlight-desktop; do
   asset="${component}-${target}"
   expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$sums")
@@ -88,22 +92,33 @@ for component in ghostlight ghostlight-service ghostlight-desktop; do
     echo "ghostlight: checksum verification failed for ${asset}" >&2
     exit 1
   fi
-  if command -v gh >/dev/null 2>&1 && gh attestation verify "$downloaded" --repo "$repository" >/dev/null 2>&1; then
-    echo "  ${component}: checksum and build provenance verified"
-  else
-    echo "  ${component}: checksum verified"
+  if ! { command -v gh >/dev/null 2>&1 && gh attestation verify "$downloaded" --repo "$repository" >/dev/null 2>&1; }; then
+    provenance_for_all=0
   fi
   chmod 0755 "$downloaded"
 done
 
+if [ "$provenance_for_all" -eq 1 ]; then
+  echo "Ghostlight ${version} downloaded. Checksums and build provenance verified."
+else
+  echo "Ghostlight ${version} downloaded. Checksums verified."
+fi
+
 # The verified service installs the whole set (the edge, the service and the shell) into
-# ~/.ghostlight/bin from its own directory. A failed download cannot partially replace a working
-# installation.
-"$temporary/ghostlight-service" deployment install $restore
+# ~/.ghostlight/bin from its own directory. Its stdout is discarded; its errors still show. A
+# failed download cannot partially replace a working installation.
+if ! "$temporary/ghostlight-service" deployment install $restore >/dev/null; then
+  echo "ghostlight: installation failed" >&2
+  exit 1
+fi
 
 ghostlight="$install_directory/ghostlight"
-echo "Ghostlight ${version} installed at ${install_directory}"
-if [ "${GHOSTLIGHT_NO_REGISTER:-0}" != "1" ]; then
-  "$ghostlight" install
+if [ "${GHOSTLIGHT_NO_REGISTER:-0}" = "1" ]; then
+  echo "Ghostlight ${version} is installed in ${install_directory}. Run 'ghostlight install' to connect your browsers and agents."
+else
+  # The installed edge prints the install summary in this console.
+  if ! "$ghostlight" install; then
+    echo "ghostlight: installation did not complete. Run '${ghostlight} doctor' for details." >&2
+    exit 1
+  fi
 fi
-echo "If anything does not connect, run '${ghostlight} doctor'."

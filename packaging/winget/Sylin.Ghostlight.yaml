@@ -42,6 +42,6 @@ Tags:
   - mcp
   - browser-automation
   - ai-agent
-InstallationNotes: Run 'ghostlight install' once. It installs Ghostlight into ~/.ghostlight/bin and registers your browsers and MCP clients. After 'winget upgrade', run 'ghostlight install' again to carry the new version into ~/.ghostlight/bin; an older copy never replaces a newer one. Then add Ghostlight in Browser and run 'ghostlight doctor'.
+InstallationNotes: Run 'ghostlight install' once. It installs Ghostlight into ~/.ghostlight/bin, registers your browsers and agents, and shows what is next. After 'winget upgrade', run 'ghostlight install' again.
 ManifestType: defaultLocale
 ManifestVersion: 1.12.0

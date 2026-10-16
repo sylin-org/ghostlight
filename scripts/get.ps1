@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1 | iex
+# irm https://sylin.org/ghostlight/get.ps1 | iex
+#
+# The Ghostlight 2.0 extension's setup page prints the one-line command that fetches this file;
+# keep its URL working for 2.x.
 #
 # -Restore installs this release over a development installation (a build the development loop
 # installed), whatever version it is: the one allowed move down. It runs the downloaded
@@ -45,6 +48,7 @@ if ([string]::IsNullOrWhiteSpace($env:USERPROFILE) -or -not [System.IO.Path]::Is
 $installDirectory = Join-Path $env:USERPROFILE ".ghostlight/bin"
 $downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ghostlight-download-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $downloadDirectory | Out-Null
+$provenanceForAll = $true
 try {
     foreach ($component in @("ghostlight", "ghostlight-service", "ghostlight-desktop")) {
         $assetName = "$component-x86_64-pc-windows-msvc.exe"
@@ -68,13 +72,9 @@ try {
             $github = Get-Command gh -ErrorAction SilentlyContinue
             if ($github) {
                 & gh attestation verify $temporary --repo $repository *> $null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "  ${component}: checksum and build provenance verified"
-                } else {
-                    Write-Host "  ${component}: checksum verified; GitHub provenance was not available"
-                }
+                if ($LASTEXITCODE -ne 0) { $provenanceForAll = $false }
             } else {
-                Write-Host "  ${component}: checksum verified"
+                $provenanceForAll = $false
             }
             Move-Item -LiteralPath $temporary -Destination $destination -Force
         }
@@ -85,14 +85,19 @@ try {
         }
     }
 
+    if ($provenanceForAll) {
+        Write-Host "Ghostlight $version downloaded. Checksums and build provenance verified."
+    } else {
+        Write-Host "Ghostlight $version downloaded. Checksums verified."
+    }
+
     # The verified service installs the whole set (the edge, the service and the shell) into
-    # ~/.ghostlight/bin from its own directory. A hidden, waited process keeps the install from
-    # flashing a window.
+    # ~/.ghostlight/bin from its own directory. Its stdout is discarded; its errors still show.
     $candidate = Join-Path $downloadDirectory "ghostlight-service.exe"
     $deployment = @("deployment", "install")
     if ($Restore) { $deployment += "--restore" }
-    $deploy = Start-Process -FilePath $candidate -ArgumentList $deployment -WindowStyle Hidden -Wait -PassThru
-    if ($deploy.ExitCode -ne 0) { throw "Ghostlight installation failed with exit code $($deploy.ExitCode)." }
+    & $candidate @deployment | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Ghostlight installation failed with exit code $LASTEXITCODE." }
 }
 finally {
     # The absolute temporary path was constructed directly under the OS temp directory.
@@ -103,11 +108,12 @@ finally {
 }
 
 $ghostlight = Join-Path $installDirectory "ghostlight.exe"
-Write-Host "Ghostlight $version installed at $installDirectory"
-if ($env:GHOSTLIGHT_NO_REGISTER -ne "1") {
-    $setup = Start-Process -FilePath $ghostlight -ArgumentList "install" -WindowStyle Hidden -Wait -PassThru
-    if ($setup.ExitCode -ne 0) {
+if ($env:GHOSTLIGHT_NO_REGISTER -eq "1") {
+    Write-Host "Ghostlight $version is installed in $installDirectory. Run 'ghostlight install' to connect your browsers and agents."
+} else {
+    # The installed edge prints the install summary in this console.
+    & $ghostlight install
+    if ($LASTEXITCODE -ne 0) {
         throw "Ghostlight installation did not complete. Run '$ghostlight doctor' for details."
     }
 }
-Write-Host "If anything does not connect, run '$ghostlight doctor'."
