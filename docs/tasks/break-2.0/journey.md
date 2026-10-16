@@ -129,6 +129,15 @@ Journey complete; owed live checks and owner items above. j17-docs has landed, s
 
 ## Owed live checks
 
+- Result, 2026-10-16 (deploy 85f19030 in place on the owner's Windows 11 machine, a home in use
+  since 1.x): the first agent request after the deploy (a browser_navigate from Claude Code)
+  wrote state/setup.json once (j09). A repeat `ghostlight install`, run outside the app
+  container, printed three lines (installed, where Ghostlight lives, the seven agents), no Next
+  line, and opened nothing (j15). The coordinator showed the owner the preview server at
+  `?setup=browser` and `?setup=agent` (j14). The owner reloaded the unpacked extension, checked
+  the popup, the options page and setup.html, and the setup preview, and reported all good. The
+  fresh-home checks (test-01, Linux) below stay owed.
+
 - j01: none. Docs only.
 - j10: none. Nothing uses the scan until j12; the first live check is the setup part reading a real Chrome, Edge or Brave profile (an extension added from the Chrome Web Store, browser closed) on Windows and Linux.
 - j12: the setup part on a real machine: in a fresh 2.0 home, `GET /api/snapshot?parts=setup` from the window shows the Browser stage with an Add row for the installed browser; with the extension added from the store and the browser closed, the row reads "Open <browser>" (the j10 scan on Windows and Linux); when the extension connects the stage becomes Agent and the stream carries `part_changed` for `setup`; a client written by `ghostlight install` reads "Restart <label> to finish." until its first session, then Connected; the first successful agent request turns the part Done and the stream announces it once; the same machine after a restart shows Retired. Inside an app container (Claude Desktop's Store package) the stage is Computer.

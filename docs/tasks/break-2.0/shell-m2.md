@@ -125,6 +125,12 @@ Each has a default the work uses until the owner answers.
 
 ## Owed live checks
 
+- Result, 2026-10-16 (deploy 85f19030 in place, development channel, Windows 11 build 26300): one
+  ghostlight-service and one ghostlight-desktop, both replaced; 8 MCP clients and the browser
+  reconnected on their own. The owner checked checkpoint 2 and reported all good: the tray icon,
+  the first-close notice, Quit in Settings and Continue at a section. The Linux and SSH checks
+  below stay owed.
+
 After the coordinator deploys m2-06, with the owner:
 
 - m2-08, Linux over SSH: with a headless service a few seconds from its idle exit, a `ghostlight
