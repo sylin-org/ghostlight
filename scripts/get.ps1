@@ -86,7 +86,7 @@ try {
     }
 
     # The verified download installs the whole set into ~/.ghostlight/bin from its own directory.
-    # Windows GUI-subsystem executables need an explicit waited process for CLI commands.
+    # ghostlight.exe is a console program; a hidden, waited process keeps the install from flashing a window.
     $candidate = Join-Path $downloadDirectory "ghostlight.exe"
     $deployment = @("deployment", "install")
     if ($Restore) { $deployment += "--restore" }

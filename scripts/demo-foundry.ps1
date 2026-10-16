@@ -87,9 +87,8 @@ function Invoke-GhostlightJson {
         [string[]] $Extra = @()
     )
 
-    # ghostlight.exe is a Windows GUI-subsystem application so ordinary desktop launches do not
-    # create a console. PowerShell does not synchronously capture that kind of executable through
-    # `&`; use an explicit process boundary so CLI calls still have deterministic output and status.
+    # ghostlight.exe is a console program. An explicit process boundary gives each CLI call
+    # captured output and a status of its own, with no console window of its own.
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $exe
     $startInfo.UseShellExecute = $false

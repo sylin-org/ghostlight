@@ -67,10 +67,10 @@ Rules:
 
 ## RESUME HERE
 
-m2-01 to m2-06 have landed (see Landed): shell milestone 2 is complete, pending the owner's live
+m2-01 to m2-08 have landed (see Landed): shell milestone 2 is complete, pending the owner's live
 demo. A service with no stream of any role for 10 minutes exits (`service/idle.rs`); an attached
 shell is a stream, so only a headless service idles out. Next: the coordinator deploys m2-06 and
-runs its live checks with the owner (below), then the install journey track starts.
+m2-08 and runs their live checks with the owner (below), then the install journey track starts.
 
 ## Landed
 
@@ -83,6 +83,7 @@ runs its live checks with the owner (below), then the install journey track star
 | m2-05-tauri-out | Tauri leaves the service. `crates/orchestrator/Cargo.toml` loses `tauri`, its four plugins, `glib`, `webkit2gtk` and `tauri-build`, and gains `embed-resource` as a Windows build dependency; `Cargo.lock` loses 201 package entries (the service tree is 129 crates on Windows). `build.rs` embeds the icon and a version resource ("Ghostlight service", "Ghostlight", "Sylin") and, on MSVC, the edge's manifest by path. The service is a console-subsystem program: the `windows_subsystem` line, `cli/console.rs` and win-peer's `console.rs` with `attach_parent_console` are deleted. `tauri.conf.json`, `capabilities/` and the orphan `hooks.nsh` are deleted. A guard test checks that `ghostlight-service` links no UI toolkit and none of `tokio`, `reqwest`, `hyper` or `socket2` on both targets. The npm launcher no longer refuses on Linux without `libwebkit2gtk-4.1.so.0`, and the service-only CI journeys run without `dbus-run-session` and `xvfb-run`. | see `git log` |
 | m2-06-idle-exit | The service exits after 10 minutes with no stream of any role. `service/idle.rs` holds `Streams`, the open-stream count with an injected clock, and its rule (`Verdict`: streams open, wait, or leave); `watch` is the thread that asks it. `serve_connection` holds a guard per accepted `mcp`, `control` and `desktop` stream and per `browser` opening, and `CountBrowsers` counts browser streams from the port's lifecycle events and passes each on to diagnostics. `Quit::idle_exit` refuses new work and makes the quit signal with no goodbye and no `state/quit`. The event name `idle_exit` joined the closed diagnostics vocabulary. | see `git log` |
 | m2-07-install-finishes-registrations | `ghostlight install` writes the Windows Start-menu shortcut and the installed-apps entry, which only a deploy reached before, so the finishing command that every container install prints now does finish them. The install command calls `Registrations::reconcile_windows_entries` (the deploy's own `windows_entry::reconcile`) with the version from `bin/install.json`, or the running service's when no record exists, and prints `Updated the ...` per entry it changed. Inside a container it adds each out-of-date entry to the kept-private list; `--dry-run` prints `Would update the ...` from `windows_entry::plan`. Seen live 2026-10-16 on deploy 50f8a0cb. | see `git log` |
+| m2-08-idle-exit-follow-ups | The idle exit no longer strands a start that lands while the service is leaving: a start other than an update waits up to 5 s for the service lock (`lifetime::LEAVING_LOCK_WAIT`) and serves when the old service releases it, and a browser or recover start that waited checks the quit latch again once it holds the lock. The idle span starts when the endpoint is bound (`Streams::published`). A service-level test opens a real browser stream through the intake and shows it holds the service. The idle tests no longer depend on a tight margin. ARCHITECTURE names every way a service with streams ends. Recorded as tidy-04b in [seams.md](seams.md). | see `git log` |
 
 ## Owner questions
 
@@ -123,6 +124,11 @@ Each has a default the work uses until the owner answers.
 ## Owed live checks
 
 After the coordinator deploys m2-06, with the owner:
+
+- m2-08, Linux over SSH: with a headless service a few seconds from its idle exit, a `ghostlight
+  call` that starts at that moment still gets its answer (from a new service that took the lock
+  the old one released) instead of "did not become ready in time". This is a timing race, so it is
+  seen as the absence of the old failure over several tries.
 
 - m2-06, Linux over SSH: a service started by `ghostlight call` (no display) exits 10 minutes after
   the last command, and `ghostlight status` then says it is not running. A `status` or any other
