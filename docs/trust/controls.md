@@ -51,13 +51,13 @@ discharge them.
   deployer duties; it is not legal advice, and how the framework applies to your deployment is
   a determination for you and your counsel.
 - ISO/IEC 42001: Ghostlight holds no 42001 certificate. The governance layer (capability
-  classification, modes, human-in-the-loop pause, audit) maps onto the operational controls an
+  classification, human-in-the-loop pause, audit) maps onto the operational controls an
   AI management system expects, as an orientation only.
 - NIST AI RMF: Govern maps to the policy and grant model; Map maps to the capability
   classification of each action; Measure maps to the audit trail and its provenance; Manage
-  maps to the modes, the take-the-wheel pause, and the panic kill switch.
+  maps to the take-the-wheel pause and the panic kill switch.
 
 See the [compliance team guide](../guides/compliance-team.md) and the
 [governance configuration guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-08-25 against the 1.0 source candidate | Contact: hello@sylin.org
+Last reviewed: 2026-10-16 against the current source | Contact: hello@sylin.org

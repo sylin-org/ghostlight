@@ -5,9 +5,10 @@ user is already signed in. It operates no vendor runtime or customer-data store.
 
 ## Architecture and trust boundaries
 
-The MCP connector terminates stdio MCP and sends typed work over a per-user named pipe or Unix
-socket, which only the same user can open, to the persistent `ghostlight` service. The service owns workspaces, language, policy, audit, execution,
-and completion. The browser connector relays typed browser work between that service and the
+The MCP relay terminates stdio MCP and sends typed work over a per-user named pipe or Unix
+socket, which only the same user can open, to the persistent `ghostlight-service`. Both relays are
+the `ghostlight` edge. The service owns workspaces, language, policy, audit, execution,
+and completion. The browser relay carries typed browser work between that service and the
 extension through Chromium native messaging. The extension owns Chrome APIs, page-local DOM work,
 browser durability, and content-free presentation. It owns no policy.
 
@@ -18,8 +19,9 @@ automatically.
 ## Governance
 
 Read, Action, Write, and Execute are independent capabilities. Ordered schema-4 grants bind a
-complete requirement set to exact, suffix-wildcard, or universal host patterns. Managed policy,
-local policy, and request restrictions intersect. Localhost, loopback, and link-local HTTP(S)
+complete requirement set to exact, suffix-wildcard, or universal host patterns. Managed and
+local tiers intersect. A request cannot narrow its own authority: request restrictions are refused,
+and audit records carry no restriction fields. Localhost, loopback, and link-local HTTP(S)
 destinations follow those policies, with one exception: agents can never open or read
 Ghostlight's own workbench address. Non-HTTP(S) schemes and configured sacred domains remain
 hard ceilings.
@@ -80,5 +82,5 @@ audit of Ghostlight will be published in full, including findings.
 
 See [data-flows.md](data-flows.md) and [supply-chain.md](supply-chain.md).
 
-Last reviewed: 2026-09-05 against the current source; local-destination policy follows ADR-0155.
+Last reviewed: 2026-10-16 against the current source; local-destination policy follows ADR-0155.
 Contact: hello@sylin.org
