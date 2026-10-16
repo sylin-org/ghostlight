@@ -661,3 +661,19 @@ apps amendment above (the shared Controls sheet) and adds to Decision 11 (presen
 - Links from the tray, a watcher's Continue and the docs can name a Settings section directly.
 - Task Manager shows Ghostlight service, Ghostlight (the tray and the window) and one Ghostlight
   connection per client.
+
+## Amendment (2026-10-15): shell milestone 2
+
+Owner-approved plan, 2026-10-15. These lines settle what the second shell milestone builds.
+
+- In Control the page may quit Ghostlight (Settings, `POST /api/quit`). This supersedes, for
+  Control only, the web apps amendment's line that the page never calls `quit_ghostlight`. Watch
+  and Closed cannot quit.
+- The window's web storage lives in `state/desktop-webview`, persistent (owner answer Q7 in shell
+  milestone 1), not `state/webview` as Decision 19 says.
+- One shell runs at a time because the service holds one desktop place: a second shell that
+  attaches is told to leave and the attached shell is shown. There is no `run/desktop.lock`
+  (amends Decision 11).
+- The first-close hint follows only a person closing the window, never an update or a crash. Its
+  marker, `state/tray-hint`, is a service-private state file like `state/watch.off`, outside what
+  the frozen edge and extension read.

@@ -74,7 +74,7 @@ pub enum Part {
     Integrations,
     /// Checkup cards and process diagnostics.
     Diagnostics,
-    /// The shared Controls sheet: pause and the session, who can watch, process diagnostics and
+    /// The controls Settings is drawn from: pause and the session, who can watch, process diagnostics and
     /// the notification test, with what each context may do.
     Controls,
 }
@@ -200,7 +200,7 @@ impl ConnectionsPart {
 /// The layer name of process diagnostics that are not being written.
 const DIAGNOSTICS_OFF_LAYER: &str = "off";
 
-/// What the service knows of the watch view the Controls sheet speaks for.
+/// What the service knows of the watch view Settings speaks for.
 #[derive(Clone, Copy, Debug)]
 pub enum ViewingFacts<'a> {
     /// No watch view is served, so nobody can watch and the setting cannot change.
@@ -214,7 +214,7 @@ pub enum ViewingFacts<'a> {
     },
 }
 
-/// The facts the Controls sheet is made from, before any context has seen them.
+/// The facts the controls part is made from, before any context has seen them.
 #[derive(Clone, Copy, Debug)]
 pub struct ControlsFacts<'a> {
     /// Whether agents may ask for browser work.
@@ -231,11 +231,11 @@ pub struct ControlsFacts<'a> {
     pub user_home: Option<&'a Path>,
 }
 
-/// The shared Controls sheet.
+/// The controls part: the state and acts Settings is drawn from.
 ///
-/// Every Ghostlight web app draws the same sheet from this part. Each act carries whether the
-/// context it was made for may do it, and `you` names that context, so a screen draws what it is
-/// told and never guesses. The part the service holds is the Control form; [`Self::seen_by`]
+/// Every Ghostlight web app draws the same Settings page from this part. Each act carries whether
+/// the context it was made for may do it, and `you` names that context, so a screen draws what it
+/// is told and never guesses. The part the service holds is the Control form; [`Self::seen_by`]
 /// makes the form another context sees.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ControlsPart {
@@ -253,7 +253,7 @@ pub struct ControlsPart {
     pub you: YouControls,
 }
 
-/// The runtime row of the Controls sheet.
+/// The runtime row of Settings, under Browser work.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct RuntimeControls {
     /// The row's label.
@@ -281,7 +281,7 @@ pub struct RuntimeActs {
     pub end_session: Availability,
 }
 
-/// The "Others can watch" row of the Controls sheet.
+/// The "Others can watch" row of Settings, under Sharing.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ViewingControls {
     /// The row's label.
@@ -306,7 +306,7 @@ pub struct ViewingActs {
     pub set_watching: Availability,
 }
 
-/// The process-diagnostics row of the Controls sheet.
+/// The process-diagnostics row of Settings, under Diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct DiagnosticsControls {
     /// The row's label.
@@ -334,7 +334,7 @@ pub struct DiagnosticsActs {
     pub reveal_diagnostics: Availability,
 }
 
-/// The notifications row of the Controls sheet.
+/// The notifications row of Settings, under Notifications.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct NotificationControls {
     /// The row's label.
@@ -352,7 +352,7 @@ pub struct NotificationActs {
     pub test_notification: Availability,
 }
 
-/// The service line of the Controls sheet.
+/// The service line, which Status shows.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ServiceControls {
     /// The sentence about the service and what is connected to it.

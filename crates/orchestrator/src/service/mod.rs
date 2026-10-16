@@ -64,7 +64,9 @@ use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::ConnectionEvidence;
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
-use crate::workbench::{RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection};
+use crate::workbench::{
+    RuntimeSource, Watching, WorkbenchFacade, WorkbenchProjection, WorkbenchQuitPort,
+};
 use crate::workspace::{ReleasedTabs, WorkspaceId, WorkspaceStore};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
@@ -393,6 +395,8 @@ impl ServiceHost {
                 return None;
             }
         };
+        self.workbench
+            .attach_quit(Arc::new(self.intake.quit.clone()));
         self.intake
             .governance
             .protect_workbench_port(pending.address().port());
@@ -612,6 +616,12 @@ impl Quit {
     /// goodbye on it.
     fn enroll(&self, writer: Arc<SocketWriter>) -> Enrolled {
         self.farewell.enroll(writer)
+    }
+}
+
+impl WorkbenchQuitPort for Quit {
+    fn quit(&self) {
+        self.begin(QuitReason::Quit, QUIT_GRACE);
     }
 }
 
@@ -2848,6 +2858,21 @@ mod tests {
             std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err(),
             "nothing answers on the port after the service stops"
         );
+    }
+
+    #[test]
+    fn the_pages_quit_is_a_persons_quit() {
+        let home = TestHome::new("workbench-quit");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        host.workbench.quit().unwrap();
+        // The same quit the tray asks for: new work is refused at once, and the latch keeps a
+        // browser that restarts from bringing Ghostlight back.
+        assert!(host.intake.quit.drain.is_quitting());
+        assert!(super::latch::is_set(
+            &crate::install::layout::Layout::new(home.path()).quit_latch()
+        ));
+        drop(host);
     }
 
     #[test]

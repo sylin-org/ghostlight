@@ -940,7 +940,7 @@ fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() 
 }
 
 #[test]
-fn the_sheet_says_what_it_is_told_in_the_service_words() {
+fn settings_say_what_they_are_told_in_the_service_words() {
     let (snapshot, _, path) = populated();
     let controls = projection(Audience::Control).part(Part::Controls, &snapshot);
     assert_eq!(controls["runtime"]["state"], "held");

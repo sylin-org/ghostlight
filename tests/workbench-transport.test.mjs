@@ -162,6 +162,7 @@ test("the other acts go where the table sends them", async () => {
   await transport.revealDiagnostics();
   await transport.continueInWindow();
   await transport.policy();
+  await transport.quit();
   const seen = send.calls.map((call) => `${call.method} ${call.path} ${call.body ?? ""}`.trim());
   assert.deepEqual(seen, [
     'POST /api/policy/preview {"document":"{}"}',
@@ -173,8 +174,25 @@ test("the other acts go where the table sends them", async () => {
     "POST /api/notifications/test {}",
     "POST /api/diagnostics/reveal {}",
     'POST /api/window {"view":"workbench"}',
-    "GET /api/policy"
+    "GET /api/policy",
+    "POST /api/quit {}"
   ]);
+});
+
+test("quitting is one POST with an empty body, and the sentence the service answers is handed back", async () => {
+  const send = fakeFetch(() => answer(202, { message: "Ghostlight is quitting." }));
+  const transport = Transport.overHttp({ fetch: send, bearer: "k" });
+  const result = await transport.quit();
+  assert.equal(send.calls.length, 1);
+  assert.equal(send.calls[0].method, "POST");
+  assert.equal(send.calls[0].path, "/api/quit");
+  assert.equal(send.calls[0].body, "{}");
+  assert.equal(send.calls[0].headers.Authorization, "Bearer k");
+  assert.equal(send.calls[0].headers["Content-Type"], "application/json");
+  assert.deepEqual(result, { message: "Ghostlight is quitting." });
+
+  const refused = Transport.overHttp({ fetch: fakeFetch(() => answer(401, { error: { code: "needs_window", message: "Change this in the Ghostlight window." } })) });
+  await assert.rejects(refused.quit(), (error) => error.code === "needs_window" && error.status === 401);
 });
 
 test("opening a destination over HTTP is one POST naming it", async () => {
@@ -451,6 +469,7 @@ test("the native shell path still invokes today's commands with today's argument
   await transport.testNotification();
   await transport.openDestination("home");
   await transport.continueInWindow();
+  await transport.quit();
   assert.deepEqual(invoked, [
     ["workbench_snapshot"],
     ["workbench_context"],
@@ -471,7 +490,8 @@ test("the native shell path still invokes today's commands with today's argument
     ["open_harness_download", { productId: "codex" }],
     ["test_notification"],
     ["open_destination", { destination: "home" }],
-    ["continue_in_window"]
+    ["continue_in_window"],
+    ["quit_ghostlight"]
   ]);
 });
 
@@ -515,7 +535,7 @@ test("every act the page names is a key of the context a window is given", () =>
     acts: Object.fromEntries([
       "search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
       "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching", "setup_all",
-      "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"
+      "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"
     ].map((act) => [act, { available: true, why_not: null }]))
   };
   const named = Object.values(Transport.ACT);

@@ -47,7 +47,8 @@
     testNotification: "test_notification",
     open: "open",
     revealDiagnostics: "reveal_diagnostics",
-    locate: "locate"
+    locate: "locate",
+    quit: "quit"
   });
   /** The context in which the service shows nothing of this computer. */
   const CONTEXT_CLOSED = "closed";
@@ -102,7 +103,8 @@
     reveal_diagnostics: { method: POST, path: "/api/diagnostics/reveal", body: () => ({}) },
     open_destination: { method: POST, path: "/api/open", body: ({ destination }) => ({ destination }) },
     open_harness_download: { method: POST, path: "/api/open", body: ({ productId }) => ({ product: productId }) },
-    continue_in_window: { method: POST, path: "/api/window", body: () => ({ view: WORKBENCH_VIEW }) }
+    continue_in_window: { method: POST, path: "/api/window", body: () => ({ view: WORKBENCH_VIEW }) },
+    quit_ghostlight: { method: POST, path: "/api/quit", body: () => ({}) }
   });
 
   /**
@@ -473,7 +475,10 @@
       openDestination: (destination) => call("open_destination", { destination }),
 
       /** Bring the Ghostlight application forward, where changes are made. */
-      continueInWindow: () => call("continue_in_window")
+      continueInWindow: () => call("continue_in_window"),
+
+      /** Quit Ghostlight, as the tray does. Answers the sentence the page then shows. */
+      quit: () => call("quit_ghostlight")
     };
   }
 

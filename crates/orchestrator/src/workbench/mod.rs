@@ -5,6 +5,8 @@ mod history;
 mod input;
 mod live;
 pub mod parts;
+#[cfg(test)]
+mod surface_tests;
 mod watching;
 pub mod web;
 
@@ -403,6 +405,7 @@ pub struct WorkbenchFacade {
     live: Arc<live::Live>,
     web: Arc<OnceLock<WebFacts>>,
     native_acts: Arc<Mutex<Option<Arc<dyn WorkbenchNativeActs>>>>,
+    quit: Arc<Mutex<Option<Arc<dyn WorkbenchQuitPort>>>>,
     policy_writes: Arc<Mutex<()>>,
     diagnostics_writes: Arc<Mutex<()>>,
 }
@@ -482,6 +485,7 @@ impl WorkbenchFacade {
             live,
             web,
             native_acts: Arc::default(),
+            quit: Arc::default(),
             policy_writes: Arc::default(),
             diagnostics_writes: Arc::default(),
         }
@@ -571,6 +575,21 @@ impl WorkbenchFacade {
     /// Attach the adapter that opens links and folders and asks for files on this computer.
     pub fn attach_native_acts(&self, acts: Arc<dyn WorkbenchNativeActs>) {
         *lock(&self.native_acts) = Some(acts);
+    }
+
+    /// Attach what ends the service when the person asks for it.
+    pub fn attach_quit(&self, port: Arc<dyn WorkbenchQuitPort>) {
+        *lock(&self.quit) = Some(port);
+    }
+
+    /// Begin a person's Quit, exactly as the tray's Quit does. Returns at once: the service
+    /// finishes what is in flight, says goodbye on every stream and then leaves.
+    pub fn quit(&self) -> Result<(), WorkbenchError> {
+        let port = lock(&self.quit)
+            .clone()
+            .ok_or(WorkbenchError::QuitUnavailable)?;
+        port.quit();
+        Ok(())
     }
 
     /// The attached native acts, or the failure every native act ends in without them.
@@ -1245,6 +1264,15 @@ pub trait WorkbenchNativeActs: Send + Sync {
     fn pick_file(&self, title: &str) -> Result<Option<PathBuf>, WorkbenchPresentationError>;
 }
 
+/// What ends the service when the person asks for it.
+///
+/// The service attaches it, so the workbench asks for a Quit without depending on how the service
+/// ends.
+pub trait WorkbenchQuitPort: Send + Sync {
+    /// Begin a person's Quit. Returns at once; the service finishes what is in flight first.
+    fn quit(&self);
+}
+
 /// The start every address the service opens has.
 const SECURE_SCHEME: &str = "https://";
 
@@ -1441,6 +1469,9 @@ pub enum WorkbenchError {
     /// Native presentation rejected the request.
     #[error(transparent)]
     Presentation(#[from] WorkbenchPresentationError),
+    /// No service is attached to end.
+    #[error("{}", words::QUIT_UNAVAILABLE)]
+    QuitUnavailable,
 }
 
 /// Complete immutable workbench read model.
@@ -1481,7 +1512,7 @@ pub struct WorkbenchSnapshot {
     pub harnesses: Vec<HarnessSummary>,
     /// Content-free authority and runtime configuration facts.
     pub configuration: ConfigurationSummary,
-    /// The shared Controls sheet, as the window sees it.
+    /// The controls part Settings is drawn from, as the window sees it.
     pub controls: parts::ControlsPart,
 }
 
@@ -2035,7 +2066,8 @@ pub enum SearchDestination {
     History,
     /// Local diagnostics.
     Checkup,
-    /// Runtime and authority controls.
+    /// The rules and the runtime state that apply here. Runtime controls live in Settings; this
+    /// still maps to the Policy page.
     Configuration,
     /// Supported harness registrations.
     Install,

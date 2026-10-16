@@ -105,11 +105,13 @@ pub enum WebAct {
     RevealDiagnostics,
     /// Ask the person for a client's application or settings file.
     Locate,
+    /// End Ghostlight, as the tray's Quit does.
+    Quit,
 }
 
 impl WebAct {
     /// Every act, in the order the context document lists them.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Search,
         Self::CheckPolicy,
         Self::Rescan,
@@ -128,6 +130,7 @@ impl WebAct {
         Self::Open,
         Self::RevealDiagnostics,
         Self::Locate,
+        Self::Quit,
     ];
 
     /// The key the page names this act by.
@@ -152,6 +155,7 @@ impl WebAct {
             Self::Open => "open",
             Self::RevealDiagnostics => "reveal_diagnostics",
             Self::Locate => "locate",
+            Self::Quit => "quit",
         }
     }
 
@@ -273,6 +277,19 @@ mod tests {
                 assert_eq!(answer.why_not.as_deref(), Some(words::CHANGE_IN_WINDOW));
             }
         }
+    }
+
+    #[test]
+    fn quit_is_the_windows_alone() {
+        assert_eq!(WebAct::ALL.len(), 19);
+        assert_eq!(WebAct::ALL.last().map(|act| act.key()), Some("quit"));
+        assert!(availability(WebAct::Quit, WebContext::Control).available);
+        let watcher = availability(WebAct::Quit, WebContext::Watch);
+        assert!(!watcher.available);
+        assert_eq!(watcher.why_not.as_deref(), Some(words::CHANGE_IN_WINDOW));
+        let closed = availability(WebAct::Quit, WebContext::Closed);
+        assert!(!closed.available);
+        assert_eq!(closed.why_not.as_deref(), Some(words::WATCHING_OFF));
     }
 
     #[test]

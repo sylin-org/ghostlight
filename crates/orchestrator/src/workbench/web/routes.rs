@@ -91,6 +91,7 @@ enum Api {
     Open,
     RevealDiagnostics,
     Locate,
+    Quit,
 }
 
 /// What a watcher may do on a route.
@@ -127,7 +128,7 @@ const fn route(
 }
 
 /// The closed table. Anything not here is not served.
-static ROUTES: [Route; 19] = [
+static ROUTES: [Route; 20] = [
     route(
         Api::Context,
         Method::Get,
@@ -258,6 +259,13 @@ static ROUTES: [Route; 19] = [
         Api::Locate,
         Method::Post,
         "/api/integrations/locate",
+        WatchAccess::NeedsWindow,
+        SMALL_BODY,
+    ),
+    route(
+        Api::Quit,
+        Method::Post,
+        "/api/quit",
         WatchAccess::NeedsWindow,
         SMALL_BODY,
     ),
@@ -647,6 +655,7 @@ fn api(
         Api::Open => open(shared, &body),
         Api::RevealDiagnostics => reveal_diagnostics(shared, &body),
         Api::Locate => acted(shared, locate(shared, &projection, &body)),
+        Api::Quit => quit(shared, &body),
     };
     drop(preview_permit);
     response
@@ -1112,6 +1121,18 @@ fn reveal_diagnostics(shared: &Shared, body: &[u8]) -> Response {
     }
     match shared.facade.reveal_diagnostics() {
         Ok(()) => json_response(Status::Ok, &json!({})),
+        Err(error) => refused(&error.to_string()),
+    }
+}
+
+/// Begin the person's Quit. The answer is 202: the service is on its way out, and the page says so
+/// instead of waiting for a change that will not come.
+fn quit(shared: &Shared, body: &[u8]) -> Response {
+    if let Err(response) = decode::<NoArguments>(body) {
+        return response;
+    }
+    match shared.facade.quit() {
+        Ok(()) => json_response(Status::Accepted, &json!({ "message": words::QUITTING })),
         Err(error) => refused(&error.to_string()),
     }
 }

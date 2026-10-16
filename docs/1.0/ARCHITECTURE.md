@@ -497,7 +497,7 @@ window, a watching screen and the browser toolbar change the runtime through one
 publishes it. File work runs outside the UI event loop. The native notification port is
 best effort and content-free. WebView, tray, notification, and recoverable Tauri failures cannot
 change domain truth; startup or event-loop failure ends the desktop authority instead of leaving
-an invisible process. Every Ghostlight web app shares one band and Controls sheet from `ui/kit`, drawn from the service's controls part.
+an invisible process. Every Ghostlight web app shares one band and a Settings tab with a rail of sections from `ui/kit`, drawn from the service's controls part; the person's Quit is one of its acts, in Control only.
 
 The page reads its context from the service before it draws and renders what it is told: an act
 its context cannot make is shown as state, with one line that leads to the Ghostlight window.
@@ -665,7 +665,7 @@ Activation is layered and eventual: `GHOSTLIGHT_DIAGNOSTICS_DIR` pins a process 
 a presence-only `diagnostics.on` marker in the home is applied live by an OS watch
 with a 2-second safety-net re-check, whichever fires first. An OS person toggles it by hand,
 with `ghostlight diagnostics on|off`, from the extension popup through the runtime-control path,
-or from the workbench Status card, which also opens the folder through a native-process act.
+or from Settings > Diagnostics, which also opens the folder through a native-process act.
 Records carry no URLs, page content, payloads, or credentials, so the folder is safe to share;
 the schema is pinned by test, retention is automatic, and the governance audit remains the only
 decision record.

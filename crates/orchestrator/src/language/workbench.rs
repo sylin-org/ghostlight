@@ -156,6 +156,12 @@ pub const CONTROLS_NOTIFICATIONS_LABEL: &str = "Notifications";
 pub const CONTROLS_NOTIFICATIONS_WORD: &str =
     "Send one local checkup notification. Nothing leaves this device.";
 
+/// What the page says once Quit has been accepted, until the service ends.
+pub const QUITTING: &str = "Ghostlight is quitting.";
+
+/// Why Quit did nothing: no service is attached to end.
+pub const QUIT_UNAVAILABLE: &str = "Ghostlight cannot quit from this view.";
+
 /// Why watching cannot be changed: no watch view is being served.
 pub const WATCHING_NOT_SERVED: &str = "Ghostlight is not serving a watch view on this computer.";
 
@@ -342,6 +348,8 @@ mod tests {
             CONTROLS_NOTIFICATIONS_WORD,
             WATCHING_NOT_SERVED,
             WATCHING_NOT_SAVED,
+            QUITTING,
+            QUIT_UNAVAILABLE,
             SERVICE_UP,
             SERVICE_STARTS_ON_DEMAND,
         ] {

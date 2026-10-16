@@ -394,6 +394,8 @@ fn parse_head(text: &str) -> Result<Head, ReadError> {
 pub enum Status {
     /// 200.
     Ok,
+    /// 202.
+    Accepted,
     /// 304.
     NotModified,
     /// 308.
@@ -434,6 +436,7 @@ impl Status {
     pub const fn code(self) -> u16 {
         match self {
             Self::Ok => 200,
+            Self::Accepted => 202,
             Self::NotModified => 304,
             Self::PermanentRedirect => 308,
             Self::BadRequest => 400,
@@ -456,6 +459,7 @@ impl Status {
     const fn reason(self) -> &'static str {
         match self {
             Self::Ok => "OK",
+            Self::Accepted => "Accepted",
             Self::NotModified => "Not Modified",
             Self::PermanentRedirect => "Permanent Redirect",
             Self::BadRequest => "Bad Request",

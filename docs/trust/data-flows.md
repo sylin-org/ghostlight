@@ -16,7 +16,7 @@ audit run on the endpoint.
 | Browser page traffic | Browser networking | Sites the user or MCP client directs the browser to. |
 | Audit records | Append-only JSON Lines file | Local path selected by the endpoint owner. |
 | Managed policy fetch | Local file read or conditional HTTPS GET | Customer-configured source, only when an administrator provisions `managed.json`. |
-| Workbench page | HTTP on 127.0.0.1 only, answered only when the Host header is that address and port. While "Others can watch" is on, anyone on this computer can see activity with hosts, client names and policy rules, and can pause agents; the person's never-touch list shows only as a count. Changes need a secret made at each service start, which the service hands out only on its per-user pipe, to the Ghostlight window. A person turns watching off in the Ghostlight window's Controls sheet; while it is off, a browser tab shows only the About page | Same endpoint. |
+| Workbench page | HTTP on 127.0.0.1 only, answered only when the Host header is that address and port. While "Others can watch" is on, anyone on this computer can see activity with hosts, client names and policy rules, and can pause agents; the person's never-touch list shows only as a count. Changes need a secret made at each service start, which the service hands out only on its per-user pipe, to the Ghostlight window. A person turns watching off in the Ghostlight window's Settings > Sharing; while it is off, a browser tab shows only the About page | Same endpoint. |
 
 The managed HTTPS source may use a bearer token and organization CA pin. The signed bundle is the
 authority: Ed25519 is required, optional ML-DSA-65 makes both legs mandatory, and rollback is

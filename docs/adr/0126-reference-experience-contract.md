@@ -1,6 +1,7 @@
 # ADR-0126: Reference experience contract
 
 Amended by ADR-0197 Decision 19: the Attention runtime state and its control file are removed.
+Decision 9 is amended by ADR-0199 ("Settings and the tray"): Settings is a sixth destination.
 
 - Status: Accepted
 - Date: 2026-08-16
@@ -148,6 +149,14 @@ unchanged.
 
 A sixth destination is rejected because it would create two status summaries, which is the exact
 duplication this epic exists to remove.
+
+### Amendment: Settings is a sixth destination (2026-10-15)
+
+[ADR-0199](0199-one-service-thin-shells.md) ("Settings and the tray") adds Settings, a tab before
+About with a rail of sections. The rejection above stands for what it rejected: Settings holds
+controls only and duplicates no status summary. Each rail entry shows the state of the control
+beside it and nothing more, and the connection sentence moved to Status. The landing destination
+is still At a glance.
 
 ### 10. Acceptance measures
 

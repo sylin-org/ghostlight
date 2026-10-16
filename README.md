@@ -166,9 +166,11 @@ actions stacking below it, newest first, each in Ghostlight's own words -- "Open
 **MCP integrations**, which connects the coding clients you already have and merges into their
 configuration with a backup (goose and Continue get Copy setup to paste, never an edit); **Status**, which answers whether the stack is healthy; **Policy**,
 which states what the current rules allow, one plain line per capability, naming the layer that
-decided each one; and **About**, which carries the promise underneath it: it never phones home.
+decided each one; **Settings**, a tab with a rail for this screen, who else can watch, browser
+work, notifications and diagnostics, and where you can quit Ghostlight; and **About**, which
+carries the promise underneath it: it never phones home.
 
-Pause and resume sit in the header beside the lamp, the same control the tray offers. They work
+Pause and resume sit in the header beside the lamp on every tab, the same control the tray offers. They work
 with or without a connected browser, because Ghostlight itself holds the pause. When configured
 policy is not valid, Ghostlight refuses all browser work and the header never reads Ready. It reads
 Policy not valid and points to Policy, unless a more urgent state such as Not connected or Paused

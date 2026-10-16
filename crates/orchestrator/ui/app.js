@@ -27,7 +27,8 @@
 
 const {
   CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
-  WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONTROLS, byteSize
+  WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, DEFAULT_VIEW,
+  parseAddress, screenState, byteSize
 } = globalThis.GhostlightWords;
 
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
@@ -85,7 +86,7 @@ const view = globalThis.GhostlightView.create({
 });
 
 /*
- * The shared Controls sheet.
+ * Settings.
  *
  * It is drawn from the controls part of the snapshot and acts through the functions below, so it
  * holds no transport of its own. Its personal settings are kept in this browser when it lets us.
@@ -98,9 +99,9 @@ function personalStorage() {
   }
 }
 
-const controls = globalThis.GhostlightControls.create({
+const settings = globalThis.GhostlightSettings.create({
   document,
-  words: { ...CONTROLS, byteSize },
+  words: { ...SETTINGS, screenState, byteSize },
   storage: personalStorage(),
   applyIntent,
   setWatching,
@@ -108,6 +109,8 @@ const controls = globalThis.GhostlightControls.create({
   revealDiagnostics,
   testNotification,
   continueInWindow,
+  quit: quitGhostlight,
+  mayQuit: () => allowed(ACT.quit),
   copyText: typeof transport.copyText === "function" ? copyAddress : undefined,
   onFailure: reportFailure
 });
@@ -115,13 +118,13 @@ const controls = globalThis.GhostlightControls.create({
 /* The controls part last painted, so a collection that did not change it repaints nothing. */
 let paintedControls = null;
 
-/** Draw the controls part, and the band's chip from the context it names. */
+/** Draw the controls part in Settings, and the band's chip from the context it names. */
 function paintControls(part) {
   if (!part) return;
   const signature = JSON.stringify(part);
   if (signature === paintedControls) return;
-  const painted = attempt("painting the controls", () => {
-    controls.render(part);
+  const painted = attempt("painting Settings", () => {
+    settings.render(part);
     if (part.you) view.chip(part.you);
   });
   if (painted) paintedControls = signature;
@@ -419,7 +422,7 @@ async function continueInWindow() {
   }
 }
 
-/** Turn "Others can watch" on or off. The Controls sheet draws the part the service answers with. */
+/** Turn "Others can watch" on or off. Settings draws the part the service answers with. */
 async function setWatching(watch) {
   if (!transport.available) return;
   try {
@@ -464,6 +467,16 @@ async function testNotification() {
   } catch (error) {
     view.toast(String(error), true);
   }
+}
+
+/**
+ * Quit Ghostlight, as the tray does. The service answers before it ends, and the band then says
+ * so in place of "Reconnecting", which is what its lost stream would otherwise read as.
+ */
+async function quitGhostlight() {
+  if (!transport.available) return;
+  const answer = await transport.quit();
+  view.leaving(answer?.message ?? "");
 }
 
 /** Put the address of the watch view on the clipboard of this screen. */
@@ -581,6 +594,33 @@ async function withButton(event, work, done) {
   }
 }
 
+/* ------------------------------- navigating ----------------------------- */
+
+/**
+ * Show a destination, and for Settings one of its sections, and bring up to date what the person
+ * is about to see. A tab, a rail entry and an address all arrive here.
+ */
+function go(name, section) {
+  view.navigate(name, section);
+  if (name === "policy" && showsData() && !view.draftIsDirty()) {
+    outdated.delete("policy");
+    loadPolicy();
+  }
+  openedView(name);
+}
+
+/**
+ * Open the page an address names.
+ *
+ * Text that is not an address opens the default destination and is replaced by its address. A
+ * page that loads with no address stays as it is; one whose address was emptied opens the default.
+ */
+function openAddress(hash, loading) {
+  const wanted = parseAddress(hash);
+  if (wanted) go(wanted.view, wanted.section ?? undefined);
+  else if (hash || !loading) go(DEFAULT_VIEW);
+}
+
 /* -------------------------------- wiring -------------------------------- */
 
 /**
@@ -598,14 +638,9 @@ function wire() {
     const confirmation = event.target.closest("[data-confirm]");
     if (confirmation && view.answerConfirmation(confirmation.dataset.confirm === "accept")) return;
     const tab = event.target.closest("[data-view]");
-    if (tab) {
-      view.navigate(tab.dataset.view);
-      if (tab.dataset.view === "policy" && showsData() && !view.draftIsDirty()) {
-        outdated.delete("policy");
-        loadPolicy();
-      }
-      openedView(tab.dataset.view);
-    }
+    if (tab) go(tab.dataset.view);
+    const entry = event.target.closest("[data-settings-section]");
+    if (entry) go("settings", entry.dataset.settingsSection);
     const ruleAction = event.target.closest("[data-rule-action]");
     if (ruleAction && !ruleAction.disabled) {
       view.ruleAction(Number(ruleAction.dataset.rule), ruleAction.dataset.ruleAction);
@@ -615,7 +650,7 @@ function wire() {
     // they may. An action inside an open rule is handled above and must not close it again.
     const toggle = event.target.closest("[data-rule-toggle]");
     if (toggle) view.toggleRule(toggle.dataset.ruleToggle);
-    // The wheel is the band's own control; the Controls sheet wires the buttons it holds.
+    // The wheel is the band's own control; Settings wires the buttons it holds.
     const wheel = event.target.closest("#wheel");
     if (wheel && !wheel.disabled) applyIntent(wheel.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");
@@ -631,6 +666,8 @@ function wire() {
     }
     if (event.target === el.palette) view.closePalette();
   });
+
+  window.addEventListener("hashchange", () => openAddress(window.location.hash, false));
 
   el["palette-query"].addEventListener("input", () => {
     clearTimeout(searchTimer);
@@ -731,7 +768,6 @@ function wire() {
 async function becomeClosed(sentence) {
   stopStream?.();
   stopStream = null;
-  attempt("closing the controls", () => controls.hide());
   let told = null;
   try {
     told = await transport.context();
@@ -741,6 +777,7 @@ async function becomeClosed(sentence) {
   const base = told?.context === CONTEXT_CLOSED ? told : { ...context, context: CONTEXT_CLOSED };
   context = { ...base, sentence: sentence ?? base.sentence };
   view.closed(context);
+  attempt("closing Settings", () => settings.closed(context.sentence));
 }
 
 const streamHandlers = {
@@ -783,10 +820,12 @@ async function start() {
   }
   if (context.context === CONTEXT_CLOSED) {
     view.closed(context);
-    attempt("closing the controls", () => controls.hide());
+    attempt("closing Settings", () => settings.closed(context.sentence));
+    attempt("opening the address", () => openAddress(window.location.hash, true));
     return;
   }
   attempt("telling the page what it may do", () => view.context(context));
+  attempt("opening the address", () => openAddress(window.location.hash, true));
   attempt("subscribing to changes", () => {
     stopStream = transport.subscribe(streamHandlers);
   });
@@ -803,7 +842,7 @@ function boot() {
     }, HEARTBEAT_MS);
   }
   attempt("wiring the surface", wire);
-  attempt("wiring the controls", () => controls.wire());
+  attempt("wiring Settings", () => settings.wire());
   attempt("starting", () => {
     start();
   });

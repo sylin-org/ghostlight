@@ -32,9 +32,6 @@
       </span>
       <span class="continue-line band-continue" id="band-continue" hidden></span>
 
-      <button class="controls-open" type="button" id="controls-open" data-word="open"
-              aria-haspopup="dialog" aria-expanded="false" aria-controls="controls-sheet" hidden></button>
-
       <nav class="tabs" aria-label="Ghostlight">
         <button class="tab active" type="button" data-view="monitor" aria-current="page">At a glance</button>
         <button class="tab" type="button" data-view="integrations">Integrations</button>
@@ -44,6 +41,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9.4 12l1.9 1.9L15 10"/></svg>
           Policy
         </button>
+        <button class="tab" type="button" data-view="settings">Settings</button>
         <button class="tab" type="button" data-view="about">About</button>
       </nav>
     </header>
@@ -97,6 +95,7 @@
           </div>
           <button class="ghost-button" type="button" id="refresh-status">Refresh</button>
         </div>
+        <p class="service-line" id="status-service"></p>
         <div class="card-grid" id="diagnostic-grid"></div>
         <p class="colophon" id="colophon"></p>
       </section>
@@ -169,6 +168,161 @@
         </section>
       </section>
 
+      <section class="view" id="view-settings" data-page="settings" aria-labelledby="settings-heading">
+        <div class="page-heading">
+          <div>
+            <span class="kicker">This screen, and Ghostlight on this computer</span>
+            <h1 id="settings-heading">Settings</h1>
+            <p>How this screen looks, who else can see Ghostlight, and how browser work, notifications and diagnostics behave.</p>
+          </div>
+        </div>
+
+        <div class="settings">
+          <nav class="settings-rail" id="settings-rail" aria-label="Settings sections">
+            <button class="rail-entry active" type="button" id="rail-screen" data-settings-section="screen" aria-current="true">
+              <span class="rail-label" data-word="sectionScreen"></span>
+              <small class="rail-state" id="rail-screen-state"></small>
+            </button>
+            <button class="rail-entry" type="button" id="rail-sharing" data-settings-section="sharing">
+              <span class="rail-label" data-word="sectionSharing"></span>
+              <small class="rail-state" id="rail-sharing-state"></small>
+            </button>
+            <button class="rail-entry" type="button" id="rail-browser-work" data-settings-section="browser-work">
+              <span class="rail-label" data-word="sectionBrowserWork"></span>
+              <small class="rail-state" id="rail-browser-work-state"></small>
+            </button>
+            <button class="rail-entry" type="button" id="rail-notifications" data-settings-section="notifications">
+              <span class="rail-label" data-word="sectionNotifications"></span>
+              <small class="rail-state" id="rail-notifications-state"></small>
+            </button>
+            <button class="rail-entry" type="button" id="rail-diagnostics" data-settings-section="diagnostics">
+              <span class="rail-label" data-word="sectionDiagnostics"></span>
+              <small class="rail-state" id="rail-diagnostics-state"></small>
+            </button>
+          </nav>
+
+          <div class="settings-body">
+            <section class="settings-section" id="settings-screen" data-section="screen" aria-labelledby="settings-screen-title">
+              <h2 id="settings-screen-title" data-word="sectionScreen"></h2>
+              <div class="settings-row">
+                <span class="settings-label" data-word="density"></span>
+                <span class="settings-choices" role="group">
+                  <button class="choice" type="button" data-personal="density" data-value="comfortable" data-word="comfortable"></button>
+                  <button class="choice" type="button" data-personal="density" data-value="compact" data-word="compact"></button>
+                </span>
+              </div>
+              <div class="settings-row">
+                <span class="settings-label" data-word="motion"></span>
+                <span class="settings-choices" role="group">
+                  <button class="choice" type="button" data-personal="motion" data-value="system" data-word="followSystem"></button>
+                  <button class="choice" type="button" data-personal="motion" data-value="reduced" data-word="reduced"></button>
+                </span>
+              </div>
+            </section>
+
+            <section class="settings-section" id="settings-sharing" data-section="sharing" aria-labelledby="settings-sharing-title" hidden>
+              <h2 id="settings-sharing-title" data-word="sectionSharing"></h2>
+              <div id="settings-sharing-rows">
+                <p class="settings-note" id="settings-sharing-who"></p>
+                <div class="settings-row" id="controls-viewing">
+                  <span class="settings-label" id="controls-viewing-label"></span>
+                  <span class="settings-state">
+                    <b id="controls-viewing-word"></b>
+                    <small class="settings-detail" id="controls-viewing-url" hidden></small>
+                  </span>
+                  <span class="settings-acts">
+                    <button class="link-button" type="button" id="controls-viewing-copy" data-viewing="copy" data-word="copyAddress" hidden></button>
+                    <button class="ghost-button" type="button" id="controls-viewing-toggle" data-viewing="toggle" hidden></button>
+                  </span>
+                </div>
+              </div>
+              <p class="settings-note" id="settings-sharing-closed" hidden></p>
+              <p class="continue-line" id="settings-sharing-continue" hidden>
+                <span id="settings-sharing-why"></span>
+                <button class="link-button" type="button" id="settings-sharing-continue-button" data-settings-continue data-word="continueInWindow"></button>
+              </p>
+            </section>
+
+            <section class="settings-section" id="settings-browser-work" data-section="browser-work" aria-labelledby="settings-browser-work-title" hidden>
+              <h2 id="settings-browser-work-title" data-word="sectionBrowserWork"></h2>
+              <div id="settings-browser-work-rows">
+                <div class="settings-row" id="controls-runtime">
+                  <span class="settings-label" id="controls-runtime-label"></span>
+                  <span class="settings-state">
+                    <b id="controls-runtime-word"></b>
+                    <small id="controls-runtime-note"></small>
+                  </span>
+                  <span class="settings-acts">
+                    <button class="ghost-button" type="button" id="controls-hold" data-intent="hold" data-word="pause" hidden></button>
+                    <button class="ghost-button" type="button" id="controls-resume" data-intent="resume" data-word="resume" hidden></button>
+                    <button class="ghost-button" type="button" id="controls-start" data-intent="start_session" data-word="startSession" hidden></button>
+                    <button class="danger-button" type="button" id="controls-end" data-intent="end_session" data-word="endSession" hidden></button>
+                  </span>
+                </div>
+                <div class="settings-row" id="settings-quit" hidden>
+                  <span class="settings-label" data-word="quitLabel"></span>
+                  <span class="settings-state">
+                    <b id="settings-quit-question" data-word="quitQuestion" hidden></b>
+                  </span>
+                  <span class="settings-acts">
+                    <button class="danger-button" type="button" id="settings-quit-ask" data-quit="ask" data-word="quit"></button>
+                    <button class="danger-button" type="button" id="settings-quit-yes" data-quit="yes" data-word="quitYes" hidden></button>
+                    <button class="ghost-button" type="button" id="settings-quit-no" data-quit="no" data-word="quitNo" hidden></button>
+                  </span>
+                </div>
+              </div>
+              <p class="settings-note" id="settings-browser-work-closed" hidden></p>
+              <p class="continue-line" id="settings-browser-work-continue" hidden>
+                <span id="settings-browser-work-why"></span>
+                <button class="link-button" type="button" id="settings-browser-work-continue-button" data-settings-continue data-word="continueInWindow"></button>
+              </p>
+            </section>
+
+            <section class="settings-section" id="settings-notifications" data-section="notifications" aria-labelledby="settings-notifications-title" hidden>
+              <h2 id="settings-notifications-title" data-word="sectionNotifications"></h2>
+              <div id="settings-notifications-rows">
+                <div class="settings-row" id="controls-notifications">
+                  <span class="settings-label" id="controls-notifications-label"></span>
+                  <span class="settings-state">
+                    <small id="controls-notifications-word"></small>
+                  </span>
+                  <span class="settings-acts">
+                    <button class="ghost-button" type="button" id="test-notification" data-word="sendTest" hidden></button>
+                  </span>
+                </div>
+              </div>
+              <p class="settings-note" id="settings-notifications-closed" hidden></p>
+              <p class="continue-line" id="settings-notifications-continue" hidden>
+                <span id="settings-notifications-why"></span>
+                <button class="link-button" type="button" id="settings-notifications-continue-button" data-settings-continue data-word="continueInWindow"></button>
+              </p>
+            </section>
+
+            <section class="settings-section" id="settings-diagnostics" data-section="diagnostics" aria-labelledby="settings-diagnostics-title" hidden>
+              <h2 id="settings-diagnostics-title" data-word="sectionDiagnostics"></h2>
+              <div id="settings-diagnostics-rows">
+                <div class="settings-row" id="controls-diagnostics">
+                  <span class="settings-label" id="controls-diagnostics-label"></span>
+                  <span class="settings-state">
+                    <b id="controls-diagnostics-word"></b>
+                    <small class="settings-detail" id="controls-diagnostics-place" hidden></small>
+                  </span>
+                  <span class="settings-acts">
+                    <button class="link-button" type="button" id="controls-diagnostics-reveal" data-diagnostics-operation="reveal" data-word="openLogFolder" hidden></button>
+                    <button class="ghost-button" type="button" id="controls-diagnostics-toggle" data-diagnostics-operation="toggle" hidden></button>
+                  </span>
+                </div>
+              </div>
+              <p class="settings-note" id="settings-diagnostics-closed" hidden></p>
+              <p class="continue-line" id="settings-diagnostics-continue" hidden>
+                <span id="settings-diagnostics-why"></span>
+                <button class="link-button" type="button" id="settings-diagnostics-continue-button" data-settings-continue data-word="continueInWindow"></button>
+              </p>
+            </section>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-about" data-page="about" aria-label="About">
         <div class="about">
           <button class="tcg" id="about-card" type="button" data-destination="home"
@@ -211,87 +365,6 @@
     </main>
   </div>
 
-  <section class="controls-sheet" id="controls-sheet" role="dialog" aria-modal="true"
-           aria-labelledby="controls-title" tabindex="-1" hidden>
-    <h2 class="sr-only" id="controls-title" data-word="title"></h2>
-
-    <div class="controls-group" id="controls-screen">
-      <h3 data-word="screen"></h3>
-      <div class="controls-row">
-        <span class="controls-label" data-word="density"></span>
-        <span class="controls-choices" role="group">
-          <button class="choice" type="button" data-personal="density" data-value="comfortable" data-word="comfortable"></button>
-          <button class="choice" type="button" data-personal="density" data-value="compact" data-word="compact"></button>
-        </span>
-      </div>
-      <div class="controls-row">
-        <span class="controls-label" data-word="motion"></span>
-        <span class="controls-choices" role="group">
-          <button class="choice" type="button" data-personal="motion" data-value="system" data-word="followSystem"></button>
-          <button class="choice" type="button" data-personal="motion" data-value="reduced" data-word="reduced"></button>
-        </span>
-      </div>
-    </div>
-
-    <div class="controls-group" id="controls-computer">
-      <h3 data-word="computer"></h3>
-      <p class="controls-service" id="controls-service"></p>
-
-      <div class="controls-row" id="controls-runtime">
-        <span class="controls-label" id="controls-runtime-label"></span>
-        <span class="controls-state">
-          <b id="controls-runtime-word"></b>
-          <small id="controls-runtime-note"></small>
-        </span>
-        <span class="controls-acts">
-          <button class="ghost-button" type="button" id="controls-hold" data-intent="hold" data-word="pause" hidden></button>
-          <button class="ghost-button" type="button" id="controls-resume" data-intent="resume" data-word="resume" hidden></button>
-          <button class="ghost-button" type="button" id="controls-start" data-intent="start_session" data-word="startSession" hidden></button>
-          <button class="danger-button" type="button" id="controls-end" data-intent="end_session" data-word="endSession" hidden></button>
-        </span>
-      </div>
-
-      <div class="controls-row" id="controls-viewing">
-        <span class="controls-label" id="controls-viewing-label"></span>
-        <span class="controls-state">
-          <b id="controls-viewing-word"></b>
-          <small class="controls-detail" id="controls-viewing-url" hidden></small>
-        </span>
-        <span class="controls-acts">
-          <button class="link-button" type="button" id="controls-viewing-copy" data-viewing="copy" data-word="copyAddress" hidden></button>
-          <button class="ghost-button" type="button" id="controls-viewing-toggle" data-viewing="toggle" hidden></button>
-        </span>
-      </div>
-
-      <div class="controls-row" id="controls-diagnostics">
-        <span class="controls-label" id="controls-diagnostics-label"></span>
-        <span class="controls-state">
-          <b id="controls-diagnostics-word"></b>
-          <small class="controls-detail" id="controls-diagnostics-place" hidden></small>
-        </span>
-        <span class="controls-acts">
-          <button class="link-button" type="button" id="controls-diagnostics-reveal" data-diagnostics-operation="reveal" data-word="openLogFolder" hidden></button>
-          <button class="ghost-button" type="button" id="controls-diagnostics-toggle" data-diagnostics-operation="toggle" hidden></button>
-        </span>
-      </div>
-
-      <div class="controls-row" id="controls-notifications">
-        <span class="controls-label" id="controls-notifications-label"></span>
-        <span class="controls-state">
-          <small id="controls-notifications-word"></small>
-        </span>
-        <span class="controls-acts">
-          <button class="ghost-button" type="button" id="test-notification" data-word="sendTest" hidden></button>
-        </span>
-      </div>
-
-      <p class="continue-line" id="controls-continue" hidden>
-        <span id="controls-continue-why"></span>
-        <button class="link-button" type="button" id="controls-continue-button" data-controls-continue data-word="continueInWindow"></button>
-      </p>
-    </div>
-  </section>
-
   <div class="palette-backdrop" id="palette" hidden>
     <div class="palette-box" role="dialog" aria-modal="true" aria-label="Search Ghostlight">
       <div class="palette-input">
@@ -323,7 +396,7 @@
   <script src="lib/transport.js"></script>
   <script src="lib/store.js"></script>
   <script src="lib/view.js"></script>
-  <script src="kit/controls.js"></script>
+  <script src="kit/settings.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

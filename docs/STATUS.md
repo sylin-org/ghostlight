@@ -25,8 +25,12 @@ Shell milestone 1 is complete and deployed on the owner's machine (ledger
 127.0.0.1 in the Control, Watch and Closed contexts, and `ghostlight-desktop` is a webview on it.
 Development deploys now install into `bin` as a channel; `~/.ghostlight/dev` and its marker are
 gone (ADR-0199 amendment of 2026-10-15). Typed `ghostlight` commands print in a Windows console,
-and `ghostlight` is on the user PATH. Next in the shell track: Tauri out of the service, presence,
-and the rest of ADR-0199.
+and `ghostlight` is on the user PATH.
+
+Shell milestone 2 is in progress (ledger [shell-m2.md](tasks/break-2.0/shell-m2.md)): Settings, a
+tab with a rail before About, replaces the Controls sheet, the page can quit in Control, and every
+tab has an address (m2-01, landed). Next: the shell carries the desktop jobs, the shell's own
+life, the switch to the shell-drawn tray, Tauri out of the service, and idle exit.
 
 Owed by the owner: Edge Add-ons and Brave store listings. Until they exist, the installation
 journey offers an Add step for Chrome only.

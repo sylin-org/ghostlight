@@ -79,13 +79,14 @@ Internal browser commands are combined when a person experiences them as one job
 - Every Linux install has an Applications entry. It uses the explicit `ghostlight open` intent,
   which demand-starts the same backgrounded authority when absent and then reveals it through the
   existing authenticated activation seam. A tray is never the only route to the workbench.
-- Five destinations and one global search reach every workbench surface and user-visible record:
-  At a glance, MCP integrations, Status, Policy, and About. At a glance is where the window opens;
+- Six destinations and one global search reach every workbench surface and user-visible record:
+  At a glance, MCP integrations, Status, Policy, Settings, and About. At a glance is where the window opens;
   it carries the current action in full and the recent ones beneath it, so a glance is enough. The
   narrow tab row abbreviates the integrations label to Integrations.
 - ADR-0126 Decision 9 made the landing destination At a glance, leading with whether Ghostlight is
   ready, connected, working, paused, recovering, or in need of attention, with the action queue
-  beneath that answer and no sixth destination added. The reference-experience epic's S6 delivered
+  beneath that answer and no sixth destination added then; Settings (ADR-0199) is the sixth, holds
+  controls only and duplicates no status summary. The reference-experience epic's S6 delivered
   it, and `language/readiness.rs` owns the answer.
 - The header never reads Ready while configured policy refuses all work. When authority fails
   closed it reads Policy not valid, in the attention tone, and points to the Policy page. It uses

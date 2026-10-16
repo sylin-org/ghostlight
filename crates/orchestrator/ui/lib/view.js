@@ -12,7 +12,7 @@
   "use strict";
 
   const {
-    VIEWS, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
+    VIEWS, SETTINGS_SECTIONS, DEFAULT_SECTION, addressOf, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
@@ -59,6 +59,7 @@
     let access = null;
     let closedMode = false;
     let lost = false;
+    let farewell = null;
     let lastFacts = null;
     const can = (act) => !closedMode && (access?.acts?.[act]?.available ?? true);
     const whyNot = (act) => access?.acts?.[act]?.why_not ?? "";
@@ -493,8 +494,9 @@
       const readiness = facts.snapshot?.readiness;
       const name = lost || !readiness ? "runtime-offline" : `runtime-${readiness.tone}`;
       runtimeClass(name);
-      // While the live stream is being opened again the page cannot vouch for what it shows.
-      el["state-word"].textContent = lost ? RECONNECTING : readiness ? readiness.word : "";
+      // While the live stream is being opened again the page cannot vouch for what it shows, and
+      // once Quit is accepted it says that instead.
+      el["state-word"].textContent = farewell ?? (lost ? RECONNECTING : readiness ? readiness.word : "");
       // Where a pause came from is the better thing to read on the word while there is one.
       el["state-word"].title = facts.snapshot?.runtime_note ?? (readiness ? readiness.detail : "");
 
@@ -591,7 +593,14 @@
 
     /** Say that the live stream is being opened again, or that it is back. */
     function reconnecting(on) {
-      lost = on;
+      lost = on || farewell !== null;
+      if (!closedMode) band(lastFacts ?? { connected: false, snapshot: null, runtime: "active", running: 0 });
+    }
+
+    /** Say that Ghostlight is quitting: the band stops vouching for anything and says so, for good. */
+    function leaving(sentence) {
+      farewell = sentence;
+      lost = true;
       if (!closedMode) band(lastFacts ?? { connected: false, snapshot: null, runtime: "active", running: 0 });
     }
 
@@ -782,6 +791,10 @@
     }
 
     function status(snapshot) {
+      // The service's own sentence about what is connected, read from the controls part it keeps.
+      const service = snapshot.controls?.service?.word ?? "";
+      el["status-service"].textContent = service;
+      el["status-service"].hidden = !service;
       el["diagnostic-grid"].innerHTML = snapshot.diagnostics.map((item) =>
         `<article class="card"><span class="severity ${escapeHtml(item.severity)}"><span class="dot"></span>`
         + `${escapeHtml(item.severity)}</span><h2>${escapeHtml(item.label)}</h2>`
@@ -1484,16 +1497,39 @@
       };
       ifChanged("about", product, () => about(product));
       ifChanged("integrations", [snapshot.harnesses, [...pending], access?.acts], () => integrations(snapshot, pending));
-      ifChanged("status", [snapshot.diagnostics, snapshot.configuration, snapshot.service], () => status(snapshot));
+      ifChanged("status", [snapshot.diagnostics, snapshot.configuration, snapshot.service, snapshot.controls?.service],
+        () => status(snapshot));
     }
 
     /* -------------------------------- chrome ------------------------------ */
 
     let current = "monitor";
+    let currentSection = DEFAULT_SECTION;
 
-    function navigate(view) {
+    /**
+     * Write where the page is into its address, in place, so a tab or a rail entry adds nothing
+     * to the history. A page that cannot be addressed still navigates.
+     */
+    function writeAddress(address) {
+      try {
+        if (window.location.hash === `#${address}`) return;
+        window.history.replaceState(null, "", `#${address}`);
+      } catch (error) {
+        // The address is a convenience; showing the page is the job.
+      }
+    }
+
+    /**
+     * Show one destination and, for Settings, one of its sections, and say where the page now is.
+     *
+     * A name that is not a destination, or a section that is not one of Settings, changes nothing.
+     * Settings without a section keeps the one it showed last.
+     */
+    function navigate(view, section) {
       if (!VIEWS[view]) return;
+      if (view === "settings" && section && !SETTINGS_SECTIONS.some((known) => known.id === section)) return;
       current = view;
+      if (view === "settings" && section) currentSection = section;
       for (const node of document.querySelectorAll(".view")) {
         node.classList.toggle("active", node.dataset.page === view);
       }
@@ -1503,7 +1539,17 @@
         if (active) tab.setAttribute("aria-current", "page");
         else tab.removeAttribute("aria-current");
       }
+      for (const entry of document.querySelectorAll(".rail-entry")) {
+        const active = entry.dataset.settingsSection === currentSection;
+        entry.classList.toggle("active", active);
+        if (active) entry.setAttribute("aria-current", "true");
+        else entry.removeAttribute("aria-current");
+      }
+      for (const part of document.querySelectorAll(".settings-section")) {
+        part.hidden = part.dataset.section !== currentSection;
+      }
       el["main-content"].scrollTop = 0;
+      writeAddress(addressOf(view, currentSection));
     }
 
     function toast(message, error = false) {
@@ -1629,8 +1675,8 @@
     return Object.freeze({
       el, attempt,
       hero, row, drop, promote, rebuildFeed, queueCount,
-      context, closed, chip, reconnecting,
-      band, collections, navigate, showing: () => current, toast, openHarnessManual,
+      context, closed, chip, reconnecting, leaving,
+      band, collections, navigate, showing: () => current, showingSection: () => currentSection, toast, openHarnessManual,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
       discardDraft, renderRules, previewResult, previewCleared, editorStatus,

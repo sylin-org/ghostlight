@@ -94,7 +94,7 @@ h1, h2, h3 { margin: 0; font-weight: 400; }
 
 /* ---------------------------- the lamp band ---------------------------- */
 .lampband {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center; gap: 18px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line);
@@ -379,6 +379,7 @@ body.runtime-offline .state-word { color: var(--muted); }
 .strip { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin-top: 22px; padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
 .strip h2 { color: var(--ink); font-size: 14px; font-weight: 400; }
 .strip p { margin: 3px 0 0; color: var(--muted); font-size: 11.5px; }
+.service-line { margin: 0 0 14px; color: var(--ink-3); font-size: 12px; }
 .colophon { margin: 22px 0 0; color: var(--faint); font: 400 10.5px/1.6 var(--mono); }
 
 /* ---------------------------- command palette --------------------------- */
@@ -785,3 +786,20 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 /* A link that looks like the buttons beside it. */
 a.ghost-button { text-decoration: none; }
 @media (max-width: 820px) { .wheel-state small, .band-continue span { display: none; } }
+
+/* Windows High Contrast swaps every colour for the system's, so the washes and tints that tell the
+   band's state, and the tab you are on, vanish. Borders stay visible and the selected tab takes the
+   system's highlight; the state is still read from its word. */
+@media (forced-colors: active) {
+  .lampband { border-bottom: 1px solid CanvasText; }
+  .lamp-halo { display: none; }
+  .lamp-core { background: Highlight; box-shadow: none; forced-color-adjust: none; }
+  .state-word, .state-facts, .state-facts b,
+  body.runtime-working .state-word, body.runtime-held .state-word,
+  body.runtime-attention .state-word, body.runtime-blocked .state-word,
+  body.runtime-offline .state-word { color: CanvasText; }
+  .tab { border: 1px solid ButtonBorder; color: ButtonText; }
+  .tab:hover { border-color: Highlight; }
+  .tab.active { border-color: Highlight; background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .wheel, .ghost-button, .danger-button { border-color: ButtonBorder; color: ButtonText; }
+}

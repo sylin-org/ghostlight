@@ -248,7 +248,7 @@ impl Live {
         }
     }
 
-    /// The Controls sheet of one look, as the window sees it.
+    /// The controls part of one look, as the window sees it.
     pub fn controls(&self, gathered: &Gathered) -> ControlsPart {
         let facts = self.web.get();
         let report = self.diagnostics.report();

@@ -44,8 +44,9 @@ Milestone 1 is complete. Its follow-ups agent-refusal-own-origin and tidy-03 hav
 9b8f59c7 is deployed in place on the owner's machine (channel development); the new refusal reads
 as specified live. The coordinator ran demo parts 0 to 2 (see Live demo results); the owner runs
 the steps that change live state: Controls in the window, a Chrome bookmark, watching off and on,
-Quit and come back. Next: the shell track is planned again (Tauri out of the service, the
-service named "Ghostlight service", presence). Owner answer Q5 is closed: `ghostlight install` stops strays, and doctor's stray
+Quit and come back. Next: shell milestone 2 (Settings, the shell carries the desktop, Tauri out of
+the service, the service named "Ghostlight service", presence), which has its own ledger,
+[shell-m2.md](shell-m2.md). Owner answer Q5 is closed: `ghostlight install` stops strays, and doctor's stray
 sentence names it (polish-02-strays).
 
 ## Landed
@@ -96,8 +97,10 @@ every route but the pages and `/api/context`.
 | `/api/open` | POST | `{ destination }` or `{ product }`, exactly one | window | 403 | none | `open_destination`, `open_harness_download` |
 | `/api/diagnostics/reveal` | POST | yes | window | 403 | none | `reveal_diagnostics` |
 | `/api/integrations/locate` | POST | `{ id }`, answers the client result or `null` | window | 403 | none | `locate_harness` |
+| `/api/quit` | POST | `{}`, answers 202 and quits as the tray's Quit does (added by shell milestone 2, see [shell-m2.md](shell-m2.md)) | window | 403 | none | `quit_ghostlight` |
 
-Not routed, by design: `quit_ghostlight` and `copy_harness_text` (m1-07 copies in the page).
+Not routed, by design: `copy_harness_text` (m1-07 copies in the page). `quit_ghostlight` was not routed in
+this milestone; shell milestone 2 routes it as `POST /api/quit`, in Control only.
 
 `/api/events` answers `200 text/event-stream` with no length, ended by closing the connection. It
 writes `event: hello` with `{ context, instance, seq }`, then `id: <instance>-<seq>` and

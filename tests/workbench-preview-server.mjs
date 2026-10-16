@@ -100,7 +100,7 @@ if (JSON.stringify(actualHarnessIds) !== JSON.stringify(expectedHarnessIds)
   throw new Error(`preview harness roster drifted: ${harnesses.length} rows / ${previewProductCount} products`);
 }
 
-// The Controls sheet as the window sees it: every act available, watching on.
+// The controls part Settings is drawn from, as the window sees it: every act available, watching on.
 const controlsFixture = {
   runtime: {
     label: "Browser work", state: "active", word: "Running", note: null,
@@ -346,7 +346,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
           // The window's own context: every act is available, so the page draws all of it.
           const acts = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
             "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
-            "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"];
+            "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"];
           return {
             context: "control", word: "Full control",
             sentence: "Others on this computer can watch this view in a browser.",
@@ -367,6 +367,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
           return preview.controls;
         }
         if (command === "continue_in_window") return null;
+        if (command === "quit_ghostlight") return { message: "Ghostlight is quitting." };
         if (command === "workbench_snapshot") return preview;
         if (command === "workbench_search") return [];
         if (command === "workbench_policy") return policyView;

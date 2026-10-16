@@ -22,6 +22,7 @@ use crate::workbench::parts::{Part, USER_HOME_VARIABLE};
 use crate::workbench::tests::RecordingActs;
 use crate::workbench::WorkbenchDestination;
 use crate::workbench::WorkbenchPresentationPort;
+use crate::workbench::WorkbenchQuitPort;
 use crate::workbench::{WorkbenchNotification, WorkbenchPresentationError, WorkbenchProjection};
 
 const EXCLUDED_HOST: &str = "private-frame.invalid";
@@ -177,6 +178,22 @@ impl WorkbenchPresentationPort for CountingWindow {
 
     fn notify(&self, _: WorkbenchNotification) -> Result<(), WorkbenchPresentationError> {
         Ok(())
+    }
+}
+
+/// A quit port that counts how often the service was asked to end.
+#[derive(Default)]
+struct CountingQuit(std::sync::atomic::AtomicUsize);
+
+impl CountingQuit {
+    fn asked(&self) -> usize {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl WorkbenchQuitPort for CountingQuit {
+    fn quit(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -475,9 +492,12 @@ fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
         post("/api/open", r#"{"destination":"home"}"#),
         post("/api/diagnostics/reveal", "{}"),
         post("/api/integrations/locate", r#"{"id":"goose"}"#),
+        post("/api/quit", "{}"),
     ];
     let acts = Arc::new(RecordingActs::default());
     fixture.facade.attach_native_acts(acts.clone());
+    let quit = Arc::new(CountingQuit::default());
+    fixture.facade.attach_quit(quit.clone());
     for call in calls {
         let label = format!("{} {}", call.method, call.path);
         let reply = fixture.watch(call);
@@ -485,6 +505,7 @@ fn every_control_only_route_refuses_a_watcher_and_changes_nothing() {
         assert_eq!(reply.code(), "needs_window", "{label}");
     }
     assert_eq!(acts.asked(), 0);
+    assert_eq!(quit.asked(), 0);
     assert!(fixture.facade.watching());
     assert!(!fixture.root.join("state").join("watch.off").exists());
     assert_eq!(fixture.facade.policy().layers.len(), 0);
@@ -530,6 +551,7 @@ fn closed_serves_the_pages_and_the_product_and_nothing_else() {
         post("/api/open", r#"{"destination":"home"}"#),
         post("/api/diagnostics/reveal", "{}"),
         post("/api/integrations/locate", r#"{"id":"goose"}"#),
+        post("/api/quit", "{}"),
     ];
     let acts = Arc::new(RecordingActs::default());
     fixture.facade.attach_native_acts(acts.clone());
@@ -1321,6 +1343,79 @@ fn a_facade_with_no_server_reports_watching_on_and_no_address() {
     );
     assert!(facade.web_address().is_none());
     assert!(facade.watching());
+}
+
+#[test]
+fn the_window_quits_through_the_attached_port_and_is_told_so() {
+    let fixture = Fixture::start();
+    let unattached = fixture.control(post("/api/quit", "{}"));
+    assert_eq!(unattached.status, 422);
+    assert_eq!(unattached.code(), "refused");
+    assert_eq!(
+        unattached.json()["error"]["message"],
+        words::QUIT_UNAVAILABLE
+    );
+
+    let quit = Arc::new(CountingQuit::default());
+    fixture.facade.attach_quit(quit.clone());
+    let reply = fixture.control(post("/api/quit", "{}"));
+    assert_eq!(reply.status, 202);
+    assert_eq!(reply.json(), json!({ "message": words::QUITTING }));
+    assert_eq!(quit.asked(), 1);
+}
+
+#[test]
+fn quit_is_the_windows_alone_and_a_closed_view_cannot_reach_it() {
+    let watched = Fixture::start();
+    let quit = Arc::new(CountingQuit::default());
+    watched.facade.attach_quit(quit.clone());
+    let watcher = watched.watch(post("/api/quit", "{}"));
+    assert_eq!(watcher.status, 401);
+    assert_eq!(watcher.code(), "needs_window");
+    assert_eq!(watcher.json()["error"]["message"], words::CHANGE_IN_WINDOW);
+
+    let closed = Fixture::closed();
+    let closed_quit = Arc::new(CountingQuit::default());
+    closed.facade.attach_quit(closed_quit.clone());
+    let refused = closed.watch(post("/api/quit", "{}"));
+    assert_eq!(refused.status, 403);
+    assert_eq!(refused.code(), "watching_off");
+    assert_eq!(quit.asked() + closed_quit.asked(), 0);
+
+    // The window can still end Ghostlight while watching is off.
+    assert_eq!(closed.control(post("/api/quit", "{}")).status, 202);
+    assert_eq!(closed_quit.asked(), 1);
+}
+
+#[test]
+fn a_quit_from_another_site_or_with_arguments_is_refused() {
+    let fixture = Fixture::start();
+    let quit = Arc::new(CountingQuit::default());
+    fixture.facade.attach_quit(quit.clone());
+    let foreign = fixture.control(
+        post("/api/quit", "{}")
+            .header("Origin", "http://evil.example")
+            .header("Sec-Fetch-Site", "cross-site"),
+    );
+    assert_eq!(foreign.status, 403);
+    assert_eq!(foreign.code(), "cross_site");
+    let with_arguments = fixture.control(post("/api/quit", r#"{"now":true}"#));
+    assert_eq!(with_arguments.status, 400);
+    let wrong_method = fixture.control(get("/api/quit"));
+    assert_eq!(wrong_method.status, 405);
+    assert_eq!(quit.asked(), 0);
+}
+
+#[test]
+fn the_context_lists_quit_as_an_act_of_the_window_only() {
+    let fixture = Fixture::start();
+    let window = fixture.control(get("/api/context")).json();
+    assert_eq!(window["acts"]["quit"]["available"], true);
+    let tab = fixture.watch(get("/api/context")).json();
+    assert_eq!(tab["acts"]["quit"]["available"], false);
+    assert_eq!(tab["acts"]["quit"]["why_not"], words::CHANGE_IN_WINDOW);
+    let closed = Fixture::closed().watch(get("/api/context")).json();
+    assert!(closed.get("acts").is_none());
 }
 
 #[test]
@@ -2133,7 +2228,7 @@ fn a_facade_that_is_not_served_does_not_claim_anyone_can_watch() {
 }
 
 #[test]
-fn diagnostics_turned_on_from_a_terminal_reach_the_sheet_within_one_refresher_tick() {
+fn diagnostics_turned_on_from_a_terminal_reach_settings_within_one_refresher_tick() {
     let fixture = Fixture::start();
     let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
     window.hello();

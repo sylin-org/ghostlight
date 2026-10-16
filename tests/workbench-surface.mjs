@@ -59,6 +59,22 @@ nodes.get("confirm-dialog").querySelector = (selector) =>
 const reported = [];
 let heartbeat = false;
 
+// The address bar of a page: what the page reads on load, and what it writes in place of a new
+// history entry.
+const addressBar = (hash = "") => {
+  const bar = { hash, replaced: [], pushed: [] };
+  bar.history = {
+    replaceState: (_state, _title, url) => {
+      bar.replaced.push(url);
+      bar.hash = url;
+    },
+    pushState: (_state, _title, url) => bar.pushed.push(url)
+  };
+  return bar;
+};
+const nativeBar = addressBar();
+const QUITTING_SENTENCE = "Ghostlight is quitting.";
+
 // The controls part exactly as the service shapes it: every act says whether this context may do
 // it, and `you` names the context. The window may do all of it; a watcher may only pause.
 const SHEET_WHY = "Change this in the Ghostlight window.";
@@ -113,7 +129,7 @@ const controlContext = {
   instance: "instance_1", opener: "service",
   acts: Object.fromEntries(["search", "check_policy", "rescan", "continue_in_window", "hold", "resume",
     "start_session", "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching",
-    "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate"]
+    "setup_all", "harness_act", "test_notification", "open", "reveal_diagnostics", "locate", "quit"]
     .map((act) => [act, { available: true, why_not: null }])),
   product: { version: "1.0.0", license: "Apache-2.0 OR MIT" },
   links: {}
@@ -190,12 +206,15 @@ const sandbox = {
   },
   window: {
     addEventListener: (kind) => listeners.push(`window:${kind}`),
+    location: nativeBar,
+    history: nativeBar.history,
     __TAURI__: {
       core: { invoke: async (cmd, args) => {
         invoked.push(cmd);
         if (cmd === "workbench_context") return controlContext;
         if (cmd === "set_diagnostics") return { layer: args.on ? "marker" : "off", directory: null, used_bytes: 0 };
         if (cmd === "continue_in_window") return null;
+        if (cmd === "quit_ghostlight") return { message: QUITTING_SENTENCE };
         if (cmd === "workbench_snapshot") return snapshot();
         if (cmd === "workbench_policy" && policyReply) return policyReply();
         if (cmd === "setup_detected_harnesses") {
@@ -267,11 +286,17 @@ sandbox.globalThis.__second = true;
 const before = sandbox.__aboutAttempts ?? 0;
 await new Promise((r) => setTimeout(r, 60));
 
-// The Controls sheet as the first snapshot drew it, read before anything below repaints it.
+// Settings as the first snapshot drew it, read before anything below repaints it.
 const sheetNode = (id) => nodes.get(id);
 const sheetAfterBoot = {
-  open: sheetNode("controls-open").hidden,
-  service: sheetNode("controls-service").textContent,
+  railScreen: sheetNode("rail-screen-state").textContent,
+  railSharing: sheetNode("rail-sharing-state").textContent,
+  railBrowserWork: sheetNode("rail-browser-work-state").textContent,
+  railNotifications: sheetNode("rail-notifications-state").textContent,
+  railDiagnostics: sheetNode("rail-diagnostics-state").textContent,
+  who: sheetNode("settings-sharing-who").textContent,
+  quitShown: !sheetNode("settings-quit").hidden,
+  service: sheetNode("status-service").textContent,
   runtimeLabel: sheetNode("controls-runtime-label").textContent,
   runtimeWord: sheetNode("controls-runtime-word").textContent,
   hold: sheetNode("controls-hold").hidden,
@@ -289,9 +314,11 @@ const sheetAfterBoot = {
   diagnosticsReveal: sheetNode("controls-diagnostics-reveal").hidden,
   notificationsWord: sheetNode("controls-notifications-word").textContent,
   test: sheetNode("test-notification").hidden,
-  continueLine: sheetNode("controls-continue").hidden,
+  continueLine: sheetNode("settings-sharing-continue").hidden,
   chip: sheetNode("context-chip").textContent,
-  chipTitle: sheetNode("context-chip").title
+  chipTitle: sheetNode("context-chip").title,
+  address: nativeBar.replaced.length,
+  errors: [...reported]
 };
 
 // The orchestrator pushes a changed status. The band, the wheel and the sentence behind the word
@@ -536,6 +563,8 @@ pushChange({
   change: { kind: "controls_changed", controls: controlsPart({ watch: false, layer: "off" }) }
 });
 const sheetAfterPush = {
+  railSharing: sheetNode("rail-sharing-state").textContent,
+  railDiagnostics: sheetNode("rail-diagnostics-state").textContent,
   viewingWord: sheetNode("controls-viewing-word").textContent,
   viewingToggle: sheetNode("controls-viewing-toggle").textContent,
   diagnosticsWord: sheetNode("controls-diagnostics-word").textContent,
@@ -788,7 +817,7 @@ const CLOSED_SENTENCE = "Watching is off on this computer. Turn it on in the Gho
 const LINKS = { home: "https://example.test/home", source: "https://example.test/source" };
 const ACT_KEYS = ["search", "check_policy", "rescan", "continue_in_window", "hold", "resume", "start_session",
   "end_session", "apply_policy", "remove_policy", "set_diagnostics", "set_watching", "setup_all", "harness_act",
-  "test_notification", "open", "reveal_diagnostics", "locate"];
+  "test_notification", "open", "reveal_diagnostics", "locate", "quit"];
 const WATCHER_ACTS = new Set(["search", "check_policy", "rescan", "continue_in_window", "hold"]);
 
 const contextFor = (kind) => {
@@ -928,6 +957,7 @@ function fakeService(kind, { served = true } = {}) {
       Promise.resolve().then(() => emit({ kind: "controls_changed", controls: controls() }));
       return answer;
     }
+    if (url.pathname === "/api/quit") return reply(202, { message: QUITTING_SENTENCE });
     if (url.pathname === "/api/integrations/rescan") return reply(200, roster(), { "ghostlight-seq": String(state.seq) });
     if (url.pathname === "/api/window" || url.pathname === "/api/open") return reply(200, {});
     if (url.pathname === "/api/policy") {
@@ -947,8 +977,9 @@ function fakeService(kind, { served = true } = {}) {
 }
 
 /** One page: the real modules over a stub document, with no native shell. */
-function bootHttpPage(kind, options) {
+function bootHttpPage(kind, options = {}) {
   const service = fakeService(kind, options);
+  const bar = addressBar(options.hash ?? "");
   const pageNodes = new Map(ids.map((id) => [id, node(id)]));
   // The markup says which elements start out hidden; the stub starts from the same truth.
   const startsHidden = new Set([...markup.matchAll(/<[^>]*\bid="([^"]+)"[^>]*>/g)]
@@ -979,6 +1010,8 @@ function bootHttpPage(kind, options) {
     },
     window: {
       addEventListener: (type, handler) => pageWindowHandlers.set(type, handler),
+      location: bar,
+      history: bar.history,
       fetch: service.fetch,
       open: (...args) => opened.push(args)
     },
@@ -1006,7 +1039,7 @@ function bootHttpPage(kind, options) {
     click({ closest: (asked) => (asked === selector ? element : null) });
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const text = (id) => pageNodes.get(id);
-  return { service, page, nodes: pageNodes, opened, reported: pageReported, copied, click, clickOn, settle,
+  return { service, page, bar, nodes: pageNodes, opened, reported: pageReported, copied, click, clickOn, settle,
     text, threw, windowHandlers: pageWindowHandlers, documentHandlers: pageDocumentHandlers,
     handlers: pageElementHandlers };
 }
@@ -1023,14 +1056,22 @@ const watchOpening = {
   setup: watching.text("setup-integrations").hidden,
   endSession: watching.text("controls-end").hidden,
   sendTest: watching.text("test-notification").hidden,
-  sheetOpen: watching.text("controls-open").hidden,
   sheetPause: watching.text("controls-hold").hidden,
   sheetViewingToggle: watching.text("controls-viewing-toggle").hidden,
   sheetDiagnosticsToggle: watching.text("controls-diagnostics-toggle").hidden,
   sheetReveal: watching.text("controls-diagnostics-reveal").hidden,
-  sheetContinue: watching.text("controls-continue").hidden,
-  sheetContinueWhy: watching.text("controls-continue-why").textContent,
+  sheetContinue: watching.text("settings-sharing-continue").hidden,
+  sheetContinueWhy: watching.text("settings-sharing-why").textContent,
+  sheetContinues: ["sharing", "browser-work", "notifications", "diagnostics"]
+    .map((section) => [watching.text(`settings-${section}-continue`).hidden, watching.text(`settings-${section}-why`).textContent]),
   sheetViewingWord: watching.text("controls-viewing-word").textContent,
+  quitHidden: watching.text("settings-quit").hidden,
+  who: watching.text("settings-sharing-who").textContent,
+  rail: ["screen", "sharing", "browser-work", "notifications", "diagnostics"]
+    .map((section) => watching.text(`rail-${section}-state`).textContent),
+  statusService: watching.text("status-service").textContent,
+  statusServiceHidden: watching.text("status-service").hidden,
+  addressWritten: watching.bar.replaced.length,
   recheck: watching.text("refresh-integrations").hidden,
   wheelHidden: watching.text("wheel").hidden,
   bandContinue: watching.text("band-continue").hidden,
@@ -1061,7 +1102,7 @@ const watchHeld = {
   sheetRuntime: watching.text("controls-runtime-word").textContent,
   sheetNote: watching.text("controls-runtime-note").textContent,
   sheetResume: watching.text("controls-resume").hidden,
-  sheetContinue: watching.text("controls-continue").hidden
+  sheetContinue: watching.text("settings-browser-work-continue").hidden
 };
 const watchBeforeAbout = watchRequests().length;
 watching.clickOn("[data-destination]", { dataset: { destination: "home" } });
@@ -1085,12 +1126,15 @@ const controlOpening = {
   setup: controlling.text("setup-integrations").hidden,
   endSession: controlling.text("controls-end").hidden,
   sendTest: controlling.text("test-notification").hidden,
-  sheetOpen: controlling.text("controls-open").hidden,
   sheetPause: controlling.text("controls-hold").hidden,
   sheetViewingToggle: controlling.text("controls-viewing-toggle").hidden,
   sheetDiagnosticsToggle: controlling.text("controls-diagnostics-toggle").hidden,
   sheetReveal: controlling.text("controls-diagnostics-reveal").hidden,
-  sheetContinue: controlling.text("controls-continue").hidden,
+  sheetContinues: ["sharing", "browser-work", "notifications", "diagnostics"].map((section) => controlling.text(`settings-${section}-continue`).hidden),
+  quitHidden: controlling.text("settings-quit").hidden,
+  who: controlling.text("settings-sharing-who").textContent,
+  statusService: controlling.text("status-service").textContent,
+  addressWritten: controlling.bar.replaced.length,
   wheelHidden: controlling.text("wheel").hidden,
   bandContinue: controlling.text("band-continue").hidden,
   rosterLineHidden: controlling.text("integrations-continue").hidden,
@@ -1120,37 +1164,44 @@ await controlling.settle();
 const controlOpenedLinks = controlling.opened.length;
 const openRequest = controlRequests.find((request) => request.path === "/api/open");
 
-// The Controls sheet of the window: the button opens it, a press inside it acts through the
-// transport, and its state follows the change the act caused without a snapshot.
-const clickInSheet = (page, selector, element) => page.click({
-  closest: (asked) => (asked === selector ? element : asked === "#controls-sheet" ? page.text("controls-sheet") : null)
+// Settings in the window: a press inside it acts through the transport, and its state follows the
+// change the act caused without a snapshot.
+const clickInSettings = (page, selector, element) => page.click({
+  closest: (asked) => (asked === selector ? element : asked === "#view-settings" ? page.text("view-settings") : null)
 });
-const keyOn = (page, key) => {
-  for (const handler of page.documentHandlers.get("keydown") ?? []) handler({ key, preventDefault() {} });
-};
-controlling.clickOn("#controls-open", controlling.text("controls-open"));
-const sheetOpened = controlling.text("controls-sheet").hidden === false;
+const where = (page) => ({
+  view: vm.runInContext("view.showing()", page.page),
+  section: vm.runInContext("view.showingSection()", page.page),
+  hash: page.bar.hash,
+  replaced: [...page.bar.replaced],
+  pushed: [...page.bar.pushed]
+});
 const controlSnapshotsBeforeSheet = controlSnapshots();
-clickInSheet(controlling, "[data-viewing]", { dataset: { viewing: "toggle" }, disabled: false });
+clickInSettings(controlling, "[data-viewing]", { dataset: { viewing: "toggle" }, disabled: false });
 await controlling.settle();
 await controlling.settle();
 await controlling.settle();
 const viewingRequest = controlRequests.find((request) => request.path === "/api/controls/viewing");
 const sheetAfterOff = {
+  rail: controlling.text("rail-sharing-state").textContent,
+  who: controlling.text("settings-sharing-who").textContent,
   word: controlling.text("controls-viewing-word").textContent,
   toggle: controlling.text("controls-viewing-toggle").textContent,
   chipTitle: controlling.text("context-chip").title,
   snapshots: controlSnapshots() - controlSnapshotsBeforeSheet
 };
-clickInSheet(controlling, "[data-intent]", { dataset: { intent: "end_session" }, disabled: false });
+clickInSettings(controlling, "[data-intent]", { dataset: { intent: "end_session" }, disabled: false });
 await controlling.settle();
 await controlling.settle();
 const intentRequests = controlRequests.filter((request) => request.path === "/api/runtime");
-keyOn(controlling, "Escape");
-const sheetClosedByEscape = controlling.text("controls-sheet").hidden === true;
-controlling.clickOn("#controls-open", controlling.text("controls-open"));
-controlling.click({ closest: () => null });
-const sheetClosedByOutsideClick = controlling.text("controls-sheet").hidden === true;
+
+// The rail: an entry shows its section and writes its address in place, the tab returns to the
+// section shown last, and the band's own wheel is not Settings' to answer.
+controlling.clickOn("[data-settings-section]", { dataset: { settingsSection: "browser-work" } });
+const afterRail = where(controlling);
+controlling.clickOn("[data-view]", { dataset: { view: "about" } });
+controlling.clickOn("[data-view]", { dataset: { view: "settings" } });
+const afterTab = where(controlling);
 
 // The rules: the tag the page read is the tag a write quotes, and a stale refusal keeps the draft.
 controlling.clickOn("[data-view]", { dataset: { view: "policy" } });
@@ -1179,6 +1230,39 @@ await controlling.settle();
 await controlling.settle();
 const writes = controlRequests.filter((request) => request.path === "/api/policy/user");
 
+// Quit asks first, inline; only the second press goes to the service, and the band then says the
+// service is quitting instead of reconnecting.
+const quitRequests = () => controlRequests.filter((request) => request.path === "/api/quit");
+const quitAsk = { dataset: { quit: "ask" }, disabled: false };
+const quitYes = { dataset: { quit: "yes" }, disabled: false };
+const quitNo = { dataset: { quit: "no" }, disabled: false };
+clickInSettings(controlling, "[data-quit]", quitAsk);
+const quitAsked = {
+  question: controlling.text("settings-quit-question").hidden === false,
+  ask: controlling.text("settings-quit-ask").hidden,
+  requests: quitRequests().length
+};
+clickInSettings(controlling, "[data-quit]", quitNo);
+const quitCancelled = {
+  question: controlling.text("settings-quit-question").hidden,
+  ask: controlling.text("settings-quit-ask").hidden,
+  requests: quitRequests().length
+};
+clickInSettings(controlling, "[data-quit]", quitAsk);
+clickInSettings(controlling, "[data-quit]", quitYes);
+await controlling.settle();
+await controlling.settle();
+await controlling.settle();
+const quitDone = {
+  requests: quitRequests().map((request) => [request.method, request.body, request.headers.Authorization]),
+  word: controlling.text("state-word").textContent,
+  wheelDisabled: controlling.text("wheel").disabled,
+  showing: vm.runInContext("view.showing()", controlling.page)
+};
+// A stream lost and found again under a quitting page does not turn the sentence back into "Reconnecting".
+vm.runInContext("view.reconnecting(true); view.reconnecting(false)", controlling.page);
+const quitAfterReconnect = controlling.text("state-word").textContent;
+
 // ---- Control, with no watch view served -------------------------------------------------------
 const unserved = bootHttpPage("control", { served: false });
 await unserved.settle();
@@ -1187,7 +1271,7 @@ const unservedSheet = {
   viewingWord: unserved.text("controls-viewing-word").textContent,
   viewingToggle: unserved.text("controls-viewing-toggle").hidden,
   viewingCopy: unserved.text("controls-viewing-copy").hidden,
-  continueLine: unserved.text("controls-continue").hidden,
+  continueLine: unserved.text("settings-sharing-continue").hidden,
   pause: unserved.text("controls-hold").hidden
 };
 
@@ -1203,6 +1287,17 @@ closedPage.clickOn("[data-view]", { dataset: { view: "policy" } });
 await closedPage.settle();
 closedPage.clickOn("[data-destination]", { dataset: { destination: "source" } });
 await closedPage.settle();
+const closedSettings = {
+  lines: ["sharing", "browser-work", "notifications", "diagnostics"].map((section) => [
+    closedPage.text(`settings-${section}-closed`).textContent,
+    closedPage.text(`settings-${section}-closed`).hidden,
+    closedPage.text(`settings-${section}-rows`).hidden,
+    closedPage.text(`rail-${section}-state`).textContent
+  ]),
+  rail: closedPage.text("rail-screen-state").textContent,
+  quitHidden: closedPage.text("settings-quit").hidden,
+  statusService: closedPage.text("status-service").textContent
+};
 const closedState = {
   requests: closedRequests.map((request) => `${request.method} ${request.path}`),
   chip: closedPage.text("context-chip").textContent,
@@ -1210,6 +1305,44 @@ const closedState = {
   wordText: closedPage.text("state-word").textContent,
   opened: closedPage.opened.map((call) => [...call])
 };
+
+// ---- Addresses: every tab has one, and a page opens on the one it is given ------------------------
+const addressed = async (kind, hash) => {
+  const opened = bootHttpPage(kind, { hash });
+  await opened.settle();
+  await opened.settle();
+  return opened;
+};
+const atSection = await addressed("control", "#settings/sharing");
+const atSectionWhere = where(atSection);
+const atBare = await addressed("control", "#settings");
+const atBareWhere = where(atBare);
+const atUnknown = await addressed("control", "#nowhere");
+const atUnknownWhere = where(atUnknown);
+const atNothing = await addressed("control", "");
+const atNothingWhere = where(atNothing);
+const atPolicy = await addressed("control", "#policy");
+const policyReadsAtAddress = atPolicy.service.state.requests.filter((request) => request.path === "/api/policy").length;
+const atWatch = await addressed("watch", "#settings/browser-work");
+const atWatchWhere = where(atWatch);
+const atClosed = await addressed("closed", "#settings/diagnostics");
+const atClosedWhere = where(atClosed);
+const atClosedLine = atClosed.text("settings-diagnostics-closed").textContent;
+// A hash typed or followed afterwards moves the page, and nothing is added to the history.
+atNothing.bar.hash = "#settings/diagnostics";
+atNothing.windowHandlers.get("hashchange")();
+await atNothing.settle();
+const afterHashChange = where(atNothing);
+atNothing.bar.hash = "#about";
+atNothing.windowHandlers.get("hashchange")();
+const afterAbout = where(atNothing);
+atNothing.bar.hash = "#settings/nowhere";
+atNothing.windowHandlers.get("hashchange")();
+const afterUnknownChange = where(atNothing);
+atNothing.bar.hash = "";
+atNothing.windowHandlers.get("hashchange")();
+const afterEmptyChange = where(atNothing);
+const addressedPages = [atSection, atBare, atUnknown, atNothing, atPolicy, atWatch, atClosed];
 
 const httpChecks = [
   ["over HTTP a watching page says so in its chip and keeps the service's sentence beside it",
@@ -1228,16 +1361,25 @@ const httpChecks = [
       && watchOpening.roster.includes('<a class="ghost-button" href="https://example.test/qwen"')
       && !watchOpening.roster.includes('data-harness-operation="download"'),
     watchOpening.roster],
-  ["a watching page shows one Continue line for the roster and one for the Controls sheet, none on Status",
+  ["a watching page shows one Continue line for the roster, one for each section of Settings and none on Status",
     watchOpening.rosterLineHidden === false && watchOpening.rosterLine.includes(CONTINUE_SENTENCE)
       && watchOpening.rosterLine.includes("data-continue") && watchOpening.rosterLine.includes("Continue in the Ghostlight window")
       && !watchOpening.status.includes("data-continue")
-      && watchOpening.sheetContinue === false && watchOpening.sheetContinueWhy === CONTINUE_SENTENCE,
+      && watchOpening.sheetContinue === false && watchOpening.sheetContinueWhy === CONTINUE_SENTENCE
+      && watchOpening.sheetContinues.every(([hidden, why]) => hidden === false && why === CONTINUE_SENTENCE),
     watchOpening.rosterLine + watchOpening.status],
-  ["a watching page has the Controls button and the sheet shows Pause while agents run, the rest as state",
-    watchOpening.sheetOpen === false && watchOpening.sheetPause === false
-      && watchOpening.sheetViewingWord === "On -- anyone on this computer can open this view",
+  ["Settings in a watching page shows Pause while agents run and the rest as state, with no Quit",
+    watchOpening.sheetPause === false && watchOpening.quitHidden === true
+      && watchOpening.sheetViewingWord === "On -- anyone on this computer can open this view"
+      && JSON.stringify(watchOpening.rail) === JSON.stringify([
+        "Comfortable, motion follows the system", "On -- anyone on this computer can open this view", "Running",
+        "Send one local checkup notification. Nothing leaves this device.", "On (marker)"]),
     JSON.stringify(watchOpening)],
+  ["Sharing says who can see a watching page, and Status carries the service's sentence at its top",
+    watchOpening.who === SHEET_WATCHER
+      && watchOpening.statusService === "Ghostlight service is up; 1 MCP client and 1 browser connected."
+      && watchOpening.statusServiceHidden === false,
+    JSON.stringify({ who: watchOpening.who, status: watchOpening.statusService })],
   ["a watching page draws the wheel while agents are running, and Apply as a way to the window",
     watchOpening.wheelHidden === false && watchOpening.bandContinue === true
       && watchOpening.apply === "Apply in the Ghostlight window",
@@ -1276,24 +1418,59 @@ const httpChecks = [
       && controlOpening.roster.includes(">Fix</button>") && controlOpening.roster.includes(">Locate</button>")
       && controlOpening.roster.includes('data-harness-operation="download"')
       && controlOpening.roster.includes('data-harness-state="updatable"')
-      && controlOpening.sheetOpen === false && controlOpening.sheetPause === false
+      && controlOpening.sheetPause === false
       && controlOpening.sheetViewingToggle === false && controlOpening.sheetDiagnosticsToggle === false
-      && controlOpening.sheetReveal === false && controlOpening.sheetContinue === true,
+      && controlOpening.sheetReveal === false && controlOpening.sheetContinues.every((hidden) => hidden === true),
     JSON.stringify({ ...controlOpening, roster: undefined, status: undefined })],
+  ["the window's Settings offers Quit, says who can see, and Status carries the service's sentence",
+    controlOpening.quitHidden === false && controlOpening.who === SHEET_WATCHED
+      && controlOpening.statusService === "Ghostlight service is up; 1 MCP client and 1 browser connected."
+      && controlOpening.addressWritten === 0,
+    JSON.stringify({ quit: controlOpening.quitHidden, who: controlOpening.who, status: controlOpening.statusService })],
   ["the window with no watch view served says so once, offers no toggle, and does not send itself to the window",
     unservedSheet.viewingWord === SHEET_NOT_SERVED && unservedSheet.viewingToggle === true
       && unservedSheet.viewingCopy === true && unservedSheet.continueLine === true
       && unservedSheet.pause === false && unserved.threw === null && unserved.reported.length === 0,
     JSON.stringify({ unservedSheet, threw: unserved.threw, reported: unserved.reported })],
-  ["the window's Controls button opens the sheet, and Escape or a click outside closes it",
-    sheetOpened && sheetClosedByEscape && sheetClosedByOutsideClick,
-    JSON.stringify({ sheetOpened, sheetClosedByEscape, sheetClosedByOutsideClick })],
-  ["Turn off in the sheet is one keyed PUT, waited for as a change, and the chip says only this window shows Ghostlight",
+  ["a rail entry shows its section and writes its address in place, and the Settings tab returns to the last one",
+    afterRail.view === "settings" && afterRail.section === "browser-work" && afterRail.hash === "#settings/browser-work"
+      && afterRail.pushed.length === 0 && afterTab.view === "settings" && afterTab.hash === "#settings/browser-work"
+      && afterTab.pushed.length === 0,
+    JSON.stringify({ afterRail, afterTab })],
+  ["Turn off in Settings is one keyed PUT, waited for as a change; the rail, the sentence and the chip follow",
     viewingRequest?.method === "PUT" && viewingRequest.body === '{"watch":false}'
       && viewingRequest.headers.Authorization === "Bearer key-1" && viewingRequest.credentials === "omit"
       && sheetAfterOff.word === "Off -- only this window shows Ghostlight" && sheetAfterOff.toggle === "Turn on"
+      && sheetAfterOff.rail === "Off -- only this window shows Ghostlight" && sheetAfterOff.who === SHEET_PRIVATE
       && sheetAfterOff.chipTitle === SHEET_PRIVATE && sheetAfterOff.snapshots === 0,
     JSON.stringify({ viewingRequest, sheetAfterOff })],
+  ["Quit asks inline first, Cancel puts the button back, and only the second press is one keyed POST",
+    quitAsked.question && quitAsked.ask === true && quitAsked.requests === 0
+      && quitCancelled.question === true && quitCancelled.ask === false && quitCancelled.requests === 0
+      && JSON.stringify(quitDone.requests) === JSON.stringify([["POST", "{}", "Bearer key-1"]]),
+    JSON.stringify({ quitAsked, quitCancelled, quitDone })],
+  ["after Quit the band says Ghostlight is quitting, not Reconnecting, and cannot be pressed",
+    quitDone.word === QUITTING_SENTENCE && quitDone.wheelDisabled === true && quitAfterReconnect === QUITTING_SENTENCE,
+    JSON.stringify({ quitDone, quitAfterReconnect })],
+  ["the window opens on a typed address, a bare one is made whole, an unknown one falls back, and none adds history",
+    atSectionWhere.view === "settings" && atSectionWhere.section === "sharing" && atSectionWhere.replaced.length === 0
+      && atBareWhere.view === "settings" && atBareWhere.hash === "#settings/screen"
+      && atUnknownWhere.view === "monitor" && atUnknownWhere.hash === "#monitor"
+      && atNothingWhere.view === "monitor" && atNothingWhere.replaced.length === 0
+      && addressedPages.every((opened) => opened.bar.pushed.length === 0),
+    JSON.stringify({ atSectionWhere, atBareWhere, atUnknownWhere, atNothingWhere })],
+  ["a page opened on #policy reads the rules once, as a click on the tab does",
+    policyReadsAtAddress === 1, `reads=${policyReadsAtAddress}`],
+  ["a hash that changes under an open page moves it, an unknown one falls back, and an emptied one opens the default",
+    afterHashChange.view === "settings" && afterHashChange.section === "diagnostics"
+      && afterAbout.view === "about" && afterUnknownChange.view === "monitor" && afterUnknownChange.hash === "#monitor"
+      && afterEmptyChange.view === "monitor",
+    JSON.stringify({ afterHashChange, afterAbout, afterUnknownChange, afterEmptyChange })],
+  ["a watching page and a closed one open on a section too",
+    atWatchWhere.view === "settings" && atWatchWhere.section === "browser-work"
+      && atClosedWhere.view === "settings" && atClosedWhere.section === "diagnostics"
+      && atClosedLine === CLOSED_SENTENCE,
+    JSON.stringify({ atWatchWhere, atClosedWhere, atClosedLine })],
   ["End session in the sheet asks for the end_session intent",
     intentRequests.some((request) => request.body === '{"intent":"end_session"}'),
     JSON.stringify(intentRequests.map((request) => request.body))],
@@ -1321,6 +1498,12 @@ const httpChecks = [
     writes.length === 2 && writes[1].headers["If-Match"] === '"tag-2"'
       && controlling.text("toast").textContent === "Your rules are applied.",
     JSON.stringify(writes.map((request) => request.headers))],
+  ["a closed page keeps This screen and gives every other section one line saying watching is off",
+    closedSettings.lines.every(([line, lineHidden, rowsHidden, rail]) =>
+      line === CLOSED_SENTENCE && lineHidden === false && rowsHidden === true && rail === "")
+      && closedSettings.rail === "Comfortable, motion follows the system" && closedSettings.quitHidden === true
+      && closedSettings.statusService === "",
+    JSON.stringify(closedSettings)],
   ["a closed page asks for its context and nothing else",
     JSON.stringify(closedState.requests) === JSON.stringify(["GET /api/context"]),
     JSON.stringify(closedState.requests)],
@@ -1336,7 +1519,10 @@ const httpChecks = [
   ["a closed page opens an About link in a new tab", closedState.opened.length === 1
     && closedState.opened[0][0] === LINKS.source, JSON.stringify(closedState.opened)],
   ["no page threw while booting", [watching, controlling, closedPage].every((p) => p.threw === null && p.reported.length === 0),
-    JSON.stringify([watching, controlling, closedPage].map((p) => [p.threw, p.reported]))]
+    JSON.stringify([watching, controlling, closedPage].map((p) => [p.threw, p.reported]))],
+  ["no page opened on an address threw or reported",
+    addressedPages.every((p) => p.threw === null && p.reported.length === 0),
+    JSON.stringify(addressedPages.map((p) => [p.threw, p.reported]))]
 ];
 
 const checks = [
@@ -1347,8 +1533,8 @@ const checks = [
       && sheetAfterBoot.test === false && nodes.get("integrations-continue").hidden === true
       && nodes.get("band-continue").hidden === true && sheetAfterBoot.continueLine === true,
     `chip=${sheetAfterBoot.chip}`],
-  ["the Controls sheet is drawn from the snapshot's controls part in the service's words",
-    sheetAfterBoot.open === false && sheetAfterBoot.runtimeLabel === "Browser work"
+  ["Settings is drawn from the snapshot's controls part in the service's words, and Status carries the sentence",
+    sheetAfterBoot.runtimeLabel === "Browser work"
       && sheetAfterBoot.runtimeWord === "Running" && sheetAfterBoot.hold === false
       && sheetAfterBoot.resume === true && sheetAfterBoot.start === true
       && sheetAfterBoot.service === "Ghostlight service is up; 1 MCP client and 1 browser connected."
@@ -1357,13 +1543,23 @@ const checks = [
       && sheetAfterBoot.viewingToggle === "Turn off" && sheetAfterBoot.viewingToggleHidden === false
       && sheetAfterBoot.notificationsWord.startsWith("Send one local checkup notification"),
     JSON.stringify(sheetAfterBoot)],
-  ["the sheet's diagnostics row renders the state and both person acts",
+  ["the rail states the sections, and the window is offered Quit and told who can see",
+    sheetAfterBoot.railScreen === "Comfortable, motion follows the system"
+      && sheetAfterBoot.railSharing === "On -- anyone on this computer can open this view"
+      && sheetAfterBoot.railBrowserWork === "Running" && sheetAfterBoot.railDiagnostics === "On (marker)"
+      && sheetAfterBoot.railNotifications.startsWith("Send one local checkup notification")
+      && sheetAfterBoot.quitShown && sheetAfterBoot.who.startsWith("Others on this computer can watch")
+      && sheetAfterBoot.address === 0
+      && sheetAfterBoot.errors.every((error) => error.includes("deliberate About failure")),
+    JSON.stringify(sheetAfterBoot)],
+  ["the diagnostics section renders the state and both person acts",
     sheetAfterBoot.diagnosticsWord === "On (marker)" && sheetAfterBoot.diagnosticsPlace === "~/.cache/ghostlight (4.1 KB)"
       && sheetAfterBoot.diagnosticsToggle === "Turn off" && sheetAfterBoot.diagnosticsToggleHidden === false
       && sheetAfterBoot.diagnosticsReveal === false,
     JSON.stringify(sheetAfterBoot)],
-  ["a pushed controls part updates the sheet and redraws the chip from the context it names, with no snapshot",
-    sheetAfterPush.viewingWord === "Off -- only this window shows Ghostlight"
+  ["a pushed controls part updates Settings and redraws the chip from the context it names, with no snapshot",
+    sheetAfterPush.railSharing === "Off -- only this window shows Ghostlight" && sheetAfterPush.railDiagnostics === "Off"
+      && sheetAfterPush.viewingWord === "Off -- only this window shows Ghostlight"
       && sheetAfterPush.viewingToggle === "Turn on" && sheetAfterPush.diagnosticsWord === "Off"
       && sheetAfterPush.diagnosticsToggle === "Turn on" && sheetAfterPush.chip === "Full control"
       && sheetAfterPush.chipTitle === SHEET_PRIVATE && sheetAfterPush.snapshots === 0,
@@ -1375,7 +1571,7 @@ const checks = [
         && !status.includes("runtime-strip") && !status.includes("notifications-strip")
         && !nodes.get("diagnostic-grid").innerHTML.includes("Process diagnostics");
     })(),
-    "the Status page still carries a control that moved to the sheet"],
+    "the Status page still carries a control that moved to Settings"],
   ["a pushed status changes the word, the sentence behind it and the wheel with no snapshot",
     wordBeforePush === "Ready" && wordAfterPush === "Paused"
       && wordTitleAfterPush === "Paused from the tray."
@@ -1554,6 +1750,7 @@ const checks = [
     `board: ${JSON.stringify(board)}`],
   ["the permanent boundaries are shown, Ghostlight's own control page among them",
     nodes.get("policy-ceilings").innerHTML.includes("not an ordinary http or https address")
+      && nodes.get("policy-ceilings").innerHTML.includes("own control page on this computer is never automated")
       && !nodes.get("policy-ceilings").innerHTML.includes("localhost")],
   ["the organization is named in its own words, with somewhere to ask",
     organization.includes("Example Org")
@@ -1632,6 +1829,22 @@ const checks = [
   ["the broken panel was attempted, not skipped", before > 0, `attempts: ${before}`]
 ];
 
+// Quit from the native window reaches the shell's own command, and the band then says so. It runs
+// last, since the band stops vouching for anything afterwards.
+const nativeClick = (selector, element) => dispatchDocument("click", {
+  target: { closest: (asked) => (asked === selector ? element : asked === "#view-settings" ? nodes.get("view-settings") : null) }
+});
+nativeClick("[data-quit]", { dataset: { quit: "ask" }, disabled: false });
+nativeClick("[data-quit]", { dataset: { quit: "yes" }, disabled: false });
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+const nativeQuit = {
+  commands: invoked.filter((cmd) => cmd === "quit_ghostlight").length,
+  word: nodes.get("state-word").textContent
+};
+checks.push(["Quit in the native window is the shell's own command, and the band then says Ghostlight is quitting",
+  nativeQuit.commands === 1 && nativeQuit.word === QUITTING_SENTENCE, JSON.stringify(nativeQuit)]);
+
 let ok = true;
 for (const [name, pass, detail] of checks) {
   if (!pass) ok = false;
@@ -1640,4 +1853,3 @@ for (const [name, pass, detail] of checks) {
 if (!ok) process.exit(1);
 console.log("");
 console.log("workbench surface ok: a broken panel costs its own panel and nothing else");
-      && nodes.get("policy-ceilings").innerHTML.includes("own control page on this computer is never automated")

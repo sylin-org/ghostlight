@@ -31,27 +31,41 @@
   /** The band's word while the live stream is lost and being opened again. */
   const RECONNECTING = "Reconnecting";
 
-  /** Said after the Controls sheet turns "Others can watch" on. */
+  /** Said after Settings turns "Others can watch" on. */
   const WATCHING_TURNED_ON = "Others can watch again.";
 
-  /** Said after the Controls sheet turns "Others can watch" off. */
+  /** Said after Settings turns "Others can watch" off. */
   const WATCHING_TURNED_OFF = "Only this window shows Ghostlight now.";
 
-  /** Said after the Controls sheet sends the notification test. */
+  /** Said after Settings sends the notification test. */
   const TEST_NOTIFICATION_SENT = "Test notification sent.";
 
-  /** Said after the Controls sheet copies the address of the watch view. */
+  /** Said after Settings copies the address of the watch view. */
   const ADDRESS_COPIED = "Address copied.";
 
   /**
-   * The labels of the Controls sheet that belong to this page: its headings, its personal
-   * settings and the verb on each button. The service says everything else, in its own part.
+   * The sections of Settings, in the order of its rail.
+   *
+   * `id` is the section's address (`#settings/<id>`) and `word` names its label in SETTINGS.
    */
-  const CONTROLS = Object.freeze({
-    open: "Controls",
-    title: "Controls",
-    screen: "On this screen",
-    computer: "For Ghostlight on this computer",
+  const SETTINGS_SECTIONS = Object.freeze([
+    Object.freeze({ id: "screen", word: "sectionScreen" }),
+    Object.freeze({ id: "sharing", word: "sectionSharing" }),
+    Object.freeze({ id: "browser-work", word: "sectionBrowserWork" }),
+    Object.freeze({ id: "notifications", word: "sectionNotifications" }),
+    Object.freeze({ id: "diagnostics", word: "sectionDiagnostics" })
+  ]);
+
+  /**
+   * The labels of Settings that belong to this page: the rail, the personal settings, the verb on
+   * each button and the question Quit asks. The service says everything else, in its own part.
+   */
+  const SETTINGS = Object.freeze({
+    sectionScreen: "This screen",
+    sectionSharing: "Sharing",
+    sectionBrowserWork: "Browser work",
+    sectionNotifications: "Notifications",
+    sectionDiagnostics: "Diagnostics",
     density: "Density",
     comfortable: "Comfortable",
     compact: "Compact",
@@ -67,10 +81,22 @@
     copyAddress: "Copy address",
     openLogFolder: "Open log folder",
     sendTest: "Send test",
+    quitLabel: "Ghostlight",
+    quit: "Quit Ghostlight",
+    quitQuestion: "Quit now? Agents lose the browser until Ghostlight starts again.",
+    quitYes: "Quit",
+    quitNo: "Cancel",
     continueInWindow: CONTINUE_LABEL
   });
 
-  /** How a count of bytes reads on the Controls sheet. */
+  /** How the personal settings read together, as the rail's state word for This screen. */
+  function screenState(density, motion) {
+    const dense = density === "compact" ? SETTINGS.compact : SETTINGS.comfortable;
+    const moving = motion === "reduced" ? "motion reduced" : "motion follows the system";
+    return `${dense}, ${moving}`;
+  }
+
+  /** How a count of bytes reads in Settings. */
   function byteSize(bytes) {
     if (!Number.isFinite(bytes) || bytes < 1024) return `${Math.max(0, Math.floor(bytes || 0))} bytes`;
     const units = ["KB", "MB", "GB"];
@@ -84,7 +110,43 @@
   }
 
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
-  const VIEWS = { monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy", about: "About" };
+  const VIEWS = {
+    monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy",
+    settings: "Settings", about: "About"
+  };
+
+  /** The destination a page opens on, and the section of Settings it opens on. */
+  const DEFAULT_VIEW = "monitor";
+  const DEFAULT_SECTION = "screen";
+
+  /**
+   * Every address a tab, a rail entry or a typed hash can name, and no other.
+   *
+   * Search destinations are not addresses: they are the service's words for what a hit is about,
+   * and SEARCH_VIEWS turns them into a view.
+   */
+  const ADDRESSES = Object.freeze([
+    "monitor", "integrations", "status", "policy", "settings", "settings/screen", "settings/sharing",
+    "settings/browser-work", "settings/notifications", "settings/diagnostics", "about"
+  ]);
+
+  /**
+   * Read an address, with or without its leading `#`.
+   *
+   * Answers `{ view, section }`, or null when the text is not an address. `section` is null for
+   * every view but Settings, and for the bare `settings` address.
+   */
+  function parseAddress(text) {
+    const address = String(text ?? "").replace(/^#/, "");
+    if (!ADDRESSES.includes(address)) return null;
+    const [view, section] = address.split("/");
+    return { view, section: section ?? null };
+  }
+
+  /** The address of a view, and of a section when the view is Settings. */
+  function addressOf(view, section) {
+    return view === "settings" && section ? `settings/${section}` : view;
+  }
 
   /**
    * How long the band keeps saying "Working" after the last thing happened.
@@ -513,8 +575,10 @@
   ];
 
   return Object.freeze({ CHANGE_EVENT, HEARTBEAT_MS, FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
+    DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
-    WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONTROLS, byteSize,
+    WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
+    screenState, byteSize,
     neverTouchedCount, leftOutCount,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     GLYPHS, ACTIVITY_GLYPH, CAPABILITY_CLASS, TOOL_GLYPH, EFFECT_STORY, READINESS_NOTE,
