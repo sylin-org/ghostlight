@@ -2,9 +2,11 @@
 //!
 //! The browser adapter already bounds what it sends; this module bounds it again, because the
 //! service never trusts a size it did not check. An item always carries its handle, role, name,
-//! state and credential flag. An item adds `area` when the page puts it in a landmark and `form`
-//! when a form owns it (ADR-0198 decision 19); both are structure, so a credential-class control
-//! carries them too. A control adds `value`, `options`, `type`, `limits`, `hint`,
+//! state and credential flag. An item adds `context` and `nth` when its role and name repeat in
+//! the answer, to tell the repeats apart (ADR-0198 rule 1); a credential-class control never
+//! carries them. An item adds `area` when the page puts it in a landmark and `form` when a form
+//! owns it (ADR-0198 decision 19); both are structure, so a credential-class control carries
+//! them too. A control adds `value`, `options`, `type`, `limits`, `hint`,
 //! `group` and `error` only when the page gave them (ADR-0198 decision 7). A credential-class
 //! control carries its masked value and nothing else, whatever the adapter sent.
 
@@ -33,6 +35,8 @@ const TYPE_MAX: usize = 20;
 const HINT_MAX: usize = 120;
 /// The longest group name.
 const GROUP_MAX: usize = 80;
+/// The longest row or group label in `context`.
+const CONTEXT_MAX: usize = 80;
 /// The longest declared limit.
 const LIMIT_MAX: usize = 120;
 /// What a set credential-class value reads as.
@@ -56,6 +60,13 @@ pub(super) fn control_item(handle: &str, target: &ObservedTarget) -> Value {
     item.insert("target".into(), json!(handle));
     item.insert("role".into(), json!(bounded(&target.role, ROLE_MAX)));
     item.insert("name".into(), json!(bounded(&target.name, NAME_MAX)));
+    if !target.credential_class {
+        let context = target.context.as_deref().map(one_line);
+        insert_text(&mut item, "context", context.as_deref(), CONTEXT_MAX);
+        if let Some(nth) = target.nth {
+            item.insert("nth".into(), json!(nth));
+        }
+    }
     if let Some(area) = target.area.as_deref().and_then(PageArea::classify) {
         item.insert("area".into(), json!(area.word()));
     }
@@ -91,6 +102,11 @@ pub(super) fn control_item(handle: &str, target: &ObservedTarget) -> Value {
     insert_text(&mut item, "group", target.group.as_deref(), GROUP_MAX);
     insert_text(&mut item, "error", target.error.as_deref(), HINT_MAX);
     Value::Object(item)
+}
+
+/// The text on one line: every run of whitespace, line breaks included, becomes a single space.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Add a bounded text key when the text is present and not empty.
@@ -215,6 +231,49 @@ mod tests {
 
         let bare = control_item("target_1", &target());
         assert!(bare.get("area").is_none() && bare.get("form").is_none());
+    }
+
+    #[test]
+    fn a_repeated_control_carries_its_context_and_nth_after_its_name() {
+        let mut repeated = target();
+        repeated.context = Some("Alpha".into());
+        repeated.nth = Some(2);
+        let item = control_item("target_1", &repeated);
+        assert_eq!(item["context"], json!("Alpha"));
+        assert_eq!(item["nth"], json!(2));
+
+        let mut context_only = target();
+        context_only.context = Some("Alpha".into());
+        let item = control_item("target_1", &context_only);
+        assert_eq!(item["context"], json!("Alpha"));
+        assert!(item.get("nth").is_none());
+
+        let mut empty = target();
+        empty.context = Some(String::new());
+        assert!(control_item("target_1", &empty).get("context").is_none());
+    }
+
+    #[test]
+    fn a_long_or_multi_line_context_is_cut_to_one_short_line() {
+        let mut wide = target();
+        wide.context = Some(format!("first\n  second\t{}", "x".repeat(200)));
+        let context = control_item("target_1", &wide)["context"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(context.starts_with("first second x"));
+        assert_eq!(context.chars().count(), CONTEXT_MAX);
+        assert!(!context.contains(['\n', '\t']));
+    }
+
+    #[test]
+    fn a_credential_control_never_carries_context_or_nth() {
+        let mut secret = target();
+        secret.credential_class = true;
+        secret.context = Some("Account".into());
+        secret.nth = Some(1);
+        let item = control_item("target_1", &secret);
+        assert!(item.get("context").is_none() && item.get("nth").is_none());
     }
 
     #[test]
@@ -418,6 +477,15 @@ mod tests {
         .unwrap();
         assert_eq!(placed.area.as_deref(), Some("dialog"));
         assert_eq!(placed.form, Some(2));
+        assert_eq!((placed.context.as_deref(), placed.nth), (None, None));
+
+        let repeated: ObservedTarget = serde_json::from_value(json!({
+            "locator": "l5", "role": "button", "name": "More options", "state": [], "credential_class": false,
+            "context": "Alpha", "nth": 2
+        }))
+        .unwrap();
+        assert_eq!(repeated.context.as_deref(), Some("Alpha"));
+        assert_eq!(repeated.nth, Some(2));
 
         let stray = serde_json::from_value::<ObservedTarget>(json!({
             "locator": "l3", "role": "button", "name": "Go", "credential_class": false, "surprise": 1

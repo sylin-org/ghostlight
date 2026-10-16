@@ -58,6 +58,14 @@ pub struct ObservedTarget {
     pub role: String,
     /// Bounded accessible name.
     pub name: String,
+    /// The label of the row or group the control sits in, present only when its role and name
+    /// repeat among the answer's targets. Never present on a credential-class control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    /// The control's position among those that share its role, name and context, counted from 1
+    /// in document order. For display only, never an address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nth: Option<u32>,
     /// Bounded semantic state labels.
     #[serde(default)]
     pub state: Vec<String>,

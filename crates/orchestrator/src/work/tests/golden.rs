@@ -6,7 +6,8 @@
 
 use super::*;
 use crate::language::self_check::golden::{
-    check_golden, golden_text, rendered_result, REFUSAL_GOLDEN, SUCCESS_GOLDEN,
+    check_golden, golden_text, rendered_result, REFUSAL_GOLDEN, REPEATED_FIND_GOLDEN,
+    SUCCESS_GOLDEN,
 };
 
 #[test]
@@ -39,6 +40,53 @@ fn a_listed_tab_matches_the_success_golden() {
     check_golden(
         SUCCESS_GOLDEN,
         &golden_text(&rendered_result("browser_tabs", arguments, &result)),
+    );
+}
+
+#[test]
+fn a_find_of_repeated_controls_matches_its_golden() {
+    let (executor, browser, _, workspace, _) = fixture();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        reused: false,
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        None,
+        &CancellationToken::default(),
+    );
+    let menu = |locator: &str, context: &str, nth: Option<u32>| ObservedTarget {
+        locator: format!("0:doc_top:{locator}"),
+        role: "button".into(),
+        name: "More options".into(),
+        state: vec!["collapsed".into()],
+        context: Some(context.into()),
+        nth,
+        ..Default::default()
+    };
+    browser.push(Ok(BrowserOutcome::targets(
+        7,
+        vec![
+            menu("first", "Morning Light", Some(1)),
+            menu("second", "Morning Light", Some(2)),
+            menu("third", "Night Drive", None),
+        ],
+    )));
+    let arguments = json!({"text":"More options"});
+    let result = executor.execute(
+        &workspace,
+        "browser_find",
+        arguments.clone(),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{result:?}");
+    check_golden(
+        REPEATED_FIND_GOLDEN,
+        &golden_text(&rendered_result("browser_find", arguments, &result)),
     );
 }
 

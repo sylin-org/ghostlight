@@ -333,6 +333,15 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_control_keeps_its_context_and_nth() {
+        let envelope = json!({"facts": {"matches": [
+            {"target": "t1", "name": "More options", "context": "Alpha", "nth": 1, "state": ["collapsed"]},
+            {"target": "t2", "name": "More options", "context": "Alpha", "nth": 2, "state": ["collapsed"]},
+        ]}});
+        assert_eq!(project(&envelope), envelope);
+    }
+
+    #[test]
     fn item_facts_stay() {
         let envelope = json!({"facts": {"items": [
             {"target": "t1", "credential_class": true, "state": ["disabled"], "value": ""},

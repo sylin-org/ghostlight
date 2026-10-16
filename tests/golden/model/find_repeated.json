@@ -1,0 +1,52 @@
+{
+  "content": [
+    {
+      "text": "Found 3 matches on example.com.",
+      "type": "text"
+    }
+  ],
+  "isError": false,
+  "structuredContent": {
+    "effect": "none",
+    "facts": {
+      "document_generation": 1,
+      "matches": [
+        {
+          "context": "Morning Light",
+          "name": "More options",
+          "nth": 1,
+          "role": "button",
+          "state": [
+            "collapsed"
+          ],
+          "target": "<volatile>"
+        },
+        {
+          "context": "Morning Light",
+          "name": "More options",
+          "nth": 2,
+          "role": "button",
+          "state": [
+            "collapsed"
+          ],
+          "target": "<volatile>"
+        },
+        {
+          "context": "Night Drive",
+          "name": "More options",
+          "role": "button",
+          "state": [
+            "collapsed"
+          ],
+          "target": "<volatile>"
+        }
+      ],
+      "tab": "<volatile>"
+    },
+    "invocation": "<volatile>",
+    "readiness": "complete",
+    "repeat_safe": true,
+    "status": "succeeded",
+    "summary": "Found 3 matches on example.com."
+  }
+}

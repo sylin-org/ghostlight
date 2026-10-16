@@ -34,6 +34,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   const OPTION_TEXT_MAX = 60;
   const HINT_MAX = 120;
   const GROUP_MAX = 80;
+  // How far up the composed tree the row of a control is looked for, and how many nodes a row
+  // is searched for its heading or first link.
+  const ITEM_DEPTH_MAX = 25;
+  const ITEM_VISIT_MAX = 200;
   const ERROR_MAX = 120;
   const LIMIT_MAX = 120;
   // The page areas an item can belong to (ADR-0198 decision 19). The service decodes the same closed
@@ -170,6 +174,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     ["reset", "button"], ["range", "slider"], ["number", "spinbutton"], ["search", "searchbox"]
   ]);
   const GROUP_ROLES = new Set(["radiogroup", "group"]);
+  // What makes an ancestor the row a control sits in. A group is a row only when the
+  // page names it.
+  const ITEM_ROLES = new Set(["row", "listitem", "article", "treeitem"]);
+  const ITEM_TAGS = new Set(["li", "tr", "article"]);
   // The accessibility role an element has by its tag alone, beyond the control roles roleFor
   // names. A tag that is not in this table has no role of its own and reads as generic.
   const IMPLICIT_ROLES = new Map([
@@ -677,6 +685,157 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return "";
   }
 
+  // The name the page declares for an element through aria-labelledby or aria-label, read as page
+  // text only: a referenced field or editable content contributes nothing, so a row named by a
+  // field never carries what the field holds. Null when the page declared none.
+  function declaredLabel(element) {
+    const labelledBy = element.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const root = element.getRootNode();
+      const text = oneLine(labelledBy.split(/\s+/).map((id) => {
+        const referenced = root.getElementById?.(id);
+        return referenced ? plainText(referenced, GROUP_MAX).text : "";
+      }).join(" "));
+      if (text) return shared.bounded(text, GROUP_MAX);
+    }
+    const aria = oneLine(element.getAttribute("aria-label"));
+    return aria ? shared.bounded(aria, GROUP_MAX) : null;
+  }
+
+  // Whether an ancestor ends the walk for a row: a landmark, a main or region, a form the page
+  // names, or a dialog. A row is never looked for outside the region that holds the control.
+  function bordersRegion(node) {
+    if (landmarkRole(node)) return true;
+    const role = explicitRole(node);
+    const tag = tagOf(node);
+    if (role === "main" || role === "region" || tag === "main") return true;
+    return tag === "form" && declaredLabel(node) !== null;
+  }
+
+  // Whether an element is a row, list item, article, tree item, a group the page names, or a
+  // fieldset with a legend.
+  function isItem(node) {
+    const role = explicitRole(node);
+    if (GROUP_ROLES.has(role) && declaredLabel(node) !== null) return true;
+    if (ITEM_ROLES.has(role)) return true;
+    const tag = tagOf(node);
+    if (tag === "fieldset") return legendText(node) !== "";
+    return ITEM_TAGS.has(tag);
+  }
+
+  // The nearest composed ancestor of an element that is a row, or null. The walk ends, with null, at
+  // a landmark, a dialog or the body, so a row is always nearer than the region that holds it.
+  function itemOf(element) {
+    let node = composedParent(element);
+    for (let depth = 0; node && depth < ITEM_DEPTH_MAX; depth += 1, node = composedParent(node)) {
+      if (node.nodeType !== 1) continue;
+      if (tagOf(node) === "body" || bordersRegion(node)) return null;
+      if (isItem(node)) return node;
+    }
+    return null;
+  }
+
+  // The legend a fieldset shows, or an empty string.
+  function legendText(fieldset) {
+    const legend = Array.from(fieldset.children ?? []).find((child) => tagOf(child) === "legend");
+    return legend ? shared.bounded(oneLine(plainText(legend, GROUP_MAX).text), GROUP_MAX) : "";
+  }
+
+  // The first descendant of a row, in document order, that `matches`, or null. The search stops
+  // after ITEM_VISIT_MAX nodes.
+  function firstWithin(item, matches) {
+    const stack = composedChildren(item).slice().reverse();
+    for (let visits = 0; stack.length && visits < ITEM_VISIT_MAX; visits += 1) {
+      const node = stack.pop();
+      if (node.nodeType !== 1 || !isComposedVisible(node)) continue;
+      if (matches(node)) return node;
+      stack.push(...composedChildren(node).slice().reverse());
+    }
+    return null;
+  }
+
+  function isHeading(node) {
+    return /^h[1-6]$/.test(tagOf(node)) || explicitRole(node) === "heading";
+  }
+
+  function isLink(node) {
+    return tagOf(node) === "a" && node.getAttribute("href") !== null;
+  }
+
+  // What a row calls itself: the name the page declared, a fieldset's legend, its first heading,
+  // else the name of its first link. `declared` is false only for the link, which a page may reuse
+  // across rows. The text is one bounded line of page text, never of a field's value.
+  function itemLabel(item) {
+    const line = (text) => shared.bounded(oneLine(text), GROUP_MAX);
+    const named = declaredLabel(item) ?? (tagOf(item) === "fieldset" ? legendText(item) : "");
+    if (named) return { text: line(named), declared: true };
+    const heading = firstWithin(item, isHeading);
+    const headed = heading ? line(plainText(heading, GROUP_MAX).text) : "";
+    if (headed) return { text: headed, declared: true };
+    const link = firstWithin(item, isLink);
+    return { text: link ? line(declaredLabel(link) ?? plainText(link, GROUP_MAX).text) : "", declared: false };
+  }
+
+  // The name of the nearest named landmark, region or tab panel around an element, or an empty
+  // string. A dialog ends the search, named or not.
+  function regionName(element) {
+    let node = composedParent(element);
+    for (let depth = 0; node && depth < ITEM_DEPTH_MAX; depth += 1, node = composedParent(node)) {
+      if (node.nodeType !== 1) continue;
+      const dialog = landmarkRole(node) === "dialog";
+      if (dialog || bordersRegion(node) || explicitRole(node) === "tabpanel") {
+        const name = declaredLabel(node);
+        if (name || dialog) return name ?? "";
+      }
+    }
+    return "";
+  }
+
+  // Where a control sits, in the page's own words: its row's label, else its group, else the
+  // region around it, else an empty string. `labels` keeps the label of each row already read. A
+  // credential-class control has no context.
+  function contextOf(element, labels = new Map()) {
+    if (credentialClass(element)) return "";
+    const item = itemOf(element);
+    if (item) {
+      if (!labels.has(item)) labels.set(item, itemLabel(item).text);
+      if (labels.get(item)) return labels.get(item);
+    }
+    return controlGroup(element) || regionName(element);
+  }
+
+  // Tells apart controls whose role and name repeat among the observations of one answer
+  // (ADR-0198 rule 1). Such a control carries `context`, where it sits, when that adds to its
+  // group; those that still share a place carry `nth`, their position among them in document
+  // order. A unique control and a credential-class control carry neither. `observed[i]` is the
+  // observation of `elements[i]`.
+  function annotateRepeats(observed, elements) {
+    const repeats = new Map();
+    observed.forEach((entry, index) => {
+      if (entry.credential_class) return;
+      const key = `${entry.role}\n${entry.name}`;
+      if (repeats.has(key)) repeats.get(key).push(index);
+      else repeats.set(key, [index]);
+    });
+    const labels = new Map();
+    for (const members of repeats.values()) {
+      if (members.length < 2) continue;
+      const places = new Map();
+      for (const index of members) {
+        const entry = observed[index];
+        const context = contextOf(elements[index], labels);
+        if (context && context !== entry.group) entry.context = context;
+        const place = entry.context ?? entry.group ?? "";
+        if (places.has(place)) places.get(place).push(entry);
+        else places.set(place, [entry]);
+      }
+      for (const same of places.values()) {
+        if (same.length >= 2) same.forEach((entry, position) => { entry.nth = position + 1; });
+      }
+    }
+    return observed;
+  }
+
   // Why the control is invalid, in words Ghostlight chooses. The browser's own message is read
   // only for a custom error, because it can quote the value or its length.
   function controlError(element) {
@@ -1005,7 +1164,7 @@ ${line}` : line;
     const truncated = Object.keys(counts).length > 0;
     if (behind) counts[LEFT_OUT.behindDialog] = behind;
     return {
-      targets: kept.map((element) => observation(element, view)),
+      targets: annotateRepeats(kept.map((element) => observation(element, view)), kept),
       truncated,
       forms: formCount(view),
       left_out: counts,
@@ -1052,7 +1211,7 @@ ${line}` : line;
     const view = observationView();
     const cut = cutByTier(kept.map((hit) => hit.element), maximum, view);
     return {
-      targets: cut.kept.map((element) => observation(element, view)),
+      targets: annotateRepeats(cut.kept.map((element) => observation(element, view)), cut.kept),
       truncated: Object.keys(cut.counts).length > 0 || pool.length > 3000,
       forms: formCount(view),
       left_out: cut.counts
@@ -1080,11 +1239,16 @@ ${line}` : line;
     for (const element of pool.slice(0, 3000)) {
       if (!element.isConnected) continue;
       if (matchesSemanticSelector(element, message)) {
-        matches.push(observation(element, view));
+        matches.push(element);
         if (matches.length > 8) break;
       }
     }
-    return { targets: matches.slice(0, 8), truncated: matches.length > 8 || pool.length > 3000, forms: formCount(view) };
+    const kept = matches.slice(0, 8);
+    return {
+      targets: annotateRepeats(kept.map((element) => observation(element, view)), kept),
+      truncated: matches.length > 8 || pool.length > 3000,
+      forms: formCount(view)
+    };
   }
 
   function extractArticle(maxChars) {

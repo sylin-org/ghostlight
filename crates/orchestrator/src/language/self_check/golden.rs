@@ -1,7 +1,7 @@
 //! Golden files: compare, or rewrite on request.
 //!
 //! The catalog golden pins `tools/list`; the result goldens pin what a model receives from
-//! `tools/call` for one success and one refusal. Volatile values (handles, times) are replaced
+//! `tools/call` for one success, one refusal and one find of repeated controls. Volatile values (handles, times) are replaced
 //! by a placeholder so the files stay stable between runs. The audit line goldens reuse the same
 //! comparison with their own update variable.
 
@@ -16,6 +16,10 @@ pub(crate) const CATALOG_GOLDEN: &str = "docs/1.0/catalog.json";
 /// The complete `tools/call` result of one successful call, relative to the repository root.
 pub(crate) const SUCCESS_GOLDEN: &str = "tests/golden/model/success.json";
 
+/// The complete `tools/call` result of one `browser_find` whose matches repeat a role and name,
+/// relative to the repository root.
+pub(crate) const REPEATED_FIND_GOLDEN: &str = "tests/golden/model/find_repeated.json";
+
 /// The complete `tools/call` result of one refused call, relative to the repository root.
 pub(crate) const REFUSAL_GOLDEN: &str = "tests/golden/model/refusal.json";
 
@@ -23,7 +27,7 @@ pub(crate) const REFUSAL_GOLDEN: &str = "tests/golden/model/refusal.json";
 const VOLATILE_PLACEHOLDER: &str = "<volatile>";
 
 /// Keys whose values are minted per run: handles, times and the resume token.
-const VOLATILE_KEYS: [&str; 5] = ["invocation", "tab", "resume", "at", "timestamp"];
+const VOLATILE_KEYS: [&str; 6] = ["invocation", "tab", "target", "resume", "at", "timestamp"];
 
 /// A path relative to the repository root, resolved from this crate.
 pub(crate) fn repository_path(relative: &str) -> std::path::PathBuf {

@@ -4061,3 +4061,175 @@ test("a find cuts by the same tiers and counts what it left out", async () => {
   assert.deepEqual(reply.value.left_out, { chrome: 1 });
   assert.equal(reply.value.truncated, true);
 });
+
+// ---- repeated controls: row context and nth ----------------------------------------------------
+
+/** An element with attributes and children, for building a fixture tree. */
+function node(harness, tag, attributes = {}, ...children) {
+  const element = harness.element(tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  for (const child of children) element.append(typeof child === "string" ? harness.text(child) : child);
+  return element;
+}
+
+/** A Suno-shaped song list: one named group per title, each with a song link and a menu button. */
+function songRows(harness, titles) {
+  const body = harness.element("body");
+  titles.forEach((title, index) => {
+    body.append(node(harness, "div", { role: "group", "aria-label": title },
+      node(harness, "a", { href: `/song/${index}` }, title),
+      node(harness, "button", { "aria-label": "More options", "aria-expanded": "false" })));
+  });
+  harness.setBody(body);
+  return body;
+}
+
+/** What a result says about where each of its targets named `name` sits. */
+function placesOf(targets, name) {
+  return targets.filter((target) => target.name === name).map((target) => [target.context ?? null, target.nth ?? null]);
+}
+
+async function findControls(harness, text) {
+  return (await harness.send({ kind: "find", text, find_kind: "control", max_results: 40 })).value.targets;
+}
+
+test("a control whose name repeats carries its row label, and nth when the row label repeats", async () => {
+  const harness = contentHarness();
+  songRows(harness, ["Alpha", "Alpha", "Beta", "Beta", "Gamma", "Gamma"]);
+
+  const found = await findControls(harness, "More options");
+
+  assert.deepEqual(placesOf(found, "More options"), [
+    ["Alpha", 1], ["Alpha", 2], ["Beta", 1], ["Beta", 2], ["Gamma", 1], ["Gamma", 2]
+  ]);
+
+  songRows(harness, ["Alpha", "Beta", "Gamma"]);
+  assert.deepEqual(placesOf(await findControls(harness, "More options"), "More options"), [
+    ["Alpha", null], ["Beta", null], ["Gamma", null]
+  ]);
+});
+
+test("a control with a unique name carries no context", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  body.append(node(harness, "div", { role: "group", "aria-label": "Alpha" },
+    node(harness, "button", { "aria-label": "Play" }),
+    node(harness, "button", { "aria-label": "More options" })));
+  harness.setBody(body);
+
+  const buttons = [...await findControls(harness, "Play"), ...await findControls(harness, "More options")];
+  assert.equal(buttons.length, 2);
+  for (const target of buttons) {
+    assert.equal("context" in target, false, target.name);
+    assert.equal("nth" in target, false, target.name);
+  }
+});
+
+test("a radio whose row label equals its group shows only group", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  for (const [legend, group] of [["Plan", "plan"], ["Billing", "billing"]]) {
+    const fieldset = node(harness, "fieldset", {}, node(harness, "legend", {}, legend));
+    fieldset.append(node(harness, "input", { type: "radio", name: group, "aria-label": "Yearly" }));
+    body.append(fieldset);
+  }
+  harness.setBody(body);
+
+  const yearly = (await findControls(harness, "Yearly")).filter((target) => target.name === "Yearly");
+
+  assert.deepEqual(yearly.map((target) => target.group), ["Plan", "Billing"]);
+  for (const target of yearly) {
+    assert.equal("context" in target, false);
+    assert.equal("nth" in target, false);
+  }
+});
+
+test("a row named by aria-labelledby of a field never carries the field value", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const field = node(harness, "input", { id: "title-field", type: "text", "aria-label": "Title" });
+  field.value = "Ada Lovelace";
+  body.append(field);
+  for (let index = 0; index < 2; index += 1) {
+    body.append(node(harness, "li", { "aria-labelledby": "title-field" }, node(harness, "button", { "aria-label": "Edit" })));
+  }
+  harness.setBody(body);
+
+  const found = await findControls(harness, "Edit");
+
+  assert.doesNotMatch(JSON.stringify(found), /Ada Lovelace/);
+  assert.deepEqual(placesOf(found, "Edit"), [[null, 1], [null, 2]]);
+});
+
+test("a row with no declared name takes its heading, else its first link name", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const play = () => node(harness, "button", { "aria-label": "Play" });
+  body.append(
+    node(harness, "li", {}, node(harness, "a", { href: "/one" }, "Link one"), node(harness, "h3", {}, "Heading one"), play()),
+    node(harness, "li", {}, node(harness, "span", {}, "no name here"), node(harness, "a", { href: "/two" }, "Link two"), play()),
+    node(harness, "li", {}, play()));
+  harness.setBody(body);
+
+  assert.deepEqual(placesOf(await findControls(harness, "Play"), "Play"), [
+    ["Heading one", null], ["Link two", null], [null, null]
+  ]);
+});
+
+test("a control in a dialog takes no item from outside the dialog", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const close = () => node(harness, "button", { "aria-label": "Close" });
+  body.append(node(harness, "li", {}, node(harness, "h3", {}, "Outer row"), close(),
+    node(harness, "div", { role: "dialog", "aria-label": "Settings" }, close())));
+  harness.setBody(body);
+
+  assert.deepEqual(placesOf(await findControls(harness, "Close"), "Close"), [["Outer row", null], ["Settings", null]]);
+});
+
+test("a control in an open shadow root takes its host row label", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  const host = harness.element("open-menu");
+  const shadow = harness.fragment();
+  shadow.host = host;
+  shadow.append(node(harness, "button", { "aria-label": "Open" }));
+  host.shadowRoot = shadow;
+  body.append(
+    node(harness, "li", {}, node(harness, "h3", {}, "Hosted row"), host),
+    node(harness, "li", {}, node(harness, "h3", {}, "Plain row"), node(harness, "button", { "aria-label": "Open" })));
+  harness.setBody(body);
+
+  assert.deepEqual(placesOf(await findControls(harness, "Open"), "Open"), [["Hosted row", null], ["Plain row", null]]);
+});
+
+test("a credential-class control never carries context or nth", async () => {
+  const harness = contentHarness();
+  const body = harness.element("body");
+  for (const title of ["First", "Second"]) {
+    body.append(node(harness, "li", {}, node(harness, "h3", {}, title), node(harness, "input", { type: "password", "aria-label": "Code" })));
+  }
+  harness.setBody(body);
+
+  const codes = (await findControls(harness, "Code")).filter((target) => target.name === "Code");
+
+  assert.equal(codes.length, 2);
+  for (const target of codes) {
+    assert.equal(target.credential_class, true);
+    assert.equal("context" in target, false);
+    assert.equal("nth" in target, false);
+  }
+});
+
+test("find, inspect and the semantic query agree on context", async () => {
+  const harness = contentHarness();
+  songRows(harness, ["Alpha", "Alpha", "Beta"]);
+
+  const found = placesOf(await findControls(harness, "More options"), "More options");
+  const inspected = await harness.send({ kind: "inspect", inspect_kind: "controls", max_items: 40, visual_settle: false });
+  const queried = await harness.send({ kind: "query_semantic", name: "More options", exact: true });
+
+  assert.deepEqual(found, [["Alpha", 1], ["Alpha", 2], ["Beta", null]]);
+  assert.deepEqual(placesOf(inspected.value.targets, "More options"), found);
+  assert.deepEqual(placesOf(queried.value.targets, "More options"), found);
+});
