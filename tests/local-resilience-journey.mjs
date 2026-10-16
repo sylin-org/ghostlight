@@ -43,6 +43,15 @@ async function tabFor(peer, url) {
 /** The parameters of a `tools/call` of `name` with `args`. */
 const toolCall = (name, args) => ({ name, arguments: args });
 
+/**
+ * The world messages of the `call` requests `browser` received from request `from` on, in order.
+ * A read is a preparation call that lets the page settle, then the read itself, so what one read
+ * costs the browser is measured from a read, never assumed.
+ */
+const callKinds = (browser, from) => browser.requests.slice(from)
+  .filter((request) => request.primitive.name === "call")
+  .map((request) => request.primitive.args.calls.map((entry) => entry.message.kind).join("+"));
+
 try {
   home.start(home.service, ["serve", "--reason", startReason.agent], { stdio: ["ignore", "ignore", "pipe"] });
   await home.serviceUp();
@@ -157,6 +166,10 @@ try {
   const d = await RelayMcp.open(home);
   await d.initialize("resilience d");
   const handleD = await tabFor(d, "https://example.edu/");
+  const healthyStart = browser.requests.length;
+  assert.equal((await d.facts("browser_read", { tab: handleD })).status, "succeeded");
+  const oneRead = callKinds(browser, healthyStart);
+  assert.ok(oneRead.includes("read_text"), `a healthy read reaches the page: ${JSON.stringify(oneRead)}`);
   browser.holdNext("navigate");
   const inFlight = d.begin("tools/call", toolCall("browser_navigate", { tab: handleD, url: "https://example.edu/second" }));
   await until(() => browser.held.length === 1, "the call in flight reaches the browser", HELD_MS);
@@ -180,6 +193,7 @@ try {
   // Stop settles the queue quietly: queued work ends with no effect, the call in flight stays
   // uncertain, and nothing is replayed when a new session begins.
   const reads = browser.requested("call").length;
+  const navigates = browser.requested("navigate").length;
   await control("end_session", "ended");
   d.notify("notifications/cancelled", { requestId: inFlight });
   const stoppedInFlight = structured(await d.response(inFlight, ANSWER_MS));
@@ -194,7 +208,8 @@ try {
   browser.held.splice(0);
   await control("start_session", "active");
   assert.equal((await d.facts("browser_read", { tab: handleD })).status, "succeeded");
-  assert.equal(browser.requested("call").length, reads + 1, "a new session runs only the new request");
+  assert.deepEqual(callKinds(browser, 0).slice(reads), oneRead, "a new session sends only what the one new read sends");
+  assert.equal(browser.requested("navigate").length, navigates, "the call in flight is not sent again");
   console.log("PASS Stop ends queued work with no effect, leaves the call in flight uncertain and replays nothing");
 
   // A client that stops reading is retired alone.

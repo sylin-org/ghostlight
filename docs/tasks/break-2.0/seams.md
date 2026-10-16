@@ -162,6 +162,7 @@ w01-windows-user-path has landed. polish-01-deployment-report has landed. tidy-0
 | ci-keyboard-denial-race | The keyboard journey's denial check no longer races the presentation (CI run 38899036828, keyboard-browser on Linux: DevTools "No node with given id found" after the credential paths). `presentation.js` replaces the denial ribbon on each denial and again after `DENIAL_MS`, while the journey held node ids across one `DOM.resolveNode` and `Runtime.callFunctionOn` round trip per element. `keyboard-browser-journey.mjs` now records the first denial's ribbon by `backendNodeId`, takes a fresh `DOM.getDocument` right before `DOM.removeNode` of the stylesheet, waits after the second click for a ribbon with a different `backendNodeId`, and reads the computed `pointer-events` and class of the host and every element in the shadow root in one `Runtime.callFunctionOn` over `querySelectorAll('*')` right after the snapshot, inside the denial's window, and asserts that the read included the `denial-ribbon` element (the read is null once the ribbon has expired). The controls, text, focus and hit-testing assertions are unchanged. Product follow-up, not done here: a data attribute on the ribbon naming its invocation would let a journey match a denial without timing. CI proves keyboard-browser on Linux, and on Windows after ci-windows-elevated-runner. | see `git log` |
 | ci-resume-binds-on-call | A resumed session's tab handle works on the first call after its browser returns (CI run 38918875893, process journey resume step on both systems; ADR-0197 D12). Each call, queued or unqueued, binds the session's pending resumed tabs of any browser already available before it executes, and restore_returned_tabs holds the unrestored lock across its restore so the watch and a worker cannot lose each other's update. Before, only the once-a-second watch bound them, so a call admitted right after the browser returned answered tab_unavailable in 0 ms. `a_call_right_after_its_browser_returns_finds_its_resumed_tab` calls with no wait. | see `git log` |
 | ci-journeys-follow-the-promises | Three journeys follow promises the product keeps (CI run 38918875893, process lane). continuity: Resume after Stop is a no-op, so the journey asserts no new control state and still that work is refused (change-only publication since 76e74030). workbench: the fake service numbers pushed changes and snapshots from one sequence, so the Clear view refresh rebuilds instead of meeting the cache's own seq (78e74ce8 made that comparison exact). desktop-windows: the browser edge with no hello starts nothing, the MCP edge starts the service at its own start (ADR-0199 D10), and that service's session is ended so round 1 races a cold start. No product change. | see `git log` |
+| ci-continuity-no-replay | The continuity journey counts what one read costs instead of assuming one request (CI run 38926210010, `tests/local-resilience-journey.mjs` line 197 on both systems: 34 !== 33). No product change: nothing of the stopped session reached the browser again. A scoped read sends a preparation `call` that lets the page settle, then the read `call` (`describe_documents` with `settle_ms`, then `read_document`), so every `browser_read` is two `call` requests. The journey now measures one healthy read on the tab before the queue is built, records the world messages of its `call` requests, and after the new session asserts the calls added since Stop equal exactly that list and that the `navigate` count did not move. The earlier check that Stop sends no call to the browser is unchanged. | see `git log` |
 
 ## Owed live checks
 
@@ -240,6 +241,7 @@ them.
 - f10d: after the changed components are deployed and the browser extension is loaded, run `node tests/live-journey.mjs` and `node tests/settlement-live-journey.mjs` against the installed stack (all-open authority, a connected browser) and keep the evidence files. On Windows, `pwsh -NoProfile -File tests/installed-windows-journey.ps1` runs the first of them as its installed-browser phase.
 - ci-resume-binds-on-call: next CI run, process suite, step "the next call resumes by token, the tab handle survives and the browser reconnects" passes on both OSes.
 - ci-journeys-follow-the-promises: next CI run, process lane: continuity and workbench pass on both OSes, desktop-windows passes on Windows (its later rounds run for the first time).
+- ci-continuity-no-replay: next CI run, process lane: the continuity journey passes on both OSes (its last line, "local resilience journey ok").
 
 ## Notes
 
@@ -392,3 +394,16 @@ them.
   - ADR-0199 Decision 10's start table says the browser relay starts the service once at its own
     start, while crates/edge/src/port.rs starts it only after the extension's hello. The journey
     follows the code. The owner should align the table row or amend the decision; no ADR was changed here.
+- ci-continuity-no-replay: diagnosed from the run's evidence and the code before any change. The
+  diagnostics of the continuity home show the stopped session did what the promise says: the held
+  navigate ended `unknown`, 29 queued reads ended `blocked` with effect none, the cancelled and the
+  expired read ended without effect, and the one `browser_read` after `start_session` succeeded
+  in 1 ms. No queued or in-flight request was sent again (hypothesis (a) is false). The extra
+  request is the preparation call: `dispatch_documents` in `work/documents.rs` hands the
+  invocation's settle budget to `describe_documents`, which sends one `observe` `call` with the
+  visual-settle condition before the `frames` request, and the read is a second `call`
+  (`read_document` or `read_text`). So a read is two `call` requests whenever settling is on (the
+  default), and the journey's `reads + 1` was wrong about the cost (hypothesis (b)). The
+  command-line journey already filters its count by `read_text` for the same reason. Fix: the
+  journey takes the call kinds of one healthy read as the cost and compares the whole list. The
+  check stays exact on both sides: an extra read, a repeated settle or a re-sent navigate fails it.
