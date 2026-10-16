@@ -11,7 +11,10 @@ There are only two branches: `main` and `dev`, locally and on the remote.
 `main` contains the published product. All implementation, experiments, dependency
 updates and release preparation happen on `dev`. Do not create feature, agent or
 release branches. Advance `main` from `dev` only after the release is publicly
-delivered with its compatible adapter. Preserve historical work in archive tags
+delivered with its compatible adapter. The one exception is the 2.0 cutover, where `main`
+advances right after `v2.0.0` becomes the latest release and before the staged extension is
+published, because the short install commands fetch their scripts from `main` (ADR-0200, second
+amendment of 2026-10-16). Preserve historical work in archive tags
 and pending edits in Git stashes; never discard it to clean up branch names.
 
 ## Read this first (in order)

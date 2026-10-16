@@ -213,7 +213,34 @@ The redirects behind `https://sylin.org/ghostlight/get.ps1` and `get.sh` point a
 Ghostlight's `main` branch (`https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/`),
 not at release assets. `main` is the published product, so the short commands install the current
 release from the day the redirects go live and follow `main` to 2.0 at publication, with no change on
-the website and none in the frozen extension. The release still attaches the scripts for its own
-custody. The redirects live in the website repository (`src/_redirects`, kept by its site check);
-publishing them is the owner's push there. This replaces the redirect target named in Decision JQ4
-above.
+the website and none in the frozen extension. The release does not attach the scripts: `main` is
+their only published home, and `release.yml` attaches the images, checksums and attestations only.
+The redirects live in the website repository (`src/_redirects`, kept by its site check);
+publishing them is the owner's push there. This replaces the redirect target named in Decision 6
+and in Decision JQ4 above, and it retires the JQ4 clause that the release attaches `get.ps1` and
+`get.sh`.
+
+## Amendment (2026-10-16): the cutover is one step
+
+Decision 16 and the amendment above left two rules that cannot both be followed. The short commands
+fetch the scripts on `main`, and `main` advances only after a release is publicly delivered with its
+compatible adapter (AGENTS.md, Branches). Once `v2.0.0` is the latest release, the 1.x scripts on
+`main` fail, because they name images the 2.0 release does not carry. The extension cannot be
+published until the command it shows works. So the cutover is one recorded step, run by the owner
+in this order:
+
+1. Publish `v2.0.0` as GitHub's latest release.
+2. Fast-forward `main` to the release commit, straight after step 1. Between the two, the short
+   commands fail; keep that gap to minutes.
+3. Run the exact frozen strings, `irm https://sylin.org/ghostlight/get.ps1 | iex` and
+   `curl -fsSL https://sylin.org/ghostlight/get.sh | sh`, and the launcher restore commands.
+4. Only when step 3 passes, publish the staged extension.
+
+The branch rule in AGENTS.md carries this one exception. It applies to the 2.0 cutover only;
+afterwards `main` advances from `dev` as before.
+
+Decision 6's precondition is restated to match. Before submission, the install is proved against a
+2.0 test release in a fork, using the fork's own URLs, because the frozen strings point at
+`sylin-org/ghostlight`. The exact frozen strings are proved at step 3, after `main` advances and
+before the extension is published. If step 3 fails, the staged extension stays unpublished and the
+fix goes to `main` and the website before step 4 repeats.
