@@ -12,8 +12,10 @@ use crate::language::self_check::golden::{
 };
 use crate::workspace::StaleReason;
 
+/// A listed tab, and a click on a handle that followed its control through a re-render, rendered
+/// the way a client receives them.
 #[test]
-fn a_listed_tab_matches_the_success_golden() {
+fn successes_match_their_golden() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
         reused: false,
@@ -39,9 +41,39 @@ fn a_listed_tab_matches_the_success_golden() {
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{result:?}");
+    let mut rendered = serde_json::Map::new();
+    rendered.insert(
+        "tabs_listed".into(),
+        rendered_result("browser_tabs", arguments, &result),
+    );
+
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Ok(BrowserOutcome::Activated {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec![],
+        subject: Some(PhysicalActionSubject {
+            role: "button".into(),
+            name: "Delete".into(),
+            rebound: true,
+        }),
+    }));
+    let arguments = json!({"tab":tab_handle,"target":target});
+    let result = executor.execute(
+        &workspace,
+        "browser_click",
+        arguments.clone(),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{result:?}");
+    assert_eq!(result.facts["rebound"], true);
+    rendered.insert(
+        "followed_click".into(),
+        rendered_result("browser_click", arguments, &result),
+    );
     check_golden(
         SUCCESS_GOLDEN,
-        &golden_text(&rendered_result("browser_tabs", arguments, &result)),
+        &golden_text(&serde_json::Value::Object(rendered)),
     );
 }
 

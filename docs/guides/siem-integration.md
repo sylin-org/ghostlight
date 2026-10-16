@@ -121,7 +121,7 @@ failure-facts content while preserving the record. Historical summary text remai
 text. See [H1 source and verification state](../tasks/security-hardening/h1-readable-audit.md)
 before assuming an installed version includes the correction.
 
-`observed` has exactly five fields:
+`observed` has five fields, and a sixth that appears only when it is true:
 
 | Field | Meaning |
 | --- | --- |
@@ -129,6 +129,7 @@ before assuming an installed version includes the correction.
 | `readiness` | `not_applicable`, `loading`, `interactive`, `complete`, or `unknown`. |
 | `count` | A bounded measurement named by `summary`. |
 | `width`, `height` | Pixel size of a capture. |
+| `rebound` | Present, as `true`, when the action used a handle that followed its control through a re-render the page proved. A closed fact: it names no handle, row or link. |
 
 The governed host and an optional normalized target name inside `summary` are the deliberate
 page-derived exceptions. The target name is bounded to 80 characters and can be removed by

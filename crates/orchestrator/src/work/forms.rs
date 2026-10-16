@@ -1169,6 +1169,7 @@ impl ApplicationExecutor {
                         Some(PhysicalActionSubject {
                             role: targets[0].role.clone(),
                             name: targets[0].name.clone(),
+                            rebound: false,
                         })
                     }
                     Ok(_) => {

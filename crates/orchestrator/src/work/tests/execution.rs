@@ -2624,6 +2624,7 @@ fn physical_action_receipt_names_the_target_without_trusting_its_role() {
         subject: Some(PhysicalActionSubject {
             role: "Save my document".into(),
             name: "Save patient record".into(),
+            rebound: false,
         }),
     }));
     let clicked = executor.execute(
@@ -2697,6 +2698,7 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
         subject: Some(PhysicalActionSubject {
             role: "button".into(),
             name: "Save patient record".into(),
+            rebound: false,
         }),
     }));
     let clicked = executor.execute(
@@ -4181,6 +4183,7 @@ fn delete_click(
         subject: Some(PhysicalActionSubject {
             role: "button".into(),
             name: "Delete".into(),
+            rebound: false,
         }),
     }));
     executor.execute(

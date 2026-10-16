@@ -255,8 +255,26 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     }
   }
 
-  // The locator of an element, minted when it has none. Every observation refreshes the identity
-  // record, so the latest view the agent saw is the one the record describes.
+  // Point a locator at a node the page proved is the control it named (ADR-0198 decision 17). A
+  // gone entry comes back to life, and an entry is the youngest again, so the oldest are the
+  // ones trimmed.
+  function repoint(locator, entry, element) {
+    if (entry.element) reverse.delete(entry.element);
+    if (entry.gone) {
+      entry.gone = false;
+      goneCount -= 1;
+      liveCount += 1;
+    }
+    entry.element = element;
+    reverse.set(element, locator);
+    locators.delete(locator);
+    locators.set(locator, entry);
+    trimLocators(false, MAX_LOCATORS);
+  }
+
+  // The locator of an element, minted when it has none. A node that is the control a gone locator
+  // named, by proof, takes that locator back instead of a new one. Every observation refreshes
+  // the identity record, so the latest view the agent saw is the one the record describes.
   function locatorFor(element, view, role, name) {
     let locator = reverse.get(element);
     // A node a list recycled for another row is no longer the control its locator named: that
@@ -265,6 +283,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       retireLocator(locators.get(locator));
       locator = undefined;
     }
+    if (!locator) locator = readopt(element, view);
     if (!locator) {
       locator = `${LOCATOR_PREFIX}${nextLocator++}`;
       reverse.set(element, locator);
@@ -297,14 +316,25 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
   }
 
   // A locator minted by another world (a rebuilt page runtime) never aliases a new element. A
-  // connected element whose row no longer holds the recorded link or declared name was recycled
-  // for another row, so its locator is removed too.
-  function resolve(locator) {
+  // locator whose node left the document follows its control when the page proves the control
+  // rendered again (ADR-0198 decision 17): the call passes `ctx` to allow that, and the locator
+  // joins `ctx.rebound`. Without `ctx` nothing is followed. A connected element whose row no
+  // longer holds the recorded link or declared name was recycled for another row, so its locator
+  // is removed too.
+  function resolve(locator, ctx) {
     if (typeof locator !== "string" || !locator.startsWith(LOCATOR_PREFIX)) throw staleLocator("unknown");
     const entry = locators.get(locator);
     if (!entry) throw staleLocator("unknown");
-    if (entry.gone) throw removedError(entry.record);
-    if (!entry.element.isConnected || recycled(entry)) {
+    if (entry.gone || !entry.element.isConnected) {
+      const followed = ctx ? follow(locator, entry) : null;
+      if (followed) {
+        ctx.rebound.push(locator);
+        return followed;
+      }
+      if (!entry.gone) retireLocator(entry);
+      throw removedError(entry.record);
+    }
+    if (recycled(entry)) {
       retireLocator(entry);
       throw removedError(entry.record);
     }
@@ -318,6 +348,18 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
 
   function cancelledError() {
     return new AssetError("cancelled", "operation cancelled");
+  }
+
+  // The call's context the first time it is asked for and nothing after: a locator follows its
+  // control at the start of a call, and a control that vanishes while the call waits is not
+  // followed.
+  function atEntry(ctx) {
+    let pending = ctx;
+    return () => {
+      const entry = pending;
+      pending = undefined;
+      return entry;
+    };
   }
 
   function throwIfCancelled(ctx) {
@@ -457,10 +499,10 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
 
   // What one read remembers about the page so each element is placed once: the area of every
   // element already walked, the ordinal of each form, the label of each row, the controls of each
-  // row, and the document's links and row-label counts. The forms, links and counts are built on
-  // first use.
+  // row, the document's links and row-label counts, and which node each gone locator's control
+  // is now. The forms, links, counts and followed nodes are built on first use.
   function observationView() {
-    return { areas: new Map(), forms: null, labels: new Map(), links: undefined, itemCounts: undefined, controls: new Map() };
+    return { areas: new Map(), forms: null, labels: new Map(), links: undefined, itemCounts: undefined, controls: new Map(), followed: undefined };
   }
 
   function observation(element, view = observationView()) {
@@ -1080,9 +1122,9 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
 
   // What the page remembers about a control so it can later say whether a node is the same
   // control: its role, exact name and credential class, where it sat (the label of its row, else
-  // its group, else its region), the row's declared name, whether that name was unique among
-  // rows when no link was recorded, the row's own link, the view, whether a dialog held it, and
-  // its place among the row's controls of the same role and name. A credential-class control
+  // its group, else its region), the row's kind and declared name, whether that name was unique
+  // among rows when no link was recorded, the row's own link, the view, whether a dialog held
+  // it, and its place among the row's controls of the same role and name. A credential-class control
   // records no place, because it is never followed or named as a replacement.
   function identityOf(element, view, role, name) {
     const credential = credentialClass(element);
@@ -1092,6 +1134,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       name,
       credential,
       context: "",
+      itemKind: null,
       itemDeclared: null,
       itemUnique: false,
       anchor: null,
@@ -1104,6 +1147,7 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     const item = itemOf(element);
     record.context = contextWithin(element, item, view.labels);
     if (!item) return record;
+    record.itemKind = itemKindOf(item);
     const label = labelOf(item, view.labels);
     if (label.declared && label.text) record.itemDeclared = label.text;
     record.anchor = ownLink(item, view);
@@ -1115,6 +1159,66 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
       record.count = same.length;
     }
     return record;
+  }
+
+  // What kind of row an item is: the role the page gave it, else its tag.
+  function itemKindOf(item) {
+    return explicitRole(item) || tagOf(item);
+  }
+
+  // The node the page proves is the control a record describes, or null (ADR-0198 decision 17).
+  // The proof is one conjunction. The record has the row's own link, the row's declared name and
+  // the control's place in the row, and is no credential-class control and no control in a
+  // dialog. In a fresh index of links, that link lies in exactly one row and nowhere outside it.
+  // That row has the recorded kind and declared name. The row holds as many controls of the
+  // recorded role and exact name as before, and the one at the recorded position is a control no
+  // locator names yet, outside every dialog, in an unchanged view. Position alone is never
+  // proof: it only picks among the controls of a row the link and the name have already proved.
+  function proveSame(record, view) {
+    if (!record || record.credential || record.inDialog) return null;
+    if (record.anchor === null || record.itemDeclared === null || record.itemKind === null || record.nth === null) return null;
+    const holders = linkIndex(view)?.get(record.anchor);
+    if (!holders || holders.size !== 1) return null;
+    const [item] = holders;
+    if (item === OUTSIDE_ROW || itemKindOf(item) !== record.itemKind) return null;
+    const label = labelOf(item, view.labels);
+    if (!label.declared || label.text !== record.itemDeclared) return null;
+    const same = controlsWithin(item, view).filter((control) => control.role === record.role && control.name === record.name);
+    if (same.length !== record.count) return null;
+    const element = same[record.nth - 1].element;
+    if (reverse.has(element) || credentialClass(element)) return null;
+    const place = placeOf(element);
+    return !place.inDialog && viewKey(place.regionKey) === record.view ? element : null;
+  }
+
+  // Point a locator whose node left the document at the node that is its control, when the page
+  // proves it, and refresh the record from the node. Null when it does not.
+  function follow(locator, entry) {
+    const view = observationView();
+    const element = proveSame(entry.record, view);
+    if (!element) return null;
+    repoint(locator, entry, element);
+    entry.record = identityOf(element, view, entry.record.role, entry.record.name);
+    return element;
+  }
+
+  // The locator a node takes back when it is the control of a gone locator, else undefined. The
+  // proof of every gone locator is made once per read, oldest first, and a node is taken by the
+  // oldest locator that proves it.
+  function readopt(element, view) {
+    if (view.followed === undefined) {
+      view.followed = new Map();
+      for (const [locator, entry] of locators) {
+        if (!entry.gone && entry.element.isConnected) continue;
+        const proven = proveSame(entry.record, view);
+        if (proven && !view.followed.has(proven)) view.followed.set(proven, locator);
+      }
+    }
+    const locator = view.followed.get(element);
+    const entry = locator && locators.get(locator);
+    if (!entry || (!entry.gone && entry.element.isConnected)) return undefined;
+    repoint(locator, entry, element);
+    return locator;
   }
 
   // Whether a connected element no longer sits in the row its record describes: the row lost the
@@ -1255,11 +1359,15 @@ const { dispatch, applyAmbient, renderPresentation } = (() => {
     return "";
   }
 
-  function actionSubject(element) {
-    return {
+  // The role and name of the element an action used. `rebound` appears, true, when the call
+  // reached the element by following its locator through a re-render.
+  function actionSubject(element, ctx) {
+    const subject = {
       role: roleFor(element),
       name: accessibleName(element)
     };
+    if (ctx?.rebound.includes(reverse.get(element))) subject.rebound = true;
+    return subject;
   }
 
   function deepestElementFromPoint(root, x, y) {
@@ -1705,9 +1813,9 @@ ${line}` : line;
     }
   }
 
-  function prepareBrowserText(element, allowCredentials = false) {
+  function prepareBrowserText(element, allowCredentials, ctx) {
     validateTextEditElement(element, allowCredentials);
-    const subject = actionSubject(element);
+    const subject = actionSubject(element, ctx);
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
     verifyBrowserTextFocus(element, allowCredentials);
@@ -1720,9 +1828,9 @@ ${line}` : line;
     return { focused: true };
   }
 
-  function prepareTextEdit(element, clearFirst, allowCredentials = false) {
+  function prepareTextEdit(element, clearFirst, allowCredentials, ctx) {
     validateTextEditElement(element, allowCredentials);
-    const subject = actionSubject(element);
+    const subject = actionSubject(element, ctx);
     element.scrollIntoView({ block: "center", inline: "center" });
     element.focus({ preventScroll: true });
     validateTextEditElement(element, allowCredentials);
@@ -1743,8 +1851,8 @@ ${line}` : line;
     return { subject };
   }
 
-  function typeText(element, text, clearFirst, allowCredentials = false) {
-    const prepared = prepareTextEdit(element, clearFirst, allowCredentials);
+  function typeText(element, text, clearFirst, allowCredentials, ctx) {
+    const prepared = prepareTextEdit(element, clearFirst, allowCredentials, ctx);
     if (!text && !clearFirst) return { typed: true, subject: prepared.subject };
     if (!text && clearFirst && !(element.value ?? element.textContent)) return { typed: true, subject: prepared.subject };
     if (!document.execCommand(text ? "insertText" : "delete", false, text)) {
@@ -2097,8 +2205,8 @@ ${line}` : line;
   // This is a read-only plan. Every known invalid field and submit target must be found
   // before an earlier field can be edited, including when the worker is preparing several frames.
   // Every field whose value cannot be taken is reported together, with what would be accepted.
-  function prepareFill(message) {
-    const elements = message.fields.map((field) => resolve(field.locator));
+  function prepareFill(message, ctx) {
+    const elements = message.fields.map((field) => resolve(field.locator, ctx));
     const problems = [];
     elements.forEach((element, index) => {
       const { problem } = checkFillElement(element, message.fields[index].value, message.allow_credentials, true);
@@ -2107,7 +2215,7 @@ ${line}` : line;
     if (problems.length) throw fieldProblemsError(problems, true);
     let submitElement = null;
     if (message.submit_locator) {
-      submitElement = requireActionable(resolve(message.submit_locator), "activate");
+      submitElement = requireActionable(resolve(message.submit_locator, ctx), "activate");
       const owner = elements[0] ? formOwner(elements[0]) : null;
       if (!owner || formOwner(submitElement) !== owner) throw new AssetError("submit_outside_form", "submit control is not contained in the resolved form");
     }
@@ -2217,20 +2325,21 @@ ${line}` : line;
   // and a spent budget (settle_ms 0) with the agent's intent intact still rechecks the values
   // once. The final current target set remains usable when the budget expires.
   async function prepareStableFill(message, ctx) {
-    if (message.visual_settle === false) return prepareFill(message);
+    const entry = atEntry(ctx);
+    if (message.visual_settle === false) return prepareFill(message, entry());
     const budget = message.settle_ms ?? 0;
     if (budget <= 0) {
-      prepareFill(message);
+      prepareFill(message, entry());
       await sleep(FILL_RECHECK_MS);
       throwIfCancelled(ctx);
-      return prepareFill(message);
+      return prepareFill(message, entry());
     }
     const started = performance.now();
     let stableSince = started;
     let signature = null;
     while (true) {
       throwIfCancelled(ctx);
-      const prepared = prepareFill(message);
+      const prepared = prepareFill(message, entry());
       const nextSignature = fillStateSignature(prepared.elements);
       const now = performance.now();
       if (nextSignature !== signature) {
@@ -2242,7 +2351,7 @@ ${line}` : line;
         return prepared;
       }
       if (now - started >= budget) {
-        return prepareFill(message);
+        return prepareFill(message, entry());
       }
       await sleep(Math.min(FILL_SETTLE_POLL_MS, budget - (now - started)));
     }
@@ -2481,8 +2590,8 @@ ${line}` : line;
     // extension performs the click through Chromium's trusted pointer path. Page-generated clicks
     // can take a different framework path and have erased otherwise valid controlled-form edits.
     if (message.kind === "activate") {
-      const element = requireActionable(resolve(message.locator), "activate");
-      const subject = actionSubject(element);
+      const element = requireActionable(resolve(message.locator, ctx), "activate");
+      const subject = actionSubject(element, ctx);
       element.scrollIntoView({ block: "center", inline: "center" });
       requireActionable(element, "activate");
       return { activated: true, subject, rectangle: viewportRectangle(element) };
@@ -2490,7 +2599,7 @@ ${line}` : line;
     // Form submission follows the same rule as activation: the submit click is the dispatch
     // tail, and a handler that opens a page-blocking dialog would freeze this thread mid-click.
     if (message.kind === "submit_fill") {
-      const { submitElement } = prepareFill(message);
+      const { submitElement } = prepareFill(message, ctx);
       if (!submitElement) throw new AssetError("invalid_request", "submit control is required");
       setTimeout(() => submitElement.click(), 0);
       return { submitted: true };
@@ -2503,20 +2612,21 @@ ${line}` : line;
     // Focus the exact text control for the browser's trusted input and prove it kept focus. The
     // value is typed by the extension afterwards, never by this call.
     if (message.kind === "focus_text_field") {
-      const element = resolve(message.field.locator);
+      const element = resolve(message.field.locator, ctx);
       validateFillElement(element, message.field.value, message.allow_credentials);
       if (!isTextual(element)) throw new AssetError("not_editable", "target does not use browser text input");
-      const { subject } = prepareBrowserText(element, message.allow_credentials);
+      const { subject } = prepareBrowserText(element, message.allow_credentials, ctx);
       return { focused: true, subject };
     }
     if (message.kind === "fill_local") {
-      const element = resolve(message.field.locator);
+      const element = resolve(message.field.locator, ctx);
       fillLocalElement(element, message.field.value, message.allow_credentials);
       return { filled: true };
     }
     if (message.kind === "read_text") {
+      const entry = atEntry(ctx);
       const extract = () => message.locator
-        ? readTarget(resolve(message.locator), message.max_chars)
+        ? readTarget(resolve(message.locator, entry()), message.max_chars)
         : message.mode === "article"
           ? extractArticle(message.max_chars)
           : composedVisibleText(document.body || document.documentElement, message.max_chars);
@@ -2524,7 +2634,7 @@ ${line}` : line;
       return { ...result, title: shared.bounded(document.title, 500), url: location.href };
     }
     if (message.kind === "inspect_tree") {
-      const root = message.locator ? resolve(message.locator) : document.body || document.documentElement;
+      const root = message.locator ? resolve(message.locator, ctx) : document.body || document.documentElement;
       const extract = () => inspectTree(root, message.max_depth ?? 6, message.max_nodes ?? DOCUMENT_TREE_NODE_LIMIT);
       return sampled(message, ctx, extract, (res) => Boolean(res?.tree && Array.isArray(res.tree.children) && res.tree.children.length > 0));
     }
@@ -2541,7 +2651,7 @@ ${line}` : line;
     if (message.kind === "describe") {
       releaseGoneLocators();
       const view = observationView();
-      return { targets: message.locators.map((locator) => observation(resolve(locator), view)) };
+      return { targets: message.locators.map((locator) => observation(resolve(locator, ctx), view)) };
     }
     if (message.kind === "query_semantic") {
       releaseGoneLocators();
@@ -2554,7 +2664,7 @@ ${line}` : line;
       return verifyBrowserTextFocus(deepestActiveElement(), message.allow_credentials);
     }
     if (message.kind === "clear_focused") return clearText(focusedControl(), message.allow_credentials);
-    if (message.kind === "type_text") return typeText(resolve(message.locator), message.text, message.clear_first, message.allow_credentials);
+    if (message.kind === "type_text") return typeText(resolve(message.locator, ctx), message.text, message.clear_first, message.allow_credentials, ctx);
     if (message.kind === "drop_files") {
       const dropTarget = deepestElementFromPoint(document, message.x, message.y);
       if (!dropTarget) throw new AssetError("no_subject", "no element is at the drop point");
@@ -2564,13 +2674,13 @@ ${line}` : line;
       return { uploaded_count: message.files.length, uploaded_bytes: message.files.reduce((sum, file) => sum + file.size, 0) };
     }
     if (message.kind === "box") {
-      const element = requireActionable(resolve(message.locator), "box");
-      return { rectangle: viewportRectangle(element), subject: actionSubject(element) };
+      const element = requireActionable(resolve(message.locator, ctx), "box");
+      return { rectangle: viewportRectangle(element), subject: actionSubject(element, ctx) };
     }
     if (message.kind === "scroll_offset") return { x: scrollX, y: scrollY };
     if (message.kind === "focus") {
-      const element = requireActionable(resolve(message.locator), "focus");
-      const subject = actionSubject(element);
+      const element = requireActionable(resolve(message.locator, ctx), "focus");
+      const subject = actionSubject(element, ctx);
       element.scrollIntoView({ block: "center", inline: "center" });
       element.focus({ preventScroll: true });
       return { focused: true, subject };
@@ -2578,8 +2688,8 @@ ${line}` : line;
     if (message.kind === "scroll") {
       let subject = null;
       if (message.locator) {
-        const element = requireActionable(resolve(message.locator), "scroll");
-        subject = actionSubject(element);
+        const element = requireActionable(resolve(message.locator, ctx), "scroll");
+        subject = actionSubject(element, ctx);
         element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
       } else {
         const viewport = message.amount === "small" ? 0.25 : message.amount === "large" ? 0.75 : message.amount === "page" ? 0.95 : 0.5;
@@ -2628,21 +2738,21 @@ ${line}` : line;
       return { focused: true };
     }
     if (message.kind === "hover") {
-      const element = requireActionable(resolve(message.locator), "hover");
+      const element = requireActionable(resolve(message.locator, ctx), "hover");
       element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-      return { rectangle: viewportRectangle(element), subject: actionSubject(element) };
+      return { rectangle: viewportRectangle(element), subject: actionSubject(element, ctx) };
     }
     if (message.kind === "upload_files") {
-      const element = resolve(message.locator);
-      const subject = actionSubject(element);
+      const element = resolve(message.locator, ctx);
+      const subject = actionSubject(element, ctx);
       return { ...uploadFiles(element, message.files), subject };
     }
     // A recording export: the bytes arrive as the call's attachment, never in the message.
     if (message.kind === "attach_file") {
       const attachment = ctx.attachment;
       if (!attachment) throw new AssetError("invalid_request", "attach_file requires an attachment");
-      const element = resolve(message.locator);
-      const subject = actionSubject(element);
+      const element = resolve(message.locator, ctx);
+      const subject = actionSubject(element, ctx);
       const file = { name: message.file_name, media_type: attachment.media_type, data: attachment.data, size: attachment.size };
       return { ...uploadFiles(element, [file]), subject };
     }

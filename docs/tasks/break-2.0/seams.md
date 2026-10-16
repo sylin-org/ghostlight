@@ -99,7 +99,7 @@ time). f01a's precondition checks it.
 
 ## RESUME HERE
 
-Next: the journeys and the carriers that follow the edge (named by the coordinator). w01-windows-user-path has landed. polish-01-deployment-report has landed. tidy-03 has landed. leftovers-1x-version-dirs has landed. The handles slices (ADR-0198 amendment "handles follow their control") run next in their own lane. h02-execute-awaits has landed. h03-find-context has landed. h04-stale-says-why has landed. h05-trusted-replacement has landed. Next: h06-handles-follow.
+Next: the journeys and the carriers that follow the edge (named by the coordinator). w01-windows-user-path has landed. polish-01-deployment-report has landed. tidy-03 has landed. leftovers-1x-version-dirs has landed. The handles slices (ADR-0198 amendment "handles follow their control") run next in their own lane. h02-execute-awaits has landed. h03-find-context has landed. h04-stale-says-why has landed. h05-trusted-replacement has landed. h06-handles-follow has landed. Next: the journeys and the carriers that follow the edge (named by the coordinator).
 
 ## Landed
 
@@ -143,6 +143,7 @@ Next: the journeys and the carriers that follow the edge (named by the coordinat
 | h03-find-context | Find, inspect and semantic-query results give a repeated role+name its row context (item label, else group, else named landmark) and nth when the context repeats; value-free; never on credential-class controls; not in history. | see `git log` |
 | h04-stale-says-why | Decision 27 and Decision 17 tombstones: the page sends stale removed/unknown in the stale_locator detail, the service maps it to BrowserError::StaleLocator and the typed stale_target refusal with stale <word>, TargetBook tombstones (navigated, tab_closed, removed) refuse before dispatch, current-generation records are bounded, detached nodes are released at the next read. | see `git log` |
 | h05-trusted-replacement | Decision 28 as amended: page identity records, own-link anchors unique among items, the stale detail computed in the failing call (matched, same, up to 3 candidates with context), candidates registered as handles under read authority, the repeat step only under the conjunction test, and a connected recycled row refuses as removed. | see `git log` |
+| h06-handles-follow | A handle follows its control through a re-render the page proves (own unique row link, declared row name, role, exact name, in-row position, unchanged view; never credential or dialog controls): rebind at use, re-adoption at find, facts.rebound and audit rebound bool, server-instructions clause. | see `git log` |
 
 ## Owed live checks
 
@@ -151,6 +152,7 @@ them.
 
 - h04: on suno.com/me, switch Songs to Playlists and back; an old handle refuses with 'That target is no longer on the page.' and stale removed.
 - h05: on suno.com/me delete one take of a title pair; the old handle names no replacement and lists the other take.
+- h06: on suno.com/me switch Songs to Playlists and back, click an old More options handle: it succeeds with rebound true (this supersedes the h04 line above for rows that have a unique link and a declared name). On the Create page, a handle taken while a clip is queued either follows once the row has its /song/ link and title, or refuses with candidates; record which, and whether the Songs tab returns to the same URL and title. `node tests/agent-ux-rerender-journey.mjs` (it starts the built edge and a live browser, so only the coordinator runs it; the file passes `node --check`) serves `tests/fixtures/agent-ux/rerender-list.html` and drives the follow, tab-switch, find, delete, recycle and renamed-region cases.
 - h02: script-browser-journey promise cases (`node tests/script-browser-journey.mjs`: a plain-expression Promise resolving to 42, a `fetch().then` chain on the local fixture, a statement script ending in a promise, and a DOM node, the last two with the `{}` step). It starts the built service, so only the coordinator runs it; the file passes `node --check`.
 
 - f01a: on a Linux host whose home holds a 1.x Flatpak route (the Flatpak Chromium manifest, the

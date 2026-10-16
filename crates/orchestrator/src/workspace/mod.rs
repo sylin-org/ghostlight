@@ -2866,6 +2866,44 @@ mod tests {
         assert!(book.retired.is_empty() && book.retired_order.is_empty());
     }
 
+    /// A control the page proved after a re-render comes back under its old locator, so reading it
+    /// again keeps its handle and the book does not grow with every render.
+    #[test]
+    fn a_re_render_the_page_proves_keeps_one_handle_and_one_record() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(1, "https://example.com"))
+            .unwrap();
+        let handle = lease
+            .register_targets(&tab, &[control("#more", "More options")])
+            .unwrap()[0]
+            .0
+            .clone();
+        store.mark_target_removed(&workspace, handle.as_str());
+        assert!(lease.resolve_target(handle.as_str(), None).is_err());
+
+        for _ in 0..5 {
+            let again = lease
+                .register_targets(&tab, &[control("#more", "More options")])
+                .unwrap()[0]
+                .0
+                .clone();
+            assert_eq!(again, handle, "the same locator is the same handle");
+        }
+
+        assert!(
+            lease.resolve_target(handle.as_str(), Some(&tab)).is_ok(),
+            "the revived handle resolves"
+        );
+        let book = &store.lock().workspaces[&workspace].targets;
+        assert_eq!(book.records.len(), 1);
+        assert_eq!(book.index.len(), 1);
+        assert!(book.retired.is_empty());
+    }
+
     /// Tombstones are bounded: the oldest are dropped, and a dropped one has no reason left.
     #[test]
     fn tombstones_are_bounded_and_the_oldest_are_dropped() {

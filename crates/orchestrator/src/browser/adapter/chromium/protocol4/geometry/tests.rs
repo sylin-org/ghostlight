@@ -65,6 +65,7 @@ fn hit(x: f64, y: f64, embed: bool) -> Hit {
         subject: (!embed).then(|| PhysicalActionSubject {
             role: "button".into(),
             name: "Save".into(),
+            rebound: false,
         }),
     }
 }
@@ -282,7 +283,8 @@ fn a_point_on_no_embed_lands_on_its_subject() {
         RouteStep::Subject {
             subject: Some(PhysicalActionSubject {
                 role: "button".into(),
-                name: "Save".into()
+                name: "Save".into(),
+                rebound: false,
             })
         }
     );

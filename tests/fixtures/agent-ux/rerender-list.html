@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ghostlight re-render fixture</title>
+<style>
+  body { font: 16px system-ui; margin: 24px; }
+  nav button, .controls button { margin: 4px; padding: 8px 12px; }
+  [role="group"] { border: 1px solid #888; margin: 6px 0; padding: 6px; }
+  [role="group"] a { margin-right: 12px; }
+</style>
+</head>
+<body>
+<!--
+  A song library that re-renders the way a React list does. Every row is a named group that holds
+  its own /song/<id> link and a "More options" button whose id changes on each render. The page
+  never changes its address or its title, so a handle can follow a button only through the row's
+  link, the row's name and the button's place in the row.
+-->
+<nav aria-label="Library views">
+  <button id="view-songs" type="button">Songs</button>
+  <button id="view-playlists" type="button">Playlists</button>
+</nav>
+<div class="controls">
+  <button id="rerender" type="button">Re-render all rows</button>
+  <button id="delete-first" type="button">Delete the first take</button>
+  <button id="recycle" type="button">Recycle the first row</button>
+  <button id="rename-region" type="button">Rename the region</button>
+  <button id="restore" type="button">Restore the library</button>
+</div>
+<main id="library" aria-label="Songs"></main>
+<script>
+  "use strict";
+  const SONGS = [["Neon Rain", 11], ["Neon Rain", 12], ["Paper Moon", 21], ["Blue Hour", 31]];
+  const PLAYLISTS = [["Night Mix", 101], ["Morning Mix", 102]];
+  const library = document.getElementById("library");
+  let renders = 0;
+  let rows = SONGS.slice();
+  // The song ids of the "More options" buttons clicked so far, for the journey to read.
+  window.optionsClicks = [];
+
+  function row(entry) {
+    const [title, id] = entry;
+    const group = document.createElement("div");
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", title);
+    const link = document.createElement("a");
+    link.href = "/song/" + id;
+    link.textContent = title;
+    const options = document.createElement("button");
+    options.type = "button";
+    options.id = ":r" + renders + "-" + id + ":";
+    options.setAttribute("aria-label", "More options");
+    options.addEventListener("click", () => {
+      window.optionsClicks.push(Number(group.querySelector("a").getAttribute("href").split("/").pop()));
+    });
+    group.append(link, options);
+    return group;
+  }
+
+  function render() {
+    renders += 1;
+    library.replaceChildren(...rows.map(row));
+  }
+
+  document.getElementById("view-songs").addEventListener("click", () => {
+    rows = SONGS.slice();
+    library.setAttribute("aria-label", "Songs");
+    render();
+  });
+  document.getElementById("view-playlists").addEventListener("click", () => {
+    rows = PLAYLISTS.slice();
+    render();
+  });
+  document.getElementById("rerender").addEventListener("click", render);
+  document.getElementById("delete-first").addEventListener("click", () => {
+    rows = rows.slice(1);
+    render();
+  });
+  // A list that reuses the first row's node for another song: the node stays in the document and
+  // stops being the row it was.
+  document.getElementById("recycle").addEventListener("click", () => {
+    const first = library.firstElementChild;
+    if (!first) return;
+    first.setAttribute("aria-label", "Recycled song");
+    first.querySelector("a").setAttribute("href", "/song/99");
+    first.querySelector("a").textContent = "Recycled song";
+  });
+  // A view switch at the same address and title that only changes the region's name.
+  document.getElementById("rename-region").addEventListener("click", () => {
+    library.setAttribute("aria-label", "Playlists");
+    render();
+  });
+  document.getElementById("restore").addEventListener("click", () => {
+    rows = SONGS.slice();
+    library.setAttribute("aria-label", "Songs");
+    render();
+  });
+  render();
+</script>
+</body>
+</html>

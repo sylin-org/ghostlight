@@ -653,6 +653,34 @@ fn only_a_returned_answer_has_an_envelope() {
     assert_eq!(decode_answer(&failed), None);
 }
 
+/// A subject says it was rebound only when the page followed the handle, and a bare subject from
+/// a page that never followed anything still decodes.
+#[test]
+fn a_subject_decodes_with_and_without_rebound() {
+    let rectangle = json!({"left": 0.0, "top": 0.0, "width": 10.0, "height": 10.0});
+    let plain: Prepared = serde_json::from_value(json!({
+        "subject": {"role": "button", "name": "Save"}, "rectangle": rectangle}))
+    .unwrap();
+    assert!(!plain.subject.rebound);
+    let followed: Prepared = serde_json::from_value(json!({
+        "subject": {"role": "button", "name": "Save", "rebound": true}, "rectangle": rectangle}))
+    .unwrap();
+    assert!(followed.subject.rebound);
+    assert_eq!(
+        serde_json::to_value(&plain.subject).unwrap(),
+        json!({"role": "button", "name": "Save"}),
+        "an ordinary subject keeps its two members"
+    );
+    assert_eq!(
+        serde_json::to_value(&followed.subject).unwrap()["rebound"],
+        json!(true)
+    );
+    let unknown = serde_json::from_value::<PhysicalActionSubject>(
+        json!({"role": "button", "name": "Save", "locator": "locator_a1b2c3d4_1"}),
+    );
+    assert!(unknown.is_err(), "no other member crosses the seam");
+}
+
 #[test]
 fn typed_values_read_what_the_asset_returns() {
     let prepared: Prepared = serde_json::from_value(json!({

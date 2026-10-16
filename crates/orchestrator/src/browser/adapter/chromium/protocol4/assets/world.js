@@ -58,10 +58,13 @@ globalThis.__ghostlightRuntime = Object.freeze({
   async call(message, { local, token, attachment, owner } = {}) {
     if (typeof message?.kind !== "string") return failure(new AssetError("invalid_request", "world call requires a kind"));
     const signal = { cancelled: false };
+    // The locators this call followed to a node the page proved is their control.
+    const rebound = [];
     if (token) tokens.set(token, signal);
     try {
       if (local) applyAmbient(local);
-      return { ok: true, value: (await dispatch(message, { signal, attachment, owner })) ?? null };
+      const value = (await dispatch(message, { signal, attachment, owner, rebound })) ?? null;
+      return rebound.length ? { ok: true, value, rebound } : { ok: true, value };
     } catch (e) {
       return failure(e);
     } finally {

@@ -67,9 +67,13 @@ Tab handles are durable correlation slots: navigating by a handle whose
 tab has closed recreates that tab through the governed open path under the same handle and says
 so in the summary. Closing a handle whose tab is already gone succeeds without touching the
 browser. Target handles are different by design -- they are perception, not identity. A target
-handle is tied to one tab and document generation, a committed navigation makes prior target
-handles stale, and acting on one forces re-inspection of a page the model has actually seen.
-Reading the same control again in the same document returns the same handle.
+handle is tied to one tab and document generation, and a committed navigation makes prior target
+handles stale. Within one document a handle follows its control through a re-render when the page
+proves it is the same control: its row's own link, unique on the page, its declared row name, its
+role, exact name and position in the row, and an unchanged view. The action then reports
+`rebound: true` in its facts and says its usual sentence; the audit keeps the bool and never a
+handle, row or link. Anything short of proof refuses as removed. Reading the same control again in
+the same document returns the same handle, also after a re-render the page proves.
 A stale target handle refuses with `reason: stale_target`, no effect and `repeat_safe: true`, and
 a `stale` fact that says why in one of four words, whoever noticed. The service notices a closed
 tab or a left document; the page notices a control that left it. A handle of a closed tab, of a
@@ -158,8 +162,9 @@ loop in six short sentences and names only catalog tools:
 > browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is
 > unambiguous. Read a page with browser_read, and get handles for its controls from browser_find or
 > browser_inspect, which also show what each form control accepts. Act with those handles, for example with browser_click or browser_fill_form;
-> timeout_ms bounds the whole call. Handles expire when the page changes, so fetch fresh ones after
-> navigation. Every result states its effect and whether repeating it is safe.
+> timeout_ms bounds the whole call. Handles expire when the page navigates; a handle follows its
+> control through a re-render the page can prove, and a stale handle's refusal says why. Every
+> result states its effect and whether repeating it is safe.
 
 ## Result envelope
 
@@ -502,7 +507,8 @@ optional `click_count` from 1 to 3 for single, double, or triple, default 1; opt
 optional `expect` postcondition. Capabilities: `action`, plus `read` when
 `selector` or `expect` is supplied.
 
-Facts: `tab`, optional `target`, optional `view`, `activated`, and any governed committed landing.
+Facts: `tab`, optional `target`, optional `view`, `activated`, `rebound: true` when the target handle
+followed its control through a re-render, and any governed committed landing.
 
 ### `browser_scroll`
 

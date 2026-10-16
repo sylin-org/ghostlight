@@ -160,31 +160,38 @@ const DIALOG_MESSAGE_MAX_CHARS: usize = 500;
 /// The bounded human identity of the element an action actually used.
 ///
 /// The role is always narrowed to Ghostlight's closed vocabulary. The optional name is page
-/// content retained only when the effective governance snapshot permits it.
+/// content retained only when the effective governance snapshot permits it. `rebound` says the
+/// action reached the element through a handle that followed its control across a re-render the
+/// page proved (ADR-0198 Decision 17).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActionSubject {
     role: TargetRole,
     label: Option<String>,
+    rebound: bool,
 }
 
 impl ActionSubject {
     /// Narrow and normalize one browser-observed physical subject.
     #[must_use]
     pub fn from_page(role: &str, name: &str, preserve_name: bool) -> Self {
-        Self {
-            role: TargetRole::classify(role),
-            label: if preserve_name {
-                one_line_bounded(name, TARGET_LABEL_MAX_CHARS)
-            } else {
-                None
-            },
-        }
+        Self::with_role(TargetRole::classify(role), name, preserve_name)
     }
 
     /// Construct the safe unnamed fallback for an already narrowed semantic target.
     #[must_use]
     pub const fn unnamed(role: TargetRole) -> Self {
-        Self { role, label: None }
+        Self {
+            role,
+            label: None,
+            rebound: false,
+        }
+    }
+
+    /// Say whether the action reached this element by following its handle through a re-render.
+    #[must_use]
+    pub const fn rebound(mut self, rebound: bool) -> Self {
+        self.rebound = rebound;
+        self
     }
 
     /// Name an already narrowed role. The name is kept only when the governed snapshot
@@ -198,6 +205,7 @@ impl ActionSubject {
             } else {
                 None
             },
+            rebound: false,
         }
     }
 
@@ -209,6 +217,12 @@ impl ActionSubject {
     /// The bounded name, when the snapshot lets it be kept.
     pub(super) fn label(&self) -> Option<&str> {
         self.label.as_deref()
+    }
+
+    /// Whether both name one control, by role and name. Whether a handle followed it to get
+    /// there does not make it another control.
+    fn names_same_control(&self, other: &Self) -> bool {
+        self.role == other.role && self.label == other.label
     }
 
     fn noun_phrase(&self) -> String {
@@ -765,7 +779,7 @@ impl Outcome {
                 host,
                 source: Some(source),
                 destination: Some(destination),
-            } if source == destination && source.label.is_some() => format!(
+            } if source.names_same_control(destination) && source.label.is_some() => format!(
                 "Dragged across {} on {}.",
                 source.noun_phrase(),
                 place(host, "the page")
@@ -971,9 +985,46 @@ impl Outcome {
         }
     }
 
-    /// Project the measurements named by the sentence into the audit vocabulary.
+    /// Whether the action used a handle that followed its control through a re-render.
+    ///
+    /// Only the closed fact is kept. The handle, the row and the link stay in the page.
+    #[must_use]
+    pub fn rebound(&self) -> bool {
+        match self {
+            Self::TargetClicked { subject, .. }
+            | Self::TargetRevealed { subject, .. }
+            | Self::TextTyped { subject, .. } => subject.rebound,
+            Self::PointClicked { subject, .. }
+            | Self::Hovered { subject, .. }
+            | Self::KeyboardSent { subject, .. }
+            | Self::FilesUploaded { subject, .. } => {
+                subject.as_ref().is_some_and(|subject| subject.rebound)
+            }
+            Self::Dragged {
+                source,
+                destination,
+                ..
+            } => [source, destination]
+                .into_iter()
+                .flatten()
+                .any(|subject| subject.rebound),
+            Self::DialogOpened { action, .. } => action.rebound(),
+            _ => false,
+        }
+    }
+
+    /// Project the measurements named by the sentence, and whether a handle followed its control,
+    /// into the audit vocabulary.
     #[must_use]
     pub fn observed(&self) -> Observed {
+        Observed {
+            rebound: self.rebound(),
+            ..self.measurements()
+        }
+    }
+
+    /// The measurements the sentence names.
+    fn measurements(&self) -> Observed {
         match self {
             Self::TabsListed { count } => Observed {
                 count: measured(*count),
@@ -1081,7 +1132,7 @@ impl Outcome {
                 host: host.clone(),
                 ..Observed::default()
             },
-            Self::DialogOpened { action, .. } => action.observed(),
+            Self::DialogOpened { action, .. } => action.measurements(),
             Self::TabClosed
             | Self::TabAlreadyClosed
             | Self::DialogHandled { .. }
@@ -1884,6 +1935,10 @@ pub struct Observed {
     /// Captured height in pixels.
     #[serde(default)]
     pub height: Option<u32>,
+    /// Whether the action used a handle that followed its control through a re-render the page
+    /// proved. A closed fact: it names no handle, row or link.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rebound: bool,
 }
 
 impl Observed {
@@ -1900,6 +1955,7 @@ impl Observed {
             count: later.count.or(self.count),
             width: later.width.or(self.width),
             height: later.height.or(self.height),
+            rebound: later.rebound || self.rebound,
         }
     }
 }
@@ -2623,6 +2679,85 @@ Changes are \"unsaved\".".into()),
         .summary();
         assert!(summary.contains(&format!("{}...", "x".repeat(77))));
         assert!(!summary.contains(&"x".repeat(81)));
+    }
+
+    /// A followed handle changes no sentence. The one fact reaches the measurements of every
+    /// action that names a subject, and of an action that left a dialog open.
+    #[test]
+    fn a_followed_handle_marks_the_measurements_and_not_the_sentence() {
+        let host = Some("example.com".to_owned());
+        let followed = || ActionSubject::from_page("button", "Save", true).rebound(true);
+        let plain = || ActionSubject::from_page("button", "Save", true);
+        let pairs = [
+            (
+                Outcome::TargetClicked {
+                    host: host.clone(),
+                    subject: followed(),
+                },
+                Outcome::TargetClicked {
+                    host: host.clone(),
+                    subject: plain(),
+                },
+            ),
+            (
+                Outcome::Hovered {
+                    host: host.clone(),
+                    subject: Some(followed()),
+                },
+                Outcome::Hovered {
+                    host: host.clone(),
+                    subject: Some(plain()),
+                },
+            ),
+            (
+                Outcome::TextTyped {
+                    host: host.clone(),
+                    subject: followed(),
+                    characters: 3,
+                },
+                Outcome::TextTyped {
+                    host: host.clone(),
+                    subject: plain(),
+                    characters: 3,
+                },
+            ),
+            (
+                Outcome::Dragged {
+                    host: host.clone(),
+                    source: Some(plain()),
+                    destination: Some(followed()),
+                },
+                Outcome::Dragged {
+                    host: host.clone(),
+                    source: Some(plain()),
+                    destination: Some(plain()),
+                },
+            ),
+        ];
+        for (followed, plain) in pairs {
+            assert_eq!(followed.summary(), plain.summary());
+            assert_eq!(followed.next_steps(), plain.next_steps());
+            assert_eq!(followed.audit().summary(), plain.audit().summary());
+            assert!(followed.observed().rebound && !plain.observed().rebound);
+            let opened = followed.with_open_dialog(DialogKind::Confirm);
+            assert!(opened.observed().rebound, "a dialog keeps the fact");
+        }
+        assert!(!Outcome::TabsListed { count: 1 }.observed().rebound);
+        let merged = Observed {
+            rebound: true,
+            ..Observed::default()
+        }
+        .merged(Observed::default());
+        assert!(merged.rebound, "a later account does not erase the fact");
+        let line = serde_json::to_value(Observed::default()).unwrap();
+        assert!(
+            line.get("rebound").is_none(),
+            "an ordinary line is unchanged"
+        );
+        assert_eq!(
+            serde_json::to_value(merged).unwrap()["rebound"],
+            serde_json::json!(true)
+        );
     }
 
     #[test]
@@ -3720,6 +3855,7 @@ Changes are \"unsaved\".".into()),
             count: Some(3),
             width: Some(1280),
             height: Some(720),
+            rebound: false,
         };
         let encoded = serde_json::to_value(&observed).unwrap();
         assert_eq!(

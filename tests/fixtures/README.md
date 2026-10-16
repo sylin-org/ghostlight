@@ -19,3 +19,10 @@ Set `GHOSTLIGHT_TEST_LIVE_SYLIN=1` to fetch current HTML and additionally naviga
 That optional lane requires network access. The default suite uses the checked-in snapshot and
 its assets. Refresh this fixture deliberately when the public demo changes, review the changed
 bytes, and repeat both browser lanes before recording new evidence.
+
+`agent-ux/rerender-list.html` is a song library that re-renders the way a React list does: named
+rows that each hold their own `/song/<id>` link and a "More options" button whose id changes on
+every render, plus buttons for an in-app tab switch at the same address, a delete, a recycle that
+reuses a row node for another link, and a view switch that renames the region. It carries no
+network resource. `tests/agent-ux-rerender-journey.mjs` serves it to a live browser and checks
+which handles follow their control and which refuse (ADR-0198 Decision 17).

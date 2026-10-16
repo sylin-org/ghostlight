@@ -149,6 +149,10 @@ pub struct PhysicalActionSubject {
     pub role: String,
     /// Bounded accessible name observed at the action boundary.
     pub name: String,
+    /// Whether the call reached the element by following its handle through a re-render the page
+    /// proved (ADR-0198 Decision 17).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rebound: bool,
 }
 
 /// What a fill gives one control, as the page receives it.

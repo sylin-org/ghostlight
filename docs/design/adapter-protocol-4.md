@@ -1572,10 +1572,12 @@ globalThis.__ghostlightRuntime = Object.freeze({
   async call(message, { local, token, attachment, owner }) {
     if (typeof message?.kind !== "string") return failure(new AssetError("invalid_request", "world call requires a kind"));
     const signal = { cancelled: false };
+    const rebound = [];                                     // locators this call followed (section 3.3)
     if (token) tokens.set(token, signal);
     try {
       if (local) applyAmbient(local);
-      return { ok: true, value: (await dispatch(message, { signal, attachment, owner })) ?? null };
+      const value = (await dispatch(message, { signal, attachment, owner, rebound })) ?? null;
+      return rebound.length ? { ok: true, value, rebound } : { ok: true, value };
     } catch (e) { return failure(e); }                      // the envelope never rejects
     finally { if (token) tokens.delete(token); }
   },
@@ -1601,9 +1603,15 @@ globalThis.__ghostlightRuntime = Object.freeze({
 ### 3.3 Envelope
 
 ```
-{ ok: true,  value: <JSON> }
+{ ok: true,  value: <JSON>, rebound?: [<locator>] }
 { ok: false, error: { code: <AssetErrorCode>, message: <bounded 500>, detail?: <object> } }
 ```
+
+`rebound` appears on a success only when the call followed at least one locator to the node the page
+proved is its control (section 3.4, ADR-0198 Decision 17), and lists those locators. An action
+subject (`{role, name}`) carries `rebound: true` when its own locator was followed in that call;
+the service reads that flag and turns it into one structural `rebound` fact. A failure never
+carries it.
 
 `detail` is optional and says what the code and message do not. The extension relays an envelope
 without reading it, so a detail needs no extension release. Only a fill carries one: a refused fill
@@ -1710,7 +1718,7 @@ The level-4 `content.js` is a copy of today's `content.js` with these edits. The
   released at the start of every `find`, `inspect`, `query_semantic` and `describe`.
 - **Identity records and the stale lookup (ADR-0198 Decision 28).** Every observation of a control
   refreshes a page-private record under its locator: role, exact name, credential class, the row's
-  label and declared name, the row's own link (a same-origin `http(s)` link that occurs in that one
+  label, kind and declared name, the row's own link (a same-origin `http(s)` link that occurs in that one
   row and nowhere else on the page, indexed once per read from at most 2000 links), the view (the
   address without its fragment, the title and the nearest named region), whether a dialog holds
   it, and its place among the row's same-named controls. The record never leaves the page. A
@@ -1722,6 +1730,20 @@ The level-4 `content.js` is a copy of today's `content.js` with these edits. The
   locator and its `context` and `nth`. `unknown` carries the word only. The service binds the
   candidate locators to the document of the one locator the command named, and drops the lookup
   for a command that names none or several.
+- **A locator follows its control (ADR-0198 Decision 17).** A locator whose node left the document
+  is pointed at the node the page proves is the same control, when a call resolves it (`resolve`
+  with the call's context) or a read meets the node. The proof is one conjunction: the record has
+  the row's own link, its declared name and its place in the row, and is no credential-class
+  control and no control in a dialog; in a fresh link index that link lies in exactly one row and
+  nowhere outside it; that row has the recorded kind and declared name; it holds as many controls
+  of the recorded role and exact name as before; the one at the recorded position holds no
+  locator yet, sits outside every dialog and is in an unchanged view. Position alone, a page id, a
+  data attribute or a name alone is never proof, and nothing watches the page between calls. A
+  call follows at the start only: a node that vanishes while the call waits is refused as
+  `removed`, and `fillStanding`, the presentation anchor and every `isConnected` recheck never
+  follow. A read that meets a node with no locator gives it the gone locator that proves it, once
+  per read, oldest first, so `find` after a re-render returns the old locators. A followed locator
+  is live again and joins the call's `rebound` list.
 - **Cancel tokens.** Every page loop checks `ctx.signal.cancelled` and throws `cancelled`:
   - `observe` (`:708-757`);
   - `prepareStableFill` (`:581-603`);

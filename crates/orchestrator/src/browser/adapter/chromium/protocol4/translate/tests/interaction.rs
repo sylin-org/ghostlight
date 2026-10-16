@@ -922,7 +922,8 @@ fn an_upload_is_one_guarded_call_to_the_inputs_document() {
             uploaded_bytes: 9,
             subject: Some(crate::browser::adapter::PhysicalActionSubject {
                 role: "button".into(),
-                name: "Choose file".into()
+                name: "Choose file".into(),
+                rebound: false,
             }),
         }
     );

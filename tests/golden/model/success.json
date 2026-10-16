@@ -1,34 +1,59 @@
 {
-  "content": [
-    {
-      "text": "Listed 1 tab in this session.",
-      "type": "text"
+  "followed_click": {
+    "content": [
+      {
+        "text": "Clicked the \"Delete\" button on example.com.",
+        "type": "text"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "effect": "applied",
+      "facts": {
+        "activated": true,
+        "rebound": true,
+        "tab": "<volatile>",
+        "target": "<volatile>"
+      },
+      "invocation": "<volatile>",
+      "readiness": "complete",
+      "repeat_safe": false,
+      "status": "succeeded",
+      "summary": "Clicked the \"Delete\" button on example.com."
     }
-  ],
-  "isError": false,
-  "structuredContent": {
-    "effect": "none",
-    "facts": {
-      "browsers": [
-        {
-          "attended": true,
-          "browser": "browser_fake",
-          "name": null
-        }
-      ],
-      "tabs": [
-        {
-          "active": true,
-          "readiness": "complete",
-          "tab": "<volatile>",
-          "title": "Example",
-          "url": "https://example.com/"
-        }
-      ]
-    },
-    "invocation": "<volatile>",
-    "repeat_safe": true,
-    "status": "succeeded",
-    "summary": "Listed 1 tab in this session."
+  },
+  "tabs_listed": {
+    "content": [
+      {
+        "text": "Listed 1 tab in this session.",
+        "type": "text"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "effect": "none",
+      "facts": {
+        "browsers": [
+          {
+            "attended": true,
+            "browser": "browser_fake",
+            "name": null
+          }
+        ],
+        "tabs": [
+          {
+            "active": true,
+            "readiness": "complete",
+            "tab": "<volatile>",
+            "title": "Example",
+            "url": "https://example.com/"
+          }
+        ]
+      },
+      "invocation": "<volatile>",
+      "repeat_safe": true,
+      "status": "succeeded",
+      "summary": "Listed 1 tab in this session."
+    }
   }
 }

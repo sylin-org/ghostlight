@@ -1528,6 +1528,11 @@ impl ApplicationExecutor {
             }
             None => outcome,
         };
+        // One structural bool: the sentence is the action's usual one, and no handle, row or
+        // link goes into the facts (ADR-0198 Decision 17).
+        if outcome.rebound() {
+            facts["rebound"] = json!(true);
+        }
         let summary = outcome.summary();
         let next_steps = outcome.next_steps();
         let observed = outcome.observed();
@@ -2392,6 +2397,7 @@ fn action_subject(
                 &subject.name,
                 context.snapshot.preserves_target_names(),
             )
+            .rebound(subject.rebound)
         })
         .or_else(|| fallback_role.map(ActionSubject::unnamed))
 }
@@ -2803,6 +2809,7 @@ mod tests {
     mod presentation;
     mod protocol4;
     mod provenance;
+    mod rebound;
     mod replacement;
     mod tabs;
     use std::fs;

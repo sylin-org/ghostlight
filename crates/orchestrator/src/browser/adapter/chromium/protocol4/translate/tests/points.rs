@@ -618,7 +618,8 @@ fn a_wheel_turns_once_a_tick_in_the_direction_asked() {
                 y: 100.0,
                 subject: Some(PhysicalActionSubject {
                     role: TOP_ROLE.into(),
-                    name: "Top".into()
+                    name: "Top".into(),
+                    rebound: false,
                 })
             },
             "the receipt reports where the wheel turned, in the top viewport"
@@ -815,7 +816,8 @@ fn a_dropped_image_is_delivered_inside_the_document_under_the_point() {
                 uploaded_bytes: 9,
                 subject: Some(PhysicalActionSubject {
                     role: "link".into(),
-                    name: "In G".into()
+                    name: "In G".into(),
+                    rebound: false,
                 })
             }
         );

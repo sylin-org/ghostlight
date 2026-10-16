@@ -75,6 +75,7 @@ fn audit_record_has_no_payload_fields() {
         count: Some(3),
         width: Some(1280),
         height: Some(720),
+        rebound: true,
     });
     let value = serde_json::to_value(record).unwrap();
     let mut found = Vec::new();
@@ -250,6 +251,7 @@ fn an_observation_has_one_place_for_a_host_and_none_for_the_rest_of_a_url() {
         count: Some(3),
         width: Some(1280),
         height: Some(720),
+        rebound: true,
     });
     let encoded = serde_json::to_value(&record).unwrap();
     let observed = encoded["observed"].as_object().unwrap();

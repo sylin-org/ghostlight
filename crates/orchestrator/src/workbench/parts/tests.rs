@@ -72,6 +72,7 @@ fn history_item(invocation: &str, check: PermissionCheck) -> HistoryItem {
             count: Some(1),
             width: Some(2),
             height: Some(3),
+            rebound: false,
         },
         channel: Some(IntakeChannel::Mcp),
         provenance: Some(details()),

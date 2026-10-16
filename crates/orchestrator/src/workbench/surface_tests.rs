@@ -137,6 +137,7 @@ fn sample_observation() -> crate::language::outcome::Observed {
         count: Some(1240),
         width: Some(1280),
         height: Some(720),
+        rebound: true,
     }
 }
 

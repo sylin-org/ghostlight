@@ -127,6 +127,7 @@ fn delete_click_with(
         subject: Some(PhysicalActionSubject {
             role: "button".into(),
             name: "Delete".into(),
+            rebound: false,
         }),
     }));
     click(executor, workspace, tab_handle, target)

@@ -4327,11 +4327,15 @@ function detach(element) {
   for (const child of element.childNodes ?? []) detach(child);
 }
 
-/** A song library: one named group per [title, id], each with its own song link and a menu button. */
-function libraryRows(harness, entries, { before = [], region = null } = {}) {
+/**
+ * A song library: one named group per [title, id], each with its own song link and a menu button.
+ * With `named` false each row is a list item that only its link names, which a handle never
+ * follows through a re-render.
+ */
+function libraryRows(harness, entries, { before = [], region = null, named = true } = {}) {
   const body = harness.element("body");
   for (const extra of before) body.append(extra);
-  const rows = entries.map(([title, id]) => node(harness, "div", { role: "group", "aria-label": title },
+  const rows = entries.map(([title, id]) => node(harness, named ? "div" : "li", named ? { role: "group", "aria-label": title } : {},
     node(harness, "a", { href: `/song/${id}` }, title),
     node(harness, "button", { "aria-label": "More options", "aria-expanded": "false" })));
   if (region) body.append(node(harness, "main", { "aria-label": region }, ...rows));
@@ -4358,8 +4362,8 @@ async function lookupOf(harness, locator) {
 test("a re-rendered row button is the one same match when role, name, credential class, row label and row link agree", async () => {
   const harness = contentHarness();
   const rows = [["Alpha", 1], ["Beta", 2], ["Gamma", 3]];
-  libraryRows(harness, rows);
-  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+  libraryRows(harness, rows, { named: false });
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { named: false }));
 
   const lookup = await lookupOf(harness, handles[1]);
 
@@ -4377,8 +4381,8 @@ test("a re-rendered row button is the one same match when role, name, credential
 test("two same-title takes give same only to the take whose link matches", async () => {
   const harness = contentHarness();
   const rows = [["Neon Rain", 11], ["Neon Rain", 12]];
-  libraryRows(harness, rows);
-  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+  libraryRows(harness, rows, { named: false });
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { named: false }));
 
   const second = await lookupOf(harness, handles[1]);
 
@@ -4407,8 +4411,8 @@ test("a row link that also appears outside the row is not an anchor", async () =
   const harness = contentHarness();
   const rows = [["Neon Rain", 11], ["Neon Rain", 12]];
   const nowPlaying = () => [node(harness, "a", { href: "/song/11" }, "Now playing")];
-  libraryRows(harness, rows, { before: nowPlaying() });
-  const handles = await rerendered(harness, () => libraryRows(harness, rows, { before: nowPlaying() }));
+  libraryRows(harness, rows, { before: nowPlaying(), named: false });
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { before: nowPlaying(), named: false }));
 
   assert.equal((await lookupOf(harness, handles[0])).same_count, 0, "the shared link proves nothing, and the title repeats");
   assert.equal((await lookupOf(harness, handles[1])).same_count, 1, "the other take still has a link of its own");
@@ -4503,10 +4507,10 @@ test("a changed view (URL, title or region) gives no same", async () => {
   };
   for (const [what, change] of Object.entries(cases)) {
     const harness = contentHarness();
-    libraryRows(harness, rows, { region: "Songs" });
+    libraryRows(harness, rows, { region: "Songs", named: false });
     const handles = await rerendered(harness, () => {
       change(harness);
-      libraryRows(harness, rows, { region: what === "the region" ? "Playlists" : "Songs" });
+      libraryRows(harness, rows, { region: what === "the region" ? "Playlists" : "Songs", named: false });
     });
     const lookup = await lookupOf(harness, handles[1]);
     assert.equal(lookup.matched, 2, what);
@@ -4514,10 +4518,10 @@ test("a changed view (URL, title or region) gives no same", async () => {
   }
 
   const harness = contentHarness();
-  libraryRows(harness, rows);
+  libraryRows(harness, rows, { named: false });
   const handles = await rerendered(harness, () => {
     harness.dom.context.location.href = "https://example.test/#details";
-    libraryRows(harness, rows);
+    libraryRows(harness, rows, { named: false });
   });
   assert.equal((await lookupOf(harness, handles[1])).same_count, 1, "a fragment is not a different view");
 });
@@ -4525,10 +4529,10 @@ test("a changed view (URL, title or region) gives no same", async () => {
 test("the latest view the agent saw is the one a handle is held to", async () => {
   const harness = contentHarness();
   const rows = [["Alpha", 1], ["Beta", 2]];
-  libraryRows(harness, rows);
+  libraryRows(harness, rows, { named: false });
   await findControls(harness, "More options");
   harness.document.title = "Library, page two";
-  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { named: false }));
   assert.equal((await lookupOf(harness, handles[1])).same_count, 1);
 });
 
@@ -4601,8 +4605,8 @@ test("a row without a recorded link or declared name never reads as recycled", a
 test("candidates are at most 3, same first, and carry context", async () => {
   const harness = contentHarness();
   const rows = [["One", 1], ["Two", 2], ["Three", 3], ["Four", 4], ["Five", 5]];
-  libraryRows(harness, rows);
-  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+  libraryRows(harness, rows, { named: false });
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { named: false }));
 
   const lookup = await lookupOf(harness, handles[3]);
 
@@ -4638,8 +4642,8 @@ test("the lookup counts at most 50 matches and says it was cut", async () => {
 test("the stale detail is computed without painting", async () => {
   const harness = contentHarness();
   const rows = [["Alpha", 1], ["Beta", 2]];
-  libraryRows(harness, rows);
-  const handles = await rerendered(harness, () => libraryRows(harness, rows));
+  libraryRows(harness, rows, { named: false });
+  const handles = await rerendered(harness, () => libraryRows(harness, rows, { named: false }));
   let created = 0;
   const counting = (make) => (...args) => {
     created += 1;
@@ -4676,4 +4680,302 @@ test("an unknown locator carries no lookup", async () => {
   const harness = contentHarness();
   libraryRows(harness, [["Alpha", 1]]);
   assert.deepEqual(await detailOf(harness, { kind: "describe", locators: ["locator_1"] }), { stale: "unknown" });
+});
+
+// ---- a handle follows its control through a re-render the page proves ---------------------------
+
+/** The Suno library: nine titles twice, 18 rows, each with its own /song/<uuid> link. */
+function sunoEntries() {
+  return Array.from({ length: 18 }, (_, index) => [`Title ${Math.floor(index / 2) + 1}`, `uuid-${index}`]);
+}
+
+/** Build the library the way React does: every button carries an id that changes per render. */
+function sunoLibrary(harness, entries, { render = 0, ...options } = {}) {
+  const body = libraryRows(harness, entries, options);
+  let index = 0;
+  const label = (element) => {
+    if (element.getAttribute?.("aria-label") === "More options") {
+      element.id = `:r${render}${index.toString(36)}:`;
+      index += 1;
+    }
+    (element.childNodes ?? []).forEach(label);
+  };
+  label(body);
+  return body;
+}
+
+/** The reply to an activation, which must have succeeded. */
+async function activated(harness, locator) {
+  const reply = await harness.send({ kind: "activate", locator });
+  assert.equal(reply.ok, true, JSON.stringify(reply));
+  return reply;
+}
+
+/** The handles of every "More options" button on the page. */
+async function optionHandles(harness) {
+  return (await findControls(harness, "More options")).filter((target) => target.name === "More options").map((target) => target.locator);
+}
+
+test("a re-rendered row control keeps its locator when its row link is unique", async () => {
+  const harness = contentHarness();
+  sunoLibrary(harness, sunoEntries(), { render: 1 });
+  const before = await optionHandles(harness);
+  assert.equal(before.length, 18);
+  detach(harness.document.body);
+  sunoLibrary(harness, sunoEntries(), { render: 2 });
+
+  for (const locator of before) {
+    const reply = await activated(harness, locator);
+    assert.deepEqual(reply.rebound, [locator]);
+    assert.equal(reply.value.subject.rebound, true);
+    assert.deepEqual(Object.keys(reply.value.subject).sort(), ["name", "rebound", "role"]);
+  }
+  const again = await activated(harness, before[0]);
+  assert.equal("rebound" in again, false, "the control is live again, so the next use follows nothing");
+  assert.equal("rebound" in again.value.subject, false);
+});
+
+test("find after a re-render returns the same locators", async () => {
+  const harness = contentHarness();
+  sunoLibrary(harness, sunoEntries(), { render: 1 });
+  const before = await optionHandles(harness);
+  detach(harness.document.body);
+  sunoLibrary(harness, sunoEntries(), { render: 2 });
+
+  const after = await optionHandles(harness);
+
+  assert.deepEqual(after, before);
+  assert.equal("rebound" in await activated(harness, before[5]), false, "the read already pointed it at the new node");
+});
+
+test("two same-title takes each follow their own link", async () => {
+  const harness = contentHarness();
+  libraryRows(harness, [["Neon Rain", 11], ["Neon Rain", 12]]);
+  const [first, second] = await optionHandles(harness);
+  detach(harness.document.body);
+  const body = libraryRows(harness, [["Neon Rain", 12], ["Neon Rain", 11]]);
+  const reached = [];
+  body.children.forEach((row, position) => { row.children[1].scrollIntoView = () => reached.push(position); });
+
+  await activated(harness, first);
+  await activated(harness, second);
+
+  assert.deepEqual(reached, [1, 0], "each went to the row of its own link, not to its place in the list");
+});
+
+test("a deleted take does not follow onto the other take", async () => {
+  const harness = contentHarness();
+  libraryRows(harness, [["Neon Rain", 11], ["Neon Rain", 12]]);
+  const [first, second] = await optionHandles(harness);
+  detach(harness.document.body);
+  libraryRows(harness, [["Neon Rain", 12]]);
+
+  assert.deepEqual((await activated(harness, second)).rebound, [second], "the take that stayed follows");
+  const detail = await detailOf(harness, { kind: "activate", locator: first });
+
+  assert.equal(detail.stale, "removed");
+  assert.equal(detail.same_count, 0);
+  assert.deepEqual(detail.candidates.map((candidate) => [candidate.same, candidate.target.locator]), [[false, second]]);
+});
+
+test("a row link that also appears outside the row is not followed", async () => {
+  const harness = contentHarness();
+  const playing = () => [node(harness, "a", { href: "/song/11" }, "Now playing")];
+  libraryRows(harness, [["Neon Rain", 11], ["Paper Moon", 12]], { before: playing() });
+  const [shared, own] = await optionHandles(harness);
+  detach(harness.document.body);
+  libraryRows(harness, [["Neon Rain", 11], ["Paper Moon", 12]], { before: playing() });
+
+  assert.deepEqual((await activated(harness, own)).rebound, [own]);
+  assert.equal(await staleWordOf(harness, { kind: "activate", locator: shared }), "removed");
+});
+
+test("a changed URL, title or region is not followed", async () => {
+  const rows = [["Alpha", 1], ["Beta", 2]];
+  const changes = {
+    "the title": [(harness) => { harness.document.title = "Playlists"; }, "Songs"],
+    "the address": [(harness) => { harness.dom.context.location.href = "https://example.test/playlists"; }, "Songs"],
+    "the region": [() => {}, "Playlists"]
+  };
+  for (const [what, [change, region]] of Object.entries(changes)) {
+    const harness = contentHarness();
+    libraryRows(harness, rows, { region: "Songs" });
+    const [locator] = await optionHandles(harness);
+    detach(harness.document.body);
+    change(harness);
+    libraryRows(harness, rows, { region });
+    assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed", what);
+  }
+
+  const harness = contentHarness();
+  libraryRows(harness, rows, { region: "Songs" });
+  const [locator] = await optionHandles(harness);
+  detach(harness.document.body);
+  harness.dom.context.location.href = "https://example.test/#details";
+  libraryRows(harness, rows, { region: "Songs" });
+  assert.deepEqual((await activated(harness, locator)).rebound, [locator], "a fragment is not another view");
+});
+
+test("a changed row name, control name, role or in-row position is not followed", async () => {
+  const buildRow = (harness, { title = "Alpha", control = { "aria-label": "More options" }, extra = 0 } = {}) => {
+    const body = harness.element("body");
+    body.append(node(harness, "div", { role: "group", "aria-label": title },
+      node(harness, "a", { href: "/song/1" }, "Alpha"),
+      node(harness, "button", control),
+      ...Array.from({ length: extra }, () => node(harness, "button", control))));
+    harness.setBody(body);
+  };
+  const changes = {
+    "the row name": { title: "Renamed" },
+    "the control name": { control: { "aria-label": "Options" } },
+    "the control role": { control: { "aria-label": "More options", role: "menuitem" } },
+    "the position in the row": { extra: 1 }
+  };
+  for (const [what, change] of Object.entries(changes)) {
+    const harness = contentHarness();
+    buildRow(harness);
+    const [locator] = await optionHandles(harness);
+    detach(harness.document.body);
+    buildRow(harness, change);
+    assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed", what);
+  }
+});
+
+test("a row with no declared name is not followed, even with a unique link", async () => {
+  const harness = contentHarness();
+  libraryRows(harness, [["Alpha", 1], ["Beta", 2]], { named: false });
+  const [locator] = await optionHandles(harness);
+  detach(harness.document.body);
+  libraryRows(harness, [["Alpha", 1], ["Beta", 2]], { named: false });
+
+  assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed");
+});
+
+test("an ordinal alone, a page id or a data attribute never follows", async () => {
+  const harness = contentHarness();
+  const rows = () => {
+    const body = harness.element("body");
+    for (const title of ["Alpha", "Beta"]) {
+      body.append(node(harness, "div", { role: "group", "aria-label": title },
+        node(harness, "button", { "aria-label": "More options", id: `menu-${title}`, "data-testid": `menu-${title}` })));
+    }
+    harness.setBody(body);
+  };
+  rows();
+  const handles = await optionHandles(harness);
+  detach(harness.document.body);
+  rows();
+
+  for (const locator of handles) assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed");
+});
+
+test("a credential-class control is never followed or re-adopted", async () => {
+  const harness = contentHarness();
+  const row = () => {
+    const body = harness.element("body");
+    body.append(node(harness, "div", { role: "group", "aria-label": "Account" },
+      node(harness, "a", { href: "/account/1" }, "Account"),
+      node(harness, "input", { type: "password", "aria-label": "Code" })));
+    harness.setBody(body);
+  };
+  const codes = async () => (await findControls(harness, "Code")).filter((target) => target.name === "Code").map((target) => target.locator);
+  row();
+  const [old] = await codes();
+  detach(harness.document.body);
+  row();
+
+  const [reread] = await codes();
+
+  assert.notEqual(reread, old, "the new field gets a new locator");
+  assert.equal(await staleWordOf(harness, { kind: "describe", locators: [old] }), "removed");
+});
+
+test("a control in a dialog is never followed", async () => {
+  const harness = contentHarness();
+  const dialog = () => {
+    const body = harness.element("body");
+    body.append(node(harness, "div", { role: "dialog", "aria-label": "Share" },
+      node(harness, "div", { role: "group", "aria-label": "Alpha" },
+        node(harness, "a", { href: "/song/1" }, "Alpha"),
+        node(harness, "button", { "aria-label": "More options" }))));
+    harness.setBody(body);
+  };
+  dialog();
+  const [locator] = await optionHandles(harness);
+  detach(harness.document.body);
+  dialog();
+
+  assert.equal(await staleWordOf(harness, { kind: "activate", locator }), "removed");
+});
+
+test("a control in an open shadow root follows through its host row", async () => {
+  const harness = contentHarness();
+  const shadows = [];
+  const row = () => {
+    const body = harness.element("body");
+    const host = harness.element("open-menu");
+    const shadow = harness.fragment();
+    shadow.host = host;
+    shadow.append(node(harness, "button", { "aria-label": "More options" }));
+    host.shadowRoot = shadow;
+    shadows.push(shadow);
+    body.append(node(harness, "div", { role: "group", "aria-label": "Alpha" }, node(harness, "a", { href: "/song/1" }, "Alpha"), host));
+    harness.setBody(body);
+  };
+  row();
+  const [locator] = await optionHandles(harness);
+  detach(harness.document.body);
+  shadows.forEach(detach);
+  row();
+
+  assert.deepEqual((await activated(harness, locator)).rebound, [locator]);
+});
+
+test("a node that vanishes during an action's wait refuses as removed", async () => {
+  const harness = contentHarness();
+  const rows = [["Alpha", 1], ["Beta", 2]];
+  const body = libraryRows(harness, rows);
+  const [alpha] = await optionHandles(harness);
+  const button = body.children[0].children[1];
+  button.scrollIntoView = () => {
+    detach(button);
+    libraryRows(harness, rows);
+  };
+
+  const reply = await harness.send({ kind: "activate", locator: alpha });
+
+  assert.equal(reply.ok, false);
+  assert.equal(reply.error.detail.stale, "removed");
+  assert.equal("rebound" in reply, false);
+  assert.equal(reply.error.detail.candidates[0].target.locator, alpha, "the lookup names the control by its own handle");
+});
+
+test("a new node already holding a locator is not taken over", async () => {
+  const harness = contentHarness();
+  const rows = [["Alpha", 1], ["Beta", 2]];
+  libraryRows(harness, rows);
+  const [old] = await optionHandles(harness);
+  detach(harness.document.body);
+  harness.document.title = "Playlists";
+  libraryRows(harness, rows);
+  const [other] = await optionHandles(harness);
+  harness.document.title = "Fixture";
+
+  assert.notEqual(other, old, "in another view the node is a new control");
+  assert.equal(await staleWordOf(harness, { kind: "activate", locator: old }), "removed");
+  await activated(harness, other);
+});
+
+test("rebound appears in the envelope only when non-empty", async () => {
+  const harness = contentHarness();
+  libraryRows(harness, [["Alpha", 1]]);
+  const [locator] = await optionHandles(harness);
+
+  assert.equal("rebound" in await harness.send({ kind: "describe", locators: [locator] }), false);
+  detach(harness.document.body);
+  libraryRows(harness, [["Alpha", 1]]);
+  const followed = await harness.send({ kind: "describe", locators: [locator] });
+  assert.deepEqual(followed.rebound, [locator]);
+  assert.equal("rebound" in await harness.send({ kind: "describe", locators: [locator] }), false);
+  assert.equal("rebound" in await harness.send({ kind: "describe", locators: ["locator_1"] }), false, "a refusal carries none");
 });
