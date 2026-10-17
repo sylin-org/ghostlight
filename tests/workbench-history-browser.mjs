@@ -48,6 +48,8 @@ try {
   const profile = join(scratch, "profile");
   chromium = start(browser, ["--remote-debugging-port=0", `--user-data-dir=${profile}`,
     ...(process.env.GHOSTLIGHT_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
+    // A run on a person's own computer can keep the browser off their screen.
+    ...(process.env.GHOSTLIGHT_TEST_HEADLESS === "1" ? ["--headless=new"] : []),
     "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
     "--disable-component-update", "--disable-sync", "about:blank"]);
   const [port, endpoint] = await readDevToolsPort(profile, chromium);
@@ -238,7 +240,8 @@ try {
   assert.equal(await evaluate(`document.querySelector('${card}').textContent.includes('Later application')`), false,
     "the trust note says the connections the session has now");
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').open`), true);
-  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('MCP client')`), true);
+  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('codex-mcp-client')`), true,
+    "the receipt keeps the claim its own connection made");
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('Later application')`), false);
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('Latest application')`), false);
   assert.equal(await evaluate("document.querySelector('#hero-body .hero-meta').textContent.includes('Codex')"), true);
