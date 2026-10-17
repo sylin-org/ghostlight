@@ -155,6 +155,7 @@
       diagnostics: diagnostics.diagnostics ?? []
     };
     if (status.runtime_note !== undefined) flat.runtime_note = status.runtime_note;
+    if (connections.no_browser !== undefined) flat.no_browser = connections.no_browser;
     if (controls !== undefined) flat.controls = controls;
     return flat;
   }

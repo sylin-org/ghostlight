@@ -1797,3 +1797,108 @@ fn connecting_a_client_republishes_setup_with_the_row_waiting_for_a_restart() {
     assert_eq!(row.detail, "Restart Cursor to finish.");
     assert_eq!(row.tone, RowTone::Attention);
 }
+
+/// A policy file that sets the browser startup posture to `posture`.
+fn startup_policy(posture: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "ghostlight-workbench-startup-{}.json",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{posture}","level":"mandatory"}}]}}"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn with_no_browser_the_glance_says_which_browser_a_request_starts_and_only_then() {
+    use crate::browser::recovery::RecoveryCandidate;
+    use crate::install::browser_package::BrowserPackage;
+    use crate::install::native_host::NativeHostState;
+    use crate::language::workbench as words;
+
+    let chrome = || RecoveryCandidate {
+        id: "chrome".into(),
+        name: "Google Chrome".into(),
+        package: BrowserPackage::Native,
+        package_detail: String::new(),
+        registration: NativeHostState::Current,
+        ordinary_executable: Some("/installed/chrome".into()),
+    };
+    for (posture, said) in [
+        ("on_demand", "Starts Google Chrome on request"),
+        ("manual", words::NO_BROWSER),
+    ] {
+        let path = startup_policy(posture);
+        let facade = facade_over(
+            GovernanceFacade::new(Some(path.clone()), None),
+            ControlledBrowser::new(false, false),
+        )
+        .with_installed_browsers(vec![chrome()]);
+        assert_eq!(
+            facade.snapshot().no_browser.as_deref(),
+            Some(said),
+            "{posture}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    let path = startup_policy("on_demand");
+    let facade = facade_over(
+        GovernanceFacade::new(Some(path.clone()), None),
+        ControlledBrowser::new(false, false),
+    )
+    .with_installed_browsers(Vec::new());
+    assert_eq!(
+        facade.snapshot().no_browser.as_deref(),
+        Some(words::NO_BROWSER),
+        "no installed browser starts"
+    );
+    let _ = std::fs::remove_file(path);
+
+    let connected = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+    )
+    .with_installed_browsers(vec![chrome()]);
+    assert_eq!(connected.snapshot().no_browser, None);
+}
+
+#[test]
+fn each_browser_counts_the_tabs_of_the_sessions_that_work_in_it() {
+    use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
+    use crate::intake::session::IntakeChannel;
+
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    for (tab_id, label) in [(1, "first"), (2, "second")] {
+        let workspace = workspaces.admit(label.into(), IntakeChannel::Mcp);
+        workspaces
+            .pin_browser(workspace.as_str(), "browser-1")
+            .unwrap();
+        let lease = workspaces.acquire(&workspace).unwrap();
+        lease
+            .add_tab(&PhysicalTab {
+                tab_id,
+                url: "https://example.com/".into(),
+                title: "test".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            })
+            .unwrap();
+    }
+    workspaces.admit("elsewhere".into(), IntakeChannel::Mcp);
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        workspaces,
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let snapshot = facade.snapshot();
+    assert_eq!(snapshot.browsers.len(), 1);
+    assert_eq!(snapshot.browsers[0].tab_count, 2);
+}

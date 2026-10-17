@@ -816,23 +816,63 @@ const provenanceChecks = [];
     html.includes('data-history-details="provenance-work:connection"')
       && html.includes('data-history-details="provenance-work:step:1:connection"')
       && !html.includes('data-history-details="provenance-work:connection" open')]);
-  const sessions = [{ ...laterSession, tab_count: 2, active_operations: 0, connections: [evidence,
-    { ...evidence, connection_id: "connection_other", reported_application: "Second application",
-      agent: "Command line", channel: "cli", explanation: "A ghostlight call session is a local program." }] }];
-  const sessionSnapshot = { ...snapshot(), sessions };
-  connectionView.collections(sessionSnapshot, new Set());
-  html = nodes.get("connections").innerHTML;
-  provenanceChecks.push(["shared sessions retain every connection with its authored explanation",
-    html.includes("Original &lt;script&gt;claim&lt;/script&gt;") && html.includes("Second application")
-      && html.includes("A ghostlight call session is a local program.") && !html.includes("trusted")
-      && !html.includes('data-history-details="sessions:connections" open')]);
-  documentHandlers.get("toggle").at(-1)({ target: { dataset: { historyDetails: "sessions:connections" }, open: true,
-    classList: { contains: () => false } } });
-  connectionView.collections({ ...sessionSnapshot, sessions: [{ ...sessions[0], active_operations: 1 }] }, new Set());
-  provenanceChecks.push(["connection details stay open across session refresh",
-    nodes.get("connections").innerHTML.includes('data-history-details="sessions:connections" open')]);
 }
 
+// At a glance: one summary, two shelves, and an agent's card in place of a list of connections.
+const glanceChecks = [];
+{
+  const glanceView = sandbox.globalThis.GhostlightView.create({});
+  const claim = (id, agent, extra = {}) => ({
+    id, client_label: agent, agent, channel: "mcp", tab_count: 0, active_operations: 0,
+    connections: [{ connection_id: `connection_${id}`, reported_application: agent, agent, channel: "mcp",
+      explanation: `"${agent}" is what the agent calls itself; Ghostlight does not verify it.` }],
+    ...extra
+  });
+  const sessions = [
+    ...Array.from({ length: 5 }, (_, at) => claim(`codex_${at}`, "Codex")),
+    claim("claude", "Claude <b>Code</b>", { tab_count: 2, active_operations: 1, browser: "Google Chrome" }),
+    { ...claim("script", "Command line"), channel: "cli",
+      connections: [{ connection_id: "connection_script", agent: "Command line", channel: "cli",
+        explanation: "A ghostlight call session is a local program." }] }
+  ];
+  const browsers = [{ id: "chrome", family: "Google Chrome", adapter_version: "2.0.0", tab_count: 2, connected: true }];
+  const draw = (facts) => {
+    glanceView.collections({ ...snapshot(), ...facts }, new Set());
+    return nodes.get("connections").innerHTML;
+  };
+  let html = draw({ sessions, browsers });
+  glanceChecks.push(["at a glance is one closed summary that counts agents and browsers",
+    html.startsWith('<details class="glance" data-history-details="glance:shelves">')
+      && html.includes(">3 agents<") && html.includes(">1 browser<") && html.includes(">Details<")
+      && !html.includes("Connection details") && !html.includes("Intake"), html]);
+  glanceChecks.push(["the shelves give each agent one chip with a count, and the working one wears the busy glyph",
+    html.includes('data-glance-agent="Codex"') && html.includes('<span class="tally">5</span>')
+      && /class="chip glance-chip busy"[^>]*data-glance-agent="Claude &lt;b&gt;Code&lt;\/b&gt;"/.test(html)
+      && html.includes(">Google Chrome<small>2 tabs</small>") && !html.includes("<b>Code</b>"), html]);
+  documentHandlers.get("toggle").at(-1)({ target: { dataset: { historyDetails: "glance:shelves" }, open: true,
+    classList: { contains: () => false } } });
+  html = draw({ sessions: sessions.slice(1), browsers });
+  glanceChecks.push(["the opened summary stays open across a refresh",
+    html.startsWith('<details class="glance" data-history-details="glance:shelves" open>'), html.slice(0, 80)]);
+  const press = (name) => documentHandlers.get("click").forEach((handler) => handler({ target: {
+    closest: (selector) => (selector === "[data-glance-agent]" ? { dataset: { glanceAgent: name } } : null) } }));
+  press("Codex");
+  html = draw({ sessions, browsers });
+  glanceChecks.push(["an agent's card says at most four sessions, how many more, and the trust note once",
+    (html.match(/class="glance-line"/g) ?? []).length === 4 && html.includes(">and 1 more<")
+      && (html.match(/is what the agent calls itself/g) ?? []).length === 1
+      && html.includes('data-copy-connection="connection_codex_0"') && html.includes(">Copy id<")
+      && !html.includes(">connection_codex_0<"), html]);
+  press("Codex");
+  html = draw({ sessions, browsers });
+  glanceChecks.push(["pressing the agent again closes its card", !html.includes('class="glance-card"'), html]);
+  for (const line of ["Starts Google Chrome on request", "No browser connected"]) {
+    html = draw({ sessions, browsers: [], no_browser: line });
+    glanceChecks.push([`with no browser the shelf says: ${line}`,
+      html.includes(`<span class="chip glance-chip missing"><span class="dot"></span>${line}</span>`)
+        && html.includes(">no browser<"), html]);
+  }
+}
 
 // H7: an existing health surface stays quiet when healthy and keeps failed storage explicit.
 const healthSnapshot = snapshot();
@@ -972,7 +1012,7 @@ function fakeService(kind, { served = true } = {}) {
   });
   const parts = () => ({
     status: status(),
-    connections: { sessions: [], browsers: [] },
+    connections: kind === "watch" ? WATCHED_CONNECTIONS : { sessions: [], browsers: [] },
     activity: { operations: [], history: [], document_coverage: [] },
     integrations: { harnesses: roster() },
     diagnostics: {
@@ -1043,6 +1083,16 @@ function fakeService(kind, { served = true } = {}) {
   }
   return { state, fetch, emit, status };
 }
+
+/** What a watching screen is shown connected: one agent and no browser, which one starts on request. */
+const WATCHED_CONNECTIONS = {
+  sessions: [{ id: "workspace_codex", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp",
+    tab_count: 0, active_operations: 0,
+    connections: [{ connection_id: "connection_watched", reported_application: "codex-mcp-client", agent: "Codex",
+      channel: "mcp", explanation: "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it." }] }],
+  browsers: [],
+  no_browser: "Starts Google Chrome on request"
+};
 
 /** One page: the real modules over a stub document, in one context. */
 function bootHttpPage(kind, options = {}) {
@@ -1149,6 +1199,14 @@ const watchOpening = {
   status: watching.text("diagnostic-grid").innerHTML,
   apply: watching.text("apply-policy").textContent
 };
+const watchGlance = { closed: watching.text("connections").innerHTML };
+watching.clickOn("[data-glance-agent]", { dataset: { glanceAgent: "Codex" } });
+watchGlance.card = watching.text("connections").innerHTML;
+watching.clickOn("[data-copy-connection]", { dataset: { copyConnection: "connection_watched" } });
+await watching.settle();
+watchGlance.copied = [...watching.copied];
+watchGlance.toast = watching.text("toast").textContent;
+watching.clickOn("[data-glance-agent]", { dataset: { glanceAgent: "Codex" } });
 const watchBeforeFocus = watchRequests().length;
 watching.windowHandlers.get("focus")?.();
 await watching.settle();
@@ -1432,6 +1490,12 @@ const afterEmptyChange = where(atNothing);
 const addressedPages = [atSection, atBare, atUnknown, atNothing, atPolicy, atWatch, atClosed];
 
 const httpChecks = [
+  ["a watching page sees the same summary, shelves and card, and may copy an id",
+    watchGlance.closed.includes('class="glance"') && watchGlance.closed.includes("Starts Google Chrome on request")
+      && watchGlance.card.includes('class="glance-card"') && watchGlance.card.includes("is what the agent calls itself")
+      && JSON.stringify(watchGlance.copied) === JSON.stringify(["connection_watched"])
+      && watchGlance.toast === "Connection id copied.",
+    JSON.stringify(watchGlance)],
   ["over HTTP a watching page says so in its chip and keeps the service's sentence beside it",
     watchOpening.chip === "Watching" && watchOpening.chipTitle.includes("Changes are made in the Ghostlight window"),
     JSON.stringify(watchOpening.chip)],
@@ -1685,6 +1749,7 @@ const checks = [
   ["audit policy authors a closed choice and organization requirement disables relaxation", authoredAudit.some((item) => item.key === "audit.availability" && item.value === "require_audit") && /value="keep_working"[^>]*disabled/.test(auditPinnedMarkup)],
   ...historyChecks,
   ...provenanceChecks,
+  ...glanceChecks,
   ["boot completed without throwing", bootThrew === null, bootThrew],
   ["surface wired", listeners.some((l) => l.startsWith("document:click"))],
   ["global error handlers attached",

@@ -145,17 +145,19 @@ const snapshot = {
   service: { version: "1.0.0", started_at_ms: Date.now() - 540000, runtime_state: "active" },
   overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
-    { id: "workspace_codex", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1 },
-    { id: "workspace_claude", client_label: "claude-code", agent: "Claude Code", channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1 },
-    { id: "workspace_script", client_label: "ghostlight call", agent: "Command line", channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0 }
+    { id: "workspace_codex", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1, browser: "Chrome" },
+    // Codex starts a session per request, so its card holds more lines than it shows.
+    ...[2, 3, 4, 5, 6].map((at) => ({ id: `workspace_codex_${at}`, client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", leased: false, tab_count: 0, held_tab_count: 0, active_operations: 0 })),
+    { id: "workspace_claude", client_label: "claude-code", agent: "Claude Code", channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1, browser: "Edge" },
+    { id: "workspace_script", client_label: "ghostlight call", agent: "Command line", channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0, browser: "Chrome" }
   ],
   operations: [
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
     { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: "Filling form", capability: "write", started_at_ms: Date.now() - 35000, phase: "held" }
   ],
   browsers: [
-    { id: "browser_chrome", family: "Chrome", adapter_version: "1.0.0", connected: true },
-    { id: "browser_edge", family: "Edge", adapter_version: "1.0.0", connected: true }
+    { id: "browser_chrome", family: "Chrome", adapter_version: "1.0.0", connected: true, tab_count: 4 },
+    { id: "browser_edge", family: "Edge", adapter_version: "1.0.0", connected: true, tab_count: 1 }
   ],
   history: [
     { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp" },
@@ -273,7 +275,7 @@ for (const session of snapshot.sessions) {
     agent: session.agent, channel: session.channel,
     explanation: session.channel === "cli"
       ? "A ghostlight call session is a local program. Ghostlight does not verify the scripts and instructions it runs."
-      : "The application name is the MCP client's own claim. Ghostlight does not verify it."
+      : `"${session.client_label}" is what the agent calls itself; Ghostlight does not verify it.`
   }];
 }
 const retainConnection = (record) => {
@@ -283,7 +285,11 @@ const retainConnection = (record) => {
 snapshot.operations.forEach(retainConnection);
 snapshot.history.forEach(retainConnection);
 
-const fixtureFor = (stage) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify({ ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] })};
+// `?browsers=none` shows At a glance with no browser connected, as the service words it when
+// Chrome would start on request.
+const withoutBrowsers = (flat) => ({ ...flat, browsers: [], no_browser: "Starts Google Chrome on request" });
+
+const fixtureFor = (stage, noBrowsers) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify((noBrowsers ? withoutBrowsers : (flat) => flat)({ ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] }))};
 window.__GHOSTLIGHT_SETUP_STATES__ = ${JSON.stringify(setupStates)};
 window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(stage)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
@@ -484,7 +490,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
       audit_notice: flat.audit_notice, configuration: flat.configuration,
       ...(flat.runtime_note === undefined ? {} : { runtime_note: flat.runtime_note })
     },
-    connections: { sessions: flat.sessions, browsers: flat.browsers },
+    connections: { sessions: flat.sessions, browsers: flat.browsers, ...(flat.no_browser ? { no_browser: flat.no_browser } : {}) },
     activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage || [] },
     integrations: { harnesses: flat.harnesses },
     diagnostics: { diagnostics: flat.diagnostics },
@@ -544,7 +550,7 @@ const server = createServer(async (request, response) => {
     }
     if (pathname === "/fixture.js") {
       response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
-      response.end(fixtureFor(stage));
+      response.end(fixtureFor(stage, address.searchParams.get("browsers") === "none"));
       return;
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
@@ -561,7 +567,7 @@ const server = createServer(async (request, response) => {
     if (name === "index.html") {
       body = Buffer.from(body.toString("utf8").replace(
         '<script src="app.js"></script>',
-        `<script src="fixture.js?setup=${stage}"></script><script src="app.js"></script>`
+        `<script src="fixture.js?${address.searchParams}"></script><script src="app.js"></script>`
       ));
     }
     response.writeHead(200, { "content-type": types[extname(name)] || "text/html; charset=utf-8", "cache-control": "no-store" });

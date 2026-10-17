@@ -39,6 +39,76 @@
   /** Said after Settings copies the address of the watch view. */
   const ADDRESS_COPIED = "Address copied.";
 
+  /** Said after an agent's card copies the id of one of its connections. */
+  const CONNECTION_ID_COPIED = "Connection id copied.";
+
+  /** The intake that admitted a session, in the service's wire words. */
+  const INTAKE = Object.freeze({ mcp: "mcp", cli: "cli" });
+
+  /** The fixed words of the At a glance summary, its shelves and an agent's card. */
+  const GLANCE = Object.freeze({
+    details: "Details",
+    hide: "Hide",
+    agents: "Agents",
+    browsers: "Browsers",
+    noAgent: "No agent connected",
+    copyId: "Copy id",
+    working: "working",
+    idle: "idle",
+    fromCommandLine: "from the command line"
+  });
+
+  /** How many session lines an agent's card shows before it says how many more there are. */
+  const GLANCE_CARD_LINES = 4;
+
+  /** `count` of a thing, with the singular for one and `none` for zero. */
+  function counted(count, one, many, none) {
+    if (count === 0) return none;
+    return count === 1 ? `1 ${one}` : `${count} ${many}`;
+  }
+
+  /** How many agents are connected, as the summary says it. */
+  const agentsCount = (count) => counted(count, "agent", "agents", "No agents");
+
+  /** How many browsers are connected, as the summary says it. */
+  const browsersCount = (count) => counted(count, "browser", "browsers", "no browser");
+
+  /** How many tabs a browser holds for the sessions working in it. */
+  const tabsCount = (count) => counted(count, "tab", "tabs", "no tabs");
+
+  /** How many sessions an agent holds, on its card. */
+  const sessionsCount = (count) => counted(count, "session", "sessions", "no sessions");
+
+  /** The line under a card's capped list of sessions. */
+  const andMore = (count) => `and ${count} more`;
+
+  /**
+   * The initials an agent wears in the summary: the first letters of its first two words, or the
+   * first two letters of a one-word name.
+   */
+  function initials(name) {
+    const parts = String(name ?? "").trim().split(/\s+/).filter(Boolean);
+    if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
+    const word = parts[0] ?? "";
+    return word.slice(0, 1).toUpperCase() + word.slice(1, 2).toLowerCase();
+  }
+
+  /**
+   * One session of an agent, in words: its tabs and the browser it works in, whether it is working,
+   * and the intake only when it is the command line.
+   */
+  function sessionLine(session) {
+    const tabs = session.tab_count ?? 0;
+    const browser = session.browser ?? "";
+    let where = tabsCount(tabs);
+    if (tabs > 0 && browser) where = `${where} in ${browser}`;
+    else if (browser) where = `In ${browser}, ${where}`;
+    else where = where.charAt(0).toUpperCase() + where.slice(1);
+    const parts = [where, session.active_operations > 0 ? GLANCE.working : GLANCE.idle];
+    if (session.channel === INTAKE.cli) parts.push(GLANCE.fromCommandLine);
+    return parts.join(", ");
+  }
+
   /**
    * The sections of Settings, in the order of its rail.
    *
@@ -217,6 +287,17 @@
     camera: '<svg viewBox="0 0 24 24"><path d="M3.5 8.5h4l1.5-2.5h6L16.5 8.5h4v11h-17z"/><circle cx="12" cy="13.5" r="3.4"/><g class="glint"><path d="M9.8 11.4 11 10.4"/></g></svg>',
     wait: '<svg viewBox="0 0 24 24"><circle class="waitdot" cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle class="waitdot" cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>'
   };
+
+  /**
+   * The glyph of each kind of connection At a glance draws: an agent's spark, the command line's
+   * prompt, and a browser's window frame.
+   */
+  const KIND_GLYPHS = Object.freeze({
+    agent: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8v2.4M8 11.8v2.4M1.8 8h2.4M11.8 8h2.4M3.6 3.6l1.6 1.6M10.8 10.8l1.6 1.6M3.6 12.4l1.6-1.6M10.8 5.2l1.6-1.6"/></svg>',
+    commandLine: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5 6 8l-3.5 3.5M7.5 11.5h6"/></svg>',
+    browser: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.8"/><path d="M1.8 6h12.4"/></svg>',
+    toward: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h10M9.5 5l3 3-3 3"/></svg>'
+  });
 
   const ACTIVITY_GLYPH = {
     "Ghostlight": "scan",
@@ -585,10 +666,12 @@
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
+    CONNECTION_ID_COPIED, INTAKE, GLANCE, GLANCE_CARD_LINES,
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
-    GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
+    GLYPHS, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,

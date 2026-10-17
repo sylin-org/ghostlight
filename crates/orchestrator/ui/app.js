@@ -28,7 +28,7 @@
 
 const {
   FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
-  WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, DEFAULT_VIEW,
+  WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONNECTION_ID_COPIED, SETTINGS, DEFAULT_VIEW,
   SETUP_ADDRESS, SETUP, parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
 
@@ -513,6 +513,16 @@ async function copyAddress(address) {
   }
 }
 
+/** Put the ids of one of an agent's connections on the clipboard of this screen. */
+async function copyConnectionId(ids) {
+  try {
+    await transport.copyText(ids);
+    view.toast(CONNECTION_ID_COPIED);
+  } catch (error) {
+    view.toast(String(error), true);
+  }
+}
+
 /** The text a client's Copy button puts on the clipboard, from what this page already holds. */
 function harnessText(id, kind) {
   const harness = store.snapshot()?.harnesses.find((item) => item.id === id);
@@ -821,6 +831,8 @@ function wire() {
     if (carryOn) continueInWindow(carryOn.dataset.address || undefined);
     const destination = event.target.closest("[data-destination]");
     if (destination) openDestination(destination.dataset.destination);
+    const connectionId = event.target.closest("[data-copy-connection]");
+    if (connectionId) copyConnectionId(connectionId.dataset.copyConnection);
     const hit = event.target.closest("[data-search-view]");
     if (hit) {
       view.navigate(SEARCH_VIEWS[hit.dataset.searchView] ?? "monitor");

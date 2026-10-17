@@ -691,6 +691,7 @@ pub(super) mod test_support {
             family: family.into(),
             adapter_version: Some("1.0.0".into()),
             connected: true,
+            tab_count: 0,
         }
     }
 

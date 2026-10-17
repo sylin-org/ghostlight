@@ -11,6 +11,14 @@ const MCP_EXPLANATION: &str =
 const CLI_EXPLANATION: &str = "A ghostlight call session is a local program. Ghostlight does not verify the scripts and instructions it runs.";
 const LEGACY_EXPLANATION: &str = "Earlier history did not establish the connecting executable.";
 
+/// What a live MCP connection establishes about the name its client `reported`: the name is the
+/// agent's own claim, which Ghostlight does not verify. Durable history keeps no name and says
+/// the same without one.
+#[must_use]
+pub fn claimed_name_explanation(reported: &str) -> String {
+    format!("\"{reported}\" is what the agent calls itself; Ghostlight does not verify it.")
+}
+
 /// The name of a command-line session's agent.
 pub const COMMAND_LINE_AGENT: &str = "Command line";
 
@@ -66,6 +74,14 @@ pub fn details(attribution: &Attribution) -> ConnectionDetails {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_live_claim_is_named_in_the_sentence_that_says_it_is_not_verified() {
+        assert_eq!(
+            claimed_name_explanation("codex-mcp-client"),
+            "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it."
+        );
+    }
 
     #[test]
     fn an_agent_is_named_as_a_person_knows_it_and_an_unknown_one_as_it_reported() {

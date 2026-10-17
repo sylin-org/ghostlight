@@ -79,7 +79,7 @@ class Element {
     this.style = { setProperty() {} };
     this.classes = new Set(String(attributes.class ?? "").split(/\s+/).filter(Boolean));
     for (const [name, value] of Object.entries(attributes)) {
-      if (name === "aria-current" || name === "src") this.attributes[name] = value;
+      if (["aria-current", "aria-expanded", "open", "src"].includes(name)) this.attributes[name] = value;
       if (!name.startsWith("data-")) continue;
       this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
     }
@@ -246,7 +246,7 @@ function page() {
     }
   };
   return {
-    document, window, body, el, address,
+    document, window, body, el, address, dispatch,
     click: (target) => dispatch("click", { target }),
     outside: () => dispatch("click", { target: new Element("p") })
   };
@@ -1015,6 +1015,7 @@ async function windowOver({ answer = () => undefined, before = () => {} } = {}) 
   const sent = [];
   const opened = [];
   const logged = [];
+  const copied = [];
   const windowListeners = {};
   const fetch = async (path, init = {}) => {
     requests.push(path);
@@ -1038,7 +1039,7 @@ async function windowOver({ answer = () => undefined, before = () => {} } = {}) 
       matchMedia: () => ({ matches: false, addEventListener() {} }),
       addEventListener: (type, handler) => (windowListeners[type] ??= []).push(handler)
     },
-    navigator: { clipboard: { writeText: async () => {} } },
+    navigator: { clipboard: { writeText: async (text) => { copied.push(text); } } },
     GhostlightAccess: Object.freeze({ bearer: "key-1" }),
     console: { error: (detail) => logged.push(detail), warn() {}, log() {} },
     setTimeout: () => 0,
@@ -1055,6 +1056,7 @@ async function windowOver({ answer = () => undefined, before = () => {} } = {}) 
     sent,
     opened,
     logged,
+    copied,
     evaluate: (code) => vm.runInContext(code, sandbox),
     fire: (type, event) => {
       for (const handler of windowListeners[type] ?? []) handler(event);
@@ -1117,6 +1119,19 @@ test("a listener that cannot attach costs its own wiring, not the first snapshot
   assert.match(said(shown, "toast"), /^wiring the surface: no listener here/);
   assert.ok(shown.requests.some((path) => path.startsWith("/api/snapshot?parts=status")), "the snapshot was still read");
   assert.equal(said(shown, "state-word"), "Ready");
+});
+
+test("Copy id puts the connection id on the clipboard and says so", async () => {
+  const sessions = [glanceSession("w1", "Codex", { tabs: 1, browser: "Google Chrome" })];
+  const shown = await windowOver({ answer: healthy(snapshotAnswer({ sessions })) });
+  const bar = drawn(shown.el("connections").innerHTML);
+  shown.click(bar.wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  const card = drawn(shown.el("connections").innerHTML);
+  shown.click(card.wearing("glance-line")[0].children.find((child) => child.tag === "button"));
+  await settle();
+  assert.deepEqual(shown.copied, ["connection_w1"]);
+  assert.equal(said(shown, "toast"), Words.CONNECTION_ID_COPIED);
+  assert.deepEqual(shown.logged, []);
 });
 
 test("pressing a destination in the window asks the service to open it by name", async () => {
@@ -1187,19 +1202,145 @@ test("a paint that throws is tried again with the same facts, and one that drew 
   assert.equal(writes, 2, "a panel that drew is not drawn again for the same facts");
 });
 
-test("the connections bar shows one chip per agent by its name, with a count when an agent holds several", () => {
+/** A session of `agent`, as the connections part carries it. */
+function glanceSession(id, agent, { channel = "mcp", tabs = 0, busy = false, browser, reported = agent } = {}) {
+  return {
+    id, client_label: reported, agent, channel, tab_count: tabs, active_operations: busy ? 1 : 0,
+    ...(browser ? { browser } : {}),
+    connections: [{
+      connection_id: `connection_${id}`, reported_application: reported, agent, channel,
+      explanation: channel === "cli" ? "A ghostlight call session is a local program."
+        : `"${reported}" is what the agent calls itself; Ghostlight does not verify it.`
+    }]
+  };
+}
+
+/** The connections part of a glance: Claude Code at work, Codex twice, and the command line. */
+const GLANCE_SESSIONS = [
+  glanceSession("w1", "Claude Code", { tabs: 1, busy: true, browser: "Google Chrome", reported: "claude-code" }),
+  glanceSession("w2", "Codex", { reported: "codex-mcp-client" }),
+  glanceSession("w3", "Codex", { tabs: 2, browser: "Google Chrome" }),
+  glanceSession("w4", "Command line", { channel: "cli" })
+];
+
+/** A view that has drawn the glance of `sessions` and `browsers`, with the parsed markup. */
+function glance({ sessions = GLANCE_SESSIONS, browsers = [{ id: "b1", family: "Google Chrome", adapter_version: "2.0.0", tab_count: 3 }], noBrowser } = {}) {
   const shown = drawing();
-  const sessions = [
-    { id: "w1", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 },
-    { id: "w2", client_label: "Codex", agent: "Codex", channel: "mcp", tab_count: 2, active_operations: 1 },
-    { id: "w3", client_label: "zed", agent: "Zed", channel: "mcp", tab_count: 0, active_operations: 0 }
+  const answer = snapshotAnswer({ sessions });
+  answer.parts.connections.browsers = browsers;
+  if (noBrowser !== undefined) answer.parts.connections.no_browser = noBrowser;
+  const snapshot = Transport.flatten(answer);
+  shown.view.collections(snapshot, new Set());
+  const read = () => drawn(shown.el("connections").innerHTML);
+  return { ...shown, snapshot, read };
+}
+
+test("the glance is one closed summary: who is connected, toward how many browsers, and Details", () => {
+  const shown = glance();
+  const bar = shown.read();
+  const details = bar.wearing("glance");
+  assert.equal(details.length, 1);
+  assert.equal(details[0].tag, "details");
+  assert.equal("open" in details[0].attributes, false, "closed by default");
+  assert.deepEqual(bar.wearing("glance-face").map((face) => face.textContent), ["Co", "CC", ""],
+    "initials for each agent, the prompt glyph for the command line");
+  assert.equal(bar.wearing("glance-face").filter((face) => face.classes.has("busy")).length, 1);
+  assert.deepEqual(bar.wearing("glance-side").map((side) => side.textContent), ["CoCC3 agents", "1 browser"]);
+  assert.equal(bar.wearing("glance-closed-word")[0].textContent, "Details");
+  assert.equal(bar.wearing("glance-open-word")[0].textContent, "Hide");
+  assert.deepEqual(shown.failures, []);
+});
+
+test("the summary counts in words, singular for one and plain for none", () => {
+  assert.deepEqual([0, 1, 3].map(Words.agentsCount), ["No agents", "1 agent", "3 agents"]);
+  assert.deepEqual([0, 1, 2].map(Words.browsersCount), ["no browser", "1 browser", "2 browsers"]);
+  const lone = glance({ sessions: [GLANCE_SESSIONS[0]], browsers: [], noBrowser: "No browser connected" }).read();
+  assert.deepEqual(lone.wearing("glance-side").map((side) => side.textContent), ["CC1 agent", "no browser"]);
+});
+
+test("the summary stays open across a repaint once a person opened it", () => {
+  const shown = glance();
+  const details = shown.read().wearing("glance")[0];
+  details.open = true;
+  details.isConnected = true;
+  shown.dispatch("toggle", { target: details });
+  shown.view.collections({ ...shown.snapshot, sessions: [GLANCE_SESSIONS[1]] }, new Set());
+  assert.equal("open" in shown.read().wearing("glance")[0].attributes, true);
+});
+
+test("the shelves name each agent once with its glyph, a count past one session, and a working agent lit", () => {
+  const shown = glance();
+  const bar = shown.read();
+  const shelves = bar.wearing("glance-shelf");
+  assert.deepEqual(shelves.map((shelf) => shelf.children[0].textContent), ["Agents", "Browsers"]);
+  const agents = bar.wearing("glance-chip").filter((chip) => chip.tag === "button");
+  assert.deepEqual(agents.map((chip) => chip.textContent), ["Codex 2", "Claude Code", "Command line"]);
+  assert.deepEqual(agents.map((chip) => chip.classes.has("busy")), [false, true, false]);
+  assert.deepEqual(agents.map((chip) => chip.attributes["aria-expanded"]), ["false", "false", "false"]);
+  const chipMarkup = (name) => shown.el("connections").innerHTML.split(`data-glance-agent="${name}"`)[1].split("</button>")[0];
+  assert.ok(chipMarkup("Codex").includes(Words.KIND_GLYPHS.agent), "an agent wears the spark");
+  assert.ok(chipMarkup("Command line").includes(Words.KIND_GLYPHS.commandLine), "the command line wears the prompt");
+  const browsers = bar.wearing("glance-chip").filter((chip) => chip.tag === "span");
+  assert.deepEqual(browsers.map((chip) => chip.textContent), ["Google Chrome3 tabs"]);
+});
+
+test("a working agent's glyph breathes in the accent, and reduced motion keeps it still", () => {
+  const breathing = naming(".glance-chip.busy svg").filter((rule) => rule.media === null);
+  assert.equal(breathing.length, 1);
+  assert.match(breathing[0].declarations.animation, /^glyph-breathe /);
+  assert.equal(breathing[0].declarations.color, "var(--a)");
+  const still = naming("*").filter((rule) => rule.media === "(prefers-reduced-motion: reduce)");
+  assert.ok(still.some((rule) => /^none/.test(rule.declarations.animation)), "reduced motion stops every animation");
+});
+
+test("with no browser the Browsers shelf says what the service says happens next", () => {
+  for (const said of ["Starts Google Chrome on request", "No browser connected"]) {
+    const bar = glance({ browsers: [], noBrowser: said }).read();
+    const missing = bar.wearing("missing");
+    assert.deepEqual(missing.map((chip) => chip.textContent), [said]);
+  }
+  const empty = glance({ sessions: [], browsers: [], noBrowser: "No browser connected" }).read();
+  assert.deepEqual(empty.wearing("missing").map((chip) => chip.textContent), ["No agent connected", "No browser connected"]);
+});
+
+test("an agent on its shelf opens its card: a few sessions in words, and the trust note once", () => {
+  const many = [
+    ...Array.from({ length: 5 }, (_, at) => glanceSession(`c${at}`, "Codex", { reported: "codex-mcp-client" })),
+    glanceSession("c9", "Codex", { tabs: 2, busy: true, browser: "Google Chrome", reported: "codex-mcp-client" })
   ];
-  shown.view.collections(Transport.flatten(snapshotAnswer({ sessions })), new Set());
-  const bar = drawn(shown.el("connections").innerHTML);
-  const clients = bar.wearing("chip").filter((chip) => chip.textContent.endsWith("tabs"));
-  assert.deepEqual(clients.map((chip) => chip.textContent), ["Codex 23 tabs", "Zed0 tabs"]);
-  assert.deepEqual(clients.map((chip) => chip.classes.has("busy")), [true, false]);
-  assert.deepEqual(bar.wearing("tally").map((tally) => tally.textContent), ["2"]);
+  const shown = glance({ sessions: many });
+  const chip = shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex");
+  shown.click(chip);
+  const card = shown.read().wearing("glance-card");
+  assert.equal(card.length, 1);
+  assert.equal(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex").attributes["aria-expanded"], "true");
+  const lines = shown.read().wearing("glance-line");
+  assert.equal(lines.length, Words.GLANCE_CARD_LINES);
+  assert.equal(lines[0].children[0].textContent, "2 tabs in Google Chrome, working", "working sessions first");
+  assert.equal(lines[1].children[0].textContent, "No tabs, idle");
+  assert.deepEqual(shown.read().wearing("glance-more").map((more) => more.textContent), ["and 2 more"]);
+  const notes = card[0].children.filter((child) => child.classes.has("connection-explanation"));
+  assert.deepEqual(notes.map((note) => note.textContent), ["&quot;codex-mcp-client&quot; is what the agent calls itself; Ghostlight does not verify it."]);
+  assert.ok(!shown.el("connections").innerHTML.includes("Intake"), "the intake is not a field of the card");
+  shown.click(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  assert.equal(shown.read().wearing("glance-card").length, 0, "the same chip closes it");
+});
+
+test("a session line says the command line only for the command line", () => {
+  assert.equal(Words.sessionLine({ tab_count: 1, browser: "Edge", active_operations: 0, channel: "cli" }),
+    "1 tab in Edge, idle, from the command line");
+  assert.equal(Words.sessionLine({ tab_count: 0, browser: "Edge", active_operations: 1, channel: "mcp" }),
+    "In Edge, no tabs, working");
+});
+
+test("each line of a card keeps its connection ids behind Copy id", () => {
+  const shown = glance();
+  shown.click(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  const copies = shown.read().wearing("glance-line").map((line) => line.children.find((child) => child.tag === "button"));
+  assert.deepEqual(copies.map((button) => button.textContent), ["Copy id", "Copy id"]);
+  assert.deepEqual(copies.map((button) => button.dataset.copyConnection), ["connection_w3", "connection_w2"]);
+  assert.ok(!shown.read().wearing("glance-line").some((line) => line.textContent.includes("connection_")),
+    "no id is printed in the line");
 });
 
 test("a settled action says the service's sentence, the readiness note beside it, and the host once", () => {

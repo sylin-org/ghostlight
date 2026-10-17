@@ -184,8 +184,8 @@ body.runtime-offline .state-word { color: var(--muted); }
 .page-heading-actions { display: flex; flex: none; align-items: center; gap: 8px; }
 .subhead { margin: 26px 0 10px; color: var(--ink-2); font-size: 14px; font-weight: 400; }
 
-/* --------------------------- connections strip -------------------------- */
-.connections { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; min-height: 24px; }
+/* ------------------------- who is connected, at a glance ------------------------- */
+.connections { margin-bottom: 12px; min-height: 30px; }
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
   height: 24px; padding: 0 10px;
@@ -193,14 +193,84 @@ body.runtime-offline .state-word { color: var(--muted); }
   color: var(--ink-3); background: var(--panel-2); font-size: 11.5px;
 }
 .chip .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
-.chip.on .dot { background: var(--ok); }
-.chip.busy .dot { background: var(--a); box-shadow: 0 0 8px rgba(var(--argb), .8); }
 .chip small { color: var(--muted); font: 400 10.5px/1 var(--mono); }
-/* How many connections one client is holding. Reads as a badge on the name, not as a tab count. */
+/* How many sessions one agent is holding. Reads as a badge on the name, not as a tab count. */
 .chip .tally {
   margin-left: -3px; padding: 1px 5px; border-radius: 999px;
   background: var(--line); color: var(--ink-3); font: 500 10px/1.3 var(--mono);
 }
+
+/* The summary: faces of the agents, toward the browsers, and the way to the shelves. */
+.glance > summary { list-style: none; }
+.glance > summary::-webkit-details-marker { display: none; }
+.glance-pill {
+  display: inline-flex; align-items: center; gap: 12px;
+  height: 30px; padding: 0 6px 0 12px;
+  border: 1px solid var(--line-2); border-radius: 999px;
+  background: var(--panel); color: var(--ink-2); font-size: 12px; cursor: pointer;
+  transition: border-color .2s var(--calm);
+}
+.glance-pill:hover { border-color: rgba(255, 255, 255, .16); }
+.glance-pill:focus-visible { border-radius: 999px; }
+.glance-side { display: inline-flex; align-items: center; gap: 7px; }
+.glance-side .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+.glance-side .dot.on { background: var(--ok); }
+.glance-faces { display: inline-flex; }
+.glance-face {
+  display: grid; width: 20px; height: 20px; margin-left: -6px; place-items: center;
+  border: 2px solid var(--bg); border-radius: 50%;
+  background: var(--ink-3); color: var(--bg); font: 600 8.5px/1 var(--mono);
+}
+.glance-face:first-child { margin-left: 0; }
+.glance-face.busy { background: var(--a); }
+.glance-face.glance-rest { background: var(--line-2); color: var(--ink-2); }
+.glance-face svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.glance-toward svg { width: 12px; height: 12px; fill: none; stroke: var(--faint); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.glance-open {
+  height: 22px; margin-left: 4px; padding: 0 9px; border-radius: 999px;
+  background: var(--line); color: var(--ink-3); font: 500 10px/22px var(--mono);
+}
+.glance-open-word, .glance[open] .glance-closed-word { display: none; }
+.glance[open] .glance-open-word { display: inline; }
+
+/* The shelves the summary opens: agents, then the browsers they work in. */
+.glance-shelves {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  margin-top: 10px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+}
+.glance-shelf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.glance-shelf .kicker { margin-right: 2px; }
+.glance-rule { width: 1px; height: 18px; background: var(--line-2); }
+.glance-chip { white-space: nowrap; }
+.glance-chip svg { flex: none; width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.glance-chip.on svg { color: var(--ink-2); }
+button.glance-chip:hover { border-color: var(--line-2); color: var(--ink-2); }
+button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); background: var(--panel); color: var(--ink); }
+/* A working agent's glyph breathes in the accent; reduced motion keeps it lit and still. */
+.glance-chip.busy, .glance-card-head.busy { border-color: rgba(var(--argb), .35); color: var(--ink-2); }
+.glance-chip.busy svg, .glance-card-head.busy svg {
+  color: var(--a); filter: drop-shadow(0 0 4px rgba(var(--argb), .9));
+  animation: glyph-breathe var(--beat-breathe) ease-in-out infinite;
+}
+@keyframes glyph-breathe { 50% { opacity: .55; } }
+.glance-chip.missing { border-style: dashed; color: var(--muted); }
+.glance-chip.missing .dot { background: var(--amber); }
+
+/* The open agent's card: its sessions in words, and the trust note once. */
+.glance-card {
+  margin-top: 10px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+}
+.glance-card-head { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.glance-card-head svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.glance-card-head h3 { color: var(--ink); font-size: 13px; }
+.glance-card-head small { color: var(--muted); font: 400 10.5px/1 var(--mono); }
+.glance-lines { margin: 8px 0 0; padding: 0; list-style: none; }
+.glance-line { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 4px 0; font-size: 12px; }
+.glance-line + .glance-line { border-top: 1px solid var(--line); }
+.glance-more { margin: 4px 0 0; color: var(--muted); font-size: 11.5px; }
+.glance-card .connection-explanation { margin: 8px 0 0; }
 
 /* ------------------------------ hero action ----------------------------- */
 .hero {
@@ -753,9 +823,6 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .connection-facts dt { color: var(--muted); }
 .connection-facts dd { margin: 0; overflow-wrap: anywhere; }
 .connection-explanation { max-width: 72ch; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.session-connections { flex-basis: 100%; min-width: 0; margin-top: 2px; }
-.connection-record { padding: 4px 0; }
-.connection-record + .connection-record { border-top: 1px solid var(--line); }
 .history-steps { list-style: none; padding: 0; margin: 12px 0 0; max-height: 360px; overflow-y: auto; }
 .history-step { padding: 10px 0; border-top: 1px solid rgba(234, 246, 255, .1); }
 .step-line { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: start; }
@@ -800,6 +867,8 @@ a.ghost-button { text-decoration: none; }
   .tab:hover { border-color: Highlight; }
   .tab.active { border-color: Highlight; background: Highlight; color: HighlightText; forced-color-adjust: none; }
   .wheel, .ghost-button, .danger-button { border-color: ButtonBorder; color: ButtonText; }
+  .glance-pill, .glance-chip, .glance-shelves, .glance-card { border-color: CanvasText; }
+  button.glance-chip[aria-expanded="true"] { border-color: Highlight; }
 }
 
 /* ------------------------------- setup view ----------------------------- */

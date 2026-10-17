@@ -193,6 +193,9 @@ pub struct ConnectionsPart {
     pub sessions: Vec<SessionSummary>,
     /// Currently connected browser instances.
     pub browsers: Vec<BrowserInstanceSummary>,
+    /// What the window says in place of a browser, present only while none is connected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_browser: Option<String>,
 }
 
 impl ConnectionsPart {
@@ -202,6 +205,7 @@ impl ConnectionsPart {
         Self {
             sessions: snapshot.sessions.clone(),
             browsers: snapshot.browsers.clone(),
+            no_browser: snapshot.no_browser.clone(),
         }
     }
 }

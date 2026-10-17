@@ -497,6 +497,29 @@ impl BrowserRecovery {
         self.mechanism = Arc::new(TestLaunch(Box::new(launch)));
     }
 
+    /// The name of the installed browser that a request from a session working in no browser yet
+    /// would start now, when it would start one: the posture is `on_demand` and one browser is
+    /// selected, the one that last connected or the only one installed, with a registration
+    /// Ghostlight can use. Nothing is started or repaired; the installed browsers are read only
+    /// under `on_demand`.
+    #[must_use]
+    pub fn starts_on_request(&self) -> Option<String> {
+        let mode = self.governance.browser_startup();
+        if mode != BrowserStartup::OnDemand {
+            return None;
+        }
+        let candidates = self.inventory.inspect().ok()?;
+        let remembered = self.browser.last_connected_browser();
+        match decide(mode, &candidates, remembered.as_deref()) {
+            RecoveryPlan::Prepare {
+                browser,
+                launch: true,
+                ..
+            } => Some(browser.name),
+            _ => None,
+        }
+    }
+
     /// Decide one missing-browser recovery request for a session that works in no browser yet,
     /// joining an overlapping request.
     pub fn request(
@@ -1783,6 +1806,77 @@ mod tests {
             installed("chrome", "Google Chrome", chrome),
             installed("edge", "Microsoft Edge", NativeHostState::Current),
         ]
+    }
+
+    /// A coordinator over `candidates` under `policy`, whose port remembers `last` as the browser
+    /// that last connected.
+    fn answering(
+        policy: &str,
+        candidates: Vec<RecoveryCandidate>,
+        last: Option<&str>,
+    ) -> (BrowserRecovery, Arc<FakeInventory>) {
+        let inventory = Arc::new(FakeInventory {
+            candidates,
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        });
+        let mut recovery = coordinator(Some(policy), Arc::clone(&inventory));
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        if let Some(last) = last {
+            browser.remember_last_connected(last);
+        }
+        recovery.browser = browser;
+        (recovery, inventory)
+    }
+
+    #[test]
+    fn a_browser_starts_on_request_only_under_on_demand_with_one_browser_selected() {
+        let unique = vec![installed(
+            "chrome",
+            "Google Chrome",
+            NativeHostState::Current,
+        )];
+        let (recovery, _) = answering("on_demand", unique.clone(), None);
+        assert_eq!(
+            recovery.starts_on_request().as_deref(),
+            Some("Google Chrome")
+        );
+
+        let (recovery, _) = answering(
+            "on_demand",
+            chrome_and_edge(NativeHostState::Current),
+            Some("edge"),
+        );
+        assert_eq!(
+            recovery.starts_on_request().as_deref(),
+            Some("Microsoft Edge"),
+            "the browser that last connected"
+        );
+
+        let (recovery, _) = answering("on_demand", chrome_and_edge(NativeHostState::Current), None);
+        assert_eq!(
+            recovery.starts_on_request(),
+            None,
+            "several browsers and no memory: the person starts one"
+        );
+
+        let broken = vec![installed(
+            "chrome",
+            "Google Chrome",
+            NativeHostState::OwnedElsewhere,
+        )];
+        let (recovery, _) = answering("on_demand", broken, None);
+        assert_eq!(recovery.starts_on_request(), None);
+
+        let (recovery, inventory) = answering("manual", unique, Some("chrome"));
+        assert_eq!(recovery.starts_on_request(), None);
+        assert_eq!(
+            inventory.inspections.load(Ordering::SeqCst),
+            0,
+            "a manual posture reads no installed browser"
+        );
     }
 
     #[test]

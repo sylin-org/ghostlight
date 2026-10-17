@@ -150,6 +150,15 @@ test("each published change moves the cache it names", () => {
   assert.equal(apply(7, PUBLISHED[10]), "hinted");
 });
 
+test("the no-browser line follows the connections part, and goes when a browser connects", () => {
+  const { store } = latched({ browsers: [], configuration: {}, overview: {} });
+  const line = "Starts Google Chrome on request";
+  store.applyChange({ seq: 1, change: { kind: "connections_changed", connections: { sessions: [], browsers: [], no_browser: line } } });
+  assert.equal(store.snapshot().no_browser, line);
+  store.applyChange({ seq: 2, change: { kind: "connections_changed", connections: { sessions: [], browsers: [{ id: "b" }] } } });
+  assert.equal("no_browser" in store.snapshot(), false);
+});
+
 /* ------------------------------------ the latch ------------------------------------ */
 
 test("the band stays working for ten seconds after the last action, not for each operation", () => {

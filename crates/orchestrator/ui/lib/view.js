@@ -18,12 +18,29 @@
     INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
-    CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount
+    CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
+    KIND_GLYPHS, INTAKE, GLANCE, GLANCE_CARD_LINES,
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 
   const TOAST_MS = 4200;
+
+  /** The disclosure key of the At a glance summary, which opens its shelves. */
+  const GLANCE_KEY = "glance:shelves";
+
+  /** The id of the open agent's card, which its chip controls. */
+  const GLANCE_CARD_ID = "glance-card";
+
+  /** How many agents the closed summary shows a face for before it says how many more. */
+  const GLANCE_FACES = 4;
+
+  /**
+   * The data keys a repaint gives focus back by: the element that held focus is found again by
+   * the same key and value.
+   */
+  const FOCUS_KEYS = Object.freeze(["actionDetails", "glanceAgent", "copyConnection"]);
 
   /** The panels that hold data, each with the line that says why it holds none and its section. */
   const DATA_PANELS = Object.freeze([
@@ -178,6 +195,13 @@
         if (details.open) expandedHistory.delete(historyKey); else expandedHistory.add(historyKey);
         details.dataset.historyOpening = String(!details.open);
       }
+      const agent = event.target.closest?.("[data-glance-agent]");
+      if (agent) {
+        const name = agent.dataset.glanceAgent;
+        glanceAgent = glanceAgent === name ? null : name;
+        if (lastConnections) paintConnections(lastConnections);
+        return;
+      }
       const button = event.target.closest?.("[data-action-details]");
       if (!button) return;
       const key = button.dataset.actionDetails;
@@ -206,7 +230,9 @@
       const active = document.activeElement;
       const focusKey = node.contains(active) && active?.tagName === "SUMMARY"
         ? active.closest("details")?.dataset.historyDetails : null;
-      const actionFocus = node.contains(active) ? active?.dataset?.actionDetails : null;
+      const focusData = node.contains(active)
+        ? FOCUS_KEYS.find((key) => active?.dataset?.[key] !== undefined) : undefined;
+      const focusValue = focusData ? active.dataset[focusData] : undefined;
       node.innerHTML = markup;
       for (const list of node.querySelectorAll(".history-steps")) {
         const key = list.closest("details")?.dataset.historyDetails;
@@ -216,8 +242,9 @@
         [...node.querySelectorAll("details")].find((details) => details.dataset.historyDetails === focusKey)
           ?.querySelector("summary")?.focus({ preventScroll: true });
       }
-      if (actionFocus) {
-        [...node.querySelectorAll("[data-action-details]")].find((button) => button.dataset.actionDetails === actionFocus)
+      if (focusData) {
+        const selector = `[data-${focusData.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}]`;
+        [...node.querySelectorAll(selector)].find((found) => found.dataset[focusData] === focusValue)
           ?.focus({ preventScroll: true });
       }
     }
@@ -244,10 +271,13 @@
       return entry.storage_detail ? `<p class="coverage-note">${escapeHtml(entry.storage_detail)}</p>` : "";
     }
 
-    /** Render authored connection evidence without treating a claim as trust. */
-    function connectionFields(evidence, historical) {
+    /**
+     * Render an action's authored connection evidence without treating a claim as trust. A live
+     * claim is never written to history, so a recorded action may have none.
+     */
+    function connectionFields(evidence) {
       const fields = [
-        ["Reported application", evidence.reported_application ?? (historical ? "Not retained in history" : "Not reported")],
+        ["Reported application", evidence.reported_application ?? "Not retained in history"],
         ["Intake", evidence.channel]
       ];
       if (evidence.connection_id) fields.push(["Connection", shortId(evidence.connection_id)]);
@@ -258,7 +288,7 @@
 
     function connectionMarkup(entry, key) {
       if (!entry.provenance && !entry.settled && entry.complete !== true) return "";
-      const body = entry.provenance ? connectionFields(entry.provenance, true)
+      const body = entry.provenance ? connectionFields(entry.provenance)
         : '<p class="connection-explanation">Connection details were not recorded.</p>';
       return historyDetails(key, "Connection details", body, "connection-details");
     }
@@ -600,45 +630,125 @@
 
     /* ----------------------------- collections ---------------------------- */
 
-    /**
-     * One chip per client, not per connection.
+    /*
+     * At a glance: one summary of who is connected and where they work.
      *
-     * A client that reconnects often -- an editor that starts a session per request, a shell
-     * running `ghostlight call` in a loop -- is one thing the user recognizes, and a row of
-     * identical names tells them nothing they did not already know. The sessions themselves stay
-     * separate everywhere that matters: each keeps its own workspace, tabs, and attribution.
+     * Agents are grouped by the name a person knows them by, not per connection: an editor that
+     * starts a session per request, or a shell running `ghostlight call` in a loop, is one agent
+     * the user recognizes. The summary opens into two shelves, agents and browsers, and an agent
+     * on its shelf opens its card, one line per session. The sessions themselves stay separate
+     * everywhere that matters: each keeps its own workspace, tabs and attribution.
      */
-    function connectionGroups(sessions) {
+    let glanceAgent = null;
+    let lastConnections = null;
+
+    /** The agents among `sessions`, each with its sessions, busiest and most tabbed first. */
+    function agentGroups(sessions) {
       const groups = new Map();
       for (const session of sessions) {
         const group = groups.get(session.agent)
-          ?? { label: session.agent, count: 0, tabs: 0, busy: false };
-        group.count += 1;
-        group.tabs += session.tab_count;
+          ?? { name: session.agent, sessions: [], tabs: 0, busy: false, commandLine: session.channel === INTAKE.cli };
+        group.sessions.push(session);
+        group.tabs += session.tab_count ?? 0;
         group.busy = group.busy || session.active_operations > 0;
         groups.set(session.agent, group);
       }
       return [...groups.values()]
-        .sort((left, right) => right.tabs - left.tabs || left.label.localeCompare(right.label));
+        .sort((left, right) => right.tabs - left.tabs || left.name.localeCompare(right.name));
+    }
+
+    const kindGlyph = (group) => (group.commandLine ? KIND_GLYPHS.commandLine : KIND_GLYPHS.agent);
+
+    /** The face an agent wears in the closed summary: its initials, or the prompt for the command line. */
+    function faceMarkup(group) {
+      const face = group.commandLine ? KIND_GLYPHS.commandLine : escapeHtml(initials(group.name));
+      return `<span class="glance-face${group.busy ? " busy" : ""}" title="${escapeHtml(group.name)}">${face}</span>`;
+    }
+
+    /** The closed summary: who is connected, toward how many browsers, and the way to the details. */
+    function pillMarkup(groups, browsers) {
+      const faces = groups.slice(0, GLANCE_FACES).map(faceMarkup).join("");
+      const hidden = groups.length - GLANCE_FACES;
+      const rest = hidden > 0 ? `<span class="glance-face glance-rest">+${hidden}</span>` : "";
+      const stack = groups.length ? `<span class="glance-faces" aria-hidden="true">${faces}${rest}</span>` : "";
+      return '<summary class="glance-pill">'
+        + `<span class="glance-side">${stack}${escapeHtml(agentsCount(groups.length))}</span>`
+        + `<span class="glance-toward">${KIND_GLYPHS.toward}</span>`
+        + `<span class="glance-side"><span class="dot${browsers.length ? " on" : ""}"></span>${escapeHtml(browsersCount(browsers.length))}</span>`
+        + `<span class="glance-open"><span class="glance-closed-word">${escapeHtml(GLANCE.details)}</span>`
+        + `<span class="glance-open-word">${escapeHtml(GLANCE.hide)}</span></span>`
+        + "</summary>";
+    }
+
+    /** One agent on its shelf: a button that opens its card. */
+    function agentChipMarkup(group) {
+      const open = glanceAgent === group.name;
+      const many = group.sessions.length > 1 ? ` <span class="tally">${group.sessions.length}</span>` : "";
+      return `<button class="chip glance-chip ${group.busy ? "busy" : "on"}" type="button"`
+        + ` data-glance-agent="${escapeHtml(group.name)}" aria-expanded="${open}" aria-controls="${GLANCE_CARD_ID}">`
+        + `${kindGlyph(group)}${escapeHtml(group.name)}${many}</button>`;
+    }
+
+    /** One browser on its shelf, with the tabs its sessions hold. */
+    function browserChipMarkup(browser) {
+      const version = browser.adapter_version ? ` title="Adapter ${escapeHtml(browser.adapter_version)}"` : "";
+      return `<span class="chip glance-chip on"${version}>${KIND_GLYPHS.browser}${escapeHtml(browser.family)}`
+        + `<small>${escapeHtml(tabsCount(browser.tab_count ?? 0))}</small></span>`;
+    }
+
+    /** The chip a shelf shows when it holds nothing, saying so. */
+    const missingMarkup = (text) => `<span class="chip glance-chip missing"><span class="dot"></span>${escapeHtml(text)}</span>`;
+
+    /** The two shelves: agents, then the browsers they work in. */
+    function shelvesMarkup(groups, browsers, noBrowser) {
+      const agents = groups.length ? groups.map(agentChipMarkup).join("") : missingMarkup(GLANCE.noAgent);
+      const places = browsers.length ? browsers.map(browserChipMarkup).join("") : missingMarkup(noBrowser ?? "");
+      return '<div class="glance-shelves">'
+        + `<div class="glance-shelf" role="group" aria-label="${escapeHtml(GLANCE.agents)}"><span class="kicker">${escapeHtml(GLANCE.agents)}</span>${agents}</div>`
+        + '<span class="glance-rule" aria-hidden="true"></span>'
+        + `<div class="glance-shelf" role="group" aria-label="${escapeHtml(GLANCE.browsers)}"><span class="kicker">${escapeHtml(GLANCE.browsers)}</span>${places}</div>`
+        + "</div>";
+    }
+
+    /**
+     * The open agent's card: one line per session, working ones first, at most a few, each with
+     * its connection ids behind Copy id, and what Ghostlight can and cannot vouch for, said once.
+     */
+    function cardMarkup(group) {
+      const sessions = [...group.sessions]
+        .sort((left, right) => (right.active_operations > 0) - (left.active_operations > 0)
+          || (right.tab_count ?? 0) - (left.tab_count ?? 0));
+      const lines = sessions.slice(0, GLANCE_CARD_LINES).map((session) => {
+        const ids = (session.connections ?? []).map((connection) => connection.connection_id).filter(Boolean);
+        const copy = ids.length
+          ? `<button class="link-button" type="button" data-copy-connection="${escapeHtml(ids.join("\n"))}" title="${escapeHtml(ids.join(" "))}">${escapeHtml(GLANCE.copyId)}</button>`
+          : "";
+        return `<li class="glance-line"><span>${escapeHtml(sessionLine(session))}</span>${copy}</li>`;
+      }).join("");
+      const more = sessions.length > GLANCE_CARD_LINES
+        ? `<p class="glance-more">${escapeHtml(andMore(sessions.length - GLANCE_CARD_LINES))}</p>` : "";
+      const notes = [...new Set(sessions.flatMap((session) => (session.connections ?? []).map((connection) => connection.explanation)))]
+        .filter(Boolean).map((note) => `<p class="connection-explanation">${escapeHtml(note)}</p>`).join("");
+      return `<section class="glance-card" id="${GLANCE_CARD_ID}" aria-label="${escapeHtml(group.name)}">`
+        + `<header class="glance-card-head${group.busy ? " busy" : ""}">${kindGlyph(group)}<h3>${escapeHtml(group.name)}</h3>`
+        + `<small>${escapeHtml(sessionsCount(group.sessions.length))}</small></header>`
+        + `<ul class="glance-lines">${lines}</ul>${more}${notes}</section>`;
+    }
+
+    function paintConnections(facts) {
+      ifChanged("connections", [facts, glanceAgent], () => {
+        const groups = agentGroups(facts.sessions);
+        const open = groups.find((group) => group.name === glanceAgent);
+        const body = shelvesMarkup(groups, facts.browsers, facts.no_browser) + (open ? cardMarkup(open) : "");
+        const markup = `<details class="glance" data-history-details="${GLANCE_KEY}"${expandedHistory.has(GLANCE_KEY) ? " open" : ""}>`
+          + pillMarkup(groups, facts.browsers) + body + "</details>";
+        replaceHistoryMarkup(el.connections, markup);
+      });
     }
 
     function connections(snapshot) {
-      const chips = connectionGroups(snapshot.sessions).map((group) => {
-        // The count earns its place only when there is more than one, so the common case stays quiet.
-        const many = group.count > 1 ? ` <span class="tally">${group.count}</span>` : "";
-        return `<span class="chip ${group.busy ? "busy" : "on"}"><span class="dot"></span>${escapeHtml(group.label)}${many}`
-          + `<small>${group.tabs} tabs</small></span>`;
-      });
-      chips.push(...snapshot.browsers.map((browser) =>
-        `<span class="chip on"><span class="dot"></span>${escapeHtml(browser.family)}`
-        + `<small>adapter ${escapeHtml(browser.adapter_version ?? "unknown")}</small></span>`));
-      if (!chips.length) {
-        chips.push('<span class="chip"><span class="dot"></span>Waiting for a client or a browser</span>');
-      }
-      const records = snapshot.sessions.flatMap(session => session.connections ?? []).map(evidence =>
-        `<div class="connection-record">${connectionFields(evidence, false)}</div>`).join("");
-      const details = records ? historyDetails("sessions:connections", "Connection details", records, "connection-details session-connections") : "";
-      replaceHistoryMarkup(el.connections, chips.join("") + details);
+      lastConnections = { sessions: snapshot.sessions, browsers: snapshot.browsers, no_browser: snapshot.no_browser };
+      paintConnections(lastConnections);
     }
 
     function links() {
@@ -1483,7 +1593,7 @@
         el["audit-health"].hidden = !snapshot.audit_notice;
       });
       passport = snapshot.configuration?.managed_policy ?? null;
-      ifChanged("connections", [snapshot.sessions, snapshot.browsers], () => connections(snapshot));
+      connections(snapshot);
       const product = {
         version: access?.product?.version ?? snapshot.service?.version,
         license: access?.product?.license,

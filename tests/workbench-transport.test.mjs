@@ -87,6 +87,13 @@ test("a snapshot of a running service has no pause note", () => {
   assert.equal("runtime_note" in flat, false);
 });
 
+test("a snapshot with no browser carries the line the service wrote for it", () => {
+  const connections = { ...parts.connections, browsers: [], no_browser: "Starts Google Chrome on request" };
+  const flat = Transport.flatten({ seq: 1, parts: { ...parts, connections } });
+  assert.equal(flat.no_browser, "Starts Google Chrome on request");
+  assert.equal("no_browser" in Transport.flatten({ seq: 1, parts }), false);
+});
+
 test("the table of parts is the one the service lists", () => {
   assert.deepEqual([...Transport.SNAPSHOT_PARTS], PARTS.split(","));
 });

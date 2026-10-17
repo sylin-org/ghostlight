@@ -522,6 +522,17 @@ impl WorkbenchFacade {
         self
     }
 
+    /// The same facade over installed browsers the no-browser line reads from a fake, for tests
+    /// that must not read this computer's.
+    #[cfg(test)]
+    pub(crate) fn with_installed_browsers(
+        self,
+        candidates: Vec<crate::browser::recovery::RecoveryCandidate>,
+    ) -> Self {
+        self.live.use_installed_browsers(candidates);
+        self
+    }
+
     /// The same facade over a computer the setup part reads from a fake, for tests that must not
     /// read this one.
     #[cfg(test)]
@@ -773,6 +784,7 @@ impl WorkbenchFacade {
             operations,
             sessions,
             browsers,
+            no_browser,
             authority,
             audit_health,
             audit_required,
@@ -846,6 +858,7 @@ impl WorkbenchFacade {
             sessions,
             operations,
             browsers,
+            no_browser,
             history,
             diagnostics,
             harnesses: self.harnesses.summaries(),
@@ -1606,6 +1619,9 @@ pub struct WorkbenchSnapshot {
     pub operations: Vec<OperationSummary>,
     /// Currently connected browser instances.
     pub browsers: Vec<BrowserInstanceSummary>,
+    /// What the window says in place of a browser while none is connected
+    /// ([`words::no_browser`]): the browser a request would start, or that none is connected.
+    pub no_browser: Option<String>,
     /// Newest-first bounded content-minimized history.
     pub history: Vec<HistoryItem>,
     /// Current local checkup results.
@@ -1785,6 +1801,8 @@ pub struct BrowserInstanceSummary {
     pub adapter_version: Option<String>,
     /// Current connection state.
     pub connected: bool,
+    /// The tabs the sessions working in this browser control, together.
+    pub tab_count: usize,
 }
 
 /// One content-minimized terminal history record.

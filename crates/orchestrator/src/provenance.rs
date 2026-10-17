@@ -76,6 +76,11 @@ impl ConnectionEvidence {
                 &self.reported_application,
                 details.channel,
             ));
+            if details.channel == IntakeChannel::Mcp {
+                details.explanation = crate::language::provenance::claimed_name_explanation(
+                    &self.reported_application,
+                );
+            }
             details.reported_application = Some(self.reported_application.clone());
         }
         details

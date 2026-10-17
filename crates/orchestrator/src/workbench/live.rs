@@ -13,7 +13,12 @@
 //! session's client arrives or leaves, or when a caller says setup changed (the client roster was
 //! looked at again, or setup completed), because an incomplete setup reads the machine each time
 //! it is built (ADR-0200 Decision 8).
+//!
+//! While no browser is connected, the connections part says which browser a request would start.
+//! Browser recovery answers that from the installed browsers, which it reads once for each stretch
+//! with no browser connected and each browser startup posture in it, and never under `manual`.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
@@ -28,9 +33,11 @@ use super::{
     WorkbenchTrayPort,
 };
 use crate::browser::adapter::RuntimeControlState;
+use crate::browser::recovery::BrowserRecovery;
 use crate::browser::BrowserPort;
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
+use crate::governance::manifest::BrowserStartup;
 use crate::governance::{GovernanceDiagnostics, GovernanceFacade};
 use crate::install::HarnessRegistry;
 use crate::intake::desktop::TrayModel;
@@ -38,7 +45,7 @@ use crate::intake::session::IntakeChannel;
 use crate::language::audit_health::AuditHealth;
 use crate::language::readiness;
 use crate::language::setup::{SetupAction, SetupView};
-use crate::language::workbench::ConnectionCounts;
+use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::provenance::ConnectionDetails;
 use crate::workspace::WorkspaceStore;
 
@@ -50,6 +57,8 @@ pub(super) struct Gathered {
     pub sessions: Vec<SessionSummary>,
     /// Connected browser instances.
     pub browsers: Vec<BrowserInstanceSummary>,
+    /// What the window says in place of a browser, while none is connected.
+    pub no_browser: Option<String>,
     /// Content-free authority facts.
     pub authority: GovernanceDiagnostics,
     /// The band chip.
@@ -72,6 +81,7 @@ impl Gathered {
         ConnectionsPart {
             sessions: self.sessions.clone(),
             browsers: self.browsers.clone(),
+            no_browser: self.no_browser.clone(),
         }
     }
 }
@@ -119,6 +129,31 @@ struct SetupSources {
     machine: Arc<dyn SetupMachine>,
 }
 
+/// Which browser a request would start, as browser recovery answers it, kept for one stretch with
+/// no browser connected.
+struct BrowserStarts {
+    /// The recovery whose decision the answer is.
+    recovery: BrowserRecovery,
+    /// The answer of the current stretch, with the posture it was read under. Nothing is kept
+    /// while a browser is connected, so the next stretch reads the installed browsers again.
+    answer: Option<(BrowserStartup, Option<String>)>,
+}
+
+impl BrowserStarts {
+    /// The name of the browser a request would start now, read again only when the stretch or
+    /// the posture is new.
+    fn answer(&mut self, posture: BrowserStartup) -> Option<String> {
+        match &self.answer {
+            Some((known, answer)) if *known == posture => answer.clone(),
+            _ => {
+                let answer = self.recovery.starts_on_request();
+                self.answer = Some((posture, answer.clone()));
+                answer
+            }
+        }
+    }
+}
+
 /// Count `connections` by the intake that admitted each, beside `browsers`.
 fn count_connections<'a>(
     connections: impl Iterator<Item = &'a ConnectionDetails>,
@@ -153,6 +188,7 @@ pub(super) struct Live {
     sources: Mutex<SetupSources>,
     remembered: Mutex<Remembered>,
     tray: Mutex<Option<Arc<dyn WorkbenchTrayPort>>>,
+    starts: Mutex<BrowserStarts>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -188,6 +224,10 @@ impl Live {
                 harnesses,
                 machine: Arc::new(ThisComputer::discover()),
             }),
+            starts: Mutex::new(BrowserStarts {
+                recovery: BrowserRecovery::discover(governance.clone(), Arc::clone(&browser)),
+                answer: None,
+            }),
             governance,
             browser,
             diagnostics,
@@ -210,12 +250,17 @@ impl Live {
     pub fn gather(&self) -> Gathered {
         let operations = self.projection.operations();
         let browser_list = self.browser.browsers();
+        let mut tabs_in = HashMap::<String, usize>::new();
         let sessions: Vec<SessionSummary> = self
             .workspaces
             .summaries()
             .into_iter()
             .map(|workspace| {
-                let browser = self.workspaces.browser_of(&workspace.id).and_then(|id| {
+                let pinned = self.workspaces.browser_of(&workspace.id);
+                if let Some(id) = &pinned {
+                    *tabs_in.entry(id.clone()).or_default() += workspace.tab_count;
+                }
+                let browser = pinned.and_then(|id| {
                     browser_list
                         .iter()
                         .find(|b| b.id == id)
@@ -245,12 +290,23 @@ impl Live {
         let browsers: Vec<BrowserInstanceSummary> = browser_list
             .into_iter()
             .map(|browser| BrowserInstanceSummary {
+                tab_count: tabs_in.get(&browser.id).copied().unwrap_or_default(),
                 id: browser.id,
                 family: browser.name.unwrap_or_else(|| "Chromium".into()),
                 adapter_version: Some(browser.adapter_version),
                 connected: true,
             })
             .collect();
+        let no_browser = {
+            let mut starts = lock(&self.starts);
+            if browsers.is_empty() {
+                let starts = starts.answer(self.governance.browser_startup());
+                Some(words::no_browser(starts.as_deref()))
+            } else {
+                starts.answer = None;
+                None
+            }
+        };
         let authority = self.governance.diagnostics();
         let runtime_state = self.governance.runtime_state();
         let audit_health = self.projection.audit_health();
@@ -269,6 +325,7 @@ impl Live {
             operations,
             sessions,
             browsers,
+            no_browser,
             authority,
             runtime_state,
             audit_health,
@@ -435,6 +492,17 @@ impl Live {
     #[cfg(test)]
     pub fn use_machine(&self, machine: Arc<dyn SetupMachine>) {
         lock(&self.sources).machine = machine;
+    }
+
+    /// Replace the installed browsers the no-browser line is read from.
+    #[cfg(test)]
+    pub fn use_installed_browsers(
+        &self,
+        candidates: Vec<crate::browser::recovery::RecoveryCandidate>,
+    ) {
+        let mut starts = lock(&self.starts);
+        starts.recovery.set_test_candidates(candidates);
+        starts.answer = None;
     }
 
     /// Remember who brought the runtime to `state`. A request that leaves the state as it was

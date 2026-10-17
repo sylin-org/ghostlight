@@ -205,7 +205,9 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             family: "Chrome".into(),
             adapter_version: Some("1.0.0".into()),
             connected: true,
+            tab_count: 2,
         }],
+        no_browser: Some("No browser connected".into()),
         history: vec![item],
         diagnostics: vec![DiagnosticItem {
             id: "service".into(),
@@ -359,6 +361,8 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "browsers[].connected",
     "browsers[].family",
     "browsers[].id",
+    "browsers[].tab_count",
+    "no_browser",
     "sessions",
     "sessions[].active_operations",
     "sessions[].agent",

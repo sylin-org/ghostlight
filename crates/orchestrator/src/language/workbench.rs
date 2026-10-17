@@ -287,6 +287,21 @@ pub const WATCHING_NOT_SERVED: &str = "Ghostlight is not serving a watch view on
 /// Why watching was not changed: the setting could not be saved.
 pub const WATCHING_NOT_SAVED: &str = "Ghostlight could not save that setting. Try again.";
 
+/// What the Browsers shelf of At a glance says while no browser is connected and Ghostlight would
+/// start none on request.
+pub const NO_BROWSER: &str = "No browser connected";
+
+/// What the Browsers shelf of At a glance says while no browser is connected: the browser an
+/// agent's request starts, when Ghostlight would start `starts` (its name), and otherwise
+/// [`NO_BROWSER`].
+#[must_use]
+pub fn no_browser(starts: Option<&str>) -> String {
+    starts.map_or_else(
+        || NO_BROWSER.to_owned(),
+        |browser| format!("Starts {browser} on request"),
+    )
+}
+
 /// How many of each kind of connection the service has right now.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ConnectionCounts {
@@ -438,6 +453,15 @@ mod tests {
         WindowReason::NoTray,
         WindowReason::DidNotStay,
     ];
+
+    #[test]
+    fn the_no_browser_line_names_a_browser_only_when_one_starts_on_request() {
+        assert_eq!(
+            no_browser(Some("Google Chrome")),
+            "Starts Google Chrome on request"
+        );
+        assert_eq!(no_browser(None), NO_BROWSER);
+    }
 
     #[test]
     fn a_window_reason_is_its_wire_word_and_every_word_is_different() {
