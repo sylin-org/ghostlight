@@ -55,6 +55,24 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
    vendor mark, then the neutral monogram) arrives in 2.0.x as symbol sources the service resolves,
    with no change to the page.
 
+8. The catalog holds every per-agent fact (2026-10-17): "Maybe we could use the catalog for much more -
+   lists of likely places for the config files to be found, how to set the config files, etc. And we
+   just project to consumer modules what they need." A read-only survey mapped every per-agent fact and
+   where it is decided (coordinator scratchpad plan11/catalog-design.json). Decision: one two-level
+   catalog (an agent, then its hosts: ordered location candidates per platform, a closed file dialect
+   that decides each fact once, detection, download, copy-only), each consumer receiving a typed
+   projection of only what it needs, and a generated, checked JSON projection for consumers outside
+   Rust. The owner answered, the same day: (a) before the release candidate, a golden of every byte the
+   installer writes and says (test-only, and the proof of 2.0's freeze of agent entries), and four
+   window defects fixed: each Cline host opens its own download page; the setup view never offers
+   Connect to a copy-only agent; neither surface offers an act an app container refuses; one session
+   never marks every host of its agent Connected; (b) `ghostlight install --client` also accepts an
+   agent's catalog id (`--client cline` selects every Cline host), and help and completions list the
+   valid ids; (c) the public lists name every agent in the catalog, generated from it; (d) macOS is
+   not in scope now, and the catalog and docs say Windows and Linux plainly. The restructure of the
+   installer itself (the two-level catalog, locations as data, dialect facts once, words in
+   language/, the generated projection) follows the release, each slice proving a zero golden diff.
+
 ## Slices
 
 1. d00-agent-names: the service names each session's agent the way a person knows it.
@@ -65,12 +83,15 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 6. d05-design-tidy: the review notes of the slices above and of the batch's integration review.
 7. d07-agent-catalog: decision 7.
 8. d08-catalog-finish: the review of d07 (decision 7).
+9. c00-writer-golden, c01-download-per-host, c02-setup-view-rules, c03-private-view-acts,
+   c11-client-by-agent and c12-agent-lists: decision 8, before the release candidate. The installer
+   restructure (c04 to c10 in the survey) follows the release.
 
 ## RESUME HERE
 
-The batch is complete again: d00 to d08 are on `dev`. Next: the coordinator pushes, watches the
-browser lane's `history-browser` journey in CI (d08 note 1 says what changed), deploys, and the
-owner runs the owed live checks below.
+d00 to d08 are on `dev` (not yet pushed). Decision 8 adds six slices before the release candidate.
+Next: c00-writer-golden, then c01, c02, c03, c11 and c12. Then the coordinator deploys, the owner looks,
+the coordinator pushes and watches the browser lane's `history-browser` journey in CI (d08 note 1).
 
 ## Landed
 
