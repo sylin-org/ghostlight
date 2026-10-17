@@ -181,7 +181,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
         sessions: vec![SessionSummary {
             id: "workspace_1".into(),
             client_label: "claude-code".into(),
-            agent: "Claude Code".into(),
+            agent: Some("Claude Code".into()),
             connections: vec![details()],
             channel: IntakeChannel::Mcp,
             leased: true,

@@ -51,7 +51,7 @@
    */
   const INTAKE_MARK = Object.freeze({ [INTAKE.cli]: "Command line" });
 
-  /** What the activity list names when no record says which agent acted. */
+  /** What the window names when no record says which agent acted, or a session's client reported no name. */
   const UNKNOWN_AGENT = "Unknown agent";
 
   /** The start every browser tool's name shares, which the activity list leaves out. */

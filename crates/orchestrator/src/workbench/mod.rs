@@ -965,7 +965,9 @@ impl WorkbenchFacade {
                 SearchHit {
                     kind: SearchKind::Session,
                     id: session.id.clone(),
-                    title: session.agent,
+                    title: session
+                        .agent
+                        .unwrap_or_else(|| crate::language::provenance::UNKNOWN_AGENT.to_owned()),
                     detail: format!("{} controlled tabs", session.tab_count),
                     timestamp_ms: None,
                     view: SearchDestination::Activity,
@@ -1703,8 +1705,9 @@ pub struct SessionSummary {
     /// The name the client reported for itself, its own unverified claim.
     pub client_label: String,
     /// The name a person knows this session's agent by
-    /// ([`crate::language::provenance::agent_name`]), wherever the window names the session.
-    pub agent: String,
+    /// ([`crate::language::provenance::agent_name`]), wherever the window names the session; none
+    /// when its client reported no name.
+    pub agent: Option<String>,
     /// Each current connection has its own observations and reported application.
     pub connections: Vec<crate::provenance::ConnectionDetails>,
     /// Which intake admitted this session, so live work can be attributed before it settles.

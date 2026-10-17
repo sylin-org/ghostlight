@@ -71,17 +71,12 @@ impl ConnectionEvidence {
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
         let mut details = self.attribution.details();
-        if !self.reported_application.is_empty() {
-            details.agent = Some(crate::language::provenance::agent_name(
-                &self.reported_application,
-                details.channel,
-            ));
+        if let Some(claim) = crate::language::provenance::claimed_name(&self.reported_application) {
+            details.agent = crate::language::provenance::agent_name(claim, details.channel);
             if details.channel == IntakeChannel::Mcp {
-                details.explanation = crate::language::provenance::claimed_name_explanation(
-                    &self.reported_application,
-                );
+                details.explanation = crate::language::provenance::claimed_name_explanation(claim);
             }
-            details.reported_application = Some(self.reported_application.clone());
+            details.reported_application = Some(claim.to_owned());
         }
         details
     }
@@ -215,6 +210,23 @@ mod tests {
         );
         let unnamed = ConnectionEvidence::new("", IntakeChannel::Mcp);
         assert_eq!(unnamed.details().agent, None);
+    }
+
+    #[test]
+    fn a_client_that_reported_no_name_names_no_agent_and_claims_nothing() {
+        for unnamed in ["", " \t ", crate::intake::mcp::DEFAULT_CLIENT_LABEL] {
+            let details = ConnectionEvidence::new(unnamed, IntakeChannel::Mcp).details();
+            assert_eq!(details.agent, None, "{unnamed:?}");
+            assert_eq!(details.reported_application, None, "{unnamed:?}");
+            assert!(!details.explanation.contains('"'), "{unnamed:?}");
+        }
+    }
+
+    #[test]
+    fn an_agent_is_named_from_the_claim_the_card_shows() {
+        let details = ConnectionEvidence::new("Some\u{202e}Agent", IntakeChannel::Mcp).details();
+        assert_eq!(details.agent.as_deref(), Some("SomeAgent"));
+        assert_eq!(details.reported_application.as_deref(), Some("SomeAgent"));
     }
 
     #[test]

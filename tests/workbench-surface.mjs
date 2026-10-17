@@ -912,6 +912,12 @@ const glanceChecks = [];
       html.includes(`<span class="chip glance-chip missing"><span class="dot"></span>${line}</span>`)
         && html.includes(">no browser<"), html]);
   }
+  const unnamed = { ...claim("unnamed", null), connections: [{ connection_id: "connection_unnamed", agent: null,
+    channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it." }] };
+  html = draw({ sessions: [unnamed, { ...unnamed, id: "unnamed_2" }], browsers });
+  glanceChecks.push(["a session whose client reported no name is one Unknown agent, never a blank chip",
+    html.includes('data-glance-agent="Unknown agent"') && html.includes('<span class="tally">2</span>')
+      && !html.includes('data-glance-agent=""') && html.includes(">1 agent<"), html]);
 }
 
 // H7: an existing health surface stays quiet when healthy and keeps failed storage explicit.

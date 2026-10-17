@@ -1359,7 +1359,7 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
         ControlledBrowser::new(false, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
-    let mut named: Vec<(String, String, Vec<Option<String>>)> = facade
+    let mut named: Vec<(Option<String>, String, Vec<Option<String>>)> = facade
         .snapshot()
         .sessions
         .into_iter()
@@ -1377,22 +1377,75 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
         named,
         [
             (
-                "Codex".to_owned(),
+                Some("Codex".to_owned()),
                 "codex-mcp-client".to_owned(),
                 vec![Some("Codex".to_owned())]
             ),
             (
-                "Command line".to_owned(),
+                Some("Command line".to_owned()),
                 "ghostlight call".to_owned(),
                 vec![Some("Command line".to_owned())]
             ),
             (
-                "my agent".to_owned(),
+                Some("my agent".to_owned()),
                 "my agent".to_owned(),
                 vec![Some("my agent".to_owned())]
             ),
         ]
     );
+}
+
+#[test]
+fn a_session_that_reported_no_name_names_no_agent_and_its_chip_keeps_only_what_its_card_shows() {
+    use crate::intake::session::IntakeChannel;
+
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    for unnamed in ["", "   ", crate::intake::mcp::DEFAULT_CLIENT_LABEL] {
+        workspaces.admit(unnamed.into(), IntakeChannel::Mcp);
+    }
+    workspaces.admit("Some\u{202e}Agent\u{200f}".into(), IntakeChannel::Mcp);
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        workspaces,
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(false, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let mut named: Vec<(Option<String>, Vec<Option<String>>)> = facade
+        .snapshot()
+        .sessions
+        .into_iter()
+        .map(|session| {
+            let agents = session
+                .connections
+                .iter()
+                .map(|connection| connection.agent.clone())
+                .collect();
+            (session.agent, agents)
+        })
+        .collect();
+    named.sort();
+    assert_eq!(
+        named,
+        [
+            (None, vec![None]),
+            (None, vec![None]),
+            (None, vec![None]),
+            (
+                Some("SomeAgent".to_owned()),
+                vec![Some("SomeAgent".to_owned())]
+            ),
+        ]
+    );
+    let hits = facade.search("unknown agent");
+    assert_eq!(hits.len(), 3);
+    assert!(hits
+        .iter()
+        .all(|hit| hit.title == crate::language::provenance::UNKNOWN_AGENT));
+    assert!(include_str!("../../ui/lib/words.js").contains(&format!(
+        "const UNKNOWN_AGENT = \"{}\";",
+        crate::language::provenance::UNKNOWN_AGENT
+    )));
 }
 
 #[test]

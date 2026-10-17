@@ -51,7 +51,9 @@ pub const DISCOVERY_REVISION: &str = "2026-07-28";
 
 const JSONRPC_VERSION: &str = "2.0";
 const SERVICE_ID_PREFIX: &str = "mcp_";
-const DEFAULT_CLIENT_LABEL: &str = "MCP client";
+/// The label of a session whose client sent no name. The browser's tab group shows it; it names
+/// no agent ([`crate::language::provenance::claimed_name`]).
+pub const DEFAULT_CLIENT_LABEL: &str = "MCP client";
 const MAX_CLIENT_LABEL_CHARS: usize = 100;
 const RESUME_TOKEN_PREFIX: &str = "rs1.";
 const MAX_RESUME_TOKEN_BYTES: usize = 64 * 1024;

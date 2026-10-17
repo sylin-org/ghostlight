@@ -104,7 +104,7 @@ struct Published {
 #[derive(Debug, Eq, PartialEq)]
 struct SetupInputsKey {
     browsers: Vec<String>,
-    clients: Vec<String>,
+    clients: Vec<Option<String>>,
     complete: bool,
 }
 
@@ -425,7 +425,7 @@ impl Live {
             .map(|browser| browser.family.clone())
             .collect();
         browsers.sort();
-        let mut clients: Vec<String> = gathered
+        let mut clients: Vec<Option<String>> = gathered
             .sessions
             .iter()
             .map(|session| session.agent.clone())

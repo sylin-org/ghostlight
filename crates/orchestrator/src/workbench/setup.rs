@@ -470,7 +470,10 @@ fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<A
 /// person knows it, is that agent's product name. A product on several hosts is one agent here,
 /// because the name a client reports does not say the host.
 fn is_agent_of(session: &SessionSummary, harness: &HarnessSummary) -> bool {
-    session.agent.eq_ignore_ascii_case(&harness.name)
+    session
+        .agent
+        .as_deref()
+        .is_some_and(|agent| agent.eq_ignore_ascii_case(&harness.name))
 }
 
 /// The name of the agent whose request finished setup: the roster's product name for the

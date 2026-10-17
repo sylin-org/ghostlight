@@ -701,16 +701,20 @@
     let glanceAgent = null;
     let lastConnections = null;
 
-    /** The agents among `sessions`, each with its sessions, busiest and most tabbed first. */
+    /**
+     * The agents among `sessions`, each with its sessions, busiest and most tabbed first. Sessions
+     * whose client reported no name form one "Unknown agent".
+     */
     function agentGroups(sessions) {
       const groups = new Map();
       for (const session of sessions) {
-        const group = groups.get(session.agent)
-          ?? { name: session.agent, sessions: [], tabs: 0, busy: false, commandLine: session.channel === INTAKE.cli };
+        const name = session.agent ?? UNKNOWN_AGENT;
+        const group = groups.get(name)
+          ?? { name, sessions: [], tabs: 0, busy: false, commandLine: session.channel === INTAKE.cli };
         group.sessions.push(session);
         group.tabs += session.tab_count ?? 0;
         group.busy = group.busy || session.active_operations > 0;
-        groups.set(session.agent, group);
+        groups.set(name, group);
       }
       return [...groups.values()]
         .sort((left, right) => right.tabs - left.tabs || left.name.localeCompare(right.name));

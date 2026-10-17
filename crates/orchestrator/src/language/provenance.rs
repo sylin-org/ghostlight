@@ -22,17 +22,32 @@ pub fn claimed_name_explanation(reported: &str) -> String {
 /// The name of a command-line session's agent.
 pub const COMMAND_LINE_AGENT: &str = "Command line";
 
+/// The name a client `reported` for itself, trimmed, or none when it reported none: a name that is
+/// empty after trimming, and Ghostlight's own label for a client that sent no name
+/// ([`crate::intake::mcp::DEFAULT_CLIENT_LABEL`]), name nobody.
+#[must_use]
+pub fn claimed_name(reported: &str) -> Option<&str> {
+    let name = reported.trim();
+    (!name.is_empty() && name != crate::intake::mcp::DEFAULT_CLIENT_LABEL).then_some(name)
+}
+
 /// The name a person knows a connection's agent by: the command line for a `ghostlight call`
 /// session, the product name for an agent Ghostlight knows, and otherwise the name the client
-/// `reported`, trimmed. Ghostlight never invents one.
+/// `reported` ([`claimed_name`]). None when an MCP client reported no name; the window then says
+/// the agent is unknown. Ghostlight never invents one.
 #[must_use]
-pub fn agent_name(reported: &str, channel: IntakeChannel) -> String {
+pub fn agent_name(reported: &str, channel: IntakeChannel) -> Option<String> {
     match channel {
-        IntakeChannel::Cli => COMMAND_LINE_AGENT.to_owned(),
-        IntakeChannel::Mcp => crate::install::agent_name(reported)
-            .map_or_else(|| reported.trim().to_owned(), str::to_owned),
+        IntakeChannel::Cli => Some(COMMAND_LINE_AGENT.to_owned()),
+        IntakeChannel::Mcp => claimed_name(reported).map(|name| {
+            crate::install::agent_name(name).map_or_else(|| name.to_owned(), str::to_owned)
+        }),
     }
 }
+
+/// What a search names a session whose agent reported no name, as the window's activity list
+/// does (`UNKNOWN_AGENT` in `ui/lib/words.js`).
+pub const UNKNOWN_AGENT: &str = "Unknown agent";
 
 /// Details for local human surfaces only; a live caller claim must never become audit content.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -85,19 +100,43 @@ mod tests {
 
     #[test]
     fn an_agent_is_named_as_a_person_knows_it_and_an_unknown_one_as_it_reported() {
-        assert_eq!(agent_name("codex-mcp-client", IntakeChannel::Mcp), "Codex");
-        assert_eq!(agent_name("Claude-Code", IntakeChannel::Mcp), "Claude Code");
+        let named = |reported, channel| agent_name(reported, channel);
         assert_eq!(
-            agent_name("  Some Agent  ", IntakeChannel::Mcp),
-            "Some Agent"
+            named("codex-mcp-client", IntakeChannel::Mcp).as_deref(),
+            Some("Codex")
         );
         assert_eq!(
-            agent_name("ghostlight call", IntakeChannel::Cli),
-            "Command line"
+            named("Claude-Code", IntakeChannel::Mcp).as_deref(),
+            Some("Claude Code")
         );
         assert_eq!(
-            agent_name("codex-mcp-client", IntakeChannel::Cli),
-            "Command line"
+            named("  Some Agent  ", IntakeChannel::Mcp).as_deref(),
+            Some("Some Agent")
+        );
+        assert_eq!(
+            named("ghostlight call", IntakeChannel::Cli).as_deref(),
+            Some("Command line")
+        );
+        assert_eq!(
+            named("codex-mcp-client", IntakeChannel::Cli).as_deref(),
+            Some("Command line")
+        );
+    }
+
+    #[test]
+    fn a_client_that_reported_no_name_names_no_agent() {
+        for unnamed in [
+            "",
+            "   ",
+            crate::intake::mcp::DEFAULT_CLIENT_LABEL,
+            " MCP client ",
+        ] {
+            assert_eq!(claimed_name(unnamed), None, "{unnamed:?}");
+            assert_eq!(agent_name(unnamed, IntakeChannel::Mcp), None, "{unnamed:?}");
+        }
+        assert_eq!(
+            agent_name("", IntakeChannel::Cli).as_deref(),
+            Some("Command line")
         );
     }
 }
