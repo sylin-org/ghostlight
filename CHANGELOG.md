@@ -5,39 +5,135 @@ All notable changes to Ghostlight are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - Unreleased
 
-### Removed
+Ghostlight 2.0.0 is a breaking release. Update the service and the Ghostlight in Browser extension
+together, because neither works with the other's 1.x version. A 1.x install moves to the 2.0
+layout once, when you run the install again. The full release notes are in
+[docs/release/notes-v2.0.0.md](docs/release/notes-v2.0.0.md).
 
-- Remove the `browser_workspace` tool. The catalog has 23 tools again. A session works only in
-  its own tabs and can no longer list other sessions or switch into another session's workspace.
-  A call to the old tool fails before any browser work and points to `browser_tabs` list
-  (ADR-0196).
+### Added
+
+- The Ghostlight window, `ghostlight-desktop`. It opens on the setup steps and then shows the
+  workbench: activity, history, policy and Settings. `ghostlight open`, the Start menu entry on
+  Windows and the Applications entry on Linux bring it back. The tray icon is there whenever the
+  desktop can show one, and it shows ready, working, paused or needs attention (ADR-0199).
+- The setup view, in three steps: This computer, Your browser and Your agent. It moves to the next
+  step on its own. The Browser step lists the Chromium browsers installed on the computer: Add opens
+  the Chrome Web Store listing in that browser, and Open starts a browser that already holds the
+  extension (ADR-0200 Decisions 1 and 8).
+- The install ends by saying the version, where Ghostlight lives, which agents have it and one next
+  step, then opens the window on the setup steps. `--no-open` leaves the window closed
+  (ADR-0200 Decision 12).
+- One-line installers that need no Node.js: `irm https://sylin.org/ghostlight/get.ps1 | iex` on
+  Windows and `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` on Linux. With
+  `GHOSTLIGHT_VERSION` set they install exactly that release, a prerelease included (ADR-0200).
+- The service serves the workbench on loopback HTTP, to the window and to browser tabs on the same
+  computer. "Others can watch" is on by default: another browser tab on this computer can watch
+  and Pause agents, and every other change needs the window. Settings turns watching off
+  (ADR-0199 amendment of 2026-10-15).
+- `ghostlight policy migrate <file>` moves a schema-3 policy file to schema 4 only where the meaning
+  stays the same. It keeps a `<file>.schema3.bak` copy and refuses anything it cannot move without
+  changing what the policy does (ADR-0197 Decision 19).
+- Handles follow their control. A handle survives a re-render that the page proves is the same
+  control, and the action reports `rebound: true`. A stale handle says why: `removed`, `navigated`,
+  `tab_closed` or `unknown`. When a role and name repeat, `browser_find` and `browser_inspect` items
+  carry `context`, their row or group, and `nth` when that repeats too (ADR-0198 amendment "handles
+  follow their control").
+- Every tool accepts `timeout_ms`, from 100 to 30000 milliseconds (ADR-0197 Decision 21).
+- Form controls say what they accept. `browser_inspect` and `browser_find` items carry a control's
+  value and, for a native select, its options. A fill matches a choice exactly, then by one
+  normalized match, and says when it did; a multiple select takes a list. A fill that cannot take
+  its values refuses before any edit and lists what would succeed. A fill says what the page now
+  holds, and fields the page changed back fail as reverted (ADR-0198 Decisions 7 to 11).
+- An action that completes with a dialog open says so, carries a `dialog_opened` fact and points to
+  `browser_dialog` (ADR-0197 Decision 21).
+- MCP clients that negotiate a revision before 2025-06-18 get the result JSON at the end of the text
+  block, because they cannot read structured content (ADR-0198 Decision 24).
 
 ### Changed
 
+- One service per OS user, `ghostlight-service`, owns the MCP server, the tools and their words,
+  governance, the audit trail and every state change (ADR-0197 Decision 17, ADR-0199 Decision 9).
+- `ghostlight` is the edge: the one executable an MCP client or a browser starts. It relays to the
+  service and starts it when it is missing, and decides nothing. The edge and the relay are version
+  4.0.0, the relay revision, and change only with their protocol (ADR-0199 Decisions 5 and 8).
+- Everything lives under `~/.ghostlight`. Its `bin` folder holds `ghostlight`,
+  `ghostlight-service` and `ghostlight-desktop`, and an update replaces them as one tested set
+  (ADR-0197 Decisions 10 and 13).
+- Launching a registered MCP client or browser starts Ghostlight when it is not running. After you
+  Quit, only an agent, a command or opening Ghostlight starts it again (ADR-0199 Decision 10).
+- A service with nothing connected to it exits after 10 minutes. The window counts as connected, so
+  this ends a service on a computer with no desktop, such as one an agent started over SSH
+  (ADR-0199 Decision 12).
+- The service and the extension speak adapter protocol 4. A 2.0 service tells a 1.x extension to
+  update and closes the connection, and a 2.0 extension tells you to update Ghostlight when it meets
+  an older service (ADR-0197 Decision 5, ADR-0200 Decision 16).
+- The extension is version 2.0.0 and frozen at its 2.0 form. It carries no policy and no page code:
+  the service gives it the page code when it connects, so a service update needs no extension
+  update. The page code lives in the service's browser adapter, under
+  `crates/orchestrator/src/browser/adapter/chromium/protocol4/assets` (ADR-0196 Decision 3,
+  ADR-0197 Decision 5).
+- The popup shows Ready, Paused, Session ended, Not connected or Update needed. The extension opens
+  its setup page only when the service is absent (ADR-0200 Decision 14, ADR-0199 Decision 23).
+- Policy files use schema 4. Ghostlight moves its own user policy the same way `policy migrate`
+  does. Policy files an administrator owns are never rewritten; they fail closed in schema 3 until
+  their owner moves them (ADR-0197 Decision 19).
+- The managed policy keeps its HTTPS fetch, signatures and rollback protection. The fetch runs on
+  the refresher thread, never on the path of a call (ADR-0197 owner review amendment).
+- Audit lines are version 2 and frozen at 2.0. A reader ignores fields it does not know. The 1.x
+  audit logs are moved aside under `state` and are not displayed (ADR-0197 Decision 22).
+- A session works only in its own tabs. Ghostlight does not adopt a tab on its own: `browser_tabs`
+  lists tabs opened from a tab the session owns, and the model may adopt one explicitly under the
+  same governance as navigation (ADR-0196, ADR-0197 Decision 20).
+- Handles are short: a prefix and eight random base32 characters, checked against the workspace that
+  owns them (ADR-0197 Decision 21).
+- A session holds one recording. `browser_record` takes no recording id, and a second start is
+  refused until the first is saved or discarded (ADR-0197 Decision 21).
+- `browser_inspect` and `browser_find` answer once the page has been quiet for 300 ms, within the
+  settle budget (ADR-0198 Decision 31).
+- The result a client reads leaves out fields at their default, and a reader treats an absent
+  field as its default (ADR-0198 Decision 21).
 - WinGet stays as a supported route (ADR-0197 Decision 16, owner review). Its Windows archive is
   built by `scripts/package-winget-archive.ps1` and is a carrier for `ghostlight install`, which
   installs into `~/.ghostlight/bin`; after `winget upgrade` the next install carries the newer
   version there, and an older copy never replaces a newer one. It is not offered as a separate
   portable download.
-- The page code the service installs into browser pages now lives in the service's browser
-  adapter, under `crates/orchestrator/src/browser/adapter/chromium/assets`, instead of being
-  split between the service and `extension/lib`. The service picks the adapter's browser family
-  and wire level from the extension's hello. The move itself changed no bytes of the
-  installed page bundle (ADR-0196 Decision 3, ADR-0197 Decision 5).
-- The Chromium page-asset tests run with `npm test --prefix` that directory and need no
-  `npm install`. CI runs them beside the extension tests.
+- The Chromium page-asset tests run with `node --test` and need no `npm install`. CI runs them
+  beside the extension tests.
+
+### Removed
+
+- The `browser_workspace` tool. The catalog has 23 tools. A session can no longer list other
+  sessions or switch into another session's workspace. A call to the old tool fails before any
+  browser work and points to `browser_tabs` list (ADR-0196).
+- The two connector executables, replaced by the edge (ADR-0199).
+- The Windows setup program (NSIS), the Debian package, Scoop, the separate portable archive and the
+  Homebrew template. The routes are `npx -y ghostlight install`, the one-line installers and WinGet
+  (ADR-0197 Decision 16, owner review).
+- The Flatpak route. The install removes the Flatpak connection a 1.x install left in your home and
+  says what it did (ADR-0197 Decision 22).
+- MCPB as a channel after this release. The Claude Desktop bundle in this release is the last one,
+  and it carries 2.0.0.
+- Observe mode, the channel enable switches, the user-policy enable switch and the frame options
+  (ADR-0197 Decision 19).
+- The `layout_stable` wait condition. A call that names it is refused with a pointer to
+  `visual_settle` (ADR-0197 Decision 21).
+- The popup's diagnostics toggle, the form-reset trace, the YAML editor for goose and Continue
+  (they get a Copy setup action) and observed peer identity (ADR-0197 Decision 22).
 
 ### Fixed
 
-- Page-asset fixes reach the installed extension at once, because the service supplies the page
-  bundle (the level 3 bundle hash changed on purpose). Choosing a select option by its visible
-  label is now confirmed as retained (LU-2). `browser_read` masks every credential-class field,
-  not only `type=password`, reports checkboxes and radios as checked or unchecked instead of
-  their value attribute, and never shows a placeholder as a value (EXT-7, HM-7). `browser_find`
-  matches visible text in `div` containers and in `[draggable]`, `[aria-label]` and `[tabindex]`
-  elements, and prefers the deepest match (LU-6). Only the returned matches get handles.
+- Ordinary page tools spend at most one second on optional preparation and then go ahead on a busy
+  page; `visual_settle: false` skips it. A composite wait keeps a condition that held when optional
+  settlement runs out and reports `visual_settled` apart (ADR-0195, prepared for 1.3.15).
+- The service supplies the page code, so page-code fixes reach the installed extension at once.
+  Choosing a select option by its visible label is now confirmed as retained (LU-2).
+  `browser_read` masks every credential-class field, not only `type=password`, reports checkboxes
+  and radios as checked or unchecked instead of their value attribute, and never shows a
+  placeholder as a value (EXT-7, HM-7). `browser_find` matches visible text in `div` containers
+  and in `[draggable]`, `[aria-label]` and `[tabindex]` elements, and prefers the deepest match
+  (LU-6). Only the returned matches get handles.
 - A tab handle from another session now points the model to its own `browser_tabs` list
   instead of suggesting a switch.
 - A refusal for another session's handle names that session only by its client label. When the
@@ -47,10 +143,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace and its tabs open until the service restarted; that path is gone.
 - Default reuse no longer takes over a tab you opened. A plain open reuses only a tab Ghostlight
   opened on that host and a released session of the same client left open, after checking the
-  live browser, and the browser is always told not to pick a tab itself. A tab another client
-  released stays in that client's group and is not reused. A released tab is reusable only after the
-  preserve-tabs setting kept it open, so the old session's cleanup can never touch the new
-  session's tab. This holds with the published adapter (ADR-0196).
+  live browser, and the browser never picks a tab itself. A tab another client released stays in
+  that client's group and is not reused. A released tab is reusable only after the preserve-tabs
+  setting kept it open, so the old session's cleanup can never touch the new session's tab
+  (ADR-0196).
 - Chrome and Edge tabs with the same id no longer refuse each other.
 - A refusal found after the browser already opened, navigated, focused, or closed a tab reports
   the applied effect and is no longer marked safe to repeat.
@@ -63,14 +159,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (ADR-0196). A browser closed longer ago than that is not waited for, so Ghostlight still starts
   it at once where browser startup is allowed.
 - One slow answer no longer cuts off a healthy browser. A short deadline, such as the 500 ms
-  status signal, no longer marks the browser unavailable or fails other calls in flight.
+  delivery of a control signal, no longer marks the browser unavailable or fails other calls in
+  flight.
 - Browser refusals say what is true: the browser stopped answering, is not connected, is not
   connected while a different browser is, or the connection was busy. "Reconnect the Ghostlight
   browser adapter" is gone, and a bridge contract failure no longer says "disconnected".
 - Process diagnostics log when a connected browser stops answering and when it answers again
   (`heartbeat_lost`, `heartbeat_resumed`).
 
-## [1.3.15] - 2026-10-05
+### Security
+
+- The workbench server binds 127.0.0.1 only and answers only when the `Host` header is its own
+  address. Control needs a key made at each service start that only the window holds, and
+  governance refuses agent navigation to the workbench's own address whatever the policy says
+  (ADR-0199 amendment of 2026-10-15).
+- On Linux, the audit log, the policy files and the other state files are created readable by
+  their owner only (mode 0600, folders 0700).
+
+## [1.3.15] - Withdrawn
+
+Prepared and submitted for staged Chrome review on 2026-10-05, and withdrawn on 2026-10-16 without a
+public release, in line with no 1.x patch releases. Its bounded preparation, document validation and
+wait changes (ADR-0195) ship in 2.0.0; its adapter compatibility with service 1.3.14 does not.
 
 ### Fixed
 

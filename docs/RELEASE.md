@@ -233,6 +233,9 @@ order. The detailed commands are in [store-disclosure-2.0.md](release/store-disc
 4. Prove the frozen one-line strings and the launcher restore commands.
 5. Publish the staged extension only when steps 1 to 4 hold and the public privacy page carries
    the 2.0 text.
+6. On `dev`, replace `Unreleased` in the CHANGELOG `[2.0.0]` heading with the date `v2.0.0`
+   became the latest release. This is a docs commit after the release commit; the tag keeps
+   `Unreleased`.
 
 The MCP Registry follows the observable npm coordinate as before and never holds this order.
 
