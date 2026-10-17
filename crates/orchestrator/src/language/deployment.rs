@@ -214,6 +214,22 @@ pub fn client_kept_private(app: &str) -> String {
     )
 }
 
+/// What a run inside the app container named `app` says of `client`, whose configuration that
+/// container keeps private: the entry an install would write, or a removal would remove, is left
+/// as it is, and the same command run from a regular terminal changes it.
+#[must_use]
+pub fn client_left_private(client: &str, app: &str, install: bool) -> String {
+    let (left, act, command) = if install {
+        ("is not written from here", "write", "install")
+    } else {
+        ("stays in place", "remove", "uninstall")
+    };
+    format!(
+        "{client}: Windows keeps this configuration private to {app}, so its Ghostlight entry \
+         {left}. To {act} it, run Ghostlight's {command} from a regular terminal."
+    )
+}
+
 /// A platform entry was written.
 #[must_use]
 pub fn platform_entry_updated(entry: &str) -> String {

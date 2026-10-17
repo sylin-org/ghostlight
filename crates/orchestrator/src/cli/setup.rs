@@ -25,7 +25,7 @@ use crate::install::reconcile::{
 };
 use crate::install::record::InstallRecord;
 use crate::install::{setup_state, version_directories};
-use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
+use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::deployment as deployment_words;
 use crate::language::environment::{self, Environment};
 use crate::language::setup::{self as setup_words, BrowserFact, InstallAgent, InstallFacts};
@@ -67,7 +67,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
     use crate::install::desktop_entry::{DesktopIntegration, DesktopIntegrationState};
     use crate::install::native_host::NativeHostRegistry;
     use crate::install::user_assets::{UserAssetState, UserAssets};
-    use crate::install::{HarnessAction, HarnessRegistry};
+    use crate::install::HarnessRegistry;
 
     ghostlight_relay::home::home()?;
     // A real install says only what the summary says, and what needs a person.
@@ -243,26 +243,23 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
     }
     let mut failures = Vec::new();
     let mut applied = Vec::new();
+    let container = Residence::detect().container().cloned();
     for summary in selected {
-        if options.dry_run {
-            println!(
-                "Would {} Ghostlight for {} ({:?}).",
-                if install { "install" } else { "remove" },
-                summary.label,
-                summary.state
-            );
-            continue;
-        }
-        if install && summary.private_view {
-            kept_private
-                .registrations
-                .push(format!("{} MCP client", summary.label));
-            continue;
-        }
-        let action = if install {
-            HarnessAction::Install
-        } else {
-            HarnessAction::Uninstall
+        let action = match client_step(&summary, install, options.dry_run, container.as_ref()) {
+            ClientStep::Apply(action) => action,
+            ClientStep::LeavePrivate => {
+                if kept_private.container.is_none() {
+                    kept_private.container.clone_from(&container);
+                }
+                kept_private
+                    .registrations
+                    .push(format!("{} MCP client", summary.label));
+                continue;
+            }
+            ClientStep::Say(line) => {
+                println!("{line}");
+                continue;
+            }
         };
         match harnesses.apply(&summary.id, action) {
             Ok(result) => {
@@ -693,10 +690,58 @@ fn finish_setup(
     Ok(())
 }
 
+/// What a run does with one MCP client it selected.
+#[derive(Debug, PartialEq, Eq)]
+enum ClientStep {
+    /// Change the client's configuration.
+    Apply(HarnessAction),
+    /// Leave the entry an install would write to the closing lines, which name the command that
+    /// finishes it from a regular terminal.
+    LeavePrivate,
+    /// Change nothing and print this line.
+    Say(String),
+}
+
+/// Decide what a run does with `summary`. Inside `container`, a client whose configuration it
+/// keeps private is never changed: a real install leaves it to the closing lines, and a dry run or
+/// a removal says that its entry is left and which command run elsewhere changes it.
+fn client_step(
+    summary: &HarnessSummary,
+    install: bool,
+    dry_run: bool,
+    container: Option<&AppContainer>,
+) -> ClientStep {
+    if summary.private_view {
+        if install && !dry_run {
+            return ClientStep::LeavePrivate;
+        }
+        if let Some(container) = container {
+            return ClientStep::Say(deployment_words::client_left_private(
+                &summary.label,
+                &container.app,
+                install,
+            ));
+        }
+    }
+    if dry_run {
+        return ClientStep::Say(format!(
+            "Would {} Ghostlight for {} ({:?}).",
+            if install { "install" } else { "remove" },
+            summary.label,
+            summary.state
+        ));
+    }
+    ClientStep::Apply(if install {
+        HarnessAction::Install
+    } else {
+        HarnessAction::Uninstall
+    })
+}
+
 /// Filter candidate MCP harness summaries based on user selection.
 ///
-/// An install also selects each client it would write if the app container it runs in did not
-/// keep that client's configuration private, so the closing lines name what is left to finish.
+/// A run also selects each client it would change if the app container it runs in did not keep
+/// that client's configuration private, so what it leaves is said rather than passed over.
 pub fn select_harnesses(
     summaries: &[crate::install::HarnessSummary],
     options: &SetupOptions,
@@ -719,20 +764,27 @@ pub fn select_harnesses(
         .iter()
         .filter(|summary| {
             if install {
-                (summary.can_install || left_private(summary))
+                (summary.can_install || left_private(summary, install))
                     && (options.all_clients || summary.state != HarnessState::NotDetected)
             } else {
-                summary.can_uninstall
+                summary.can_uninstall || left_private(summary, install)
             }
         })
         .cloned()
         .collect())
 }
 
-/// Whether an install would write `summary`'s entry but leaves it to a regular terminal, because
-/// the app container this process runs in keeps the client's configuration private.
-fn left_private(summary: &crate::install::HarnessSummary) -> bool {
-    summary.private_view && !summary.copy_only && summary.state.takes_install()
+/// Whether an install would write `summary`'s entry, or a removal would remove it, but the run
+/// leaves it to a regular terminal, because the app container this process runs in keeps the
+/// client's configuration private.
+fn left_private(summary: &crate::install::HarnessSummary, install: bool) -> bool {
+    summary.private_view
+        && !summary.copy_only
+        && if install {
+            summary.state.takes_install()
+        } else {
+            summary.state == HarnessState::Installed
+        }
 }
 
 /// Print the line that names the Ghostlight program browsers start.
@@ -848,10 +900,10 @@ mod tests {
     use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
 
     use super::{
-        private_browser_registrations, select_harnesses, select_install_browsers,
-        stray_not_stopped_lines, Collected,
+        client_step, private_browser_registrations, select_harnesses, select_install_browsers,
+        stray_not_stopped_lines, ClientStep, Collected,
     };
-    use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
+    use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
     use crate::language::setup::{BrowserFact, BrowserForm, InstallAgent};
 
     fn browser(id: &str, package: BrowserPackage) -> BrowserRegistration {
@@ -1138,7 +1190,7 @@ mod tests {
     }
 
     #[test]
-    fn an_install_inside_a_container_selects_the_private_clients_it_leaves_to_finish() {
+    fn a_run_inside_a_container_selects_the_private_clients_it_leaves() {
         let private = |id: &str, state: HarnessState| HarnessSummary {
             can_install: false,
             private_view: true,
@@ -1172,10 +1224,51 @@ mod tests {
             ids(select_harnesses(&summaries, &every, true).unwrap()),
             ["cursor", "claude-desktop", "zed", "vscode"]
         );
-        // A removal selects only what inspection offers to remove, which is nothing private.
-        assert!(select_harnesses(&summaries, &options, false)
-            .unwrap()
-            .is_empty());
+        // A removal selects the private client that has Ghostlight's entry, so it can say so.
+        assert_eq!(
+            ids(select_harnesses(&summaries, &options, false).unwrap()),
+            ["windsurf"]
+        );
+    }
+
+    #[test]
+    fn a_run_inside_a_container_changes_no_private_client_and_says_what_it_left() {
+        let container = crate::install::container::AppContainer {
+            app: "OpenAI.Codex".into(),
+        };
+        let desktop = HarnessSummary {
+            can_install: false,
+            private_view: true,
+            ..harness("claude-desktop", "Claude Desktop", HarnessState::Installed)
+        };
+        for dry_run in [false, true] {
+            let ClientStep::Say(line) = client_step(&desktop, false, dry_run, Some(&container))
+            else {
+                panic!("a removal inside a container must not remove a private entry");
+            };
+            assert!(line.starts_with("Claude Desktop: "), "{line}");
+            assert!(line.contains("private to OpenAI.Codex"), "{line}");
+            assert!(line.contains("entry stays in place"), "{line}");
+            assert!(line.contains("Ghostlight's uninstall"), "{line}");
+        }
+        assert_eq!(
+            client_step(&desktop, true, false, Some(&container)),
+            ClientStep::LeavePrivate
+        );
+        let ClientStep::Say(line) = client_step(&desktop, true, true, Some(&container)) else {
+            panic!("a dry run inside a container must say what it would leave");
+        };
+        assert!(line.contains("not written from here") && line.contains("Ghostlight's install"));
+
+        let cursor = harness("cursor", "Cursor", HarnessState::Installed);
+        assert_eq!(
+            client_step(&cursor, false, false, Some(&container)),
+            ClientStep::Apply(HarnessAction::Uninstall)
+        );
+        assert_eq!(
+            client_step(&cursor, true, false, None),
+            ClientStep::Apply(HarnessAction::Install)
+        );
     }
 
     fn applied(id: &str, label: &str, changed: bool) -> HarnessActionResult {

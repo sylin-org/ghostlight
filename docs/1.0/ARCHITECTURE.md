@@ -135,7 +135,9 @@ unwritten, except the configuration of the container's own app, and reports them
 command that finishes them from a regular terminal, `<home>/bin/ghostlight.exe install`; `doctor` says it cannot see what other apps see.
 Inspection there offers no Install, Fix or Uninstall for a client whose configuration the container
 keeps private, and its detail says why, so neither the setup view nor Integrations offers a change
-that would be refused, and Set up everything leaves that client out. An install
+that would be refused, and Set up everything leaves that client out. A dry run or a removal there
+names each such client whose entry it leaves in place, with the command that changes it from a
+regular terminal. An install
 outside a container moves the older manifest out of `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts`
 and removes that directory when it is empty.
 Only then does the installer stop the 1.x images (and look again for a few rounds for any that
