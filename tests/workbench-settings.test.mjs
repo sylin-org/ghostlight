@@ -1490,6 +1490,70 @@ test("an agent that needs attention shows the service's evidence and numbered st
   const unreadable = agentsPage([agent("zed", "Zed", "needs_attention", { detail: "This configuration could not be read; it was left untouched." })]);
   assert.equal(unreadable.pane().wearing("agent-lead")[0].textContent, "This configuration could not be read; it was left untouched.",
     "without evidence the service's own sentence names what it saw");
+  const bare = unreadable.pane().wearing("agent-steps")[0].children;
+  assert.equal(bare.length, 2);
+  assert.ok(bare[0].children[0].textContent.startsWith(Words.AGENTS.repairStep), "the person corrects the file");
+  assert.equal(bare[0].children.length, 1, "the repair step has no button");
+  assert.equal(bare[1].children[1].textContent, "Re-check");
+  const html = unreadable.el("agents-pane").innerHTML;
+  assert.ok(!html.includes("what Ghostlight found"), "Ghostlight found no entry, so nothing says it did");
+  assert.ok(!html.includes(Words.AGENTS.copyStep));
+});
+
+test("a session that arrives after the first paint reaches the rail, the pane and Remove", () => {
+  const shown = agentsPage(ROSTER);
+  shown.pick("codex");
+  const entry = () => shown.rail().wearing("agent-entry").find((node) => node.dataset.agent === "codex");
+  const sub = () => [...entry().descendants()].find((node) => node.classes.has("agent-entry-sub"))?.textContent ?? null;
+  assert.equal(sub(), null);
+  assert.equal(shown.pane().wearing("agent-live").length, 0);
+  assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "0");
+  shown.view.collections({ ...shown.snapshot, sessions: [glanceSession("w1", "Codex", { tabs: 3 })] }, new Set());
+  assert.equal(sub(), "1 session, 3 tabs");
+  assert.ok(entry().children.find((node) => node.classes.has("agent-dot")).classes.has("d-live"), "the dot pulses teal");
+  assert.equal(shown.pane().wearing("agent-live")[0].children[1].textContent,
+    "1 Codex session is connected right now, with 3 browser tabs open.");
+  assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "1");
+  shown.view.collections({ ...shown.snapshot, sessions: [] }, new Set());
+  assert.equal(sub(), null, "and leaves when the session ends");
+  assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "0");
+  assert.deepEqual(shown.failures, []);
+});
+
+test("a copy-only agent found here claims nothing about a file Ghostlight never reads", () => {
+  const goose = agent("goose", "goose", "available", { copy_only: true, config_path: "/home/ann/.config/goose/config.yaml" });
+  const rows = [agent("zed", "Zed", "installed"), goose];
+  const shown = agentsPage(rows);
+  assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.children[0].textContent),
+    ["Connected", "Found, set up by hand"]);
+  assert.ok(!shown.el("agents-list").innerHTML.includes("Found, not connected"));
+  assert.equal(shown.el("integrations-heading").innerHTML, "Ghostlight is in <em>Zed</em>.");
+  assert.equal(Words.agentHeadline([{ standing: "installed", label: "Zed" }, { standing: "installed", label: "Codex" },
+    { standing: "by_hand", label: "goose" }]).trail, " agents it can check.");
+  shown.pick("goose");
+  assert.equal(shown.pane().wearing("agent-state")[0].textContent, "Found, set up by hand");
+  const lead = shown.pane().wearing("agent-lead")[0].textContent;
+  assert.match(lead, /cannot tell whether goose has Ghostlight&#039;s entry/);
+  assert.ok(!/does not know about Ghostlight|not connected/.test(lead), lead);
+  assert.deepEqual(shown.pane().wearing("agent-act").map((row) => row.children[0].textContent), ["Copy setup"]);
+  assert.equal(shown.el("integrations-caption").textContent, "Nothing Ghostlight can set up. goose is left for you.");
+  const alone = agentsPage([goose]);
+  assert.equal(alone.el("integrations-heading").innerHTML, "Ghostlight cannot check <em>goose</em>, which is set up by hand.");
+});
+
+test("a copy-only agent with a live session is connected, and is never called not connected", () => {
+  const goose = agent("goose", "goose", "available", { copy_only: true, config_path: "/home/ann/.config/goose/config.yaml" });
+  const shown = agentsPage([agent("zed", "Zed", "installed"), goose], { sessions: [glanceSession("w1", "goose", { tabs: 1 })] });
+  assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.children[0].textContent), ["Connected"]);
+  assert.equal(shown.el("integrations-heading").innerHTML, "Ghostlight is in <em>all 2</em> of your agents.");
+  assert.equal(shown.title(), "goose", "the agent with tabs");
+  assert.equal(shown.pane().wearing("agent-state")[0].textContent, "Connected");
+  assert.match(shown.pane().wearing("agent-lead")[0].textContent, /^goose is using Ghostlight right now\./);
+  assert.equal(shown.pane().wearing("agent-live").length, 1);
+  assert.deepEqual(shown.pane().wearing("agent-act"), [], "nothing to do next");
+  assert.equal(shown.pane().wearing("agent-remove").length, 0, "Ghostlight never edits its file, so it offers no Remove");
+  assert.ok(!shown.el("agents-pane").innerHTML.includes("not connected"));
+  assert.equal(shown.el("integrations-caption").textContent, "Nothing to set up.");
 });
 
 test("Remove asks first, naming the sessions that use Ghostlight now", () => {
@@ -1506,7 +1570,7 @@ test("Remove asks first, naming the sessions that use Ghostlight now", () => {
 
 test("the headline counts the agents with Ghostlight, and Set up everything says beforehand what it will do", () => {
   const head = (rows) => {
-    const said = Words.agentHeadline(rows);
+    const said = Words.agentHeadline(rows.map((row) => ({ ...row, standing: Words.agentStanding(row, { sessions: 0 }) })));
     return `${said.lead}${said.accent}${said.trail}`;
   };
   const on = (count) => Array.from({ length: count }, (_, at) => agent(`a${at}`, `A${at}`, "installed"));

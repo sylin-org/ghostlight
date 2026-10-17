@@ -1817,7 +1817,7 @@ const checks = [
     paneAfterFailure.includes('id="agents-pane-title">Qwen Code</h2>') && paneAfterFailure.includes("qwen setup"),
     JSON.stringify(paneAfterFailure)],
   ["the rail groups agents by state and folds the ones not on this computer into one closed row",
-    JSON.stringify(railHeads(agentsShown.rail)) === JSON.stringify(["Needs a look 3", "Connected 2", "Found, not connected 2"])
+    JSON.stringify(railHeads(agentsShown.rail)) === JSON.stringify(["Needs a look 3", "Connected 2", "Found, not connected 1", "Found, set up by hand 1"])
       && JSON.stringify(railNames(agentsShown.rail).slice(0, 7))
         === JSON.stringify(["junie", "kilo-code", "cursor", "zed", "windsurf", "claude-code", "goose"])
       && agentsShown.rail.includes("<b>4</b> more agents Ghostlight can join")
@@ -1867,8 +1867,10 @@ const checks = [
       && agentPanes.zed.includes('data-view="monitor" data-show-agent="Zed"')
       && agentPanes.zed.includes('class="agent-hero s-live"'),
     agentPanes.zed],
-  ["a copy-only agent is connected by pasting, and is never offered Connect or Prepare",
+  ["a copy-only agent is connected by pasting, claims nothing about its file, and is never offered Connect or Prepare",
     agentPanes.goose.includes("Ghostlight never edits settings.json.")
+      && agentPanes.goose.includes("so it cannot tell whether goose has Ghostlight&#039;s entry")
+      && agentPanes.goose.includes(">Found, set up by hand</span>") && !agentPanes.goose.includes("not connected")
       && agentPanes.goose.includes('<button class="primary-button" type="button" data-harness-operation="copy"')
       && !agentPanes.goose.includes(">Connect</button>")
       && agentPanes.continue.includes(">Install</button>") && !agentPanes.continue.includes(">Prepare</button>"),
@@ -1885,7 +1887,7 @@ const checks = [
     fixConfirmationShown && fixWasManaged,
     `shown=${fixConfirmationShown} calls=${JSON.stringify(managedHarnesses)}`],
   ["the headline counts the agents with Ghostlight, and Set up everything says beforehand what it will do",
-    agentsShown.heading === "Ghostlight is in <em>2 of your 7</em> agents."
+    agentsShown.heading === "Ghostlight is in <em>2 of the 6</em> agents it can check."
       && agentsShown.caption === "Will connect Claude Code and update Cursor. goose, Junie and Kilo Code are left for you."
       && agentsShown.setupTitle === agentsShown.caption,
     JSON.stringify(agentsShown.heading + " | " + agentsShown.caption)],

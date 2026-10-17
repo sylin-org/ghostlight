@@ -270,23 +270,45 @@
 
   /* ----------------------------- Integrations ----------------------------- */
 
-  /** What each of the service's agent states reads as, on the rail and in the pane. */
+  /**
+   * What each place an agent stands reads as, on the rail and in the pane: the service's states,
+   * and `by_hand` for an agent found here whose file Ghostlight never reads (see agentStanding).
+   */
   const AGENT_STATE_WORDS = Object.freeze({
     installed: "Connected",
     not_detected: "Not on this computer",
     available: "Found, not connected",
+    by_hand: "Found, set up by hand",
     updatable: "Needs an update",
     needs_attention: "Needs your attention"
   });
 
+  /** The standing, and the rail group, of a copy-only agent found here that is not in use. */
+  const BY_HAND = "by_hand";
+
   /**
-   * The rail's groups, in rail order, each with the states it holds. A group with no agent is not
+   * Where an agent stands, from the service's state and the agent's live sessions (`use`).
+   *
+   * Ghostlight never reads a copy-only agent's file, so the service cannot say whether its entry is
+   * there. Such an agent counts as connected while one of its sessions is live, and one found here
+   * with none stands `by_hand`: neither connected nor not connected, because nothing observed says
+   * which. Every other agent stands where the service's state puts it.
+   */
+  function agentStanding(agent, use) {
+    if (!agent.copy_only) return agent.state;
+    if (use.sessions > 0) return "installed";
+    return agent.state === "available" ? BY_HAND : agent.state;
+  }
+
+  /**
+   * The rail's groups, in rail order, each with the standings it holds. A group with no agent is not
    * drawn, so Needs a look appears only when something does.
    */
   const AGENT_GROUPS = Object.freeze([
     Object.freeze({ key: "look", title: "Needs a look", states: Object.freeze(["needs_attention", "updatable"]) }),
     Object.freeze({ key: "connected", title: AGENT_STATE_WORDS.installed, states: Object.freeze(["installed"]) }),
     Object.freeze({ key: "found", title: AGENT_STATE_WORDS.available, states: Object.freeze(["available"]) }),
+    Object.freeze({ key: BY_HAND, title: AGENT_STATE_WORDS[BY_HAND], states: Object.freeze([BY_HAND]) }),
     Object.freeze({ key: "absent", title: AGENT_STATE_WORDS.not_detected, states: Object.freeze(["not_detected"]) })
   ]);
 
@@ -311,6 +333,7 @@
     showSessions: "See them in At a glance",
     fixSteps: "How to fix it",
     copyStep: "Replace what Ghostlight found with the entry below",
+    repairStep: "Correct the file yourself, so Ghostlight can read it",
     recheckStep: "Check again",
     noAgents: "No supported agent was found for this user.",
     rechecked: "Looked for agents again."
@@ -333,23 +356,32 @@
 
   /**
    * The page's headline: how many of the agents found on this computer have Ghostlight, as a lead,
-   * the emphasised part and a trail.
+   * the emphasised part and a trail. Each agent carries its `standing`. An agent set up by hand is
+   * left out of the count, since Ghostlight cannot tell whether it has the entry, and the headline
+   * then says it counts only the agents Ghostlight can check.
    */
   function agentHeadline(agents) {
-    const here = agents.filter((agent) => agent.state !== "not_detected");
-    const on = agents.filter((agent) => agent.state === "installed");
-    if (!here.length) return { lead: "Add Ghostlight to ", accent: "your agent", trail: "." };
+    const unseen = agents.filter((agent) => agent.standing === BY_HAND);
+    const here = agents.filter((agent) => !["not_detected", BY_HAND].includes(agent.standing));
+    const on = agents.filter((agent) => agent.standing === "installed");
+    if (!here.length) {
+      if (!unseen.length) return { lead: "Add Ghostlight to ", accent: "your agent", trail: "." };
+      return unseen.length === 1
+        ? { lead: "Ghostlight cannot check ", accent: unseen[0].label, trail: ", which is set up by hand." }
+        : { lead: "Ghostlight cannot check ", accent: "your agents", trail: ", which are set up by hand." };
+    }
+    const kind = unseen.length ? " agents it can check" : " agents";
+    const among = (count) => (unseen.length ? `of the ${count}` : `of your ${count}`);
     if (on.length === here.length) {
-      return on.length === 1
-        ? { lead: "Ghostlight is in ", accent: on[0].label, trail: "." }
-        : { lead: "Ghostlight is in ", accent: `all ${on.length}`, trail: " of your agents." };
+      if (on.length === 1) return { lead: "Ghostlight is in ", accent: on[0].label, trail: "." };
+      return { lead: "Ghostlight is in ", accent: `all ${on.length}`, trail: unseen.length ? `${kind}.` : " of your agents." };
     }
     if (!on.length) {
       return here.length === 1
         ? { lead: "Ghostlight is not in ", accent: here[0].label, trail: " yet." }
-        : { lead: "Ghostlight is in ", accent: "none", trail: ` of your ${here.length} agents yet.` };
+        : { lead: "Ghostlight is in ", accent: "none", trail: ` ${among(here.length)}${kind} yet.` };
     }
-    return { lead: "Ghostlight is in ", accent: `${on.length} of your ${here.length}`, trail: " agents." };
+    return { lead: "Ghostlight is in ", accent: `${on.length} ${among(here.length)}`, trail: `${kind}.` };
   }
 
   /** A short list of agents by name, or how many when there are more than three. */
@@ -386,14 +418,19 @@
   }
 
   /**
-   * The one sentence the pane says about an agent, from its state and the file it reads. A blocked
-   * agent with no evidence says the service's own sentence, which names what Ghostlight saw.
+   * The one sentence the pane says about an agent, from where it stands and the file it reads. A
+   * blocked agent with no evidence says the service's own sentence, which names what Ghostlight
+   * saw. A copy-only agent's sentence claims nothing about a file Ghostlight never reads.
    */
   function agentLead(agent, { prepare }) {
     const { name, file } = agent;
-    switch (agent.state) {
+    switch (agent.standing) {
       case "installed":
-        return `Ghostlight's entry is in ${name}'s ${file}, so ${name} can use your browser.`;
+        return agent.copy_only
+          ? `${name} is using Ghostlight right now. Ghostlight never reads ${name}'s ${file}, so it knows ${name} has its entry only while ${name} is connected.`
+          : `Ghostlight's entry is in ${name}'s ${file}, so ${name} can use your browser.`;
+      case BY_HAND:
+        return `${name} is on this computer. Ghostlight never reads ${name}'s ${file}, so it cannot tell whether ${name} has Ghostlight's entry until ${name} connects.`;
       case "not_detected":
         return prepare
           ? `${name} is not installed on this computer. You can install it, or prepare its settings first.`
@@ -421,11 +458,15 @@
       case "update": return `Rewrites Ghostlight's own entry in ${file}. Nothing else in the file changes. Restart ${name} afterwards.`;
       case "fix": return `Backs up ${file}, then puts Ghostlight's entry in place of what is there. Nothing else in the file changes. Asks first.`;
       case "locate": return `Lets you choose ${name}'s settings file or program yourself, if Ghostlight looks in the wrong place.`;
-      case "recheck": return `Once the entry is right, ${name} moves to ${AGENT_STATE_WORDS.installed}.`;
+      case "repair": return `The sentence above says what Ghostlight saw. Ghostlight leaves ${file} as it is.`;
+      case "recheck":
+        return agent.evidence
+          ? `Once the entry is right, ${name} moves to ${AGENT_STATE_WORDS.installed}.`
+          : `Ghostlight reads ${file} again and says what it finds.`;
       case "copy":
+        if (agent.standing === "installed") return `Copies this entry, to set ${name} up by hand on another computer.`;
         if (agent.copy_only) return `Ghostlight never edits ${file}. Copying this entry and pasting it in yourself is the only way to connect ${name}.`;
-        if (agent.state === "installed") return `Copies this entry, to set ${name} up by hand on another computer.`;
-        if (agent.state === "needs_attention") return "Copies the entry that belongs there, to paste over what Ghostlight found.";
+        if (agent.evidence) return "Copies the entry that belongs there, to paste over what Ghostlight found.";
         return `Copies this entry, to paste into ${file} yourself.`;
       default: return "";
     }
@@ -433,7 +474,7 @@
 
   /** What the settings file is to this agent, under its label. */
   function agentFileLabel(agent) {
-    if (agent.copy_only && agent.state !== "installed") return "Where to paste it";
+    if (agent.copy_only) return agent.standing === "installed" ? "Ghostlight never reads it" : "Where to paste it";
     return ({
       installed: "Ghostlight's entry is in here", not_detected: `Where ${agent.name} will look`,
       available: "Where Connect writes", updatable: "Where Update writes", needs_attention: "Where the problem is"
@@ -869,7 +910,7 @@
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
-    AGENT_STATE_WORDS, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
+    AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     GLYPHS, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,

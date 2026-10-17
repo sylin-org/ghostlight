@@ -72,8 +72,11 @@ and chose master and detail with five grafts (the decision is recorded as decisi
 [docs/tasks/break-2.0/design.md](../tasks/break-2.0/design.md)). Decision 1 of this record no
 longer governs the 2.0 window; Decisions 2 to 4 stand as history.
 
-- A rail lists every agent, grouped by state (Needs a look, Connected, Found, not connected, Not on
-  this computer), with a state dot per agent and a second line only for what is that agent's own.
+- A rail lists every agent, grouped by state (Needs a look, Connected, Found, not connected, Found,
+  set up by hand, Not on this computer), with a state dot per agent and a second line only for what
+  is that agent's own. Ghostlight never reads a copy-only agent's file, so one found here is
+  connected only while one of its sessions is live, and otherwise is set up by hand: the page
+  claims nothing about its file and leaves it out of the headline's count.
   The agents not on this computer fold into one row that opens in place and that search reaches.
 - The pane shows the one agent picked: one sentence for it, each button with its effect written
   beside it, the settings file, Ghostlight's entry shown whole, the service's evidence and numbered

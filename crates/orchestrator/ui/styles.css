@@ -459,7 +459,8 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agents-fold-list { margin-top: 4px; }
 
 /* The state dot. Its colour says who acts: green nothing to do, teal in use now, blue Ghostlight
-   can do it in one press, amber it is the person's to fix, a grey ring not here. */
+   can do it in one press, amber it is the person's to fix, a grey ring not here, a dashed ring set up
+   by hand, where Ghostlight cannot see. */
 .agent-dot { position: relative; display: inline-block; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--faint); }
 .agent-dot.d-installed { background: var(--ok); }
 .agent-dot.d-live { background: var(--a); box-shadow: 0 0 8px rgba(var(--argb), .8); animation: glyph-breathe var(--beat-breathe) ease-in-out infinite; }
@@ -467,6 +468,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agent-dot.d-updatable { border: 1.5px solid var(--cap-action); background: linear-gradient(90deg, var(--cap-action) 50%, transparent 50%); }
 .agent-dot.d-needs_attention { background: var(--amber); }
 .agent-dot.d-not_detected { border: 1.5px solid var(--faint); background: transparent; }
+.agent-dot.d-by_hand { border: 1.5px dashed var(--muted); background: transparent; }
 /* An agent in use now: a soft teal halo breathes around its dot. Reduced motion keeps it lit and still. */
 .agent-dot.d-live::after {
   content: ""; position: absolute; inset: -7px; border-radius: 50%; pointer-events: none;
@@ -501,6 +503,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .s-not_detected .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
 .s-not_detected .agent-icon { opacity: .45; filter: grayscale(.8); }
 .s-not_detected .agent-ghost { opacity: .7; }
+.s-by_hand .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--muted) 0 2px, transparent 2px 6px); }
 .s-available .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--cap-action) 0 4px, transparent 4px 8px); }
 .s-updatable .agent-wire { background: rgba(96, 165, 250, .5); }
 .s-updatable .agent-wire b, .s-needs_attention .agent-wire b {

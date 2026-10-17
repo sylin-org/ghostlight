@@ -15,7 +15,7 @@
     VIEWS, SETTINGS_SECTIONS, DEFAULT_SECTION, addressOf, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
-    AGENT_STATE_WORDS, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
+    AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
@@ -867,14 +867,20 @@
       return { sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0) };
     }
 
-    const inUse = (agent) => agent.state === "installed" && agent.use.sessions > 0;
-    const toneOf = (agent) => (inUse(agent) ? "live" : agent.state);
+    /** An agent as the page draws it: its roster row, the file it reads, its live use and where it stands. */
+    function agentOf(harness, sessions) {
+      const use = useOf(harness, sessions);
+      return { ...harness, file: fileOf(harness.config_path), use, standing: agentStanding(harness, use) };
+    }
+
+    const inUse = (agent) => agent.standing === "installed" && agent.use.sessions > 0;
+    const toneOf = (agent) => (inUse(agent) ? "live" : agent.standing);
     const byLabel = (left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
 
     /** The rail's groups that hold an agent, each sorted the way a person scans it. */
     function railGroups(agents) {
       return AGENT_GROUPS.map((group) => {
-        const members = agents.filter((agent) => group.states.includes(agent.state));
+        const members = agents.filter((agent) => group.states.includes(agent.standing));
         if (group.key === "look") {
           members.sort((left, right) => group.states.indexOf(left.state) - group.states.indexOf(right.state) || byLabel(left, right));
         } else if (group.key === "connected") {
@@ -886,12 +892,15 @@
       }).filter((group) => group.agents.length);
     }
 
-    /** The agent the page opens on: one that needs a look, then one found, then one with tabs, then the first connected. */
+    /**
+     * The agent the page opens on: one that needs a look, then one found, then one with tabs, then
+     * the first connected, then one set up by hand.
+     */
     function mostRelevant(groups) {
       const members = (key) => groups.find((group) => group.key === key)?.agents ?? [];
       const connected = members("connected");
       return (members("look")[0] ?? members("found")[0] ?? connected.find((agent) => agent.use.tabs > 0)
-        ?? connected[0] ?? members(ABSENT_GROUP)[0])?.id ?? null;
+        ?? connected[0] ?? members(BY_HAND)[0] ?? members(ABSENT_GROUP)[0])?.id ?? null;
     }
 
     /** What this screen may do for `agent`, from the roster's flags and what the screen was told. */
@@ -945,7 +954,8 @@
       if (inUse(agent)) return { tone: "live", text: agentUse(agent.use) };
       if (agent.state === "needs_attention") return { tone: "warn", text: AGENT_STATE_WORDS.needs_attention };
       if (agent.state === "updatable") return { tone: "action", text: AGENT_STATE_WORDS.updatable };
-      if (agent.copy_only && agent.state !== "installed") return { tone: "", text: AGENTS.copyOnly };
+      // An agent set up by hand sits under a heading that already says so.
+      if (agent.copy_only && agent.standing === "not_detected") return { tone: "", text: AGENTS.copyOnly };
       return null;
     }
 
@@ -953,8 +963,8 @@
       const sub = subOf(agent);
       const second = sub
         ? `<span class="agent-entry-sub${sub.tone ? ` ${sub.tone}` : ""}">${escapeHtml(sub.text)}</span>`
-        : `<span class="sr-only">, ${escapeHtml(AGENT_STATE_WORDS[agent.state] ?? "")}</span>`;
-      return `<button class="agent-entry e-${escapeHtml(agent.state)}" type="button" data-agent="${escapeHtml(agent.id)}"`
+        : `<span class="sr-only">, ${escapeHtml(AGENT_STATE_WORDS[agent.standing] ?? "")}</span>`;
+      return `<button class="agent-entry e-${escapeHtml(agent.standing)}" type="button" data-agent="${escapeHtml(agent.id)}"`
         + ` aria-controls="agents-pane" aria-current="${agent.id === agentPick}">`
         + `<span class="agent-dot d-${escapeHtml(toneOf(agent))}" aria-hidden="true"></span>`
         + `<img src="integrations/${escapeHtml(agent.icon ?? "generic.svg")}" alt="" width="22" height="22">`
@@ -998,26 +1008,39 @@
         + `<img class="agent-ghost" src="${MASCOT}" alt="" width="50" height="50"></div>`
         + `<div class="agent-hero-text"><h2 id="agents-pane-title">${escapeHtml(agent.label)}</h2>`
         + `<div class="agent-state-line"><span class="agent-dot d-${escapeHtml(tone)}" aria-hidden="true"></span>`
-        + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(AGENT_STATE_WORDS[agent.state] ?? "")}</span></div></div></header>`;
+        + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(AGENT_STATE_WORDS[agent.standing] ?? "")}</span></div></div></header>`;
     }
 
     const actRow = (act, agent, primary) => `<div class="agent-act">${actButton(act, agent, primary)}`
       + `<span class="agent-why">${escapeHtml(agentWhy(act, agent))}</span></div>`;
 
+    /**
+     * The numbered steps for an agent that needs attention Ghostlight cannot fix, from what the
+     * service observed: with evidence, an entry it found in the way, which the right entry replaces;
+     * without, a file it could not read or parse, which only the person can correct. The repair
+     * step has no button.
+     */
+    function stepsOf(agent, acts) {
+      const steps = agent.evidence
+        ? [{ act: "copy", what: AGENTS.copyStep, primary: true }]
+        : [{ act: "repair", what: AGENTS.repairStep, primary: false }];
+      steps.push({ act: "recheck", what: AGENTS.recheckStep, primary: !agent.evidence });
+      return steps.filter(({ act }) => act === "repair" || acts[act]);
+    }
+
     /** The next step: each button the agent's state allows, with what it does beside it. */
     function nextMarkup(agent, acts, used) {
       if (agent.state === "needs_attention" && !acts.fix) {
-        const steps = [];
-        if (acts.copy) steps.push(["copy", AGENTS.copyStep, true]);
-        if (acts.recheck) steps.push(["recheck", AGENTS.recheckStep, false]);
-        for (const [act] of steps) used.add(act);
+        const steps = stepsOf(agent, acts);
+        for (const { act } of steps) used.add(act);
         return `<ol class="agent-steps" aria-label="${escapeHtml(AGENTS.fixSteps)}">`
-          + steps.map(([act, what, primary]) => `<li><span class="agent-step-what">${escapeHtml(what)}`
-            + `<small>${escapeHtml(agentWhy(act, agent))}</small></span>${actButton(act, agent, primary)}</li>`).join("")
+          + steps.map(({ act, what, primary }) => `<li><span class="agent-step-what">${escapeHtml(what)}`
+            + `<small>${escapeHtml(agentWhy(act, agent))}</small></span>`
+            + `${act === "repair" ? "" : actButton(act, agent, primary)}</li>`).join("")
           + "</ol>";
       }
       const order = ["install", "connect", "update", "prepare", "fix"];
-      if (agent.copy_only && agent.state !== "installed") order.push("copy");
+      if (agent.copy_only && agent.standing !== "installed") order.push("copy");
       const rows = order.filter((act) => acts[act]).map((act, index) => {
         used.add(act);
         return actRow(act, agent, index === 0);
@@ -1088,11 +1111,10 @@
       const headline = agentHeadline(agents);
       el["integrations-heading"].innerHTML = `${escapeHtml(headline.lead)}<em>${escapeHtml(headline.accent)}</em>`
         + escapeHtml(headline.trail);
-      const changeable = (agent) => agent.state === "available" || agent.state === "updatable";
       const plan = {
         connect: agents.filter((agent) => agent.can_install && agent.state === "available").map((agent) => agent.label),
         update: agents.filter((agent) => agent.can_install && agent.state === "updatable").map((agent) => agent.label),
-        left: agents.filter((agent) => agent.state === "needs_attention" || (changeable(agent) && agent.copy_only))
+        left: agents.filter((agent) => agent.state === "needs_attention" || agent.standing === BY_HAND)
           .map((agent) => agent.label)
       };
       const actionable = plan.connect.length + plan.update.length > 0;
@@ -1114,9 +1136,7 @@
 
     function drawAgents() {
       const { harnesses, sessions } = lastAgents;
-      const agents = harnesses.map((harness) => ({
-        ...harness, file: fileOf(harness.config_path), use: useOf(harness, sessions)
-      }));
+      const agents = harnesses.map((harness) => agentOf(harness, sessions));
       agentsHeading(agents);
       // One line for the whole page, naming the first change this screen cannot make.
       const withheld = [ACT.harnessAct, ACT.locate, ACT.setupAll].find((act) => !can(act));
@@ -1130,7 +1150,7 @@
       const groups = railGroups(agents);
       if (!agents.some((agent) => agent.id === agentPick)) {
         agentPick = mostRelevant(groups);
-        if (agents.find((agent) => agent.id === agentPick)?.state === "not_detected") foldOpen = true;
+        if (agents.find((agent) => agent.id === agentPick)?.standing === "not_detected") foldOpen = true;
       }
       replaceHistoryMarkup(el["agents-list"], railMarkup(groups));
       const picked = agents.find((agent) => agent.id === agentPick);
@@ -1143,7 +1163,7 @@
     /** Paint the page when its facts or the person's place on it changed. */
     function paintAgents() {
       if (!lastAgents) return;
-      ifChanged("integrations", [lastAgents.facts, agentPick, foldOpen, agentQuery], drawAgents);
+      ifChanged("agents", [lastAgents.facts, agentPick, foldOpen, agentQuery], drawAgents);
     }
 
     function integrations(snapshot, pending) {
@@ -1154,12 +1174,17 @@
       paintAgents();
     }
 
+    /** Whether the agent `id` sits in the fold of agents not on this computer. */
+    function folded(id) {
+      const harness = lastAgents?.harnesses.find((row) => row.id === id);
+      return Boolean(harness) && agentOf(harness, lastAgents.sessions).standing === "not_detected";
+    }
+
     /** Show `id` in the pane, and open the fold when it sits there and no search is running. */
     function showAgent(id) {
       if (!lastAgents?.harnesses.some((harness) => harness.id === id)) return;
       agentPick = id;
-      const picked = lastAgents.harnesses.find((harness) => harness.id === id);
-      if (picked.state === "not_detected" && !agentQuery.trim()) foldOpen = true;
+      if (folded(id) && !agentQuery.trim()) foldOpen = true;
       paintAgents();
     }
 
@@ -1169,10 +1194,7 @@
 
     function findAgent(text) {
       agentQuery = text;
-      if (!text.trim()) {
-        const picked = lastAgents?.harnesses.find((harness) => harness.id === agentPick);
-        if (picked?.state === "not_detected") foldOpen = true;
-      }
+      if (!text.trim() && folded(agentPick)) foldOpen = true;
       paintAgents();
     }
 
@@ -1921,7 +1943,8 @@
         counts: { sessions: snapshot.sessions.length, browsers: snapshot.browsers.length, recorded: snapshot.history.length }
       };
       ifChanged("about", product, () => about(product));
-      ifChanged("integrations", [snapshot.harnesses, [...pending], access?.acts], () => integrations(snapshot, pending));
+      // The page's own memo decides; its facts hold each agent's live sessions, which change alone.
+      attempt("painting integrations", () => integrations(snapshot, pending));
       ifChanged("status", [snapshot.diagnostics, snapshot.configuration, snapshot.service, snapshot.controls?.service],
         () => status(snapshot));
     }
