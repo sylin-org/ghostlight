@@ -510,6 +510,13 @@ Every one of these cost something to learn.
   the forced replacement in DEV-LOOP.md.
 - **A delegated batch spec must say what a change makes redundant**, not only what it adds, or the
   executor is correct and the surface is repetitive.
+- **No bureaucratic rules: every check and fence must serve the person.** Ask first whether a
+  check matters to a user or only to the process; the fix can be removing the check. In a slice
+  spec, give a golden or a fence its purpose ("no byte the installer writes changes"), never a
+  blanket ban ("zero diff"), so the executor lands a justified diff for review instead of stopping.
+  A golden pins only its own subject; a field outside it is noise that turns every unrelated
+  change into churn (owner, 2026-10-16 and 2026-10-17, after a zero-diff rule blocked the icon
+  endpoint over the window's symbol, which the installer neither writes nor says).
 - **History helps people resume work.** Readable history is the default, with detail on demand
   and policy controlling retention. State what happened plainly; explain uncertainty when it
   changes the next step. Displaying more existing detail never authorizes capturing more content.
