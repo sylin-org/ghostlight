@@ -490,11 +490,12 @@ workbench shows waiting becoming running once.
    per invocation. Notification failure cannot change governance, audit, or completion truth.
 7. Workbench runtime controls use the existing governance facade and publish the resulting state
    through the existing browser port. The desktop adapter cannot dispatch a browser primitive.
-8. The Integrations page explicitly checks, connects, and disconnects Codex, Claude Code,
-   Claude Desktop, Cursor, Visual Studio Code, historical Windsurf, current Devin, Zed, OpenCode,
-   and Crush registrations. Mutations are
-   serialized, idempotent, backed up, preserve unrelated entries, and touch only an entry whose
-   command is Ghostlight's edge (`ghostlight mcp`). One `Set up everything` action adds missing
+8. The Integrations page explicitly checks, connects, and disconnects the registration of every
+   host in the agent catalog whose file Ghostlight edits (`install::ROSTER`, listed in
+   docs/guides/installation.md, which a test keeps equal to it); a host whose file Ghostlight
+   never edits offers its entry to copy instead. Mutations are serialized, idempotent, backed
+   up, preserve unrelated entries, and touch only an entry whose command is Ghostlight's edge
+   (`ghostlight mcp`). One `Set up everything` action adds missing
    registrations and updates Ghostlight-owned registrations for every detected target while
    skipping current and not-detected targets. One target's environmental failure does not prevent
    independent targets from being attempted, and foreign or malformed entries remain untouched by

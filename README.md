@@ -60,7 +60,8 @@ The published release is 1.3.14. It is available as the GitHub release
 ## Your first five minutes
 
 You need Chrome, Edge, Brave, or Chromium 125+ and an MCP client. The `npx` installer needs
-Node.js; the one-line installers do not. The service you run afterward is native Rust.
+Node.js; the one-line installers do not. The service you run afterward is native Rust. Agent setup
+supports Windows and Linux; macOS is not supported yet.
 
 1. Install Ghostlight. It registers the MCP clients it finds and opens the Ghostlight window on
    its setup steps:
@@ -126,8 +127,9 @@ Ghostlight is at its best when browser work has a thread to follow:
 - **See what failed.** Bring page state, console messages, and network requests together so the
   next debugging step comes from evidence instead of guesswork.
 
-Use the same browser capability from Codex, Claude Code, Claude Desktop, Cursor, VS Code, Windsurf,
-Zed, OpenCode, Crush, or another compatible stdio MCP client. Agents receive structured page
+Use the same browser capability from any agent Ghostlight sets up (the
+[installation guide](docs/guides/installation.md#agents-ghostlight-sets-up) lists every one), or
+from another compatible stdio MCP client. Agents receive structured page
 reads, exact element references, bounded action receipts, and specific recovery guidance. They can
 ask the policy tool to explain the authority in force at any moment.
 

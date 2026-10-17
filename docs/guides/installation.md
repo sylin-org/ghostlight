@@ -83,19 +83,52 @@ The npm process is a download and launch edge, not the product authority. Suppor
 registrations point directly at the installed native `ghostlight` edge with the argument `mcp`. A
 bare `npx -y ghostlight` remains the stdio command for another compatible MCP client.
 
+## Agents Ghostlight sets up
+
+Agent setup supports Windows and Linux; macOS is not supported yet.
+
+`ghostlight install` and the **Integrations** page set up every agent in Ghostlight's catalog, on
+each host the agent runs on, in the user-level configuration the table names. The Entry column is
+where Ghostlight's entry sits in that file. OpenCode's entry keeps the form its file already uses,
+or takes the newer one when only `opencode2` is installed. Copy setup means Ghostlight never edits
+that file: you paste the YAML entry it shows into the file yourself. `--client` takes a host id or
+an agent's id; an agent's id is shown beside its name when it is none of its host ids.
+
+<!-- BEGIN agent list -->
+<!-- Generated from the agent catalog by install::agent_list. Rewrite it with GHOSTLIGHT_AGENT_LIST_UPDATE=1 cargo test -p ghostlight-service agent_list -->
+
+The catalog holds 20 agents on 23 hosts.
+
+| Agent | Host id | Target | Entry | Windows | Linux |
+| --- | --- | --- | --- | --- | --- |
+| Codex | `codex` | User | `mcp_servers.ghostlight` (TOML) | `%CODEX_HOME%\config.toml` when CODEX_HOME is set, else `%USERPROFILE%\.codex\config.toml` | `$CODEX_HOME/config.toml` when CODEX_HOME is set, else `~/.codex/config.toml` |
+| Claude Code | `claude-code` | User | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.claude.json` | `~/.claude.json` |
+| Claude Desktop | `claude-desktop` | User | `mcpServers.ghostlight` (JSON) | `%APPDATA%\Claude\claude_desktop_config.json` | `$XDG_CONFIG_HOME/Claude/claude_desktop_config.json` |
+| Cursor | `cursor` | User | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.cursor\mcp.json` | `~/.cursor/mcp.json` |
+| Visual Studio Code | `vscode` | User | `servers.ghostlight` (JSON) | `%APPDATA%\Code\User\mcp.json` | `$XDG_CONFIG_HOME/Code/User/mcp.json` |
+| Windsurf | `windsurf` | User | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.codeium\windsurf\mcp_config.json` | `~/.codeium/windsurf/mcp_config.json` |
+| Devin | `devin` | Devin user | `mcpServers.ghostlight` (JSON) | `%APPDATA%\devin\mcp_config.json` | `$XDG_CONFIG_HOME/devin/mcp_config.json` |
+| Zed | `zed` | User | `context_servers.ghostlight` (JSON) | `%APPDATA%\Zed\settings.json` | `$XDG_CONFIG_HOME/zed/settings.json` |
+| ZCode | `zcode` | User | `mcp.servers.ghostlight` (JSON) | `%USERPROFILE%\.zcode\cli\config.json` | `~/.zcode/cli/config.json` |
+| OpenCode | `opencode` | User | `mcp.ghostlight` or `mcp.servers.ghostlight` (JSON) | `%USERPROFILE%\.config\opencode\`: the first found of `opencode.jsonc`, `opencode.json`; else a new `opencode.json` | `~/.config/opencode/`: the first found of `opencode.jsonc`, `opencode.json`; else a new `opencode.json` |
+| Crush | `crush` | User | `mcp.ghostlight` (JSON) | `%CRUSH_GLOBAL_CONFIG%` when CRUSH_GLOBAL_CONFIG is set, else `%USERPROFILE%\.config\crush\crush.json` | `$CRUSH_GLOBAL_CONFIG` when CRUSH_GLOBAL_CONFIG is set, else `~/.config/crush/crush.json` |
+| GitHub Copilot CLI | `copilot-cli` | CLI | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.copilot\mcp-config.json` | `~/.copilot/mcp-config.json` |
+| Cline (`cline`) | `cline-cli` | CLI | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.cline\data\settings\cline_mcp_settings.json` | `~/.cline/data/settings/cline_mcp_settings.json` |
+| Cline (`cline`) | `cline-vscode` | Visual Studio Code | `mcpServers.ghostlight` (JSON) | `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json` | `$XDG_CONFIG_HOME/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` |
+| Cline (`cline`) | `cline-cursor` | Cursor | `mcpServers.ghostlight` (JSON) | `%APPDATA%\Cursor\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json` | `$XDG_CONFIG_HOME/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` |
+| Cline (`cline`) | `cline-windsurf` | Windsurf | `mcpServers.ghostlight` (JSON) | `%APPDATA%\Windsurf\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json` | `$XDG_CONFIG_HOME/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` |
+| Kiro | `kiro` | CLI and IDE | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.kiro\settings\mcp.json` | `~/.kiro/settings/mcp.json` |
+| Qwen Code | `qwen-code` | CLI | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.qwen\settings.json` | `~/.qwen/settings.json` |
+| Junie | `junie` | CLI and JetBrains | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.junie\mcp\mcp.json` | `~/.junie/mcp/mcp.json` |
+| Kilo Code | `kilo-code` | CLI | `mcp.ghostlight` (JSON) | `%APPDATA%\kilo\`: the first found of `kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json`; else a new `kilo.json` | `$XDG_CONFIG_HOME/kilo/`: the first found of `kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json`; else a new `kilo.json` |
+| goose | `goose` | CLI and desktop | Copy setup (YAML) | `%APPDATA%\goose\config.yaml` | `$XDG_CONFIG_HOME/goose/config.yaml` |
+| Continue | `continue` | CLI and IDE | Copy setup (YAML) | `%USERPROFILE%\.continue\config.yaml` | `~/.continue/config.yaml` |
+| Antigravity | `antigravity` | CLI | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.gemini\config\mcp_config.json` | `~/.gemini/config/mcp_config.json` |
+
+Where XDG_CONFIG_HOME is not set it is `~/.config`, and where APPDATA is not set it is `%USERPROFILE%\AppData\Roaming`.
+<!-- END agent list -->
+
 ## Workbench installation behavior
-
-The **Integrations** page supports these explicit user-level configurations:
-
-| Harness | Configuration family |
-| --- | --- |
-| Codex | `mcp_servers.ghostlight` in TOML |
-| Claude Code, Claude Desktop, Cursor, Windsurf | `mcpServers.ghostlight` in JSON or JSONC |
-| Visual Studio Code | `servers.ghostlight` in JSON or JSONC |
-| Zed | `context_servers.ghostlight` in JSON or JSONC |
-| OpenCode | detected v1 `mcp.ghostlight` or v2 `mcp.servers.ghostlight` dialect |
-| Crush | `mcp.ghostlight` in JSON or JSONC |
-| goose, Continue | Copy setup: you paste the YAML entry into the client's file. Ghostlight never edits it. |
 
 **Check** is read-only. **Install** and **Uninstall** are explicit, serialized operations. They:
 

@@ -36,8 +36,10 @@ Ghostlight from the Start menu or Applications, or run `ghostlight open`, to see
 Use `npx -y ghostlight doctor` only if the connection needs recovery. It is not a required second
 installation command.
 
-Supported workbench registrations are Codex, Claude Code, Claude Desktop, Cursor, Visual Studio
-Code, Windsurf, Zed, OpenCode, and Crush. Another compatible local stdio MCP client can point
+Ghostlight sets up every agent in its catalog. The
+[installation guide](docs/guides/installation.md#agents-ghostlight-sets-up) lists each one with its
+hosts and where its configuration lives. Agent setup supports Windows and Linux; macOS is not
+supported yet. Another compatible local stdio MCP client can point
 directly at the installed `ghostlight` executable with the argument `mcp` (the entry is
 `ghostlight mcp`), with no role flag or model dialect. An entry that names
 `ghostlight-mcp-connector` was written for an earlier build and no longer works: `ghostlight
