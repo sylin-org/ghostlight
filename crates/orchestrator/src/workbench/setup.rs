@@ -672,12 +672,11 @@ pub(super) mod test_support {
         }
     }
 
-    /// A session from the client that calls itself `client_label`.
-    pub fn session(id: &str, client_label: &str) -> SessionSummary {
+    /// A session from the client that calls itself `reported`.
+    pub fn session(id: &str, reported: &str) -> SessionSummary {
         SessionSummary {
             id: id.into(),
-            client_label: client_label.into(),
-            agent: crate::language::provenance::agent_name(client_label, IntakeChannel::Mcp),
+            agent: crate::language::provenance::agent_name(reported, IntakeChannel::Mcp),
             connections: Vec::new(),
             channel: IntakeChannel::Mcp,
             leased: false,

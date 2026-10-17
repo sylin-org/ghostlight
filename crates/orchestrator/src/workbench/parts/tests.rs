@@ -180,7 +180,6 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
         },
         sessions: vec![SessionSummary {
             id: "workspace_1".into(),
-            client_label: "claude-code".into(),
             agent: Some("Claude Code".into()),
             connections: vec![details()],
             channel: IntakeChannel::Mcp,
@@ -369,7 +368,6 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "sessions[].agent",
     "sessions[].browser",
     "sessions[].channel",
-    "sessions[].client_label",
     "sessions[].connections",
     "sessions[].connections[].agent",
     "sessions[].connections[].channel",

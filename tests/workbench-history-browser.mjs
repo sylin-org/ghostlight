@@ -203,7 +203,6 @@ try {
   await evaluate("document.querySelector('.session-connections > summary').focus({ preventScroll: true })");
   await evaluate(`(() => {
     const snapshot = window.__GHOSTLIGHT_PREVIEW__;
-    snapshot.sessions[0].client_label = 'Later application';
     snapshot.sessions[0].agent = 'Later application';
     snapshot.sessions[0].connections = [
       { ...snapshot.sessions[0].connections[0], connection_id: 'connection_later',

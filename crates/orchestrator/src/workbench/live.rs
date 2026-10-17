@@ -278,7 +278,6 @@ impl Live {
                         &workspace.client_label,
                         workspace.channel,
                     ),
-                    client_label: workspace.client_label,
                     connections: workspace.connections,
                     channel: workspace.channel,
                     leased: workspace.leased,

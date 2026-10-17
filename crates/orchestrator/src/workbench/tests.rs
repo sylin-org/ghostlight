@@ -1369,7 +1369,12 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
                 .iter()
                 .map(|connection| connection.agent.clone())
                 .collect();
-            (session.agent, session.client_label, agents)
+            let reported = session
+                .connections
+                .first()
+                .and_then(|connection| connection.reported_application.clone())
+                .unwrap_or_default();
+            (session.agent, reported, agents)
         })
         .collect();
     named.sort();

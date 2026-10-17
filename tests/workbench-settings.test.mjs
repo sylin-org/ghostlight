@@ -981,7 +981,7 @@ function snapshotAnswer({ history = [settledRead()], sessions, service = { versi
         }
       },
       connections: {
-        sessions: sessions ?? [{ id: "w1", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 }],
+        sessions: sessions ?? [{ id: "w1", agent: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 }],
         browsers: [{ id: "b1", family: "Chrome", adapter_version: "2.0.0" }]
       },
       activity: { operations: [], history, document_coverage: [] },
@@ -1205,7 +1205,7 @@ test("a paint that throws is tried again with the same facts, and one that drew 
 /** A session of `agent`, as the connections part carries it. */
 function glanceSession(id, agent, { channel = "mcp", tabs = 0, busy = false, browser, reported = agent } = {}) {
   return {
-    id, client_label: reported, agent, channel, tab_count: tabs, active_operations: busy ? 1 : 0,
+    id, agent, channel, tab_count: tabs, active_operations: busy ? 1 : 0,
     ...(browser ? { browser } : {}),
     connections: [{
       connection_id: `connection_${id}`, reported_application: reported, agent, channel,

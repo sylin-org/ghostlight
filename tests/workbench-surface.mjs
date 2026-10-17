@@ -823,7 +823,7 @@ const provenanceChecks = [];
     connection_id: "connection_original", reported_application: "Original <script>claim</script>",
     agent: "Original <script>claim</script>", channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it."
   };
-  const laterSession = { id: "shared-workspace", client_label: "Later application", agent: "Later application", channel: "cli" };
+  const laterSession = { id: "shared-workspace", agent: "Later application", channel: "cli" };
   const connectionView = sandbox.globalThis.GhostlightView.create({ sessionFor: () => laterSession });
   const entries = sandbox.globalThis.GhostlightEntries;
   const operation = { invocation: "provenance-work", workspace: laterSession.id, tool: "browser_read",
@@ -859,7 +859,7 @@ const glanceChecks = [];
 {
   const glanceView = sandbox.globalThis.GhostlightView.create({});
   const claim = (id, agent, extra = {}) => ({
-    id, client_label: agent, agent, channel: "mcp", tab_count: 0, active_operations: 0,
+    id, agent, channel: "mcp", tab_count: 0, active_operations: 0,
     connections: [{ connection_id: `connection_${id}`, reported_application: agent, agent, channel: "mcp",
       explanation: `"${agent}" is what the agent calls itself; Ghostlight does not verify it.` }],
     ...extra
@@ -1132,7 +1132,7 @@ function fakeService(kind, { served = true } = {}) {
 
 /** What a watching screen is shown connected: one agent and no browser, which one starts on request. */
 const WATCHED_CONNECTIONS = {
-  sessions: [{ id: "workspace_codex", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp",
+  sessions: [{ id: "workspace_codex", agent: "Codex", channel: "mcp",
     tab_count: 0, active_operations: 0,
     connections: [{ connection_id: "connection_watched", reported_application: "codex-mcp-client", agent: "Codex",
       channel: "mcp", explanation: "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it." }] }],

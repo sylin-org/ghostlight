@@ -1702,8 +1702,6 @@ pub struct OverviewSummary {
 pub struct SessionSummary {
     /// Opaque workspace identity.
     pub id: String,
-    /// The name the client reported for itself, its own unverified claim.
-    pub client_label: String,
     /// The name a person knows this session's agent by
     /// ([`crate::language::provenance::agent_name`]), wherever the window names the session; none
     /// when its client reported no name.
