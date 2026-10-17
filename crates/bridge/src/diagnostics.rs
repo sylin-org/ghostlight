@@ -72,6 +72,9 @@ pub mod event {
     pub const OPERATION_FAILED: &str = "operation_failed";
     pub const DIAGNOSTICS_TOGGLE_REQUESTED: &str = "diagnostics_toggle_requested";
     pub const DIAGNOSTICS_TOGGLED: &str = "diagnostics_toggled";
+    /// An agent icon source that could not be read was skipped; the agent keeps its next source
+    /// or its monogram.
+    pub const AGENT_ICON_SKIPPED: &str = "agent_icon_skipped";
 }
 
 /// Which Ghostlight process is writing. Component names appear in file names and records.

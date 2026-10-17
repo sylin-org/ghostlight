@@ -17,6 +17,7 @@ audit run on the endpoint.
 | Audit records | Append-only JSON Lines file | Local path selected by the endpoint owner. |
 | Setup page | The extension's own bundled page, opened by the extension on its first connection when Ghostlight is absent, and by the setup buttons in the popup and the options page. It loads nothing from the network | Same endpoint. |
 | Setup profile check | Local file reads by the service, only while setup is incomplete. For each installed Chromium browser it reads the `Local State` file for the names of the profiles and checks whether the extension's folder exists in each. Nothing is stored, logged or sent, and the names are shown only in the Ghostlight window | Same endpoint. |
+| Agent icons | Local file reads by the service, at its start and on Re-check, only to show each installed agent's own icon. It reads the agents' app files the catalog names: a program's icon resource and a Store package's logo on Windows, a desktop entry and the PNG icon it names in the icon theme on Linux. It keeps a copy in `state/icons` and sends nothing | Same endpoint. |
 | Add and Open in a browser | A click in the Ghostlight window makes the service start the named browser, which opens the Chrome Web Store listing for Add, or the profile that holds the extension for Open | The browser then loads the store listing itself. |
 | Get Google Chrome | A click in the Ghostlight window opens google.com in the default browser | Google, in the person's browser. |
 | Setup command | The command a person pastes in a terminal. Its address is on sylin.org, which answers with a redirect to the script on GitHub; the script downloads the release files from GitHub | The person's own terminal, when the person runs it. |
@@ -82,6 +83,12 @@ either case.
   person, the profile, the agent or any page, and it leaves the computer nowhere. When several
   browsers are installed, none is connected and `Auto-open browser on request` is on, an agent
   request starts that browser.
+- `state/icons` in the home holds a copy of each installed agent's own icon, as
+  `<agent id>.png` or `<agent id>.ico`, and beside each copy a manifest, `<agent id>.json`: the
+  path of the app file the icon came from, that file's size and modification time, and the copy's
+  SHA-256. It holds nothing about the person, the agent's work or any page, and it leaves the
+  computer nowhere. The window shows the copies; deleting the directory brings back the
+  monograms until the next look.
 - `state/audit-v<version>.jsonl` and `state/audit-pre-<version>.jsonl` in the home are the audit
   logs of 1.x, moved aside when an install finds them (from a 1.x per-version directory in `bin`,
   or from the 1.x log location). They keep the content-minimized records they had and gain no
@@ -98,7 +105,7 @@ either case.
 - On Linux, the audit log, policy, state, run and diagnostics files that Ghostlight creates
   under `~/.ghostlight` are readable only by the user, and the directories it creates there are
   closed to other users. That includes `bin/install.json`, `install.lock`, `state/quit`,
-  `state/watch.off`, `state/setup.json`, `state/last-browser.json`, the archived 1.x logs, and the files an upgrade from 1.x
+  `state/watch.off`, `state/setup.json`, `state/last-browser.json`, `state/icons`, the archived 1.x logs, and the files an upgrade from 1.x
   copies there. The Windows native-host manifest is not in this list. A file that already existed
   keeps its mode.
 
@@ -116,4 +123,4 @@ See [security-overview.md](security-overview.md),
 [the SIEM guide](../guides/siem-integration.md), and
 [the governance guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-10-16 against the current source | Contact: hello@sylin.org
+Last reviewed: 2026-10-17 against the current source | Contact: hello@sylin.org

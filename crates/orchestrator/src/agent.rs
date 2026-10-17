@@ -7,6 +7,10 @@
 //! [`Agent::listed`], so every surface draws the same name and the same symbol. The page decides
 //! nothing about an agent's looks: it draws the [`Symbol`] it is given.
 //!
+//! A roster agent's symbol is the app's own icon when the service has one cached for it
+//! ([`crate::install::icons`]), served by the window under [`ICON_DIRECTORY`] with its version in
+//! the address, and otherwise the agent's packaged monogram tile.
+//!
 //! An agent is projected for a person when a snapshot is built and is never persisted: the audit
 //! keeps only the channel and the connection identity.
 
@@ -30,6 +34,12 @@ pub const UNKNOWN_NAME_SEPARATOR: char = ':';
 
 /// The directory beside the window's page that serves the packaged agent tiles.
 pub const TILE_DIRECTORY: &str = "integrations";
+
+/// The directory beside the window's page that serves the agents' own icons, by agent id.
+pub const ICON_DIRECTORY: &str = "agent-icons";
+
+/// The query key that carries a served icon's version, so a changed icon gets a new address.
+const ICON_VERSION_KEY: &str = "v";
 
 /// The key of an image symbol: the path the window serves it at.
 const SRC_KEY: &str = "src";
@@ -94,6 +104,14 @@ impl Symbol {
     pub fn tile(file: &str) -> Self {
         Self::Image(format!("{TILE_DIRECTORY}/{file}"))
     }
+
+    /// The cached icon of agent `id` at `version`, served under [`ICON_DIRECTORY`].
+    #[must_use]
+    pub fn icon(id: &str, version: &str) -> Self {
+        Self::Image(format!(
+            "{ICON_DIRECTORY}/{id}?{ICON_VERSION_KEY}={version}"
+        ))
+    }
 }
 
 impl Serialize for Symbol {
@@ -108,13 +126,27 @@ impl Serialize for Symbol {
 }
 
 impl Agent {
-    /// A roster agent: its catalog id, its product name and its packaged monogram tile.
+    /// A roster agent: its catalog id, its product name, and the app's own icon when the service
+    /// has one cached for it, else its packaged monogram tile.
     #[must_use]
     pub fn listed(id: &str, name: &str, monogram: &str) -> Self {
+        Self::shown(
+            id,
+            name,
+            monogram,
+            crate::install::icons::published_version(id).as_deref(),
+        )
+    }
+
+    /// A roster agent wearing its cached icon at `icon_version`, or its monogram without one.
+    fn shown(id: &str, name: &str, monogram: &str, icon_version: Option<&str>) -> Self {
         Self {
             id: id.to_owned(),
             name: name.to_owned(),
-            symbol: Symbol::tile(monogram),
+            symbol: icon_version.map_or_else(
+                || Symbol::tile(monogram),
+                |version| Symbol::icon(id, version),
+            ),
         }
     }
 
@@ -214,6 +246,28 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Symbol::Glyph(Glyph::Unknown)).unwrap(),
             serde_json::json!({ "glyph": "unknown" })
+        );
+    }
+
+    #[test]
+    fn a_roster_agent_wears_its_cached_icon_and_otherwise_its_monogram() {
+        assert_eq!(
+            Agent::shown("zed", "Zed", "zed.svg", Some("0123456789ab")).symbol,
+            Symbol::Image("agent-icons/zed?v=0123456789ab".into())
+        );
+        assert_eq!(
+            serde_json::to_value(Agent::shown("zed", "Zed", "zed.svg", Some("0123456789ab")))
+                .unwrap()["symbol"],
+            serde_json::json!({ "src": "agent-icons/zed?v=0123456789ab" })
+        );
+        assert_eq!(
+            Agent::shown("zed", "Zed", "zed.svg", None).symbol,
+            Symbol::tile("zed.svg")
+        );
+        assert_eq!(
+            Agent::listed("zed", "Zed", "zed.svg").symbol,
+            Symbol::tile("zed.svg"),
+            "no test publishes a cache, so every agent keeps its monogram"
         );
     }
 

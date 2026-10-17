@@ -61,6 +61,7 @@ use crate::browser::{
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuthoritySnapshot, GovernanceFacade, JsonlAuditSink};
 use crate::install;
+use crate::install::icons::{self, IconCache, IconPlaces};
 use crate::intake::desktop::{DesktopFrame, TrayItemId, TrayModel};
 use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
@@ -237,12 +238,24 @@ impl ServiceHost {
     /// outlasts a service leaving on idle, and gives way ([`AuthorityAlreadyRunning`]) when the
     /// wait ends; a browser or recover start that waited looks at the latch again once it holds
     /// the lock; and only then does any other start clear the latch and open state.
+    ///
+    /// The service then shows the installed agents' own icons: it publishes the icon cache in the
+    /// home's state directory, which every agent's symbol reads, and looks for the icons in the
+    /// background. Only this start does, so a test service never reads this computer's apps.
     pub fn start_waiting(home: &Path, reason: StartReason) -> Result<Self> {
-        Self::start_with_token(
+        let host = Self::start_with_token(
             home,
             StartTerms::for_reason(reason),
             ghostlight_win_peer::is_elevated,
-        )
+        )?;
+        let cache = IconCache::open(
+            install::layout::Layout::new(home).icons(),
+            IconPlaces::system(),
+            Some(host.diagnostics.sink()),
+        );
+        icons::publish(&cache);
+        host.workbench.attach_icons(cache);
+        Ok(host)
     }
 
     /// Like [`ServiceHost::start_waiting`], with the terms spelled out and the answer to "is this

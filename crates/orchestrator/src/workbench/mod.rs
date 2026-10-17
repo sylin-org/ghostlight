@@ -38,6 +38,7 @@ use crate::browser::BrowserPort;
 use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport};
+use crate::install::icons::{CachedIcon, IconCache};
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSetupResult,
     HarnessSummary,
@@ -424,6 +425,8 @@ pub struct WorkbenchFacade {
     governance: GovernanceFacade,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     harnesses: HarnessRegistry,
+    /// The agents' own icons, once the service attaches its cache.
+    icons: Arc<OnceLock<IconCache>>,
     live: Arc<live::Live>,
     web: Arc<OnceLock<WebFacts>>,
     native_acts: Arc<Mutex<Option<Arc<dyn WorkbenchNativeActs>>>>,
@@ -505,6 +508,7 @@ impl WorkbenchFacade {
             governance,
             diagnostics,
             harnesses,
+            icons: Arc::default(),
             live,
             web,
             native_acts: Arc::default(),
@@ -641,6 +645,42 @@ impl WorkbenchFacade {
         self.setup()
             .filter(|progress| !progress.is_complete())
             .map(|_| PageAddress::Setup)
+    }
+
+    /// Attach the cache of the agents' own icons, which the window serves, and look for them in
+    /// the background. The first call wins.
+    ///
+    /// The copies the cache already holds are shown at once; each look that changes an icon tells
+    /// every screen, so the agents' symbols follow without a reload.
+    pub fn attach_icons(&self, cache: IconCache) {
+        if self.icons.set(cache).is_ok() {
+            self.icons_changed();
+            self.refresh_icons();
+        }
+    }
+
+    /// The cached icon of the catalog agent `agent_id`, as the window serves it; none for an id
+    /// outside the catalog or an agent with no icon cached.
+    #[must_use]
+    pub fn agent_icon(&self, agent_id: &str) -> Option<CachedIcon> {
+        self.icons.get()?.icon(agent_id)
+    }
+
+    /// Look for the agents' icons again in the background, off every request.
+    fn refresh_icons(&self) {
+        if let Some(cache) = self.icons.get() {
+            let facade = self.clone();
+            cache.refresh_in_background(move || facade.icons_changed());
+        }
+    }
+
+    /// Tell every screen that an agent's icon changed: the roster is looked at again, since each
+    /// row carries its agent's symbol, and the look at the service that follows carries the
+    /// sessions' agents.
+    fn icons_changed(&self) {
+        if let Ok(summaries) = self.harnesses.refresh() {
+            self.integrations_changed(&summaries);
+        }
     }
 
     /// Attach the adapter that opens links and folders and asks for files on this computer.
@@ -1221,10 +1261,12 @@ impl WorkbenchFacade {
         }
     }
 
-    /// Re-check supported development harnesses without changing their configuration.
+    /// Re-check supported development harnesses without changing their configuration, and look
+    /// for the agents' icons again in the background.
     pub fn refresh_harnesses(&self) -> Result<Vec<HarnessSummary>, HarnessError> {
         let summaries = self.harnesses.refresh()?;
         self.integrations_changed(&summaries);
+        self.refresh_icons();
         Ok(summaries)
     }
 

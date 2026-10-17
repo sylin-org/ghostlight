@@ -68,7 +68,7 @@ There is one Ghostlight home per OS user, `~/.ghostlight`, and every path derive
 (ADR-0197 Decision 10): the installed executables `ghostlight` and `ghostlight-service` in `bin`, `run` (the service lock and, on Linux,
 the relay socket), the state
 directory `state` (audit log, MCP client locations, the setup record `setup.json`, the
-last-browser record `last-browser.json`), the policy
+last-browser record `last-browser.json`, the agent icon cache `icons`), the policy
 directory `policy`, the Windows native-host manifest in `manifests`, and diagnostics in
 `diagnostics` with the `diagnostics.on` marker.
 `GHOSTLIGHT_TEST_HOME` names another home and exists only for tests and journeys. Every route
@@ -562,6 +562,18 @@ foreign-owned configuration rather than guessing. A separate confirmed Fix actio
 parseable foreign entry under Ghostlight's own key. The writer re-checks that state, preserves the
 same surrounding document, and uses the same backup and atomic replacement seam. Fix is never an
 automatic or aggregate action. The UI exposes no generic filesystem or process operation.
+
+An agent wears its app's own icon when one is installed. The catalog (`install::ROSTER`) names,
+per host, where that icon may be found: a Windows program (on `PATH`, through the program a
+launcher script starts, or below a known folder), a Store package, or Linux desktop entries, and
+the agent whose icon stands for one that has none (Claude Code wears Claude Desktop's). One
+resolver, `install/icons.rs`, runs off the request path, at the service's start and on Re-check,
+bounded in time. It keeps the first icon found in `state/icons` with a manifest, reads a source
+again only when its file changed, and on Linux takes PNG only, never SVG. Only Linux sources give
+an icon in this build; a Windows source's program is found but its icon is not read. The agent's
+symbol is `agent-icons/<id>?v=<version>` while a copy is cached, else the monogram tile, decided
+where `crate::agent` builds the agent. The window serves the copy at that address as `image/png`
+or `image/x-icon` with `default-src 'none'; sandbox`, for catalog ids only.
 
 Linux desktop integration is another installer-owned local-human capability. A per-user install
 owns one XDG desktop entry and one byte-identical icon. The entry runs the shell,

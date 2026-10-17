@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Privacy Policy
 
-Last updated: 2026-10-16
+Last updated: 2026-10-17
 
 Canonical public URL: https://sylin.org/ghostlight/privacy/
 
@@ -96,6 +96,10 @@ frames or GIFs, dialog text, console text, or network payloads.
   extension's folder is in each profile, so its window can tell you whether to add the extension
   or open the browser. The read is local. Profile names appear only in the Ghostlight window on
   this computer and are never stored, logged or sent.
+- To show each installed agent's own icon in its window, the Ghostlight application on this
+  computer reads the agents' app files: a program's icon resource and a Store package's logo on
+  Windows, a desktop entry and the icon it names on Linux. It keeps a copy of each icon in
+  `state/icons` in its home folder and sends nothing.
 - No Chrome sync storage; adapter identity and user settings remain local to the browser profile.
 - No browsing-history database or background collection unrelated to a requested operation.
 

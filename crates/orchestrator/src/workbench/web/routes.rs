@@ -17,6 +17,7 @@ use super::events::{Refused, EVENT_STREAM_TYPE};
 use super::http::{header, Head, Incoming, Method, Response, Status};
 use super::limits::retry_after_seconds;
 use super::{same_secret, Shared};
+use crate::agent::ICON_DIRECTORY;
 use crate::install::HarnessAction;
 use crate::language::setup::SetupAction;
 use crate::language::workbench as words;
@@ -69,6 +70,10 @@ const DENY_FRAMES: &str = "DENY";
 const PAGE_POLICY: &str = "default-src 'self'; connect-src 'self'; img-src 'self' data:; \
 style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; \
 form-action 'none'; frame-ancestors 'none'";
+
+/// What an agent's icon may do once loaded: nothing. An image needs no policy to show, and a
+/// copied icon opened on its own runs nothing.
+const ICON_POLICY: &str = "default-src 'none'; sandbox";
 
 /// Every route that is not a page file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -473,20 +478,39 @@ fn respond(shared: &Shared, head: &Head, incoming: &mut Incoming) -> Response {
 
     match target {
         Target::Page(asset) => page(head, asset),
+        Target::AgentIcon(agent_id) => agent_icon(shared, head, agent_id),
         Target::Api(route) => api(shared, route, context, head, incoming),
     }
 }
 
-enum Target {
+enum Target<'a> {
     Page(&'static Asset),
+    /// The cached icon of the agent with this catalog id. Like a page file, it is served in every
+    /// context: an image request carries no bearer, and the window draws its agents with it.
+    AgentIcon(&'a str),
     Api(&'static Route),
 }
 
+/// The agent id an icon path names: `/agent-icons/<id>`.
+fn icon_path(path: &str) -> Option<&str> {
+    path.strip_prefix('/')?
+        .strip_prefix(ICON_DIRECTORY)?
+        .strip_prefix('/')
+        .filter(|id| !id.is_empty() && !id.contains('/'))
+}
+
 /// Find the route a request names, or the refusal that says why there is none.
-fn find(head: &Head) -> Result<Target, Response> {
+fn find(head: &Head) -> Result<Target<'_>, Response> {
     let not_found = || failure(Status::NotFound, ErrorCode::NotFound, words::NOT_FOUND);
     if unsafe_path(&head.path) {
         return Err(not_found());
+    }
+    if let Some(agent_id) = icon_path(&head.path) {
+        return if matches!(head.method, Method::Get | Method::Head) {
+            Ok(Target::AgentIcon(agent_id))
+        } else {
+            Err(method_not_allowed(&[Method::Get, Method::Head]))
+        };
     }
     if let Some(asset) = assets::lookup(&head.path) {
         return if matches!(head.method, Method::Get | Method::Head) {
@@ -593,6 +617,32 @@ fn page(head: &Head, asset: &'static Asset) -> Response {
     let response = response
         .with_header(header::ETAG, tag)
         .with_header(header::CACHE_CONTROL, PAGE_CACHE);
+    if head.method == Method::Head {
+        response.head_only()
+    } else {
+        response
+    }
+}
+
+/// Serve the cached icon of the catalog agent `agent_id` as the image it is, with a policy that
+/// lets it run nothing. An id outside the catalog, or an agent with no icon cached, is not found.
+fn agent_icon(shared: &Shared, head: &Head, agent_id: &str) -> Response {
+    let Some(icon) = shared.facade.agent_icon(agent_id) else {
+        return failure(Status::NotFound, ErrorCode::NotFound, words::NOT_FOUND);
+    };
+    let tag = format!("\"{}\"", icon.sha256);
+    let unchanged = head
+        .header(header::IF_NONE_MATCH)
+        .is_some_and(|value| value == tag);
+    let response = if unchanged {
+        Response::new(Status::NotModified)
+    } else {
+        Response::new(Status::Ok).with_body(icon.kind.media_type(), icon.bytes)
+    };
+    let response = response
+        .with_header(header::ETAG, tag)
+        .with_header(header::CACHE_CONTROL, PAGE_CACHE)
+        .with_header(header::CONTENT_SECURITY_POLICY, ICON_POLICY);
     if head.method == Method::Head {
         response.head_only()
     } else {

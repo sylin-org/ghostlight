@@ -63,6 +63,10 @@ pub const SETUP_RECORD_NAME: &str = "setup.json";
 /// connected, by its native-host browser id. It holds that id and nothing else.
 pub const LAST_BROWSER_RECORD_NAME: &str = "last-browser.json";
 
+/// The directory under the state directory that keeps a copy of each installed agent's own icon,
+/// with a manifest beside each copy.
+pub const ICONS_DIRECTORY_NAME: &str = "icons";
+
 /// Directory of the user's policy.
 pub const POLICY_DIRECTORY_NAME: &str = "policy";
 
@@ -208,6 +212,12 @@ impl Layout {
     #[must_use]
     pub fn last_browser_record(&self) -> PathBuf {
         self.state().join(LAST_BROWSER_RECORD_NAME)
+    }
+
+    /// The agent icon cache: `home/state/icons`.
+    #[must_use]
+    pub fn icons(&self) -> PathBuf {
+        self.state().join(ICONS_DIRECTORY_NAME)
     }
 
     /// The user policy directory: `home/policy`.

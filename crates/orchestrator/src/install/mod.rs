@@ -9,6 +9,7 @@ pub mod container;
 pub mod deployment;
 pub mod desktop_entry;
 pub mod entry;
+pub mod icons;
 pub mod last_browser;
 pub mod layout;
 pub mod migration;
@@ -48,6 +49,7 @@ use crate::agent::Agent;
 use crate::language::deployment as words;
 
 use container::{AppContainer, Residence};
+use icons::{AgentIconSources, IconSource, KnownFolder, ProgramPlace};
 use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
 
 const SERVER_NAME: &str = "ghostlight";
@@ -55,6 +57,8 @@ const SERVER_NAME: &str = "ghostlight";
 const MCP_ARGUMENTS: [&str; 1] = [MCP_ARGUMENT];
 /// The package name of the Claude desktop app, which reads the Claude Desktop configuration.
 const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
+/// The package name of the Codex desktop app.
+const CODEX_PACKAGE: &str = "OpenAI.Codex";
 /// File in the state directory recording where each MCP client's configuration was found.
 const HARNESS_LOCATIONS_FILE: &str = "harness-locations.json";
 /// The Windows variable that names the person's home, read before `HOME`.
@@ -787,9 +791,10 @@ enum JsonDialect {
     ZCode,
 }
 
-/// One agent Ghostlight can set up, on one host: who the agent is, how the window shows it, and
-/// where its MCP configuration lives on a computer. The roster is the one record of all three, and
-/// the catalog of agents beside the command line and an unknown agent ([`crate::agent`]).
+/// One agent Ghostlight can set up, on one host: who the agent is, how the window shows it (its
+/// monogram, and where the app's own icon may be found), and where its MCP configuration lives on
+/// a computer. The roster is the one record of all of it, and the catalog of agents beside the
+/// command line and an unknown agent ([`crate::agent`]).
 struct AgentRow {
     /// The harness id: one per host the agent runs on.
     id: &'static str,
@@ -818,6 +823,13 @@ struct AgentRow {
     dialect: ConfigDialect,
     /// The package name of the packaged app that reads this configuration, when the client is one.
     own_package: Option<&'static str>,
+    /// Where this host's own app icon may be found, in order ([`icons`]). Empty when the host has
+    /// no app of its own or none is known with confidence.
+    icons: &'static [IconSource],
+    /// The catalog id of the agent whose icon stands for this one when none of its own is found:
+    /// a terminal tool wears its vendor's desktop app's icon. `None` shows the agent's monogram
+    /// instead.
+    icon_family: Option<&'static str>,
 }
 
 /// Where every Cline host keeps its MCP settings below its own storage directory.
@@ -829,6 +841,84 @@ const OPENCODE_FILES: &[&str] = &["opencode.jsonc", "opencode.json"];
 /// The files Kilo Code reads in its configuration directory, in the order it prefers them: its
 /// own, then OpenCode's.
 const KILO_FILES: &[&str] = &["kilo.jsonc", "kilo.json", "opencode.jsonc", "opencode.json"];
+
+/// Where the Codex desktop app's icon may be found: its Store package. The Codex CLI shares the
+/// agent, so it wears the app's icon.
+const CODEX_ICONS: &[IconSource] = &[IconSource::WindowsPackage(CODEX_PACKAGE)];
+
+/// Where Claude Desktop's icon may be found: its Store package, then the per-user installer's
+/// program.
+const CLAUDE_DESKTOP_ICONS: &[IconSource] = &[
+    IconSource::WindowsPackage(CLAUDE_DESKTOP_PACKAGE),
+    IconSource::WindowsExe(&[ProgramPlace::Below(
+        KnownFolder::LocalAppData,
+        "AnthropicClaude/claude.exe",
+    )]),
+];
+
+/// Where Cursor's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
+/// desktop entry.
+const CURSOR_ICONS: &[IconSource] = &[
+    IconSource::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/cursor/Cursor.exe"),
+        ProgramPlace::OnPath("cursor"),
+    ]),
+    IconSource::LinuxDesktop(&["cursor"]),
+];
+
+/// Where Visual Studio Code's icon may be found: the program its `code` launcher starts, its
+/// per-user and machine-wide installs, and its desktop entry from a package, the Snap or the
+/// Flatpak.
+const VSCODE_ICONS: &[IconSource] = &[
+    IconSource::WindowsExe(&[
+        ProgramPlace::OnPath("code"),
+        ProgramPlace::Below(
+            KnownFolder::LocalAppData,
+            "Programs/Microsoft VS Code/Code.exe",
+        ),
+        ProgramPlace::Below(KnownFolder::ProgramFiles, "Microsoft VS Code/Code.exe"),
+    ]),
+    IconSource::LinuxDesktop(&["code", "code_code", "com.visualstudio.code"]),
+];
+
+/// Where Windsurf's icon may be found: its per-user install, the launcher on `PATH`, and its
+/// Linux desktop entry.
+const WINDSURF_ICONS: &[IconSource] = &[
+    IconSource::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Windsurf/Windsurf.exe"),
+        ProgramPlace::OnPath("windsurf"),
+    ]),
+    IconSource::LinuxDesktop(&["windsurf"]),
+];
+
+/// Where Zed's icon may be found: its per-user install, the program on `PATH`, and its Linux
+/// desktop entry.
+const ZED_ICONS: &[IconSource] = &[
+    IconSource::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Zed/Zed.exe"),
+        ProgramPlace::OnPath("zed"),
+    ]),
+    IconSource::LinuxDesktop(&["dev.zed.Zed", "zed"]),
+];
+
+/// Where Kiro's icon may be found: its per-user install, the launcher on `PATH`, and its Linux
+/// desktop entry.
+const KIRO_ICONS: &[IconSource] = &[
+    IconSource::WindowsExe(&[
+        ProgramPlace::Below(KnownFolder::LocalAppData, "Programs/Kiro/Kiro.exe"),
+        ProgramPlace::OnPath("kiro"),
+    ]),
+    IconSource::LinuxDesktop(&["kiro"]),
+];
+
+/// Where Antigravity's icon may be found: its per-user install and its Linux desktop entry.
+const ANTIGRAVITY_ICONS: &[IconSource] = &[
+    IconSource::WindowsExe(&[ProgramPlace::Below(
+        KnownFolder::LocalAppData,
+        "Programs/Antigravity/Antigravity.exe",
+    )]),
+    IconSource::LinuxDesktop(&["antigravity"]),
+];
 
 /// Every agent Ghostlight can set up, one row per host.
 const ROSTER: &[AgentRow] = &[
@@ -846,6 +936,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["codex"],
         dialect: ConfigDialect::CodexToml,
         own_package: None,
+        icons: CODEX_ICONS,
+        icon_family: None,
     },
     AgentRow {
         id: "claude-code",
@@ -861,6 +953,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["claude"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: Some("claude-desktop"),
     },
     AgentRow {
         id: "claude-desktop",
@@ -876,6 +970,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: Some(CLAUDE_DESKTOP_PACKAGE),
+        icons: CLAUDE_DESKTOP_ICONS,
+        icon_family: None,
     },
     AgentRow {
         id: "cursor",
@@ -891,6 +987,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["cursor", "cursor-agent"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: CURSOR_ICONS,
+        icon_family: None,
     },
     AgentRow {
         id: "vscode",
@@ -906,6 +1004,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["code"],
         dialect: ConfigDialect::Json(JsonDialect::Servers),
         own_package: None,
+        icons: VSCODE_ICONS,
+        icon_family: None,
     },
     AgentRow {
         id: "windsurf",
@@ -921,6 +1021,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["windsurf"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: WINDSURF_ICONS,
+        icon_family: None,
     },
     // Windsurf's current official distribution is named Devin and moved its user MCP
     // configuration. Keep the historical target above so either installed generation can be
@@ -939,6 +1041,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["devin", "devin-desktop", "surf"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "zed",
@@ -960,6 +1064,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["zed", "zeditor"],
         dialect: ConfigDialect::Json(JsonDialect::ContextServers),
         own_package: None,
+        icons: ZED_ICONS,
+        icon_family: None,
     },
     // ZCode's MCP registration lives in its shared CLI configuration under `mcp.servers`
     // (ADR-0141). No official download destination is pinned until one is verified.
@@ -977,6 +1083,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["zcode"],
         dialect: ConfigDialect::Json(JsonDialect::ZCode),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "opencode",
@@ -992,6 +1100,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["opencode", "opencode2"],
         dialect: ConfigDialect::OpenCode,
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "crush",
@@ -1012,6 +1122,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["crush"],
         dialect: ConfigDialect::Json(JsonDialect::Crush),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "copilot-cli",
@@ -1027,6 +1139,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["copilot"],
         dialect: ConfigDialect::Json(JsonDialect::Copilot),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "cline-cli",
@@ -1042,6 +1156,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["cline"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "cline-vscode",
@@ -1064,6 +1180,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "cline-cursor",
@@ -1084,6 +1202,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "cline-windsurf",
@@ -1104,6 +1224,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "kiro",
@@ -1119,6 +1241,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["kiro", "kiro-cli"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: KIRO_ICONS,
+        icon_family: None,
     },
     AgentRow {
         id: "qwen-code",
@@ -1134,6 +1258,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["qwen"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "junie",
@@ -1149,6 +1275,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["junie"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "kilo-code",
@@ -1164,6 +1292,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["kilo"],
         dialect: ConfigDialect::Json(JsonDialect::OpenCodeV1),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "goose",
@@ -1179,6 +1309,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["goose"],
         dialect: ConfigDialect::Manual(ManualDialect::Goose),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "continue",
@@ -1194,6 +1326,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["cn"],
         dialect: ConfigDialect::Manual(ManualDialect::Continue),
         own_package: None,
+        icons: &[],
+        icon_family: None,
     },
     AgentRow {
         id: "antigravity",
@@ -1209,6 +1343,8 @@ const ROSTER: &[AgentRow] = &[
         executables: &["agy"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
+        icons: ANTIGRAVITY_ICONS,
+        icon_family: None,
     },
 ];
 
@@ -1312,6 +1448,29 @@ pub fn agent_called(reported: &str) -> Option<Agent> {
         .iter()
         .find(|row| row.is_called(reported))
         .map(AgentRow::agent)
+}
+
+/// Where each catalog agent's own icon may be found, one entry per agent in roster order: its
+/// hosts' icon sources in roster order, and the first family a host names.
+#[must_use]
+pub fn icon_catalog() -> Vec<AgentIconSources> {
+    let mut catalog: Vec<AgentIconSources> = Vec::new();
+    for row in ROSTER {
+        if let Some(agent) = catalog
+            .iter_mut()
+            .find(|agent| agent.agent_id == row.agent_id)
+        {
+            agent.sources.extend_from_slice(row.icons);
+            agent.family = agent.family.or(row.icon_family);
+        } else {
+            catalog.push(AgentIconSources {
+                agent_id: row.agent_id,
+                sources: row.icons.to_vec(),
+                family: row.icon_family,
+            });
+        }
+    }
+    catalog
 }
 
 fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
@@ -4496,5 +4655,37 @@ mod tests {
         assert!(value["mcpServers"].get("ghostlight").is_some());
 
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_icon_catalog_names_each_agent_once_and_every_family_is_another_catalog_agent() {
+        let catalog = super::icon_catalog();
+        let ids: Vec<&str> = catalog.iter().map(|agent| agent.agent_id).collect();
+        let mut expected: Vec<&str> = Vec::new();
+        for row in ROSTER {
+            if !expected.contains(&row.agent_id) {
+                expected.push(row.agent_id);
+            }
+        }
+        assert_eq!(ids, expected, "one entry per agent, in roster order");
+        for agent in &catalog {
+            if let Some(family) = agent.family {
+                assert_ne!(family, agent.agent_id, "{}", agent.agent_id);
+                let stand_in = catalog
+                    .iter()
+                    .find(|other| other.agent_id == family)
+                    .unwrap_or_else(|| panic!("{} names no catalog agent", agent.agent_id));
+                assert!(
+                    !stand_in.sources.is_empty(),
+                    "{family} stands for {} but has no sources",
+                    agent.agent_id
+                );
+            }
+        }
+        let family_of = |id: &str| catalog.iter().find(|agent| agent.agent_id == id).unwrap();
+        assert_eq!(family_of("claude-code").family, Some("claude-desktop"));
+        assert!(family_of("claude-code").sources.is_empty());
+        assert!(!family_of("codex").sources.is_empty());
+        assert!(family_of("cline").sources.is_empty());
     }
 }

@@ -2604,3 +2604,68 @@ fn a_pause_changes_the_runtime_row_of_every_screens_controls() {
         "watch"
     );
 }
+
+#[test]
+fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
+    use crate::install::icons::{IconCache, IconPlaces};
+
+    let fixture = Fixture::closed();
+    let share = fixture.root.join("share");
+    let entry = share.join("applications").join("dev.zed.Zed.desktop");
+    std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+    std::fs::write(&entry, "[Desktop Entry]\nName=Zed\nIcon=zed\n").unwrap();
+    let png = share.join("icons/hicolor/64x64/apps/zed.png");
+    std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+    let bytes = b"\x89PNG\r\n\x1a\nzed".to_vec();
+    std::fs::write(&png, &bytes).unwrap();
+    let icons = fixture.root.join("state").join("icons");
+    let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
+    assert!(cache.refresh());
+    fixture.facade.attach_icons(cache.clone());
+    let version = cache.version("zed").unwrap();
+
+    let reply = fixture.watch(get(&format!("/agent-icons/zed?v={version}")));
+    assert_eq!(
+        reply.status, 200,
+        "served in every context, as page files are"
+    );
+    assert_eq!(reply.header("Content-Type"), Some("image/png"));
+    assert_eq!(reply.header("X-Content-Type-Options"), Some("nosniff"));
+    assert_eq!(
+        reply.header("Content-Security-Policy"),
+        Some("default-src 'none'; sandbox")
+    );
+    assert_eq!(
+        reply.header("Cross-Origin-Resource-Policy"),
+        Some("same-origin")
+    );
+    assert_eq!(reply.body, bytes);
+    let tag = reply.header("ETag").unwrap().to_owned();
+    let unchanged = fixture.watch(get("/agent-icons/zed").header("If-None-Match", &tag));
+    assert_eq!(unchanged.status, 304);
+    let head = fixture.watch(Call::new("HEAD", "/agent-icons/zed"));
+    assert_eq!(head.status, 200);
+    assert!(head.body.is_empty());
+
+    let window = fixture.control(get("/agent-icons/zed"));
+    assert_eq!(window.status, 200);
+    assert_eq!(window.body, bytes);
+
+    for path in [
+        "/agent-icons/not-an-agent",
+        "/agent-icons/codex",
+        "/agent-icons/",
+        "/agent-icons/zed/more",
+        "/agent-icons/..%2fzed",
+        "/agent-icons/zed.json",
+    ] {
+        let reply = fixture.watch(get(path));
+        assert_eq!(reply.status, 404, "{path}");
+        assert_eq!(reply.code(), "not_found", "{path}");
+    }
+    assert_eq!(
+        fixture.watch(post("/agent-icons/zed", "{}")).status,
+        405,
+        "an icon is only read"
+    );
+}
