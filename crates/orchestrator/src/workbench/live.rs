@@ -420,10 +420,11 @@ impl Live {
             .map(|browser| browser.family.clone())
             .collect();
         browsers.sort();
+        // Keyed on the catalog id, the same identity the setup view matches agents by.
         let mut clients: Vec<String> = gathered
             .sessions
             .iter()
-            .map(|session| session.agent.name.clone())
+            .map(|session| session.agent.id.clone())
             .collect();
         clients.sort();
         SetupInputsKey {
