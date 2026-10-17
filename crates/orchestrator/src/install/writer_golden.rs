@@ -10,7 +10,9 @@
 //!
 //! The seeds are written out here as a person's files hold them, never built by the code under
 //! test. Every path is built with forward slashes, and the run's directory and the edge are shown
-//! as placeholders, so one file holds on every build system.
+//! as placeholders, so one file holds on every build system. How the build system's own
+//! separators are written, backslashes and their escapes on Windows, is pinned per build system
+//! in `tests/golden/agents/native/` (the `native` module).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -207,39 +209,105 @@ impl Seed {
     }
 }
 
+/// How a run spells the paths it builds.
+#[derive(Clone, Copy)]
+enum Spelling {
+    /// Forward slashes on every build system, so one golden file holds on all of them.
+    Portable,
+    /// The build system's own separator, as Ghostlight spells a person's paths.
+    #[cfg(any(windows, target_os = "linux"))]
+    Native,
+}
+
+impl Spelling {
+    fn separator(self) -> char {
+        match self {
+            Self::Portable => '/',
+            #[cfg(any(windows, target_os = "linux"))]
+            Self::Native => std::path::MAIN_SEPARATOR,
+        }
+    }
+}
+
+/// `parts` below `root`, each after `separator`.
+fn spelled(root: &str, separator: char, parts: &[&str]) -> String {
+    let mut path = root.to_owned();
+    for part in parts {
+        path.push(separator);
+        path.push_str(part);
+    }
+    path
+}
+
 /// One fresh directory standing for a computer, removed when dropped.
 struct Run {
     directory: PathBuf,
-    /// The directory as text with forward slashes, the prefix of every path the run builds.
+    /// The directory as text, spelled with [`Run::separator`], the prefix of every path the run
+    /// builds.
     root: String,
+    separator: char,
     computer: Computer,
     context: HarnessContext,
+    /// Each text the golden hides and the placeholder it shows instead, replaced in this order.
+    masks: Vec<(String, &'static str)>,
 }
 
 impl Run {
+    /// A run whose paths are spelled with forward slashes, with the edge and the directory hidden.
     fn new(computer: Computer) -> Self {
+        Self::spelled(computer, Spelling::Portable)
+    }
+
+    /// A fresh run on `computer` whose paths are spelled as `spelling` says.
+    fn spelled(computer: Computer, spelling: Spelling) -> Self {
         let directory = std::env::temp_dir().join(format!(
             "ghostlight-writer-golden-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4().simple()
         ));
         fs::create_dir_all(&directory).expect("the run's directory is writable");
-        let root = directory.to_string_lossy().replace('\\', "/");
+        let separator = spelling.separator();
+        let root = directory
+            .to_string_lossy()
+            .replace(['\\', '/'], &separator.to_string());
         assert!(
             !root.contains(['"', '\'']),
             "the temporary directory {root} holds a quote, which the seeds cannot write as a \
              plain string"
         );
         let windows = computer.windows();
-        let home = PathBuf::from(format!("{root}/{PERSON}"));
-        let roots = harness_roots(&home, None, None, None, windows);
-        let edge = PathBuf::from(format!(
-            "{root}/{PERSON}/.ghostlight/bin/{}",
-            executable_name(EDGE_COMMAND_NAME, windows)
+        let home = PathBuf::from(spelled(&root, separator, &[PERSON]));
+        let edge_name = executable_name(EDGE_COMMAND_NAME, windows);
+        let edge = PathBuf::from(spelled(
+            &root,
+            separator,
+            &[PERSON, ".ghostlight", "bin", &edge_name],
         ));
         fs::create_dir_all(edge.parent().expect("the edge has a directory"))
             .expect("the edge's directory is writable");
         fs::write(&edge, b"edge").expect("the edge is writable");
+        let (app_data, masks) = match spelling {
+            Spelling::Portable => (
+                None,
+                vec![
+                    (edge.to_string_lossy().into_owned(), EDGE_PLACEHOLDER),
+                    (root.clone(), ROOT_PLACEHOLDER),
+                ],
+            ),
+            // The directory is hidden as a JSON or TOML string escapes it and as it is, so the
+            // separators and escapes of every path below it stay in the golden.
+            #[cfg(any(windows, target_os = "linux"))]
+            Spelling::Native => (
+                windows.then(|| {
+                    PathBuf::from(spelled(&root, separator, &[PERSON, "AppData", "Roaming"]))
+                }),
+                vec![
+                    (quoted(&root).trim_matches('"').to_owned(), ROOT_PLACEHOLDER),
+                    (root.clone(), ROOT_PLACEHOLDER),
+                ],
+            ),
+        };
+        let roots = harness_roots(&home, None, app_data, None, windows);
         let private_view = (computer == Computer::InsideAnotherApp).then(|| PrivateView {
             container: AppContainer {
                 app: CONTAINER_APP.into(),
@@ -253,7 +321,11 @@ impl Run {
             codex_config: roots.codex_config,
             edge,
             path_entries: Vec::new(),
-            locations: PathBuf::from(format!("{root}/state/{HARNESS_LOCATIONS_FILE}")),
+            locations: PathBuf::from(spelled(
+                &root,
+                separator,
+                &["state", HARNESS_LOCATIONS_FILE],
+            )),
             windows,
             linux: computer == Computer::Linux,
             private_view,
@@ -261,8 +333,10 @@ impl Run {
         Self {
             directory,
             root,
+            separator,
             computer,
             context,
+            masks,
         }
     }
 
@@ -272,25 +346,27 @@ impl Run {
 
     /// A program of this run's install, by name.
     fn program(&self, directory: &str, name: &str) -> String {
-        format!(
-            "{}/{PERSON}/.ghostlight/{directory}/{}",
-            self.root,
-            executable_name(name, self.computer.windows())
-        )
+        let name = executable_name(name, self.computer.windows());
+        self.below(&[PERSON, ".ghostlight", directory, &name])
     }
 
     fn old_edge(&self) -> String {
-        format!(
-            "{}/{OLD_PERSON}/.ghostlight/bin/{}",
-            self.root,
-            executable_name(EDGE_COMMAND_NAME, self.computer.windows())
-        )
+        let name = executable_name(EDGE_COMMAND_NAME, self.computer.windows());
+        self.below(&[OLD_PERSON, ".ghostlight", "bin", &name])
     }
 
-    /// `text` with the edge and the run's directory replaced by their placeholders.
+    /// The path of `parts` below the run's directory, spelled as the run spells paths.
+    fn below(&self, parts: &[&str]) -> String {
+        spelled(&self.root, self.separator, parts)
+    }
+
+    /// `text` with every hidden text replaced by its placeholder.
     fn masked(&self, text: &str) -> String {
-        text.replace(&self.edge(), EDGE_PLACEHOLDER)
-            .replace(&self.root, ROOT_PLACEHOLDER)
+        self.masks
+            .iter()
+            .fold(text.to_owned(), |text, (hidden, placeholder)| {
+                text.replace(hidden, placeholder)
+            })
     }
 
     /// A path as the golden shows it: masked, with forward slashes.
@@ -305,7 +381,11 @@ impl Run {
         while let Some(directory) = pending.pop() {
             for entry in fs::read_dir(&directory).expect("the run's directory is readable") {
                 let entry = entry.expect("a directory entry is readable");
-                let path = format!("{directory}/{}", entry.file_name().to_string_lossy());
+                let path = spelled(
+                    &directory,
+                    self.separator,
+                    &[&entry.file_name().to_string_lossy()],
+                );
                 if entry.file_type().expect("an entry has a type").is_dir() {
                     pending.push(path);
                 } else if Path::new(&path) != self.context.edge {
@@ -327,7 +407,7 @@ impl Run {
             let name = default
                 .file_name()
                 .expect("a configuration has a file name");
-            PathBuf::from(format!("{}/located/{}", self.root, name.to_string_lossy()))
+            PathBuf::from(self.below(&["located", &name.to_string_lossy()]))
         } else {
             default
         };
@@ -901,13 +981,18 @@ fn golden_file(name: &str) -> String {
     format!("{GOLDEN_DIRECTORY}/{name}")
 }
 
-#[test]
-fn every_host_writes_and_says_what_the_writer_golden_records() {
+/// Refuse to run while Crush would read this computer's real file instead of the run's.
+fn refuse_a_real_crush_file() {
     assert!(
         std::env::var_os(CRUSH_LOCATION_VARIABLE).is_none(),
         "{CRUSH_LOCATION_VARIABLE} is set, so Crush's file would be this computer's real one; \
          unset it to run the writer golden"
     );
+}
+
+#[test]
+fn every_host_writes_and_says_what_the_writer_golden_records() {
+    refuse_a_real_crush_file();
     // Every host runs in directories of its own, so the hosts are recorded side by side.
     let goldens: Vec<(String, String)> = std::thread::scope(|scope| {
         let hosts: Vec<_> = ROSTER
@@ -954,6 +1039,102 @@ fn every_host_writes_and_says_what_the_writer_golden_records() {
             present, expected,
             "{GOLDEN_DIRECTORY} holds exactly one file per roster host and {SETUP_GOLDEN}; run \
              with {UPDATE_VARIABLE}=1 to rewrite it when the roster changes on purpose"
+        );
+    }
+}
+
+/// The native golden: how this build system's own paths are spelled in what the installer writes,
+/// pinned in `tests/golden/agents/native/`, one file per build system.
+///
+/// A person's edge is a native path, so on Windows every file Ghostlight writes holds backslashes,
+/// escaped as JSON or TOML escapes them. The portable golden builds every path with forward
+/// slashes and so cannot see that. Here the run spells its paths with the build system's
+/// separator and hides only its directory, in every form a file writes it, so the separators and
+/// escapes of the edge below it stay in the file. Each build system checks its own file and leaves
+/// the other alone.
+#[cfg(any(windows, target_os = "linux"))]
+mod native {
+    use super::*;
+
+    /// The directory of the native goldens, relative to the repository root.
+    const NATIVE_DIRECTORY: &str = "tests/golden/agents/native";
+
+    /// This build system's native golden file and the computer it records.
+    #[cfg(windows)]
+    const SYSTEM: (&str, Computer) = ("windows.txt", Computer::Windows);
+    #[cfg(target_os = "linux")]
+    const SYSTEM: (&str, Computer) = ("linux.txt", Computer::Linux);
+
+    /// What the native golden pins, for the failure message.
+    const NATIVE_SUBJECT: &str = "how the installer spells this computer's own paths";
+
+    /// The seed every recorded host starts from: a person's file with another server in it.
+    const NATIVE_SEED: Seed = Seed::Other;
+
+    /// The way a host's file is written, or none for a file Ghostlight never writes.
+    fn written_as(dialect: ConfigDialect) -> Option<String> {
+        match dialect {
+            ConfigDialect::Json(dialect) => Some(format!("JSON {dialect:?}")),
+            ConfigDialect::OpenCode => Some("OpenCode".into()),
+            ConfigDialect::CodexToml => Some("Codex TOML".into()),
+            ConfigDialect::Manual(_) => None,
+        }
+    }
+
+    /// The first roster host of each way a file is written, with that way's name.
+    fn hosts() -> Vec<(String, &'static AgentRow)> {
+        let mut hosts: Vec<(String, &'static AgentRow)> = Vec::new();
+        for row in ROSTER {
+            if let Some(way) = written_as(row.dialect) {
+                if hosts.iter().all(|(seen, _)| *seen != way) {
+                    hosts.push((way, row));
+                }
+            }
+        }
+        hosts
+    }
+
+    /// The native golden of `computer`: for each recorded host, its seed, what inspection says
+    /// (the manual setup document among it) and what Install says and writes.
+    fn native_golden(computer: Computer) -> String {
+        let mut out = format!(
+            "# How Ghostlight's installer spells this computer's own paths, on {}.\n\
+             # Recorded by install::writer_golden on this build system only. Rewrite it only on\n\
+             # purpose, with {UPDATE_VARIABLE}=1, and read the diff line by line.\n\
+             # {ROOT_PLACEHOLDER} is the run's directory, as each file writes it; every path below it\n\
+             # keeps its own separators and escapes.\n",
+            computer.heading()
+        );
+        for (way, row) in hosts() {
+            let _ = writeln!(out, "\n=== {} ({way}) / {}", row.id, NATIVE_SEED.heading());
+            let run = Run::spelled(computer, Spelling::Native);
+            let (path, bytes, registry) = run.seeded(row, NATIVE_SEED);
+            let bytes = bytes.expect("the native seed is a file");
+            let _ = writeln!(out, "seed {}:", run.shown(&path));
+            write_block(&mut out, &run, bytes.as_bytes());
+            out.push_str("-- inspect\n");
+            write_summary(&mut out, &run, &registry, &summary_of(&registry, row.id));
+            write_act(
+                &mut out,
+                &run,
+                &registry,
+                row.id,
+                HarnessAction::Install,
+                Some(bytes.as_str()),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn this_computer_s_own_paths_are_written_as_the_native_golden_records() {
+        refuse_a_real_crush_file();
+        let (name, computer) = SYSTEM;
+        check_golden_with(
+            &format!("{NATIVE_DIRECTORY}/{name}"),
+            &native_golden(computer),
+            UPDATE_VARIABLE,
+            NATIVE_SUBJECT,
         );
     }
 }

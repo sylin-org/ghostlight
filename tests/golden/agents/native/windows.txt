@@ -1,0 +1,474 @@
+# How Ghostlight's installer spells this computer's own paths, on Windows.
+# Recorded by install::writer_golden on this build system only. Rewrite it only on
+# purpose, with GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1, and read the diff line by line.
+# <root> is the run's directory, as each file writes it; every path below it
+# keeps its own separators and escapes.
+
+=== codex (Codex TOML) / other: comments, a setting and another server
+seed <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://developers.openai.com/codex/cli/
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.codex/config.toml
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | [mcp_servers]
+  |
+  | [mcp_servers.ghostlight]
+  | command = '<root>\Pat Doe\.ghostlight\bin\ghostlight.exe'
+  | args = ["mcp"]
+-- install
+changed: yes
+says: Ghostlight was registered with Codex. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+  |
+  | [mcp_servers.ghostlight]
+  | command = '<root>\Pat Doe\.ghostlight\bin\ghostlight.exe'
+  | args = ["mcp"]
+wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
+
+=== claude-code (JSON McpServers) / other: comments, a setting and another server
+seed <root>/Pat Doe/.claude.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://claude.com/product/claude-code
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.claude.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.claude.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "env": {},
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.claude.json.ghostlight-backup: the seed's bytes
+
+=== vscode (JSON Servers) / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "type": "stdio",
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== zed (JSON ContextServers) / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/Zed/settings.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "context_servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://zed.dev/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Zed/settings.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "context_servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with Zed. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Zed/settings.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "context_servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "env": {},
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Zed/settings.json.ghostlight-backup: the seed's bytes
+
+=== zcode (JSON ZCode) / other: comments, a setting and another server
+seed <root>/Pat Doe/.zcode/cli/config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     "servers": {
+  |       // Another server.
+  |       "other": {"command": "other-server", "args": ["--flag"]},
+  |     },
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.zcode/cli/config.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "mcp": {
+  |     "servers": {
+  |       "ghostlight": {
+  |         "args": [
+  |           "mcp"
+  |         ],
+  |         "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |         "env": {}
+  |       }
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with ZCode. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.zcode/cli/config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     "servers": {
+  |       // Another server.
+  |       "other": {"command": "other-server", "args": ["--flag"]},
+  |       "ghostlight": {
+  |         "args": ["mcp"],
+  |         "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |         "env": {},
+  |       },
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.zcode/cli/config.json.ghostlight-backup: the seed's bytes
+
+=== opencode (OpenCode) / other: comments, a setting and another server
+seed <root>/Pat Doe/.config/opencode/opencode.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"type": "local", "command": ["other-server", "--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://opencode.ai/docs
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/opencode/opencode.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "mcp": {
+  |     "ghostlight": {
+  |       "command": [
+  |         "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |         "mcp"
+  |       ],
+  |       "enabled": true,
+  |       "type": "local"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with OpenCode. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/opencode/opencode.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"type": "local", "command": ["other-server", "--flag"]},
+  |     "ghostlight": {
+  |       "command": ["<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe", "mcp"],
+  |       "enabled": true,
+  |       "type": "local",
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/opencode/opencode.json.ghostlight-backup: the seed's bytes
+
+=== crush (JSON Crush) / other: comments, a setting and another server
+seed <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://github.com/charmbracelet/crush
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/crush/crush.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "mcp": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with Crush. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "type": "stdio",
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/crush/crush.json.ghostlight-backup: the seed's bytes
+
+=== copilot-cli (JSON Copilot) / other: comments, a setting and another server
+seed <root>/Pat Doe/.copilot/mcp-config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://github.com/github/copilot-cli
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.copilot/mcp-config.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "env": {},
+  |       "tools": [
+  |         "*"
+  |       ],
+  |       "type": "local"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with GitHub Copilot CLI. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.copilot/mcp-config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |       "env": {},
+  |       "tools": ["*"],
+  |       "type": "local",
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.copilot/mcp-config.json.ghostlight-backup: the seed's bytes
+
+=== kilo-code (JSON OpenCodeV1) / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/kilo/kilo.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"type": "local", "command": ["other-server", "--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://kilo.ai/
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/kilo/kilo.json
+connector command: "<root>\Pat Doe\.ghostlight\bin\ghostlight.exe" mcp
+manual setup:
+  | {
+  |   "mcp": {
+  |     "ghostlight": {
+  |       "command": [
+  |         "<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe",
+  |         "mcp"
+  |       ],
+  |       "enabled": true,
+  |       "type": "local"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- install
+changed: yes
+says: Ghostlight was registered with Kilo Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/kilo/kilo.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"type": "local", "command": ["other-server", "--flag"]},
+  |     "ghostlight": {
+  |       "command": ["<root>\\Pat Doe\\.ghostlight\\bin\\ghostlight.exe", "mcp"],
+  |       "enabled": true,
+  |       "type": "local",
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/kilo/kilo.json.ghostlight-backup: the seed's bytes
