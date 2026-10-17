@@ -240,12 +240,12 @@ test("opening a destination over HTTP is one POST naming it", async () => {
   const send = fakeFetch(() => answer(200, {}));
   const transport = Transport.overHttp({ fetch: send, bearer: "k" });
   await transport.openDestination("home");
-  await transport.openHarnessDownload("codex");
+  await transport.openHarnessDownload("cline-vscode");
   assert.equal(send.calls.length, 2);
   assert.equal(send.calls[0].method, "POST");
   assert.equal(send.calls[0].path, "/api/open");
   assert.equal(send.calls[0].body, '{"destination":"home"}');
-  assert.equal(send.calls[1].body, '{"product":"codex"}');
+  assert.equal(send.calls[1].body, '{"harness":"cline-vscode"}');
 });
 
 test("a success with no body resolves null, and an act hands over the change it caused", async () => {

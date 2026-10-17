@@ -17,7 +17,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: not_detected (not detected)
 detail: Not detected. You can prepare its user configuration before installing it.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -70,7 +70,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: available (detected, not connected)
 detail: Detected and ready for an explicit Ghostlight registration.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -131,7 +131,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: available (detected, not connected)
 detail: Detected and ready for an explicit Ghostlight registration.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -198,7 +198,7 @@ state: needs_attention (needs attention)
 detail: A foreign entry holds this target's Ghostlight registration; it was left untouched.
 evidence: Found another program, `node` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `<edge>` there and changed nothing.
 offers: fix, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -262,7 +262,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: installed (connected)
 detail: Ghostlight is registered for this user context.
 offers: uninstall, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -323,7 +323,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -398,7 +398,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -473,7 +473,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -543,7 +543,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: needs_attention (needs attention)
 detail: This configuration could not be parsed at line 4; it was left untouched.
 offers: download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -600,7 +600,7 @@ wrote <root>/state/harness-locations.json:
 state: available (detected, not connected)
 detail: Detected and ready for an explicit Ghostlight registration.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/located/cline_mcp_settings.json
@@ -665,7 +665,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: not_detected (not detected)
 detail: Not detected. You can prepare its user configuration before installing it.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -718,7 +718,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: available (detected, not connected)
 detail: Detected and ready for an explicit Ghostlight registration.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -779,7 +779,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: available (detected, not connected)
 detail: Detected and ready for an explicit Ghostlight registration.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -846,7 +846,7 @@ state: needs_attention (needs attention)
 detail: A foreign entry holds this target's Ghostlight registration; it was left untouched.
 evidence: Found another program, `node` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `<edge>` there and changed nothing.
 offers: fix, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -910,7 +910,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: installed (connected)
 detail: Ghostlight is registered for this user context.
 offers: uninstall, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -971,7 +971,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -1046,7 +1046,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -1121,7 +1121,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -1191,7 +1191,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 state: needs_attention (needs attention)
 detail: This configuration could not be parsed at line 4; it was left untouched.
 offers: download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -1248,7 +1248,7 @@ wrote <root>/state/harness-locations.json:
 state: available (detected, not connected)
 detail: Detected and ready for an explicit Ghostlight registration.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
 config path: <root>/located/cline_mcp_settings.json
@@ -1313,7 +1313,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: not_detected (not detected)
 detail: Not detected. You can prepare its user configuration before installing it.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: yes
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -1360,7 +1360,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: available (detected, not connected)
 detail: Detected and ready for an explicit Ghostlight registration.
 offers: install, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: yes
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json
@@ -1408,7 +1408,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 state: installed (connected)
 detail: Ghostlight is registered for this user context.
 offers: uninstall, download, locate
-download: https://docs.cline.bot/cline-cli/overview
+download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: yes
 config path: <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json

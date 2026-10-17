@@ -105,7 +105,7 @@
     test_notification: { method: POST, path: "/api/notifications/test", body: () => ({}) },
     reveal_diagnostics: { method: POST, path: "/api/diagnostics/reveal", body: () => ({}) },
     open_destination: { method: POST, path: "/api/open", body: ({ destination }) => ({ destination }) },
-    open_harness_download: { method: POST, path: "/api/open", body: ({ productId }) => ({ product: productId }) },
+    open_harness_download: { method: POST, path: "/api/open", body: ({ id }) => ({ harness: id }) },
     continue_in_window: {
       method: POST,
       path: "/api/window",
@@ -457,8 +457,8 @@
       /** Ask the service to have the person locate one supported harness executable or settings file. */
       locateHarness: (id) => call("locate_harness", { id }),
 
-      /** Open one product-owned official download destination. */
-      openHarnessDownload: (productId) => call("open_harness_download", { productId }),
+      /** Open the official download page of one host, named by its harness id. */
+      openHarnessDownload: (id) => call("open_harness_download", { id }),
 
       /** Prove the notification path end to end. */
       testNotification: () => call("test_notification"),

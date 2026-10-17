@@ -537,26 +537,6 @@ struct DiagnosticsPart<'a> {
     diagnostics: &'a [DiagnosticItem],
 }
 
-/// The key a client entry holds its official download address under.
-const DOWNLOAD_URL_KEY: &str = "download_url";
-
-/// Add the official download address to a projected client entry that has one.
-///
-/// The address is public, so every audience is given it: a tab opens it as an ordinary anchor.
-/// An entry with no download keeps no key. `resolve` answers the address of a product.
-pub fn add_download_url(harness: &mut Value, resolve: impl FnOnce(&str) -> Option<&'static str>) {
-    if harness.get("can_download") != Some(&Value::Bool(true)) {
-        return;
-    }
-    let url = harness
-        .get("product_id")
-        .and_then(Value::as_str)
-        .and_then(resolve);
-    if let (Some(url), Some(entry)) = (url, harness.as_object_mut()) {
-        entry.insert(DOWNLOAD_URL_KEY.to_owned(), json!(url));
-    }
-}
-
 /// What one audience sees, made for one user home.
 #[derive(Clone, Debug)]
 pub struct Projection {

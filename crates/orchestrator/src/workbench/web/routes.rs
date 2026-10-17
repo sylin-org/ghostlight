@@ -17,11 +17,11 @@ use super::events::{Refused, EVENT_STREAM_TYPE};
 use super::http::{header, Head, Incoming, Method, Response, Status};
 use super::limits::retry_after_seconds;
 use super::{same_secret, Shared};
-use crate::install::{HarnessAction, HarnessActionResult};
+use crate::install::HarnessAction;
 use crate::language::setup::SetupAction;
 use crate::language::workbench as words;
 use crate::workbench::context::WebContext;
-use crate::workbench::parts::{add_download_url, Audience, Part, Projection};
+use crate::workbench::parts::{Audience, Part, Projection};
 use crate::workbench::{
     validate_policy_document, validate_search_query, HarnessActError, PageAddress,
     PolicyWriteError, RuntimeSource, WorkbenchDestination, WorkbenchRuntimeIntent,
@@ -784,13 +784,13 @@ struct HarnessArguments {
     expected_state: String,
 }
 
-/// What the page asks to have opened: a destination from the closed vocabulary or a client's
-/// product, and exactly one of the two.
+/// What the page asks to have opened: a destination from the closed vocabulary or a host's
+/// download page by its harness id, and exactly one of the two.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OpenArguments {
     destination: Option<WorkbenchDestination>,
-    product: Option<String>,
+    harness: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -834,14 +834,7 @@ fn snapshot(shared: &Shared, head: &Head, projection: &Projection) -> Response {
         .into_iter()
         .filter(|part| projection.shows(*part))
         .map(|part| {
-            let mut value = projection.part(part, &snapshot, || shared.facade.setup_view());
-            if part == Part::Integrations {
-                if let Some(harnesses) = value.get_mut("harnesses").and_then(Value::as_array_mut) {
-                    harnesses
-                        .iter_mut()
-                        .for_each(|harness| link_download(shared, harness));
-                }
-            }
+            let value = projection.part(part, &snapshot, || shared.facade.setup_view());
             (part.token().to_owned(), value)
         })
         .collect();
@@ -874,22 +867,6 @@ fn acted(shared: &Shared, response: Response) -> Response {
     } else {
         response
     }
-}
-
-/// Give a projected client entry its download address, when the product has one.
-fn link_download(shared: &Shared, harness: &mut Value) {
-    add_download_url(harness, |product| {
-        shared.facade.harness_download_url(product).ok()
-    });
-}
-
-/// A client act's result, projected, with the summary's download address.
-fn harness_result(shared: &Shared, projection: &Projection, result: &HarnessActionResult) -> Value {
-    let mut value = projection.harness_result(result);
-    if let Some(summary) = value.get_mut("summary") {
-        link_download(shared, summary);
-    }
-    value
 }
 
 fn search(shared: &Shared, body: &[u8]) -> Response {
@@ -943,15 +920,7 @@ fn rescan(shared: &Shared, projection: &Projection, watching: bool, body: &[u8])
         shared.limits.rescan_for_window(scan)
     };
     match outcome {
-        Ok(summaries) => {
-            let mut roster = projection.harnesses(&summaries);
-            if let Some(harnesses) = roster.as_array_mut() {
-                harnesses
-                    .iter_mut()
-                    .for_each(|harness| link_download(shared, harness));
-            }
-            json_response(Status::Ok, &roster)
-        }
+        Ok(summaries) => json_response(Status::Ok, &projection.harnesses(&summaries)),
         Err(message) => refused(&message),
     }
 }
@@ -1100,7 +1069,7 @@ fn harness_act(shared: &Shared, projection: &Projection, body: &[u8]) -> Respons
         arguments.action.into(),
         &arguments.expected_state,
     ) {
-        Ok(result) => json_response(Status::Ok, &harness_result(shared, projection, &result)),
+        Ok(result) => json_response(Status::Ok, &projection.harness_result(&result)),
         Err(HarnessActError::Stale) => {
             failure(Status::Conflict, ErrorCode::Stale, words::STALE_HARNESS)
         }
@@ -1126,12 +1095,12 @@ fn open(shared: &Shared, body: &[u8]) -> Response {
     let opened = match arguments {
         OpenArguments {
             destination: Some(destination),
-            product: None,
+            harness: None,
         } => shared.facade.open_destination(destination),
         OpenArguments {
             destination: None,
-            product: Some(product),
-        } => shared.facade.open_harness_download(&product),
+            harness: Some(harness),
+        } => shared.facade.open_harness_download(&harness),
         OpenArguments { .. } => return bad_request(),
     };
     match opened {
@@ -1186,7 +1155,7 @@ fn locate(shared: &Shared, projection: &Projection, body: &[u8]) -> Response {
         Err(response) => return response,
     };
     match shared.facade.locate_harness_by_picking(&arguments.id) {
-        Ok(Some(result)) => json_response(Status::Ok, &harness_result(shared, projection, &result)),
+        Ok(Some(result)) => json_response(Status::Ok, &projection.harness_result(&result)),
         Ok(None) => json_response(Status::Ok, &Value::Null),
         Err(error) => refused(&error.to_string()),
     }

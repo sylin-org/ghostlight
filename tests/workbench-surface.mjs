@@ -1385,6 +1385,11 @@ controlling.clickOn("[data-destination]", { dataset: { destination: "home" } });
 await controlling.settle();
 const controlOpenedLinks = controlling.opened.length;
 const openRequest = controlRequests.find((request) => request.path === "/api/open");
+controlling.clickOn("[data-harness-operation]", {
+  dataset: { harness: "qwen-code", harnessOperation: "download", harnessName: "Qwen Code" }
+});
+await controlling.settle();
+const downloadRequest = controlRequests.filter((request) => request.path === "/api/open")[1];
 
 // Settings in the window: a press inside it acts through the transport, and its state follows the
 // change the act caused without a snapshot.
@@ -1721,6 +1726,11 @@ const httpChecks = [
   ["the window's pause is waited for as well", controlHold?.headers.Authorization === "Bearer key-1"
     && controlSnapshotsAfterHold === controlSnapshotsBeforeHold && controlWordAfterHold === "resume",
     `snapshots=${controlSnapshotsBeforeHold}->${controlSnapshotsAfterHold} intent=${controlWordAfterHold}`],
+  ["Install in a page that cannot open links asks the service for that host's page by its harness id",
+    downloadRequest?.body === '{"harness":"qwen-code"}'
+      && controlPanes["qwen-code"].includes('data-harness-operation="download" data-harness="qwen-code"')
+      && !controlPanes["qwen-code"].includes("data-product"),
+    JSON.stringify(downloadRequest)],
   ["the window asks its service to open a link, and a tab opens it itself",
     controlOpenedLinks === 0 && openRequest?.body === '{"destination":"home"}'
       && openRequest.headers.Authorization === "Bearer key-1" && watchAbout.opened.length === 1,

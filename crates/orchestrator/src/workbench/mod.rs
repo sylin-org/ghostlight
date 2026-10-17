@@ -692,10 +692,12 @@ impl WorkbenchFacade {
         self.open_secure_link(&*self.native_acts()?, destination.url())
     }
 
-    /// Open the official download page of one supported client.
-    pub fn open_harness_download(&self, product_id: &str) -> Result<(), NativeActError> {
+    /// Open the official download page of one host, named by its harness id.
+    ///
+    /// An id outside the roster or a host with no download page is refused and opens nothing.
+    pub fn open_harness_download(&self, id: &str) -> Result<(), NativeActError> {
         let acts = self.native_acts()?;
-        let url = self.harness_download_url(product_id)?;
+        let url = self.harnesses.download_url(id)?;
         self.open_secure_link(&*acts, url)
     }
 
@@ -1275,11 +1277,6 @@ impl WorkbenchFacade {
         let result = self.harnesses.setup_detected()?;
         self.roster_changed();
         Ok(result)
-    }
-
-    /// Resolve one supported product's closed official download destination.
-    pub fn harness_download_url(&self, product_id: &str) -> Result<&'static str, HarnessError> {
-        self.harnesses.download_url(product_id)
     }
 
     /// Validate and remember one user-located harness executable or configuration.

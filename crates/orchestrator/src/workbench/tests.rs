@@ -1206,25 +1206,52 @@ fn every_runtime_intent_reads_from_the_name_the_page_sends() {
 }
 
 #[test]
-fn a_clients_download_opens_its_page_and_an_unknown_product_opens_nothing() {
+fn each_host_opens_its_own_download_page_and_an_unknown_one_opens_nothing() {
     let (facade, acts, root) = facade_with_acts(true);
-    let product = facade
+    let cline: Vec<_> = facade
         .cached_harnesses()
         .into_iter()
-        .find(|summary| summary.can_download)
-        .expect("some supported client has an official download")
-        .product_id;
-    facade.open_harness_download(&product).unwrap();
-    let expected = facade.harness_download_url(&product).unwrap();
-    assert!(expected.starts_with("https://"));
-    assert_eq!(*acts.urls.lock().unwrap(), [expected]);
+        .filter(|summary| summary.agent.id == "cline")
+        .collect();
+    let hosts: Vec<&str> = cline.iter().map(|summary| summary.id.as_str()).collect();
+    assert_eq!(
+        hosts,
+        [
+            "cline-cli",
+            "cline-vscode",
+            "cline-cursor",
+            "cline-windsurf"
+        ]
+    );
+    for summary in &cline {
+        facade.open_harness_download(&summary.id).unwrap();
+    }
+    let expected: Vec<String> = cline
+        .iter()
+        .map(|summary| {
+            summary
+                .download_url
+                .clone()
+                .expect("every Cline host has a page")
+        })
+        .collect();
+    assert_eq!(*acts.urls.lock().unwrap(), expected);
+    assert_ne!(
+        expected[0], expected[1],
+        "the extension's page is not the CLI's"
+    );
 
-    let refused = facade.open_harness_download("not-a-product").unwrap_err();
+    let refused = facade.open_harness_download("not-a-harness").unwrap_err();
+    assert!(matches!(
+        refused,
+        super::NativeActError::Harness(crate::install::HarnessError::UnknownHarness(_))
+    ));
+    let refused = facade.open_harness_download("claude-desktop").unwrap_err();
     assert!(matches!(
         refused,
         super::NativeActError::Harness(crate::install::HarnessError::NoDownload(_))
     ));
-    assert_eq!(acts.urls.lock().unwrap().len(), 1);
+    assert_eq!(acts.urls.lock().unwrap().len(), cline.len());
     let _ = std::fs::remove_dir_all(root);
 }
 

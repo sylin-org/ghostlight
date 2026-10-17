@@ -678,8 +678,8 @@ fn write_summary(
     summary: &HarnessSummary,
 ) {
     let HarnessSummary {
-        id: _,
-        product_id,
+        id,
+        product_id: _,
         name: _,
         label: _,
         target: _,
@@ -691,6 +691,7 @@ fn write_summary(
         can_fix,
         can_uninstall,
         can_download,
+        download_url,
         can_locate,
         copy_only,
         private_view,
@@ -714,10 +715,13 @@ fn write_summary(
     .filter_map(|(offered, act)| offered.then_some(act))
     .collect();
     let _ = writeln!(out, "offers: {}", acts.join(", "));
+    assert_eq!(
+        download_url.as_deref(),
+        registry.download_url(id).ok(),
+        "{id}: the page the window opens is the one the summary names"
+    );
     if *can_download {
-        let download = registry
-            .download_url(product_id)
-            .unwrap_or("none, although offered");
+        let download = download_url.as_deref().unwrap_or("none, although offered");
         let _ = writeln!(out, "download: {download}");
     }
     let _ = writeln!(out, "copy only: {}", yes(*copy_only));

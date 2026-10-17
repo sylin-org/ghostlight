@@ -4,6 +4,7 @@
 //! browser tab or the window would. A server takes the default port of its home or, when another
 //! test holds it, a port the system picks; no test depends on which.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -2100,31 +2101,38 @@ fn the_window_opens_a_destination_or_a_clients_download_and_nothing_else() {
         [WorkbenchDestination::Home.url()]
     );
 
-    let product = fixture
+    let vscode = fixture
         .facade
         .cached_harnesses()
         .into_iter()
-        .find(|summary| summary.can_download)
-        .unwrap()
-        .product_id;
+        .find(|summary| summary.id == "cline-vscode")
+        .unwrap();
     let download = fixture.control(post(
         "/api/open",
-        &json!({ "product": product }).to_string(),
+        &json!({ "harness": vscode.id }).to_string(),
     ));
     assert_eq!(download.status, 200);
-    assert_eq!(acts.urls.lock().unwrap().len(), 2);
-    assert!(acts.urls.lock().unwrap()[1].starts_with("https://"));
+    assert_eq!(
+        acts.urls.lock().unwrap()[1..],
+        [vscode.download_url.unwrap()]
+    );
 
-    let unknown = fixture.control(post("/api/open", r#"{"product":"not-a-product"}"#));
-    assert_eq!(unknown.status, 422);
-    assert_eq!(unknown.code(), "refused");
+    for unknown in [
+        r#"{"harness":"not-a-harness"}"#,
+        r#"{"harness":"claude-desktop"}"#,
+    ] {
+        let unknown = fixture.control(post("/api/open", unknown));
+        assert_eq!(unknown.status, 422);
+        assert_eq!(unknown.code(), "refused");
+    }
 
     for body in [
         r#"{"destination":"https://example.com"}"#,
-        r#"{"destination":"home","product":"x"}"#,
+        r#"{"destination":"home","harness":"x"}"#,
         r#"{}"#,
         r#"{"url":"https://example.com"}"#,
-        r#"{"destination":null,"product":null}"#,
+        r#"{"product":"cline"}"#,
+        r#"{"destination":null,"harness":null}"#,
     ] {
         let reply = fixture.control(post("/api/open", body));
         assert_eq!(reply.status, 400, "{body}");
@@ -2321,8 +2329,14 @@ fn every_context_is_given_the_table_of_links_and_never_an_address_of_its_own() {
 }
 
 #[test]
-fn a_watcher_is_given_the_download_address_of_each_client_that_has_one() {
+fn a_watcher_is_given_the_download_address_of_each_host_that_has_one() {
     let fixture = Fixture::start();
+    let pages: HashMap<String, Option<String>> = fixture
+        .facade
+        .cached_harnesses()
+        .into_iter()
+        .map(|summary| (summary.id, summary.download_url))
+        .collect();
     for reply in [
         fixture.watch(get("/api/snapshot?parts=integrations")),
         fixture.control(get("/api/snapshot?parts=integrations")),
@@ -2331,20 +2345,24 @@ fn a_watcher_is_given_the_download_address_of_each_client_that_has_one() {
         let harnesses = body["parts"]["integrations"]["harnesses"]
             .as_array()
             .unwrap();
-        let mut downloadable = 0;
-        for harness in harnesses {
-            if harness["can_download"] == true {
-                downloadable += 1;
-                let url = fixture
-                    .facade
-                    .harness_download_url(harness["product_id"].as_str().unwrap())
-                    .unwrap();
-                assert_eq!(harness["download_url"], url);
-            } else {
-                assert!(harness.get("download_url").is_none());
-            }
+        let shown: HashMap<&str, Option<&str>> = harnesses
+            .iter()
+            .map(|harness| {
+                assert_eq!(
+                    harness["can_download"] == true,
+                    harness.get("download_url").is_some()
+                );
+                (
+                    harness["id"].as_str().unwrap(),
+                    harness.get("download_url").and_then(Value::as_str),
+                )
+            })
+            .collect();
+        assert_eq!(shown.len(), pages.len());
+        for (id, page) in &pages {
+            assert_eq!(shown[id.as_str()], page.as_deref(), "{id}");
         }
-        assert!(downloadable > 0);
+        assert_ne!(shown["cline-vscode"], shown["cline-cli"]);
     }
     let rescan = fixture.watch(post("/api/integrations/rescan", "{}")).json();
     assert!(rescan

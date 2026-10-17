@@ -533,13 +533,13 @@ function harnessText(id, kind) {
 async function handleHarnessAction(button) {
   if (!transport.available || button.disabled) return;
   const { harness: id, harnessOperation: operation, harnessAction: action, harnessState: state,
-    harnessName: name, harnessFile: file, harnessSessions: sessions, product: productId, copyKind: copyKind } = button.dataset;
+    harnessName: name, harnessFile: file, harnessSessions: sessions, copyKind: copyKind } = button.dataset;
   if (operation === "manage" && action === "uninstall"
     && !(await view.confirmRemoval(name, file, Number(sessions ?? 0)))) return;
   if (operation === "manage" && action === "fix" && !(await view.confirmFix(name, file))) return;
   if (operation === "download") {
     try {
-      await transport.openHarnessDownload(productId);
+      await transport.openHarnessDownload(id);
       view.toast(`Opened the official ${name} download page.`);
     } catch (error) {
       view.toast(String(error), true);

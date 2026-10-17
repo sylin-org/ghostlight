@@ -660,6 +660,7 @@ pub(super) mod test_support {
             can_fix: false,
             can_uninstall: false,
             can_download: false,
+            download_url: None,
             can_locate: true,
             copy_only: false,
             private_view: false,

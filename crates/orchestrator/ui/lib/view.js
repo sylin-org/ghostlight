@@ -932,8 +932,7 @@
         // A tab follows the product's own link; the window asks the service to open it.
         return opensLinks()
           ? `<a class="${kind}" href="${escapeHtml(agent.download_url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
-          : `<button class="${kind}" type="button" data-harness-operation="download"`
-            + ` data-product="${escapeHtml(agent.product_id)}"${who}>${label}</button>`;
+          : `<button class="${kind}" type="button" data-harness-operation="download"${who}>${label}</button>`;
       }
       if (act === "locate") return `<button class="${kind}" type="button" data-harness-operation="locate"${who}>${label}</button>`;
       if (act === "copy") {

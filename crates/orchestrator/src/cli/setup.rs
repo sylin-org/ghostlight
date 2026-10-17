@@ -1117,6 +1117,7 @@ mod tests {
             can_fix: false,
             can_uninstall: false,
             can_download: false,
+            download_url: None,
             can_locate: false,
             copy_only: false,
             private_view: false,

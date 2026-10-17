@@ -227,13 +227,14 @@ impl HarnessRegistry {
         })
     }
 
-    /// Return the closed official download destination for one supported product.
-    pub fn download_url(&self, product_id: &str) -> Result<&'static str, HarnessError> {
-        definitions(&self.inner.context)
-            .into_iter()
-            .find(|definition| definition.product_id == product_id)
-            .and_then(|definition| definition.download_url)
-            .ok_or_else(|| HarnessError::NoDownload(product_id.into()))
+    /// Return the closed official download destination of one host, by its harness id.
+    ///
+    /// Fails with `UnknownHarness` for an id outside the roster and with `NoDownload` for a host
+    /// that has no official download page.
+    pub fn download_url(&self, id: &str) -> Result<&'static str, HarnessError> {
+        definition(&self.inner.context, id)?
+            .download_url
+            .ok_or_else(|| HarnessError::NoDownload(id.into()))
     }
 
     /// Persist one user-selected executable or configuration path after validating it.
@@ -379,8 +380,12 @@ pub struct HarnessSummary {
     pub can_fix: bool,
     /// Whether an owned registration can be removed.
     pub can_uninstall: bool,
-    /// Whether the product has a closed official download destination on this platform.
+    /// Whether this host has a closed official download destination on this platform.
     pub can_download: bool,
+    /// This host's official download page, present exactly when `can_download` is. It is public,
+    /// so every audience is given it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_url: Option<String>,
     /// Whether the native Locate action is available.
     pub can_locate: bool,
     /// Whether Ghostlight never edits this target's file, so copying its setup and pasting it in
@@ -1264,6 +1269,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         can_fix,
         can_uninstall: state == HarnessState::Installed,
         can_download: definition.download_url.is_some(),
+        download_url: definition.download_url.map(str::to_owned),
         can_locate: true,
         copy_only: manual,
         private_view: context.private_to(definition).is_some(),
@@ -2331,7 +2337,7 @@ pub enum HarnessError {
     /// Unsupported identifier supplied by the presentation adapter.
     #[error("unknown supported harness `{0}`")]
     UnknownHarness(String),
-    /// The selected product does not have an official download on this platform.
+    /// The selected host does not have an official download on this platform.
     #[error("supported harness `{0}` has no official download for this platform")]
     NoDownload(String),
     /// The installed edge is unavailable.
@@ -2744,19 +2750,24 @@ mod tests {
         let directory = temporary("download-destinations");
         let context = context(&directory);
         let registry = HarnessRegistry::with_context(context.clone());
-        for product_id in definitions(&context)
-            .into_iter()
-            .filter(|row| row.download_url.is_some())
-            .map(|row| row.product_id)
-        {
-            assert!(registry
-                .download_url(product_id)
-                .unwrap()
-                .starts_with("https://"));
+        for summary in registry.summaries() {
+            let row = ROSTER.iter().find(|row| row.id == summary.id).unwrap();
+            assert_eq!(summary.download_url.as_deref(), row.download_url);
+            assert_eq!(summary.can_download, row.download_url.is_some());
+            match row.download_url {
+                Some(url) => {
+                    assert!(url.starts_with("https://"), "{}", row.id);
+                    assert_eq!(registry.download_url(row.id).unwrap(), url);
+                }
+                None => assert!(matches!(
+                    registry.download_url(row.id),
+                    Err(HarnessError::NoDownload(_))
+                )),
+            }
         }
         assert!(matches!(
-            registry.download_url("not-a-product"),
-            Err(HarnessError::NoDownload(_))
+            registry.download_url("not-a-harness"),
+            Err(HarnessError::UnknownHarness(_))
         ));
         fs::remove_dir_all(directory).unwrap();
     }
