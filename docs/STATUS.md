@@ -48,6 +48,8 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   stream of any role for 10 minutes exits). Next: the owner's checkpoint 2 (tray icon and state
   dot, first-close hint, Start-menu launch, Quit in Settings, Continue at a section from a watch
   tab).
+- **Window design** ([design.md](tasks/break-2.0/design.md)): landed on `dev` on 2026-10-17 and
+  awaits the owner's live check.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
