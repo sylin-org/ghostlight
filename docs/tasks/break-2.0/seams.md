@@ -210,6 +210,24 @@ w01-windows-user-path has landed. polish-01-deployment-report has landed. tidy-0
 
 ## Owed live checks
 
+- Result, 2026-10-17 (release-candidate live run on the owner's Windows 11 machine, Chrome, deploys
+  c225fd78 then 9c52a892 in place, version 2.0.0): every public demo stage passed through Ghostlight's
+  own tools. Brief (fill, submit, an expect that honestly failed on the stage's canned success text),
+  form (an unknown select option refused with nothing changed, then fill and submit), desk (right,
+  triple and double click, typing and keys, a view-coordinate drag, a wheel scroll inside a region, a
+  prompt dialog announced by the click and answered), signals (console and network diagnosis, a wait
+  on a slow task), reading (article, structure, find), studio (inline file upload; captured-image
+  hand-back failed, fixed in 9c52a892 and then passed), composed iframe (selector fill in the frame in
+  the shadow root, a click whose expect held), shadow (open-root fill and submit; the closed root
+  lists nothing and a point click lands inside it), foundry (a 3-step and a 7-step flow with a
+  flow_ref screenshot upload, drag to a drop target, a 21 s recording saved to the page's GIF input),
+  hover, zoom, back and forward, a stale handle after navigation, tabs list, an awaited execute, and
+  policy_explain. The session and its tab survived the service replacement. Website notes (not
+  product): the brief stage's success text ignores its input, the foundry Promote button has no
+  handler without a policy, and the shadow stage says Ghostlight reports a closed root, which it does
+  not. Product notes for 2.x: the document outline at a shallow depth is mostly unlabeled containers;
+  on-demand start with two registered browsers asks instead of using the profile scan (2.0.1).
+
 - Result, 2026-10-16: CI run 38936325057 on dev ec0f61f4 is green in all 11 jobs. The browser lane passed
   frame-browser on Linux and Windows with the recaptured fixture (iframe-fixture-composed), so the shadow-root
   stage, the "Verify composed frame" find and click and the label change ran for the first time. The
