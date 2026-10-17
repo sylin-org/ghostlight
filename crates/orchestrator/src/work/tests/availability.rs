@@ -721,6 +721,54 @@ fn a_flow_names_the_browser_only_on_the_records_of_work_that_reached_it() {
     );
 }
 
+/// A record names the browser a command was written to, whatever the failure: a read whose
+/// deadline ran out while the browser held it, or a page that changed under it, fails before any
+/// effect and still reached the browser. A command that failed before any of it was written names
+/// none.
+#[test]
+fn a_record_names_the_browser_a_command_was_written_to_whatever_the_failure() {
+    for (written, failure, named) in [
+        (
+            true,
+            BrowserError::DeadlineBeforeDispatch,
+            Some("Google Chrome"),
+        ),
+        (
+            true,
+            BrowserError::DocumentUnavailable,
+            Some("Google Chrome"),
+        ),
+        (false, BrowserError::DisconnectedBeforeDispatch, None),
+    ] {
+        let (executor, browser, workspace, audit) = pinned_to_chrome();
+        if written {
+            browser.push(Err(failure.clone()));
+        } else {
+            browser.push_unwritten(Err(failure.clone()));
+        }
+
+        let listed = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"list"}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            listed.status,
+            Status::Failed,
+            "{failure:?}: {}",
+            listed.summary
+        );
+        assert_eq!(browser.routed(), vec!["browser_chrome"], "{failure:?}");
+        assert_eq!(
+            audit.0.lock().unwrap()[0].browser.as_deref(),
+            named,
+            "{failure:?}"
+        );
+    }
+}
+
 /// A pinned browser that stays gone while a different browser is connected is the one case
 /// that names another profile. Nothing is sent, the session is not moved, and the record names
 /// no browser, because none was reached.

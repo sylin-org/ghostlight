@@ -88,6 +88,12 @@ pub struct BrowserDispatch<'a> {
     pub cancelled: &'a AtomicBool,
     /// Product-owned runtime control decision; never held across a receipt wait.
     pub admit: &'a dyn Fn() -> Result<(), BrowserError>,
+    /// Set by the port when it starts writing the command's first frame to the browser, and
+    /// never cleared. Once set, the browser took part in the work whatever the outcome; while
+    /// clear, nothing of the command left the service. Reaching the browser says nothing about
+    /// effects: a read the browser held when its deadline ran out reached it and changed
+    /// nothing.
+    pub written: &'a AtomicBool,
 }
 
 /// A synchronous physical primitive port used only by the orchestrator executor.
@@ -108,6 +114,10 @@ pub trait BrowserPort: Send + Sync {
     ) -> Result<BrowserOutcome, BrowserError>;
 
     /// Recheck live controls immediately before dispatch; real relays do this after writer wait.
+    /// The port sets `dispatch.written` when it starts writing the command to the browser.
+    ///
+    /// This default has no write boundary of its own to observe, so it counts the command as
+    /// written once runtime control admits it and it hands the command to [`Self::call`].
     fn call_guarded(
         &self,
         browser: &str,
@@ -116,6 +126,7 @@ pub trait BrowserPort: Send + Sync {
         dispatch: BrowserDispatch<'_>,
     ) -> Result<BrowserOutcome, BrowserError> {
         (dispatch.admit)()?;
+        dispatch.written.store(true, Ordering::SeqCst);
         self.call(
             browser,
             workspace,
@@ -1002,6 +1013,7 @@ impl BrowserPort for RelayBrowserPort {
                 deadline,
                 cancelled,
                 admit: &|| Ok(()),
+                written: &AtomicBool::new(false),
             },
         )
     }
@@ -1337,29 +1349,6 @@ impl BrowserError {
         }
     }
 
-    /// Whether the failure was seen before any part of the request was sent to a browser, so no
-    /// browser took part in the work.
-    #[must_use]
-    pub const fn before_dispatch(&self) -> bool {
-        matches!(
-            self,
-            Self::DocumentAccess(_)
-                | Self::DocumentUnavailable
-                | Self::RuntimeControl(_)
-                | Self::DisconnectedBeforeDispatch
-                | Self::NotAnsweringBeforeDispatch
-                | Self::BusyBeforeDispatch
-                | Self::WrongProfile
-                | Self::CancelledBeforeDispatch
-                | Self::DeadlineBeforeDispatch
-                | Self::UnknownBrowser(_)
-                | Self::BrowserPinned
-                | Self::AmbiguousBrowser(_)
-                | Self::RecoveryManual { .. }
-                | Self::RecoveryFailed { .. }
-        )
-    }
-
     /// Whether dispatch could have caused a physical effect.
     #[must_use]
     pub const fn effect_unknown(&self) -> bool {
@@ -1379,7 +1368,7 @@ mod contract_tests;
 #[cfg(test)]
 pub(crate) mod testing {
     use std::collections::VecDeque;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, MutexGuard};
     use std::time::Instant;
 
@@ -1399,13 +1388,20 @@ pub(crate) mod testing {
         scopes: Mutex<Vec<crate::browser::adapter::documents::DocumentScope>>,
         calls: Mutex<Vec<Work>>,
         routed: Mutex<Vec<String>>,
-        outcomes: Mutex<VecDeque<Result<BrowserOutcome, BrowserError>>>,
+        outcomes: Mutex<VecDeque<Queued>>,
         control_states: Mutex<Vec<RuntimeControlState>>,
         connected: Mutex<Vec<BrowserSummary>>,
         returning: Mutex<bool>,
         last_connected: Mutex<Option<String>>,
         installed: Mutex<std::collections::HashMap<String, String>>,
         arrivals: Mutex<std::collections::HashMap<String, u64>>,
+    }
+
+    /// One answer the fake will give, and whether it wrote the command to the browser first.
+    #[derive(Debug)]
+    struct Queued {
+        outcome: Result<BrowserOutcome, BrowserError>,
+        written: bool,
     }
 
     impl Default for FakeBrowser {
@@ -1449,8 +1445,21 @@ pub(crate) mod testing {
         pub fn scopes(&self) -> Vec<crate::browser::adapter::documents::DocumentScope> {
             lock(&self.scopes).clone()
         }
+        /// Queue the next answer of a command the fake writes to the browser, whatever the
+        /// answer says.
         pub fn push(&self, outcome: Result<BrowserOutcome, BrowserError>) {
-            lock(&self.outcomes).push_back(outcome);
+            lock(&self.outcomes).push_back(Queued {
+                outcome,
+                written: true,
+            });
+        }
+        /// Queue the next answer of a command the fake fails before writing any of it, as a port
+        /// does when the connection is gone before its first frame.
+        pub fn push_unwritten(&self, outcome: Result<BrowserOutcome, BrowserError>) {
+            lock(&self.outcomes).push_back(Queued {
+                outcome,
+                written: false,
+            });
         }
         pub fn calls(&self) -> Vec<Work> {
             lock(&self.calls).clone()
@@ -1492,15 +1501,14 @@ pub(crate) mod testing {
         }
     }
 
-    impl BrowserPort for FakeBrowser {
-        fn call(
+    impl FakeBrowser {
+        /// Answer one command, with whether the fake wrote it to the browser. Every command is
+        /// written except one answered from [`Self::push_unwritten`].
+        fn answer(
             &self,
             browser: &str,
-            _workspace: &str,
             command: Work,
-            _deadline: Instant,
-            _cancelled: &AtomicBool,
-        ) -> Result<BrowserOutcome, BrowserError> {
+        ) -> (Result<BrowserOutcome, BrowserError>, bool) {
             use crate::browser::adapter::documents::{
                 DocumentInventory, DocumentObservation, PhysicalDocument,
             };
@@ -1525,22 +1533,27 @@ pub(crate) mod testing {
                         .map(|document| vec![document.id.clone()])
                         .unwrap_or_default();
                 }
-                return Ok(BrowserOutcome::Documents {
-                    tab_id: *tab_id,
-                    inventory,
-                });
+                return (
+                    Ok(BrowserOutcome::Documents {
+                        tab_id: *tab_id,
+                        inventory,
+                    }),
+                    true,
+                );
             }
             if let Work::InDocuments { scope, primitive } = command {
                 lock(&self.scopes).push(scope.clone());
-                return self
-                    .call(browser, _workspace, *primitive, _deadline, _cancelled)
-                    .map(|result| BrowserOutcome::InDocuments {
+                let (outcome, written) = self.answer(browser, *primitive);
+                return (
+                    outcome.map(|result| BrowserOutcome::InDocuments {
                         observation: DocumentObservation {
                             visited: scope.allowed,
                             ..DocumentObservation::default()
                         },
                         result: Box::new(result),
-                    });
+                    }),
+                    written,
+                );
             }
             if matches!(&command, Work::Observe { condition, .. } if condition == "visual_settle") {
                 let tab_id = match &command {
@@ -1549,21 +1562,28 @@ pub(crate) mod testing {
                 };
                 lock(&self.routed).push(browser.into());
                 lock(&self.calls).push(command);
-                if let Some(outcome) = lock(&self.outcomes).pop_front() {
-                    return outcome;
+                if let Some(queued) = lock(&self.outcomes).pop_front() {
+                    return (queued.outcome, queued.written);
                 }
-                return Ok(BrowserOutcome::Observed {
-                    tab_id,
-                    satisfied: true,
-                    elapsed_ms: 0,
-                    readiness: crate::browser::adapter::BrowserReadiness::Complete,
-                });
+                return (
+                    Ok(BrowserOutcome::Observed {
+                        tab_id,
+                        satisfied: true,
+                        elapsed_ms: 0,
+                        readiness: crate::browser::adapter::BrowserReadiness::Complete,
+                    }),
+                    true,
+                );
             }
             lock(&self.routed).push(browser.into());
             lock(&self.calls).push(command);
-            let result = lock(&self.outcomes)
-                .pop_front()
-                .unwrap_or_else(|| Err(BrowserError::Primitive("no fake outcome".into())));
+            let Queued {
+                outcome: result,
+                written,
+            } = lock(&self.outcomes).pop_front().unwrap_or_else(|| Queued {
+                outcome: Err(BrowserError::Primitive("no fake outcome".into())),
+                written: true,
+            });
             if let Ok(
                 BrowserOutcome::TabOpened { tab, .. }
                 | BrowserOutcome::Navigated { tab, .. }
@@ -1583,7 +1603,35 @@ pub(crate) mod testing {
                     },
                 );
             }
-            result
+            (result, written)
+        }
+    }
+
+    impl BrowserPort for FakeBrowser {
+        fn call(
+            &self,
+            browser: &str,
+            _workspace: &str,
+            command: Work,
+            _deadline: Instant,
+            _cancelled: &AtomicBool,
+        ) -> Result<BrowserOutcome, BrowserError> {
+            self.answer(browser, command).0
+        }
+
+        fn call_guarded(
+            &self,
+            browser: &str,
+            _workspace: &str,
+            command: Work,
+            dispatch: super::BrowserDispatch<'_>,
+        ) -> Result<BrowserOutcome, BrowserError> {
+            (dispatch.admit)()?;
+            let (outcome, written) = self.answer(browser, command);
+            if written {
+                dispatch.written.store(true, Ordering::SeqCst);
+            }
+            outcome
         }
 
         fn browsers(&self) -> Vec<BrowserSummary> {

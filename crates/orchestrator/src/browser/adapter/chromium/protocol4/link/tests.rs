@@ -422,6 +422,7 @@ fn a_stale_locator_after_a_started_effect_settles_as_an_unknown_effect() {
     let next = Arc::new(Mutex::new(answer(Value::Null)));
     let (port, _fake) = port(scripted(&next));
     let cancelled = AtomicBool::new(false);
+    let written = AtomicBool::new(false);
     let admit = || Ok(());
     let stale = || BrowserError::stale(StaleReason::Removed);
     let mut link = Link::new(
@@ -431,6 +432,7 @@ fn a_stale_locator_after_a_started_effect_settles_as_an_unknown_effect() {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
             admit: &admit,
+            written: &written,
         },
     );
     assert_eq!(link.settle(stale()), stale(), "before any effect it stands");
@@ -622,11 +624,13 @@ fn runtime_control_refusing_an_effect_writes_nothing() {
     let next = Arc::new(Mutex::new(answer(json!({"tabs": []}))));
     let (port, fake) = port(scripted(&next));
     let cancelled = AtomicBool::new(false);
+    let written = AtomicBool::new(false);
     let refuse = || Err(BrowserError::RuntimeControl(ReasonCode::RuntimeHold));
     let dispatch = || BrowserDispatch {
         deadline: Instant::now() + PATIENCE,
         cancelled: &cancelled,
         admit: &refuse,
+        written: &written,
     };
     assert_eq!(
         port.call_guarded(
@@ -640,14 +644,69 @@ fn runtime_control_refusing_an_effect_writes_nothing() {
         ),
         Err(BrowserError::RuntimeControl(ReasonCode::RuntimeHold))
     );
+    assert!(
+        !written.load(Ordering::SeqCst),
+        "the refused effect never reached the browser"
+    );
     assert_eq!(
         port.call_guarded(FOUR, WORKSPACE, BrowserCommand::ListTabs, dispatch()),
         Ok(BrowserOutcome::Tabs { tabs: vec![] }),
         "a read does not ask runtime control"
     );
+    assert!(written.load(Ordering::SeqCst));
     let seen = fake.wait(|seen| !seen.requests.is_empty());
     assert_eq!(seen.requests.len(), 1);
     assert!(matches!(seen.requests[0].1, wire::Primitive::ListTabs(_)));
+}
+
+/// A command reached the browser once its frame was written, whatever its failure says about
+/// effects: a read whose deadline runs out while the browser holds it, and a navigation whose
+/// receipt reports the document changed, both fail before any effect and both reached it. A
+/// browser with no connection is never written to.
+#[test]
+fn a_written_command_reached_the_browser_whatever_its_failure() {
+    let (port, fake) = port(Box::new(|correlation, primitive| match primitive {
+        wire::Primitive::ListTabs(_) => Reply::Never,
+        _ => Reply::Now(FakeExtension::failed(
+            correlation,
+            wire::Failure::DocumentChanged,
+        )),
+    }));
+    let cancelled = AtomicBool::new(false);
+    let admit = || Ok(());
+    let run = |browser: &str, command: BrowserCommand, patience: Duration| {
+        let written = AtomicBool::new(false);
+        let outcome = port.call_guarded(
+            browser,
+            WORKSPACE,
+            command,
+            BrowserDispatch {
+                deadline: Instant::now() + patience,
+                cancelled: &cancelled,
+                admit: &admit,
+                written: &written,
+            },
+        );
+        (outcome, written.load(Ordering::SeqCst))
+    };
+    let navigate = || BrowserCommand::Navigate {
+        tab_id: 12,
+        url: "https://example.com/".into(),
+    };
+
+    assert_eq!(
+        run(FOUR, BrowserCommand::ListTabs, Duration::from_millis(300)),
+        (Err(BrowserError::DeadlineBeforeDispatch), true)
+    );
+    assert_eq!(
+        run(FOUR, navigate(), PATIENCE),
+        (Err(BrowserError::DocumentUnavailable), true)
+    );
+    assert_eq!(
+        run("browser_gone", navigate(), PATIENCE),
+        (Err(BrowserError::DisconnectedBeforeDispatch), false)
+    );
+    assert_eq!(fake.wait(|seen| seen.requests.len() == 2).requests.len(), 2);
 }
 
 #[test]
@@ -998,6 +1057,7 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
     let next = Arc::new(Mutex::new(answer(Value::Null)));
     let (port, _fake) = port(scripted(&next));
     let cancelled = AtomicBool::new(false);
+    let written = AtomicBool::new(false);
     let admit = || Ok(());
     let scroll = || PlannedCall::top(world::scroll(None, Some("down"), None));
     let read = || PlannedCall::top(world::read_text(None, None, 100));
@@ -1038,6 +1098,7 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
                 deadline: Instant::now() + PATIENCE,
                 cancelled: &cancelled,
                 admit: &admit,
+                written: &written,
             },
         );
         let answers = link
@@ -1059,6 +1120,7 @@ fn an_effect_call_acts_only_when_an_answer_shows_it_ran() {
                 deadline: Instant::now() + PATIENCE,
                 cancelled: &cancelled,
                 admit: &admit,
+                written: &written,
             },
         );
         let failed = link
@@ -1088,6 +1150,7 @@ fn cancelled_call(dispatched: bool) -> Result<Answers, BrowserError> {
         })
     }));
     let cancelled = AtomicBool::new(false);
+    let written = AtomicBool::new(false);
     let admit = || Ok(());
     let mut link = Link::new(
         line(&port),
@@ -1096,6 +1159,7 @@ fn cancelled_call(dispatched: bool) -> Result<Answers, BrowserError> {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
             admit: &admit,
+            written: &written,
         },
     );
     thread::scope(|scope| {
@@ -1139,6 +1203,7 @@ fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
         Reply::Now(FakeExtension::ok(correlation, outcome))
     }));
     let cancelled = AtomicBool::new(false);
+    let written = AtomicBool::new(false);
     let admit = || Ok(());
     let mut link = Link::new(
         line(&port),
@@ -1147,6 +1212,7 @@ fn requests_route_by_correlation_and_large_ones_arrive_in_chunks() {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
             admit: &admit,
+            written: &written,
         },
     );
     let listed = link.send(wire::ListTabs { tab_ids: None }).unwrap();
@@ -1181,6 +1247,7 @@ fn the_tab_comes_from_the_last_receipt_or_one_listing() {
     }));
     let (port, fake) = port(scripted(&next));
     let cancelled = AtomicBool::new(false);
+    let written = AtomicBool::new(false);
     let admit = || Ok(());
     let mut link = Link::new(
         line(&port),
@@ -1189,6 +1256,7 @@ fn the_tab_comes_from_the_last_receipt_or_one_listing() {
             deadline: Instant::now() + PATIENCE,
             cancelled: &cancelled,
             admit: &admit,
+            written: &written,
         },
     );
     link.send(wire::Navigate {

@@ -23,6 +23,7 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
         let writer =
             std::sync::Arc::clone(&lock(&port.adapters).connections[TEST_BROWSER].line.writer);
         let cancelled = AtomicBool::new(false);
+        let written = AtomicBool::new(false);
         let held = AtomicBool::new(false);
         let (admitted, checked) = mpsc::channel();
         let guard = writer
@@ -54,6 +55,7 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
                                 Ok(())
                             }
                         },
+                        written: &written,
                     },
                 )
             });
@@ -79,5 +81,6 @@ fn queued_dispatch_rechecks_control_cancellation_and_deadline_without_sending() 
             fake.wait(|_| true).requests.is_empty(),
             "no command may reach the adapter"
         );
+        assert!(!written.load(Ordering::SeqCst));
     }
 }

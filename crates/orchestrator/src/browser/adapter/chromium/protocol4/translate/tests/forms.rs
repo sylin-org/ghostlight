@@ -538,6 +538,7 @@ fn a_pause_between_fields_after_an_edit_leaves_the_effect_unknown() {
         }
     };
     let cancelled = AtomicBool::new(false);
+    let written = AtomicBool::new(false);
     let error = port
         .call_guarded(
             FOUR,
@@ -557,6 +558,7 @@ fn a_pause_between_fields_after_an_edit_leaves_the_effect_unknown() {
                 deadline: Instant::now() + PATIENCE,
                 cancelled: &cancelled,
                 admit: &admit,
+                written: &written,
             },
         )
         .unwrap_err();

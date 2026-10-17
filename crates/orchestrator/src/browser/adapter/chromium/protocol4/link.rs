@@ -483,6 +483,7 @@ impl<'a> Link<'a> {
             (self.dispatch.admit)().map_err(|error| self.settle(error))?;
         }
         let receiver = self.line.receipts.register(&correlation);
+        self.mark_written();
         if write_request_payload(&mut output, &payload, &correlation).is_err() {
             drop(output);
             self.line.receipts.forget(&correlation);
@@ -605,8 +606,14 @@ impl<'a> Link<'a> {
             .writer
             .until(Instant::now() + CONTROL_DELIVERY_TIMEOUT)
             .map_err(|_| BrowserError::BusyBeforeDispatch)?;
+        self.mark_written();
         write_frame(&mut output, &wire::Outbound::Notice(notice))
             .map_err(|_| BrowserError::DisconnectedAfterDispatch)
+    }
+
+    /// Tell the caller that the command reached the browser: a frame of it is being written.
+    fn mark_written(&self) {
+        self.dispatch.written.store(true, Ordering::SeqCst);
     }
 
     /// Ask the extension to interrupt the primitive with `correlation`. Best effort: a writer

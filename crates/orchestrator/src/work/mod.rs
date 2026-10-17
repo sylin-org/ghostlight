@@ -1320,16 +1320,12 @@ impl ApplicationExecutor {
         let browser = self.admitted_browser(context)?;
         self.presentation
             .bind_command(context.workspace.as_str(), context.invocation, &command);
-        let admit = || self.admit_dispatch(context);
         let outcome = self.send(
             context,
             &browser,
             command,
-            crate::browser::BrowserDispatch {
-                deadline: context.deadline,
-                cancelled: context.cancellation.flag(),
-                admit: &admit,
-            },
+            context.deadline,
+            context.cancellation.flag(),
         );
         // An adapter that reports effect-unknown has answered honestly. Route it through the
         // truthful unknown rendering instead of letting per-family receipt matching mistake it
@@ -1342,8 +1338,8 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Send one command to `browser` and remember that the invocation reached it, unless the
-    /// command failed before any of it was sent.
+    /// Send one command to `browser` under runtime control, and remember that the invocation
+    /// reached it when the port wrote any of the command, whatever the outcome.
     ///
     /// The name is read before sending, so a browser that disconnects after taking the command is
     /// still named in the record of the work it took part in.
@@ -1352,7 +1348,8 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         browser: &str,
         command: BrowserCommand,
-        dispatch: crate::browser::BrowserDispatch<'_>,
+        deadline: Instant,
+        cancelled: &AtomicBool,
     ) -> Result<BrowserOutcome, BrowserError> {
         let name = self
             .browser
@@ -1360,11 +1357,19 @@ impl ApplicationExecutor {
             .into_iter()
             .find(|summary| summary.id == browser)
             .map(|summary| summary.display_name());
-        let outcome =
-            self.browser
-                .call_guarded(browser, context.workspace.as_str(), command, dispatch);
-        let sent = !matches!(&outcome, Err(error) if error.before_dispatch());
-        if let Some(name) = name.filter(|_| sent) {
+        let written = AtomicBool::new(false);
+        let outcome = self.browser.call_guarded(
+            browser,
+            context.workspace.as_str(),
+            command,
+            crate::browser::BrowserDispatch {
+                deadline,
+                cancelled,
+                admit: &|| self.admit_dispatch(context),
+                written: &written,
+            },
+        );
+        if let Some(name) = name.filter(|_| written.load(Ordering::SeqCst)) {
             let mut reached = self.reached();
             let entry = reached.entry(context.invocation.into()).or_default();
             entry.invocation = Some(name.clone());
@@ -1627,11 +1632,8 @@ impl ApplicationExecutor {
                 tab_id: tab.physical_id,
                 released: false,
             },
-            crate::browser::BrowserDispatch {
-                deadline,
-                cancelled: &cancelled,
-                admit: &|| self.admit_dispatch(context),
-            },
+            deadline,
+            &cancelled,
         ) {
             Ok(BrowserOutcome::TabClosed { tab_id }) if tab_id == tab.physical_id => {
                 if lease.confirm_tab_closed(&tab.handle).is_ok() {
