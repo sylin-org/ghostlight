@@ -95,8 +95,8 @@ impl ApplicationExecutor {
         let observed = self
             .take_observation(&terminal.result.invocation)
             .merged(terminal.observed.clone());
-        // Unconsumed candidate sets belong only to stale-target failures; drop strays here so
-        // nothing leaks across invocations.
+        // The record names only a browser that is connected: a call refused because the
+        // session's browser is gone never reached one, and a guessed family would say it did.
         let browser_label = self
             .workspaces
             .browser_of(workspace.as_str())
@@ -106,7 +106,6 @@ impl ApplicationExecutor {
                     .into_iter()
                     .find(|b| b.id == id)
                     .map(|b| b.name.unwrap_or_else(|| "Chromium".into()))
-                    .or_else(|| Some("Chromium".into()))
             });
         let mut record = AuditRecord::now(
             &terminal.result.invocation,

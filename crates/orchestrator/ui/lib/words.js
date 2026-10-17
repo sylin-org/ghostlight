@@ -45,6 +45,29 @@
   /** The intake that admitted a session, in the service's wire words. */
   const INTAKE = Object.freeze({ mcp: "mcp", cli: "cli" });
 
+  /**
+   * The intakes the activity list marks, and the words of each mark. Only the exception is marked:
+   * nearly every action arrives over MCP, so an MCP mark on every row would say nothing.
+   */
+  const INTAKE_MARK = Object.freeze({ [INTAKE.cli]: "Command line" });
+
+  /** What the activity list names when no record says which agent acted. */
+  const UNKNOWN_AGENT = "Unknown agent";
+
+  /** The start every browser tool's name shares, which the activity list leaves out. */
+  const SHARED_TOOL_PREFIX = "browser_";
+
+  /**
+   * A catalog tool as the activity list names it: the shared start left out and the rest in words,
+   * so "browser_fill_form" reads "fill form" and "policy_explain" reads "policy explain". The
+   * exact name stays one hover away, and everything an agent or a machine reads keeps it.
+   */
+  function toolWords(tool) {
+    const name = String(tool ?? "");
+    const rest = name.startsWith(SHARED_TOOL_PREFIX) ? name.slice(SHARED_TOOL_PREFIX.length) : name;
+    return rest.replaceAll("_", " ");
+  }
+
   /** The fixed words of the At a glance summary, its shelves and an agent's card. */
   const GLANCE = Object.freeze({
     details: "Details",
@@ -666,7 +689,7 @@
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
-    CONNECTION_ID_COPIED, INTAKE, GLANCE, GLANCE_CARD_LINES,
+    CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, UNKNOWN_AGENT, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,

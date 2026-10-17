@@ -79,7 +79,7 @@ class Element {
     this.style = { setProperty() {} };
     this.classes = new Set(String(attributes.class ?? "").split(/\s+/).filter(Boolean));
     for (const [name, value] of Object.entries(attributes)) {
-      if (["aria-current", "aria-expanded", "open", "src"].includes(name)) this.attributes[name] = value;
+      if (["aria-current", "aria-expanded", "open", "src", "title"].includes(name)) this.attributes[name] = value;
       if (!name.startsWith("data-")) continue;
       this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
     }
@@ -1161,13 +1161,13 @@ test("a browser tab opens the address the service listed for a destination, and 
 
 const Entries = globalThis.GhostlightEntries;
 
-/** The view over the page's markup, recording every paint that failed. */
-function drawing() {
+/** The view over the page's markup, recording every paint that failed. `sessionFor` reads a session. */
+function drawing({ sessionFor } = {}) {
   const shown = page();
   const failures = [];
   globalThis.document = shown.document;
   globalThis.window = shown.window;
-  const view = View.create({ onFailure: (what, error) => failures.push(`${what}: ${error?.message ?? error}`) });
+  const view = View.create({ sessionFor, onFailure: (what, error) => failures.push(`${what}: ${error?.message ?? error}`) });
   return { ...shown, view, failures };
 }
 
@@ -1388,6 +1388,90 @@ test("every readiness the service reports reads beside the row's sentence, and t
       readiness);
   }
   assert.ok(naming(".row-dur.unsettled").length > 0, "the stylesheet gives the marked duration no treatment");
+});
+
+/** The cells of the one row below the hero, for `record` as the service sends it. */
+function rowOf(record, options) {
+  const shown = drawing(options);
+  shown.view.rebuildFeed([
+    Entries.entryFromRecord(settledRead({ invocation: "newest" }), null),
+    Entries.entryFromRecord(record, null)
+  ]);
+  const [row] = queueRows(shown);
+  const cells = drawn(row.innerHTML);
+  const cell = (className) => cells.wearing(className)[0];
+  return { shown, cells, cell, text: cells.root.children.map((node) => node.textContent).join(" ") };
+}
+
+test("a tool reads without the shared browser_ prefix, in words, and a tool without it in words too", () => {
+  assert.equal(Words.toolWords("browser_navigate"), "navigate");
+  assert.equal(Words.toolWords("browser_fill_form"), "fill form");
+  assert.equal(Words.toolWords("browser_press_key"), "press key");
+  assert.equal(Words.toolWords("policy_explain"), "policy explain");
+  const catalog = JSON.parse(readFileSync(join(ui, "..", "..", "..", "docs", "1.0", "catalog.json"), "utf8"));
+  for (const { name } of catalog) {
+    const shown = Words.toolWords(name);
+    assert.ok(shown && !shown.startsWith("browser") && !shown.includes("_"), `${name} reads ${shown}`);
+  }
+});
+
+test("a row names its tool in words, the exact name on hover and among the detail card's facts", () => {
+  const { cell, cells } = rowOf(settledRead({ invocation: "fill-1", tool: "browser_fill_form", capability: "write" }));
+  assert.equal(cell("row-tool").textContent, "fill form");
+  assert.equal(cell("row-tool").attributes.title, "browser_fill_form");
+  const meta = cells.wearing("hero-meta")[0];
+  assert.ok(meta.textContent.includes("browser_fill_form"), meta.textContent);
+  assert.equal(cells.wearing("hero-tool")[0].attributes.title, "browser_fill_form");
+});
+
+test("an action no record names an agent for says Unknown agent, its workspace id only on hover", () => {
+  const workspace = "workspace_0123456789abcdef825";
+  const { cell, text } = rowOf(settledRead({ invocation: "unknown-1", workspace, provenance: null }));
+  assert.equal(cell("row-client").textContent, "Unknown agent");
+  assert.equal(cell("row-client").attributes.title, workspace);
+  assert.ok(!text.includes("workspace_"), `a raw id is printed in the row: ${text}`);
+});
+
+test("an action names the agent its record names, with no hover id", () => {
+  const { cell } = rowOf(settledRead({ invocation: "codex-1", provenance: {
+    connection_id: "connection_1", reported_application: "codex-mcp-client", agent: "Codex", channel: "mcp",
+    explanation: "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it."
+  } }));
+  assert.equal(cell("row-client").textContent, "Codex");
+  assert.equal(cell("row-client").attributes.title, undefined);
+});
+
+test("the intake is marked only for the command line, never for MCP", () => {
+  const mcp = rowOf(settledRead({ invocation: "mcp-1", channel: "mcp" }));
+  assert.equal(mcp.cell("row-channel").textContent, "");
+  assert.equal(mcp.cell("row-channel").children.length, 0);
+  const cli = rowOf(settledRead({ invocation: "cli-1", channel: "cli" }));
+  assert.equal(cli.cell("row-channel").textContent, "Command line");
+  assert.equal(cli.cell("row-channel").attributes.title, "Command line");
+  assert.ok(cli.cells.wearing("sr-only").length > 0, "the mark's words are for a screen reader");
+  assert.ok(naming(".row-channel svg").length > 0, "the stylesheet sizes the mark");
+});
+
+test("a call refused before it reached a browser shows no browser, though its session works in one", () => {
+  const session = { id: "w1", agent: "Codex", channel: "mcp", browser: "Chromium" };
+  const refused = rowOf(settledRead({
+    invocation: "refused-1", allowed: false, reason: "browser_disconnected", status: "failed",
+    summary: "The browser this session works in is not connected. Nothing was sent."
+  }), { sessionFor: () => session });
+  assert.equal(refused.cell("row-browser").textContent, "");
+  const reached = rowOf(settledRead({ invocation: "reached-1", browser: "Google Chrome" }), { sessionFor: () => session });
+  assert.equal(reached.cell("row-browser").textContent, "Google Chrome");
+});
+
+test("the hero names the command line once", () => {
+  const shown = drawing();
+  shown.view.hero(Entries.entryFromRecord(settledRead({ invocation: "call-1", channel: "cli", provenance: {
+    connection_id: "connection_1", reported_application: null, agent: "Command line", channel: "cli",
+    explanation: "A ghostlight call session is a local program."
+  } }), null), false);
+  const meta = drawn(shown.el("hero-body").innerHTML).wearing("hero-meta")[0].textContent;
+  assert.equal(meta.split("Command line").length - 1, 1, meta);
+  assert.ok(!/via|cli/.test(meta), meta);
 });
 
 test("a managed policy's passport shows every signed fact", () => {

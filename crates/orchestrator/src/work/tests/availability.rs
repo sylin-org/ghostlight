@@ -606,11 +606,38 @@ fn a_pinned_browser_with_no_known_installed_browser_is_never_started() {
     let _ = fs::remove_file(policy);
 }
 
+/// A call that reaches its session's connected browser names that browser in the record.
+#[test]
+fn a_call_that_reaches_the_session_browser_names_it_in_the_record() {
+    let (executor, browser, workspaces, workspace, audit) = fixture();
+    let mut chrome = summary("browser_chrome", true);
+    chrome.name = Some("Google Chrome".into());
+    browser.connect(vec![chrome]);
+    workspaces
+        .pin_browser(workspace.as_str(), "browser_chrome")
+        .unwrap();
+    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
+
+    let listed = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"list"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(
+        audit.0.lock().unwrap()[0].browser.as_deref(),
+        Some("Google Chrome")
+    );
+}
+
 /// A pinned browser that stays gone while a different browser is connected is the one case
-/// that names another profile. Nothing is sent, and the session is not moved.
+/// that names another profile. Nothing is sent, the session is not moved, and the record names
+/// no browser, because none was reached.
 #[test]
 fn a_pinned_browser_absent_while_another_is_connected_is_the_wrong_profile() {
-    let (executor, browser, workspaces, workspace, _) = fixture();
+    let (executor, browser, workspaces, workspace, audit) = fixture();
     browser.connect(vec![summary("browser_edge", true)]);
     workspaces
         .pin_browser(workspace.as_str(), "browser_chrome")
@@ -642,13 +669,15 @@ fn a_pinned_browser_absent_while_another_is_connected_is_the_wrong_profile() {
         workspaces.browser_of(workspace.as_str()).as_deref(),
         Some("browser_chrome")
     );
+    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
 }
 
 /// A pinned browser that stays gone with nothing else connected is reported as not connected.
-/// This service never saw it connect as an installed browser, so nothing is started for it.
+/// This service never saw it connect as an installed browser, so nothing is started for it, and
+/// the record names no browser.
 #[test]
 fn a_pinned_browser_absent_with_nothing_connected_is_not_connected_and_never_recovered() {
-    let (executor, browser, workspaces, workspace, _) = fixture();
+    let (executor, browser, workspaces, workspace, audit) = fixture();
     browser.connect(vec![]);
     browser.set_returning(true);
     workspaces
@@ -675,6 +704,7 @@ fn a_pinned_browser_absent_with_nothing_connected_is_not_connected_and_never_rec
         vec!["Ask the user to reopen that browser, then repeat the call."]
     );
     assert!(browser.routed().is_empty());
+    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
 }
 
 /// Evidence of a returning browser earns a wait, not a different answer: when nothing arrives

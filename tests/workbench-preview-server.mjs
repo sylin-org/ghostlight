@@ -139,6 +139,13 @@ const controlsFixture = {
   you: { context: "control", word: "Full control", sentence: "Others on this computer can watch this view in a browser." }
 };
 
+/** The connection evidence a preview record carries, as the service shapes it. */
+function previewEvidence(connection_id, reported_application, agent, channel) {
+  const explanation = channel === "cli" ? "A ghostlight call session is a local program."
+    : `"${reported_application}" is what the agent calls itself; Ghostlight does not verify it.`;
+  return { connection_id, reported_application, agent, channel, explanation };
+}
+
 const snapshot = {
   seq: 0,
   generated_at_ms: Date.now(),
@@ -159,9 +166,13 @@ const snapshot = {
     { id: "browser_chrome", family: "Chrome", adapter_version: "1.0.0", connected: true, tab_count: 4 },
     { id: "browser_edge", family: "Edge", adapter_version: "1.0.0", connected: true, tab_count: 1 }
   ],
+  // The activity list names each agent, marks the command line, and shows no browser for a call
+  // that never reached one; a record that names no agent reads "Unknown agent".
   history: [
-    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp" },
-    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_codex", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli" }
+    { timestamp_ms: Date.now() - 60000, invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", provenance: previewEvidence("connection_claude", "claude-code", "Claude Code", "mcp") },
+    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", provenance: previewEvidence("connection_codex", "codex-mcp-client", "Codex", "mcp") },
+    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", provenance: previewEvidence("connection_script", null, "Command line", "cli") },
+    { timestamp_ms: Date.now() - 420000, invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp" }
   ],
   diagnostics: [
     { id: "service", label: "Orchestrator", severity: "passing", detail: "Ghostlight is accepting local connections." },

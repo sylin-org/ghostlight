@@ -330,9 +330,10 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .row-tool { overflow: hidden; padding: 0; color: var(--ink-2); font-size: 12.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .row-tool:hover, .row-tool[aria-expanded="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .action-details { padding: 16px; margin-block: 8px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .025); }
-/* The intake that drove the action. Neutral on purpose: capability is the coloured chip, and two
-   competing colours in one row would say neither. */
-.row-channel { color: var(--faint); font: 500 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+/* The intake that drove the action, marked only when it is the command line. Neutral on purpose:
+   capability is the coloured chip, and two competing colours in one row would say neither. */
+.row-channel { display: flex; align-items: center; color: var(--faint); }
+.row-channel svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .row-activity { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .row.blocked .row-activity { color: #fca5a5; }
 .row-client { overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }

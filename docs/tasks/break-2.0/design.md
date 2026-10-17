@@ -56,8 +56,7 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 
 ## RESUME HERE
 
-d01-glance-summary has landed. Next: d02-activity-names, then d04-integrations; d03-call-help
-runs in its own lane.
+d02-activity-names has landed. Next: d04-integrations; d03-call-help runs in its own lane.
 
 ## Landed
 
@@ -65,6 +64,7 @@ runs in its own lane.
 |---|---|---|
 | d00-agent-names | The service names each session's agent as a person knows it. `install::agent_name` is one closed table beside the harness registry (`AGENT_NAMES`): each product name as the install summary says it, with its harness and product ids and the client names it is known to send (`codex-mcp-client`, `claude-ai`, `cursor-vscode`), matched ignoring case and surrounding space; a test keeps it in step with every registry row. `language::provenance::agent_name` adds the command line (`COMMAND_LINE_AGENT`, "Command line") and shows an unknown name as reported, trimmed. `SessionSummary.agent` and `ConnectionDetails.agent` carry it on sessions, operations and history items; `client_label` and `reported_application` keep the reported name for the trust note. Durable history names only the command line, from its channel. The setup view matches a session to an agent by that name, so a Codex session turns the Codex row Connected, and names the finishing agent by product name. The window's chips, activity client column, hero and search name the agent. | see `git log` |
 | d01-glance-summary | At a glance opens on one summary pill instead of a chip per client and browser plus Connection details. The pill shows a face per agent (initials, the prompt glyph for the command line, teal while working), "N agents", an arrow, a dot and "N browsers", and Details; it is a `<details>` disclosure kept open across repaints like the page's other disclosures, remembered as a page disclosure apart from the activity feed's, so a feed rebuild (a queued call, Clear view, a stream reconnect) never closes it. Details opens two shelves: agents (spark or prompt glyph, the d00 name, a count past one session, a working agent's glyph breathing in teal and still under reduced motion) and browsers (window glyph, name, tab count, adapter version on hover). With no browser the shelf shows the service's line in a dashed chip: "Starts <browser> on request" only when `BrowserRecovery::starts_on_request` says a request would start one (`on_demand` and the remembered or only installed browser with a usable registration), otherwise "No browser connected" (`language::workbench::no_browser`). An agent chip opens its card: one line per session in words (tabs and browser, working or idle, "from the command line" for the command line), at most 4 and "and N more", each with Copy id for its connection ids, and the trust note once. A live MCP connection's explanation now names the claim (`"codex-mcp-client" is what the agent calls itself; Ghostlight does not verify it.`, `language::provenance::claimed_name_explanation`). The service adds `tab_count` to each browser and `no_browser` to the connections part, which a watcher is sent too. The per-connection list, its CSS and the chip-dot rules nothing used are gone. | see `git log` |
+| d02-activity-names | Activity rows and the hero say what a person needs. `toolWords` in `ui/lib/words.js` is the one rule for a tool's displayed name: the shared `browser_` start left out and the rest in words ("navigate", "fill form", "press key", "policy explain"); the exact name is the row's and the hero title's hover and a fact in the detail card's meta line. The client column and the hero name the agent (d00), or "Unknown agent" with the workspace id only as a hover. The intake cell is empty for MCP and holds the prompt glyph for the command line, with "Command line" as its hover and screen-reader words; the hero no longer adds "via cli". A settled row names only the browser its record names and never borrows its session's. The service names only a connected browser: a call whose session's browser is gone records none (`work/receipt.rs`), and a session pinned to a browser that is gone carries none (`workbench/live.rs`), where both guessed "Chromium" before. docs/MEMORY.md's "Activity lists lead with tool identity" says the window drops the prefix. | see `git log` |
 
 ## Owed live checks
 
@@ -86,6 +86,15 @@ owner before anything is pushed.
   `browser.startup` set to `manual` it says "No browser connected". A watching browser tab shows
   the same pill, shelves and card. The open pill and card survive a new session arriving, a call
   queued behind a running one, Clear view and a stream reconnect.
+
+- d02-activity-names: in the window's Activity list, rows read "navigate", "fill form", "press
+  key" with the icon first, and hovering a tool shows its exact name (`browser_fill_form`), which
+  the opened detail card also lists among its facts. A `ghostlight call` row shows the prompt glyph
+  in the intake column (hover: "Command line") and an MCP row shows nothing there; the hero of a
+  `ghostlight call` says "Command line" once, with no "via cli". A restored row of an MCP agent
+  reads "Unknown agent" (hover shows the workspace id). With the session's browser closed and auto
+  open off, the refused row ("The browser this session works in is not connected. Nothing was
+  sent.") shows no browser, and the agent's card line for that session names no browser either.
 
 ## Notes
 
@@ -115,3 +124,20 @@ owner before anything is pushed.
   of the Command line card, as the spec says, although the card's title already says it. (7) The
   preview server shows the no-browser state at `?browsers=none` and gives Codex six sessions so its
   card says "and 2 more".
+- d02-activity-names: differences from the spec. (1) The command-line intake is a mark, the
+  prompt glyph of the At a glance shelves, with "Command line" as its hover and screen-reader
+  words, not the words printed: the intake column is 34 px wide, and the client column of the same
+  row already says "Command line". (2) The exact tool name sits in the detail card's meta line
+  (the hero's facts), because the row's detail card is the hero's markup. (3) The service fix is
+  the root of the guessed "Chromium": the receipt and the session summary named an unconnected
+  pinned browser "Chromium". Both now name only a connected browser, so a session whose browser
+  closed shows no browser on its card line too. A call whose browser disconnected after it did its
+  work also records none, because the service keeps no name for a browser that is gone. A
+  connected browser that reports no product name still reads "Chromium", the adapter's family.
+  (4) A call refused by policy while its session's browser is connected still names that browser:
+  the record cannot tell a refusal before dispatch from one after a target was resolved in the
+  page, and the session does work in that browser. (5) The detail card's Connection fact keeps its
+  shortened connection id, and a refusal keeps its denial id, because both are handles a person
+  quotes when asking; no workspace id is printed. (6) A composition step with no receipt names its
+  tool in words too. (7) The preview server's history shows each case: a refusal before dispatch
+  with no browser, a command-line row, and a restored row that reads "Unknown agent".

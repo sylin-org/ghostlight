@@ -260,12 +260,13 @@ impl Live {
                 if let Some(id) = &pinned {
                     *tabs_in.entry(id.clone()).or_default() += workspace.tab_count;
                 }
+                // Only a connected browser is named; a pinned browser that is gone has no name
+                // to give, and a guessed family would name the wrong one.
                 let browser = pinned.and_then(|id| {
                     browser_list
                         .iter()
                         .find(|b| b.id == id)
                         .map(|b| b.name.clone().unwrap_or_else(|| "Chromium".into()))
-                        .or_else(|| Some("Chromium".into()))
                 });
                 SessionSummary {
                     active_operations: operations

@@ -19,7 +19,7 @@
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
-    KIND_GLYPHS, INTAKE, GLANCE, GLANCE_CARD_LINES,
+    KIND_GLYPHS, INTAKE, INTAKE_MARK, UNKNOWN_AGENT, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
@@ -165,22 +165,46 @@
     }
 
     /**
-     * The agent behind an action, named as a person knows it. Attribution belongs to the action's
-     * connection, including after disconnect or restart.
+     * The row's intake cell: a mark for the exception, the command line, and nothing for MCP.
+     * The glyph is the mark; its words are for a hover and a screen reader.
      */
-    function clientFor(entry) {
-      const evidence = entry.provenance;
-      if (evidence) return evidence.agent ?? shortId(entry.workspace);
-      if (entry.settled) return shortId(entry.workspace);
-      return sessionFor(entry.workspace)?.agent ?? shortId(entry.workspace);
+    function intakeMarkup(entry) {
+      const mark = INTAKE_MARK[channelFor(entry)];
+      if (!mark) return '<div class="row-channel"></div>';
+      return `<div class="row-channel" title="${escapeHtml(mark)}">${KIND_GLYPHS.commandLine}`
+        + `<span class="sr-only">${escapeHtml(mark)}</span></div>`;
     }
 
-    /** Browser that performed or is performing this action. */
+    /**
+     * The agent behind an action, named as a person knows it, or null when no record says.
+     * Attribution belongs to the action's connection, including after disconnect or restart.
+     */
+    function agentFor(entry) {
+      const evidence = entry.provenance;
+      if (evidence) return evidence.agent ?? null;
+      if (entry.settled) return null;
+      return sessionFor(entry.workspace)?.agent ?? null;
+    }
+
+    /**
+     * The agent's name as text, and the hover it wears. An unknown agent reads "Unknown agent", and
+     * its workspace id is one hover away, never printed.
+     */
+    function agentMarkup(tag, className, entry) {
+      const agent = agentFor(entry);
+      const hover = agent ? "" : ` title="${escapeHtml(entry.workspace ?? "")}"`;
+      return `<${tag} class="${className}"${hover}>${escapeHtml(agent ?? UNKNOWN_AGENT)}</${tag}>`;
+    }
+
+    /**
+     * The browser that performed or is performing this action. A settled action names only the
+     * browser its record names: one refused before it reached a browser names none, and must not
+     * borrow the browser its session works in now.
+     */
     function browserFor(entry) {
       if (entry.browser) return entry.browser;
-      const session = sessionFor(entry.workspace);
-      if (session?.browser) return session.browser;
-      return "";
+      if (entry.settled) return "";
+      return sessionFor(entry.workspace)?.browser ?? "";
     }
 
     /* -------------------------------- monitor ----------------------------- */
@@ -315,7 +339,7 @@
         const labels = { succeeded: "Completed", not_started: "Could not start", not_run: "Not run", pending: "Pending", unconfirmed: "Receipt unavailable" };
         const label = labels[state] ?? words(state);
         const problem = receipt?.storage === "unconfirmed" || !["succeeded", "not_run", "pending"].includes(state);
-        const title = receipt?.summary ?? step.tool ?? `Step ${step.position}`;
+        const title = receipt?.summary ?? (step.tool ? toolWords(step.tool) : `Step ${step.position}`);
         const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`)
           + connectionMarkup(receipt, `${entry.invocation}:step:${step.position}:connection`) : "";
         return `<li class="history-step" data-step-problem="${problem}"><div class="step-line">`
@@ -343,22 +367,22 @@
       // same thing twice. Readiness is the one observed fact no sentence states.
       const observed = entry.settled ? entry.observed : null;
       const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
+      // The agent's name already says the command line, so the intake is not said again.
       const meta = [];
-      if (entry.workspace) meta.push(`<span>${escapeHtml(clientFor(entry))}</span>`);
+      if (entry.workspace) meta.push(agentMarkup("span", "hero-agent", entry));
       const browser = browserFor(entry);
       if (browser) meta.push(`<span><i></i>${escapeHtml(browser)}</span>`);
-      // Only a non-default intake earns words. Labelling every agent row "mcp" is noise.
-      if (entry.channel && entry.channel !== "mcp") meta.push(`<span><i></i>via ${escapeHtml(entry.channel)}</span>`);
       if (entry.capability && !entry.steps?.length) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
       if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
       if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);
       if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
+      if (entry.tool) meta.push(`<span class="hero-tool-name"><i></i>${escapeHtml(entry.tool)}</span>`);
 
       const reason = isBlocked(entry) && entry.reason
         ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>${refusalMarkup(entry)}`
         : "";
 
-      return `<div class="hero-tool">${escapeHtml(entry.tool)}<span class="cap-label">${escapeHtml(entry.steps?.length ? "per step" : entry.capability ?? "read")}</span></div>`
+      return `<div class="hero-tool" title="${escapeHtml(entry.tool ?? "")}">${escapeHtml(toolWords(entry.tool))}<span class="cap-label">${escapeHtml(entry.steps?.length ? "per step" : entry.capability ?? "read")}</span></div>`
         + `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
         + reason
         + compositionMarkup(entry)
@@ -438,10 +462,10 @@
         ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
         : duration(settledMs(entry));
       return `<div class="med-mini">${glyphFor(entry)}</div>`
-        + `<button class="row-tool" type="button" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(entry.tool)}</button>`
-        + `<div class="row-channel">${escapeHtml(channelFor(entry))}</div>`
+        + `<button class="row-tool" type="button" title="${escapeHtml(entry.tool ?? "")}" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(toolWords(entry.tool))}</button>`
+        + intakeMarkup(entry)
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
-        + `<div class="row-client">${escapeHtml(clientFor(entry))}</div>`
+        + agentMarkup("div", "row-client", entry)
         + `<div class="row-browser">${escapeHtml(browserFor(entry))}</div>`
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
