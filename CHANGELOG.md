@@ -48,8 +48,6 @@ layout once, when you run the install again. The full release notes are in
   holds, and fields the page changed back fail as reverted (ADR-0198 Decisions 7 to 11).
 - An action that completes with a dialog open says so, carries a `dialog_opened` fact and points to
   `browser_dialog` (ADR-0197 Decision 21).
-- MCP clients that negotiate a revision before 2025-06-18 get the result JSON at the end of the text
-  block, because they cannot read structured content (ADR-0198 Decision 24).
 
 ### Changed
 
@@ -94,6 +92,10 @@ layout once, when you run the install again. The full release notes are in
   settle budget (ADR-0198 Decision 31).
 - The result a client reads leaves out fields at their default, and a reader treats an absent
   field as its default (ADR-0198 Decision 21).
+- Results carry the envelope once, in structured content. The text block is the summary and next
+  steps, and tool definitions carry no `outputSchema` (ADR-0197 Decision 17). Clients on an MCP
+  revision before 2025-06-18 still get the result JSON at the end of the text block
+  (ADR-0198 Decision 24).
 - WinGet stays as a supported route (ADR-0197 Decision 16, owner review). Its Windows archive is
   built by `scripts/package-winget-archive.ps1` and is a carrier for `ghostlight install`, which
   installs into `~/.ghostlight/bin`; after `winget upgrade` the next install carries the newer
