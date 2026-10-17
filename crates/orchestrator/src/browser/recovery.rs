@@ -1,16 +1,21 @@
 //! Pre-effect browser-readiness recovery decisions.
 //!
-//! The executor asks this service only for a session that works in no browser yet, when the
-//! ordinary plural-browser resolver proves that no usable adapter exists and no browser is on its
-//! way back. A session already working in a browser waits for that browser instead and is never
-//! sent here, because recovery chooses or starts a browser and that session's browser is already
-//! chosen (ADR-0196 Decision 12). This module inspects local installation facts and never
-//! presents a browser choice: unique connectable evidence acts under the configured posture;
-//! among several installed browsers, the one that last connected acts the same way, and with no
-//! such memory plural evidence repairs what Ghostlight already owns and leaves startup to the
-//! person (ADR-0149 amendment, 2026-10-17). No refusal spends its words declining to choose.
-//! Where the selected platform and policy permit it, the same flight performs one
-//! ordinary-profile launch and waits within the invocation deadline for an inbound adapter.
+//! The executor asks this service in two cases. A session that works in no browser yet asks when
+//! the ordinary plural-browser resolver proves that no usable adapter exists and no browser is on
+//! its way back. This module then inspects local installation facts and never presents a browser
+//! choice: unique connectable evidence acts under the configured posture; among several installed
+//! browsers, the one that last connected acts the same way, and with no such memory plural
+//! evidence repairs what Ghostlight already owns and leaves startup to the person (ADR-0149
+//! amendment, 2026-10-17). No refusal spends its words declining to choose.
+//!
+//! A session whose own browser stayed gone through the return grace asks for that installed
+//! browser by name. Under `on_demand` the flight starts that browser and never another. It leaves
+//! startup to the person when the posture is `manual` or the browser is not one Ghostlight can
+//! start, and starts nothing when the browser is already running in another profile (ADR-0196
+//! Decision 12 amendment, 2026-10-17).
+//!
+//! Where the selected platform and policy permit it, a flight performs one ordinary-profile
+//! launch and waits within the invocation deadline for an inbound adapter.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -95,7 +100,8 @@ impl RecoveryFailure {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecoveryDecision {
     /// Startup is left to the person: either the configured posture is manual, or more than one
-    /// browser could serve and none of them is a usable browser that last connected.
+    /// browser could serve and none of them is a usable browser that last connected, or the one
+    /// browser a request named is not one Ghostlight can start.
     Manual {
         /// Installed browsers with a current Ghostlight native-host registration.
         browsers: Vec<RecoveryCandidate>,
@@ -107,7 +113,8 @@ pub enum RecoveryDecision {
         /// Whether an owned stale registration may be reconciled first.
         repair_owned_registration: bool,
     },
-    /// One newly connected adapter is ready for the ordinary resolver.
+    /// One connected adapter is ready for the ordinary resolver. For a request that named an
+    /// installed browser, it is a connection of that browser, which may be another profile.
     Ready {
         /// Opaque connected browser identity reported by the adapter.
         browser: String,
@@ -187,13 +194,13 @@ impl BrowserInventory for SystemBrowserInventory {
     }
 }
 
-/// A mechanism whose repair and launch both succeed and connect nothing.
+/// A mechanism whose repair and launch both succeed, and whose launch runs one test action in
+/// place of a browser process, such as connecting a fake adapter or counting.
 #[cfg(test)]
-#[derive(Debug)]
-struct LaunchWithoutAdapter;
+struct TestLaunch(Box<dyn Fn() + Send + Sync>);
 
 #[cfg(test)]
-impl RecoveryMechanism for LaunchWithoutAdapter {
+impl RecoveryMechanism for TestLaunch {
     fn repair(
         &self,
         _browser: &RecoveryCandidate,
@@ -209,6 +216,7 @@ impl RecoveryMechanism for LaunchWithoutAdapter {
         _deadline: Instant,
         _cancelled: &AtomicBool,
     ) -> Result<(), MechanismError> {
+        (self.0)();
         Ok(())
     }
 }
@@ -381,15 +389,26 @@ struct FlightState {
     participants: usize,
 }
 
+/// What one flight recovers, and so which requests share it.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum FlightScope {
+    /// A browser for sessions that work in no browser yet.
+    Unbound,
+    /// One installed browser, by native-host id, for sessions whose own browser it is.
+    Browser(String),
+}
+
 #[derive(Debug)]
 struct RecoveryFlight {
+    scope: FlightScope,
     state: Mutex<FlightState>,
     changed: Condvar,
 }
 
 impl RecoveryFlight {
-    fn new() -> Self {
+    fn new(scope: FlightScope) -> Self {
         Self {
+            scope,
             state: Mutex::new(FlightState {
                 phase: FlightPhase::Inspecting,
                 owner: false,
@@ -400,12 +419,9 @@ impl RecoveryFlight {
     }
 }
 
-/// The one flight scope: recovery serves only sessions that work in no browser yet.
-const UNBOUND_SCOPE: &str = "unbound";
-
 #[derive(Debug, Default)]
 struct Flights {
-    scopes: HashMap<String, Arc<RecoveryFlight>>,
+    scopes: HashMap<FlightScope, Arc<RecoveryFlight>>,
 }
 
 /// Cloneable, service-scoped single-flight recovery decision service.
@@ -441,7 +457,14 @@ impl BrowserRecovery {
     /// starts without the Ghostlight extension. No process is started.
     #[cfg(test)]
     pub(crate) fn set_test_launch_without_adapter(&mut self) {
-        self.mechanism = Arc::new(LaunchWithoutAdapter);
+        self.set_test_launch(|| {});
+    }
+
+    /// Make every repair and launch succeed, each launch running `launch` instead of starting a
+    /// process.
+    #[cfg(test)]
+    pub(crate) fn set_test_launch(&mut self, launch: impl Fn() + Send + Sync + 'static) {
+        self.mechanism = Arc::new(TestLaunch(Box::new(launch)));
     }
 
     /// Decide one missing-browser recovery request for a session that works in no browser yet,
@@ -451,26 +474,53 @@ impl BrowserRecovery {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<RecoveryDecision, RecoveryWaitError> {
-        let flight = self.join_flight(UNBOUND_SCOPE);
+        self.fly(FlightScope::Unbound, deadline, cancelled)
+    }
+
+    /// Start the installed browser `installed` (a native-host id such as `chrome`) for a session
+    /// whose own browser it is, joining an overlapping request for the same browser.
+    ///
+    /// Only that browser is ever started. The answer is `Ready` once a connection of it arrives,
+    /// or at once when one is already connected, since launching a running browser again would
+    /// only open a window in the profile it already runs; `Manual` when the posture is `manual` or
+    /// the browser is not one Ghostlight can start; and the ordinary failures, `HandshakeTimeout`
+    /// among them, otherwise.
+    pub fn request_browser(
+        &self,
+        installed: &str,
+        deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Result<RecoveryDecision, RecoveryWaitError> {
+        self.fly(FlightScope::Browser(installed.into()), deadline, cancelled)
+    }
+
+    fn fly(
+        &self,
+        scope: FlightScope,
+        deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Result<RecoveryDecision, RecoveryWaitError> {
+        let flight = self.join_flight(scope);
         let result = self.participate(&flight, deadline, cancelled);
-        self.leave_flight(UNBOUND_SCOPE, &flight);
+        self.leave_flight(&flight);
         result
     }
 
-    fn join_flight(&self, scope: &str) -> Arc<RecoveryFlight> {
+    fn join_flight(&self, scope: FlightScope) -> Arc<RecoveryFlight> {
         let mut flights = lock(&self.flights);
-        if let Some(flight) = flights.scopes.get(scope) {
+        if let Some(flight) = flights.scopes.get(&scope) {
             let flight = Arc::clone(flight);
             lock(&flight.state).participants += 1;
             return flight;
         }
-        let flight = Arc::new(RecoveryFlight::new());
-        flights.scopes.insert(scope.into(), Arc::clone(&flight));
+        let flight = Arc::new(RecoveryFlight::new(scope.clone()));
+        flights.scopes.insert(scope, Arc::clone(&flight));
         flight
     }
 
-    fn leave_flight(&self, scope: &str, flight: &Arc<RecoveryFlight>) {
+    fn leave_flight(&self, flight: &Arc<RecoveryFlight>) {
         let mut flights = lock(&self.flights);
+        let scope = &flight.scope;
         let Some(current) = flights.scopes.get(scope) else {
             return;
         };
@@ -515,7 +565,7 @@ impl BrowserRecovery {
                 let phase = state.phase.clone();
                 drop(state);
 
-                let next = self.advance(phase.clone(), deadline, cancelled);
+                let next = self.advance(&flight.scope, phase.clone(), deadline, cancelled);
 
                 let mut state = lock(&flight.state);
                 state.owner = false;
@@ -543,31 +593,53 @@ impl BrowserRecovery {
 
     fn advance(
         &self,
+        scope: &FlightScope,
         phase: FlightPhase,
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<FlightPhase, RecoveryWaitError> {
-        match phase {
-            FlightPhase::Inspecting => Ok(self.inventory.inspect().map_or_else(
-                |_| {
-                    FlightPhase::Complete(RecoveryDecision::Failed {
-                        reason: RecoveryFailure::NativeHostUnavailable,
-                        details: Vec::new(),
-                    })
+        match (scope, phase) {
+            (FlightScope::Browser(installed), FlightPhase::Inspecting) => {
+                Ok(self.inspect_for(installed))
+            }
+            (FlightScope::Browser(installed), FlightPhase::Launched { browser }) => {
+                let Some(connected) = self.connected_as(installed) else {
+                    thread::sleep(
+                        deadline
+                            .saturating_duration_since(Instant::now())
+                            .min(Duration::from_millis(10)),
+                    );
+                    return Ok(FlightPhase::Launched { browser });
+                };
+                Ok(FlightPhase::Complete(RecoveryDecision::Ready {
+                    browser: connected,
+                }))
+            }
+            (FlightScope::Unbound, FlightPhase::Inspecting) => {
+                Ok(self.inventory.inspect().map_or_else(
+                    |_| {
+                        FlightPhase::Complete(RecoveryDecision::Failed {
+                            reason: RecoveryFailure::NativeHostUnavailable,
+                            details: Vec::new(),
+                        })
+                    },
+                    |candidates| {
+                        let remembered = self.browser.last_connected_browser();
+                        phase_from_plan(decide(
+                            self.governance.browser_startup(),
+                            &candidates,
+                            remembered.as_deref(),
+                        ))
+                    },
+                ))
+            }
+            (
+                _,
+                FlightPhase::Repairing {
+                    browser,
+                    launch_after,
                 },
-                |candidates| {
-                    let remembered = self.browser.last_connected_browser();
-                    phase_from_plan(decide(
-                        self.governance.browser_startup(),
-                        &candidates,
-                        remembered.as_deref(),
-                    ))
-                },
-            )),
-            FlightPhase::Repairing {
-                browser,
-                launch_after,
-            } => match self.mechanism.repair(&browser, deadline, cancelled) {
+            ) => match self.mechanism.repair(&browser, deadline, cancelled) {
                 Ok(()) if launch_after => Ok(FlightPhase::Launching { browser }),
                 Ok(()) => Ok(FlightPhase::Complete(RecoveryDecision::Manual {
                     browsers: vec![browser],
@@ -580,10 +652,13 @@ impl BrowserRecovery {
                     }))
                 }
             },
-            FlightPhase::RepairingQueue {
-                mut remaining,
-                named,
-            } => {
+            (
+                _,
+                FlightPhase::RepairingQueue {
+                    mut remaining,
+                    named,
+                },
+            ) => {
                 let Some(browser) = remaining.pop_front() else {
                     return Ok(FlightPhase::Complete(RecoveryDecision::Manual {
                         browsers: named,
@@ -604,7 +679,7 @@ impl BrowserRecovery {
                     }
                 }
             }
-            FlightPhase::Launching { browser } => {
+            (_, FlightPhase::Launching { browser }) => {
                 match self.mechanism.launch(&browser, deadline, cancelled) {
                     Ok(()) => Ok(FlightPhase::Launched { browser }),
                     Err(MechanismError::Wait(error)) => Err(error),
@@ -616,7 +691,7 @@ impl BrowserRecovery {
                     }
                 }
             }
-            FlightPhase::Launched { browser } => {
+            (FlightScope::Unbound, FlightPhase::Launched { browser }) => {
                 let connected = self.browser.browsers();
                 if connected.is_empty() {
                     thread::sleep(
@@ -641,8 +716,37 @@ impl BrowserRecovery {
                 };
                 Ok(FlightPhase::Complete(decision))
             }
-            FlightPhase::Complete(decision) => Ok(FlightPhase::Complete(decision)),
+            (_, FlightPhase::Complete(decision)) => Ok(FlightPhase::Complete(decision)),
         }
+    }
+
+    /// The first phase of a flight that starts the installed browser `installed`.
+    fn inspect_for(&self, installed: &str) -> FlightPhase {
+        if self.governance.browser_startup() == BrowserStartup::Manual {
+            return FlightPhase::Complete(RecoveryDecision::Manual {
+                browsers: Vec::new(),
+            });
+        }
+        if let Some(running) = self.connected_as(installed) {
+            return FlightPhase::Complete(RecoveryDecision::Ready { browser: running });
+        }
+        self.inventory.inspect().map_or_else(
+            |()| {
+                FlightPhase::Complete(RecoveryDecision::Manual {
+                    browsers: Vec::new(),
+                })
+            },
+            |candidates| phase_from_plan(decide_browser(&candidates, installed)),
+        )
+    }
+
+    /// A connected browser identity that reported the installed browser `installed`.
+    fn connected_as(&self, installed: &str) -> Option<String> {
+        self.browser
+            .browsers()
+            .into_iter()
+            .map(|connected| connected.id)
+            .find(|id| self.browser.installed_browser_of(id).as_deref() == Some(installed))
     }
 }
 
@@ -655,9 +759,7 @@ fn decide(
 ) -> RecoveryPlan {
     let installed: Vec<_> = candidates
         .iter()
-        .filter(|candidate| {
-            candidate.ordinary_executable.is_some() && candidate.package.native_messaging_usable()
-        })
+        .filter(|candidate| startable(candidate))
         .cloned()
         .collect();
     if installed.len() > 1 {
@@ -739,6 +841,34 @@ fn decide(
         });
     };
 
+    start_plan(mode, browser)
+}
+
+/// Plan starting the installed browser `installed` and no other, under `on_demand`. A browser
+/// Ghostlight cannot start, because it is not installed or has no verified ordinary executable,
+/// leaves startup to the person.
+fn decide_browser(candidates: &[RecoveryCandidate], installed: &str) -> RecoveryPlan {
+    candidates
+        .iter()
+        .find(|candidate| candidate.id == installed && startable(candidate))
+        .map_or_else(
+            || {
+                RecoveryPlan::Complete(RecoveryDecision::Manual {
+                    browsers: Vec::new(),
+                })
+            },
+            |browser| start_plan(BrowserStartup::OnDemand, browser.clone()),
+        )
+}
+
+/// Whether Ghostlight could start `candidate`: an ordinary executable it verified, from a package
+/// that can start a native messaging host.
+fn startable(candidate: &RecoveryCandidate) -> bool {
+    candidate.ordinary_executable.is_some() && candidate.package.native_messaging_usable()
+}
+
+/// Plan starting the one selected `browser` under `mode`, by its registration.
+fn start_plan(mode: BrowserStartup, browser: RecoveryCandidate) -> RecoveryPlan {
     match browser.registration {
         NativeHostState::Missing | NativeHostState::NeedsAttention => {
             RecoveryPlan::Complete(RecoveryDecision::Failed {
@@ -956,7 +1086,7 @@ mod tests {
                 let flights = lock(&recovery.flights);
                 flights
                     .scopes
-                    .get(UNBOUND_SCOPE)
+                    .get(&FlightScope::Unbound)
                     .map(|flight| lock(&flight.state).participants)
                     .unwrap_or(0)
             };
@@ -1166,24 +1296,24 @@ mod tests {
             release: Mutex::new(None),
         });
         let recovery = coordinator(Some("manual"), inventory);
-        let first = recovery.join_flight(UNBOUND_SCOPE);
-        let joined = recovery.join_flight(UNBOUND_SCOPE);
+        let first = recovery.join_flight(FlightScope::Unbound);
+        let joined = recovery.join_flight(FlightScope::Unbound);
         assert!(Arc::ptr_eq(&first, &joined));
         lock(&first.state).phase = FlightPhase::Complete(RecoveryDecision::Failed {
             reason: RecoveryFailure::BrowserAbsent,
             details: Vec::new(),
         });
 
-        recovery.leave_flight(UNBOUND_SCOPE, &first);
-        let late_joiner = recovery.join_flight(UNBOUND_SCOPE);
+        recovery.leave_flight(&first);
+        let late_joiner = recovery.join_flight(FlightScope::Unbound);
         assert!(Arc::ptr_eq(&joined, &late_joiner));
-        recovery.leave_flight(UNBOUND_SCOPE, &joined);
-        recovery.leave_flight(UNBOUND_SCOPE, &late_joiner);
+        recovery.leave_flight(&joined);
+        recovery.leave_flight(&late_joiner);
         assert!(lock(&recovery.flights).scopes.is_empty());
 
-        let next_generation = recovery.join_flight(UNBOUND_SCOPE);
+        let next_generation = recovery.join_flight(FlightScope::Unbound);
         assert!(!Arc::ptr_eq(&first, &next_generation));
-        recovery.leave_flight(UNBOUND_SCOPE, &next_generation);
+        recovery.leave_flight(&next_generation);
     }
 
     #[test]
@@ -1692,6 +1822,177 @@ mod tests {
             decide(BrowserStartup::Manual, &candidates, Some("chrome")),
             RecoveryPlan::Complete(RecoveryDecision::Manual {
                 browsers: candidates.clone(),
+            })
+        );
+    }
+
+    /// A recovery for the installed browser `named` under `posture`, over Chrome and Edge in
+    /// `chrome`'s registration state, with `browser` as its port and `mechanism` as its launcher.
+    fn named_recovery(
+        posture: &str,
+        chrome: NativeHostState,
+        browser: &Arc<FakeBrowser>,
+        mechanism: &Arc<FakeMechanism>,
+    ) -> (BrowserRecovery, Arc<FakeInventory>) {
+        let inventory = Arc::new(FakeInventory {
+            candidates: chrome_and_edge(chrome),
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        });
+        let mut recovery = coordinator(Some(posture), Arc::clone(&inventory));
+        recovery.browser = Arc::clone(browser) as Arc<dyn BrowserPort>;
+        recovery.mechanism = Arc::clone(mechanism) as Arc<dyn RecoveryMechanism>;
+        (recovery, inventory)
+    }
+
+    fn request_chrome(recovery: &BrowserRecovery, wait: Duration) -> RecoveryDecision {
+        recovery
+            .request_browser("chrome", Instant::now() + wait, &AtomicBool::new(false))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_named_browser_is_started_and_its_arriving_connection_is_ready() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_installed("browser_chromium", "chrome");
+        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
+        let (recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_secs(1)),
+            RecoveryDecision::Ready {
+                browser: "browser_chromium".into(),
+            }
+        );
+        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+        assert!(lock(&recovery.flights).scopes.is_empty());
+    }
+
+    #[test]
+    fn a_named_browser_with_a_stale_registration_is_repaired_then_started() {
+        assert_eq!(
+            decide_browser(&chrome_and_edge(NativeHostState::Updatable), "chrome"),
+            RecoveryPlan::Prepare {
+                browser: installed("chrome", "Google Chrome", NativeHostState::Updatable),
+                repair_owned_registration: true,
+                launch: true,
+            }
+        );
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_installed("browser_chromium", "chrome");
+        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
+        let (recovery, _) = named_recovery(
+            "on_demand",
+            NativeHostState::Updatable,
+            &browser,
+            &mechanism,
+        );
+
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_secs(1)),
+            RecoveryDecision::Ready {
+                browser: "browser_chromium".into(),
+            }
+        );
+        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 1);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_named_browser_is_never_answered_by_another_installed_browser() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(vec![summary("browser_edge", true)]);
+        browser.remember_installed("browser_edge", "edge");
+        let mechanism = mechanism(Ok(()), None);
+        let (recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_millis(50)),
+            RecoveryDecision::Failed {
+                reason: RecoveryFailure::HandshakeTimeout,
+                details: vec!["Google Chrome".into()],
+            }
+        );
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_named_browser_running_in_another_profile_is_not_started_again() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(vec![summary("browser_other_profile", true)]);
+        browser.remember_installed("browser_other_profile", "chrome");
+        let mechanism = mechanism(Ok(()), None);
+        let (recovery, inventory) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_secs(1)),
+            RecoveryDecision::Ready {
+                browser: "browser_other_profile".into(),
+            }
+        );
+        assert_eq!(inventory.inspections.load(Ordering::SeqCst), 0);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_named_browser_is_left_to_the_person_under_manual_or_when_ghostlight_cannot_start_it() {
+        let left_to_the_person = RecoveryDecision::Manual {
+            browsers: Vec::new(),
+        };
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
+        let (manual, inventory) =
+            named_recovery("manual", NativeHostState::Current, &browser, &mechanism);
+        assert_eq!(
+            request_chrome(&manual, Duration::from_secs(1)),
+            left_to_the_person
+        );
+        assert_eq!(inventory.inspections.load(Ordering::SeqCst), 0);
+
+        let (on_demand, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+        assert_eq!(
+            on_demand
+                .request_browser(
+                    "brave",
+                    Instant::now() + Duration::from_secs(1),
+                    &AtomicBool::new(false),
+                )
+                .unwrap(),
+            left_to_the_person
+        );
+        let mut uninstalled = chrome_and_edge(NativeHostState::Current);
+        uninstalled[0].ordinary_executable = None;
+        assert_eq!(
+            decide_browser(&uninstalled, "chrome"),
+            RecoveryPlan::Complete(left_to_the_person)
+        );
+        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 0);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_named_browser_without_a_usable_registration_names_the_remedy() {
+        assert_eq!(
+            decide_browser(&chrome_and_edge(NativeHostState::Missing), "chrome"),
+            RecoveryPlan::Complete(RecoveryDecision::Failed {
+                reason: RecoveryFailure::NativeHostUnavailable,
+                details: vec!["Google Chrome".into()],
+            })
+        );
+        assert_eq!(
+            decide_browser(&chrome_and_edge(NativeHostState::OwnedElsewhere), "chrome"),
+            RecoveryPlan::Complete(RecoveryDecision::Failed {
+                reason: RecoveryFailure::OwnedElsewhere,
+                details: vec!["Google Chrome".into()],
             })
         );
     }

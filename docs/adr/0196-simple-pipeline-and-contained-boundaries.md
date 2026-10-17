@@ -1,6 +1,8 @@
 # ADR-0196: Simple pipeline and contained boundaries
 
 Decision 7 superseded by ADR-0197 Decision 5 (the break is strict, with no transition level).
+Decision 12 amended 2026-10-17: a session's own browser that stays gone is started again under
+`on_demand` (amendment at the end).
 
 Date: 2026-10-13. Status: Accepted by owner direction.
 
@@ -161,3 +163,57 @@ The 2026-10-05 merge kept 29 trial commits in history but not in the tree. Their
 | Cancel retires page work, generation-fenced leases (ADR-0190, 0191, 0192) | fcb4bce6, d936b708, f7f00f07, f2e42368 | Superseded. Requirement kept: cancel stops the service issuing steps, and page loops stop on a cancel call |
 | Quiet coexistence, Show tab, Linux focus work (ADR-0186) | 8c8d856c, d66efa36, f3fedbb9 | Left archived |
 | Capture-mask experiments | df27b57b, 1468b85b, ff223cba | Superseded by ADR-0194 |
+
+## Amendment 2026-10-17: a session's own browser starts again
+
+Coordinator decision under the owner's delegation of agent-facing experience (2026-10-14),
+following the owner's ruling of the same day that a request with no browser open starts the
+browser that last connected (ADR-0149 amendment, 2026-10-17).
+
+Evidence, from the live run on the owner's Windows 11 machine with `browser.startup` at
+`on_demand`: an MCP session had worked in Chrome. The owner closed every Chrome window. The
+session's next request answered that its browser was not connected and asked the model to have
+the user reopen it. In the same minute a fresh session's request started Chrome through recovery
+and opened its page in 8 seconds, and the first session then saw the same browser identity
+again. A session with no browser was better served than one with a browser.
+
+Decision 12 asks a call to wait while the browser is evidently returning and then tell the
+truth. It does not forbid starting the session's own browser after the wait. It now reads, in
+addition:
+
+- When the browser a session works in stays absent, with nothing connected or with another
+  browser connected, and `browser.startup` is `on_demand`, the service starts that browser
+  through the same recovery the unbound path uses: registration checks, repair of a stale
+  registration it owns, one ordinary-profile launch, and the bounded handshake wait. The call
+  continues when the same browser identity connects.
+- The service knows which installed browser that is because, for its own life and in memory
+  only, it keeps the installed browser (`chrome`, `edge`, ...) each browser identity reported
+  when it connected. No file is written. A session whose browser cannot be mapped to exactly one
+  installed browser, as after a service restart before the browser reconnected, or from a build
+  that reports no browser name, keeps the waits and refusals this Decision already gave it.
+- This recovery starts the named browser only and never chooses another. When another profile
+  of that browser connects instead, or is already connected (starting the browser again would
+  only open a window in that profile, so nothing is started), the answer is the existing wrong
+  profile refusal. When nothing connects, it is the existing handshake timeout. `manual` never
+  launches.
+- The wait still comes first, so a reconnecting browser or a service update never gets a second
+  window. While the service can start the session's browser, the wait ends once no browser is
+  evidently returning, the same evidence the unbound path reads, so a browser the person closed
+  keeps the call's budget for its start. Without that possibility the session waits the whole
+  grace, as before.
+
+No model-facing sentence changed, and the catalog is unchanged.
+
+Acceptance evidence:
+
+1. Unit tests pin the named recovery: it starts that browser and is ready when its connection
+   arrives, repairs a stale owned registration first, ignores another installed browser's
+   connection, starts nothing when the browser runs in another profile, and leaves startup to
+   the person under `manual` or when Ghostlight cannot start that browser.
+2. Executor tests pin the journey over the fake port and the real relay port: a browser closed
+   long ago is started again without waiting out the grace and takes the call; a browser that
+   returns within the grace starts nothing; another profile connecting is the wrong profile;
+   nothing connecting is the handshake timeout; `manual` and an unknown installed browser keep
+   the old refusals.
+3. Owed live check: on Windows, an MCP session that worked in Chrome, Chrome closed by the
+   person, the session's next request starts Chrome and proceeds in the same session.

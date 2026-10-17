@@ -105,7 +105,9 @@ layout once, when you run the install again. The full release notes are in
   connected to Ghostlight, instead of asking you to open one. Ghostlight remembers only which
   browser that was, in `state/last-browser.json`. With no such memory it still names the
   browsers you can open, and `Auto-open browser on request` off still never starts one
-  (ADR-0149 amendment, 2026-10-17).
+  (ADR-0149 amendment, 2026-10-17). The same holds for an agent session whose browser you
+  closed: its next request starts that browser again, never another, and continues there once
+  it is back (ADR-0196 Decision 12 amendment, 2026-10-17).
 - The Chromium page-asset tests run with `node --test` and need no `npm install`. CI runs them
   beside the extension tests.
 

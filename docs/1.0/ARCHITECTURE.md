@@ -384,8 +384,8 @@ Waiting is bounded and lives at the one browser seam (ADR-0196 Decision 12). The
 `await_available` for one browser with available, not answering (a registered connection still
 installing its page runtime, or one whose liveness lapsed), or absent. A bound workspace waits up
 to `RETURN_GRACE`, about seven seconds and capped by the invocation deadline less the adapter
-receipt reserve, and is never handed to browser recovery: recovery chooses or starts a browser,
-and that workspace's browser is already chosen. A workspace with no binding waits within the
+receipt reserve. Recovery never chooses a browser for it: that workspace's browser is already
+chosen. A workspace with no binding waits within the
 same grace before recovery only while the port reports evidence that a browser is returning, and
 `await_any` reads that evidence again on every poll. Each piece lapses on its own: a registered
 connection that is not available lasts as long as the connection, an initialized connection that
@@ -403,6 +403,18 @@ when it accepts a hello whose reported name maps to exactly one supported browse
 native-host id, and nothing else, to `state/last-browser.json`. With several installed browsers
 and no usable memory, recovery repairs the stale registrations it owns and leaves startup to the
 person. `manual` never launches.
+
+A bound workspace whose browser stays gone gets its own browser started again, under `on_demand`
+only (ADR-0196 Decision 12 amendment, 2026-10-17). The port keeps, in memory for the service's
+life, the installed browser each browser identity reported when it connected
+(`installed_browser_of`). When the bound browser maps to one, its wait ends as soon as no browser
+is evidently returning (`await_returning`), and `BrowserRecovery::request_browser` runs a flight
+scoped to that installed browser: registration checks, owned repair, one launch and the handshake
+wait. It answers ready when a connection of that browser arrives, or at once when one is already
+connected in another profile, since starting it again would only open a window there. The
+executor takes the call only when the bound identity is back and otherwise refuses with
+`browser_wrong_profile`. With no mapping, as after a service restart, the bound workspace waits
+the whole grace and keeps its refusals.
 
 An adapter that advertises end-to-end liveness acknowledges content-free service heartbeats at the
 extension shore, independently of browser operations. Relay attachment and adapter availability are

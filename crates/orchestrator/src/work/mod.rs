@@ -40,6 +40,7 @@ use crate::browser::{choose_browser, Availability, BrowserError, BrowserPort, RE
 use crate::events::{DenialPresentation, DomainEvent};
 
 use crate::audit::AuditRecord;
+use crate::governance::manifest::BrowserStartup;
 use crate::governance::{
     AuthoritySnapshot, Capability, CapabilitySet, Decision, GovernanceFacade, ReasonCode,
 };
@@ -1335,7 +1336,9 @@ impl ApplicationExecutor {
     /// browser connected at all.
     ///
     /// The binding is what makes the choice stable. It is taken once, on the first crossing, and
-    /// every later crossing in this workspace reads it back instead of choosing again.
+    /// every later crossing in this workspace reads it back instead of choosing again. When the
+    /// bound browser is gone, the call waits for it and may start that same browser again, but
+    /// never moves the session to another one.
     fn target_browser(&self, context: &InvocationContext<'_>) -> Result<String, BrowserError> {
         let pinned = self.workspaces.browser_of(context.workspace.as_str());
         let chosen = match choose_browser(
@@ -1362,31 +1365,91 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Wait a bounded grace for the browser this session already works in, then say what is
-    /// true.
+    /// Wait a bounded grace for the browser this session already works in, then start that
+    /// browser again when Ghostlight can, and otherwise say what is true.
     ///
-    /// A pinned session is never sent to recovery. Recovery chooses or starts a browser, and this
-    /// session's browser is already chosen; the same browser reconnecting, or still installing
-    /// its page runtime, is exactly what the grace is for (ADR-0196 Decision 12).
+    /// The same browser reconnecting, or still installing its page runtime, is what the grace is
+    /// for, so the grace always comes first and a reconnecting browser never gets a second
+    /// window. When the session's browser is one installed browser this service saw it connect
+    /// as, and `browser.startup` is `on_demand`, the grace ends once nothing is evidently
+    /// returning, which leaves the start the call's budget, and recovery then starts that browser
+    /// and no other (ADR-0196 Decision 12 amendment, 2026-10-17). Otherwise the session waits the
+    /// whole grace and the refusal says the browser is not connected, or that another one is.
     fn await_pinned_browser(
         &self,
         context: &InvocationContext<'_>,
         pinned: &str,
     ) -> Result<String, BrowserError> {
         let cancelled = context.cancellation.flag();
-        let availability =
-            self.browser
-                .await_available(pinned, return_grace_end(context.deadline), cancelled);
+        let restartable = self
+            .browser
+            .installed_browser_of(pinned)
+            .filter(|_| self.governance.browser_startup() == BrowserStartup::OnDemand);
+        let grace_end = return_grace_end(context.deadline);
+        let availability = if restartable.is_some() {
+            self.browser.await_returning(pinned, grace_end, cancelled)
+        } else {
+            self.browser.await_available(pinned, grace_end, cancelled)
+        };
         if cancelled.load(Ordering::SeqCst) {
             return Err(BrowserError::CancelledBeforeDispatch);
         }
-        match availability {
-            Availability::Available => Ok(pinned.into()),
-            Availability::NotAnswering => Err(BrowserError::NotAnsweringBeforeDispatch),
-            Availability::Absent if self.browser.browsers().is_empty() => {
-                Err(BrowserError::DisconnectedBeforeDispatch)
+        match (availability, restartable) {
+            (Availability::Available, _) => Ok(pinned.into()),
+            (Availability::NotAnswering, _) => Err(BrowserError::NotAnsweringBeforeDispatch),
+            (Availability::Absent, Some(installed)) => {
+                self.restart_pinned_browser(context, pinned, &installed)
             }
-            Availability::Absent => Err(BrowserError::WrongProfile),
+            (Availability::Absent, None) => Err(self.pinned_browser_absent()),
+        }
+    }
+
+    /// Start `installed`, the installed browser this session's browser `pinned` connected as,
+    /// and take the call there once `pinned` is back.
+    ///
+    /// Another profile of that browser connecting instead is the wrong profile. A browser that
+    /// recovery leaves to the person gets the refusal a session that waited for its browser
+    /// always got.
+    fn restart_pinned_browser(
+        &self,
+        context: &InvocationContext<'_>,
+        pinned: &str,
+        installed: &str,
+    ) -> Result<String, BrowserError> {
+        let cancelled = context.cancellation.flag();
+        match self
+            .recovery
+            .request_browser(installed, context.deadline, cancelled)
+        {
+            Ok(RecoveryDecision::Ready { .. })
+                if self
+                    .browser
+                    .browsers()
+                    .iter()
+                    .any(|connected| connected.id == pinned) =>
+            {
+                Ok(pinned.into())
+            }
+            Ok(RecoveryDecision::Ready { .. }) => Err(BrowserError::WrongProfile),
+            Ok(RecoveryDecision::Manual { .. }) => Err(self.pinned_browser_absent()),
+            Ok(RecoveryDecision::Failed { reason, details }) => {
+                Err(BrowserError::RecoveryFailed { reason, details })
+            }
+            Ok(RecoveryDecision::Launch { .. }) => {
+                unreachable!("the recovery service consumes its internal launch plan")
+            }
+            Err(RecoveryWaitError::Cancelled) => Err(BrowserError::CancelledBeforeDispatch),
+            Err(RecoveryWaitError::Deadline) => Err(BrowserError::DeadlineBeforeDispatch),
+        }
+    }
+
+    /// The refusal for a session whose browser is not connected: not connected when no browser
+    /// is, and the wrong profile when another browser is.
+    fn pinned_browser_absent(&self) -> BrowserError {
+        if self.browser.browsers().is_empty() {
+            BrowserError::DisconnectedBeforeDispatch
+        } else {
+            BrowserError::WrongProfile
         }
     }
 

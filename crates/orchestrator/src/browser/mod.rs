@@ -135,6 +135,14 @@ pub trait BrowserPort: Send + Sync {
         None
     }
 
+    /// The native-host id (`chrome`, `edge`, ...) of the installed browser that `browser`, a
+    /// browser identity, reported when it connected to this service, or `None` when it never
+    /// connected or its reported name maps to no single supported browser. Kept for the
+    /// service's life, so it answers for a browser that has since closed. The default knows none.
+    fn installed_browser_of(&self, _browser: &str) -> Option<String> {
+        None
+    }
+
     /// Wait until one exact browser can take work, `until` passes, or the call is cancelled.
     ///
     /// The default reads `browsers()`, so a port that cannot tell a silent connection from an
@@ -161,6 +169,30 @@ pub trait BrowserPort: Send + Sync {
                     .saturating_duration_since(Instant::now())
                     .min(AVAILABILITY_POLL),
             );
+        }
+    }
+
+    /// Wait like [`await_available`](Self::await_available), but stop as soon as `browser` is
+    /// absent and no browser is evidently returning ([`browser_returning`](Self::browser_returning)).
+    ///
+    /// A session that Ghostlight can start its browser for waits only while that browser may be
+    /// on its way back, so a browser the person closed keeps the call's budget for its start.
+    fn await_returning(
+        &self,
+        browser: &str,
+        until: Instant,
+        cancelled: &AtomicBool,
+    ) -> Availability {
+        loop {
+            let slice = (Instant::now() + AVAILABILITY_POLL).min(until);
+            let availability = self.await_available(browser, slice, cancelled);
+            if availability == Availability::Available
+                || cancelled.load(Ordering::SeqCst)
+                || Instant::now() >= until
+                || (availability == Availability::Absent && !self.browser_returning())
+            {
+                return availability;
+            }
         }
     }
 
@@ -338,6 +370,10 @@ struct AdapterRegistry {
     /// is likely to come back. One that left longer ago than the return grace is evidence of
     /// nothing.
     departed: Option<Instant>,
+    /// The installed browser (`chrome`, `edge`, ...) each browser identity reported when it
+    /// connected, kept for the service's life in memory only, so a session whose browser closed
+    /// can start that same browser again.
+    installed: HashMap<String, &'static str>,
 }
 
 impl AdapterRegistry {
@@ -778,6 +814,9 @@ impl RelayBrowserPort {
                     "browser connection capacity reached".into(),
                 ));
             }
+            if let Some(installed) = installed {
+                adapters.installed.insert(browser_id.clone(), installed);
+            }
             let previous = adapters.connections.insert(browser_id.clone(), connection);
             if let Some(previous) = &previous {
                 retire(previous);
@@ -961,6 +1000,13 @@ impl BrowserPort for RelayBrowserPort {
     fn last_connected_browser(&self) -> Option<String> {
         let record = lock(&self.last_browser).clone()?;
         last_browser::read(&record)
+    }
+
+    fn installed_browser_of(&self, browser: &str) -> Option<String> {
+        lock(&self.adapters)
+            .installed
+            .get(browser)
+            .map(|installed| (*installed).to_owned())
     }
 
     /// A silent connection is waited on until it answers a timer heartbeat again.
@@ -1304,6 +1350,7 @@ pub(crate) mod testing {
         connected: Mutex<Vec<BrowserSummary>>,
         returning: Mutex<bool>,
         last_connected: Mutex<Option<String>>,
+        installed: Mutex<std::collections::HashMap<String, String>>,
     }
 
     impl Default for FakeBrowser {
@@ -1318,6 +1365,7 @@ pub(crate) mod testing {
                 connected: Mutex::new(vec![summary(FAKE_BROWSER, true)]),
                 returning: Mutex::new(false),
                 last_connected: Mutex::new(None),
+                installed: Mutex::default(),
             }
         }
     }
@@ -1370,6 +1418,11 @@ pub(crate) mod testing {
         /// Remember `browser`, a native-host id, as the installed browser that last connected.
         pub fn remember_last_connected(&self, browser: &str) {
             *lock(&self.last_connected) = Some(browser.into());
+        }
+        /// Report that the browser identity `browser` connected as the installed browser
+        /// `installed`, a native-host id.
+        pub fn remember_installed(&self, browser: &str, installed: &str) {
+            lock(&self.installed).insert(browser.into(), installed.into());
         }
     }
 
@@ -1477,6 +1530,10 @@ pub(crate) mod testing {
 
         fn last_connected_browser(&self) -> Option<String> {
             lock(&self.last_connected).clone()
+        }
+
+        fn installed_browser_of(&self, browser: &str) -> Option<String> {
+            lock(&self.installed).get(browser).cloned()
         }
 
         fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {

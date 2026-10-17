@@ -233,9 +233,15 @@ Refusals say what is true, and their next steps suggest only what the caller can
   last 1.5 seconds. It stops waiting as soon as none of these holds, so a browser closed long ago
   goes straight to browser startup with the whole deadline to launch it. The wait lasts up to
   about seven seconds and ends early enough to leave the call time to run.
-  A silent browser gets one liveness probe at once. A session that already works in a browser is
-  never sent to browser startup. Then the refusal says which fact stopped the call, with
-  `failed`, no effect, and `repeat_safe: true`:
+  A silent browser gets one liveness probe at once. Under `on_demand`, when Ghostlight knows
+  which installed browser a session's own browser is, the session waits only while a browser is
+  evidently returning, and a browser still gone after that is started again, so the start keeps
+  the call's budget. The call then goes through when the same browser connects; another
+  profile of it connecting is `browser_wrong_profile`, and a start whose adapter never connects
+  is `browser_handshake_timeout`, with the words every browser start has. No new sentence is
+  needed (ADR-0196 Decision 12 amendment, 2026-10-17). Otherwise a session that already works in
+  a browser is never sent to browser startup. Then the refusal says which fact stopped the call,
+  with `failed`, no effect, and `repeat_safe: true`:
 
   | Fact | `reason` | Summary | Next step |
   | --- | --- | --- | --- |

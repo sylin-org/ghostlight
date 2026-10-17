@@ -1,10 +1,12 @@
 //! Browser availability at the one browser seam: a call waits a bounded grace for a browser that
-//! is on its way back, then says what is true (ADR-0196 Decision 12).
+//! is on its way back, starts a session's own browser again when Ghostlight can, and otherwise
+//! says what is true (ADR-0196 Decision 12 and its 2026-10-17 amendment).
 //!
 //! The relay cases run the executor over a real `RelayBrowserPort` and scripted protocol-4
 //! extensions, because what they prove lives in the port: a connection that left moments ago,
 //! and a silent connection that answers again.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Instant;
 
@@ -296,6 +298,266 @@ fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_wind
     let _ = fs::remove_file(policy);
 }
 
+/// Governance that starts a browser on demand, the Windows default, written out so the tests
+/// read the same on every platform.
+fn on_demand_startup() -> (GovernanceFacade, PathBuf) {
+    let policy = temporary_policy("on-demand-browser-startup");
+    fs::write(
+        &policy,
+        all_open_policy_with(
+            r#"[{"key":"browser.startup","value":"on_demand","level":"mandatory"}]"#,
+        ),
+    )
+    .unwrap();
+    (GovernanceFacade::new(Some(policy.clone()), None), policy)
+}
+
+/// The installed browser the relay fixture's scripted extensions connect as: their hello
+/// reports the name Chrome.
+const RELAY_INSTALLED: &str = "chrome";
+
+/// Installed-browser facts naming Chrome, the browser the scripted extensions connect as.
+fn chrome_installed() -> Vec<RecoveryCandidate> {
+    vec![RecoveryCandidate {
+        id: RELAY_INSTALLED.into(),
+        name: "Google Chrome".into(),
+        package: BrowserPackage::Native,
+        package_detail: "Google Chrome native package".into(),
+        registration: NativeHostState::Current,
+        ordinary_executable: Some(PathBuf::from("chrome")),
+    }]
+}
+
+/// The session's browser closed long ago. Under `on_demand`, the call does not spend the grace
+/// on it: Ghostlight starts that browser at once, and the call goes through when the same
+/// browser connects again.
+#[test]
+fn a_pinned_browser_closed_long_ago_is_started_again_and_takes_the_call() {
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
+    let (governance, policy) = on_demand_startup();
+    let (mut executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
+    executor.recovery.set_test_candidates(chrome_installed());
+    let launches = Arc::new(AtomicUsize::new(0));
+    let started = Arc::new(Mutex::new(Vec::new()));
+    {
+        let (port, launches, started) = (
+            Arc::clone(&port),
+            Arc::clone(&launches),
+            Arc::clone(&started),
+        );
+        executor.recovery.set_test_launch(move || {
+            launches.fetch_add(1, Ordering::SeqCst);
+            started.lock().unwrap().push(attach(&port, false));
+        });
+    }
+
+    let first = attach(&port, false);
+    workspaces
+        .pin_browser(workspace.as_str(), RELAY_BROWSER)
+        .unwrap();
+    assert_eq!(
+        port.installed_browser_of(RELAY_BROWSER).as_deref(),
+        Some(RELAY_INSTALLED)
+    );
+    first.close();
+    await_unregistered(&port);
+    port.backdate(RETURN_GRACE);
+    assert!(!port.browser_returning());
+
+    let began = Instant::now();
+    let listed = list_tabs(&executor, &workspace);
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(listed.facts["browsers"][0]["browser"], json!(RELAY_BROWSER));
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    assert!(
+        began.elapsed() < RETURN_GRACE / 2,
+        "the start did not wait out the grace, took {:?}",
+        began.elapsed()
+    );
+    assert_eq!(
+        workspaces.browser_of(workspace.as_str()).as_deref(),
+        Some(RELAY_BROWSER)
+    );
+    let _ = fs::remove_file(policy);
+}
+
+/// A session's browser that comes back inside the grace takes the call, and nothing is
+/// started, even when Ghostlight could start it.
+#[test]
+fn a_pinned_browser_that_returns_within_the_grace_starts_nothing() {
+    let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
+    let (governance, policy) = on_demand_startup();
+    let (mut executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
+    executor.recovery.set_test_candidates(chrome_installed());
+    let launches = Arc::new(AtomicUsize::new(0));
+    {
+        let launches = Arc::clone(&launches);
+        executor.recovery.set_test_launch(move || {
+            launches.fetch_add(1, Ordering::SeqCst);
+        });
+    }
+
+    let first = attach(&port, false);
+    workspaces
+        .pin_browser(workspace.as_str(), RELAY_BROWSER)
+        .unwrap();
+    first.close();
+    await_unregistered(&port);
+    let second = attach_later(&port, Duration::from_millis(300));
+
+    let listed = list_tabs(&executor, &workspace);
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(launches.load(Ordering::SeqCst), 0);
+    drop(second.join().unwrap());
+    let _ = fs::remove_file(policy);
+}
+
+/// A fake-port executor whose session works in `browser_chrome`, a browser that connected as
+/// the fixture's one installed browser and is gone now. Each launch counts, then runs
+/// `arrive` with the port.
+fn closed_session_browser(
+    governance: GovernanceFacade,
+    arrive: impl Fn(&FakeBrowser) + Send + Sync + 'static,
+) -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    crate::workspace::WorkspaceId,
+    Arc<AtomicUsize>,
+) {
+    let (mut executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
+    browser.connect(vec![]);
+    browser.remember_installed("browser_chrome", "chromium");
+    workspaces
+        .pin_browser(workspace.as_str(), "browser_chrome")
+        .unwrap();
+    let launches = Arc::new(AtomicUsize::new(0));
+    {
+        let (browser, launches) = (Arc::clone(&browser), Arc::clone(&launches));
+        executor.recovery.set_test_launch(move || {
+            launches.fetch_add(1, Ordering::SeqCst);
+            arrive(&browser);
+        });
+    }
+    (executor, browser, workspace, launches)
+}
+
+fn navigate_within_a_second(
+    executor: &ApplicationExecutor,
+    workspace: &crate::workspace::WorkspaceId,
+) -> crate::work::result::InvocationResult {
+    navigate_for(executor, workspace, 1000)
+}
+
+/// The session's browser is started again while a different browser stays connected, and the
+/// call goes to the session's browser once it is back.
+#[test]
+fn a_pinned_browser_started_again_beside_another_browser_takes_the_call() {
+    let (governance, policy) = on_demand_startup();
+    let (executor, browser, workspace, launches) = closed_session_browser(governance, |browser| {
+        browser.connect(vec![
+            summary("browser_edge", false),
+            summary("browser_chrome", true),
+        ]);
+    });
+    browser.connect(vec![summary("browser_edge", true)]);
+    browser.remember_installed("browser_edge", "edge");
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+
+    let opened = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    assert_eq!(browser.routed(), vec!["browser_chrome".to_owned()]);
+    let _ = fs::remove_file(policy);
+}
+
+/// When the start brings back another profile of the same browser instead, the call is
+/// refused as the wrong profile, nothing is sent and the session is not moved.
+#[test]
+fn a_started_browser_that_connects_as_another_profile_is_the_wrong_profile() {
+    let (governance, policy) = on_demand_startup();
+    let (executor, browser, workspace, launches) = closed_session_browser(governance, |browser| {
+        browser.remember_installed("browser_other_profile", "chromium");
+        browser.connect(vec![summary("browser_other_profile", true)]);
+    });
+
+    let refused = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(refused.status, Status::Failed);
+    assert_eq!(refused.effect, Effect::None);
+    assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    assert!(browser.routed().is_empty());
+    let _ = fs::remove_file(policy);
+}
+
+/// When the started browser never connects, the call ends with the handshake timeout every
+/// browser start gets.
+#[test]
+fn a_started_browser_that_never_connects_is_the_handshake_timeout() {
+    let (governance, policy) = on_demand_startup();
+    let (executor, browser, workspace, launches) = closed_session_browser(governance, |_| {});
+
+    let refused = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(refused.status, Status::Failed);
+    assert_eq!(refused.effect, Effect::None);
+    assert_eq!(
+        refused.facts["reason"],
+        json!("browser_handshake_timeout"),
+        "{:?}",
+        refused.facts
+    );
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    assert!(browser.routed().is_empty());
+    let _ = fs::remove_file(policy);
+}
+
+/// Under `manual`, the session's browser is never started: the refusals are the ones a session
+/// that waited for its browser always got.
+#[test]
+fn under_manual_startup_a_pinned_browser_is_never_started() {
+    let (governance, policy) = manual_startup();
+    let (executor, browser, workspace, launches) = closed_session_browser(governance, |_| {});
+
+    let refused = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(refused.facts["reason"], json!("browser_disconnected"));
+    browser.connect(vec![summary("browser_edge", true)]);
+    let refused = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
+    assert_eq!(launches.load(Ordering::SeqCst), 0);
+    let _ = fs::remove_file(policy);
+}
+
+/// A session's browser this service never saw connect as one installed browser, as after a
+/// service restart or from a build that reports no name, is never started: the refusals are
+/// unchanged.
+#[test]
+fn a_pinned_browser_with_no_known_installed_browser_is_never_started() {
+    let (governance, policy) = on_demand_startup();
+    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
+    browser.connect(vec![]);
+    workspaces
+        .pin_browser(workspace.as_str(), "browser_chrome")
+        .unwrap();
+    let mut executor = executor;
+    let launches = Arc::new(AtomicUsize::new(0));
+    {
+        let launches = Arc::clone(&launches);
+        executor.recovery.set_test_launch(move || {
+            launches.fetch_add(1, Ordering::SeqCst);
+        });
+    }
+
+    let refused = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(refused.facts["reason"], json!("browser_disconnected"));
+    browser.connect(vec![summary("browser_edge", true)]);
+    let refused = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
+    assert_eq!(launches.load(Ordering::SeqCst), 0);
+    let _ = fs::remove_file(policy);
+}
+
 /// A pinned browser that stays gone while a different browser is connected is the one case
 /// that names another profile. Nothing is sent, and the session is not moved.
 #[test]
@@ -335,8 +597,7 @@ fn a_pinned_browser_absent_while_another_is_connected_is_the_wrong_profile() {
 }
 
 /// A pinned browser that stays gone with nothing else connected is reported as not connected.
-/// It never reaches recovery, which would choose or launch a browser for an already-bound
-/// session.
+/// This service never saw it connect as an installed browser, so nothing is started for it.
 #[test]
 fn a_pinned_browser_absent_with_nothing_connected_is_not_connected_and_never_recovered() {
     let (executor, browser, workspaces, workspace, _) = fixture();

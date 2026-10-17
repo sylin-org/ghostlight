@@ -86,9 +86,15 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
 19. A workspace binds to one browser for its life. Physical tab ids resolve only within their
     browser, and a bound browser that disconnects is waited for rather than replaced by another.
     The wait lasts up to about seven seconds, capped by the call's deadline, and the same browser
-    reconnecting while it installs its page runtime takes the call. A bound session never reaches
-    browser startup. If the browser does not return, the refusal says it is not answering, not
-    connected, or not connected while a different browser is (`browser_wrong_profile`). A session
+    reconnecting while it installs its page runtime takes the call. Under `on_demand`, when this
+    service saw the bound browser connect as one installed browser, the wait ends once no browser
+    is evidently returning, and that browser, never another, is started again; the call goes
+    through when the same browser identity connects, another profile connecting instead is
+    `browser_wrong_profile`, and nothing connecting is `browser_handshake_timeout` (ADR-0196
+    Decision 12 amendment, 2026-10-17). Otherwise, and always under `manual`, a bound session
+    never reaches browser startup. If the browser does not return, the refusal says it is not
+    answering, not connected, or not connected while a different browser is
+    (`browser_wrong_profile`). A session
     with no browser yet waits before browser startup only while a browser is evidently returning,
     and the evidence is read again on every poll: a registered connection still initializing or
     silent, a connection that ended less than the grace ago, or a service endpoint published less
