@@ -15,8 +15,10 @@
 //! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
 //! `item_id_list` (named by the installer's Start-menu shortcut), whether the process sits in the
 //! visible window station in `window_station` (the service starts the shell only where a person
-//! could see it), and announcing a change of the user's environment variables to running programs
-//! in `settings_change`. Starting the service, process identity and the session listener live in
+//! could see it), announcing a change of the user's environment variables to running programs
+//! in `settings_change`, a program's own icon read from its icon resource in `program_icon`, and
+//! the install folders of a Store package family in `package` (the window shows each agent's
+//! app icon). Starting the service, process identity and the session listener live in
 //! the relay's audited `os` module (ADR-0199 Decisions 3 and 14). Non-Windows targets compile the
 //! portable surface returning an empty answer.
 
@@ -25,9 +27,13 @@ mod elevation;
 #[cfg(target_os = "windows")]
 mod item_id_list;
 #[cfg(target_os = "windows")]
+mod package;
+#[cfg(target_os = "windows")]
 mod private_file;
 #[cfg(target_os = "windows")]
 mod process;
+#[cfg(target_os = "windows")]
+mod program_icon;
 #[cfg(target_os = "windows")]
 mod settings_change;
 #[cfg(target_os = "windows")]
@@ -79,6 +85,34 @@ pub fn item_id_list(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
 #[cfg(target_os = "windows")]
 pub fn broadcast_environment_change() {
     settings_change::environment_changed();
+}
+
+/// The icon of the program at `path` as the bytes of a `.ico` file of at most `max_bytes`: the
+/// largest images of the program's first icon group, read with the program mapped as a data file,
+/// so none of its code runs. `Ok(None)` when the program has no icon resource, no image fits, or
+/// the platform has no icon resources; an error when the file cannot be mapped as a program.
+pub fn program_icon(path: &std::path::Path, max_bytes: usize) -> std::io::Result<Option<Vec<u8>>> {
+    #[cfg(target_os = "windows")]
+    return program_icon::of_program(path, max_bytes);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (path, max_bytes);
+        Ok(None)
+    }
+}
+
+/// The install folders of the Store (MSIX) packages of the package family `family`
+/// (`<name>_<publisher id>`) installed for this user, as Windows's app model reports them. Empty
+/// when none is installed, when Windows cannot say, or where the platform has no packages.
+#[must_use]
+pub fn package_install_folders(family: &str) -> Vec<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    return package::install_folders(family);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = family;
+        Vec::new()
+    }
 }
 
 /// Whether a window this process opens could be seen by a person: the process is in the visible,

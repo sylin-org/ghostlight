@@ -569,8 +569,11 @@ launcher script starts, or below a known folder), a Store package, or Linux desk
 the agent whose icon stands for one that has none (Claude Code wears Claude Desktop's). One
 resolver, `install/icons.rs`, runs off the request path, at the service's start and on Re-check,
 bounded in time. It keeps the first icon found in `state/icons` with a manifest, reads a source
-again only when its file changed, and on Linux takes PNG only, never SVG. Only Linux sources give
-an icon in this build; a Windows source's program is found but its icon is not read. The agent's
+again only when its file changed, and on Linux takes PNG only, never SVG. On Windows a program's
+icon is its icon resource, copied as a `.ico` file by `crates/win-peer`, which maps the program as
+data and runs none of it; a Store app's icon is the PNG logo its package manifest names, in the
+variant that suits the window, found through its family's folder below `%LOCALAPPDATA%\Packages`
+and the install folder Windows names for that family. The agent's
 symbol is `agent-icons/<id>?v=<version>` while a copy is cached, else the monogram tile, decided
 where `crate::agent` builds the agent. The window serves the copy at that address as `image/png`
 or `image/x-icon` with `default-src 'none'; sandbox`, for catalog ids only.

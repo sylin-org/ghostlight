@@ -36,12 +36,13 @@ const PACKAGE_ROOT_DIRECTORY: &str = "WindowsApps";
 const PROGRAM_FILES_DIRECTORY: &str = "Program Files";
 
 /// Separates the fields of a package directory such as `Claude_1.2.3_x64__id`: name, version,
-/// architecture, resource id and publisher id.
-const PACKAGE_FIELD_SEPARATOR: char = '_';
+/// architecture, resource id and publisher id. A package family name, `Claude_id`, is the first
+/// and the last.
+pub(super) const PACKAGE_FIELD_SEPARATOR: char = '_';
 
-/// Where an app's private copy of `%LOCALAPPDATA%` lives, below `%LOCALAPPDATA%`. The package
-/// family name follows [`PRIVATE_DATA_PARENT`].
-const PRIVATE_DATA_PARENT: &str = "Packages";
+/// Where an app's private copy of `%LOCALAPPDATA%` lives, below `%LOCALAPPDATA%`: one folder per
+/// package family installed for the person, named by the family name.
+pub(super) const PRIVATE_DATA_PARENT: &str = "Packages";
 
 /// The directories between the package family directory and the private `%LOCALAPPDATA%`.
 const PRIVATE_DATA_CHILD: [&str; 2] = ["LocalCache", "Local"];

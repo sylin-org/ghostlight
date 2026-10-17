@@ -97,8 +97,8 @@ frames or GIFs, dialog text, console text, or network payloads.
   or open the browser. The read is local. Profile names appear only in the Ghostlight window on
   this computer and are never stored, logged or sent.
 - To show each installed agent's own icon in its window, the Ghostlight application on this
-  computer reads the agents' app files: a program's icon resource and a Store package's logo on
-  Windows, a desktop entry and the icon it names on Linux. It keeps a copy of each icon in
+  computer reads the agents' app files: a program's icon resource and a Store package's manifest
+  and logo on Windows, a desktop entry and the icon it names on Linux. It keeps a copy of each icon in
   `state/icons` in its home folder and sends nothing.
 - No Chrome sync storage; adapter identity and user settings remain local to the browser profile.
 - No browsing-history database or background collection unrelated to a requested operation.

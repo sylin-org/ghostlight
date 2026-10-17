@@ -12,9 +12,12 @@
 //! monogram, which is the normal case.
 //!
 //! On Linux an icon comes from the agent's desktop entry and the icon theme, PNG only, because a
-//! local SVG could carry script. On Windows this build finds the program a source names, through a
-//! launcher script on `PATH` when there is one, but reads no program's icon resource and no Store
-//! package's logo, so a Windows source gives no icon.
+//! local SVG could carry script. On Windows a program's icon is its icon resource, copied as a
+//! `.ico` file (through `ghostlight-win-peer`, which maps the program as data and runs none of
+//! it); the program is found below a known folder or on `PATH`, through the program a `.cmd` or
+//! `.ps1` launcher starts. A Store app's icon is the PNG logo its package manifest names, in the
+//! variant that suits the window best; the package is found by its family's folder below
+//! `%LOCALAPPDATA%\Packages`, and Windows says where it is installed.
 //!
 //! The agent symbols read the cache the service publishes ([`publish`], [`published_version`]),
 //! and the window serves its copies ([`IconCache::icon`]). Everything here is a local read of the
@@ -34,6 +37,7 @@ use ghostlight_bridge::diagnostics::{event, Level, Sink};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::container::{PACKAGE_FIELD_SEPARATOR, PRIVATE_DATA_PARENT};
 use super::record::atomic_replace;
 use super::{lock, HOME_VARIABLE, USER_PROFILE_VARIABLE};
 
@@ -46,6 +50,12 @@ const MAX_ICON_BYTES: u64 = 1024 * 1024;
 
 /// The largest desktop entry or launcher script read.
 const MAX_TEXT_BYTES: u64 = 64 * 1024;
+
+/// The largest package manifest read.
+const MAX_MANIFEST_BYTES: u64 = 512 * 1024;
+
+/// The most entries of one folder looked at: the package families, or a package's logo variants.
+const MAX_FOLDER_ENTRIES: usize = 4096;
 
 /// How many characters of the copy's SHA-256 name its version in the window's address.
 pub const VERSION_LENGTH: usize = 12;
@@ -125,6 +135,51 @@ const LAUNCHER_SUFFIXES: [&str; 2] = [".cmd", ".ps1"];
 /// How a launcher script names its own directory: `%~dp0` in a batch file, `%dp0%` in an npm
 /// batch shim, and `$basedir` or `$PSScriptRoot` in a PowerShell one.
 const LAUNCHER_DIRECTORY_MARKS: [&str; 4] = ["%~dp0", "%dp0%", "$basedir", "$PSScriptRoot"];
+
+/// The file in a package's install folder that describes the package and its apps.
+const PACKAGE_MANIFEST: &str = "AppxManifest.xml";
+
+/// The manifest element of one app of a package.
+const APPLICATION_ELEMENT: &str = "Application";
+
+/// The manifest element, inside an app's, that names the app's logos.
+const VISUAL_ELEMENTS_ELEMENT: &str = "VisualElements";
+
+/// The logo attributes of `VisualElements` read, in order, with the size in pixels each logo is
+/// drawn at before scaling: the app list icon, then the medium tile.
+const LOGO_ATTRIBUTES: [(&str, u32); 2] = [("Square44x44Logo", 44), ("Square150x150Logo", 150)];
+
+/// Separates a logo file's name, its qualifiers and its extension:
+/// `Logo.targetsize-48_altform-unplated.png`.
+const QUALIFIERS_START: char = '.';
+
+/// Separates one logo qualifier from the next.
+const QUALIFIER_SEPARATOR: char = '_';
+
+/// Separates a logo qualifier's name from its value.
+const QUALIFIER_VALUE_SEPARATOR: char = '-';
+
+/// The qualifier of a logo drawn at a percentage of its attribute's size.
+const SCALE_QUALIFIER: &str = "scale";
+
+/// The scale, in percent, at which a logo is drawn at its attribute's size.
+const FULL_SCALE: u32 = 100;
+
+/// The qualifier of a logo drawn at an exact size in pixels.
+const TARGET_SIZE_QUALIFIER: &str = "targetsize";
+
+/// The qualifier of a logo's alternate form.
+const ALTERNATE_FORM_QUALIFIER: &str = "altform";
+
+/// The qualifier of a logo for a high-contrast theme, which is never taken.
+const CONTRAST_QUALIFIER: &str = "contrast";
+
+/// The alternate form drawn without the tile's plate: the app's own mark on a clear background.
+const UNPLATED_FORM: &str = "unplated";
+
+/// The smallest logo, in pixels, that stays sharp at the window's largest symbol on a dense
+/// screen. The smallest logo at least this size is taken, else the largest one.
+const PREFERRED_LOGO_PIXELS: u32 = 96;
 
 /// Programs a launcher starts to run a script, never the agent's own program: an npm shim names
 /// Node, and such a launcher names no program of the agent.
@@ -214,6 +269,10 @@ impl IconKind {
     }
 }
 
+/// How the install folders of a Store package family are found: the family name in, the folders
+/// out.
+pub type PackageFolders = fn(&str) -> Vec<PathBuf>;
+
 /// The computer an agent's icon is looked for on.
 #[derive(Clone, Debug, Default)]
 pub struct IconPlaces {
@@ -228,6 +287,8 @@ pub struct IconPlaces {
     path_entries: Vec<PathBuf>,
     /// The data directories desktop entries and icons are found in, in order.
     data_dirs: Vec<PathBuf>,
+    /// How a Store package's install folders are found; none where packages are not looked at.
+    packages: Option<PackageFolders>,
 }
 
 impl IconPlaces {
@@ -255,6 +316,7 @@ impl IconPlaces {
                 program_files: env::var_os(PROGRAM_FILES_VARIABLE).map(PathBuf::from),
                 path_entries,
                 data_dirs: Vec::new(),
+                packages: Some(ghostlight_win_peer::package_install_folders),
             }
         } else {
             Self {
@@ -267,6 +329,7 @@ impl IconPlaces {
                     env::var_os(XDG_DATA_HOME_VARIABLE),
                     env::var_os(XDG_DATA_DIRS_VARIABLE),
                 ),
+                packages: None,
             }
         }
     }
@@ -281,7 +344,8 @@ impl IconPlaces {
         }
     }
 
-    /// A Windows computer with these folders and `PATH`, for tests that must not read this one.
+    /// A Windows computer with these folders and `PATH`, whose Store packages are not looked at,
+    /// for tests that must not read this one.
     #[cfg(test)]
     pub(crate) fn windows(
         local_app_data: PathBuf,
@@ -294,6 +358,7 @@ impl IconPlaces {
             program_files: Some(program_files),
             path_entries,
             data_dirs: Vec::new(),
+            packages: None,
         }
     }
 
@@ -394,7 +459,7 @@ impl Stamp {
 enum Located {
     /// A PNG image.
     Png(PathBuf),
-    /// A Windows program, whose icon resource this build does not read.
+    /// A Windows program, whose icon resource holds its icon.
     Program(PathBuf),
 }
 
@@ -725,17 +790,43 @@ impl IconCache {
                 .filter_map(|place| program(places, *place))
                 .map(Located::Program)
                 .collect(),
+            IconSource::WindowsPackage(name) if places.windows => self
+                .package_logos(agent_id, name)
+                .into_iter()
+                .map(Located::Png)
+                .collect(),
             IconSource::LinuxDesktop(ids) if !places.windows => ids
                 .iter()
                 .filter_map(|id| self.desktop_icon(agent_id, id))
                 .map(Located::Png)
                 .collect(),
-            // This build does not find a Store package's install folder, and a source for the
-            // other system names nothing here.
+            // A source for the other system names nothing here.
             IconSource::WindowsPackage(_)
             | IconSource::WindowsExe(_)
             | IconSource::LinuxDesktop(_) => Vec::new(),
         }
+    }
+
+    /// The logos of the Store app with package name `name`: one per install folder of each of its
+    /// families installed for the person.
+    fn package_logos(&self, agent_id: &str, name: &str) -> Vec<PathBuf> {
+        let places = &self.inner.places;
+        let (Some(local_app_data), Some(install_folders)) =
+            (places.local_app_data.as_deref(), places.packages)
+        else {
+            return Vec::new();
+        };
+        package_families(local_app_data, name)
+            .iter()
+            .flat_map(|family| install_folders(family))
+            .filter_map(|install| match package_logo(&install) {
+                Ok(logo) => logo,
+                Err(error) => {
+                    self.report(agent_id, &Skip::Unreadable(error.kind()));
+                    None
+                }
+            })
+            .collect()
     }
 
     /// The PNG icon the desktop entry `id` names, from the first data directory that holds the
@@ -840,7 +931,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// The icon in `located`, as `stamp` saw it: a PNG is read whole when it is small enough and
-/// starts like one. A program gives none, because this build reads no icon resource.
+/// starts like one; a program gives its icon resource as an icon file within the same bound, or
+/// none when it has no icon.
 fn read_icon(located: &Located, stamp: &Stamp) -> Result<Option<(IconKind, Vec<u8>)>, Skip> {
     match located {
         Located::Png(path) => {
@@ -856,7 +948,13 @@ fn read_icon(located: &Located, stamp: &Stamp) -> Result<Option<(IconKind, Vec<u
                 Err(Skip::NotPng)
             }
         }
-        Located::Program(_) => Ok(None),
+        Located::Program(path) => {
+            let limit = usize::try_from(MAX_ICON_BYTES).unwrap_or(usize::MAX);
+            match ghostlight_win_peer::program_icon(path, limit) {
+                Ok(icon) => Ok(icon.map(|bytes| (IconKind::Ico, bytes))),
+                Err(error) => Err(Skip::Unreadable(error.kind())),
+            }
+        }
     }
 }
 
@@ -1006,6 +1104,229 @@ fn launcher_path(directory: &Path, token: &str) -> Option<PathBuf> {
         }
     }
     Some(path)
+}
+
+/// The families of the Store app with package name `name` installed for the person: the folders
+/// below `%LOCALAPPDATA%\Packages` named `<name>_<publisher id>`, ignoring the name's case, in
+/// name order.
+fn package_families(local_app_data: &Path, name: &str) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(local_app_data.join(PRIVATE_DATA_PARENT)) else {
+        return Vec::new();
+    };
+    let mut families: Vec<String> = entries
+        .take(MAX_FOLDER_ENTRIES)
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|family| {
+            family
+                .rsplit_once(PACKAGE_FIELD_SEPARATOR)
+                .is_some_and(|(own, publisher)| {
+                    own.eq_ignore_ascii_case(name)
+                        && !publisher.is_empty()
+                        && publisher.chars().all(|unit| unit.is_ascii_alphanumeric())
+                })
+        })
+        .collect();
+    families.sort();
+    families
+}
+
+/// The logo file of the first app of the package installed in `install`, in the variant that
+/// suits the window best; none when its manifest names no PNG logo that is there.
+fn package_logo(install: &Path) -> io::Result<Option<PathBuf>> {
+    let Some(bytes) = read_bounded(&install.join(PACKAGE_MANIFEST), MAX_MANIFEST_BYTES)? else {
+        return Ok(None);
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    Ok(manifest_logo(&text).and_then(|(logo, base)| logo_file(install, &logo, base)))
+}
+
+/// The logo the first app of a package manifest names, with the size in pixels it is drawn at
+/// before scaling: the first of [`LOGO_ATTRIBUTES`] its `VisualElements` carries.
+fn manifest_logo(text: &str) -> Option<(String, u32)> {
+    let mut in_application = false;
+    let mut rest = text;
+    while let Some(open) = rest.find('<') {
+        rest = &rest[open + 1..];
+        if let Some(comment) = rest.strip_prefix("!--") {
+            rest = comment.split_once("-->").map_or("", |(_, after)| after);
+            continue;
+        }
+        let end = tag_end(rest)?;
+        let tag = &rest[..end];
+        rest = &rest[end + 1..];
+        let name_end = tag
+            .find(|character: char| character.is_whitespace() || character == '/')
+            .unwrap_or(tag.len());
+        match local_name(&tag[..name_end]) {
+            APPLICATION_ELEMENT => in_application = true,
+            VISUAL_ELEMENTS_ELEMENT if in_application => {
+                let attributes = tag_attributes(&tag[name_end..]);
+                return LOGO_ATTRIBUTES.iter().find_map(|(wanted, base)| {
+                    attributes
+                        .iter()
+                        .find(|(attribute, _)| local_name(attribute) == *wanted)
+                        .map(|(_, value)| ((*value).to_owned(), *base))
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// An XML name without its namespace prefix.
+fn local_name(name: &str) -> &str {
+    name.rsplit_once(':').map_or(name, |(_, local)| local)
+}
+
+/// Where the tag that starts `text` ends: its first `>` outside a quoted value.
+fn tag_end(text: &str) -> Option<usize> {
+    let mut quote = None;
+    for (at, character) in text.char_indices() {
+        match quote {
+            Some(open) if open == character => quote = None,
+            Some(_) => {}
+            None if matches!(character, '"' | '\'') => quote = Some(character),
+            None if character == '>' => return Some(at),
+            None => {}
+        }
+    }
+    None
+}
+
+/// The attributes of a tag after its name: each name and its quoted value as written.
+fn tag_attributes(text: &str) -> Vec<(&str, &str)> {
+    let mut attributes = Vec::new();
+    let mut rest = text;
+    while let Some((name, after)) = rest.split_once('=') {
+        let after = after.trim_start();
+        let Some(quote) = after
+            .chars()
+            .next()
+            .filter(|quote| matches!(quote, '"' | '\''))
+        else {
+            break;
+        };
+        let Some((value, next)) = after[1..].split_once(quote) else {
+            break;
+        };
+        attributes.push((name.trim(), value));
+        rest = next;
+    }
+    attributes
+}
+
+/// The best variant for the window of the PNG logo `logo`, a path relative to the package's
+/// `install` folder drawn at `base` pixels before scaling. Among the files beside it named the
+/// logo's name with qualifiers (`scale-200`, `targetsize-48`, `altform-unplated`), the smallest of
+/// at least [`PREFERRED_LOGO_PIXELS`] is taken, else the largest, unplated before plain. A logo
+/// path that leaves the install folder, or that is not a PNG, names nothing.
+fn logo_file(install: &Path, logo: &str, base: u32) -> Option<PathBuf> {
+    let parts: Vec<&str> = logo.split(['\\', '/']).collect();
+    if parts
+        .iter()
+        .any(|part| matches!(*part, "" | "." | "..") || part.contains([':', '&']))
+    {
+        return None;
+    }
+    let (file, folders) = parts.split_last()?;
+    let (stem, extension) = file.rsplit_once(QUALIFIERS_START)?;
+    if !extension.eq_ignore_ascii_case(PNG_EXTENSION) {
+        return None;
+    }
+    let folder = folders
+        .iter()
+        .fold(install.to_path_buf(), |path, part| path.join(part));
+    fs::read_dir(&folder)
+        .ok()?
+        .take(MAX_FOLDER_ENTRIES)
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| logo_variant(&name, stem, base).map(|variant| (variant.rank(), name)))
+        .min()
+        .map(|(_, name)| folder.join(name))
+}
+
+/// What a logo file's qualifiers say about it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LogoVariant {
+    /// The size it is drawn at, in pixels.
+    pixels: u32,
+    /// How well its form suits the window, best first.
+    form: LogoForm,
+}
+
+/// A logo's form, best first for the window.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum LogoForm {
+    /// The app's mark on a clear background.
+    Unplated,
+    /// No alternate form named.
+    Plain,
+    /// Another alternate form, such as one for a light taskbar.
+    Other,
+}
+
+impl LogoVariant {
+    /// The variant's place in the window's preference, lowest first: a logo of at least
+    /// [`PREFERRED_LOGO_PIXELS`] before a smaller one, the closer to that size the better, then
+    /// its form.
+    fn rank(self) -> (bool, u32, LogoForm) {
+        let small = self.pixels < PREFERRED_LOGO_PIXELS;
+        let distance = if small {
+            u32::MAX - self.pixels
+        } else {
+            self.pixels
+        };
+        (small, distance, self.form)
+    }
+}
+
+/// The variant `file` is of the logo named `stem`, drawn at `base` pixels before scaling; none
+/// when `file` is another file, not a PNG, or a high-contrast variant.
+fn logo_variant(file: &str, stem: &str, base: u32) -> Option<LogoVariant> {
+    let (named, extension) = file.rsplit_once(QUALIFIERS_START)?;
+    if !extension.eq_ignore_ascii_case(PNG_EXTENSION) {
+        return None;
+    }
+    let qualifiers = if named.eq_ignore_ascii_case(stem) {
+        ""
+    } else {
+        let (own, qualifiers) = named.rsplit_once(QUALIFIERS_START)?;
+        if !own.eq_ignore_ascii_case(stem) {
+            return None;
+        }
+        qualifiers
+    };
+    let mut variant = LogoVariant {
+        pixels: base,
+        form: LogoForm::Plain,
+    };
+    for qualifier in qualifiers
+        .split(QUALIFIER_SEPARATOR)
+        .filter(|qualifier| !qualifier.is_empty())
+    {
+        let (name, value) = qualifier.split_once(QUALIFIER_VALUE_SEPARATOR)?;
+        match name.to_ascii_lowercase().as_str() {
+            SCALE_QUALIFIER => {
+                variant.pixels = base.checked_mul(value.parse().ok()?)? / FULL_SCALE;
+            }
+            TARGET_SIZE_QUALIFIER => variant.pixels = value.parse().ok()?,
+            ALTERNATE_FORM_QUALIFIER => {
+                variant.form = if value.eq_ignore_ascii_case(UNPLATED_FORM) {
+                    LogoForm::Unplated
+                } else {
+                    LogoForm::Other
+                };
+            }
+            CONTRAST_QUALIFIER => return None,
+            _ => {}
+        }
+    }
+    Some(variant)
 }
 
 fn is_interpreter(path: &Path) -> bool {
@@ -1463,6 +1784,230 @@ mod tests {
         );
         assert!(!cache.refresh());
         assert_eq!(cache.version("vscode"), None);
+    }
+
+    /// A package manifest in the shape the Store's packages use, with a comment and a quoted `>`
+    /// before the app's logos.
+    const FIXTURE_MANIFEST: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+  <Identity Name="OpenAI.Codex" Publisher="CN=Example" Version="26.1.0.0" />
+  <Properties><Logo>Assets\StoreLogo.png</Logo></Properties>
+  <!-- <uap:VisualElements Square44x44Logo="Assets\Commented.png"/> -->
+  <Applications>
+    <Application Id="App" Executable="app\Codex.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Codex" Description="a > b"
+        BackgroundColor="transparent" Square150x150Logo="Assets\Tile.png"
+        Square44x44Logo="Assets\AppList.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+</Package>
+"#;
+
+    /// The install folder the test computer's package lookup answers for the fixture's family.
+    static FIXTURE_INSTALL: OnceLock<PathBuf> = OnceLock::new();
+
+    /// The fixture family that [`fixture_install_folders`] knows.
+    const FIXTURE_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+
+    fn fixture_install_folders(family: &str) -> Vec<PathBuf> {
+        if family == FIXTURE_FAMILY {
+            FIXTURE_INSTALL.get().cloned().into_iter().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// An install folder holding the fixture manifest and the logo files `logos` in `Assets`.
+    fn fixture_package(install: &Path, logos: &[&str]) {
+        write(
+            &install.join("AppxManifest.xml"),
+            FIXTURE_MANIFEST.as_bytes(),
+        );
+        for logo in logos {
+            write(&install.join("Assets").join(logo), &png(logo));
+        }
+    }
+
+    fn logo_name(install: &Path) -> Option<String> {
+        package_logo(install)
+            .unwrap()
+            .map(|logo| logo.file_name().unwrap().to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn a_package_manifest_names_its_first_apps_list_logo_then_its_tile() {
+        assert_eq!(
+            manifest_logo(FIXTURE_MANIFEST),
+            Some((r"Assets\AppList.png".to_owned(), 44))
+        );
+        let tile_only = FIXTURE_MANIFEST.replace(r#"Square44x44Logo="Assets\AppList.png""#, "");
+        assert_eq!(
+            manifest_logo(&tile_only),
+            Some((r"Assets\Tile.png".to_owned(), 150))
+        );
+        let no_logo = tile_only.replace(r#"Square150x150Logo="Assets\Tile.png""#, "");
+        assert_eq!(manifest_logo(&no_logo), None);
+        let no_app = "<Package><uap:VisualElements Square44x44Logo='Assets\\A.png'/></Package>";
+        assert_eq!(manifest_logo(no_app), None, "logos outside an app");
+        assert_eq!(manifest_logo("<Package><Application"), None, "an open tag");
+    }
+
+    #[test]
+    fn a_store_logo_is_the_variant_that_suits_the_window() {
+        let scratch = Scratch::new();
+        let install = scratch
+            .path()
+            .join("OpenAI.Codex_26.1.0.0_x64__2p2nqsd0c76g0");
+        fixture_package(
+            &install,
+            &[
+                "AppList.scale-100.png",
+                "AppList.scale-200.png",
+                "AppList.targetsize-48_altform-unplated.png",
+                "AppList.targetsize-96.png",
+                "AppList.targetsize-96_altform-unplated.png",
+                "AppList.targetsize-96_altform-lightunplated.png",
+                "AppList.altform-unplated_targetsize-256.png",
+                "AppList.targetsize-100_contrast-black.png",
+                "AppList.targetsize-96_altform-unplated.svg",
+                "Other.targetsize-96.png",
+            ],
+        );
+        assert_eq!(
+            logo_name(&install).as_deref(),
+            Some("AppList.targetsize-96_altform-unplated.png")
+        );
+        for gone in [
+            "AppList.targetsize-96.png",
+            "AppList.targetsize-96_altform-unplated.png",
+            "AppList.targetsize-96_altform-lightunplated.png",
+        ] {
+            fs::remove_file(install.join("Assets").join(gone)).unwrap();
+        }
+        assert_eq!(
+            logo_name(&install).as_deref(),
+            Some("AppList.altform-unplated_targetsize-256.png"),
+            "the next size up"
+        );
+        fs::remove_file(install.join("Assets/AppList.altform-unplated_targetsize-256.png"))
+            .unwrap();
+        assert_eq!(
+            logo_name(&install).as_deref(),
+            Some("AppList.scale-200.png"),
+            "88 px, the largest below the preferred size"
+        );
+        assert_eq!(
+            logo_variant("APPLIST.PNG", "AppList", 44),
+            Some(LogoVariant {
+                pixels: 44,
+                form: LogoForm::Plain
+            })
+        );
+        assert_eq!(logo_variant("AppList.scale-x.png", "AppList", 44), None);
+    }
+
+    #[test]
+    fn a_logo_path_never_leaves_the_install_folder() {
+        let scratch = Scratch::new();
+        let install = scratch.path().join("install");
+        write(&scratch.path().join("Outside.png"), &png("outside"));
+        write(&install.join("Assets/Logo.png"), &png("logo"));
+        assert!(logo_file(&install, r"Assets\Logo.png", 44).is_some());
+        assert!(logo_file(&install, "Assets/Logo.png", 44).is_some());
+        for refused in [
+            r"..\Outside.png",
+            r"Assets\..\..\Outside.png",
+            r"\Outside.png",
+            r"C:\Outside.png",
+            r"Assets\Logo.jpg",
+            r"Assets\&amp;Logo.png",
+            "",
+        ] {
+            assert_eq!(logo_file(&install, refused, 44), None, "{refused}");
+        }
+    }
+
+    #[test]
+    fn a_package_family_is_its_name_and_a_publisher_id() {
+        let scratch = Scratch::new();
+        let local = scratch.path().join("Local");
+        for family in [
+            FIXTURE_FAMILY,
+            "openai.codex_8wekyb3d8bbwe",
+            "OpenAI.CodexBeta_2p2nqsd0c76g0",
+            "OpenAI.Codex_",
+            "Claude_pzs8sxrjxfjjc",
+        ] {
+            fs::create_dir_all(local.join("Packages").join(family)).unwrap();
+        }
+        write(&local.join("Packages/OpenAI.Codex_file0000000"), b"");
+        assert_eq!(
+            package_families(&local, "OpenAI.Codex"),
+            [FIXTURE_FAMILY, "openai.codex_8wekyb3d8bbwe"]
+        );
+        assert!(package_families(&scratch.path().join("absent"), "Claude").is_empty());
+    }
+
+    #[test]
+    fn a_store_apps_logo_is_cached_from_its_install_folder() {
+        let scratch = Scratch::new();
+        let local = scratch.path().join("Local");
+        fs::create_dir_all(local.join("Packages").join(FIXTURE_FAMILY)).unwrap();
+        let install = scratch.path().join("WindowsApps").join("codex");
+        fixture_package(&install, &["AppList.targetsize-96_altform-unplated.png"]);
+        FIXTURE_INSTALL
+            .set(install.clone())
+            .expect("only this test sets the fixture install");
+        let mut places = IconPlaces::windows(local, scratch.path().join("pf"), Vec::new());
+        places.packages = Some(fixture_install_folders);
+        let cache = IconCache::with_catalog(
+            scratch.path().join("icons"),
+            places,
+            vec![agent(
+                "codex",
+                vec![IconSource::WindowsPackage("OpenAI.Codex")],
+                None,
+            )],
+        );
+        assert!(cache.refresh());
+        let icon = cache.icon("codex").unwrap();
+        assert_eq!(icon.kind, IconKind::Png);
+        assert_eq!(
+            icon.bytes,
+            png("AppList.targetsize-96_altform-unplated.png")
+        );
+    }
+
+    /// A program every Windows has gives its icon resource as an icon file; no agent's install is
+    /// read.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_windows_programs_icon_resource_is_cached_as_an_icon_file() {
+        let scratch = Scratch::new();
+        let system = PathBuf::from(env::var_os("SystemRoot").unwrap()).join("System32");
+        let places = IconPlaces::windows(
+            scratch.path().join("Local"),
+            scratch.path().join("pf"),
+            vec![system],
+        );
+        let cache = IconCache::with_catalog(
+            scratch.path().join("icons"),
+            places,
+            vec![agent(
+                "notepad",
+                vec![IconSource::WindowsExe(&[ProgramPlace::OnPath("notepad")])],
+                None,
+            )],
+        );
+        assert!(cache.refresh());
+        let icon = cache.icon("notepad").unwrap();
+        assert_eq!(icon.kind, IconKind::Ico);
+        assert!(icon.bytes.starts_with(&[0, 0, 1, 0]));
+        assert!(u16::from_le_bytes([icon.bytes[4], icon.bytes[5]]) >= 1);
+        assert!(!cache.refresh(), "an unchanged program is not read again");
     }
 
     #[test]
