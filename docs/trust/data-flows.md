@@ -80,7 +80,8 @@ either case.
 - `state/last-browser.json` in the home names the installed browser whose extension last
   connected, by one browser id such as `chrome` or `edge`. It holds that id and nothing about the
   person, the profile, the agent or any page, and it leaves the computer nowhere. When several
-  browsers are installed and none is connected, an agent request starts that browser.
+  browsers are installed, none is connected and `Auto-open browser on request` is on, an agent
+  request starts that browser.
 - `state/audit-v<version>.jsonl` and `state/audit-pre-<version>.jsonl` in the home are the audit
   logs of 1.x, moved aside when an install finds them (from a 1.x per-version directory in `bin`,
   or from the 1.x log location). They keep the content-minimized records they had and gain no
