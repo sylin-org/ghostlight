@@ -82,3 +82,20 @@ No additional task inference, caller text, script, page label or retained contex
 Existing records already carry the tool. Evaluate the complete mixed activity list, including
 live work, ordinary successes, refusals, controls, uncertainty, partial work and older records.
 An isolated card or technical safety check does not establish human comprehension.
+
+## Amendment (2026-10-17): the 2.0 window words the tool name
+
+The owner reviewed the 2.0 window on 2026-10-17 and decided the activity list drops the shared
+`browser_` prefix and shows the meaningful part (navigate, fill form), as decision 2 of
+[docs/tasks/break-2.0/design.md](../tasks/break-2.0/design.md) records. The owner correction
+above, which restores the exact catalog tool name in that column, no longer governs the 2.0
+window.
+
+- The activity column shows the tool in words beside its icon. The exact catalog name stays on
+  hover and in the detail card, and the detail button's accessible name still starts with the
+  visible tool identity.
+- Agents, the audit trail and the catalog keep the exact names. Nothing outside the window
+  changes.
+- The rest of the correction stands: the authored outcome sentence is secondary, exceptional
+  recovery stays below uncertain and partial rows, and the whole mixed list is the test of
+  comprehension.

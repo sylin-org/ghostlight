@@ -121,3 +121,20 @@ implementation status. Signature/hash verification remains deferred to a further
 C2/C3 still require their concrete subject and connection proof under ADR-0105. This reporting
 foundation adds no host containment, endpoint-wide audit, or upstream application-authentication
 claim. Source completion, local deployment, and publication remain separate states.
+
+## Amendment (2026-10-17): the 2.0 window replaces the chips and session-level details
+
+The owner reviewed the 2.0 window on 2026-10-17 and decided decisions 1 and 4 of
+[docs/tasks/break-2.0/design.md](../tasks/break-2.0/design.md). They replace two parts of
+"Keep ordinary work quiet and details accessible":
+
+- The familiar client chips are replaced by one summary pill and, behind it, an agent shelf and a
+  browser shelf.
+- The collapsed session-level Connection details section is replaced by a card per agent. The
+  card shows that agent's sessions in words, the trust note once, the intake only when it is
+  unusual, and the connection id behind Copy id.
+
+The per-action Connection details in the activity detail card stand as written. The live MCP
+explanation now names the reported claim. The rest of the section is unchanged: the
+orchestrator authors the explanation, the UI escapes claims and renders evidence, and no trusted
+badge or admission consequence follows from unchecked evidence.
