@@ -5,7 +5,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `pass`, `fail` (wi
 
 ## RESUME HERE
 
-L01 passed. Next: L02, the full gate.
+L01 and L02 passed. Next: L03, the journeys.
 
 ## Tasks
 
@@ -37,7 +37,7 @@ Cursor, Zed, VS Code, Goose, OpenCode, Crush, Qwen Code, Kiro, Windsurf, Junie, 
 Continue) named a `.tmp/fleet-test-01` build that no longer exists. All of it is backed up in the
 ignored `.tmp/linux-1/baseline-2026-10-17/`.
 
-### L02 The full gate on Linux (todo)
+### L02 The full gate on Linux (pass)
 
 From the repository root: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
 -- -D warnings`, `cargo test --workspace`, `npm test` in `extension/`, `node --test
@@ -48,6 +48,27 @@ scripts/check-repository-integrity.ps1`. These cover the Linux-only tests the le
 relay and edge tests (f07a to f12a in seams.md), the private-file modes (f09), the writer golden's
 Linux file and Codex forwarding (c00 in design.md), the Linux icon resolver (e01) and the agent
 table (c12). Record every failure exactly.
+
+Result, 2026-10-17, at 17a0c060, default `target/`: every command passed, no failure.
+
+- `cargo fmt --all -- --check`: clean. `cargo clippy --workspace --all-targets -- -D warnings`:
+  no warning.
+- `cargo test --workspace`: 2251 passed, 0 failed, 1 ignored (the stand-in process
+  `a_stray_stand_in_waits_when_asked`, ignored by design). Per binary: service lib 1917, relay
+  lib 117, relay `golden4` 10, desktop lib 140, edge 51, bridge 13, store listing copy 2,
+  elevation 1. The owed Linux runs are among them: `install::writer_golden` (both tests,
+  including `native::this_computer_s_own_paths_are_written_as_the_native_golden_records` against
+  `native/linux.txt`), the Codex forwarding tests, `install::agent_list`, all 16
+  `install::icons::` tests (the XDG, Flatpak and Snap order and the theme PNG resolver), and the
+  private-file tests of the log and audit writers.
+- `npm test` in `extension/`: 492 pass. Page assets: 270 pass. `node --test
+  "tests/workbench-*.test.mjs"`: 140 pass. `node tests/workbench-surface.mjs`: ok. `npm test
+  --prefix packaging/npm`: 26 pass. `sh -n scripts/*.sh`: clean. The integrity script: links
+  valid, ASCII rule holds.
+- Guards: `node --test tests/guards/` as written fails on Node 22.22.1 with `Cannot find module
+  .../tests/guards` (a directory argument is read as a module path, not searched). The glob form,
+  `node --test "tests/guards/*.test.mjs"`, runs both guard files: 10 pass. CI names the files one
+  by one. Nothing in the product is wrong; the command in this task is.
 
 ### L03 The journeys on Linux (todo)
 
