@@ -30,9 +30,9 @@
   --line: rgba(255, 255, 255, .06);
   --line-2: rgba(255, 255, 255, .1);
 
-  /* The neutral tile an agent's image waits on and an app's own icon sits on, light enough for a
-     dark glyph to read. */
-  --icon-tile: #e4e4e7;
+  /* The neutral tile an agent's image waits on and an app's own icon sits on: a mid gray, about
+     as far from white as from black, so an all-white icon and an all-black one both read. */
+  --icon-tile: #75757d;
 
   /* Surfaces are washes over the ground, not boxes. */
   --panel: rgba(255, 255, 255, .022);
