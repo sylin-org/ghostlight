@@ -5355,6 +5355,9 @@ mod tests {
 
         let (_home, host, quit_requested) =
             idling_host("idle-browser", IDLE_LIMIT, &Arc::default());
+        // Hold the service while the stand-in browser connects: on a loaded machine that can take
+        // longer than the short idle limit, and a service already leaving rightly refuses it.
+        let connecting = host.quit.drain.admit().unwrap();
         // Stand in for the browser edge: carry the extension's bytes over a browser stream.
         let (native, extension) = pair().unwrap();
         let carrier = thread::spawn(move || {
@@ -5384,6 +5387,8 @@ mod tests {
                 .iter()
                 .any(|browser| browser.id == "browser_idle")
         });
+        // From here only the browser holds the service.
+        drop(connecting);
         assert!(
             quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
             "an attached browser holds the service past two limits"
