@@ -1944,6 +1944,50 @@ fn with_no_browser_the_glance_says_which_browser_a_request_starts_and_only_then(
 }
 
 #[test]
+fn a_snapshot_never_waits_on_another_reading_the_installed_browsers() {
+    use crate::browser::recovery::RecoveryCandidate;
+    use crate::install::browser_package::BrowserPackage;
+    use crate::install::native_host::NativeHostState;
+    use crate::language::workbench as words;
+    use std::sync::mpsc;
+
+    let path = startup_policy("on_demand");
+    let facade = facade_over(
+        GovernanceFacade::new(Some(path.clone()), None),
+        ControlledBrowser::new(false, false),
+    );
+    let (entered, reading) = mpsc::channel();
+    let (finish, held) = mpsc::channel::<()>();
+    let held = Mutex::new(held);
+    facade.live.use_browser_inspection(move || {
+        entered.send(()).unwrap();
+        held.lock().unwrap().recv().unwrap();
+        Vec::new()
+    });
+    std::thread::scope(|scope| {
+        let slow = scope.spawn(|| facade.snapshot().no_browser);
+        reading.recv().unwrap();
+        // The read is held open; the installed browsers change without waiting for it.
+        facade.live.use_installed_browsers(vec![RecoveryCandidate {
+            id: "chrome".into(),
+            name: "Google Chrome".into(),
+            package: BrowserPackage::Native,
+            package_detail: String::new(),
+            registration: NativeHostState::Current,
+            ordinary_executable: Some("/installed/chrome".into()),
+        }]);
+        finish.send(()).unwrap();
+        assert_eq!(slow.join().unwrap().as_deref(), Some(words::NO_BROWSER));
+    });
+    // The held read began before the change, so its answer was not kept.
+    assert_eq!(
+        facade.snapshot().no_browser.as_deref(),
+        Some("Starts Google Chrome on request")
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn each_browser_counts_the_tabs_of_the_sessions_that_work_in_it() {
     use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
     use crate::intake::session::IntakeChannel;

@@ -16,7 +16,9 @@
 //!
 //! While no browser is connected, the connections part says which browser a request would start.
 //! Browser recovery answers that from the installed browsers, which it reads once for each stretch
-//! with no browser connected and each browser startup posture in it, and never under `manual`.
+//! with no browser connected and each browser startup posture in it, and never under `manual`. The
+//! read happens outside every lock, so no snapshot waits on another's; two snapshots that miss at
+//! once may each read them.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -134,23 +136,19 @@ struct SetupSources {
 struct BrowserStarts {
     /// The recovery whose decision the answer is.
     recovery: BrowserRecovery,
+    /// Advances whenever a look sees a browser connected, so an answer read before that is never
+    /// kept for the stretch after it.
+    stretch: u64,
     /// The answer of the current stretch, with the posture it was read under. Nothing is kept
     /// while a browser is connected, so the next stretch reads the installed browsers again.
     answer: Option<(BrowserStartup, Option<String>)>,
 }
 
 impl BrowserStarts {
-    /// The name of the browser a request would start now, read again only when the stretch or
-    /// the posture is new.
-    fn answer(&mut self, posture: BrowserStartup) -> Option<String> {
-        match &self.answer {
-            Some((known, answer)) if *known == posture => answer.clone(),
-            _ => {
-                let answer = self.recovery.starts_on_request();
-                self.answer = Some((posture, answer.clone()));
-                answer
-            }
-        }
+    /// Forget the answer: a browser is connected, or the installed browsers changed.
+    fn end_stretch(&mut self) {
+        self.answer = None;
+        self.stretch = self.stretch.wrapping_add(1);
     }
 }
 
@@ -226,6 +224,7 @@ impl Live {
             }),
             starts: Mutex::new(BrowserStarts {
                 recovery: BrowserRecovery::discover(governance.clone(), Arc::clone(&browser)),
+                stretch: 0,
                 answer: None,
             }),
             governance,
@@ -297,15 +296,12 @@ impl Live {
                 connected: true,
             })
             .collect();
-        let no_browser = {
-            let mut starts = lock(&self.starts);
-            if browsers.is_empty() {
-                let starts = starts.answer(self.governance.browser_startup());
-                Some(words::no_browser(starts.as_deref()))
-            } else {
-                starts.answer = None;
-                None
-            }
+        let no_browser = if browsers.is_empty() {
+            let starts = self.starts_on_request(self.governance.browser_startup());
+            Some(words::no_browser(starts.as_deref()))
+        } else {
+            lock(&self.starts).end_stretch();
+            None
         };
         let authority = self.governance.diagnostics();
         let runtime_state = self.governance.runtime_state();
@@ -494,6 +490,27 @@ impl Live {
         lock(&self.sources).machine = machine;
     }
 
+    /// The name of the browser a request would start now under `posture`, read again only when
+    /// the stretch or the posture is new. The installed browsers are read with the lock released,
+    /// and the answer is kept only when no browser connected meanwhile.
+    fn starts_on_request(&self, posture: BrowserStartup) -> Option<String> {
+        let (recovery, stretch) = {
+            let starts = lock(&self.starts);
+            if let Some((known, answer)) = &starts.answer {
+                if *known == posture {
+                    return answer.clone();
+                }
+            }
+            (starts.recovery.clone(), starts.stretch)
+        };
+        let answer = recovery.starts_on_request();
+        let mut starts = lock(&self.starts);
+        if starts.stretch == stretch {
+            starts.answer = Some((posture, answer.clone()));
+        }
+        answer
+    }
+
     /// Replace the installed browsers the no-browser line is read from.
     #[cfg(test)]
     pub fn use_installed_browsers(
@@ -502,7 +519,18 @@ impl Live {
     ) {
         let mut starts = lock(&self.starts);
         starts.recovery.set_test_candidates(candidates);
-        starts.answer = None;
+        starts.end_stretch();
+    }
+
+    /// Read the installed browsers the no-browser line is read from by running `inspect`.
+    #[cfg(test)]
+    pub fn use_browser_inspection(
+        &self,
+        inspect: impl Fn() -> Vec<crate::browser::recovery::RecoveryCandidate> + Send + Sync + 'static,
+    ) {
+        let mut starts = lock(&self.starts);
+        starts.recovery.set_test_inspection(inspect);
+        starts.end_stretch();
     }
 
     /// Remember who brought the runtime to `state`. A request that leaves the state as it was

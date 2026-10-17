@@ -244,6 +244,17 @@ impl BrowserInventory for FixedBrowserInventory {
     }
 }
 
+/// Installed browsers a unit test answers by running a function, which may hold the read open.
+#[cfg(test)]
+struct InspectingInventory(Box<dyn Fn() -> Vec<RecoveryCandidate> + Send + Sync>);
+
+#[cfg(test)]
+impl BrowserInventory for InspectingInventory {
+    fn inspect(&self) -> Result<Vec<RecoveryCandidate>, ()> {
+        Ok((self.0)())
+    }
+}
+
 #[derive(Debug)]
 struct SystemRecoveryMechanism;
 
@@ -481,6 +492,15 @@ impl BrowserRecovery {
     #[cfg(test)]
     pub(crate) fn set_test_candidates(&mut self, candidates: Vec<RecoveryCandidate>) {
         self.inventory = Arc::new(FixedBrowserInventory { candidates });
+    }
+
+    /// Read the installed browsers by running `inspect` in unit tests.
+    #[cfg(test)]
+    pub(crate) fn set_test_inspection(
+        &mut self,
+        inspect: impl Fn() -> Vec<RecoveryCandidate> + Send + Sync + 'static,
+    ) {
+        self.inventory = Arc::new(InspectingInventory(Box::new(inspect)));
     }
 
     /// Make every launch succeed without an adapter ever arriving, as a browser does when it
