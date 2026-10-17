@@ -413,7 +413,7 @@ async function viewChecks() {
         && code.querySelector("button").getAttribute("aria-label") === "Copy prompt"
         && code.querySelector(".gl-copy__lbl").textContent === "Copy"
         && page.text("setup-rows-label") === "Agents on this computer"
-        && page.rows().map((row) => row.classes).join(";") === "gl-row is-done;gl-row is-todo;gl-row is-attention"
+        && page.rows().map((row) => row.classes).join(";") === "gl-row is-done;gl-row is-todo;gl-row is-attention;gl-row is-todo;gl-row is-todo"
         && page.live().text === "Waiting for your agent."
         && page.companion.getAttribute("data-light") === "lit"
         && page.segments().join() === "true,false",
@@ -504,6 +504,26 @@ async function viewChecks() {
     page.el("setup-skip").click(page.document);
     add("Skip for now asks the page to leave", calls.skips === 1);
   }
+  {
+    const { screen, calls, page } = viewRig();
+    screen.open(stage("agent"));
+    const update = page.rows().find((row) => row.id === "zed");
+    add("an agent with an older entry reads Needs an update and offers Update",
+      update.detail === "Needs an update" && update.button.textContent === "Update"
+        && update.button.getAttribute("aria-label") === "Update Zed");
+    update.button.click(page.document);
+    const updating = page.rows().find((row) => row.id === "zed");
+    add("an Update click asks to write the entry and shows Updating",
+      calls.actions.at(-1)[0].kind === "connect_agent" && updating.detail === "Updating"
+        && updating.classes === "gl-row is-working");
+    const goose = page.rows().find((row) => row.id === "goose");
+    add("a copy-only agent offers Copy setup and never Connect",
+      goose.detail === "Found, set up by hand" && goose.button.textContent === "Copy setup");
+    goose.button.click(page.document);
+    add("a Copy setup click asks for the copy and shows no pending words",
+      show(calls.actions.at(-1)[0]) === show({ kind: "copy_setup", agent: "goose" })
+        && page.rows().find((row) => row.id === "goose").detail === "Found, set up by hand");
+  }
 
   // ---- the meeting ----
   {
@@ -532,7 +552,7 @@ async function viewChecks() {
     add("the agent step replaces the browser step at 1900 ms, drawn at rest with its entrance",
       before === "Add Ghostlight to your browser." && page.headline() === "Ask your agent."
         && page.el("setup-main").classes.has("gl-swap") && page.el("setup-after").classes.has("gl-swap")
-        && page.rows().map((row) => row.name).join() === "Claude Code,Claude Desktop,Cursor"
+        && page.rows().map((row) => row.name).join() === "Claude Code,Claude Desktop,Cursor,Zed,goose"
         && page.live().text === "Waiting for your agent." && !page.live().done
         && page.discs()[1] === "gl-stepper__disc gl-stepper__disc--1 is-done",
       show({ before, now: page.headline() }));
@@ -657,7 +677,7 @@ async function viewChecks() {
 
 /* ------------------------------ the page around it ------------------------------ */
 
-/** A snapshot, shaped as the service's parts, with the one client the setup rows can connect. */
+/** A snapshot, shaped as the service's parts, with the clients the setup rows act on. */
 function snapshotParts() {
   return {
     status: {
@@ -674,6 +694,17 @@ function snapshotParts() {
         agent: { id: "claude-desktop", name: "Claude Desktop", symbol: { src: "integrations/claude-desktop.svg" } },
         state: "available", detail: "Detected.", can_install: true, can_uninstall: false, can_download: true, can_locate: true,
         config_path: "/home/test/claude.json", connector_command: "ghostlight mcp", manual_setup: "{}"
+      }, {
+        id: "zed", product_id: "zed", name: "Zed", target: "User",
+        agent: { id: "zed", name: "Zed", symbol: { src: "integrations/zed.svg" } },
+        state: "updatable", detail: "Needs an update.", can_install: true, can_uninstall: false, can_download: true, can_locate: true,
+        config_path: "/home/test/.config/zed/settings.json", connector_command: "ghostlight mcp", manual_setup: "{}"
+      }, {
+        id: "goose", product_id: "goose", name: "goose", target: "CLI and desktop",
+        agent: { id: "goose", name: "goose", symbol: { src: "integrations/goose.svg" } },
+        state: "available", detail: "Set up by hand.", can_install: false, can_uninstall: false, can_download: true, can_locate: true,
+        copy_only: true, config_path: "/home/test/.config/goose/config.yaml", connector_command: "ghostlight mcp",
+        manual_setup: "extensions: { ghostlight: { cmd: ghostlight } }"
       }]
     },
     diagnostics: { diagnostics: [] }
@@ -717,7 +748,7 @@ function openStream() {
 async function bootPage({ setup, hash = "", context = "control", focused = true, reduced = false } = {}) {
   const document = fakeDocument({ focused });
   const clock = fakeClock();
-  const world = { setup: setup ?? null, requests: [], seq: 10, stream: null, hidden: [], refusals: new Map() };
+  const world = { setup: setup ?? null, requests: [], seq: 10, stream: null, hidden: [], refusals: new Map(), copied: [] };
   const address = {
     hash,
     replaced: [],
@@ -778,7 +809,7 @@ async function bootPage({ setup, hash = "", context = "control", focused = true,
         return said(200, {});
       }
     },
-    navigator: { clipboard: { writeText: async () => undefined } },
+    navigator: { clipboard: { writeText: async (text) => { world.copied.push(text); } } },
     GhostlightAccess: Object.freeze({ bearer: "key-1" }),
     AbortController, TextDecoder, TextEncoder,
     setTimeout: clock.schedule,
@@ -946,6 +977,21 @@ async function pageChecks() {
     await page.announce(stages("done"));
     await page.clock.advance(6000);
     add("a finished setup takes a window that was showing it to the monitor", !page.setupShown() && page.address.hash === "#monitor");
+  }
+  {
+    const page = await bootPage({ setup: stages("agent") });
+    await page.click(page.row("zed").button);
+    add("an Update click posts the integrations act with the state the agent was drawn in",
+      show(page.posted("/api/integrations/act").map((request) => request.body))
+        === show([{ id: "zed", action: "install", expected_state: "updatable" }])
+        && page.row("zed").detail === "Updating",
+      show({ posted: page.posted("/api/integrations/act"), row: page.row("zed") }));
+    await page.click(page.row("goose").button);
+    add("a Copy setup click puts the agent's own setup on the clipboard and says so, and stays in setup",
+      show(page.world.copied) === show(["extensions: { ghostlight: { cmd: ghostlight } }"])
+        && page.el("toast").textContent === "Manual setup copied." && page.setupShown()
+        && page.posted("/api/setup/act").length === 0,
+      show({ copied: page.world.copied, toast: page.el("toast").textContent }));
   }
   {
     const page = await bootPage({ setup: stages("agent") });

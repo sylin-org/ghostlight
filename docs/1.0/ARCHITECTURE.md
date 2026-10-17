@@ -581,8 +581,11 @@ setup. A complete setup reads nothing from the machine.
 The setup view's browser steps are service acts. `POST /api/setup/act` (window only) carries out
 `add_in_browser`, which starts the named browser at the store listing, and `open_browser`, which
 starts it in the profile that holds the extension, after checking the step against what the
-computer shows now. Any other step is refused. The Get Google Chrome link, the Connect act of
-the integrations tab and the Review link need no setup route. The window serves the extension's
+computer shows now. Any other step is refused. The Get Google Chrome link, the Connect and Update
+act of the integrations tab, Copy setup and the Review link need no setup route. An agent row offers
+Connect or Update only where the client roster says Ghostlight can install, and reads Connected
+only while the agent is in use: a live session of it with that row's entry in place, the one rule
+the Integrations page reads from the connections part (`harnesses_in_use`). The window serves the extension's
 own `extension/kit.css` and mascot at `/extension/kit.css` and `/extension/ghostlight-mascot.png`
 from the closed asset table in `workbench/web/assets.rs`, so the setup view and the extension's
 pages share one stylesheet with no copy.

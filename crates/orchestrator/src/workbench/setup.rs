@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ghostlight_relay::os;
 
-use super::{BrowserInstanceSummary, SessionSummary, WorkbenchError};
+use super::{parts, BrowserInstanceSummary, SessionSummary, WorkbenchError};
 use crate::audit::AuditRecord;
 use crate::browser::session::graphical_session_environment;
 use crate::install::browser_package::BrowserPackage;
@@ -358,7 +358,8 @@ pub(super) fn perform(
         }
         SetupAction::GetChrome
         | SetupAction::ConnectAgent { .. }
-        | SetupAction::ReviewAgent { .. } => return Err(WorkbenchError::SetupStepNotOffered),
+        | SetupAction::ReviewAgent { .. }
+        | SetupAction::CopySetup { .. } => return Err(WorkbenchError::SetupStepNotOffered),
     };
     let executable = machine
         .browser_executable(browser)
@@ -450,11 +451,14 @@ fn browser_facts(
 }
 
 /// One client on this computer as the setup view knows it, or none for a client that is not here.
+/// What may be done for it is the roster's word, and whether it is in use the workbench's one
+/// rule ([`parts::in_use`]).
 fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<AgentFact> {
     let state = match harness.state {
         HarnessState::NotDetected => return None,
         HarnessState::Installed => AgentState::Written,
-        HarnessState::Available | HarnessState::Updatable => AgentState::Found,
+        HarnessState::Available => AgentState::Found,
+        HarnessState::Updatable => AgentState::Updatable,
         HarnessState::NeedsAttention => AgentState::NeedsAttention,
     };
     Some(AgentFact {
@@ -462,15 +466,10 @@ fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<A
         label: harness.label.clone(),
         state,
         private_view: harness.private_view,
-        seen: sessions.iter().any(|session| is_agent_of(session, harness)),
+        can_install: harness.can_install,
+        copy_only: harness.copy_only,
+        in_use: parts::in_use(harness, sessions),
     })
-}
-
-/// Whether `session` is a session of the agent `harness` sets up: both carry the same catalog id.
-/// An agent on several hosts is one agent here, because the name a client reports does not say
-/// the host.
-fn is_agent_of(session: &SessionSummary, harness: &HarnessSummary) -> bool {
-    session.agent.id == harness.agent.id
 }
 
 /// The name of the agent whose request finished setup: the roster's product name for the
@@ -486,7 +485,7 @@ pub(super) fn agent_name(
         .find(|session| session.id == finished.workspace)?;
     harnesses
         .iter()
-        .find(|harness| is_agent_of(session, harness))
+        .find(|harness| parts::is_agent_of(session, harness))
         .map(|harness| harness.name.clone())
 }
 
@@ -1032,31 +1031,50 @@ mod tests {
         assert_eq!(codex.tone, RowTone::Done);
     }
 
+    /// A client the roster says Ghostlight can write, in `state`.
+    fn writable(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
+        HarnessSummary {
+            can_install: true,
+            ..harness(id, label, state)
+        }
+    }
+
+    /// A host of Cline, the one agent of the four Cline hosts.
+    fn cline(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
+        HarnessSummary {
+            agent: crate::agent::Agent::listed("cline", "Cline", "cline.svg"),
+            ..harness(id, label, state)
+        }
+    }
+
     #[test]
     fn a_client_that_is_not_here_is_no_row_and_the_others_keep_their_states() {
         let computer = Computer::default();
         let roster = [
             harness("goose", "Goose", HarnessState::NotDetected),
-            harness("cursor", "Cursor", HarnessState::Available),
-            harness("zed", "Zed", HarnessState::Updatable),
+            writable("cursor", "Cursor", HarnessState::Available),
+            writable("zed", "Zed", HarnessState::Updatable),
             harness("codex", "Codex", HarnessState::NeedsAttention),
         ];
         let view = incomplete(&computer, &[connected("Chrome")], &[], &roster);
         let ids: Vec<&str> = view.rows.iter().map(|row| row.id.as_str()).collect();
         assert_eq!(ids, ["cursor", "zed", "codex"]);
+        let cursor = row(&view, "cursor");
+        assert_eq!(cursor.detail, "Found");
         assert!(matches!(
-            row(&view, "cursor")
+            cursor
                 .action
                 .as_ref()
-                .map(|action| &action.action),
-            Some(SetupAction::ConnectAgent { .. })
+                .map(|action| (&action.action, action.label.as_str())),
+            Some((SetupAction::ConnectAgent { .. }, "Connect"))
         ));
+        let zed = row(&view, "zed");
+        assert_eq!(zed.detail, "Needs an update");
         assert!(matches!(
-            row(&view, "zed")
-                .action
+            zed.action
                 .as_ref()
-                .map(|action| &action.action),
-            Some(SetupAction::ConnectAgent { .. })
+                .map(|action| (&action.action, action.label.as_str())),
+            Some((SetupAction::ConnectAgent { .. }, "Update"))
         ));
         assert!(matches!(
             row(&view, "codex")
@@ -1065,6 +1083,86 @@ mod tests {
                 .map(|action| &action.action),
             Some(SetupAction::ReviewAgent { .. })
         ));
+    }
+
+    #[test]
+    fn connect_and_update_are_offered_only_where_the_roster_can_install() {
+        let computer = Computer::default();
+        let roster = [
+            harness("cursor", "Cursor", HarnessState::Available),
+            harness("zed", "Zed", HarnessState::Updatable),
+        ];
+        let view = incomplete(&computer, &[connected("Chrome")], &[], &roster);
+        assert!(row(&view, "cursor").action.is_none());
+        assert!(row(&view, "zed").action.is_none());
+    }
+
+    #[test]
+    fn a_copy_only_client_offers_copy_setup_and_never_connect() {
+        let computer = Computer::default();
+        let goose = HarnessSummary {
+            copy_only: true,
+            ..harness("goose", "goose", HarnessState::Available)
+        };
+        let view = incomplete(
+            &computer,
+            &[connected("Chrome")],
+            &[],
+            std::slice::from_ref(&goose),
+        );
+        let by_hand = row(&view, "goose");
+        assert_eq!(by_hand.detail, "Found, set up by hand");
+        assert!(matches!(
+            by_hand.action.as_ref().map(|action| &action.action),
+            Some(SetupAction::CopySetup { agent }) if agent == "goose"
+        ));
+
+        let in_use = incomplete(
+            &computer,
+            &[connected("Chrome")],
+            &[session("workspace_1", "goose")],
+            &[goose],
+        );
+        assert_eq!(row(&in_use, "goose").detail, "Connected");
+    }
+
+    #[test]
+    fn one_session_of_an_agent_marks_only_its_hosts_that_have_the_entry() {
+        let computer = Computer::default();
+        let roster = [
+            cline("cline-cli", "Cline (CLI)", HarnessState::Installed),
+            cline(
+                "cline-vscode",
+                "Cline (Visual Studio Code)",
+                HarnessState::Available,
+            ),
+            cline("cline-cursor", "Cline (Cursor)", HarnessState::Updatable),
+            cline(
+                "cline-windsurf",
+                "Cline (Windsurf)",
+                HarnessState::NeedsAttention,
+            ),
+        ];
+        let view = incomplete(
+            &computer,
+            &[connected("Chrome")],
+            &[session("workspace_1", "cline")],
+            &roster,
+        );
+        let details: Vec<(&str, &str)> = view
+            .rows
+            .iter()
+            .map(|row| (row.id.as_str(), row.detail.as_str()))
+            .collect();
+        assert_eq!(
+            details,
+            [
+                ("cline-cli", "Connected"),
+                ("cline-vscode", "Found"),
+                ("cline-cursor", "Needs an update"),
+                ("cline-windsurf", "Needs attention"),
+            ]
+        );
     }
 
     #[test]
@@ -1335,6 +1433,9 @@ mod tests {
             },
             SetupAction::ReviewAgent {
                 agent: "cursor".into(),
+            },
+            SetupAction::CopySetup {
+                agent: "goose".into(),
             },
         ] {
             refused(perform(&computer, &action));

@@ -148,6 +148,7 @@
       },
       sessions,
       browsers,
+      harnesses_in_use: connections.harnesses_in_use ?? [],
       operations,
       history,
       document_coverage: activity.document_coverage ?? [],

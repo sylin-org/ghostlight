@@ -365,6 +365,7 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "browsers[].family",
     "browsers[].id",
     "browsers[].tab_count",
+    "harnesses_in_use",
     "no_browser",
     "sessions",
     "sessions[].active_operations",

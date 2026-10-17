@@ -301,3 +301,18 @@ This replaces the fork test in Decision 6 and in the amendment "the cutover is o
 pre-submission proof is the pinned prerelease. The exact frozen strings are still proved at the
 cutover, after `main` advances and before the extension is published. The order is written out in
 `docs/release/store-disclosure-2.0.md`.
+
+## Amendment (2026-10-17): an agent row offers what the roster allows
+
+Owner decision 8 of the window design batch (`docs/tasks/break-2.0/design.md`) found that the agent
+step re-decided what the client roster already says. Decision 9 now reads, for each agent row:
+
+- An agent reads Connected only while it is in use: a live session of that agent, with that row's
+  entry in place. A session says its agent, not its host, so one Cline session never marks a Cline
+  host without the entry. A copy-only agent (goose, Continue) is in use while a session of it is
+  live, since Ghostlight never reads its file. The workbench decides this once; the window's
+  Integrations page reads the same answer from the connections part (`harnesses_in_use`).
+- Connect is offered only where the roster says Ghostlight can install. A copy-only agent reads
+  "Found, set up by hand" and offers Copy setup, which copies the entry the Integrations page shows.
+- An entry an older Ghostlight wrote reads "Needs an update" and offers Update, the words and the
+  act of the Integrations page.

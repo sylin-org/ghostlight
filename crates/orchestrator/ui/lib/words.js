@@ -273,16 +273,17 @@
   const BY_HAND = "by_hand";
 
   /**
-   * Where an agent stands, from the service's state and the agent's live sessions (`use`).
+   * Where an agent stands, from the service's state and whether the service says it is in use.
    *
    * Ghostlight never reads a copy-only agent's file, so the service cannot say whether its entry is
-   * there. Such an agent counts as connected while one of its sessions is live, and one found here
-   * with none stands `by_hand`: neither connected nor not connected, because nothing observed says
-   * which. Every other agent stands where the service's state puts it.
+   * there. Such an agent counts as connected while the service says it is in use (one of its
+   * sessions is live), and one found here that is not stands `by_hand`: neither connected nor not
+   * connected, because nothing observed says which. Every other agent stands where the service's
+   * state puts it.
    */
-  function agentStanding(agent, use) {
+  function agentStanding(agent, inUse) {
     if (!agent.copy_only) return agent.state;
-    if (use.sessions > 0) return "installed";
+    if (inUse) return "installed";
     return agent.state === "available" ? BY_HAND : agent.state;
   }
 

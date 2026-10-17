@@ -840,8 +840,9 @@
      * person picked shown in full beside it.
      *
      * Every fact comes from the service's roster: the state, what each act may do, the settings
-     * file, the entry and the evidence. An agent's sessions are the sessions the service names by
-     * that agent's name, the rule the setup view uses, so the page counts them and decides nothing.
+     * file, the entry and the evidence. Which agents are in use is the service's word too
+     * (`harnesses_in_use`, the rule the setup view reads); the page counts an in-use agent's
+     * sessions and tabs for its words, and decides nothing.
      * The pick is kept by id across repaints, so an agent that moves group when someone acts on it
      * stays in the pane.
      */
@@ -860,13 +861,19 @@
       return { sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0) };
     }
 
-    /** An agent as the page draws it: its roster row, the file it reads, its live use and where it stands. */
-    function agentOf(harness, sessions) {
-      const use = useOf(harness, sessions);
-      return { ...harness, file: fileOf(harness.config_path), use, standing: agentStanding(harness, use) };
+    /**
+     * An agent as the page draws it: its roster row, the file it reads, whether the service says it
+     * is in use (`inUseIds`, the rows it names), its live use and where it stands.
+     */
+    function agentOf(harness, sessions, inUseIds) {
+      const used = inUseIds.includes(harness.id);
+      return {
+        ...harness, file: fileOf(harness.config_path), in_use: used, use: useOf(harness, sessions),
+        standing: agentStanding(harness, used)
+      };
     }
 
-    const inUse = (agent) => agent.standing === "installed" && agent.use.sessions > 0;
+    const inUse = (agent) => agent.in_use;
     const toneOf = (agent) => (inUse(agent) ? "live" : agent.standing);
     const byLabel = (left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
 
@@ -1127,8 +1134,8 @@
     }
 
     function drawAgents() {
-      const { harnesses, sessions } = lastAgents;
-      const agents = harnesses.map((harness) => agentOf(harness, sessions));
+      const { harnesses, sessions, inUseIds } = lastAgents;
+      const agents = harnesses.map((harness) => agentOf(harness, sessions, inUseIds));
       agentsHeading(agents);
       // One line for the whole page, naming the first change this screen cannot make.
       const withheld = [ACT.harnessAct, ACT.locate, ACT.setupAll].find((act) => !can(act));
@@ -1161,15 +1168,16 @@
     function integrations(snapshot, pending) {
       const harnesses = snapshot.harnesses;
       const sessions = snapshot.sessions ?? [];
+      const inUseIds = snapshot.harnesses_in_use ?? [];
       const uses = harnesses.map((harness) => useOf(harness, sessions));
-      lastAgents = { harnesses, sessions, pending, facts: [harnesses, uses, [...pending], access?.acts] };
+      lastAgents = { harnesses, sessions, inUseIds, pending, facts: [harnesses, uses, inUseIds, [...pending], access?.acts] };
       paintAgents();
     }
 
     /** Whether the agent `id` sits in the fold of agents not on this computer. */
     function folded(id) {
       const harness = lastAgents?.harnesses.find((row) => row.id === id);
-      return Boolean(harness) && agentOf(harness, lastAgents.sessions).standing === "not_detected";
+      return Boolean(harness) && agentOf(harness, lastAgents.sessions, lastAgents.inUseIds).standing === "not_detected";
     }
 
     /** Show `id` in the pane, and open the fold when it sits there and no search is running. */

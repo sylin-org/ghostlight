@@ -48,7 +48,7 @@ const parts = {
     configuration: { policy: { tone: "applied" }, managed_policy: { configured: false } },
     runtime_note: "Paused from the tray."
   },
-  connections: { sessions: [{ id: "w1" }], browsers: [{ id: "b1" }, { id: "b2" }] },
+  connections: { sessions: [{ id: "w1" }], browsers: [{ id: "b1" }, { id: "b2" }], harnesses_in_use: ["codex"] },
   activity: {
     operations: [{ invocation: "a" }],
     history: [{ invocation: "b", allowed: true }, { invocation: "c", allowed: false }],
@@ -69,10 +69,11 @@ test("a snapshot is one GET naming the six parts, put back into today's flat sha
   assert.equal(send.calls[0].body, undefined);
   assert.deepEqual(Object.keys(snapshot).sort(), [
     "audit_health", "audit_notice", "browsers", "configuration", "controls", "diagnostics",
-    "document_coverage", "harnesses", "history", "instance", "operations", "overview",
+    "document_coverage", "harnesses", "harnesses_in_use", "history", "instance", "operations", "overview",
     "readiness", "runtime_note", "seq", "service", "sessions"
   ]);
   assert.deepEqual(snapshot.controls, parts.controls);
+  assert.deepEqual(snapshot.harnesses_in_use, ["codex"], "the rows the service says are in use");
   assert.equal(snapshot.seq, 9);
   assert.equal(snapshot.service.runtime_state, "active");
   assert.equal(snapshot.runtime_note, "Paused from the tray.");

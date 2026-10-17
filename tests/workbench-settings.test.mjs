@@ -1433,12 +1433,16 @@ function agent(id, name, state, extra = {}) {
   };
 }
 
-/** A view that has drawn the Integrations page of `harnesses` beside `sessions`, in `context`. */
-function agentsPage(harnesses, { sessions = [], context } = {}) {
+/**
+ * A view that has drawn the Integrations page of `harnesses` beside `sessions`, in `context`, with
+ * the rows the service says are in use (`inUse`, their ids).
+ */
+function agentsPage(harnesses, { sessions = [], inUse = [], context } = {}) {
   const shown = drawing();
   if (context) shown.view.context(context);
   const answer = snapshotAnswer({ sessions });
   answer.parts.integrations.harnesses = harnesses;
+  answer.parts.connections.harnesses_in_use = inUse;
   const snapshot = Transport.flatten(answer);
   shown.view.collections(snapshot, new Set());
   const rail = () => drawn(shown.el("agents-list").innerHTML);
@@ -1505,7 +1509,7 @@ test("the agents not on this computer fold into one closed row that opens in pla
 });
 
 test("each state reads as its own words, and a group shows only when it holds an agent", () => {
-  const shown = agentsPage(ROSTER, { sessions: [glanceSession("w1", "Zed", { tabs: 2 }), glanceSession("w2", "Zed")] });
+  const shown = agentsPage(ROSTER, { sessions: [glanceSession("w1", "Zed", { tabs: 2 }), glanceSession("w2", "Zed")], inUse: ["zed"] });
   assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.children[0].textContent),
     ["Needs a look", "Connected", "Found, not connected"]);
   const sub = (id) => [...shown.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id).descendants()].find((node) => node.classes.has("agent-entry-sub"))?.textContent ?? null;
@@ -1571,16 +1575,31 @@ test("a session that arrives after the first paint reaches the rail, the pane an
   assert.equal(sub(), null);
   assert.equal(shown.pane().wearing("agent-live").length, 0);
   assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "0");
-  shown.view.collections({ ...shown.snapshot, sessions: [glanceSession("w1", "Codex", { tabs: 3 })] }, new Set());
+  shown.view.collections({ ...shown.snapshot, sessions: [glanceSession("w1", "Codex", { tabs: 3 })], harnesses_in_use: ["codex"] },
+    new Set());
   assert.equal(sub(), "1 session, 3 tabs");
   assert.ok(entry().children.find((node) => node.classes.has("agent-dot")).classes.has("d-live"), "the dot pulses teal");
   assert.equal(shown.pane().wearing("agent-live")[0].children[1].textContent,
     "1 Codex session is connected right now, with 3 browser tabs open.");
   assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "1");
-  shown.view.collections({ ...shown.snapshot, sessions: [] }, new Set());
+  shown.view.collections({ ...shown.snapshot, sessions: [], harnesses_in_use: [] }, new Set());
   assert.equal(sub(), null, "and leaves when the session ends");
   assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "0");
   assert.deepEqual(shown.failures, []);
+});
+
+test("only the rows the service says are in use pulse, so one session never lights every host of its agent", () => {
+  const cline = (id, label, state) => ({ ...agent(id, "Cline", state), label, agent: namedAgent("Cline") });
+  const rows = [cline("cline-cli", "Cline (CLI)", "installed"), cline("cline-vscode", "Cline (Visual Studio Code)", "available"),
+    cline("cline-cursor", "Cline (Cursor)", "installed")];
+  const shown = agentsPage(rows, { sessions: [glanceSession("w1", "Cline", { tabs: 1 })], inUse: ["cline-cli"] });
+  const dot = (id) => shown.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id)
+    .children.find((node) => node.classes.has("agent-dot"));
+  assert.ok(dot("cline-cli").classes.has("d-live"));
+  assert.ok(dot("cline-cursor").classes.has("d-installed"), "a session the service did not put on this host leaves it still");
+  assert.ok(dot("cline-vscode").classes.has("d-available"));
+  assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.children[0].textContent),
+    ["Connected", "Found, not connected"]);
 });
 
 test("a copy-only agent found here claims nothing about a file Ghostlight never reads", () => {
@@ -1606,7 +1625,8 @@ test("a copy-only agent found here claims nothing about a file Ghostlight never 
 
 test("a copy-only agent with a live session is connected, and is never called not connected", () => {
   const goose = agent("goose", "goose", "available", { copy_only: true, config_path: "/home/ann/.config/goose/config.yaml" });
-  const shown = agentsPage([agent("zed", "Zed", "installed"), goose], { sessions: [glanceSession("w1", "goose", { tabs: 1 })] });
+  const shown = agentsPage([agent("zed", "Zed", "installed"), goose],
+    { sessions: [glanceSession("w1", "goose", { tabs: 1 })], inUse: ["goose"] });
   assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.children[0].textContent), ["Connected"]);
   assert.equal(shown.el("integrations-heading").innerHTML, "Ghostlight is in <em>all 2</em> of your agents.");
   assert.equal(shown.title(), "goose", "the agent with tabs");
@@ -1633,7 +1653,7 @@ test("Remove asks first, naming the sessions that use Ghostlight now", () => {
 
 test("the headline counts the agents with Ghostlight, and Set up everything says beforehand what it will do", () => {
   const head = (rows) => {
-    const said = Words.agentHeadline(rows.map((row) => ({ ...row, standing: Words.agentStanding(row, { sessions: 0 }) })));
+    const said = Words.agentHeadline(rows.map((row) => ({ ...row, standing: Words.agentStanding(row, false) })));
     return `${said.lead}${said.accent}${said.trail}`;
   };
   const on = (count) => Array.from({ length: count }, (_, at) => agent(`a${at}`, `A${at}`, "installed"));

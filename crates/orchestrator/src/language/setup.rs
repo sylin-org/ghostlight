@@ -75,6 +75,18 @@ const COPY_PROMPT: &str = "Copy prompt";
 const GET_CHROME_LABEL: &str = "Get Google Chrome";
 /// The label of the button that adds the extension.
 const ADD_LABEL: &str = "Add";
+/// What an agent row says when its entry was written by an older Ghostlight. The Integrations page
+/// says the same for the same state (`AGENT_STATE_WORDS.updatable` in `ui/lib/words.js`).
+pub const WORD_NEEDS_UPDATE: &str = "Needs an update";
+/// The label of the button that brings an older entry up to date, as the Integrations page labels
+/// its own (`AGENT_ACTS.update`).
+pub const UPDATE_LABEL: &str = "Update";
+/// What an agent row says when Ghostlight never edits its file, as the Integrations page says it
+/// (`AGENT_STATE_WORDS.by_hand`).
+pub const WORD_BY_HAND: &str = "Found, set up by hand";
+/// The label of the button that copies an agent's setup, as the Integrations page labels its own
+/// (`AGENT_ACTS.copy`).
+pub const COPY_SETUP_LABEL: &str = "Copy setup";
 
 /// The computer Ghostlight runs on, as far as the finishing command is concerned.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -135,6 +147,8 @@ pub enum AgentState {
     Found,
     /// The agent has Ghostlight's entry.
     Written,
+    /// The agent has an entry an older Ghostlight wrote, which an update brings up to date.
+    Updatable,
     /// The agent has an entry that needs a person to look at it.
     NeedsAttention,
 }
@@ -150,8 +164,13 @@ pub struct AgentFact {
     pub state: AgentState,
     /// Whether the agent runs in an app container, where Ghostlight cannot write its entry.
     pub private_view: bool,
-    /// Whether the service has seen a session from this agent.
-    pub seen: bool,
+    /// Whether Ghostlight can write or update the agent's entry now, as the client roster says.
+    pub can_install: bool,
+    /// Whether Ghostlight never edits the agent's file, so copying its setup is the only way in.
+    pub copy_only: bool,
+    /// Whether the agent is in use: a live session of it, with this entry in place. The workbench
+    /// decides it once for the setup view and the Integrations page alike.
+    pub in_use: bool,
 }
 
 /// The observations the setup view is composed from.
@@ -320,7 +339,8 @@ pub enum RowTone {
 }
 
 /// What a row's button asks for. The page posts the kinds the service performs, opens the link
-/// for `get_chrome`, and sends `review_agent` to the integrations tab.
+/// for `get_chrome`, sends `review_agent` to the integrations tab, and puts the agent's setup on
+/// the clipboard for `copy_setup`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SetupAction {
@@ -339,13 +359,18 @@ pub enum SetupAction {
     },
     /// Open the Google Chrome download page.
     GetChrome,
-    /// Write Ghostlight's entry into the agent.
+    /// Write Ghostlight's entry into the agent: add it, or bring an older one up to date.
     ConnectAgent {
         /// The agent's identifier.
         agent: String,
     },
     /// Go to the integrations tab to look at the agent's entry.
     ReviewAgent {
+        /// The agent's identifier.
+        agent: String,
+    },
+    /// Put the agent's setup on the clipboard, for an agent whose file Ghostlight never edits.
+    CopySetup {
         /// The agent's identifier.
         agent: String,
     },
@@ -783,31 +808,39 @@ fn agent_row(agent: &AgentFact) -> Row {
         tone,
         action,
     };
-    if agent.seen {
+    if agent.in_use {
         return row(WORD_CONNECTED.to_owned(), RowTone::Done, None);
     }
+    let writes = agent.can_install && !agent.private_view;
     match agent.state {
         AgentState::Written => row(
             format!("Restart {} to finish.", agent.label),
             RowTone::Attention,
             None,
         ),
+        AgentState::Found if agent.copy_only => row(
+            WORD_BY_HAND.to_owned(),
+            RowTone::Todo,
+            Some(RowAction {
+                action: SetupAction::CopySetup {
+                    agent: agent.id.clone(),
+                },
+                label: COPY_SETUP_LABEL.to_owned(),
+                name: format!("Copy setup for {}", agent.label),
+                primary: false,
+                external: false,
+                pending: None,
+            }),
+        ),
         AgentState::Found => row(
             "Found".to_owned(),
             RowTone::Todo,
-            (!agent.private_view).then(|| RowAction {
-                action: SetupAction::ConnectAgent {
-                    agent: agent.id.clone(),
-                },
-                label: "Connect".to_owned(),
-                name: format!("Connect {}", agent.label),
-                primary: false,
-                external: false,
-                pending: Some(Pending {
-                    detail: "Connecting".to_owned(),
-                    live: None,
-                }),
-            }),
+            writes.then(|| write_action(agent, "Connect", "Connecting")),
+        ),
+        AgentState::Updatable => row(
+            WORD_NEEDS_UPDATE.to_owned(),
+            RowTone::Todo,
+            writes.then(|| write_action(agent, UPDATE_LABEL, "Updating")),
         ),
         AgentState::NeedsAttention => row(
             "Needs attention".to_owned(),
@@ -823,6 +856,23 @@ fn agent_row(agent: &AgentFact) -> Row {
                 pending: None,
             }),
         ),
+    }
+}
+
+/// The button that writes the agent's entry, labelled `label`, with `working` shown while it runs.
+fn write_action(agent: &AgentFact, label: &str, working: &str) -> RowAction {
+    RowAction {
+        action: SetupAction::ConnectAgent {
+            agent: agent.id.clone(),
+        },
+        label: label.to_owned(),
+        name: format!("{label} {}", agent.label),
+        primary: false,
+        external: false,
+        pending: Some(Pending {
+            detail: working.to_owned(),
+            live: None,
+        }),
     }
 }
 
@@ -1006,7 +1056,9 @@ mod tests {
             label: label.to_owned(),
             state,
             private_view: false,
-            seen: false,
+            can_install: true,
+            copy_only: false,
+            in_use: false,
         }
     }
 
@@ -1386,8 +1438,8 @@ mod tests {
 
     #[test]
     fn every_agent_row_reads_its_state() {
-        let mut seen = agent("claude-code", "Claude Code", AgentState::Written);
-        seen.seen = true;
+        let mut in_use = agent("claude-code", "Claude Code", AgentState::Written);
+        in_use.in_use = true;
         let written = agent("codex", "Codex", AgentState::Written);
         let found = agent("cursor", "Cursor", AgentState::Found);
         let mut private = agent("desktop", "Claude Desktop", AgentState::Found);
@@ -1395,7 +1447,7 @@ mod tests {
         let attention = agent("zed", "Zed", AgentState::NeedsAttention);
         let view = compose(&facts(
             vec![connected(chrome(BrowserForm::Native))],
-            vec![seen, written, found, private, attention],
+            vec![in_use, written, found, private, attention],
         ));
 
         let connected_row = row(&view, "claude-code");
@@ -1446,6 +1498,107 @@ mod tests {
         assert_eq!(review.label, "Review");
         assert_eq!(review.name, "Review Zed");
         assert!(review.pending.is_none());
+    }
+
+    #[test]
+    fn an_updatable_agent_reads_needs_an_update_and_offers_update() {
+        let view = compose(&facts(
+            vec![connected(chrome(BrowserForm::Native))],
+            vec![agent("zed", "Zed", AgentState::Updatable)],
+        ));
+        let updatable = row(&view, "zed");
+        assert_eq!(updatable.detail, "Needs an update");
+        assert_eq!(updatable.tone, RowTone::Todo);
+        let update = updatable.action.as_ref().unwrap();
+        assert_eq!(
+            update.action,
+            SetupAction::ConnectAgent {
+                agent: "zed".to_owned()
+            }
+        );
+        assert_eq!(update.label, "Update");
+        assert_eq!(update.name, "Update Zed");
+        assert_eq!(
+            update.pending,
+            Some(Pending {
+                detail: "Updating".to_owned(),
+                live: None
+            })
+        );
+    }
+
+    #[test]
+    fn an_agent_ghostlight_cannot_write_is_offered_no_connect_or_update() {
+        for state in [AgentState::Found, AgentState::Updatable] {
+            let mut refused = agent("cursor", "Cursor", state);
+            refused.can_install = false;
+            let mut private = agent("desktop", "Claude Desktop", state);
+            private.private_view = true;
+            let view = compose(&facts(
+                vec![connected(chrome(BrowserForm::Native))],
+                vec![refused, private],
+            ));
+            assert!(row(&view, "cursor").action.is_none(), "{state:?}");
+            assert!(row(&view, "desktop").action.is_none(), "{state:?}");
+        }
+    }
+
+    #[test]
+    fn a_copy_only_agent_offers_copy_setup_and_turns_connected_in_use() {
+        let mut goose = agent("goose", "goose", AgentState::Found);
+        goose.copy_only = true;
+        goose.can_install = false;
+        let view = compose(&facts(
+            vec![connected(chrome(BrowserForm::Native))],
+            vec![goose.clone()],
+        ));
+        let by_hand = row(&view, "goose");
+        assert_eq!(by_hand.detail, "Found, set up by hand");
+        assert_eq!(by_hand.tone, RowTone::Todo);
+        let copy = by_hand.action.as_ref().unwrap();
+        assert_eq!(
+            copy.action,
+            SetupAction::CopySetup {
+                agent: "goose".to_owned()
+            }
+        );
+        assert_eq!(copy.label, "Copy setup");
+        assert_eq!(copy.name, "Copy setup for goose");
+        assert!(!copy.primary && !copy.external && copy.pending.is_none());
+
+        goose.in_use = true;
+        let view = compose(&facts(
+            vec![connected(chrome(BrowserForm::Native))],
+            vec![goose],
+        ));
+        let connected_row = row(&view, "goose");
+        assert_eq!(connected_row.detail, "Connected");
+        assert!(connected_row.action.is_none());
+    }
+
+    #[test]
+    fn the_agent_words_the_page_shares_are_the_pages_own() {
+        let page = include_str!("../../ui/lib/words.js");
+        for line in [
+            format!("updatable: \"{WORD_NEEDS_UPDATE}\""),
+            format!("by_hand: \"{WORD_BY_HAND}\""),
+            format!("update: \"{UPDATE_LABEL}\""),
+            format!("copy: \"{COPY_SETUP_LABEL}\""),
+        ] {
+            assert!(page.contains(&line), "the page does not say {line}");
+        }
+    }
+
+    #[test]
+    fn a_copy_setup_step_serializes_with_its_kind() {
+        let json = serde_json::to_value(SetupAction::CopySetup {
+            agent: "goose".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "kind": "copy_setup", "agent": "goose" })
+        );
     }
 
     #[test]
@@ -1770,6 +1923,7 @@ mod tests {
                 agent("a", "Alpha", AgentState::Found),
                 agent("b", "Beta", AgentState::Written),
                 agent("c", "Gamma", AgentState::NeedsAttention),
+                agent("d", "Delta", AgentState::Updatable),
             ],
         );
         state.agent_name = Some("Alpha".to_owned());

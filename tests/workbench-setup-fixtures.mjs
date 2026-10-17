@@ -64,6 +64,14 @@ export const setupStages = {
       agentRow("cursor", "Cursor", "Needs attention", "attention", {
         action: { kind: "review_agent", agent: "cursor" }, label: "Review", name: "Review Cursor",
         primary: false, external: false, pending: null
+      }),
+      agentRow("zed", "Zed", "Needs an update", "todo", {
+        action: { kind: "connect_agent", agent: "zed" }, label: "Update", name: "Update Zed",
+        primary: false, external: false, pending: { detail: "Updating", live: null }
+      }),
+      agentRow("goose", "goose", "Found, set up by hand", "todo", {
+        action: { kind: "copy_setup", agent: "goose" }, label: "Copy setup", name: "Copy setup for goose",
+        primary: false, external: false, pending: null
       })
     ],
     live: { text: "Waiting for your agent.", done: false },

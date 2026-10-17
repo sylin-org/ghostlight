@@ -14,6 +14,9 @@
 //! looked at again, or setup completed), because an incomplete setup reads the machine each time
 //! it is built (ADR-0200 Decision 8).
 //!
+//! The connections part also names the client roster's rows in use, read from the cached roster
+//! beside the sessions, so the Integrations page learns it with the sessions it is decided from.
+//!
 //! While no browser is connected, the connections part says which browser a request would start.
 //! Browser recovery answers that from the installed browsers, which it reads once for each stretch
 //! with no browser connected and each browser startup posture in it, and never under `manual`. The
@@ -61,6 +64,9 @@ pub(super) struct Gathered {
     pub browsers: Vec<BrowserInstanceSummary>,
     /// What the window says in place of a browser, while none is connected.
     pub no_browser: Option<String>,
+    /// The ids of the cached client roster's rows these sessions put in use
+    /// ([`parts::harnesses_in_use`]).
+    pub harnesses_in_use: Vec<String>,
     /// Content-free authority facts.
     pub authority: GovernanceDiagnostics,
     /// The band chip.
@@ -84,6 +90,7 @@ impl Gathered {
             sessions: self.sessions.clone(),
             browsers: self.browsers.clone(),
             no_browser: self.no_browser.clone(),
+            harnesses_in_use: self.harnesses_in_use.clone(),
         }
     }
 }
@@ -303,6 +310,8 @@ impl Live {
             lock(&self.starts).end_stretch();
             None
         };
+        let roster = lock(&self.sources).harnesses.clone();
+        let harnesses_in_use = parts::harnesses_in_use(&roster.summaries(), &sessions);
         let authority = self.governance.diagnostics();
         let runtime_state = self.governance.runtime_state();
         let audit_health = self.projection.audit_health();
@@ -322,6 +331,7 @@ impl Live {
             sessions,
             browsers,
             no_browser,
+            harnesses_in_use,
             authority,
             runtime_state,
             audit_health,

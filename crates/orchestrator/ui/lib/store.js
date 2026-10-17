@@ -175,6 +175,7 @@
       if (!snapshot) return;
       snapshot.sessions = connections.sessions;
       snapshot.browsers = connections.browsers;
+      snapshot.harnesses_in_use = connections.harnesses_in_use;
       if (connections.no_browser === undefined) delete snapshot.no_browser;
       else snapshot.no_browser = connections.no_browser;
       snapshot.overview = {

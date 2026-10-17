@@ -159,6 +159,16 @@ test("the no-browser line follows the connections part, and goes when a browser 
   assert.equal("no_browser" in store.snapshot(), false);
 });
 
+test("the rows in use follow the connections part, as the service publishes them with the sessions", () => {
+  const { store } = latched({ browsers: [], configuration: {}, overview: {}, harnesses_in_use: [] });
+  const session = { id: "w", agent: { id: "codex" } };
+  store.applyChange({ seq: 1, change: { kind: "connections_changed",
+    connections: { sessions: [session], browsers: [], harnesses_in_use: ["codex"] } } });
+  assert.deepEqual(store.snapshot().harnesses_in_use, ["codex"]);
+  store.applyChange({ seq: 2, change: { kind: "connections_changed", connections: { sessions: [], browsers: [], harnesses_in_use: [] } } });
+  assert.deepEqual(store.snapshot().harnesses_in_use, []);
+});
+
 /* ------------------------------------ the latch ------------------------------------ */
 
 test("the band stays working for ten seconds after the last action, not for each operation", () => {

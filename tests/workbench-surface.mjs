@@ -554,6 +554,8 @@ view.collections({
     { id: "w-zed-2", agent: namedAgent("Zed"), channel: "mcp", tab_count: 2, active_operations: 1 },
     { id: "w-cli", agent: namedAgent("Command line"), channel: "cli", tab_count: 1, active_operations: 0 }
   ],
+  // The service says which rows are in use; the page draws what it says.
+  harnesses_in_use: ["zed"],
   browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
   configuration: { managed_policy: { configured: false } },
   harnesses: agentRoster

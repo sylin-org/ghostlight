@@ -4,8 +4,8 @@
 //! `tests/workbench-store.test.mjs`, `tests/workbench-transport.test.mjs` and
 //! `tests/workbench-settings.test.mjs`. What stays here is what running a module cannot reveal:
 //! the product's artwork byte for byte, the palette and motion curve the page shares with
-//! sylin.org and the page assets, the layers that must never reach for the document, and a
-//! surface that carries no address of its own.
+//! sylin.org and the page assets, the layers that must never reach for the document, a surface
+//! that carries no address of its own, and words the page keys by the service's wire values.
 
 #[test]
 fn workbench_uses_the_original_ghostlight_artwork_byte_for_byte() {
@@ -95,5 +95,57 @@ fn the_surface_carries_no_address_of_its_own() {
     assert!(
         !surface_source().contains("https://"),
         "the surface script carries a raw URL"
+    );
+}
+
+#[test]
+fn the_page_has_a_word_for_every_state_the_roster_sends_and_no_other() {
+    use std::collections::BTreeSet;
+
+    use crate::install::HarnessState;
+
+    let words = include_str!("../../ui/lib/words.js");
+    let start = words
+        .find("const AGENT_STATE_WORDS = Object.freeze({")
+        .expect("the page names the agent states");
+    let block = &words[start..];
+    let block = &block[block.find('{').unwrap() + 1..block.find("});").unwrap()];
+    let keys: BTreeSet<&str> = block
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .map(|(key, _)| key.trim())
+        .collect();
+    let states = [
+        HarnessState::NotDetected,
+        HarnessState::Available,
+        HarnessState::Installed,
+        HarnessState::Updatable,
+        HarnessState::NeedsAttention,
+    ];
+    // A new state fails to compile here, so it cannot reach the page without a word.
+    for state in states {
+        match state {
+            HarnessState::NotDetected
+            | HarnessState::Available
+            | HarnessState::Installed
+            | HarnessState::Updatable
+            | HarnessState::NeedsAttention => {}
+        }
+    }
+    let mut expected: BTreeSet<String> = states
+        .iter()
+        .map(|state| {
+            serde_json::to_value(state)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    // The one standing the page adds: a copy-only agent found here whose file it never reads.
+    expected.insert("by_hand".to_owned());
+    assert_eq!(
+        keys,
+        expected.iter().map(String::as_str).collect::<BTreeSet<_>>()
     );
 }

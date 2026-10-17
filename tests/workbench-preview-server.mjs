@@ -189,6 +189,8 @@ const snapshot = {
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
     { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: "Filling form", capability: "write", started_at_ms: Date.now() - 35000, phase: "held" }
   ],
+  // The rows the service says are in use: a live session of the agent with its entry in place.
+  harnesses_in_use: ["codex", "claude-code"],
   browsers: [
     { id: "browser_chrome", family: "Chrome", adapter_version: "1.0.0", connected: true, tab_count: 4 },
     { id: "browser_edge", family: "Edge", adapter_version: "1.0.0", connected: true, tab_count: 1 }
@@ -572,7 +574,10 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
       audit_notice: flat.audit_notice, configuration: flat.configuration,
       ...(flat.runtime_note === undefined ? {} : { runtime_note: flat.runtime_note })
     },
-    connections: { sessions: flat.sessions, browsers: flat.browsers, ...(flat.no_browser ? { no_browser: flat.no_browser } : {}) },
+    connections: {
+      sessions: flat.sessions, browsers: flat.browsers, harnesses_in_use: flat.harnesses_in_use,
+      ...(flat.no_browser ? { no_browser: flat.no_browser } : {})
+    },
     activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage || [] },
     integrations: { harnesses: flat.harnesses },
     diagnostics: { diagnostics: flat.diagnostics },

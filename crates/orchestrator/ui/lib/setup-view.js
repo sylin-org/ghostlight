@@ -36,7 +36,8 @@
     openBrowser: "open_browser",
     getChrome: "get_chrome",
     connectAgent: "connect_agent",
-    reviewAgent: "review_agent"
+    reviewAgent: "review_agent",
+    copySetup: "copy_setup"
   });
 
   /** How long the browser step must have been on screen before a connection is worth a meeting. */

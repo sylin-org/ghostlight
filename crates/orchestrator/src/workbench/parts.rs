@@ -24,7 +24,7 @@ use crate::browser::adapter::RuntimeControlState;
 use crate::diagnostics::DiagnosticsReport;
 use crate::governance::effective::{EffectiveAuthority, LayerKind, PolicyChip};
 use crate::governance::ManagedPolicyPassport;
-use crate::install::{HarnessActionResult, HarnessSummary};
+use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::audit_health::AuditHealth;
 use crate::language::coverage::HumanCoverage;
 use crate::language::setup::SetupView;
@@ -196,6 +196,10 @@ pub struct ConnectionsPart {
     /// What the window says in place of a browser, present only while none is connected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_browser: Option<String>,
+    /// The ids of the client roster's rows in use now ([`harnesses_in_use`]), in roster order.
+    /// The Integrations page reads it beside the sessions it is decided from, so it changes when
+    /// they do.
+    pub harnesses_in_use: Vec<String>,
 }
 
 impl ConnectionsPart {
@@ -206,8 +210,42 @@ impl ConnectionsPart {
             sessions: snapshot.sessions.clone(),
             browsers: snapshot.browsers.clone(),
             no_browser: snapshot.no_browser.clone(),
+            harnesses_in_use: harnesses_in_use(&snapshot.harnesses, &snapshot.sessions),
         }
     }
+}
+
+/// Whether the roster row `harness` is in use now: a live session of its agent, with the row's
+/// entry in place. A copy-only row's file is never read, so for it the session is the only sign of
+/// the entry. A session says its agent, not the host it runs on ([`is_agent_of`]), so a session
+/// of an agent marks each of that agent's rows with an entry, and none without one.
+///
+/// The one rule the setup view and the Integrations page both read.
+#[must_use]
+pub(crate) fn in_use(harness: &HarnessSummary, sessions: &[SessionSummary]) -> bool {
+    (harness.copy_only || harness.state == HarnessState::Installed)
+        && sessions.iter().any(|session| is_agent_of(session, harness))
+}
+
+/// Whether `session` is a session of the agent `harness` sets up: both carry the same catalog id.
+/// An agent on several hosts is one agent here, because the name a client reports does not say
+/// the host.
+#[must_use]
+pub(crate) fn is_agent_of(session: &SessionSummary, harness: &HarnessSummary) -> bool {
+    session.agent.id == harness.agent.id
+}
+
+/// The ids of the rows of `harnesses` that are [`in_use`] given `sessions`, in roster order.
+#[must_use]
+pub(crate) fn harnesses_in_use(
+    harnesses: &[HarnessSummary],
+    sessions: &[SessionSummary],
+) -> Vec<String> {
+    harnesses
+        .iter()
+        .filter(|harness| in_use(harness, sessions))
+        .map(|harness| harness.id.clone())
+        .collect()
 }
 
 /// The layer name of process diagnostics that are not being written.

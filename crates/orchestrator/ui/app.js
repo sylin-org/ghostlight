@@ -757,6 +757,10 @@ async function setupAction(action, row) {
       case ACTION.reviewAgent:
         go("integrations");
         break;
+      case ACTION.copySetup:
+        await transport.copyText(harnessText(action.agent, COPY_KIND.setup));
+        view.toast(COPIED_SETUP);
+        break;
       default:
         throw new Error(`unknown setup step ${action.kind}`);
     }

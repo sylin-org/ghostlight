@@ -1963,6 +1963,53 @@ fn connecting_a_client_republishes_setup_with_the_row_waiting_for_a_restart() {
     assert_eq!(row.tone, RowTone::Attention);
 }
 
+#[test]
+fn a_session_puts_a_client_in_use_only_once_its_entry_is_in_place_and_the_connections_say_so() {
+    use crate::install::HarnessAction;
+    use crate::intake::session::IntakeChannel;
+    use crate::language::setup::Stage;
+
+    let bench = SetupBench::with_a_client_to_connect();
+    bench.browser.connect(true);
+    bench.facade.refresh_harnesses().unwrap();
+    bench.workspaces.admit("Cursor".into(), IntakeChannel::Mcp);
+    bench.facade.refresh_live_parts();
+    let published_in_use = || {
+        heard(&bench.events)
+            .into_iter()
+            .rev()
+            .filter_map(|event| match event.change {
+                WorkbenchChange::ConnectionsChanged { connections } => {
+                    Some(connections.harnesses_in_use)
+                }
+                _ => None,
+            })
+            .next()
+    };
+    let snapshot_in_use =
+        || super::parts::ConnectionsPart::of(&bench.facade.snapshot()).harnesses_in_use;
+    assert_eq!(published_in_use(), Some(Vec::new()));
+    assert!(snapshot_in_use().is_empty());
+    let view = bench.facade.setup_view();
+    assert_eq!(view.stage, Stage::Agent);
+    assert_eq!(
+        super::setup::test_support::row(&view, "cursor").detail,
+        "Found"
+    );
+
+    bench
+        .facade
+        .manage_harness_expecting("cursor", HarnessAction::Install, "available")
+        .unwrap();
+    assert_eq!(published_in_use(), Some(vec!["cursor".to_owned()]));
+    assert_eq!(snapshot_in_use(), ["cursor"]);
+    let view = bench.facade.setup_view();
+    assert_eq!(
+        super::setup::test_support::row(&view, "cursor").detail,
+        "Connected"
+    );
+}
+
 /// A policy file that sets the browser startup posture to `posture`.
 fn startup_policy(posture: &str) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!(
