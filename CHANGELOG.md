@@ -126,6 +126,10 @@ layout once, when you run the install again. The full release notes are in
 
 ### Fixed
 
+- A captured screenshot handed back to a page (`browser_upload` with `source_image`, attached to a
+  file input or dropped at a point) no longer fails with "file payload size mismatch". The stated
+  size ignored base64 padding, so about two images in three were refused; this has been wrong since
+  1.0.
 - Ordinary page tools spend at most one second on optional preparation and then go ahead on a busy
   page; `visual_settle: false` skips it. A composite wait keeps a condition that held when optional
   settlement runs out and reports `visual_settled` apart (ADR-0195, prepared for 1.3.15).

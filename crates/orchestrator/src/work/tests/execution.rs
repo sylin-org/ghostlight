@@ -787,6 +787,84 @@ fn audit_excludes_script_results_and_invalid_input_context() {
     assert_eq!(records[1].summary, "Executed JavaScript on example.com.");
 }
 
+/// A captured image handed back to the page states the size its base64 decodes to, padding
+/// included; the page refuses a file whose stated size differs from its bytes.
+#[test]
+fn a_captured_image_states_its_decoded_size() {
+    for (data, size) in [("QQ==", 1u64), ("QUI=", 2), ("QUJD", 3), ("QUJDRA==", 4)] {
+        let (executor, browser, _, workspace, _) = fixture();
+        browser.push(Ok(BrowserOutcome::TabOpened {
+            tab: tab(7, "https://example.com/"),
+            committed_urls: vec!["https://example.com/".into()],
+        }));
+        let opened = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"url":"https://example.com/"}),
+            None,
+            &CancellationToken::default(),
+        );
+        let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+        browser.push(Ok(BrowserOutcome::Screenshot {
+            tab_id: 7,
+            mime_type: "image/png".into(),
+            data: data.into(),
+            width: 800,
+            height: 600,
+            viewport: ViewportGeometry {
+                scope: CaptureScope::Viewport,
+                page_x: 0.0,
+                page_y: 0.0,
+                css_width: 800.0,
+                css_height: 600.0,
+                visual_page_x: 0.0,
+                visual_page_y: 0.0,
+                visual_css_width: 800.0,
+                visual_css_height: 600.0,
+                device_scale: 1.0,
+                zoom: 1.0,
+                output_scale: 1.0,
+            },
+        }));
+        let shot = executor.execute(
+            &workspace,
+            "browser_screenshot",
+            json!({"tab":tab_handle}),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(shot.status, Status::Succeeded, "{shot:?}");
+        browser.push(Ok(BrowserOutcome::FilesUploaded {
+            tab_id: 7,
+            uploaded_count: 1,
+            uploaded_bytes: size,
+            subject: None,
+        }));
+        let dropped = executor.execute(
+            &workspace,
+            "browser_upload",
+            json!({
+                "tab": tab_handle,
+                "source_image": shot.facts["image"],
+                "view": shot.facts["view"],
+                "x": 10,
+                "y": 10
+            }),
+            None,
+            &CancellationToken::default(),
+        );
+        assert_eq!(dropped.status, Status::Succeeded, "{data}: {dropped:?}");
+        assert!(
+            browser.calls().iter().any(|call| matches!(
+                call,
+                BrowserCommand::DropImageAt { file, .. } if file.size == size && file.data == data
+            )),
+            "{data} must state {size} bytes: {:?}",
+            browser.calls()
+        );
+    }
+}
+
 /// A script whose value is exactly `{}` gets one step naming what else reads as `{}`, worded for
 /// whether the script was awaited. Nothing else changes, and nothing of the script or its value
 /// reaches the audit.

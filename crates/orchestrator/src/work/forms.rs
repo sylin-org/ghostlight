@@ -548,7 +548,7 @@ impl ApplicationExecutor {
                 .expect("validated source_image");
             match lease.take_image(image, &selected) {
                 Some((mime_type, data)) => {
-                    let decoded = (data.len() / 4 * 3) as u64;
+                    let decoded = base64_decoded_len(&data);
                     (
                         vec![PhysicalFile {
                             name: "capture".into(),
@@ -1392,4 +1392,16 @@ fn decode_inline_files(
         });
     }
     Ok((decoded, total))
+}
+
+/// The number of bytes a standard base64 text decodes to, with or without padding. A captured
+/// image travels as base64, and the page refuses a file whose stated size is not its byte count.
+fn base64_decoded_len(data: &str) -> u64 {
+    let digits = data.trim_end_matches('=').len();
+    let partial = match digits % 4 {
+        2 => 1,
+        3 => 2,
+        _ => 0,
+    };
+    (digits / 4 * 3 + partial) as u64
 }
