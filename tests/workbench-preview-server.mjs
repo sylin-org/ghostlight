@@ -156,10 +156,20 @@ const controlsFixture = {
   you: { context: "control", word: "Full control", sentence: "Others on this computer can watch this view in a browser." }
 };
 
-/** The connection evidence a preview record carries, as the service shapes it. */
+/** What durable evidence says of an MCP connection, which keeps no claim (`language::provenance`). */
+const DURABLE_MCP_EXPLANATION = "The application name is the MCP client's own claim. Ghostlight does not verify it.";
+
+/** What a record from before connection identities says of its connection. */
+const LEGACY_EXPLANATION = "Earlier history did not establish the connecting executable.";
+
+/**
+ * The connection evidence a preview record carries, as the service shapes it: a live claim, or
+ * none for durable evidence restored from history.
+ */
 function previewEvidence(connection_id, reported_application, channel) {
   const explanation = channel === "cli" ? "A ghostlight call session is a local program."
-    : `"${reported_application}" is what the agent calls itself; Ghostlight does not verify it.`;
+    : reported_application === null ? DURABLE_MCP_EXPLANATION
+      : `"${reported_application}" is what the agent calls itself; Ghostlight does not verify it.`;
   return { connection_id, reported_application, channel, explanation };
 }
 
@@ -189,7 +199,7 @@ const snapshot = {
     { timestamp_ms: Date.now() - 60000, invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", provenance: previewEvidence("connection_claude", "claude-code", "mcp") },
     { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", provenance: previewEvidence("connection_codex", "codex-mcp-client", "mcp") },
     { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", provenance: previewEvidence("connection_script", null, "cli") },
-    { timestamp_ms: Date.now() - 420000, invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp" }
+    { timestamp_ms: Date.now() - 420000, invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", provenance: previewEvidence("connection_restored", null, "mcp") }
   ],
   diagnostics: [
     { id: "service", label: "Orchestrator", severity: "passing", detail: "Ghostlight is accepting local connections." },
@@ -307,10 +317,32 @@ for (const session of snapshot.sessions) {
       : `"${reported}" is what the agent calls itself; Ghostlight does not verify it.`
   }];
 }
+
+/**
+ * The agent the service names for work from the work's own evidence, never from its session
+ * (`Agent::of_evidence`): the command line from its channel, the agent a live claim names, and
+ * the unknown agent for evidence that keeps no claim, as a record restored from history does.
+ */
+const agentOfEvidence = (evidence) => {
+  if (evidence?.channel === "cli") return COMMAND_LINE_AGENT;
+  const claim = evidence?.reported_application;
+  if (!claim) return UNKNOWN_AGENT;
+  return agentNamed(Object.keys(REPORTED).find((name) => REPORTED[name] === claim) ?? claim);
+};
+
+/**
+ * Give a record the evidence the service keeps beside it: its own when it has some, the live
+ * session's connection for work recorded in this run, and for a restored record with none only
+ * what its channel says. Its agent comes from that evidence.
+ */
 const retainConnection = (record) => {
-  const session = snapshot.sessions.find(item => item.id === record.workspace);
-  record.provenance = structuredClone(session?.connections[0] ?? null);
-  record.agent = structuredClone(session?.agent ?? UNKNOWN_AGENT);
+  if (record.provenance === undefined) {
+    const session = snapshot.sessions.find((item) => item.id === record.workspace);
+    record.provenance = session ? structuredClone(session.connections[0])
+      : record.channel ? { connection_id: null, reported_application: null, channel: record.channel, explanation: LEGACY_EXPLANATION }
+        : null;
+  }
+  record.agent = structuredClone(agentOfEvidence(record.provenance));
   for (const step of record.steps ?? []) if (step.record) retainConnection(step.record);
 };
 snapshot.operations.forEach(retainConnection);
