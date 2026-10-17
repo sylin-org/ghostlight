@@ -213,6 +213,18 @@ w01-windows-user-path has landed. polish-01-deployment-report has landed. tidy-0
 
 ## Owed live checks
 
+- Result, 2026-10-17 (deploy d81114a0 in place on the owner's Windows 11 machine, Chrome and Edge
+  installed, auto-open on): launch-last-browser, relaunch-session-browser and relaunch-guard pass live.
+  With every Chrome window closed, a fresh session (ghostlight call) started Chrome and opened its page
+  in 8 s (deploy 531f1987); a session that had worked in Chrome started it again after a service
+  restart; and a fresh session and a bound session asking in the same second both succeeded with one
+  Chrome process started by the service (07:11:38). Owner decision, same day: when Ghostlight starts
+  Chrome it starts as the person set it up (its startup window or restored tabs), so the agent's page
+  may open in a second window; --no-startup-window was offered and declined. 2.x notes from the
+  relaunch-guard review: a Chromium connection reports no name, so its start keeps the launch guard for
+  the full window; a flight waiting on another flight's failed spawn ends in a handshake timeout rather
+  than launch_failed.
+
 - Result, 2026-10-17 (release-candidate live run on the owner's Windows 11 machine, Chrome, deploys
   c225fd78 then 9c52a892 in place, version 2.0.0): every public demo stage passed through Ghostlight's
   own tools. Brief (fill, submit, an expect that honestly failed on the stage's canned success text),
