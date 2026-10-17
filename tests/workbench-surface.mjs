@@ -156,14 +156,18 @@ let policyReply = null;
 /** The agents on the roster these fixtures use, by the name the service gives each. */
 const ROSTER_AGENTS = new Map([["Codex", "codex"], ["Zed", "zed"], ["Claude Code", "claude-code"]]);
 
+/** The app's own icon the service found for an agent, with its line about where it came from. */
+const appIcon = (id, app) => ({ icon: `agent-icons/${id}?v=0123456789ab`, about: `Icon from the installed ${app} app.` });
+
 /**
- * An agent as the service names it: a roster agent wears its packaged tile, the command line its
- * prompt, and any other name, or none, the unknown glyph. An agent Ghostlight does not know is
- * identified by the name it reported.
+ * An agent as the service names it: Codex wears the icon the service found in its app, the other
+ * roster agents their packaged tiles, the command line its prompt, and any other name, or none,
+ * the unknown glyph. An agent Ghostlight does not know is identified by the name it reported.
  */
 const namedAgent = (name) => {
   if (name === "Command line") return { id: "command_line", name, symbol: { glyph: "command_line" } };
   const id = ROSTER_AGENTS.get(name);
+  if (id === "codex") return { id, name, symbol: appIcon(id, name) };
   if (id) return { id, name, symbol: { src: `integrations/${id}.svg` } };
   if (name == null) return { id: "unknown", name: "Unknown agent", symbol: { glyph: "unknown" } };
   return { id: `unknown:${name}`, name, symbol: { glyph: "unknown" } };
@@ -532,7 +536,8 @@ const agentRow = (id, name, state, extra = {}) => ({
 });
 const agentRoster = [
   agentRow("zcode", "ZCode", "not_detected"),
-  agentRow("windsurf", "Windsurf", "installed"),
+  agentRow("windsurf", "Windsurf", "installed",
+    { agent: { id: "windsurf", name: "Windsurf", symbol: appIcon("windsurf", "Windsurf") } }),
   agentRow("goose", "goose", "available", { copy_only: true }),
   agentRow("junie", "Junie", "needs_attention", {
     can_install: false, can_fix: true,
@@ -899,6 +904,11 @@ const glanceChecks = [];
     return nodes.get("connections").innerHTML;
   };
   let html = draw({ sessions, browsers });
+  glanceChecks.push(["an agent's own icon sits on its tile in the summary face and on its shelf chip, beside glyphs",
+    html.includes('<span class="symbol symbol-face symbol-icon" aria-hidden="true"><img src="agent-icons/codex?v=0123456789ab" alt="" width="20" height="20"></span>')
+      && html.includes('<span class="symbol symbol-chip symbol-icon" aria-hidden="true"><img src="agent-icons/codex?v=0123456789ab" alt="" width="14" height="14"></span>')
+      && html.includes('<span class="symbol symbol-face" aria-hidden="true"><svg')
+      && !html.includes("Icon from the installed"), html]);
   glanceChecks.push(["at a glance is one closed summary that counts agents and browsers",
     html.startsWith('<details class="glance" data-page-details="glance">')
       && html.includes(">3 agents<") && html.includes(">1 browser<") && html.includes(">Details<")
@@ -922,6 +932,7 @@ const glanceChecks = [];
   html = draw({ sessions, browsers });
   glanceChecks.push(["an agent's card says at most four sessions, how many more, and the trust note once",
     (html.match(/class="glance-line"/g) ?? []).length === 4 && html.includes(">and 1 more<")
+      && html.includes('<span class="symbol symbol-card symbol-icon" aria-hidden="true"><img src="agent-icons/codex?v=0123456789ab" alt="" width="16" height="16"></span>')
       && (html.match(/is what the agent calls itself/g) ?? []).length === 1
       && html.includes('data-copy-connection="connection_codex_0"') && html.includes(">Copy id<")
       && !html.includes(">connection_codex_0<"), html]);
@@ -1904,6 +1915,13 @@ const checks = [
       && agentPanes.antigravity.includes(">Install</button>") && agentPanes.antigravity.includes(">Prepare</button>")
       && agentPanes.antigravity.includes("You can install it, or prepare its settings first."),
     JSON.stringify(agentPanes)],
+  ["an agent's own icon sits on its tile on the rail and in the pane, which says once where it came from; a monogram says nothing",
+    agentsShown.rail.includes('<span class="symbol symbol-rail symbol-icon" aria-hidden="true"><img src="agent-icons/windsurf?v=0123456789ab" alt="" width="22" height="22"></span>')
+      && agentsShown.rail.includes('<span class="symbol symbol-rail" aria-hidden="true"><img src="integrations/zed.svg" alt="" width="22" height="22"></span>')
+      && agentPanes.windsurf.includes('<span class="symbol symbol-pane symbol-icon" aria-hidden="true"><img src="agent-icons/windsurf?v=0123456789ab" alt="" width="46" height="46"></span>')
+      && (agentPanes.windsurf.match(/<p class="agent-icon-about">Icon from the installed Windsurf app\.<\/p>/g) ?? []).length === 1
+      && !agentPanes.zed.includes("agent-icon-about") && !agentPanes.cursor.includes("agent-icon-about"),
+    agentsShown.rail + agentPanes.windsurf],
   ["an agent in use says its sessions and tabs, links to At a glance, and pulses on its wire",
     agentPanes.zed.includes("2 Zed sessions are connected right now, with 3 browser tabs open.")
       && agentPanes.zed.includes('data-view="monitor" data-show-agent="zed"')

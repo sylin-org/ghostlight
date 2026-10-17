@@ -1425,7 +1425,7 @@ fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
 
     let codex = one_agent_across_the_window("codex-mcp-client", &["codex"]);
     assert_eq!(codex.name, "Codex");
-    assert_eq!(codex.symbol, Symbol::Image("integrations/codex.svg".into()));
+    assert_eq!(codex.symbol, Symbol::Tile("integrations/codex.svg".into()));
     let cline = one_agent_across_the_window(
         "cline",
         &[
@@ -1437,7 +1437,7 @@ fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
     );
     assert_eq!(cline.id, "cline");
     assert_eq!(cline.name, "Cline");
-    assert_eq!(cline.symbol, Symbol::Image("integrations/cline.svg".into()));
+    assert_eq!(cline.symbol, Symbol::Tile("integrations/cline.svg".into()));
 }
 
 /// The agent a session whose client calls itself `reported` carries, after showing that its

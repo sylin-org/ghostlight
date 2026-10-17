@@ -1450,8 +1450,8 @@ pub fn agent_called(reported: &str) -> Option<Agent> {
         .map(AgentRow::agent)
 }
 
-/// Where each catalog agent's own icon may be found, one entry per agent in roster order: its
-/// hosts' icon sources in roster order, and the first family a host names.
+/// Where each catalog agent's own icon may be found, one entry per agent in roster order: its name,
+/// its hosts' icon sources in roster order, and the first family a host names.
 #[must_use]
 pub fn icon_catalog() -> Vec<AgentIconSources> {
     let mut catalog: Vec<AgentIconSources> = Vec::new();
@@ -1465,6 +1465,7 @@ pub fn icon_catalog() -> Vec<AgentIconSources> {
         } else {
             catalog.push(AgentIconSources {
                 agent_id: row.agent_id,
+                name: row.name,
                 sources: row.icons.to_vec(),
                 family: row.icon_family,
             });
@@ -3084,7 +3085,7 @@ mod tests {
         let registry = HarnessRegistry::with_context(context);
         for summary in registry.summaries() {
             assert!(
-                matches!(&summary.agent.symbol, Symbol::Image(path)
+                matches!(&summary.agent.symbol, Symbol::Tile(path)
                     if path.strip_prefix("integrations/").is_some_and(|file| asset_root.join(file).is_file())),
                 "missing packaged artwork for {}",
                 summary.id

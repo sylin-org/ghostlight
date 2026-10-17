@@ -38,3 +38,9 @@ every render, plus buttons for an in-app tab switch at the same address, a delet
 reuses a row node for another link, and a view switch that renames the region. It carries no
 network resource. `tests/agent-ux-rerender-journey.mjs` serves it to a live browser and checks
 which handles follow their control and which refuse (ADR-0198 Decision 17).
+
+`workbench/agent-icon.png` is a 48 px PNG drawn for the window's tests: a blue disc with a dark
+ring and a yellow diamond on a transparent ground, no app's artwork. The preview server
+(`tests/workbench-preview-server.mjs`) serves it as Codex's own icon at `agent-icons/codex`, the
+way the service serves an icon it found in an installed app, so the window shows one agent's icon
+beside the monograms.

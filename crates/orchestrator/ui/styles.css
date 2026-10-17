@@ -30,6 +30,9 @@
   --line: rgba(255, 255, 255, .06);
   --line-2: rgba(255, 255, 255, .1);
 
+  /* The neutral tile an app's own icon sits on, light enough for a dark glyph to read. */
+  --icon-tile: #e4e4e7;
+
   /* Surfaces are washes over the ground, not boxes. */
   --panel: rgba(255, 255, 255, .022);
   --panel-2: rgba(255, 255, 255, .012);
@@ -234,11 +237,13 @@ body.runtime-offline .state-word { color: var(--muted); }
 .glance[open] .glance-open-word { display: inline; }
 
 /*
- * An agent's symbol, as the service names it: a tile the window serves or a glyph the page draws,
- * at the size of the place that draws it (SYMBOL_SIZES in ui/lib/words.js).
+ * An agent's symbol, as the service names it: a tile the window serves, an app's own icon it
+ * serves, or a glyph the page draws, at the size of the place that draws it (SYMBOL_SIZES in
+ * ui/lib/words.js). Each place gives a tile and an icon the same rounded outline, so a row that
+ * mixes them keeps one shape.
  */
 .symbol { display: inline-grid; flex: none; place-items: center; }
-.symbol img { display: block; }
+.symbol img { display: block; object-fit: contain; }
 .symbol svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .symbol-face, .symbol-face img { width: 100%; height: 100%; }
 .symbol-face img { border-radius: 50%; }
@@ -251,6 +256,15 @@ body.runtime-offline .state-word { color: var(--muted); }
 .symbol-rail svg { width: 16px; height: 16px; }
 .symbol-pane img { width: 46px; height: 46px; border-radius: 11px; box-shadow: 0 0 0 1px var(--line-2); }
 .symbol-pane svg { width: 30px; height: 30px; }
+/*
+ * An app's own icon sits whole, never stretched, on a neutral tile with a little room around it,
+ * so an icon drawn for a light taskbar or with a transparent ground still reads on the dark window.
+ */
+.symbol-icon img { background: var(--icon-tile); }
+.symbol-face.symbol-icon img { padding: 2px; }
+.symbol-chip.symbol-icon img, .symbol-card.symbol-icon img { padding: 1px; }
+.symbol-rail.symbol-icon img { padding: 2px; }
+.symbol-pane.symbol-icon img { padding: 5px; }
 
 /* The shelves the summary opens: agents, then the browsers they work in. */
 .glance-shelves {
@@ -538,6 +552,8 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agent-state.t-live { color: var(--a); }
 .agent-state.t-available, .agent-state.t-updatable { color: var(--cap-action); }
 .agent-state.t-needs_attention { color: var(--amber); }
+/* Which installed app the agent's own icon came from: one quiet line under the state. */
+.agent-icon-about { margin: 7px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 
 .agent-lead { max-width: 66ch; margin: 18px 0 0; color: var(--ink-3); font-size: 13px; }
 .agent-live {

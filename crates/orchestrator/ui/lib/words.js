@@ -534,18 +534,24 @@
   const SYMBOL_SIZES = Object.freeze({ face: 20, chip: 14, card: 16, rail: 22, pane: 46 });
 
   /**
-   * What the window shows for `agent` at `size`, one of SYMBOL_SIZES: the image the service names,
+   * What the window shows for `agent` at `size`, one of SYMBOL_SIZES: the packaged tile the
+   * service names, the app's own icon it names (drawn whole on a neutral tile of the same shape),
    * or the glyph it names. The page decides nothing about an agent's looks; every place that draws
    * an agent draws it through this.
    */
   function symbolMarkup(agent, size) {
     const symbol = agent?.symbol ?? {};
     const pixels = SYMBOL_SIZES[size];
-    const shown = symbol.src
-      ? `<img src="${escapeHtml(symbol.src)}" alt="" width="${pixels}" height="${pixels}">`
+    const image = symbol.icon ?? symbol.src;
+    const shown = image
+      ? `<img src="${escapeHtml(image)}" alt="" width="${pixels}" height="${pixels}">`
       : SYMBOL_GLYPHS[symbol.glyph] ?? SYMBOL_GLYPHS[GLYPH.unknown];
-    return `<span class="symbol symbol-${size}" aria-hidden="true">${shown}</span>`;
+    const kind = symbol.icon ? " symbol-icon" : "";
+    return `<span class="symbol symbol-${size}${kind}" aria-hidden="true">${shown}</span>`;
   }
+
+  /** The sentence that says which installed app an agent's own icon came from, when it has one. */
+  const symbolAbout = (agent) => (agent?.symbol?.icon ? agent.symbol.about ?? "" : "");
 
   /**
    * The glyphs At a glance draws for what is not an agent: a browser's window frame, and the arrow
@@ -930,7 +936,7 @@
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
-    GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, symbolMarkup, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
+    GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,

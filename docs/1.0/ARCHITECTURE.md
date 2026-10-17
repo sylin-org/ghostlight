@@ -573,10 +573,15 @@ again only when its file changed, and on Linux takes PNG only, never SVG. On Win
 icon is its icon resource, copied as a `.ico` file by `crates/win-peer`, which maps the program as
 data and runs none of it; a Store app's icon is the PNG logo its package manifest names, in the
 variant that suits the window, found through its family's folder below `%LOCALAPPDATA%\Packages`
-and the install folder Windows names for that family. The agent's
-symbol is `agent-icons/<id>?v=<version>` while a copy is cached, else the monogram tile, decided
-where `crate::agent` builds the agent. The window serves the copy at that address as `image/png`
-or `image/x-icon` with `default-src 'none'; sandbox`, for catalog ids only.
+and the install folder Windows names for that family. The manifest also names the agent whose app
+gave the icon and the kind of place it was read from. The agent's symbol is
+`{ "icon": "agent-icons/<id>?v=<version>", "about": "Icon from the installed <app> app." }` while a
+copy is cached, else the monogram tile `{ "src": "integrations/<file>" }`, decided where
+`crate::agent` builds the agent; the page draws an icon whole on a neutral tile of the monogram's
+shape, and the Integrations pane shows its `about` line. The window serves the copy at that
+address as `image/png` or `image/x-icon` with `default-src 'none'; sandbox`, for catalog ids only.
+`ghostlight doctor` reads the cache, never the apps, and says per agent whether an icon was found,
+from which agent's app and which kind of place.
 
 Linux desktop integration is another installer-owned local-human capability. A per-user install
 owns one XDG desktop entry and one byte-identical icon. The entry runs the shell,

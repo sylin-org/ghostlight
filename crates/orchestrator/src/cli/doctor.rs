@@ -1,8 +1,8 @@
 //! Comprehensive local installation health check and diagnosis.
 //!
 //! This module gathers environmental observations across binaries, package registrations,
-//! MCP harness configs, the service endpoint and status, and diagnostics, and can optionally apply
-//! non-destructive repairs.
+//! MCP harness configs, the agents' cached icons, the service endpoint and status, and
+//! diagnostics, and can optionally apply non-destructive repairs.
 
 use std::path::PathBuf;
 
@@ -16,9 +16,11 @@ use crate::cli::status::{
 };
 use crate::install::container;
 use crate::install::deployment::{stray_processes, StrayProcess};
+use crate::install::icons::{AgentIcon, IconCache, IconPlaces};
 use crate::install::layout::Layout;
 use crate::install::record::{Channel, InstallRecord};
 use crate::install::version_directories;
+use crate::language::agent_icon;
 use crate::language::deployment as deployment_words;
 use crate::language::workbench as words;
 
@@ -37,6 +39,9 @@ pub struct DoctorObservation {
     user_assets: crate::install::user_assets::UserAssetReport,
     desktop: crate::install::desktop_entry::DesktopIntegrationReport,
     harnesses: Vec<crate::install::HarnessSummary>,
+    /// Every catalog agent and the icon the service's cache holds for it. Doctor reads the cache
+    /// and looks at no app.
+    icons: Vec<AgentIcon>,
     runtime: RuntimeObservation,
     strays: Vec<StrayProcess>,
     version_directories: Vec<PathBuf>,
@@ -96,6 +101,7 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         user_assets: crate::install::user_assets::UserAssets::discover().check()?,
         desktop: DesktopIntegration::discover().check()?,
         harnesses: HarnessRegistry::discover().refresh()?,
+        icons: IconCache::open(layout.icons(), IconPlaces::system(), None).agents(),
         runtime,
         strays,
         version_directories: version_directories::find(&layout),
@@ -184,6 +190,9 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
             println!("  {evidence}");
         }
     }
+    for line in agent_icon::doctor_lines(&observation.icons) {
+        println!("{line}");
+    }
     render_runtime_status(&observation.runtime, false, observation.sibling_set_ready);
     for stray in &observation.strays {
         println!("{}", words::stray_line(&stray.image.display().to_string()));
@@ -247,12 +256,30 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "documentation": observation.user_assets,
         "applications": observation.desktop,
         "mcp_clients": observation.harnesses,
+        "agent_icons": observation.icons.iter().map(icon_document).collect::<Vec<_>>(),
         "service": runtime_document(&observation.runtime),
         "strays": observation.strays,
         "version_directories": observation.version_directories,
         "readiness": observation.readiness,
         "process_diagnostics": observation.diagnostics,
     })
+}
+
+/// What `doctor --json` says about one agent's icon: whether one was found and, when it was, the
+/// catalog id of the agent whose app gave it and the kind of place it was read from.
+fn icon_document(agent: &AgentIcon) -> serde_json::Value {
+    match &agent.found {
+        Some(found) => serde_json::json!({
+            "agent": agent.agent_id,
+            "found": true,
+            "app": found.app_id,
+            "source": found.found_in,
+        }),
+        None => serde_json::json!({
+            "agent": agent.agent_id,
+            "found": false,
+        }),
+    }
 }
 
 /// Format a readiness summary line for output.
@@ -302,6 +329,7 @@ mod tests {
                 icon: None,
             },
             harnesses: Vec::new(),
+            icons: Vec::new(),
             runtime: crate::cli::status::RuntimeObservation {
                 endpoint: "endpoint".into(),
                 status: Some(crate::intake::listener::control::Status {
@@ -431,6 +459,37 @@ mod tests {
         assert_eq!(
             doctor_document(&observed)["version_directories"],
             serde_json::json!(["bin/v1.3.5", "bin/v1.3.6"])
+        );
+    }
+
+    #[test]
+    fn doctor_json_says_per_agent_whether_an_icon_was_found_and_from_where() {
+        use crate::install::icons::{AgentIcon, FoundIcon, IconSourceKind};
+
+        let mut observed = observation(Vec::new());
+        observed.icons = vec![
+            AgentIcon {
+                agent_id: "claude-code",
+                name: "Claude Code",
+                found: Some(FoundIcon {
+                    version: "0123456789ab".into(),
+                    app_id: "claude-desktop",
+                    app_name: "Claude Desktop",
+                    found_in: IconSourceKind::StoreApp,
+                }),
+            },
+            AgentIcon {
+                agent_id: "cline",
+                name: "Cline",
+                found: None,
+            },
+        ];
+        assert_eq!(
+            doctor_document(&observed)["agent_icons"],
+            serde_json::json!([
+                { "agent": "claude-code", "found": true, "app": "claude-desktop", "source": "store_app" },
+                { "agent": "cline", "found": false },
+            ])
         );
     }
 

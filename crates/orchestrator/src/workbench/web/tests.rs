@@ -2622,7 +2622,7 @@ fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
     let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
     assert!(cache.refresh());
     fixture.facade.attach_icons(cache.clone());
-    let version = cache.version("zed").unwrap();
+    let version = cache.found("zed").unwrap().version;
 
     let reply = fixture.watch(get(&format!("/agent-icons/zed?v={version}")));
     assert_eq!(

@@ -9,6 +9,10 @@ const extensionFolder = join(repository, "extension");
 const port = Number(process.env.GHOSTLIGHT_PREVIEW_PORT || 41737);
 const connectorPath = "/opt/ghostlight/ghostlight";
 const connectorCommand = `${connectorPath} mcp`;
+// The one app icon the preview shows, a small synthetic PNG, served the way the service serves an
+// agent's cached icon.
+const agentIconFile = join(repository, "tests", "fixtures", "workbench", "agent-icon.png");
+const AGENT_ICON_DIRECTORY = "agent-icons";
 
 const harnessDetail = Object.freeze({
   installed: "Ghostlight is registered for this user context.",
@@ -25,7 +29,7 @@ const jsonSetup = (collection = "mcpServers") => JSON.stringify({
 
 const previewHarness = ({
   id, agentId = id, productId = id, name, label = name, target, monogram = `${id}.svg`, state, configPath,
-  canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false
+  canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false, iconFound = false
 }) => ({
   id,
   product_id: productId,
@@ -33,8 +37,13 @@ const previewHarness = ({
   label,
   target,
   // The agent the row sets up, as the service names it: one id for every host of one agent, and
-  // its packaged monogram tile.
-  agent: { id: agentId, name, symbol: { src: `integrations/${monogram}` } },
+  // its packaged monogram tile, or the app's own icon when the service found one.
+  agent: {
+    id: agentId, name,
+    symbol: iconFound
+      ? { icon: `${AGENT_ICON_DIRECTORY}/${agentId}?v=0123456789ab`, about: `Icon from the installed ${name} app.` }
+      : { src: `integrations/${monogram}` }
+  },
   state,
   detail: detail ?? harnessDetail[state],
   ...(evidence ? { evidence } : {}),
@@ -63,7 +72,7 @@ const harnesses = [
   previewHarness({ id: "windsurf", name: "Windsurf", target: "User", state: "available", configPath: "/home/test/.codeium/windsurf/mcp_config.json" }),
   previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", monogram: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
   previewHarness({ id: "crush", name: "Crush", target: "User", state: "not_detected", configPath: "/home/test/.config/crush/crush.json", manualSetup: jsonSetup("mcp") }),
-  previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorPath}"\nargs = ["mcp"]\n` }),
+  previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorPath}"\nargs = ["mcp"]\n`, iconFound: true }),
   previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "not_detected", copyOnly: true, configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorPath}"\n    args: ["mcp"]\n` }),
   previewHarness({ id: "antigravity", name: "Antigravity", target: "CLI", state: "not_detected", configPath: "/home/test/.gemini/config/mcp_config.json" }),
   previewHarness({
@@ -642,6 +651,17 @@ const server = createServer(async (request, response) => {
       return;
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
+    const [directory, iconOf] = name.split("/");
+    if (directory === AGENT_ICON_DIRECTORY) {
+      const found = harnesses.some((harness) => harness.agent.id === iconOf && harness.agent.symbol.icon);
+      if (!found) {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { "content-type": "image/png", "cache-control": "no-cache" });
+      response.end(await readFile(agentIconFile));
+      return;
+    }
     // The setup view shares two of the extension's files, which the service serves under /extension/.
     const shared = { "extension/kit.css": join(extensionFolder, "kit.css"),
       "extension/ghostlight-mascot.png": join(extensionFolder, "icons", "ghostlight-mascot.png") };

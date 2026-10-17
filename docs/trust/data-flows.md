@@ -85,8 +85,8 @@ either case.
   request starts that browser.
 - `state/icons` in the home holds a copy of each installed agent's own icon, as
   `<agent id>.png` or `<agent id>.ico`, and beside each copy a manifest, `<agent id>.json`: the
-  path of the app file the icon came from, that file's size and modification time, and the copy's
-  SHA-256. It holds nothing about the person, the agent's work or any page, and it leaves the
+  path of the app file the icon came from, that file's size and modification time, the copy's
+  SHA-256, the catalog id of the agent whose app gave it and the kind of place it was read from. It holds nothing about the person, the agent's work or any page, and it leaves the
   computer nowhere. The window shows the copies; deleting the directory brings back the
   monograms until the next look.
 - `state/audit-v<version>.jsonl` and `state/audit-pre-<version>.jsonl` in the home are the audit

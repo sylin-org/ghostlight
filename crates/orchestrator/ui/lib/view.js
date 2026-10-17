@@ -21,7 +21,7 @@
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
-    KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
+    KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
@@ -997,9 +997,13 @@
       return html || `<p class="agents-empty">${escapeHtml(noAgentCalled(agentQuery.trim()))}</p>`;
     }
 
-    /** The agent and the mascot, joined by a wire that shows the state. */
+    /**
+     * The agent and the mascot, joined by a wire that shows the state, and under the state, when
+     * the agent wears its app's own icon, the service's line that says which app it came from.
+     */
     function agentHeroMarkup(agent) {
       const tone = toneOf(agent);
+      const about = symbolAbout(agent.agent);
       return `<header class="agent-hero s-${escapeHtml(tone)}">`
         + '<div class="agent-link" aria-hidden="true">'
         + symbolMarkup(agent.agent, "pane")
@@ -1007,7 +1011,9 @@
         + `<img class="agent-ghost" src="${MASCOT}" alt="" width="50" height="50"></div>`
         + `<div class="agent-hero-text"><h2 id="agents-pane-title">${escapeHtml(agent.label)}</h2>`
         + `<div class="agent-state-line"><span class="agent-dot d-${escapeHtml(tone)}" aria-hidden="true"></span>`
-        + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(AGENT_STATE_WORDS[agent.standing] ?? "")}</span></div></div></header>`;
+        + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(AGENT_STATE_WORDS[agent.standing] ?? "")}</span></div>`
+        + (about ? `<p class="agent-icon-about">${escapeHtml(about)}</p>` : "")
+        + "</div></header>";
     }
 
     const actRow = (act, agent, primary) => `<div class="agent-act">${actButton(act, agent, primary)}`

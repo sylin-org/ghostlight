@@ -19,7 +19,7 @@
 //! variant that suits the window best; the package is found by its family's folder below
 //! `%LOCALAPPDATA%\Packages`, and Windows says where it is installed.
 //!
-//! The agent symbols read the cache the service publishes ([`publish`], [`published_version`]),
+//! The agent symbols read the cache the service publishes ([`publish`], [`published`]),
 //! and the window serves its copies ([`IconCache::icon`]). Everything here is a local read of the
 //! installed apps' files; nothing is sent anywhere.
 
@@ -225,11 +225,38 @@ pub enum IconSource {
     LinuxDesktop(&'static [&'static str]),
 }
 
+impl IconSource {
+    /// The kind of place this source reads an icon from.
+    #[must_use]
+    pub const fn kind(self) -> IconSourceKind {
+        match self {
+            Self::WindowsExe(_) => IconSourceKind::Program,
+            Self::WindowsPackage(_) => IconSourceKind::StoreApp,
+            Self::LinuxDesktop(_) => IconSourceKind::DesktopEntry,
+        }
+    }
+}
+
+/// The kinds of place an agent's icon is read from, as a cached icon's manifest and
+/// `ghostlight doctor --json` name them.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IconSourceKind {
+    /// The icon resource of a Windows program.
+    Program,
+    /// The logo of a Microsoft Store app.
+    StoreApp,
+    /// The icon a Linux desktop entry names.
+    DesktopEntry,
+}
+
 /// One agent's icon facts from the catalog.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentIconSources {
     /// The agent's catalog id.
     pub agent_id: &'static str,
+    /// The agent's name, which is also the name of its app.
+    pub name: &'static str,
     /// Where its own icon may be found, in order: its hosts' sources in roster order.
     pub sources: Vec<IconSource>,
     /// The agent whose icon stands for this one when none of its own is found.
@@ -420,6 +447,10 @@ struct Manifest {
     kind: IconKind,
     /// The SHA-256 of the copy, in lowercase hex.
     sha256: String,
+    /// The catalog id of the agent whose app gave the icon: the agent's own, or its family's.
+    app: String,
+    /// The kind of place the icon was read from.
+    found_in: IconSourceKind,
 }
 
 impl Manifest {
@@ -525,6 +556,30 @@ pub struct CachedIcon {
     pub sha256: String,
 }
 
+/// What the cache holds for one agent: the copy's version and where its icon came from.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FoundIcon {
+    /// The copy's version, the first [`VERSION_LENGTH`] characters of its SHA-256.
+    pub version: String,
+    /// The catalog id of the agent whose app gave the icon: the agent's own, or its family's.
+    pub app_id: &'static str,
+    /// That agent's name, which is also its app's.
+    pub app_name: &'static str,
+    /// The kind of place the icon was read from.
+    pub found_in: IconSourceKind,
+}
+
+/// One catalog agent and what the cache holds for it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentIcon {
+    /// The agent's catalog id.
+    pub agent_id: &'static str,
+    /// The agent's name.
+    pub name: &'static str,
+    /// Its cached icon and where it came from; none when the agent shows its monogram.
+    pub found: Option<FoundIcon>,
+}
+
 /// The cached icons of the catalog's agents, and the one resolver that keeps them.
 ///
 /// Cheap to clone: every clone is the same cache.
@@ -580,7 +635,9 @@ impl IconCache {
         let shelf = catalog
             .iter()
             .filter_map(|agent| {
-                kept_manifest(&directory, agent.agent_id).map(|manifest| (agent.agent_id, manifest))
+                kept_manifest(&directory, agent.agent_id)
+                    .filter(|manifest| catalog.iter().any(|app| app.agent_id == manifest.app))
+                    .map(|manifest| (agent.agent_id, manifest))
             })
             .collect();
         Self {
@@ -596,13 +653,44 @@ impl IconCache {
         }
     }
 
-    /// The version of `agent_id`'s cached icon, the first [`VERSION_LENGTH`] characters of its
-    /// SHA-256; none when no icon is cached for it.
+    /// What is cached for `agent_id`: its icon's version and where it came from; none when no
+    /// icon is cached for it.
     #[must_use]
-    pub fn version(&self, agent_id: &str) -> Option<String> {
-        self.shelf()
-            .get(agent_id)
-            .map(|manifest| manifest.sha256.chars().take(VERSION_LENGTH).collect())
+    pub fn found(&self, agent_id: &str) -> Option<FoundIcon> {
+        let shelf = self.shelf();
+        let manifest = shelf.get(agent_id)?;
+        let app = self
+            .inner
+            .catalog
+            .iter()
+            .find(|app| app.agent_id == manifest.app)?;
+        Some(FoundIcon {
+            version: manifest.sha256.chars().take(VERSION_LENGTH).collect(),
+            app_id: app.agent_id,
+            app_name: app.name,
+            found_in: manifest.found_in,
+        })
+    }
+
+    /// Every catalog agent in catalog order and what is cached for it, for a report of what the
+    /// resolver found.
+    #[must_use]
+    pub fn agents(&self) -> Vec<AgentIcon> {
+        self.inner
+            .catalog
+            .iter()
+            .map(|agent| AgentIcon {
+                agent_id: agent.agent_id,
+                name: agent.name,
+                found: self.found(agent.agent_id),
+            })
+            .collect()
+    }
+
+    /// The version of `agent_id`'s cached icon, for tests that compare copies.
+    #[cfg(test)]
+    fn version(&self, agent_id: &str) -> Option<String> {
+        self.found(agent_id).map(|found| found.version)
     }
 
     /// The cached icon of `agent_id`, read from the cache now; none for an id outside the catalog
@@ -746,6 +834,8 @@ impl IconCache {
                             modified_ns: stamp.modified_ns,
                             kind,
                             sha256: sha256_hex(&bytes),
+                            app: agent.agent_id.to_owned(),
+                            found_in: source.kind(),
                         };
                         return Some(Outcome::Fresh(manifest, bytes));
                     }
@@ -895,11 +985,11 @@ pub fn publish(cache: &IconCache) {
     let _ = PUBLISHED.set(cache.clone());
 }
 
-/// The version of `agent_id`'s icon in the published cache; none before a cache is published or
-/// when no icon is cached for the agent.
+/// What the published cache holds for `agent_id` ([`IconCache::found`]); none before a cache is
+/// published or when no icon is cached for the agent.
 #[must_use]
-pub fn published_version(agent_id: &str) -> Option<String> {
-    PUBLISHED.get()?.version(agent_id)
+pub fn published(agent_id: &str) -> Option<FoundIcon> {
+    PUBLISHED.get()?.found(agent_id)
 }
 
 /// The manifest of `agent_id`'s cached copy in `directory`, when it reads and the copy's bytes are
@@ -1386,6 +1476,7 @@ mod tests {
     ) -> AgentIconSources {
         AgentIconSources {
             agent_id,
+            name: agent_id,
             sources,
             family,
         }
@@ -1469,6 +1560,28 @@ mod tests {
         assert!(cache.refresh());
         assert_eq!(cache.icon("terminal-tool").unwrap().bytes, png("family"));
         assert_eq!(cache.version("terminal-tool"), cache.version("desktop-app"));
+        let stood_in = cache.found("terminal-tool").unwrap();
+        assert_eq!(
+            (stood_in.app_id, stood_in.app_name, stood_in.found_in),
+            ("desktop-app", "desktop-app", IconSourceKind::DesktopEntry),
+            "a family's icon says it came from the family's app"
+        );
+        assert_eq!(cache.found("desktop-app").unwrap().app_id, "desktop-app");
+        let report: Vec<(&str, bool)> = cache
+            .agents()
+            .iter()
+            .map(|agent| (agent.agent_id, agent.found.is_some()))
+            .collect();
+        assert_eq!(
+            report,
+            [
+                ("terminal-tool", true),
+                ("desktop-app", true),
+                ("lonely", false),
+                ("orphan", false)
+            ],
+            "the report lists every agent in catalog order"
+        );
         assert_eq!(cache.icon("lonely"), None);
         assert_eq!(cache.version("lonely"), None);
         assert_eq!(
@@ -1529,6 +1642,8 @@ mod tests {
         assert!(manifest["modified_ns"].as_u64().unwrap() > 0);
         assert_eq!(manifest["kind"], "png");
         assert_eq!(manifest["sha256"], sha256_hex(&png("kiro")));
+        assert_eq!(manifest["app"], "kiro");
+        assert_eq!(manifest["found_in"], "desktop_entry");
 
         let reopened = tree.cache(catalog.clone());
         assert_eq!(
@@ -1556,6 +1671,8 @@ mod tests {
             modified_ns: 1,
             kind: IconKind::Ico,
             sha256: sha256_hex(&bytes),
+            app: "antigravity".into(),
+            found_in: IconSourceKind::Program,
         };
         write(
             &tree.cache_dir().join("antigravity.json"),
@@ -1566,6 +1683,16 @@ mod tests {
         assert_eq!(icon.kind.media_type(), "image/x-icon");
         assert_eq!(icon.bytes, bytes);
         assert_eq!(IconKind::Png.media_type(), "image/png");
+        assert_eq!(
+            cache.found("antigravity").unwrap().found_in,
+            IconSourceKind::Program
+        );
+        assert_eq!(
+            tree.cache(vec![agent("other", Vec::new(), None)])
+                .found("antigravity"),
+            None,
+            "an id outside the catalog has nothing cached"
+        );
     }
 
     #[test]
