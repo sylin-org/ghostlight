@@ -6,6 +6,7 @@ pub mod session;
 pub mod transport;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -14,6 +15,8 @@ use std::time::{Duration, Instant};
 use crate::browser::adapter::chromium::protocol4::{self, link::Line, link::Link, wire};
 use crate::browser::adapter::{BrowserEvent, BrowserOutcome, RuntimeControlState, Work};
 use crate::browser::transport::{SocketReader, SocketWriter, EXCHANGE_TIMEOUT};
+use crate::install::last_browser;
+use crate::install::native_host::browser_id_named;
 use ghostlight_relay::endpoint::Connection as RelayConnection;
 use ghostlight_relay::protocol::{goodbye_frame, GoodbyeReason};
 use serde_json::Value;
@@ -124,6 +127,13 @@ pub trait BrowserPort: Send + Sync {
 
     /// Every connected browser, most recently attended first.
     fn browsers(&self) -> Vec<BrowserSummary>;
+
+    /// The native-host id (`chrome`, `edge`, ...) of the installed browser that last connected,
+    /// as this port remembers it across service starts, or `None` when it remembers none. The
+    /// default remembers nothing.
+    fn last_connected_browser(&self) -> Option<String> {
+        None
+    }
 
     /// Wait until one exact browser can take work, `until` passes, or the call is cancelled.
     ///
@@ -561,6 +571,9 @@ pub struct RelayBrowserPort {
     lifecycle: Mutex<Option<Arc<dyn AdapterLifecycleObserver>>>,
     /// The page assets every protocol-4 connection receives in `hello_accepted`.
     assets: Arc<wire::Assets>,
+    /// The last-browser record this port writes when a connection is accepted and reads for
+    /// recovery. Unset, the port remembers nothing.
+    last_browser: Mutex<Option<PathBuf>>,
     heartbeat: HeartbeatSettings,
     /// When relays could last begin reconnecting to this port: its construction, then the moment
     /// the service published the endpoint relays find it by. Right after that, relays that served
@@ -608,6 +621,7 @@ impl RelayBrowserPort {
             control_state: Mutex::new(RuntimeControlState::Active),
             lifecycle: Mutex::new(None),
             assets,
+            last_browser: Mutex::new(None),
             heartbeat,
             opened: Mutex::new(Instant::now()),
         }
@@ -647,6 +661,15 @@ impl RelayBrowserPort {
     /// Install the adapter lifecycle observer.
     pub fn set_lifecycle_observer(&self, observer: Arc<dyn AdapterLifecycleObserver>) {
         *lock(&self.lifecycle) = Some(observer);
+    }
+
+    /// Remember in `record` which installed browser last connected, and recall it from there.
+    ///
+    /// Each accepted connection whose reported name maps to exactly one supported browser makes
+    /// the record name that browser's native-host id ([`last_browser`]). A connection that maps
+    /// to none leaves the record as it was.
+    pub fn remember_browsers_in(&self, record: PathBuf) {
+        *lock(&self.last_browser) = Some(record);
     }
 
     /// Whether at least one compatible adapter is currently connected.
@@ -740,27 +763,46 @@ impl RelayBrowserPort {
     /// Refuses a new browser once the port holds its connection capacity.
     fn register(&self, connection: Connection, attended: bool) -> Result<(), BrowserError> {
         let browser_id = connection.browser_id.clone();
+        let installed = connection
+            .browser_name
+            .as_deref()
+            .and_then(browser_id_named);
         let lifecycle = lock(&self.lifecycle).clone();
-        let mut adapters = lock(&self.adapters);
-        if !adapters.connections.contains_key(&browser_id)
-            && adapters.connections.len() >= MAX_BROWSER_CONNECTIONS
         {
-            connection.line.writer.close();
-            return Err(BrowserError::Protocol(
-                "browser connection capacity reached".into(),
-            ));
+            let mut adapters = lock(&self.adapters);
+            if !adapters.connections.contains_key(&browser_id)
+                && adapters.connections.len() >= MAX_BROWSER_CONNECTIONS
+            {
+                connection.line.writer.close();
+                return Err(BrowserError::Protocol(
+                    "browser connection capacity reached".into(),
+                ));
+            }
+            let previous = adapters.connections.insert(browser_id.clone(), connection);
+            if let Some(previous) = &previous {
+                retire(previous);
+            }
+            if attended {
+                adapters.attend(&browser_id);
+            }
+            if let Some(observer) = lifecycle.as_ref() {
+                observer.adapter_attached(&browser_id, previous.is_some());
+            }
         }
-        let previous = adapters.connections.insert(browser_id.clone(), connection);
-        if let Some(previous) = &previous {
-            retire(previous);
-        }
-        if attended {
-            adapters.attend(&browser_id);
-        }
-        if let Some(observer) = lifecycle.as_ref() {
-            observer.adapter_attached(&browser_id, previous.is_some());
+        if let Some(installed) = installed {
+            self.remember(installed);
         }
         Ok(())
+    }
+
+    /// Make the last-browser record, when this port keeps one, name `installed`. The record only
+    /// lets recovery start the right browser later, so a home that cannot take the write keeps
+    /// the connection all the same.
+    fn remember(&self, installed: &str) {
+        let record = lock(&self.last_browser).clone();
+        if let Some(record) = record {
+            let _ = last_browser::record(&record, installed);
+        }
     }
 
     /// The notification targets a new connection's reader reports to.
@@ -914,6 +956,11 @@ impl BrowserPort for RelayBrowserPort {
 
     fn browsers(&self) -> Vec<BrowserSummary> {
         self.connected_browsers()
+    }
+
+    fn last_connected_browser(&self) -> Option<String> {
+        let record = lock(&self.last_browser).clone()?;
+        last_browser::read(&record)
     }
 
     /// A silent connection is waited on until it answers a timer heartbeat again.
@@ -1256,6 +1303,7 @@ pub(crate) mod testing {
         control_states: Mutex<Vec<RuntimeControlState>>,
         connected: Mutex<Vec<BrowserSummary>>,
         returning: Mutex<bool>,
+        last_connected: Mutex<Option<String>>,
     }
 
     impl Default for FakeBrowser {
@@ -1269,6 +1317,7 @@ pub(crate) mod testing {
                 control_states: Mutex::default(),
                 connected: Mutex::new(vec![summary(FAKE_BROWSER, true)]),
                 returning: Mutex::new(false),
+                last_connected: Mutex::new(None),
             }
         }
     }
@@ -1317,6 +1366,10 @@ pub(crate) mod testing {
         /// start or while a connection initializes.
         pub fn set_returning(&self, returning: bool) {
             *lock(&self.returning) = returning;
+        }
+        /// Remember `browser`, a native-host id, as the installed browser that last connected.
+        pub fn remember_last_connected(&self, browser: &str) {
+            *lock(&self.last_connected) = Some(browser.into());
         }
     }
 
@@ -1420,6 +1473,10 @@ pub(crate) mod testing {
 
         fn browser_returning(&self) -> bool {
             *lock(&self.returning)
+        }
+
+        fn last_connected_browser(&self) -> Option<String> {
+            lock(&self.last_connected).clone()
         }
 
         fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {

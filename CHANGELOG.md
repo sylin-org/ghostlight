@@ -101,6 +101,11 @@ layout once, when you run the install again. The full release notes are in
   installs into `~/.ghostlight/bin`; after `winget upgrade` the next install carries the newer
   version there, and an older copy never replaces a newer one. It is not offered as a separate
   portable download.
+- With several browsers installed and none open, an agent request starts the browser that last
+  connected to Ghostlight, instead of asking you to open one. Ghostlight remembers only which
+  browser that was, in `state/last-browser.json`. With no such memory it still names the
+  browsers you can open, and `Auto-open browser on request` off still never starts one
+  (ADR-0149 amendment, 2026-10-17).
 - The Chromium page-asset tests run with `node --test` and need no `npm install`. CI runs them
   beside the extension tests.
 

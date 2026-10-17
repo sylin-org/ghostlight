@@ -59,6 +59,10 @@ pub const TRAY_HINT_NAME: &str = "tray-hint";
 /// request that reached a browser.
 pub const SETUP_RECORD_NAME: &str = "setup.json";
 
+/// The record under the state directory that names the installed browser whose extension last
+/// connected, by its native-host browser id. It holds that id and nothing else.
+pub const LAST_BROWSER_RECORD_NAME: &str = "last-browser.json";
+
 /// Directory of the user's policy.
 pub const POLICY_DIRECTORY_NAME: &str = "policy";
 
@@ -199,6 +203,13 @@ impl Layout {
         self.state().join(SETUP_RECORD_NAME)
     }
 
+    /// The last-browser record: `home/state/last-browser.json`. It exists once a browser
+    /// Ghostlight can name has connected.
+    #[must_use]
+    pub fn last_browser_record(&self) -> PathBuf {
+        self.state().join(LAST_BROWSER_RECORD_NAME)
+    }
+
     /// The user policy directory: `home/policy`.
     #[must_use]
     pub fn policy(&self) -> PathBuf {
@@ -252,6 +263,10 @@ mod tests {
         );
         assert_eq!(layout.tray_hint(), home.join("state").join("tray-hint"));
         assert_eq!(layout.setup_record(), home.join("state").join("setup.json"));
+        assert_eq!(
+            layout.last_browser_record(),
+            home.join("state").join("last-browser.json")
+        );
         assert_eq!(layout.policy(), home.join("policy"));
         assert_eq!(layout.manifests(), home.join("manifests"));
     }

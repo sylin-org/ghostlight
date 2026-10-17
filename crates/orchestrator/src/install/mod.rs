@@ -7,6 +7,7 @@ pub mod container;
 pub mod deployment;
 pub mod desktop_entry;
 pub mod entry;
+pub mod last_browser;
 pub mod layout;
 pub mod migration;
 pub mod native_host;

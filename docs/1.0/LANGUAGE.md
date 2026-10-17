@@ -277,8 +277,8 @@ existing history does not authorize more capture. Additional retention profiles 
 diagnostic capture remain deferred (ADR-0103 H1 amendment).
 
 When no browser is connected and startup is left to the person -- because `browser.startup` is
-`manual`, or because more than one installed browser could serve and Ghostlight does not choose
-where to direct attention -- the refusal addresses the MCP model: ask the user to open one of the
+`manual`, or because more than one installed browser could serve and none of them is a usable
+browser that last connected to Ghostlight -- the refusal addresses the MCP model: ask the user to open one of the
 eligible installed browser windows it names, with the Ghostlight extension installed, then repeat
 the call. Facts carry the closed `browser_startup_manual` reason and a `browsers` array; one
 choice also retains the singular `browser` fact. The summary contains the whole recovery
@@ -289,7 +289,9 @@ replaces the extension-absent recovery step, and the step after a launched brows
 never arrived, under the same condition. Stale Ghostlight-owned
 registrations among several installed browsers are repaired silently first, so the named browsers can actually connect; when
 no installed browser has a usable registration, the refusal names the browsers found and one
-choice-free remedy instead. No browser refusal ever says that Ghostlight declined to choose.
+choice-free remedy instead. No browser refusal ever says that Ghostlight declined to choose. Under `on_demand`, the
+browser that last connected is started instead of asking, so no new sentence is needed for it
+(ADR-0149 amendment, 2026-10-17).
 When the registration names the edge of a different Ghostlight installation,
 recovery changes nothing and answers `Another Ghostlight installation owns the browser
 registration.` with the `native_host_owned_elsewhere` fact and one next step: the user runs

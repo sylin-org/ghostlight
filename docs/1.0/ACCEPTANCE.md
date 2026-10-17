@@ -329,9 +329,13 @@ workbench shows waiting becoming running once.
     every eligible installed browser it names with the Ghostlight extension installed, carries
     the same names in structured facts, and does not repeat the instruction in `next_steps`.
 22. With several installed browsers and no adapter connected, no browser refusal names a choice
-    or says Ghostlight declined to choose: plural evidence returns the ask in either posture,
-    stale same-tree registrations are repaired silently before the ask, and nothing usable
-    answers with one named choice-free remedy instead (ADR-0149).
+    or says Ghostlight declined to choose. Under `on_demand`, the browser that last connected, as
+    `state/last-browser.json` names it, starts as a unique candidate would, after a silent repair
+    of its own stale same-tree registration. With no such record, or one naming a browser that is
+    no longer installed or has no usable registration, plural evidence returns the ask in either
+    posture, stale same-tree registrations are repaired silently before the ask, and nothing
+    usable answers with one named choice-free remedy instead. `manual` never launches (ADR-0149
+    and its 2026-10-17 amendment).
 23. A registration owned by another Ghostlight installation is never adopted by recovery: the
     call fails with `native_host_owned_elsewhere`, the machine's registration is byte-identical
     afterward, `doctor` names the owning directory and marks it removed when that installation

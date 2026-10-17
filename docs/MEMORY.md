@@ -207,11 +207,13 @@ the owner wants, and what this project learned the hard way.
 - **Manual browser recovery speaks to the model.** When browser auto-open is off, never make the
   model translate a person-facing error. Tell it to ask the user to open any eligible installed
   browser Ghostlight can name, with the extension installed, then repeat the call.
-- **Plural evidence asks; unique evidence acts.** A person who cares which browser is used has
-  one open already or names one, so Ghostlight never presents a browser choice and never spends
-  a refusal saying it declined to choose (the owner's verdict on the ambiguity refusal,
-  ADR-0149). Name every connectable browser, repair silently what Ghostlight already owns, and
-  reserve launching for a unique candidate.
+- **Start the browser the person uses; ask only without one.** Ghostlight never presents a
+  browser choice and never spends a refusal saying it declined to choose (the owner's verdict on
+  the ambiguity refusal, ADR-0149). With no browser connected, it starts the only installed
+  browser, or, among several, the one that last connected to it ("Start the last one", the
+  owner's ruling of 2026-10-17, ADR-0149 amendment). With several and no such memory, name every
+  connectable browser, repair silently what Ghostlight already owns, and leave startup to the
+  person. The `manual` posture never launches.
 - **Diagnostics are a product surface, not a developer afterthought.** Process logs must be
   findable, readable, correlatable, and factual: one command to one chronological story,
   operation ids that follow one call across processes, terse dense lines carrying the numbers

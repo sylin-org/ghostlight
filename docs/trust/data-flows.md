@@ -77,6 +77,10 @@ either case.
   browser and succeeded, or the time of the upgrade for a 1.x home already in use. It holds that
   time and nothing about the person, the agent or the page. While it is absent, setup is
   incomplete and the Ghostlight window can show its setup steps.
+- `state/last-browser.json` in the home names the installed browser whose extension last
+  connected, by one browser id such as `chrome` or `edge`. It holds that id and nothing about the
+  person, the profile, the agent or any page, and it leaves the computer nowhere. When several
+  browsers are installed and none is connected, an agent request starts that browser.
 - `state/audit-v<version>.jsonl` and `state/audit-pre-<version>.jsonl` in the home are the audit
   logs of 1.x, moved aside when an install finds them (from a 1.x per-version directory in `bin`,
   or from the 1.x log location). They keep the content-minimized records they had and gain no
@@ -93,7 +97,7 @@ either case.
 - On Linux, the audit log, policy, state, run and diagnostics files that Ghostlight creates
   under `~/.ghostlight` are readable only by the user, and the directories it creates there are
   closed to other users. That includes `bin/install.json`, `install.lock`, `state/quit`,
-  `state/watch.off`, `state/setup.json`, the archived 1.x logs, and the files an upgrade from 1.x
+  `state/watch.off`, `state/setup.json`, `state/last-browser.json`, the archived 1.x logs, and the files an upgrade from 1.x
   copies there. The Windows native-host manifest is not in this list. A file that already existed
   keeps its mode.
 

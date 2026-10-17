@@ -5,11 +5,12 @@
 //! way back. A session already working in a browser waits for that browser instead and is never
 //! sent here, because recovery chooses or starts a browser and that session's browser is already
 //! chosen (ADR-0196 Decision 12). This module inspects local installation facts and never
-//! presents a browser choice: unique connectable evidence acts under the configured posture,
-//! plural evidence repairs what Ghostlight already owns and leaves startup to the person, and no
-//! refusal spends its words declining to choose. Where the selected platform and policy permit
-//! it, the same flight performs one ordinary-profile launch and waits within the invocation
-//! deadline for an inbound adapter.
+//! presents a browser choice: unique connectable evidence acts under the configured posture;
+//! among several installed browsers, the one that last connected acts the same way, and with no
+//! such memory plural evidence repairs what Ghostlight already owns and leaves startup to the
+//! person (ADR-0149 amendment, 2026-10-17). No refusal spends its words declining to choose.
+//! Where the selected platform and policy permit it, the same flight performs one
+//! ordinary-profile launch and waits within the invocation deadline for an inbound adapter.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -94,7 +95,7 @@ impl RecoveryFailure {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecoveryDecision {
     /// Startup is left to the person: either the configured posture is manual, or more than one
-    /// browser could serve and Ghostlight does not choose where to direct attention.
+    /// browser could serve and none of them is a usable browser that last connected.
     Manual {
         /// Installed browsers with a current Ghostlight native-host registration.
         browsers: Vec<RecoveryCandidate>,
@@ -555,7 +556,12 @@ impl BrowserRecovery {
                     })
                 },
                 |candidates| {
-                    phase_from_plan(decide(self.governance.browser_startup(), &candidates))
+                    let remembered = self.browser.last_connected_browser();
+                    phase_from_plan(decide(
+                        self.governance.browser_startup(),
+                        &candidates,
+                        remembered.as_deref(),
+                    ))
                 },
             )),
             FlightPhase::Repairing {
@@ -640,7 +646,13 @@ impl BrowserRecovery {
     }
 }
 
-fn decide(mode: BrowserStartup, candidates: &[RecoveryCandidate]) -> RecoveryPlan {
+/// Plan recovery from the installed `candidates` under `mode`, given the native-host id of the
+/// browser that last connected, when one is `remembered`.
+fn decide(
+    mode: BrowserStartup,
+    candidates: &[RecoveryCandidate],
+    remembered: Option<&str>,
+) -> RecoveryPlan {
     let installed: Vec<_> = candidates
         .iter()
         .filter(|candidate| {
@@ -649,9 +661,29 @@ fn decide(mode: BrowserStartup, candidates: &[RecoveryCandidate]) -> RecoveryPla
         .cloned()
         .collect();
     if installed.len() > 1 {
-        // Plural evidence never chooses and never says it declined to. Name every connectable
-        // browser and leave startup to the person; repair only what Ghostlight already owns so
-        // the named browsers can actually connect when opened.
+        // Several installed browsers: under `on_demand`, the one that last connected is the
+        // browser this person uses with Ghostlight, so it starts exactly as a unique candidate
+        // would, after repairing its own stale registration (ADR-0149 amendment, 2026-10-17).
+        let last = remembered.and_then(|id| installed.iter().find(|browser| browser.id == id));
+        if let Some(browser) = last.filter(|_| mode == BrowserStartup::OnDemand) {
+            let repair_owned_registration = match browser.registration {
+                NativeHostState::Current => Some(false),
+                NativeHostState::Updatable => Some(true),
+                NativeHostState::Missing
+                | NativeHostState::OwnedElsewhere
+                | NativeHostState::NeedsAttention => None,
+            };
+            if let Some(repair_owned_registration) = repair_owned_registration {
+                return RecoveryPlan::Prepare {
+                    browser: browser.clone(),
+                    repair_owned_registration,
+                    launch: true,
+                };
+            }
+        }
+        // Otherwise plural evidence never chooses and never says it declined to. Name every
+        // connectable browser and leave startup to the person; repair only what Ghostlight
+        // already owns so the named browsers can actually connect when opened.
         let connectable: Vec<_> = installed
             .iter()
             .filter(|browser| browser.registration == NativeHostState::Current)
@@ -1212,6 +1244,7 @@ mod tests {
                     NativeHostState::Current,
                 ),
             ],
+            None,
         );
 
         assert!(matches!(
@@ -1233,6 +1266,7 @@ mod tests {
                 BrowserPackage::NotChecked,
                 NativeHostState::Current,
             )],
+            None,
         );
 
         assert_eq!(
@@ -1260,6 +1294,7 @@ mod tests {
                     NativeHostState::Current,
                 ),
             ],
+            None,
         );
 
         assert!(matches!(
@@ -1286,6 +1321,7 @@ mod tests {
                     NativeHostState::Current,
                 ),
             ],
+            None,
         );
 
         assert!(matches!(
@@ -1305,6 +1341,7 @@ mod tests {
                 BrowserPackage::NotChecked,
                 NativeHostState::Missing,
             )],
+            None,
         );
 
         assert_eq!(
@@ -1353,6 +1390,7 @@ mod tests {
                 BrowserPackage::Snap,
                 NativeHostState::Current,
             )],
+            None,
         );
         assert!(matches!(
             decision,
@@ -1375,6 +1413,7 @@ mod tests {
                 ),
                 candidate("Chromium", BrowserPackage::Native, NativeHostState::Missing),
             ],
+            None,
         );
         assert_eq!(
             decision,
@@ -1394,6 +1433,7 @@ mod tests {
                 BrowserPackage::Native,
                 NativeHostState::OwnedElsewhere,
             )],
+            None,
         );
         assert_eq!(
             decision,
@@ -1420,6 +1460,7 @@ mod tests {
                     NativeHostState::OwnedElsewhere,
                 ),
             ],
+            None,
         );
         assert!(matches!(
             decision,
@@ -1445,6 +1486,7 @@ mod tests {
                     NativeHostState::OwnedElsewhere,
                 ),
             ],
+            None,
         );
         assert_eq!(
             decision,
@@ -1471,6 +1513,7 @@ mod tests {
                     NativeHostState::Current,
                 ),
             ],
+            None,
         );
         assert!(matches!(
             decision,
@@ -1518,6 +1561,139 @@ mod tests {
         ));
         assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 2);
         assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
+    }
+
+    /// An installed native browser under the native-host id the inventory reports for it.
+    fn installed(id: &str, name: &str, registration: NativeHostState) -> RecoveryCandidate {
+        RecoveryCandidate {
+            id: id.into(),
+            ..candidate(name, BrowserPackage::Native, registration)
+        }
+    }
+
+    /// Chrome in `chrome`'s registration state beside a connectable Edge.
+    fn chrome_and_edge(chrome: NativeHostState) -> Vec<RecoveryCandidate> {
+        vec![
+            installed("chrome", "Google Chrome", chrome),
+            installed("edge", "Microsoft Edge", NativeHostState::Current),
+        ]
+    }
+
+    #[test]
+    fn plural_on_demand_launches_the_browser_that_last_connected() {
+        let candidates = chrome_and_edge(NativeHostState::Current);
+        assert_eq!(
+            decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
+            RecoveryPlan::Prepare {
+                browser: candidates[0].clone(),
+                repair_owned_registration: false,
+                launch: true,
+            }
+        );
+        assert_eq!(
+            decide(BrowserStartup::OnDemand, &candidates, Some("edge")),
+            RecoveryPlan::Prepare {
+                browser: candidates[1].clone(),
+                repair_owned_registration: false,
+                launch: true,
+            }
+        );
+    }
+
+    #[test]
+    fn a_remembered_stale_registration_is_repaired_then_that_browser_is_launched() {
+        let candidates = chrome_and_edge(NativeHostState::Updatable);
+        assert_eq!(
+            decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
+            RecoveryPlan::Prepare {
+                browser: candidates[0].clone(),
+                repair_owned_registration: true,
+                launch: true,
+            }
+        );
+
+        let inventory = Arc::new(FakeInventory {
+            candidates,
+            inspections: AtomicUsize::new(0),
+            entered: None,
+            release: Mutex::new(None),
+        });
+        let mut recovery = coordinator(Some("on_demand"), inventory);
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_last_connected("chrome");
+        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
+        recovery.browser = browser;
+        recovery.mechanism = Arc::clone(&mechanism) as Arc<dyn RecoveryMechanism>;
+
+        let decision = recovery
+            .request(
+                Instant::now() + Duration::from_secs(1),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+
+        assert_eq!(
+            decision,
+            RecoveryDecision::Ready {
+                browser: "browser_chromium".into(),
+            }
+        );
+        assert_eq!(mechanism.repairs.load(Ordering::SeqCst), 1);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn without_a_usable_remembered_browser_plural_evidence_still_names_every_browser() {
+        let candidates = chrome_and_edge(NativeHostState::Current);
+        let named_both = RecoveryPlan::Complete(RecoveryDecision::Manual {
+            browsers: candidates.clone(),
+        });
+        for remembered in [None, Some("brave"), Some("not-a-browser")] {
+            assert_eq!(
+                decide(BrowserStartup::OnDemand, &candidates, remembered),
+                named_both,
+                "{remembered:?}"
+            );
+        }
+
+        // A remembered browser whose executable is gone is no longer installed.
+        let mut uninstalled = chrome_and_edge(NativeHostState::Current);
+        uninstalled[0].ordinary_executable = None;
+        uninstalled.push(installed("brave", "Brave", NativeHostState::Current));
+        assert_eq!(
+            decide(BrowserStartup::OnDemand, &uninstalled, Some("chrome")),
+            RecoveryPlan::Complete(RecoveryDecision::Manual {
+                browsers: uninstalled[1..].to_vec(),
+            })
+        );
+
+        // A remembered browser Ghostlight cannot repair is not usable.
+        for unusable in [
+            NativeHostState::Missing,
+            NativeHostState::OwnedElsewhere,
+            NativeHostState::NeedsAttention,
+        ] {
+            let candidates = chrome_and_edge(unusable);
+            assert_eq!(
+                decide(BrowserStartup::OnDemand, &candidates, Some("chrome")),
+                RecoveryPlan::Complete(RecoveryDecision::Manual {
+                    browsers: vec![candidates[1].clone()],
+                }),
+                "{unusable:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_manual_posture_with_a_memory_still_leaves_startup_to_the_person() {
+        let candidates = chrome_and_edge(NativeHostState::Current);
+        assert_eq!(
+            decide(BrowserStartup::Manual, &candidates, Some("chrome")),
+            RecoveryPlan::Complete(RecoveryDecision::Manual {
+                browsers: candidates.clone(),
+            })
+        );
     }
 
     #[test]
@@ -1618,6 +1794,7 @@ mod tests {
                 BrowserPackage::Native,
                 NativeHostState::Updatable,
             )],
+            None,
         );
         assert!(matches!(
             decision,

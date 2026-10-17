@@ -1436,7 +1436,7 @@ pub enum Refusal {
     /// This session already works in a different browser.
     BrowserPinned,
     /// Startup is left to the person: the posture is manual, or more than one browser could
-    /// serve and Ghostlight does not choose where to direct attention.
+    /// serve and none of them is a usable browser that last connected.
     BrowserStartupManual {
         browsers: Vec<String>,
         /// Whether the person also needs to hear where the extension comes from.

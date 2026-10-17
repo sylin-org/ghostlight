@@ -573,6 +573,18 @@ fn windows_browser_executable_path(root: &Path, browser: &BrowserSpec) -> PathBu
         .join(browser.windows_executable)
 }
 
+/// The id of the one supported browser that a connected extension's reported name denotes,
+/// matched against each browser's full or short name (`Google Chrome` or `Chrome`). `None` when
+/// no supported browser, or more than one, carries that name.
+#[must_use]
+pub fn browser_id_named(name: &str) -> Option<&'static str> {
+    let mut named = BROWSERS
+        .iter()
+        .filter(|browser| browser.name == name || browser.short == name);
+    let browser = named.next()?;
+    named.next().is_none().then_some(browser.id)
+}
+
 fn select_browsers(ids: &[String]) -> Result<Vec<BrowserSpec>, NativeHostError> {
     let mut selected = Vec::new();
     for id in ids {
@@ -1796,6 +1808,17 @@ mod tests {
             browser_manifest_path(&windows, &BROWSERS[0]),
             windows_manifest_path(&windows)
         );
+    }
+
+    #[test]
+    fn a_reported_browser_name_maps_to_its_one_browser_id() {
+        assert_eq!(browser_id_named("Google Chrome"), Some("chrome"));
+        assert_eq!(browser_id_named("Chrome"), Some("chrome"));
+        assert_eq!(browser_id_named("Microsoft Edge"), Some("edge"));
+        assert_eq!(browser_id_named("Brave"), Some("brave"));
+        assert_eq!(browser_id_named("Chromium"), Some("chromium"));
+        assert_eq!(browser_id_named("Opera"), None);
+        assert_eq!(browser_id_named(""), None);
     }
 
     #[test]

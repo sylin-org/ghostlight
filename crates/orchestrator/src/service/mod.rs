@@ -318,6 +318,7 @@ impl ServiceHost {
         let governance = GovernanceFacade::from_environment();
         let service_epoch = format!("service_{}", Uuid::new_v4().simple());
         let browser = Arc::new(RelayBrowserPort::new(service_epoch, page_assets()));
+        browser.remember_browsers_in(layout.last_browser_record());
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
         let streams = Streams::new(Arc::new(SystemClock), terms.idle_exit);
         browser.set_lifecycle_observer(Arc::new(idle::CountBrowsers::new(
@@ -5381,6 +5382,42 @@ mod tests {
             .expect("the service leaves once the browser has gone");
         let _ = carrier.join();
         drop(host);
+    }
+
+    #[test]
+    fn the_browser_that_connected_is_remembered_by_the_next_service_of_the_home() {
+        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
+        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
+        use crate::browser::BrowserPort as _;
+
+        let home = TestHome::new("last-browser");
+        let record = crate::install::layout::Layout::new(home.path()).last_browser_record();
+        {
+            let host = ServiceHost::start(home.path()).unwrap();
+            assert_eq!(host.browser.last_connected_browser(), None);
+            let (service, extension) = pair().unwrap();
+            // The fake reports the name Chrome, which is the chrome browser.
+            let fake = FakeExtension::connect(
+                extension,
+                &FakeExtension::hello("browser_last"),
+                Box::new(|correlation, _| {
+                    FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
+                }),
+            );
+            host.browser.attach(service).unwrap();
+            assert_eq!(
+                host.browser.last_connected_browser().as_deref(),
+                Some("chrome")
+            );
+            fake.close();
+        }
+        let fresh = ServiceHost::start(home.path()).unwrap();
+        assert_eq!(
+            fresh.browser.last_connected_browser().as_deref(),
+            Some("chrome")
+        );
+        std::fs::write(&record, b"{").unwrap();
+        assert_eq!(fresh.browser.last_connected_browser(), None);
     }
 
     #[test]

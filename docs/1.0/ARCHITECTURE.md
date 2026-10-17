@@ -67,7 +67,8 @@ tray still gets a service, and `status` and `doctor` say why there is no window.
 There is one Ghostlight home per OS user, `~/.ghostlight`, and every path derives from it
 (ADR-0197 Decision 10): the installed executables `ghostlight` and `ghostlight-service` in `bin`, `run` (the service lock and, on Linux,
 the relay socket), the state
-directory `state` (audit log, MCP client locations, the setup record `setup.json`), the policy
+directory `state` (audit log, MCP client locations, the setup record `setup.json`, the
+last-browser record `last-browser.json`), the policy
 directory `policy`, the Windows native-host manifest in `manifests`, and diagnostics in
 `diagnostics` with the `diagnostics.on` marker.
 `GHOSTLIGHT_TEST_HOME` names another home and exists only for tests and journeys. Every route
@@ -395,6 +396,13 @@ that window, and its registration then carries the wait through the page-runtime
 Reported attention is not evidence, because it never lapses. Once no evidence remains, recovery
 runs at once, so a browser closed long ago or a cold start with no relay keeps nearly the whole
 deadline for a launch.
+
+Under `on_demand`, recovery starts the only installed browser, or, among several, the browser
+that last connected to Ghostlight (ADR-0149 amendment, 2026-10-17). The port learns that browser
+when it accepts a hello whose reported name maps to exactly one supported browser, and writes its
+native-host id, and nothing else, to `state/last-browser.json`. With several installed browsers
+and no usable memory, recovery repairs the stale registrations it owns and leaves startup to the
+person. `manual` never launches.
 
 An adapter that advertises end-to-end liveness acknowledges content-free service heartbeats at the
 extension shore, independently of browser operations. Relay attachment and adapter availability are

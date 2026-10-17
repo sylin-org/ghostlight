@@ -115,3 +115,42 @@ Additional acceptance evidence:
    diagnoses, deliberate adoption by install, refusal by owned repair, and the recovery ladder
    arms (single, mixed plural, all-elsewhere).
 2. The exact refusal sentence and next step are pinned in the language module.
+
+## Amendment 2026-10-17: the browser that last connected starts
+
+Owner decision, in chat, after the 2.0 release-candidate live run on the owner's Windows 11
+machine: "Start the last one". With Chrome closed, Chrome and Edge both installed and
+registered, and `browser.startup` at `on_demand`, an agent request answered that no browser was
+connected and asked the person to open Chrome or Edge. Decision 1 sent every machine with two
+installed browsers there, and Edge is installed on every Windows machine, so a Chrome user with
+Chrome closed never got the on-demand start. That reverses this ADR's verdict for one case.
+
+Decision 1 now reads: when no browser is connected and more than one installed browser could
+serve, under `on_demand` recovery starts the browser that last connected to Ghostlight, exactly
+as it starts a unique candidate. A current registration launches it; a stale registration this
+installation owns is repaired first, then it launches. The launch uses the ordinary profile with
+no arguments, and a browser that then does not connect gets the existing handshake-timeout answer.
+
+The rest stands:
+
+- With no memory, or when the remembered browser is no longer installed or its registration
+  cannot be used or repaired, plural evidence asks as Decision 1 said, and Decisions 2 and 3
+  apply unchanged.
+- `manual` never launches, with or without a memory.
+- No refusal names a choice or says Ghostlight declined to choose.
+
+The memory is one record, `state/last-browser.json` in the home, a private file. When the service
+accepts a browser's connection and the browser name the extension reports maps to exactly one
+supported browser, the record names that browser's native-host id (`chrome`, `edge`, `brave` or
+`chromium`). A name that maps to none writes nothing. The record holds that id and nothing else:
+no profile, no page, no time. A missing or unparsable record means no memory. Recovery reads no
+browser file to learn it.
+
+Additional acceptance evidence:
+
+1. Unit tests pin the remembered launch, the repair before it, the unchanged ask with no memory or
+   an unusable memory, and the unchanged `manual` posture.
+2. A service test pins that an accepted connection writes the record, a fresh service of the same
+   home reads it back, and an unparsable record is no memory.
+3. Owed live check: on Windows with Chrome and Edge installed, Chrome closed after it last
+   connected, an agent request starts Chrome and proceeds; on a fresh home the answer names both.
