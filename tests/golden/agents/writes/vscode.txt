@@ -9,7 +9,7 @@ product: vscode
 name: Visual Studio Code
 label: Visual Studio Code
 target: User
-agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"src":"integrations/vscode.svg"}}
+agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"icon":"agent-icons/vscode?v=de94b0196b4e"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json: no file
@@ -657,7 +657,7 @@ product: vscode
 name: Visual Studio Code
 label: Visual Studio Code
 target: User
-agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"src":"integrations/vscode.svg"}}
+agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"icon":"agent-icons/vscode?v=de94b0196b4e"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/Code/User/mcp.json: no file
@@ -1305,7 +1305,7 @@ product: vscode
 name: Visual Studio Code
 label: Visual Studio Code
 target: User
-agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"src":"integrations/vscode.svg"}}
+agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"icon":"agent-icons/vscode?v=de94b0196b4e"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json: no file

@@ -9,7 +9,7 @@ product: kilo-code
 name: Kilo Code
 label: Kilo Code
 target: CLI
-agent: {"id":"kilo-code","name":"Kilo Code","symbol":{"src":"integrations/kilo-code.svg"}}
+agent: {"id":"kilo-code","name":"Kilo Code","symbol":{"icon":"agent-icons/kilo-code?v=c13705ea73a7"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/kilo/kilo.json: no file
@@ -667,7 +667,7 @@ product: kilo-code
 name: Kilo Code
 label: Kilo Code
 target: CLI
-agent: {"id":"kilo-code","name":"Kilo Code","symbol":{"src":"integrations/kilo-code.svg"}}
+agent: {"id":"kilo-code","name":"Kilo Code","symbol":{"icon":"agent-icons/kilo-code?v=c13705ea73a7"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/kilo/kilo.json: no file
@@ -1325,7 +1325,7 @@ product: kilo-code
 name: Kilo Code
 label: Kilo Code
 target: CLI
-agent: {"id":"kilo-code","name":"Kilo Code","symbol":{"src":"integrations/kilo-code.svg"}}
+agent: {"id":"kilo-code","name":"Kilo Code","symbol":{"icon":"agent-icons/kilo-code?v=c13705ea73a7"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/kilo/kilo.json: no file

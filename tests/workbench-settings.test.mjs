@@ -953,14 +953,14 @@ const WINDOW_CONTEXT = {
 };
 
 /**
- * An agent as the service names it: an agent on the roster wears its packaged tile, and the
+ * An agent as the service names it: an agent on the roster has its image address, and the
  * command line and an agent Ghostlight does not know wear their glyphs.
  */
 function namedAgent(name) {
   if (name === "Command line") return { id: "command_line", name, symbol: { glyph: "command_line" } };
   if (name === "Unknown agent") return { id: "unknown", name, symbol: { glyph: "unknown" } };
   const id = name.toLowerCase().replaceAll(" ", "-");
-  return { id, name, symbol: { src: `integrations/${id}.svg` } };
+  return { id, name, symbol: { icon: `agent-icons/${id}?v=fedcba987654` } };
 }
 
 /** One settled read, as the service records it. */
@@ -1279,8 +1279,8 @@ test("an agent wears the symbol the service names, drawn by one renderer in the 
   shown.click(drawn(html()).wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex"));
   assert.ok(html().includes(Words.symbolMarkup(codex, "card")), "the card");
   assert.ok(shown.el("agents-list").innerHTML.includes(Words.symbolMarkup(codex, "rail")), "the rail");
-  assert.ok(html().includes('<img src="integrations/codex.svg" alt="" width="20" height="20">'));
-  assert.ok(Words.symbolMarkup(codex, "rail").includes('src="integrations/codex.svg"'), "the same tile at every size");
+  assert.ok(html().includes('<img data-icon="agent-icons/codex?v=fedcba987654" alt="" width="20" height="20">'));
+  assert.ok(Words.symbolMarkup(codex, "rail").includes('data-icon="agent-icons/codex?v=fedcba987654"'), "the same address at every size");
   assert.ok(!("agent" in Words.KIND_GLYPHS) && !("initials" in Words), "no spark and no initials for an agent");
   assert.equal(faces.filter((face) => face.classes.has("busy")).length, 1, "the working agent still shows it");
   assert.deepEqual(shown.failures, []);
@@ -1292,10 +1292,27 @@ test("the command line and an unknown agent are drawn from the glyph their symbo
   assert.equal(Words.symbolMarkup(namedAgent("Unknown agent"), "chip"),
     `<span class="symbol symbol-chip" aria-hidden="true">${Words.SYMBOL_GLYPHS[Words.GLYPH.unknown]}</span>`);
   assert.equal(Words.symbolMarkup(namedAgent("Codex"), "pane"),
-    '<span class="symbol symbol-pane" aria-hidden="true"><img src="integrations/codex.svg" alt="" width="46" height="46"></span>');
+    '<span class="symbol symbol-pane" aria-hidden="true"><img data-icon="agent-icons/codex?v=fedcba987654" alt="" width="46" height="46"></span>');
   for (const size of Object.keys(Words.SYMBOL_SIZES)) {
     assert.ok(naming(`.symbol-${size} img`).length > 0, `the stylesheet sizes a ${size} tile`);
   }
+});
+
+test("an agent's image waits on the neutral tile, an app's own icon keeps it, and a monogram draws on nothing", () => {
+  const tiled = (selector) => naming(selector).some((rule) => rule.declarations.background === "var(--icon-tile)");
+  assert.ok(tiled(".symbol img:not([src])"), "an image still loading, or one that failed, shows the tile");
+  const appIcon = Words.symbolMarkup({ symbol: { icon: "agent-icons/zed?v=0123456789ab", about: "Icon from the installed Zed app." } }, "rail");
+  assert.ok(appIcon.includes(`class="symbol symbol-rail ${Words.APP_ICON_CLASS}"`), appIcon);
+  assert.ok(tiled(`.${Words.APP_ICON_CLASS} img`), "an app's icon, which may have no ground, keeps the tile");
+  assert.ok(!Words.symbolMarkup(namedAgent("Codex"), "rail").includes(Words.APP_ICON_CLASS), "a monogram is a tile itself");
+  const backed = RULES.filter((rule) => "background" in rule.declarations
+    && rule.selectors.some((selector) => /(^|\s)\.symbol(-[a-z-]+)?(\.[a-z-]+)*\s+img$/.test(selector)));
+  assert.deepEqual(backed.flatMap((rule) => rule.selectors), [`.${Words.APP_ICON_CLASS} img`],
+    "no rule paints the tile under every loaded image, where it would show at a monogram's corners");
+  const symbolClasses = new Set(RULES.flatMap((rule) => rule.selectors.join(" ").match(/\.symbol-[a-z-]+/g) ?? []));
+  const drawn = new Set([...Object.keys(Words.SYMBOL_SIZES).map((size) => `.symbol-${size}`), `.${Words.APP_ICON_CLASS}`]);
+  assert.deepEqual([...symbolClasses].filter((name) => !drawn.has(name)), [],
+    "the stylesheet styles no symbol class the page no longer draws");
 });
 
 test("the summary counts in words, singular for one and plain for none", () => {
@@ -1338,14 +1355,14 @@ test("the shelves name each agent once with its glyph, a count past one session,
   assert.deepEqual(agents.map((chip) => chip.classes.has("busy")), [false, true, false]);
   assert.deepEqual(agents.map((chip) => chip.attributes["aria-expanded"]), ["false", "false", "false"]);
   const chipMarkup = (id) => shown.el("connections").innerHTML.split(`data-glance-agent="${id}"`)[1].split("</button>")[0];
-  assert.ok(chipMarkup("codex").includes(Words.symbolMarkup(namedAgent("Codex"), "chip")), "an agent wears its tile");
+  assert.ok(chipMarkup("codex").includes(Words.symbolMarkup(namedAgent("Codex"), "chip")), "an agent wears its image");
   assert.ok(chipMarkup("command_line").includes(Words.SYMBOL_GLYPHS[Words.GLYPH.commandLine]), "the command line wears the prompt");
   const browsers = bar.wearing("glance-chip").filter((chip) => chip.tag === "span");
   assert.deepEqual(browsers.map((chip) => chip.textContent), ["Google Chrome3 tabs"]);
 });
 
 test("the shelves group sessions by the agent id the service gives, never by name", () => {
-  const cline = { id: "cline", name: "Cline", symbol: { src: "integrations/cline.svg" } };
+  const cline = { id: "cline", name: "Cline", symbol: { icon: "agent-icons/cline?v=fedcba987654" } };
   const stranger = (name) => ({ id: `unknown:${name}`, name, symbol: { glyph: "unknown" } });
   const sessions = [
     { ...glanceSession("on-cli", "Cline"), agent: cline },
@@ -1423,7 +1440,7 @@ test("each line of a card keeps its connection ids behind Copy id", () => {
 /** One agent of the roster, as the integrations part carries it. */
 function agent(id, name, state, extra = {}) {
   return {
-    id, product_id: id, name, label: name, target: "User", agent: { id, name, symbol: { src: `integrations/${id}.svg` } },
+    id, product_id: id, name, label: name, target: "User", agent: { id, name, symbol: { icon: `agent-icons/${id}?v=fedcba987654` } },
     state, detail: "Said by the service.",
     can_install: ["available", "updatable", "not_detected"].includes(state) && !extra.copy_only,
     can_fix: false, can_uninstall: state === "installed", can_download: true, can_locate: true, copy_only: false,

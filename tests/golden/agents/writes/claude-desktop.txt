@@ -9,7 +9,7 @@ product: claude-desktop
 name: Claude Desktop
 label: Claude Desktop
 target: User
-agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"src":"integrations/claude-desktop.svg"}}
+agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"icon":"agent-icons/claude-desktop?v=a9b1a3833928"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json: no file
@@ -647,7 +647,7 @@ product: claude-desktop
 name: Claude Desktop
 label: Claude Desktop
 target: User
-agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"src":"integrations/claude-desktop.svg"}}
+agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"icon":"agent-icons/claude-desktop?v=a9b1a3833928"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json: no file
@@ -1285,7 +1285,7 @@ product: claude-desktop
 name: Claude Desktop
 label: Claude Desktop
 target: User
-agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"src":"integrations/claude-desktop.svg"}}
+agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"icon":"agent-icons/claude-desktop?v=a9b1a3833928"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json: no file

@@ -1,10 +1,11 @@
 //! The workbench's own files, embedded in the service.
 //!
 //! The table is closed: a path that is not in it is not served. Types come from a closed table of
-//! five kinds, and each file's tag is a hash of its bytes. Almost every file is under the `ui`
+//! four kinds, and each file's tag is a hash of its bytes. Almost every file is under the `ui`
 //! folder. The two the setup view shares with the browser extension (its stylesheet and the
 //! mascot) are the extension's own files, embedded from where they live, so the window and the
-//! extension's pages draw from the same bytes.
+//! extension's pages draw from the same bytes. The agents' images are not page files: the window
+//! serves each agent's one image address from the catalog ([`crate::agent::image`]).
 
 use std::sync::OnceLock;
 
@@ -21,8 +22,6 @@ pub enum AssetType {
     Js,
     /// A raster image.
     Png,
-    /// A vector image.
-    Svg,
 }
 
 impl AssetType {
@@ -34,7 +33,6 @@ impl AssetType {
             Self::Css => "text/css; charset=utf-8",
             Self::Js => "text/javascript; charset=utf-8",
             Self::Png => "image/png",
-            Self::Svg => "image/svg+xml",
         }
     }
 }
@@ -84,61 +82,6 @@ pub const ASSETS: &[Asset] = &[
     asset!("/lib/transport.js", Js, "lib/transport.js"),
     asset!("/lib/view.js", Js, "lib/view.js"),
     asset!("/lib/words.js", Js, "lib/words.js"),
-    asset!(
-        "/integrations/antigravity.svg",
-        Svg,
-        "integrations/antigravity.svg"
-    ),
-    asset!(
-        "/integrations/claude-code.svg",
-        Svg,
-        "integrations/claude-code.svg"
-    ),
-    asset!(
-        "/integrations/claude-desktop.svg",
-        Svg,
-        "integrations/claude-desktop.svg"
-    ),
-    asset!("/integrations/cline.svg", Svg, "integrations/cline.svg"),
-    asset!("/integrations/codex.svg", Svg, "integrations/codex.svg"),
-    asset!(
-        "/integrations/continue.svg",
-        Svg,
-        "integrations/continue.svg"
-    ),
-    asset!(
-        "/integrations/copilot-cli.svg",
-        Svg,
-        "integrations/copilot-cli.svg"
-    ),
-    asset!("/integrations/crush.svg", Svg, "integrations/crush.svg"),
-    asset!("/integrations/cursor.svg", Svg, "integrations/cursor.svg"),
-    asset!("/integrations/goose.svg", Svg, "integrations/goose.svg"),
-    asset!("/integrations/junie.svg", Svg, "integrations/junie.svg"),
-    asset!(
-        "/integrations/kilo-code.svg",
-        Svg,
-        "integrations/kilo-code.svg"
-    ),
-    asset!("/integrations/kiro.svg", Svg, "integrations/kiro.svg"),
-    asset!(
-        "/integrations/opencode.svg",
-        Svg,
-        "integrations/opencode.svg"
-    ),
-    asset!(
-        "/integrations/qwen-code.svg",
-        Svg,
-        "integrations/qwen-code.svg"
-    ),
-    asset!("/integrations/vscode.svg", Svg, "integrations/vscode.svg"),
-    asset!(
-        "/integrations/windsurf.svg",
-        Svg,
-        "integrations/windsurf.svg"
-    ),
-    asset!("/integrations/zcode.svg", Svg, "integrations/zcode.svg"),
-    asset!("/integrations/zed.svg", Svg, "integrations/zed.svg"),
     asset!("/extension/kit.css", Css, extension "kit.css"),
     asset!(
         "/extension/ghostlight-mascot.png",
@@ -217,7 +160,6 @@ mod tests {
                     .collect();
                 format!("/{}", parts.join("/"))
             })
-            .filter(|path| path != "/integrations/PROVENANCE.md")
             .map(|path| {
                 if path == "/index.html" {
                     "/".to_owned()
@@ -258,7 +200,6 @@ mod tests {
                 "css" => AssetType::Css,
                 "js" => AssetType::Js,
                 "png" => AssetType::Png,
-                "svg" => AssetType::Svg,
                 _ => AssetType::Html,
             };
             assert_eq!(asset.kind, expected, "{}", asset.path);

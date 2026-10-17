@@ -19,8 +19,9 @@
 //! variant that suits the window best; the package is found by its family's folder below
 //! `%LOCALAPPDATA%\Packages`, and Windows says where it is installed.
 //!
-//! The agent symbols read the cache the service publishes ([`publish`], [`published`]),
-//! and the window serves its copies ([`IconCache::icon`]). Everything here is a local read of the
+//! The agent symbols read the cache the service publishes ([`publish`], [`published`]), and the
+//! window serves its copies ([`IconCache::icon`]) at each agent's one image address, where an agent
+//! with no copy gets its monogram ([`crate::agent::image`]). Everything here is a local read of the
 //! installed apps' files; nothing is sent anywhere.
 
 use std::collections::BTreeMap;
@@ -57,8 +58,8 @@ const MAX_MANIFEST_BYTES: u64 = 512 * 1024;
 /// The most entries of one folder looked at: the package families, or a package's logo variants.
 const MAX_FOLDER_ENTRIES: usize = 4096;
 
-/// How many characters of the copy's SHA-256 name its version in the window's address.
-pub const VERSION_LENGTH: usize = 12;
+/// How many characters of an image's SHA-256 name its version in the window's address.
+const VERSION_LENGTH: usize = 12;
 
 /// The suffix of a cached icon's manifest.
 const MANIFEST_SUFFIX: &str = ".json";
@@ -559,7 +560,7 @@ pub struct CachedIcon {
 /// What the cache holds for one agent: the copy's version and where its icon came from.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FoundIcon {
-    /// The copy's version, the first [`VERSION_LENGTH`] characters of its SHA-256.
+    /// The copy's version ([`version_of`] its SHA-256).
     pub version: String,
     /// The catalog id of the agent whose app gave the icon: the agent's own, or its family's.
     pub app_id: &'static str,
@@ -665,7 +666,7 @@ impl IconCache {
             .iter()
             .find(|app| app.agent_id == manifest.app)?;
         Some(FoundIcon {
-            version: manifest.sha256.chars().take(VERSION_LENGTH).collect(),
+            version: version_of(&manifest.sha256),
             app_id: app.agent_id,
             app_name: app.name,
             found_in: manifest.found_in,
@@ -985,11 +986,17 @@ pub fn publish(cache: &IconCache) {
     let _ = PUBLISHED.set(cache.clone());
 }
 
-/// What the published cache holds for `agent_id` ([`IconCache::found`]); none before a cache is
-/// published or when no icon is cached for the agent.
+/// The cache the service published; none before it publishes one, and in every test.
 #[must_use]
-pub fn published(agent_id: &str) -> Option<FoundIcon> {
-    PUBLISHED.get()?.found(agent_id)
+pub fn published() -> Option<&'static IconCache> {
+    PUBLISHED.get()
+}
+
+/// The version of an image whose SHA-256 is `sha256`, in lowercase hex: its first 12
+/// characters, which name it in the window's address.
+#[must_use]
+pub fn version_of(sha256: &str) -> String {
+    sha256.chars().take(VERSION_LENGTH).collect()
 }
 
 /// The manifest of `agent_id`'s cached copy in `directory`, when it reads and the copy's bytes are
@@ -1016,7 +1023,9 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+/// The SHA-256 of `bytes`, in lowercase hex.
+#[must_use]
+pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 

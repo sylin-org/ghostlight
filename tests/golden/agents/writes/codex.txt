@@ -9,7 +9,7 @@ product: codex
 name: Codex
 label: Codex
 target: User
-agent: {"id":"codex","name":"Codex","symbol":{"src":"integrations/codex.svg"}}
+agent: {"id":"codex","name":"Codex","symbol":{"icon":"agent-icons/codex?v=3bf3787877b5"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.codex/config.toml: no file
@@ -607,7 +607,7 @@ product: codex
 name: Codex
 label: Codex
 target: User
-agent: {"id":"codex","name":"Codex","symbol":{"src":"integrations/codex.svg"}}
+agent: {"id":"codex","name":"Codex","symbol":{"icon":"agent-icons/codex?v=3bf3787877b5"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.codex/config.toml: no file
@@ -1236,7 +1236,7 @@ product: codex
 name: Codex
 label: Codex
 target: User
-agent: {"id":"codex","name":"Codex","symbol":{"src":"integrations/codex.svg"}}
+agent: {"id":"codex","name":"Codex","symbol":{"icon":"agent-icons/codex?v=3bf3787877b5"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.codex/config.toml: no file

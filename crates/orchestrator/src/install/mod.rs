@@ -45,6 +45,7 @@ use thiserror::Error;
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
 
+use crate::agent::image::{monogram, Monogram};
 use crate::agent::Agent;
 use crate::language::deployment as words;
 
@@ -739,8 +740,8 @@ struct HarnessDefinition {
     /// The name a person reads: `name`, with the host added when several targets share the name.
     label: String,
     target: &'static str,
-    /// The agent's packaged monogram tile, a file under `ui/integrations/`.
-    monogram: &'static str,
+    /// The agent's packaged monogram tile.
+    monogram: Monogram,
     download_url: Option<&'static str>,
     path: PathBuf,
     default_path: PathBuf,
@@ -810,8 +811,9 @@ struct AgentRow {
     /// its harness id and product name.
     aliases: &'static [&'static str],
     target: &'static str,
-    /// The agent's symbol: its packaged monogram tile, a file under `ui/integrations/`.
-    monogram: &'static str,
+    /// The agent's packaged monogram tile, the image the window serves for it when no better one
+    /// is found ([`crate::agent::image`]): the same for every host of one agent.
+    monogram: Monogram,
     download_url: Option<&'static str>,
     /// Where the configuration file is on the computer a context describes when the agent has
     /// none yet: the file a new configuration is written to.
@@ -929,7 +931,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Codex",
         aliases: &["codex-mcp-client"],
         target: "User",
-        monogram: "codex.svg",
+        monogram: monogram!("codex.svg"),
         download_url: Some("https://developers.openai.com/codex/cli/"),
         path: |context| context.codex_config.clone(),
         candidates: &[],
@@ -946,7 +948,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Claude Code",
         aliases: &[],
         target: "User",
-        monogram: "claude-code.svg",
+        monogram: monogram!("claude-code.svg"),
         download_url: Some("https://claude.com/product/claude-code"),
         path: |context| context.home.join(".claude.json"),
         candidates: &[],
@@ -963,7 +965,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Claude Desktop",
         aliases: &["claude-ai"],
         target: "User",
-        monogram: "claude-desktop.svg",
+        monogram: monogram!("claude-desktop.svg"),
         download_url: None,
         path: |context| context.roaming.join("Claude/claude_desktop_config.json"),
         candidates: &[],
@@ -980,7 +982,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cursor",
         aliases: &["cursor-vscode"],
         target: "User",
-        monogram: "cursor.svg",
+        monogram: monogram!("cursor.svg"),
         download_url: Some("https://cursor.com/downloads"),
         path: |context| context.home.join(".cursor/mcp.json"),
         candidates: &[],
@@ -997,7 +999,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Visual Studio Code",
         aliases: &[],
         target: "User",
-        monogram: "vscode.svg",
+        monogram: monogram!("vscode.svg"),
         download_url: Some("https://code.visualstudio.com/download"),
         path: |context| context.roaming.join("Code/User/mcp.json"),
         candidates: &[],
@@ -1014,7 +1016,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Windsurf",
         aliases: &[],
         target: "User",
-        monogram: "windsurf.svg",
+        monogram: monogram!("windsurf.svg"),
         download_url: Some("https://windsurf.com/editor/download"),
         path: |context| context.home.join(".codeium/windsurf/mcp_config.json"),
         candidates: &[],
@@ -1034,7 +1036,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Devin",
         aliases: &[],
         target: "Devin user",
-        monogram: "windsurf.svg",
+        monogram: monogram!("windsurf.svg"),
         download_url: Some("https://windsurf.com/editor/download"),
         path: |context| context.config.join("devin/mcp_config.json"),
         candidates: &[],
@@ -1051,7 +1053,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Zed",
         aliases: &[],
         target: "User",
-        monogram: "zed.svg",
+        monogram: monogram!("zed.svg"),
         download_url: Some("https://zed.dev/download"),
         path: |context| {
             if context.windows {
@@ -1076,7 +1078,7 @@ const ROSTER: &[AgentRow] = &[
         name: "ZCode",
         aliases: &[],
         target: "User",
-        monogram: "zcode.svg",
+        monogram: monogram!("zcode.svg"),
         download_url: None,
         path: |context| context.home.join(".zcode/cli/config.json"),
         candidates: &[],
@@ -1093,7 +1095,7 @@ const ROSTER: &[AgentRow] = &[
         name: "OpenCode",
         aliases: &[],
         target: "User",
-        monogram: "opencode.svg",
+        monogram: monogram!("opencode.svg"),
         download_url: Some("https://opencode.ai/docs"),
         path: |context| context.home.join(".config/opencode/opencode.json"),
         candidates: OPENCODE_FILES,
@@ -1110,7 +1112,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Crush",
         aliases: &[],
         target: "User",
-        monogram: "crush.svg",
+        monogram: monogram!("crush.svg"),
         download_url: Some("https://github.com/charmbracelet/crush"),
         path: |context| {
             context
@@ -1132,7 +1134,7 @@ const ROSTER: &[AgentRow] = &[
         name: "GitHub Copilot CLI",
         aliases: &[],
         target: "CLI",
-        monogram: "copilot-cli.svg",
+        monogram: monogram!("copilot-cli.svg"),
         download_url: Some("https://github.com/github/copilot-cli"),
         path: |context| context.home.join(".copilot/mcp-config.json"),
         candidates: &[],
@@ -1149,7 +1151,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "CLI",
-        monogram: "cline.svg",
+        monogram: monogram!("cline.svg"),
         download_url: Some("https://docs.cline.bot/cline-cli/overview"),
         path: |context| context.home.join(".cline/data").join(CLINE_SETTINGS),
         candidates: &[],
@@ -1166,7 +1168,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "Visual Studio Code",
-        monogram: "cline.svg",
+        monogram: monogram!("cline.svg"),
         download_url: Some(
             "https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev",
         ),
@@ -1190,7 +1192,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "Cursor",
-        monogram: "cline.svg",
+        monogram: monogram!("cline.svg"),
         download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
         path: |context| {
             context
@@ -1212,7 +1214,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "Windsurf",
-        monogram: "cline.svg",
+        monogram: monogram!("cline.svg"),
         download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
         path: |context| {
             context
@@ -1234,7 +1236,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Kiro",
         aliases: &[],
         target: "CLI and IDE",
-        monogram: "kiro.svg",
+        monogram: monogram!("kiro.svg"),
         download_url: Some("https://kiro.dev/downloads/"),
         path: |context| context.home.join(".kiro/settings/mcp.json"),
         candidates: &[],
@@ -1251,7 +1253,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Qwen Code",
         aliases: &[],
         target: "CLI",
-        monogram: "qwen-code.svg",
+        monogram: monogram!("qwen-code.svg"),
         download_url: Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
         path: |context| context.home.join(".qwen/settings.json"),
         candidates: &[],
@@ -1268,7 +1270,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Junie",
         aliases: &[],
         target: "CLI and JetBrains",
-        monogram: "junie.svg",
+        monogram: monogram!("junie.svg"),
         download_url: Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
         path: |context| context.home.join(".junie/mcp/mcp.json"),
         candidates: &[],
@@ -1285,7 +1287,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Kilo Code",
         aliases: &[],
         target: "CLI",
-        monogram: "kilo-code.svg",
+        monogram: monogram!("kilo-code.svg"),
         download_url: Some("https://kilo.ai/"),
         path: |context| context.config.join("kilo").join("kilo.json"),
         candidates: KILO_FILES,
@@ -1302,7 +1304,7 @@ const ROSTER: &[AgentRow] = &[
         name: "goose",
         aliases: &[],
         target: "CLI and desktop",
-        monogram: "goose.svg",
+        monogram: monogram!("goose.svg"),
         download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
         path: |context| context.config.join("goose/config.yaml"),
         candidates: &[],
@@ -1319,7 +1321,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Continue",
         aliases: &[],
         target: "CLI and IDE",
-        monogram: "continue.svg",
+        monogram: monogram!("continue.svg"),
         download_url: Some("https://docs.continue.dev/cli/quickstart"),
         path: |context| context.home.join(".continue/config.yaml"),
         candidates: &[],
@@ -1336,7 +1338,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Antigravity",
         aliases: &[],
         target: "CLI",
-        monogram: "antigravity.svg",
+        monogram: monogram!("antigravity.svg"),
         download_url: Some("https://antigravity.google/download?platform=linux"),
         path: |context| context.home.join(".gemini/config/mcp_config.json"),
         candidates: &[],
@@ -1448,6 +1450,21 @@ pub fn agent_called(reported: &str) -> Option<Agent> {
         .iter()
         .find(|row| row.is_called(reported))
         .map(AgentRow::agent)
+}
+
+/// The packaged monogram tile of the catalog agent `agent_id`; none for an id outside the catalog.
+#[must_use]
+pub fn monogram_of(agent_id: &str) -> Option<Monogram> {
+    ROSTER
+        .iter()
+        .find(|row| row.agent_id == agent_id)
+        .map(|row| row.monogram)
+}
+
+/// Every roster row's monogram tile, for tests that check the packaged tiles.
+#[cfg(test)]
+pub(crate) fn monograms() -> Vec<Monogram> {
+    ROSTER.iter().map(|row| row.monogram).collect()
 }
 
 /// Where each catalog agent's own icon may be found, one entry per agent in roster order: its name,
@@ -3081,13 +3098,18 @@ mod tests {
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
             .unwrap();
-        let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/integrations");
         let registry = HarnessRegistry::with_context(context);
         for summary in registry.summaries() {
-            assert!(
-                matches!(&summary.agent.symbol, Symbol::Tile(path)
-                    if path.strip_prefix("integrations/").is_some_and(|file| asset_root.join(file).is_file())),
-                "missing packaged artwork for {}",
+            let served = crate::agent::image::served(&summary.agent.id, None)
+                .unwrap_or_else(|| panic!("missing packaged artwork for {}", summary.id));
+            assert_eq!(served.media_type, "image/svg+xml", "{}", summary.id);
+            assert_eq!(
+                summary.agent.symbol,
+                Symbol::Icon {
+                    address: format!("agent-icons/{}?v={}", summary.agent.id, served.version),
+                    about: None,
+                },
+                "every row names its agent's one image address: {}",
                 summary.id
             );
             assert_eq!(

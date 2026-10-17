@@ -33,12 +33,13 @@ use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::agent::image::ServedImage;
 use crate::audit::AuditRecord;
 use crate::browser::BrowserPort;
 use crate::events::DomainEvent;
 use crate::governance::effective::{EffectiveAuthority, PolicyChip};
 use crate::governance::{AuthoringError, CapabilitySet, GovernanceFacade, ManagedPolicyPassport};
-use crate::install::icons::{CachedIcon, IconCache};
+use crate::install::icons::IconCache;
 use crate::install::{
     HarnessAction, HarnessActionResult, HarnessError, HarnessRegistry, HarnessSetupResult,
     HarnessSummary,
@@ -659,11 +660,12 @@ impl WorkbenchFacade {
         }
     }
 
-    /// The cached icon of the catalog agent `agent_id`, as the window serves it; none for an id
-    /// outside the catalog or an agent with no icon cached.
+    /// The image the window serves for the catalog agent `agent_id` now: its app's own icon when
+    /// the attached cache holds one, else its monogram ([`crate::agent::image::served`]); none for
+    /// an id outside the catalog.
     #[must_use]
-    pub fn agent_icon(&self, agent_id: &str) -> Option<CachedIcon> {
-        self.icons.get()?.icon(agent_id)
+    pub fn agent_image(&self, agent_id: &str) -> Option<ServedImage> {
+        crate::agent::image::served(agent_id, self.icons.get())
     }
 
     /// Look for the agents' icons again in the background, off every request.

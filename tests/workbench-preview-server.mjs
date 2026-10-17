@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
@@ -12,7 +14,17 @@ const connectorCommand = `${connectorPath} mcp`;
 // The one app icon the preview shows, a small synthetic PNG, served the way the service serves an
 // agent's cached icon.
 const agentIconFile = join(repository, "tests", "fixtures", "workbench", "agent-icon.png");
+// The packaged monogram tiles, which the service serves at an agent's address when it has no icon.
+const monogramFolder = join(repository, "crates", "orchestrator", "src", "agent", "monograms");
 const AGENT_ICON_DIRECTORY = "agent-icons";
+/** What the service and this preview send with an agent's image (`workbench/web/routes.rs`). */
+const IMAGE_POLICY = "default-src 'none'; sandbox";
+
+/** An image as the service serves it at an agent's address: its media type, bytes and version. */
+const agentImage = (file, type) => {
+  const bytes = readFileSync(file);
+  return { type, bytes, version: createHash("sha256").update(bytes).digest("hex").slice(0, 12) };
+};
 
 const harnessDetail = Object.freeze({
   installed: "Ghostlight is registered for this user context.",
@@ -27,6 +39,16 @@ const jsonSetup = (collection = "mcpServers") => JSON.stringify({
   [collection]: { ghostlight: { command: connectorPath, args: ["mcp"], env: {} } }
 }, null, 2);
 
+/** The image the preview serves at each agent's address, by agent id. */
+const agentImages = new Map();
+
+/** A roster agent wearing `image` at its address, and the sentence an app's own icon carries. */
+const agentNamedBy = (id, name, image, appIcon) => {
+  agentImages.set(id, image);
+  const symbol = { icon: `${AGENT_ICON_DIRECTORY}/${id}?v=${image.version}` };
+  return { id, name, symbol: appIcon ? { ...symbol, about: `Icon from the installed ${name} app.` } : symbol };
+};
+
 const previewHarness = ({
   id, agentId = id, productId = id, name, label = name, target, monogram = `${id}.svg`, state, configPath,
   canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false, iconFound = false
@@ -37,13 +59,11 @@ const previewHarness = ({
   label,
   target,
   // The agent the row sets up, as the service names it: one id for every host of one agent, and
-  // its packaged monogram tile, or the app's own icon when the service found one.
-  agent: {
-    id: agentId, name,
-    symbol: iconFound
-      ? { icon: `${AGENT_ICON_DIRECTORY}/${agentId}?v=0123456789ab`, about: `Icon from the installed ${name} app.` }
-      : { src: `integrations/${monogram}` }
-  },
+  // its one image address, which serves the app's own icon when the service found one (and then
+  // says where it came from) and its packaged monogram otherwise.
+  agent: agentNamedBy(agentId, name, iconFound
+    ? agentImage(agentIconFile, "image/png")
+    : agentImage(join(monogramFolder, monogram), "image/svg+xml"), iconFound),
   state,
   detail: detail ?? harnessDetail[state],
   ...(evidence ? { evidence } : {}),
@@ -632,7 +652,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
 })();`;
 
 const types = {
-  ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".svg": "image/svg+xml"
+  ".css": "text/css", ".js": "text/javascript", ".png": "image/png"
 };
 
 const server = createServer(async (request, response) => {
@@ -651,15 +671,18 @@ const server = createServer(async (request, response) => {
       return;
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
-    const [directory, iconOf] = name.split("/");
+    const [directory, iconOf, ...beyond] = name.split("/");
     if (directory === AGENT_ICON_DIRECTORY) {
-      const found = harnesses.some((harness) => harness.agent.id === iconOf && harness.agent.symbol.icon);
-      if (!found) {
+      const image = beyond.length === 0 ? agentImages.get(iconOf) : undefined;
+      if (!image) {
         response.writeHead(404).end();
         return;
       }
-      response.writeHead(200, { "content-type": "image/png", "cache-control": "no-cache" });
-      response.end(await readFile(agentIconFile));
+      response.writeHead(200, {
+        "content-type": image.type, "cache-control": "no-cache", etag: `"${image.version}"`,
+        "x-content-type-options": "nosniff", "content-security-policy": IMAGE_POLICY
+      });
+      response.end(request.method === "HEAD" ? undefined : image.bytes);
       return;
     }
     // The setup view shares two of the extension's files, which the service serves under /extension/.
@@ -667,7 +690,7 @@ const server = createServer(async (request, response) => {
       "extension/ghostlight-mascot.png": join(extensionFolder, "icons", "ghostlight-mascot.png") };
     const served = new Set(["index.html", "styles.css", "app.js", "ghostlight.png"]);
     if (!served.has(name) && !Object.hasOwn(shared, name) && !/^lib\/[a-z-]+\.js$/.test(name)
-      && !/^kit\/[a-z]+\.(js|css)$/.test(name) && !/^integrations\/[a-z0-9-]+\.svg$/.test(name)) {
+      && !/^kit\/[a-z]+\.(js|css)$/.test(name)) {
       response.writeHead(404).end();
       return;
     }

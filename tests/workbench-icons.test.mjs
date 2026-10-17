@@ -1,9 +1,9 @@
-// The agents' icons, exercised for real.
+// The agents' images, exercised for real.
 //
-// The view leaves an image with the address of an icon and no source; the icons module asks for
-// the icon once and fills in every image that names it. These tests run the real modules against
-// a small stand-in for the part of the document they touch. No page and no Ghostlight process is
-// involved.
+// The view leaves an image with the agent's image address and no source, the same for every
+// agent; the icons module asks for the address once and fills in every image that names it. These
+// tests run the real modules against a small stand-in for the part of the document they touch. No
+// page and no Ghostlight process is involved.
 //
 // Run with: node --test tests/workbench-icons.test.mjs
 import assert from "node:assert/strict";
@@ -41,16 +41,23 @@ function scopeOf(images) {
 
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 
-test("the view leaves an app's icon as an address and no source, and a tile as a source", () => {
-  const zed = { symbol: { icon: ADDRESS, about: "Icon from the installed Zed app." } };
+test("the view draws every agent's image the same way, an address and no source, and keeps an app's icon on its tile", () => {
+  const appIcon = { symbol: { icon: ADDRESS, about: "Icon from the installed Zed app." } };
+  const monogram = { symbol: { icon: "agent-icons/codex?v=fedcba987654" } };
   assert.equal(
-    Words.symbolMarkup(zed, "chip"),
-    `<span class="symbol symbol-chip symbol-icon" aria-hidden="true"><img ${Words.ICON_ATTRIBUTE}="${ADDRESS}" alt="" width="14" height="14"></span>`
+    Words.symbolMarkup(appIcon, "chip"),
+    `<span class="symbol symbol-chip ${Words.APP_ICON_CLASS}" aria-hidden="true"><img ${Words.ICON_ATTRIBUTE}="${ADDRESS}" alt="" width="14" height="14"></span>`,
+    "the service says where an app's icon came from, so it stays on the neutral tile"
   );
   assert.equal(
-    Words.symbolMarkup({ symbol: { src: "integrations/zed.svg" } }, "chip"),
-    '<span class="symbol symbol-chip" aria-hidden="true"><img src="integrations/zed.svg" alt="" width="14" height="14"></span>'
+    Words.symbolMarkup(monogram, "chip"),
+    `<span class="symbol symbol-chip" aria-hidden="true"><img ${Words.ICON_ATTRIBUTE}="agent-icons/codex?v=fedcba987654" alt="" width="14" height="14"></span>`,
+    "a monogram is a tile of its own"
   );
+  assert.equal(Words.symbolAbout(appIcon), "Icon from the installed Zed app.");
+  assert.equal(Words.symbolAbout(monogram), "", "a monogram says nothing about where it came from");
+  assert.ok(!Words.symbolMarkup({ symbol: { src: "integrations/zed.svg" } }, "chip").includes("<img"),
+    "the page draws no image by a tile address");
 });
 
 test("an icon is asked for once, however many images name it, and each gets its source", async () => {
@@ -62,7 +69,6 @@ test("an icon is asked for once, however many images name it, and each gets its 
       asked.push(address);
       return `data:image/png;base64,${address.length}`;
     },
-    onFailure: () => assert.fail("nothing failed")
   });
   icons.settle();
   icons.settle();
@@ -81,8 +87,7 @@ test("an image drawn again is filled from what is known, without asking again", 
     load: async () => {
       asks += 1;
       return "data:image/png;base64,AAAA";
-    },
-    onFailure: () => assert.fail("nothing failed")
+    }
   });
   icons.settle();
   await settled();
@@ -93,34 +98,30 @@ test("an image drawn again is filled from what is known, without asking again", 
 });
 
 test("an image with a source of its own is left alone", async () => {
-  const tile = image(ADDRESS, "integrations/zed.svg");
+  const drawn = image(ADDRESS, "data:image/png;base64,AAAA");
   const icons = Icons.create({
-    scope: scopeOf([tile]),
-    load: async () => assert.fail("a drawn image asks for nothing"),
-    onFailure: () => assert.fail("nothing failed")
+    scope: scopeOf([drawn]),
+    load: async () => assert.fail("a drawn image asks for nothing")
   });
   icons.settle();
   await settled();
-  assert.equal(tile.getAttribute("src"), "integrations/zed.svg");
+  assert.equal(drawn.getAttribute("src"), "data:image/png;base64,AAAA");
 });
 
-test("an icon that cannot be had is reported once and leaves the image empty", async () => {
+test("an image that cannot be had keeps its tile, is not asked for again, and says nothing", async () => {
   const images = [image(ADDRESS)];
-  const reported = [];
   let asks = 0;
   const icons = Icons.create({
     scope: scopeOf(images),
     load: async () => {
       asks += 1;
       throw new Error("Watching is off.");
-    },
-    onFailure: (what, error) => reported.push(`${what}: ${error.message}`)
+    }
   });
   icons.settle();
   await settled();
   icons.settle();
   await settled();
   assert.equal(asks, 1);
-  assert.deepEqual(reported, ["An agent's icon could not be loaded: Watching is off."]);
-  assert.equal(images[0].getAttribute("src"), null);
+  assert.equal(images[0].getAttribute("src"), null, "the image waits on its neutral tile");
 });

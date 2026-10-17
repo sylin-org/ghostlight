@@ -9,7 +9,7 @@ product: zed
 name: Zed
 label: Zed
 target: User
-agent: {"id":"zed","name":"Zed","symbol":{"src":"integrations/zed.svg"}}
+agent: {"id":"zed","name":"Zed","symbol":{"icon":"agent-icons/zed?v=9a1d932c948e"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Zed/settings.json: no file
@@ -657,7 +657,7 @@ product: zed
 name: Zed
 label: Zed
 target: User
-agent: {"id":"zed","name":"Zed","symbol":{"src":"integrations/zed.svg"}}
+agent: {"id":"zed","name":"Zed","symbol":{"icon":"agent-icons/zed?v=9a1d932c948e"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/zed/settings.json: no file
@@ -1305,7 +1305,7 @@ product: zed
 name: Zed
 label: Zed
 target: User
-agent: {"id":"zed","name":"Zed","symbol":{"src":"integrations/zed.svg"}}
+agent: {"id":"zed","name":"Zed","symbol":{"icon":"agent-icons/zed?v=9a1d932c948e"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Zed/settings.json: no file

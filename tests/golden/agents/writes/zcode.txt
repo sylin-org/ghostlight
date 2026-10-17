@@ -9,7 +9,7 @@ product: zcode
 name: ZCode
 label: ZCode
 target: User
-agent: {"id":"zcode","name":"ZCode","symbol":{"src":"integrations/zcode.svg"}}
+agent: {"id":"zcode","name":"ZCode","symbol":{"icon":"agent-icons/zcode?v=61eaee07c51e"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.zcode/cli/config.json: no file
@@ -705,7 +705,7 @@ product: zcode
 name: ZCode
 label: ZCode
 target: User
-agent: {"id":"zcode","name":"ZCode","symbol":{"src":"integrations/zcode.svg"}}
+agent: {"id":"zcode","name":"ZCode","symbol":{"icon":"agent-icons/zcode?v=61eaee07c51e"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.zcode/cli/config.json: no file
@@ -1401,7 +1401,7 @@ product: zcode
 name: ZCode
 label: ZCode
 target: User
-agent: {"id":"zcode","name":"ZCode","symbol":{"src":"integrations/zcode.svg"}}
+agent: {"id":"zcode","name":"ZCode","symbol":{"icon":"agent-icons/zcode?v=61eaee07c51e"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.zcode/cli/config.json: no file

@@ -9,7 +9,7 @@ product: kiro
 name: Kiro
 label: Kiro
 target: CLI and IDE
-agent: {"id":"kiro","name":"Kiro","symbol":{"src":"integrations/kiro.svg"}}
+agent: {"id":"kiro","name":"Kiro","symbol":{"icon":"agent-icons/kiro?v=7fd6713a9ad1"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.kiro/settings/mcp.json: no file
@@ -657,7 +657,7 @@ product: kiro
 name: Kiro
 label: Kiro
 target: CLI and IDE
-agent: {"id":"kiro","name":"Kiro","symbol":{"src":"integrations/kiro.svg"}}
+agent: {"id":"kiro","name":"Kiro","symbol":{"icon":"agent-icons/kiro?v=7fd6713a9ad1"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.kiro/settings/mcp.json: no file
@@ -1305,7 +1305,7 @@ product: kiro
 name: Kiro
 label: Kiro
 target: CLI and IDE
-agent: {"id":"kiro","name":"Kiro","symbol":{"src":"integrations/kiro.svg"}}
+agent: {"id":"kiro","name":"Kiro","symbol":{"icon":"agent-icons/kiro?v=7fd6713a9ad1"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.kiro/settings/mcp.json: no file

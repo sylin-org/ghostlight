@@ -534,32 +534,37 @@
   const SYMBOL_SIZES = Object.freeze({ face: 20, chip: 14, card: 16, rail: 22, pane: 46 });
 
   /**
-   * The attribute that holds the address of an app's own icon on an image that has no source yet:
-   * the service answers the icon only to a request the page makes with its key, so the icons
+   * The attribute that holds the address of an agent's image on an image that has no source yet:
+   * the service answers the image only to a request the page makes with its key, so the icons
    * module fills the source in.
    */
   const ICON_ATTRIBUTE = "data-icon";
 
   /**
-   * What the window shows for `agent` at `size`, one of SYMBOL_SIZES: the packaged tile the
-   * service names, the app's own icon it names (drawn whole on a neutral tile of the same shape,
-   * its source filled in once the page has it), or the glyph it names. The page decides nothing about an agent's looks; every place that draws
-   * an agent draws it through this.
+   * The class of a symbol whose image the service says is an installed app's own icon (it says
+   * where such an image came from, and only for one), which the stylesheet sets on a neutral tile.
+   */
+  const APP_ICON_CLASS = "symbol-app-icon";
+
+  /**
+   * What the window shows for `agent` at `size`, one of SYMBOL_SIZES: the image at the address the
+   * service names (whichever image the service serves there, filled in once the page has it), or
+   * the glyph it names. An image waits on a neutral tile; an app's own icon, which may have no
+   * ground of its own, keeps that tile once drawn, and a monogram is a tile itself. The page
+   * decides nothing about an agent's looks; every place that draws an agent draws it through this.
    */
   function symbolMarkup(agent, size) {
     const symbol = agent?.symbol ?? {};
     const pixels = SYMBOL_SIZES[size];
-    const attribute = symbol.icon ? ICON_ATTRIBUTE : "src";
-    const address = symbol.icon ?? symbol.src;
-    const shown = address
-      ? `<img ${attribute}="${escapeHtml(address)}" alt="" width="${pixels}" height="${pixels}">`
+    const shown = symbol.icon
+      ? `<img ${ICON_ATTRIBUTE}="${escapeHtml(symbol.icon)}" alt="" width="${pixels}" height="${pixels}">`
       : SYMBOL_GLYPHS[symbol.glyph] ?? SYMBOL_GLYPHS[GLYPH.unknown];
-    const kind = symbol.icon ? " symbol-icon" : "";
-    return `<span class="symbol symbol-${size}${kind}" aria-hidden="true">${shown}</span>`;
+    const ground = symbol.icon && symbol.about ? ` ${APP_ICON_CLASS}` : "";
+    return `<span class="symbol symbol-${size}${ground}" aria-hidden="true">${shown}</span>`;
   }
 
-  /** The sentence that says which installed app an agent's own icon came from, when it has one. */
-  const symbolAbout = (agent) => (agent?.symbol?.icon ? agent.symbol.about ?? "" : "");
+  /** The sentence that says which installed app an agent's image came from, when the service says one. */
+  const symbolAbout = (agent) => agent?.symbol?.about ?? "";
 
   /**
    * The glyphs At a glance draws for what is not an agent: a browser's window frame, and the arrow
@@ -944,7 +949,7 @@
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
-    GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
+    GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, APP_ICON_CLASS, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,

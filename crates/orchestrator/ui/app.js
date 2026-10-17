@@ -15,7 +15,7 @@
  *   Store      the cache, and the only thing that may change it (no document)
  *   View       everything that touches the document            (cannot fetch, cannot mutate)
  *   SetupView  the setup view that stands in for the tabs      (cannot fetch, decides nothing)
- *   Icons      the agents' own icons, drawn once fetched        (cannot fetch itself, decides nothing)
+ *   Icons      the agents' images, drawn once fetched           (cannot fetch itself, decides nothing)
  *
  * Data flows one way: transport brings a snapshot, the store folds it in and announces what
  * changed from a closed list of kinds, and the view draws what it is handed. A view that cannot
@@ -81,15 +81,15 @@ const view = globalThis.GhostlightView.create({
 });
 
 /*
- * The agents' own icons.
+ * The agents' images.
  *
- * The view leaves an image without a source where an icon belongs. This asks the service for the
- * icon with the page's key and fills the image in, after every redraw.
+ * The view leaves an image without a source where an agent's image belongs. This asks the service
+ * for it with the page's key and fills the image in, after every redraw. An image that cannot be
+ * had stays on its neutral tile; the agent's name beside it still says who it is.
  */
 const icons = globalThis.GhostlightIcons.create({
   scope: document,
-  load: (address) => transport.image(address),
-  onFailure: reportFailure
+  load: (address) => transport.image(address)
 });
 new MutationObserver(() => icons.settle()).observe(document.body, { childList: true, subtree: true });
 

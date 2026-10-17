@@ -691,17 +691,17 @@ function snapshotParts() {
     integrations: {
       harnesses: [{
         id: "claude-desktop", product_id: "claude-desktop", name: "Claude Desktop", target: "User",
-        agent: { id: "claude-desktop", name: "Claude Desktop", symbol: { src: "integrations/claude-desktop.svg" } },
+        agent: { id: "claude-desktop", name: "Claude Desktop", symbol: { icon: "agent-icons/claude-desktop?v=fedcba987654" } },
         state: "available", detail: "Detected.", can_install: true, can_uninstall: false, can_download: true, can_locate: true,
         config_path: "/home/test/claude.json", connector_command: "ghostlight mcp", manual_setup: "{}"
       }, {
         id: "zed", product_id: "zed", name: "Zed", target: "User",
-        agent: { id: "zed", name: "Zed", symbol: { src: "integrations/zed.svg" } },
+        agent: { id: "zed", name: "Zed", symbol: { icon: "agent-icons/zed?v=fedcba987654" } },
         state: "updatable", detail: "Needs an update.", can_install: true, can_uninstall: false, can_download: true, can_locate: true,
         config_path: "/home/test/.config/zed/settings.json", connector_command: "ghostlight mcp", manual_setup: "{}"
       }, {
         id: "goose", product_id: "goose", name: "goose", target: "CLI and desktop",
-        agent: { id: "goose", name: "goose", symbol: { src: "integrations/goose.svg" } },
+        agent: { id: "goose", name: "goose", symbol: { icon: "agent-icons/goose?v=fedcba987654" } },
         state: "available", detail: "Set up by hand.", can_install: false, can_uninstall: false, can_download: true, can_locate: true,
         copy_only: true, config_path: "/home/test/.config/goose/config.yaml", connector_command: "ghostlight mcp",
         manual_setup: "extensions: { ghostlight: { cmd: ghostlight } }"

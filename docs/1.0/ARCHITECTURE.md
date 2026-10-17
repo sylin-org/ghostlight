@@ -574,16 +574,30 @@ icon is its icon resource, copied as a `.ico` file by `crates/win-peer`, which m
 data and runs none of it; a Store app's icon is the PNG logo its package manifest names, in the
 variant that suits the window, found through its family's folder below `%LOCALAPPDATA%\Packages`
 and the install folder Windows names for that family. The manifest also names the agent whose app
-gave the icon and the kind of place it was read from. The agent's symbol is
-`{ "icon": "agent-icons/<id>?v=<version>", "about": "Icon from the installed <app> app." }` while a
-copy is cached, else the monogram tile `{ "src": "integrations/<file>" }`, decided where
-`crate::agent` builds the agent; the page draws an icon whole on a neutral tile of the monogram's
-shape, and the Integrations pane shows its `about` line. The window serves the copy at that
-address as `image/png` or `image/x-icon` with `default-src 'none'; sandbox`, for catalog ids only.
-It is data about this computer, so it follows the data routes: it answers the window and a
-watcher, and while "Others can watch" is off it answers that watching is off, whatever the id.
-An image request carries no bearer, so the page leaves the image without a source and fetches the
-icon with its bearer (`ui/lib/icons.js`), then draws what it was given.
+gave the icon and the kind of place it was read from.
+
+Every catalog agent has one image address, `agent-icons/<agent id>`, and the service decides what
+it serves there (`crate::agent::image`), in the owner's order: the app's own icon from the cache,
+then a curated vendor mark (none is packaged yet), then the agent's packaged monogram tile. The
+tiles are Ghostlight's own SVGs in `crates/orchestrator/src/agent/monograms/`, embedded per catalog
+row and served only at that address, never as page files. The agent's symbol, built where
+`crate::agent` builds the agent, is `{ "icon": "agent-icons/<id>?v=<version>" }`: the version is
+the first 12 hex characters of the SHA-256 of the image served there now, so the address changes
+exactly when the image does. It also carries `"about": "Icon from the installed <app> app."` only
+when that image is an app's own icon, and the Integrations pane shows that line. The command line
+and an unknown agent keep their glyphs. The image is the agent's image only: whether the agent is
+connected or working is the page's dot and words, never part of the image. The window answers GET
+and HEAD at the address for catalog ids only (any other id is not found), as `image/png`,
+`image/x-icon` or, for a monogram, `image/svg+xml`, with `nosniff`, `default-src 'none'; sandbox`
+and an ETag of the version. Which image it serves says what is installed, so the address follows
+the data routes: it answers the window and a watcher, and while "Others can watch" is off it
+answers that watching is off, whatever the id. An image request carries no bearer, so the page
+draws every agent image the same way: it leaves the image without a source, fetches each address
+once with its bearer (`ui/lib/icons.js`) and fills in every image that names it. Until then the
+image shows a neutral tile, and an image that cannot be had keeps that tile and says nothing. Once
+drawn, an image whose symbol carries `about` (an app's own icon, which may have no ground of its
+own) stays on that tile with a little room around it; a monogram is a tile itself and draws on
+nothing.
 `ghostlight doctor` reads the cache, never the apps, and says per agent whether an icon was found,
 from which agent's app and which kind of place.
 

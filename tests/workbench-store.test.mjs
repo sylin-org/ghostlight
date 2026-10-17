@@ -217,11 +217,11 @@ test("only an action refreshes the latch: a runtime or status change does not", 
 
 test("a workspace resolves to its own session, even when several share one client", () => {
   const { store } = recording();
-  const codex = { id: "codex", name: "Codex", symbol: { src: "integrations/codex.svg" } };
+  const codex = { id: "codex", name: "Codex", symbol: { icon: "agent-icons/codex?v=fedcba987654" } };
   const sessions = [
     { id: "w1", agent: codex, channel: "mcp" },
     { id: "w2", agent: codex, channel: "mcp" },
-    { id: "w3", agent: { id: "zed", name: "Zed", symbol: { src: "integrations/zed.svg" } }, channel: "mcp" }
+    { id: "w3", agent: { id: "zed", name: "Zed", symbol: { icon: "agent-icons/zed?v=fedcba987654" } }, channel: "mcp" }
   ];
   store.applySnapshot({ ...snapshotAt(0), sessions }, true);
   assert.equal(store.sessionFor("w2"), sessions[1]);

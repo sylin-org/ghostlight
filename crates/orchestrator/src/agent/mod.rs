@@ -7,20 +7,22 @@
 //! [`Agent::listed`], so every surface draws the same name and the same symbol. The page decides
 //! nothing about an agent's looks: it draws the [`Symbol`] it is given.
 //!
-//! A roster agent's symbol is the app's own icon when the service has one cached for it
-//! ([`crate::install::icons`]), served by the window under [`ICON_DIRECTORY`] with its version in
-//! the address and with the sentence that says which app it came from, and otherwise the agent's
-//! packaged monogram tile.
+//! A roster agent's symbol is one address, the agent's under [`ICON_DIRECTORY`], with the version
+//! of the image the window serves there ([`image`]): the app's own icon when the service has one
+//! cached for it, with the sentence that says which app it came from, and otherwise the agent's
+//! packaged monogram tile. The page fetches every address the same way and decides nothing.
 //!
 //! An agent is projected for a person when a snapshot is built and is never persisted: the audit
 //! keeps only the channel and the connection identity.
 
+pub mod image;
+
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
-use crate::install::icons::FoundIcon;
+use self::image::{AgentImage, Monogram};
+use crate::install::icons::IconCache;
 use crate::intake::session::IntakeChannel;
-use crate::language::agent_icon::icon_from;
 use crate::language::provenance::{claimed_name, COMMAND_LINE_AGENT, UNKNOWN_AGENT};
 use crate::provenance::ConnectionDetails;
 
@@ -35,22 +37,16 @@ pub const UNKNOWN_ID: &str = "unknown";
 /// agent's id. No roster id holds it.
 pub const UNKNOWN_NAME_SEPARATOR: char = ':';
 
-/// The directory beside the window's page that serves the packaged agent tiles.
-pub const TILE_DIRECTORY: &str = "integrations";
-
-/// The directory beside the window's page that serves the agents' own icons, by agent id.
+/// The directory beside the window's page that serves each catalog agent's image, by agent id.
 pub const ICON_DIRECTORY: &str = "agent-icons";
 
-/// The query key that carries a served icon's version, so a changed icon gets a new address.
+/// The query key that carries a served image's version, so a changed image gets a new address.
 const ICON_VERSION_KEY: &str = "v";
 
-/// The key of a tile symbol: the path the window serves it at.
-const SRC_KEY: &str = "src";
-
-/// The key of an icon symbol: the path the window serves it at.
+/// The key of an image symbol: the address the window serves the agent's image at.
 const ICON_KEY: &str = "icon";
 
-/// The key of an icon symbol's sentence about where the icon came from.
+/// The key of an image symbol's sentence about which installed app the image came from.
 const ABOUT_KEY: &str = "about";
 
 /// The key of a glyph symbol: the glyph's word.
@@ -77,19 +73,19 @@ pub struct Agent {
 
 /// What the window shows for an agent: a closed vocabulary the page draws as given.
 ///
-/// It serializes as `{ "src": "<path>" }` for a packaged tile the window serves, as
-/// `{ "icon": "<path>", "about": "<sentence>" }` for an app's own icon the window serves, or as
+/// It serializes as `{ "icon": "<address>" }` for a catalog agent's image the window serves, with
+/// `"about": "<sentence>"` beside it when that image is an installed app's own icon, or as
 /// `{ "glyph": "<word>" }` for a glyph the page draws.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Symbol {
-    /// A packaged tile the window serves, by its path beside the page, drawn as it is.
-    Tile(String),
-    /// An app's own icon the window serves, drawn whole on a neutral tile of the monogram's shape.
+    /// A catalog agent's image, which the window serves at the address and the page draws whole.
     Icon {
-        /// Its path beside the page.
-        src: String,
-        /// The sentence that says which installed app it came from.
-        about: String,
+        /// The agent's address beside the page, with the served image's version.
+        address: String,
+        /// The sentence that says which installed app the image came from; none for a monogram.
+        /// The page reads it as the mark of an app's own icon, which may have no ground of its
+        /// own, and sets that image on a neutral tile; a monogram is a tile itself.
+        about: Option<String>,
     },
     /// A glyph the page draws.
     Glyph(Glyph),
@@ -116,19 +112,16 @@ impl Glyph {
 }
 
 impl Symbol {
-    /// The packaged tile `file`, served under [`TILE_DIRECTORY`].
+    /// The image of the catalog agent `id`: its address under [`ICON_DIRECTORY`] at the version
+    /// of the `image` the window serves there, and the sentence an app's own icon carries.
     #[must_use]
-    pub fn tile(file: &str) -> Self {
-        Self::Tile(format!("{TILE_DIRECTORY}/{file}"))
-    }
-
-    /// The cached icon of agent `id` that the cache `found`, served under [`ICON_DIRECTORY`] at
-    /// its version, with the sentence that says which app it came from.
-    #[must_use]
-    pub fn icon(id: &str, found: &FoundIcon) -> Self {
+    pub fn image(id: &str, image: &AgentImage) -> Self {
         Self::Icon {
-            src: format!("{ICON_DIRECTORY}/{id}?{ICON_VERSION_KEY}={}", found.version),
-            about: icon_from(found.app_name),
+            address: format!(
+                "{ICON_DIRECTORY}/{id}?{ICON_VERSION_KEY}={}",
+                image.version()
+            ),
+            about: image.about(),
         }
     }
 }
@@ -136,8 +129,9 @@ impl Symbol {
 impl Serialize for Symbol {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let entries: Vec<(&str, &str)> = match self {
-            Self::Tile(path) => vec![(SRC_KEY, path)],
-            Self::Icon { src, about } => vec![(ICON_KEY, src), (ABOUT_KEY, about)],
+            Self::Icon { address, about } => std::iter::once((ICON_KEY, address.as_str()))
+                .chain(about.as_deref().map(|about| (ABOUT_KEY, about)))
+                .collect(),
             Self::Glyph(glyph) => vec![(GLYPH_KEY, glyph.word())],
         };
         let mut map = serializer.serialize_map(Some(entries.len()))?;
@@ -149,24 +143,20 @@ impl Serialize for Symbol {
 }
 
 impl Agent {
-    /// A roster agent: its catalog id, its product name, and the app's own icon when the service
-    /// has one cached for it, else its packaged monogram tile.
+    /// A roster agent: its catalog id, its product name, and the image the window serves for it
+    /// from the cache the service published: the app's own icon when one is cached, else its
+    /// packaged `monogram`.
     #[must_use]
-    pub fn listed(id: &str, name: &str, monogram: &str) -> Self {
-        Self::shown(
-            id,
-            name,
-            monogram,
-            crate::install::icons::published(id).as_ref(),
-        )
+    pub fn listed(id: &str, name: &str, monogram: Monogram) -> Self {
+        Self::shown(id, name, monogram, crate::install::icons::published())
     }
 
-    /// A roster agent wearing the icon the cache `found` for it, or its monogram without one.
-    fn shown(id: &str, name: &str, monogram: &str, found: Option<&FoundIcon>) -> Self {
+    /// A roster agent wearing the best image `cache` gives it ([`AgentImage::best`]).
+    fn shown(id: &str, name: &str, monogram: Monogram, cache: Option<&IconCache>) -> Self {
         Self {
             id: id.to_owned(),
             name: name.to_owned(),
-            symbol: found.map_or_else(|| Symbol::tile(monogram), |found| Symbol::icon(id, found)),
+            symbol: Symbol::image(id, &AgentImage::best(id, monogram, cache)),
         }
     }
 
@@ -253,11 +243,34 @@ fn takes_a_reserved_name(name: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The address the window serves a monogram at, for the agent `id` whose tile is `monogram`.
+    fn monogram_address(id: &str, monogram: Monogram) -> String {
+        format!(
+            "agent-icons/{id}?v={}",
+            AgentImage::Monogram(monogram).version()
+        )
+    }
+
     #[test]
     fn a_symbol_serializes_as_what_to_show() {
         assert_eq!(
-            serde_json::to_value(Symbol::tile("codex.svg")).unwrap(),
-            serde_json::json!({ "src": "integrations/codex.svg" })
+            serde_json::to_value(Symbol::Icon {
+                address: "agent-icons/codex?v=0123456789ab".into(),
+                about: None,
+            })
+            .unwrap(),
+            serde_json::json!({ "icon": "agent-icons/codex?v=0123456789ab" })
+        );
+        assert_eq!(
+            serde_json::to_value(Symbol::Icon {
+                address: "agent-icons/zed?v=0123456789ab".into(),
+                about: Some("Icon from the installed Zed app.".into()),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "icon": "agent-icons/zed?v=0123456789ab",
+                "about": "Icon from the installed Zed app.",
+            })
         );
         assert_eq!(
             serde_json::to_value(Symbol::Glyph(Glyph::CommandLine)).unwrap(),
@@ -271,7 +284,7 @@ mod tests {
 
     #[test]
     fn a_roster_agent_wears_its_cached_icon_and_otherwise_its_monogram() {
-        use crate::install::icons::IconSourceKind;
+        use crate::install::icons::{FoundIcon, IconSourceKind};
 
         let found = |app_id, app_name| FoundIcon {
             version: "0123456789ab".into(),
@@ -280,40 +293,45 @@ mod tests {
             found_in: IconSourceKind::DesktopEntry,
         };
         assert_eq!(
-            Agent::shown("zed", "Zed", "zed.svg", Some(&found("zed", "Zed"))).symbol,
+            Symbol::image("zed", &AgentImage::AppIcon(found("zed", "Zed"))),
             Symbol::Icon {
-                src: "agent-icons/zed?v=0123456789ab".into(),
-                about: "Icon from the installed Zed app.".into(),
+                address: "agent-icons/zed?v=0123456789ab".into(),
+                about: Some("Icon from the installed Zed app.".into()),
             }
         );
         assert_eq!(
-            serde_json::to_value(Agent::shown(
+            serde_json::to_value(Symbol::image(
                 "claude-code",
-                "Claude Code",
-                "claude-code.svg",
-                Some(&found("claude-desktop", "Claude Desktop")),
+                &AgentImage::AppIcon(found("claude-desktop", "Claude Desktop")),
             ))
-            .unwrap()["symbol"],
+            .unwrap(),
             serde_json::json!({
                 "icon": "agent-icons/claude-code?v=0123456789ab",
                 "about": "Icon from the installed Claude Desktop app.",
             }),
             "an icon its family's app gave names that app"
         );
+        let zed = image::monogram!("zed.svg");
+        let monogram = Symbol::Icon {
+            address: monogram_address("zed", zed),
+            about: None,
+        };
+        assert_eq!(Agent::shown("zed", "Zed", zed, None).symbol, monogram);
         assert_eq!(
-            Agent::shown("zed", "Zed", "zed.svg", None).symbol,
-            Symbol::tile("zed.svg")
+            serde_json::to_value(&monogram).unwrap(),
+            serde_json::json!({ "icon": monogram_address("zed", zed) }),
+            "a monogram says nothing about where it came from"
         );
         assert_eq!(
-            Agent::listed("zed", "Zed", "zed.svg").symbol,
-            Symbol::tile("zed.svg"),
+            Agent::listed("zed", "Zed", zed).symbol,
+            monogram,
             "no test publishes a cache, so every agent keeps its monogram"
         );
     }
 
     #[test]
     fn the_page_draws_every_glyph_the_service_names() {
-        let words = include_str!("../ui/lib/words.js");
+        let words = include_str!("../../ui/lib/words.js");
         let vocabulary = words
             .lines()
             .find(|line| line.contains("const GLYPH = "))
@@ -410,7 +428,10 @@ mod tests {
             Agent {
                 id: "codex".into(),
                 name: "Codex".into(),
-                symbol: Symbol::Tile("integrations/codex.svg".into()),
+                symbol: Symbol::Icon {
+                    address: monogram_address("codex", image::monogram!("codex.svg")),
+                    about: None,
+                },
             }
         );
         assert_eq!(

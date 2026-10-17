@@ -9,7 +9,7 @@ product: goose
 name: goose
 label: goose
 target: CLI and desktop
-agent: {"id":"goose","name":"goose","symbol":{"src":"integrations/goose.svg"}}
+agent: {"id":"goose","name":"goose","symbol":{"icon":"agent-icons/goose?v=a41cc510e0c9"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/goose/config.yaml: no file
@@ -184,7 +184,7 @@ product: goose
 name: goose
 label: goose
 target: CLI and desktop
-agent: {"id":"goose","name":"goose","symbol":{"src":"integrations/goose.svg"}}
+agent: {"id":"goose","name":"goose","symbol":{"icon":"agent-icons/goose?v=a41cc510e0c9"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/goose/config.yaml: no file
@@ -359,7 +359,7 @@ product: goose
 name: goose
 label: goose
 target: CLI and desktop
-agent: {"id":"goose","name":"goose","symbol":{"src":"integrations/goose.svg"}}
+agent: {"id":"goose","name":"goose","symbol":{"icon":"agent-icons/goose?v=a41cc510e0c9"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/goose/config.yaml: no file

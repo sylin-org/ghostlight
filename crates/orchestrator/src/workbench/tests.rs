@@ -1423,9 +1423,16 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
 fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
     use crate::agent::Symbol;
 
+    let image_of = |id: &str| Symbol::Icon {
+        address: format!(
+            "agent-icons/{id}?v={}",
+            crate::agent::image::served(id, None).unwrap().version
+        ),
+        about: None,
+    };
     let codex = one_agent_across_the_window("codex-mcp-client", &["codex"]);
     assert_eq!(codex.name, "Codex");
-    assert_eq!(codex.symbol, Symbol::Tile("integrations/codex.svg".into()));
+    assert_eq!(codex.symbol, image_of("codex"));
     let cline = one_agent_across_the_window(
         "cline",
         &[
@@ -1437,7 +1444,7 @@ fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
     );
     assert_eq!(cline.id, "cline");
     assert_eq!(cline.name, "Cline");
-    assert_eq!(cline.symbol, Symbol::Tile("integrations/cline.svg".into()));
+    assert_eq!(cline.symbol, image_of("cline"));
 }
 
 /// The agent a session whose client calls itself `reported` carries, after showing that its

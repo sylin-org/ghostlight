@@ -156,19 +156,23 @@ let policyReply = null;
 /** The agents on the roster these fixtures use, by the name the service gives each. */
 const ROSTER_AGENTS = new Map([["Codex", "codex"], ["Zed", "zed"], ["Claude Code", "claude-code"]]);
 
-/** The app's own icon the service found for an agent, with its line about where it came from. */
+/** The image address of a roster agent whose image is its monogram, which says nothing else. */
+const monogram = (id) => ({ icon: `agent-icons/${id}?v=fedcba987654` });
+
+/** The image address of an agent whose image is its app's own icon, with its line about where it came from. */
 const appIcon = (id, app) => ({ icon: `agent-icons/${id}?v=0123456789ab`, about: `Icon from the installed ${app} app.` });
 
 /**
- * An agent as the service names it: Codex wears the icon the service found in its app, the other
- * roster agents their packaged tiles, the command line its prompt, and any other name, or none,
- * the unknown glyph. An agent Ghostlight does not know is identified by the name it reported.
+ * An agent as the service names it: every roster agent has its image address (Codex's serves the
+ * icon the service found in its app, the others their monograms), the command line its prompt, and
+ * any other name, or none, the unknown glyph. An agent Ghostlight does not know is identified by
+ * the name it reported.
  */
 const namedAgent = (name) => {
   if (name === "Command line") return { id: "command_line", name, symbol: { glyph: "command_line" } };
   const id = ROSTER_AGENTS.get(name);
   if (id === "codex") return { id, name, symbol: appIcon(id, name) };
-  if (id) return { id, name, symbol: { src: `integrations/${id}.svg` } };
+  if (id) return { id, name, symbol: monogram(id) };
   if (name == null) return { id: "unknown", name: "Unknown agent", symbol: { glyph: "unknown" } };
   return { id: `unknown:${name}`, name, symbol: { glyph: "unknown" } };
 };
@@ -188,14 +192,14 @@ const snapshot = () => ({
   }] : [],
   harnesses: [{
     id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User",
-    agent: { id: "codex", name: "Codex", symbol: { src: "integrations/codex.svg" } }, state: "updatable",
+    agent: { id: "codex", name: "Codex", symbol: monogram("codex") }, state: "updatable",
     detail: "The connector path belongs to an older installation.",
     can_install: true, can_fix: false, can_uninstall: false, can_download: true, can_locate: true,
     config_path: "/home/test/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "[mcp_servers.ghostlight]"
   }, {
     id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI",
-    agent: { id: "qwen-code", name: "Qwen Code", symbol: { src: "integrations/qwen-code.svg" } },
+    agent: { id: "qwen-code", name: "Qwen Code", symbol: monogram("qwen-code") },
     state: "not_detected", detail: "Not detected.", can_install: true, can_fix: false, can_uninstall: false,
     can_download: true, can_locate: true, copy_only: false, config_path: "/home/test/.qwen/settings.json",
     connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup"
@@ -527,7 +531,7 @@ const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error)
 // the booted roster's, so the booted page's own listeners leave this one alone.
 const AGENT_COMMAND = "/opt/ghostlight/ghostlight mcp";
 const agentRow = (id, name, state, extra = {}) => ({
-  id, product_id: id, name, label: name, target: "User", agent: { id, name, symbol: { src: `integrations/${id}.svg` } },
+  id, product_id: id, name, label: name, target: "User", agent: { id, name, symbol: monogram(id) },
   state, detail: "Said by the service.",
   can_install: ["available", "updatable", "not_detected"].includes(state) && !extra.copy_only,
   can_fix: false, can_uninstall: state === "installed", can_download: true, can_locate: true, copy_only: false,
@@ -904,10 +908,11 @@ const glanceChecks = [];
     return nodes.get("connections").innerHTML;
   };
   let html = draw({ sessions, browsers });
-  glanceChecks.push(["an agent's own icon sits on its tile in the summary face and on its shelf chip, beside glyphs",
-    html.includes('<span class="symbol symbol-face symbol-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="20" height="20"></span>')
-      && html.includes('<span class="symbol symbol-chip symbol-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="14" height="14"></span>')
+  glanceChecks.push(["an agent's image waits for its address in the summary face and on its shelf chip, beside glyphs, and an app's icon keeps its tile",
+    html.includes('<span class="symbol symbol-face symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="20" height="20"></span>')
+      && html.includes('<span class="symbol symbol-chip symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="14" height="14"></span>')
       && html.includes('<span class="symbol symbol-face" aria-hidden="true"><svg')
+      && !html.includes(" src=\"agent-icons/") && !html.includes("integrations/")
       && !html.includes("Icon from the installed"), html]);
   glanceChecks.push(["at a glance is one closed summary that counts agents and browsers",
     html.startsWith('<details class="glance" data-page-details="glance">')
@@ -932,7 +937,7 @@ const glanceChecks = [];
   html = draw({ sessions, browsers });
   glanceChecks.push(["an agent's card says at most four sessions, how many more, and the trust note once",
     (html.match(/class="glance-line"/g) ?? []).length === 4 && html.includes(">and 1 more<")
-      && html.includes('<span class="symbol symbol-card symbol-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="16" height="16"></span>')
+      && html.includes('<span class="symbol symbol-card symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="16" height="16"></span>')
       && (html.match(/is what the agent calls itself/g) ?? []).length === 1
       && html.includes('data-copy-connection="connection_codex_0"') && html.includes(">Copy id<")
       && !html.includes(">connection_codex_0<"), html]);
@@ -1027,22 +1032,22 @@ const contextFor = (kind) => {
 
 const roster = () => [
   { id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User",
-    agent: { id: "codex", name: "Codex", symbol: { src: "integrations/codex.svg" } }, state: "updatable",
+    agent: { id: "codex", name: "Codex", symbol: monogram("codex") }, state: "updatable",
     detail: "Old owned connector.", can_install: true, can_fix: false, can_uninstall: false, can_download: true,
     can_locate: true, config_path: "~/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "codex setup", download_url: "https://example.test/codex" },
   { id: "zed", product_id: "zed", name: "Zed", label: "Zed", target: "User",
-    agent: { id: "zed", name: "Zed", symbol: { src: "integrations/zed.svg" } }, state: "installed",
+    agent: { id: "zed", name: "Zed", symbol: monogram("zed") }, state: "installed",
     detail: "Current.", can_install: false, can_fix: false, can_uninstall: true, can_download: true,
     can_locate: true, config_path: "~/.config/zed/settings.json", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "zed setup", download_url: "https://example.test/zed" },
   { id: "junie", product_id: "junie", name: "Junie", label: "Junie", target: "CLI",
-    agent: { id: "junie", name: "Junie", symbol: { src: "integrations/junie.svg" } }, state: "needs_attention",
+    agent: { id: "junie", name: "Junie", symbol: monogram("junie") }, state: "needs_attention",
     detail: "Foreign entry preserved.", can_install: false, can_fix: true, can_uninstall: false, can_download: true,
     can_locate: true, config_path: "~/.junie/mcp.json", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "junie setup", download_url: "https://example.test/junie" },
   { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI",
-    agent: { id: "qwen-code", name: "Qwen Code", symbol: { src: "integrations/qwen-code.svg" } },
+    agent: { id: "qwen-code", name: "Qwen Code", symbol: monogram("qwen-code") },
     state: "not_detected", detail: "Not detected.", can_install: true, can_fix: false, can_uninstall: false,
     can_download: true, can_locate: true, config_path: "~/.qwen/settings.json",
     connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup",
@@ -1915,10 +1920,11 @@ const checks = [
       && agentPanes.antigravity.includes(">Install</button>") && agentPanes.antigravity.includes(">Prepare</button>")
       && agentPanes.antigravity.includes("You can install it, or prepare its settings first."),
     JSON.stringify(agentPanes)],
-  ["an agent's own icon sits on its tile on the rail and in the pane, which says once where it came from; a monogram says nothing",
-    agentsShown.rail.includes('<span class="symbol symbol-rail symbol-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="22" height="22"></span>')
-      && agentsShown.rail.includes('<span class="symbol symbol-rail" aria-hidden="true"><img src="integrations/zed.svg" alt="" width="22" height="22"></span>')
-      && agentPanes.windsurf.includes('<span class="symbol symbol-pane symbol-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="46" height="46"></span>')
+  ["every agent's image is drawn the same way on the rail and in the pane; an app's icon keeps its tile and says once where it came from, and a monogram says nothing",
+    agentsShown.rail.includes('<span class="symbol symbol-rail symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="22" height="22"></span>')
+      && agentsShown.rail.includes('<span class="symbol symbol-rail" aria-hidden="true"><img data-icon="agent-icons/zed?v=fedcba987654" alt="" width="22" height="22"></span>')
+      && !agentsShown.rail.includes(" src=") && !agentsShown.rail.includes("symbol-icon")
+      && agentPanes.windsurf.includes('<span class="symbol symbol-pane symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="46" height="46"></span>')
       && (agentPanes.windsurf.match(/<p class="agent-icon-about">Icon from the installed Windsurf app\.<\/p>/g) ?? []).length === 1
       && !agentPanes.zed.includes("agent-icon-about") && !agentPanes.cursor.includes("agent-icon-about"),
     agentsShown.rail + agentPanes.windsurf],

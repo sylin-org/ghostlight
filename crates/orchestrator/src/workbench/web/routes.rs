@@ -71,9 +71,10 @@ const PAGE_POLICY: &str = "default-src 'self'; connect-src 'self'; img-src 'self
 style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; \
 form-action 'none'; frame-ancestors 'none'";
 
-/// What an agent's icon may do once loaded: nothing. An image needs no policy to show, and a
-/// copied icon opened on its own runs nothing.
-const ICON_POLICY: &str = "default-src 'none'; sandbox";
+/// What an agent's image may do once loaded: nothing. An image needs no policy to show, the
+/// packaged tiles need nothing beyond their own markup, and an image opened on its own runs
+/// nothing.
+const IMAGE_POLICY: &str = "default-src 'none'; sandbox";
 
 /// Every route that is not a page file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -478,23 +479,24 @@ fn respond(shared: &Shared, head: &Head, incoming: &mut Incoming) -> Response {
 
     match target {
         Target::Page(asset) => page(head, asset),
-        Target::AgentIcon(_) if context == WebContext::Closed => watching_off(),
-        Target::AgentIcon(agent_id) => agent_icon(shared, head, agent_id),
+        Target::AgentImage(_) if context == WebContext::Closed => watching_off(),
+        Target::AgentImage(agent_id) => agent_image(shared, head, agent_id),
         Target::Api(route) => api(shared, route, context, head, incoming),
     }
 }
 
 enum Target<'a> {
     Page(&'static Asset),
-    /// The cached icon of the agent with this catalog id. It is data about this computer, so it
-    /// answers the window and a watcher and, while watching is off, says so like every data route.
-    /// The page fetches it, with its bearer when it has one, rather than drawing it by address.
-    AgentIcon(&'a str),
+    /// The image of the agent with this catalog id. Which image it is says what is installed on
+    /// this computer, so it answers the window and a watcher and, while watching is off, says so
+    /// like every data route, whatever the id. The page fetches it, with its bearer when it has
+    /// one, rather than drawing it by address.
+    AgentImage(&'a str),
     Api(&'static Route),
 }
 
-/// The agent id an icon path names: `/agent-icons/<id>`.
-fn icon_path(path: &str) -> Option<&str> {
+/// The agent id an image path names: `/agent-icons/<id>`.
+fn image_path(path: &str) -> Option<&str> {
     path.strip_prefix('/')?
         .strip_prefix(ICON_DIRECTORY)?
         .strip_prefix('/')
@@ -507,9 +509,9 @@ fn find(head: &Head) -> Result<Target<'_>, Response> {
     if unsafe_path(&head.path) {
         return Err(not_found());
     }
-    if let Some(agent_id) = icon_path(&head.path) {
+    if let Some(agent_id) = image_path(&head.path) {
         return if matches!(head.method, Method::Get | Method::Head) {
-            Ok(Target::AgentIcon(agent_id))
+            Ok(Target::AgentImage(agent_id))
         } else {
             Err(method_not_allowed(&[Method::Get, Method::Head]))
         };
@@ -626,25 +628,26 @@ fn page(head: &Head, asset: &'static Asset) -> Response {
     }
 }
 
-/// Serve the cached icon of the catalog agent `agent_id` as the image it is, with a policy that
-/// lets it run nothing. An id outside the catalog, or an agent with no icon cached, is not found.
-fn agent_icon(shared: &Shared, head: &Head, agent_id: &str) -> Response {
-    let Some(icon) = shared.facade.agent_icon(agent_id) else {
+/// Serve the image the service has for the catalog agent `agent_id` now (its app's own icon, else
+/// its monogram), tagged with its version and with a policy that lets it run nothing. An id
+/// outside the catalog is not found.
+fn agent_image(shared: &Shared, head: &Head, agent_id: &str) -> Response {
+    let Some(image) = shared.facade.agent_image(agent_id) else {
         return failure(Status::NotFound, ErrorCode::NotFound, words::NOT_FOUND);
     };
-    let tag = format!("\"{}\"", icon.sha256);
+    let tag = format!("\"{}\"", image.version);
     let unchanged = head
         .header(header::IF_NONE_MATCH)
         .is_some_and(|value| value == tag);
     let response = if unchanged {
         Response::new(Status::NotModified)
     } else {
-        Response::new(Status::Ok).with_body(icon.kind.media_type(), icon.bytes)
+        Response::new(Status::Ok).with_body(image.media_type, image.bytes)
     };
     let response = response
         .with_header(header::ETAG, tag)
         .with_header(header::CACHE_CONTROL, PAGE_CACHE)
-        .with_header(header::CONTENT_SECURITY_POLICY, ICON_POLICY);
+        .with_header(header::CONTENT_SECURITY_POLICY, IMAGE_POLICY);
     if head.method == Method::Head {
         response.head_only()
     } else {

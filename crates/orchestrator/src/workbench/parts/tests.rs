@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use super::*;
-use crate::agent::Agent;
+use crate::agent::{Agent, Symbol, ICON_DIRECTORY};
 use crate::browser::adapter::RuntimeControlState;
 use crate::governance::evidence::{PermissionCheck, PermissionTrace};
 use crate::governance::{
@@ -37,6 +37,19 @@ fn temp_policy() -> PathBuf {
     ));
     std::fs::write(&path, POLICY).unwrap();
     path
+}
+
+/// `agent` wearing its installed app's own icon, as a roster agent does once the service has one
+/// cached: the one symbol that also says which app its image came from. Built here, because no test
+/// publishes the icon cache [`Agent::listed`] reads.
+fn wearing_an_app_icon(agent: Agent) -> Agent {
+    Agent {
+        symbol: Symbol::Icon {
+            address: format!("{ICON_DIRECTORY}/{}?v=0123456789ab", agent.id),
+            about: Some(crate::language::agent_icon::icon_from(&agent.name)),
+        },
+        ..agent
+    }
 }
 
 fn details() -> ConnectionDetails {
@@ -77,7 +90,7 @@ fn history_item(invocation: &str, check: PermissionCheck) -> HistoryItem {
         },
         channel: Some(IntakeChannel::Mcp),
         provenance: Some(details()),
-        agent: Agent::of_evidence(Some(&details())),
+        agent: wearing_an_app_icon(Agent::of_evidence(Some(&details()))),
         browser: Some("Chrome".into()),
         complete: true,
         composition: Some(CompositionProgress {
@@ -181,7 +194,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
         },
         sessions: vec![SessionSummary {
             id: "workspace_1".into(),
-            agent: Agent::of(Some("claude-code"), IntakeChannel::Mcp),
+            agent: wearing_an_app_icon(Agent::of(Some("claude-code"), IntakeChannel::Mcp)),
             connections: vec![details()],
             channel: IntakeChannel::Mcp,
             leased: true,
@@ -199,7 +212,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             started_at_ms: Some(12),
             phase: OperationPhase::Running,
             provenance: Some(details()),
-            agent: Agent::of_evidence(Some(&details())),
+            agent: wearing_an_app_icon(Agent::of_evidence(Some(&details()))),
         }],
         browsers: vec![BrowserInstanceSummary {
             id: "browser_1".into(),
@@ -222,7 +235,11 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             name: "Cursor".into(),
             label: "Cursor".into(),
             target: "Cursor".into(),
-            agent: Agent::listed("cursor", "Cursor", "cursor.svg"),
+            agent: wearing_an_app_icon(Agent::listed(
+                "cursor",
+                "Cursor",
+                crate::agent::image::Monogram::FIXTURE,
+            )),
             state: HarnessState::NeedsAttention,
             detail: "Something else starts here.".into(),
             evidence: Some("A program named other, with 2 arguments.".into()),
@@ -373,7 +390,8 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "sessions[].agent.id",
     "sessions[].agent.name",
     "sessions[].agent.symbol",
-    "sessions[].agent.symbol.src",
+    "sessions[].agent.symbol.about",
+    "sessions[].agent.symbol.icon",
     "sessions[].browser",
     "sessions[].channel",
     "sessions[].connections",
@@ -411,7 +429,8 @@ const OPERATION_KEYS: &[&str] = &[
     "operations[].agent.id",
     "operations[].agent.name",
     "operations[].agent.symbol",
-    "operations[].agent.symbol.src",
+    "operations[].agent.symbol.about",
+    "operations[].agent.symbol.icon",
     "operations[].capability",
     "operations[].invocation",
     "operations[].phase",
@@ -431,7 +450,8 @@ const RECORD_KEYS: &[&str] = &[
     "agent.id",
     "agent.name",
     "agent.symbol",
-    "agent.symbol.src",
+    "agent.symbol.about",
+    "agent.symbol.icon",
     "allowed",
     "browser",
     "capability",
@@ -509,7 +529,8 @@ const INTEGRATION_KEYS: &[&str] = &[
     "harnesses[].agent.id",
     "harnesses[].agent.name",
     "harnesses[].agent.symbol",
-    "harnesses[].agent.symbol.src",
+    "harnesses[].agent.symbol.about",
+    "harnesses[].agent.symbol.icon",
     "harnesses[].can_download",
     "harnesses[].can_fix",
     "harnesses[].can_install",

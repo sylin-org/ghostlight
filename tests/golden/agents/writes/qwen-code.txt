@@ -9,7 +9,7 @@ product: qwen-code
 name: Qwen Code
 label: Qwen Code
 target: CLI
-agent: {"id":"qwen-code","name":"Qwen Code","symbol":{"src":"integrations/qwen-code.svg"}}
+agent: {"id":"qwen-code","name":"Qwen Code","symbol":{"icon":"agent-icons/qwen-code?v=d9a10b23c1df"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.qwen/settings.json: no file
@@ -657,7 +657,7 @@ product: qwen-code
 name: Qwen Code
 label: Qwen Code
 target: CLI
-agent: {"id":"qwen-code","name":"Qwen Code","symbol":{"src":"integrations/qwen-code.svg"}}
+agent: {"id":"qwen-code","name":"Qwen Code","symbol":{"icon":"agent-icons/qwen-code?v=d9a10b23c1df"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.qwen/settings.json: no file
@@ -1305,7 +1305,7 @@ product: qwen-code
 name: Qwen Code
 label: Qwen Code
 target: CLI
-agent: {"id":"qwen-code","name":"Qwen Code","symbol":{"src":"integrations/qwen-code.svg"}}
+agent: {"id":"qwen-code","name":"Qwen Code","symbol":{"icon":"agent-icons/qwen-code?v=d9a10b23c1df"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.qwen/settings.json: no file

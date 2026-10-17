@@ -139,6 +139,17 @@ test("an image is asked for with the key and handed back as a source the page ca
   assert.equal(big, `data:image/png;base64,${Buffer.from(large).toString("base64")}`, "an image larger than one chunk");
 });
 
+test("a monogram the service serves at an agent's address is drawn the same way as an app's icon", async () => {
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const send = fakeFetch(() => ({
+    ok: true, status: 200, headers: { get: () => "image/svg+xml" }, arrayBuffer: async () => svg.buffer
+  }));
+  const source = await Transport.overHttp({ fetch: send, bearer: "secret-1" }).image("agent-icons/codex?v=fedcba987654");
+  assert.equal(send.calls[0].path, "/agent-icons/codex?v=fedcba987654");
+  assert.equal(send.calls[0].headers.Authorization, "Bearer secret-1");
+  assert.equal(source, `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
+});
+
 test("an image the service refuses rejects with its sentence", async () => {
   const send = fakeFetch(() => answer(403, { error: { code: "watching_off", message: "Watching is off." } }));
   await assert.rejects(

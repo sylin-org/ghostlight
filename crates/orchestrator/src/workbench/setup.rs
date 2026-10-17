@@ -650,7 +650,7 @@ pub(super) mod test_support {
             name: label.into(),
             label: label.into(),
             target: label.into(),
-            agent: crate::agent::Agent::listed(id, label, &format!("{id}.svg")),
+            agent: crate::agent::Agent::listed(id, label, crate::agent::image::Monogram::FIXTURE),
             state,
             detail: String::new(),
             evidence: None,
@@ -1041,7 +1041,11 @@ mod tests {
     /// A host of Cline, the one agent of the four Cline hosts.
     fn cline(id: &str, label: &str, state: HarnessState) -> HarnessSummary {
         HarnessSummary {
-            agent: crate::agent::Agent::listed("cline", "Cline", "cline.svg"),
+            agent: crate::agent::Agent::listed(
+                "cline",
+                "Cline",
+                crate::agent::image::Monogram::FIXTURE,
+            ),
             ..harness(id, label, state)
         }
     }
@@ -1265,7 +1269,11 @@ mod tests {
         for host in &mut two_hosts {
             host.product_id = "cline".into();
             host.name = "Cline".into();
-            host.agent = crate::agent::Agent::listed("cline", "Cline", "cline.svg");
+            host.agent = crate::agent::Agent::listed(
+                "cline",
+                "Cline",
+                crate::agent::image::Monogram::FIXTURE,
+            );
         }
         assert_eq!(
             agent_name(&finished, &[session("workspace_1", "Cline")], &two_hosts).as_deref(),

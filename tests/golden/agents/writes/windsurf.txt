@@ -9,7 +9,7 @@ product: windsurf
 name: Windsurf
 label: Windsurf
 target: User
-agent: {"id":"windsurf","name":"Windsurf","symbol":{"src":"integrations/windsurf.svg"}}
+agent: {"id":"windsurf","name":"Windsurf","symbol":{"icon":"agent-icons/windsurf?v=82e0571599f5"}}
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.codeium/windsurf/mcp_config.json: no file
@@ -657,7 +657,7 @@ product: windsurf
 name: Windsurf
 label: Windsurf
 target: User
-agent: {"id":"windsurf","name":"Windsurf","symbol":{"src":"integrations/windsurf.svg"}}
+agent: {"id":"windsurf","name":"Windsurf","symbol":{"icon":"agent-icons/windsurf?v=82e0571599f5"}}
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.codeium/windsurf/mcp_config.json: no file
@@ -1305,7 +1305,7 @@ product: windsurf
 name: Windsurf
 label: Windsurf
 target: User
-agent: {"id":"windsurf","name":"Windsurf","symbol":{"src":"integrations/windsurf.svg"}}
+agent: {"id":"windsurf","name":"Windsurf","symbol":{"icon":"agent-icons/windsurf?v=82e0571599f5"}}
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.codeium/windsurf/mcp_config.json: no file

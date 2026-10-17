@@ -1201,7 +1201,7 @@ mod tests {
             name: label.into(),
             label: label.into(),
             target: label.into(),
-            agent: crate::agent::Agent::listed(id, label, &format!("{id}.svg")),
+            agent: crate::agent::Agent::listed(id, label, crate::agent::image::Monogram::FIXTURE),
             state,
             detail: String::new(),
             evidence: None,
@@ -1264,7 +1264,11 @@ mod tests {
     #[test]
     fn a_client_id_selects_an_agents_detected_hosts_or_one_host_in_the_order_given() {
         let cline = |id: &str, host: &str, state: HarnessState| HarnessSummary {
-            agent: crate::agent::Agent::listed("cline", "Cline", "cline.svg"),
+            agent: crate::agent::Agent::listed(
+                "cline",
+                "Cline",
+                crate::agent::image::Monogram::FIXTURE,
+            ),
             ..harness(id, &format!("Cline ({host})"), state)
         };
         let summaries = [

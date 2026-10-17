@@ -1254,7 +1254,7 @@ fn methods_and_paths_are_closed() {
         "/app.js%00",
         "/lib\\view.js",
         "/index.html",
-        "/integrations/PROVENANCE.md",
+        "/integrations/codex.svg",
     ] {
         let reply = get(path).send(port);
         assert_eq!(reply.status, 404, "{path}");
@@ -2605,11 +2605,10 @@ fn a_pause_changes_the_runtime_row_of_every_screens_controls() {
     );
 }
 
-#[test]
-fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
+/// A cache under `fixture` that has found Zed's icon on a Linux computer, and the icon's bytes.
+fn zed_icon_cache(fixture: &Fixture) -> (crate::install::icons::IconCache, Vec<u8>) {
     use crate::install::icons::{IconCache, IconPlaces};
 
-    let fixture = Fixture::start();
     let share = fixture.root.join("share");
     let entry = share.join("applications").join("dev.zed.Zed.desktop");
     std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
@@ -2621,40 +2620,101 @@ fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
     let icons = fixture.root.join("state").join("icons");
     let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
     assert!(cache.refresh());
-    fixture.facade.attach_icons(cache.clone());
-    let version = cache.found("zed").unwrap().version;
+    (cache, bytes)
+}
 
-    let reply = fixture.watch(get(&format!("/agent-icons/zed?v={version}")));
-    assert_eq!(reply.status, 200, "a watcher draws the agents it is shown");
-    assert_eq!(reply.header("Content-Type"), Some("image/png"));
-    assert_eq!(reply.header("X-Content-Type-Options"), Some("nosniff"));
+/// The headers an agent's image is served with, which a HEAD answers too.
+const IMAGE_HEADERS: [&str; 6] = [
+    "Content-Type",
+    "Content-Length",
+    "ETag",
+    "X-Content-Type-Options",
+    "Content-Security-Policy",
+    "Cross-Origin-Resource-Policy",
+];
+
+#[test]
+fn every_catalog_agent_has_one_image_address_and_it_serves_the_best_image_there_is() {
+    let fixture = Fixture::start();
+    let monogram = include_bytes!("../../agent/monograms/zed.svg");
+
+    let first = fixture.watch(get("/agent-icons/zed"));
+    assert_eq!(first.status, 200, "a watcher draws the agents it is shown");
+    assert_eq!(first.header("Content-Type"), Some("image/svg+xml"));
+    assert_eq!(first.body, monogram, "no icon is cached, so the monogram");
+    assert_eq!(first.header("X-Content-Type-Options"), Some("nosniff"));
     assert_eq!(
-        reply.header("Content-Security-Policy"),
+        first.header("Content-Security-Policy"),
         Some("default-src 'none'; sandbox")
     );
     assert_eq!(
-        reply.header("Cross-Origin-Resource-Policy"),
+        first.header("Cross-Origin-Resource-Policy"),
         Some("same-origin")
     );
-    assert_eq!(reply.body, bytes);
-    let tag = reply.header("ETag").unwrap().to_owned();
-    let unchanged = fixture.watch(get("/agent-icons/zed").header("If-None-Match", &tag));
-    assert_eq!(unchanged.status, 304);
-    let head = fixture.watch(Call::new("HEAD", "/agent-icons/zed"));
-    assert_eq!(head.status, 200);
-    assert!(head.body.is_empty());
+    let monogram_tag = first.header("ETag").unwrap().to_owned();
+    let version = crate::agent::image::served("zed", None).unwrap().version;
+    assert_eq!(monogram_tag, format!("\"{version}\""));
 
-    let window = fixture.control(get("/agent-icons/zed"));
-    assert_eq!(window.status, 200);
-    assert_eq!(window.body, bytes);
+    for id in ["codex", "claude-code", "cline", "goose"] {
+        let reply = fixture.control(get(&format!("/agent-icons/{id}?v=0123456789ab")));
+        assert_eq!(reply.status, 200, "{id}");
+        assert_eq!(reply.header("Content-Type"), Some("image/svg+xml"), "{id}");
+    }
+
+    let (cache, bytes) = zed_icon_cache(&fixture);
+    fixture.facade.attach_icons(cache.clone());
+    let icon = fixture.control(get("/agent-icons/zed"));
+    assert_eq!(icon.status, 200);
+    assert_eq!(icon.header("Content-Type"), Some("image/png"));
+    assert_eq!(icon.body, bytes, "the cached icon comes first");
+    assert_eq!(
+        icon.header("Content-Security-Policy"),
+        Some("default-src 'none'; sandbox")
+    );
+    let icon_tag = icon.header("ETag").unwrap().to_owned();
+    assert_ne!(
+        icon_tag, monogram_tag,
+        "the version follows the served image"
+    );
+    assert_eq!(
+        icon_tag,
+        format!("\"{}\"", cache.found("zed").unwrap().version)
+    );
+    assert_eq!(
+        fixture
+            .watch(get("/agent-icons/codex"))
+            .header("Content-Type"),
+        Some("image/svg+xml"),
+        "an agent with no icon keeps its monogram"
+    );
+
+    let unchanged = fixture.watch(get("/agent-icons/zed").header("If-None-Match", &icon_tag));
+    assert_eq!(unchanged.status, 304);
+    let stale = fixture.watch(get("/agent-icons/zed").header("If-None-Match", &monogram_tag));
+    assert_eq!(
+        stale.status, 200,
+        "an old version is answered with the new image"
+    );
+
+    for path in ["/agent-icons/zed", "/agent-icons/codex"] {
+        let full = fixture.watch(get(path));
+        let head = fixture.watch(Call::new("HEAD", path));
+        assert_eq!(head.status, full.status, "{path}");
+        assert!(head.body.is_empty(), "{path}");
+        for name in IMAGE_HEADERS {
+            assert_eq!(head.header(name), full.header(name), "{path} {name}");
+        }
+    }
 
     for path in [
         "/agent-icons/not-an-agent",
-        "/agent-icons/codex",
+        "/agent-icons/command_line",
+        "/agent-icons/unknown",
         "/agent-icons/",
         "/agent-icons/zed/more",
         "/agent-icons/..%2fzed",
         "/agent-icons/zed.json",
+        "/integrations/zed.svg",
     ] {
         let reply = fixture.watch(get(path));
         assert_eq!(reply.status, 404, "{path}");
@@ -2663,41 +2723,42 @@ fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
     assert_eq!(
         fixture.watch(post("/agent-icons/zed", "{}")).status,
         405,
-        "an icon is only read"
+        "an image is only read"
     );
 }
 
 #[test]
-fn an_agents_icon_answers_that_watching_is_off_and_never_shows_what_is_installed() {
-    use crate::install::icons::{IconCache, IconPlaces};
-
+fn an_agents_image_answers_that_watching_is_off_and_never_shows_what_is_installed() {
     let fixture = Fixture::closed();
-    let share = fixture.root.join("share");
-    let entry = share.join("applications").join("dev.zed.Zed.desktop");
-    std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
-    std::fs::write(&entry, "[Desktop Entry]\nName=Zed\nIcon=zed\n").unwrap();
-    let png = share.join("icons/hicolor/64x64/apps/zed.png");
-    std::fs::create_dir_all(png.parent().unwrap()).unwrap();
-    let bytes = b"\x89PNG\r\n\x1a\nzed".to_vec();
-    std::fs::write(&png, &bytes).unwrap();
-    let icons = fixture.root.join("state").join("icons");
-    let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
-    assert!(cache.refresh());
+    let (cache, bytes) = zed_icon_cache(&fixture);
     fixture.facade.attach_icons(cache);
 
-    for path in [
+    let refusals: Vec<(u16, String, Vec<u8>)> = [
         "/agent-icons/zed",
         "/agent-icons/codex",
         "/agent-icons/not-an-agent",
-    ] {
-        for call in [get(path), Call::new("HEAD", path)] {
-            let label = format!("{} {path}", call.method);
-            let reply = fixture.watch(call);
-            assert_eq!(reply.status, 403, "{label}");
-            assert_eq!(reply.code(), "watching_off", "{label}");
-            assert!(!reply.body.starts_with(&bytes[..4]), "{label}");
-        }
+    ]
+    .into_iter()
+    .flat_map(|path| [get(path), Call::new("HEAD", path)])
+    .map(|call| {
+        let reply = fixture.watch(call);
+        assert!(!reply.body.starts_with(&bytes[..4]));
+        (reply.status, reply.code(), reply.body)
+    })
+    .collect();
+    for (status, code, _) in &refusals {
+        assert_eq!(*status, 403);
+        assert_eq!(code, "watching_off");
     }
+    let gets: Vec<&Vec<u8>> = refusals
+        .iter()
+        .step_by(2)
+        .map(|(_, _, body)| body)
+        .collect();
+    assert!(
+        gets.windows(2).all(|pair| pair[0] == pair[1]),
+        "every id is refused the same way, so a refusal says nothing about the agent"
+    );
 
     let window = fixture.control(get("/agent-icons/zed"));
     assert_eq!(window.status, 200, "the window draws its agents either way");
