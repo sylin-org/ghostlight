@@ -580,6 +580,10 @@ copy is cached, else the monogram tile `{ "src": "integrations/<file>" }`, decid
 `crate::agent` builds the agent; the page draws an icon whole on a neutral tile of the monogram's
 shape, and the Integrations pane shows its `about` line. The window serves the copy at that
 address as `image/png` or `image/x-icon` with `default-src 'none'; sandbox`, for catalog ids only.
+It is data about this computer, so it follows the data routes: it answers the window and a
+watcher, and while "Others can watch" is off it answers that watching is off, whatever the id.
+An image request carries no bearer, so the page leaves the image without a source and fetches the
+icon with its bearer (`ui/lib/icons.js`), then draws what it was given.
 `ghostlight doctor` reads the cache, never the apps, and says per agent whether an icon was found,
 from which agent's app and which kind of place.
 

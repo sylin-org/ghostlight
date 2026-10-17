@@ -1057,7 +1057,7 @@ async function windowOver({ answer = () => undefined, before = () => {} } = {}) 
     clearTimeout() {},
     setInterval: () => 0,
     clearInterval() {},
-    AbortController, TextDecoder, TextEncoder, URL
+    AbortController, TextDecoder, TextEncoder, URL, MutationObserver: class { observe() {} }
   });
   for (const source of SCRIPTS) vm.runInContext(source, sandbox);
   for (let turn = 0; turn < 5; turn += 1) await settle();

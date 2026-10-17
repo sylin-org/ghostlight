@@ -112,6 +112,41 @@ test("a search is a POST whose body holds the words and whose address holds none
   assert.equal(call.cache, "no-store");
 });
 
+test("an image is asked for with the key and handed back as a source the page can draw", async () => {
+  const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x7a]);
+  const respond = () => ({
+    ok: true,
+    status: 200,
+    headers: { get: (name) => (name.toLowerCase() === "content-type" ? "image/png" : null) },
+    arrayBuffer: async () => bytes.buffer
+  });
+  const keyed = fakeFetch(respond);
+  const source = await Transport.overHttp({ fetch: keyed, bearer: "secret-1" }).image("agent-icons/zed?v=0123456789ab");
+  assert.equal(keyed.calls[0].method, "GET");
+  assert.equal(keyed.calls[0].path, "/agent-icons/zed?v=0123456789ab");
+  assert.equal(keyed.calls[0].headers.Authorization, "Bearer secret-1");
+  assert.equal(keyed.calls[0].credentials, "omit");
+  assert.equal(source, `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`);
+
+  const open = fakeFetch(respond);
+  await Transport.overHttp({ fetch: open }).image("agent-icons/zed");
+  assert.equal("Authorization" in open.calls[0].headers, false, "a tab sends no key");
+
+  const large = new Uint8Array(100000).fill(7);
+  const big = await Transport.overHttp({
+    fetch: fakeFetch(() => ({ ok: true, status: 200, headers: { get: () => "image/png" }, arrayBuffer: async () => large.buffer }))
+  }).image("agent-icons/zed");
+  assert.equal(big, `data:image/png;base64,${Buffer.from(large).toString("base64")}`, "an image larger than one chunk");
+});
+
+test("an image the service refuses rejects with its sentence", async () => {
+  const send = fakeFetch(() => answer(403, { error: { code: "watching_off", message: "Watching is off." } }));
+  await assert.rejects(
+    Transport.overHttp({ fetch: send }).image("agent-icons/zed"),
+    (refusal) => refusal.status === 403 && refusal.code === "watching_off" && String(refusal) === "Watching is off."
+  );
+});
+
 test("an intent is a POST with the key, and without a key no Authorization is sent", async () => {
   const keyed = fakeFetch(() => answer(200, { accepted: true }));
   await Transport.overHttp({ fetch: keyed, bearer: "secret-1" }).applyIntent("hold");

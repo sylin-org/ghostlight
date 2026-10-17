@@ -41,6 +41,7 @@ fn surface_source() -> String {
         include_str!("../../ui/lib/words.js"),
         include_str!("../../ui/lib/entries.js"),
         include_str!("../../ui/lib/transport.js"),
+        include_str!("../../ui/lib/icons.js"),
         include_str!("../../ui/lib/setup-view.js"),
         include_str!("../../ui/lib/store.js"),
         include_str!("../../ui/lib/view.js"),

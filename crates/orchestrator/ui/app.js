@@ -7,7 +7,7 @@
  * current: every change arrives with a monotonic sequence, and a gap means the cache is thrown
  * away and rebuilt from a fresh snapshot. Nothing here is ever the source of truth.
  *
- * This file composes five parts and owns nothing itself:
+ * This file composes these parts and owns nothing itself:
  *
  *   Words      the fixed vocabulary and its number formatting  (pure)
  *   Entries    the shape one row of the monitor takes          (pure)
@@ -15,6 +15,7 @@
  *   Store      the cache, and the only thing that may change it (no document)
  *   View       everything that touches the document            (cannot fetch, cannot mutate)
  *   SetupView  the setup view that stands in for the tabs      (cannot fetch, decides nothing)
+ *   Icons      the agents' own icons, drawn once fetched        (cannot fetch itself, decides nothing)
  *
  * Data flows one way: transport brings a snapshot, the store folds it in and announces what
  * changed from a closed list of kinds, and the view draws what it is handed. A view that cannot
@@ -78,6 +79,19 @@ const view = globalThis.GhostlightView.create({
   coverageFor: (invocation) => store.snapshot()?.document_coverage?.find((item) => item.invocation === invocation),
   onFailure: reportFailure
 });
+
+/*
+ * The agents' own icons.
+ *
+ * The view leaves an image without a source where an icon belongs. This asks the service for the
+ * icon with the page's key and fills the image in, after every redraw.
+ */
+const icons = globalThis.GhostlightIcons.create({
+  scope: document,
+  load: (address) => transport.image(address),
+  onFailure: reportFailure
+});
+new MutationObserver(() => icons.settle()).observe(document.body, { childList: true, subtree: true });
 
 /*
  * The setup view.

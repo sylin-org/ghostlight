@@ -478,6 +478,7 @@ fn respond(shared: &Shared, head: &Head, incoming: &mut Incoming) -> Response {
 
     match target {
         Target::Page(asset) => page(head, asset),
+        Target::AgentIcon(_) if context == WebContext::Closed => watching_off(),
         Target::AgentIcon(agent_id) => agent_icon(shared, head, agent_id),
         Target::Api(route) => api(shared, route, context, head, incoming),
     }
@@ -485,8 +486,9 @@ fn respond(shared: &Shared, head: &Head, incoming: &mut Incoming) -> Response {
 
 enum Target<'a> {
     Page(&'static Asset),
-    /// The cached icon of the agent with this catalog id. Like a page file, it is served in every
-    /// context: an image request carries no bearer, and the window draws its agents with it.
+    /// The cached icon of the agent with this catalog id. It is data about this computer, so it
+    /// answers the window and a watcher and, while watching is off, says so like every data route.
+    /// The page fetches it, with its bearer when it has one, rather than drawing it by address.
     AgentIcon(&'a str),
     Api(&'static Route),
 }

@@ -66,6 +66,9 @@
   /** How long a stream may stay silent before it counts as dead. */
   const DEAD_AFTER_MS = 40000;
 
+  /** How many bytes of an image are turned to text at a time, which keeps each call's arguments small. */
+  const BASE64_CHUNK = 0x8000;
+
   const GET = "GET";
   const POST = "POST";
   const PUT = "PUT";
@@ -238,6 +241,30 @@
     }
 
     /**
+     * An image the service serves, as a source the page can draw.
+     *
+     * The service answers an image only to a request that carries the page's key, or to a watcher
+     * while watching is on, so the page asks with `fetch` like any other call and draws the bytes
+     * it was given.
+     */
+    async function image(address) {
+      if (!available) throw new Error("no orchestrator is attached");
+      const response = await send(`/${address}`, {
+        method: GET,
+        headers: headers(false),
+        credentials: "omit"
+      });
+      if (!response.ok) throw await refusalOf(response);
+      const kind = response.headers?.get?.("Content-Type") ?? "";
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      let text = "";
+      for (let at = 0; at < bytes.length; at += BASE64_CHUNK) {
+        text += String.fromCharCode(...bytes.subarray(at, at + BASE64_CHUNK));
+      }
+      return `data:${kind};base64,${btoa(text)}`;
+    }
+
+    /**
      * Read the live stream until it ends, and open it again after each failure.
      *
      * An event the service names is passed to the handler of that name. Any other event is a
@@ -377,6 +404,8 @@
     return Object.freeze({
       available,
       ...commands(call),
+
+      image,
 
       /** Put text on the clipboard of the screen that asked. */
       copyText(text) {

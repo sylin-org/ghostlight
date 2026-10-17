@@ -2609,7 +2609,7 @@ fn a_pause_changes_the_runtime_row_of_every_screens_controls() {
 fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
     use crate::install::icons::{IconCache, IconPlaces};
 
-    let fixture = Fixture::closed();
+    let fixture = Fixture::start();
     let share = fixture.root.join("share");
     let entry = share.join("applications").join("dev.zed.Zed.desktop");
     std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
@@ -2625,10 +2625,7 @@ fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
     let version = cache.found("zed").unwrap().version;
 
     let reply = fixture.watch(get(&format!("/agent-icons/zed?v={version}")));
-    assert_eq!(
-        reply.status, 200,
-        "served in every context, as page files are"
-    );
+    assert_eq!(reply.status, 200, "a watcher draws the agents it is shown");
     assert_eq!(reply.header("Content-Type"), Some("image/png"));
     assert_eq!(reply.header("X-Content-Type-Options"), Some("nosniff"));
     assert_eq!(
@@ -2668,4 +2665,41 @@ fn an_agents_cached_icon_is_served_as_an_image_that_runs_nothing() {
         405,
         "an icon is only read"
     );
+}
+
+#[test]
+fn an_agents_icon_answers_that_watching_is_off_and_never_shows_what_is_installed() {
+    use crate::install::icons::{IconCache, IconPlaces};
+
+    let fixture = Fixture::closed();
+    let share = fixture.root.join("share");
+    let entry = share.join("applications").join("dev.zed.Zed.desktop");
+    std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+    std::fs::write(&entry, "[Desktop Entry]\nName=Zed\nIcon=zed\n").unwrap();
+    let png = share.join("icons/hicolor/64x64/apps/zed.png");
+    std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+    let bytes = b"\x89PNG\r\n\x1a\nzed".to_vec();
+    std::fs::write(&png, &bytes).unwrap();
+    let icons = fixture.root.join("state").join("icons");
+    let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
+    assert!(cache.refresh());
+    fixture.facade.attach_icons(cache);
+
+    for path in [
+        "/agent-icons/zed",
+        "/agent-icons/codex",
+        "/agent-icons/not-an-agent",
+    ] {
+        for call in [get(path), Call::new("HEAD", path)] {
+            let label = format!("{} {path}", call.method);
+            let reply = fixture.watch(call);
+            assert_eq!(reply.status, 403, "{label}");
+            assert_eq!(reply.code(), "watching_off", "{label}");
+            assert!(!reply.body.starts_with(&bytes[..4]), "{label}");
+        }
+    }
+
+    let window = fixture.control(get("/agent-icons/zed"));
+    assert_eq!(window.status, 200, "the window draws its agents either way");
+    assert_eq!(window.body, bytes);
 }

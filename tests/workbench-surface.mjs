@@ -342,7 +342,7 @@ const sandbox = {
   },
   navigator: { clipboard: { writeText: async () => undefined } },
   GhostlightAccess: Object.freeze({ bearer: "key-1" }),
-  AbortController, TextDecoder, TextEncoder,
+  AbortController, TextDecoder, TextEncoder, MutationObserver: class { observe() {} },
   setTimeout: (fn, ms) => { if (typeof fn === "function" && !ms) fn(); return 0; },
   clearTimeout() {}, clearInterval() {},
   setInterval: () => 0,
@@ -905,8 +905,8 @@ const glanceChecks = [];
   };
   let html = draw({ sessions, browsers });
   glanceChecks.push(["an agent's own icon sits on its tile in the summary face and on its shelf chip, beside glyphs",
-    html.includes('<span class="symbol symbol-face symbol-icon" aria-hidden="true"><img src="agent-icons/codex?v=0123456789ab" alt="" width="20" height="20"></span>')
-      && html.includes('<span class="symbol symbol-chip symbol-icon" aria-hidden="true"><img src="agent-icons/codex?v=0123456789ab" alt="" width="14" height="14"></span>')
+    html.includes('<span class="symbol symbol-face symbol-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="20" height="20"></span>')
+      && html.includes('<span class="symbol symbol-chip symbol-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="14" height="14"></span>')
       && html.includes('<span class="symbol symbol-face" aria-hidden="true"><svg')
       && !html.includes("Icon from the installed"), html]);
   glanceChecks.push(["at a glance is one closed summary that counts agents and browsers",
@@ -932,7 +932,7 @@ const glanceChecks = [];
   html = draw({ sessions, browsers });
   glanceChecks.push(["an agent's card says at most four sessions, how many more, and the trust note once",
     (html.match(/class="glance-line"/g) ?? []).length === 4 && html.includes(">and 1 more<")
-      && html.includes('<span class="symbol symbol-card symbol-icon" aria-hidden="true"><img src="agent-icons/codex?v=0123456789ab" alt="" width="16" height="16"></span>')
+      && html.includes('<span class="symbol symbol-card symbol-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="16" height="16"></span>')
       && (html.match(/is what the agent calls itself/g) ?? []).length === 1
       && html.includes('data-copy-connection="connection_codex_0"') && html.includes(">Copy id<")
       && !html.includes(">connection_codex_0<"), html]);
@@ -1220,7 +1220,7 @@ function bootHttpPage(kind, options = {}) {
     GhostlightAccess: kind === "control" ? Object.freeze({ bearer: service.state.bearer }) : undefined,
     setTimeout: (fn, ms) => { if (typeof fn === "function" && !ms) fn(); return 0; },
     clearTimeout() {}, clearInterval() {}, setInterval: () => 0,
-    AbortController, TextDecoder, TextEncoder,
+    AbortController, TextDecoder, TextEncoder, MutationObserver: class { observe() {} },
     Date, JSON, Math, String, Number, Boolean, Array, Object, Set, Map, Promise, Error,
     isNaN, parseInt, parseFloat, performance: { now: () => 0 }, crypto: { randomUUID: () => "x" }
   };
@@ -1916,9 +1916,9 @@ const checks = [
       && agentPanes.antigravity.includes("You can install it, or prepare its settings first."),
     JSON.stringify(agentPanes)],
   ["an agent's own icon sits on its tile on the rail and in the pane, which says once where it came from; a monogram says nothing",
-    agentsShown.rail.includes('<span class="symbol symbol-rail symbol-icon" aria-hidden="true"><img src="agent-icons/windsurf?v=0123456789ab" alt="" width="22" height="22"></span>')
+    agentsShown.rail.includes('<span class="symbol symbol-rail symbol-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="22" height="22"></span>')
       && agentsShown.rail.includes('<span class="symbol symbol-rail" aria-hidden="true"><img src="integrations/zed.svg" alt="" width="22" height="22"></span>')
-      && agentPanes.windsurf.includes('<span class="symbol symbol-pane symbol-icon" aria-hidden="true"><img src="agent-icons/windsurf?v=0123456789ab" alt="" width="46" height="46"></span>')
+      && agentPanes.windsurf.includes('<span class="symbol symbol-pane symbol-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="46" height="46"></span>')
       && (agentPanes.windsurf.match(/<p class="agent-icon-about">Icon from the installed Windsurf app\.<\/p>/g) ?? []).length === 1
       && !agentPanes.zed.includes("agent-icon-about") && !agentPanes.cursor.includes("agent-icon-about"),
     agentsShown.rail + agentPanes.windsurf],

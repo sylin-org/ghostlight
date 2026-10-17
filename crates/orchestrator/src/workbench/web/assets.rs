@@ -78,6 +78,7 @@ pub const ASSETS: &[Asset] = &[
     asset!("/kit/settings.js", Js, "kit/settings.js"),
     asset!("/kit/kit.css", Css, "kit/kit.css"),
     asset!("/lib/entries.js", Js, "lib/entries.js"),
+    asset!("/lib/icons.js", Js, "lib/icons.js"),
     asset!("/lib/setup-view.js", Js, "lib/setup-view.js"),
     asset!("/lib/store.js", Js, "lib/store.js"),
     asset!("/lib/transport.js", Js, "lib/transport.js"),
