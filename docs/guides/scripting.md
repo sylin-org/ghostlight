@@ -50,7 +50,8 @@ a capture reports that its content was omitted, since a megabyte of base64 in a 
 nobody. In a batch, later captures gain an index rather than overwriting the first.
 
 `--catalog` lists the tools this build offers. Their full contract is in
-[`../1.0/LANGUAGE.md`](../1.0/LANGUAGE.md).
+[`../1.0/LANGUAGE.md`](../1.0/LANGUAGE.md). `ghostlight call --help` (or `-h`) prints the usage, the
+exit codes and the session variable on one screen, and reaches no service.
 
 ## Several calls, one session
 

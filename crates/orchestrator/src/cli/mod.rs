@@ -300,6 +300,10 @@ pub fn dispatch(mode: parse::LaunchMode) -> anyhow::Result<()> {
             parse::print_help();
             Ok(())
         }
+        parse::LaunchMode::CallHelp => {
+            parse::print_call_help();
+            Ok(())
+        }
         parse::LaunchMode::Version => {
             println!("ghostlight {}", env!("CARGO_PKG_VERSION"));
             Ok(())

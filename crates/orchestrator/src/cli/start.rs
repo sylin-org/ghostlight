@@ -125,6 +125,7 @@ fn role_of(mode: &LaunchMode) -> Role {
         LaunchMode::Doctor { .. }
         | LaunchMode::Status { .. }
         | LaunchMode::Help
+        | LaunchMode::CallHelp
         | LaunchMode::Version => Role::Inspect,
         _ => Role::Launch,
     }
@@ -330,6 +331,17 @@ mod tests {
             Start::Dispatch(LaunchMode::Serve(StartReason::Agent))
         );
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn call_help_runs_where_it_is_and_installs_nothing() {
+        let home = Home::new();
+        let carrier = home.carrier();
+        for arguments in [&["call", "--help"][..], &["call", "-h"]] {
+            let (result, calls) = home.start(&carrier, arguments);
+            assert_eq!(result.unwrap(), Start::Dispatch(LaunchMode::CallHelp));
+            assert!(calls.is_empty(), "{arguments:?}");
+        }
     }
 
     #[test]

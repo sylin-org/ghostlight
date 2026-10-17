@@ -9,6 +9,7 @@ use ghostlight_relay::protocol::StartReason;
 use ghostlight_relay::route::{BROWSER_ORIGIN_PREFIX, MCP_ARGUMENT};
 use ghostlight_relay::spawn::REASON_OPTION;
 
+use super::{EXIT_BLOCKED, EXIT_CANCELLED, EXIT_FAILED, EXIT_SUCCEEDED, EXIT_UNKNOWN, EXIT_USAGE};
 use crate::install::deployment::{DEVELOPMENT_OPTION, PLAN_OPTION, RESTORE_OPTION};
 
 /// Every subcommand a person is offered, in help order.
@@ -70,6 +71,8 @@ pub enum LaunchMode {
     },
     /// Render stable command-line help.
     Help,
+    /// Render the usage of `call`, the command a script runs. It reaches no service.
+    CallHelp,
     /// Render the exact package version.
     Version,
 }
@@ -269,7 +272,14 @@ pub fn launch_mode(arguments: impl IntoIterator<Item = OsString>) -> anyhow::Res
     {
         Ok(LaunchMode::Serve(serve_reason(&arguments[1..])?))
     } else if arguments.first().is_some_and(|argument| argument == "call") {
-        Ok(LaunchMode::Call)
+        if arguments[1..]
+            .iter()
+            .any(|argument| argument == "--help" || argument == "-h")
+        {
+            Ok(LaunchMode::CallHelp)
+        } else {
+            Ok(LaunchMode::Call)
+        }
     } else if arguments
         .first()
         .is_some_and(|argument| argument == "diagnostics")
@@ -378,6 +388,50 @@ pub fn print_help() {
     println!("{}", help_text());
 }
 
+/// Render the usage of `ghostlight call`: its forms, its exit codes, how it picks a session, and
+/// where the scripting guide is.
+///
+/// The exit codes come from the constants `run` returns, so the text cannot drift from them.
+pub fn call_help_text() -> String {
+    format!(
+        "Usage:
+  ghostlight call <tool> [json] [--json] [--output <file>]
+                                     Run one browser tool with a JSON object as its input
+  ghostlight call --stdin [--json] [--output <file>]
+                                     Run one '<tool> <json>' line at a time over one session
+  ghostlight call --catalog          List the browser tools
+  ghostlight call --help             Show this text
+
+Options:
+  --json                             Print the whole terminal result instead of its sentence
+  --output <file>                    Write bounded content, such as a screenshot, to a file
+
+Exit codes:
+  {succeeded}  Succeeded
+  {usage}  The call could not be made: bad arguments, bad JSON, or no reachable service
+  {blocked}  Blocked by authority
+  {failed}  Failed
+  {cancelled}  Cancelled
+  {unknown}  The effect cannot be determined; do not retry blindly
+
+Calls from one terminal share tabs; set {session} to name a session when a program starts calls through other shells.
+
+More: docs/guides/scripting.md",
+        succeeded = EXIT_SUCCEEDED,
+        usage = EXIT_USAGE,
+        blocked = EXIT_BLOCKED,
+        failed = EXIT_FAILED,
+        cancelled = EXIT_CANCELLED,
+        unknown = EXIT_UNKNOWN,
+        session = crate::cli::session::SESSION_VARIABLE,
+    )
+}
+
+/// Print the `ghostlight call` usage to standard output.
+pub fn print_call_help() {
+    println!("{}", call_help_text());
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
@@ -385,7 +439,10 @@ mod tests {
 
     use ghostlight_relay::protocol::StartReason;
 
-    use super::{help_text, launch_mode, LaunchMode, NativeHostCommand, SetupOptions, SUBCOMMANDS};
+    use super::{
+        call_help_text, help_text, launch_mode, LaunchMode, NativeHostCommand, SetupOptions,
+        SUBCOMMANDS,
+    };
 
     #[test]
     fn the_flatpak_form_is_a_usage_error() {
@@ -622,6 +679,50 @@ mod tests {
         );
         assert!(launch_mode(["native-host".into(), "guess".into()]).is_err());
         assert!(launch_mode(["nonsense".into()]).is_err());
+    }
+
+    #[test]
+    fn call_help_is_asked_for_with_help_or_h_in_any_position() {
+        for arguments in [
+            vec!["call", "--help"],
+            vec!["call", "-h"],
+            vec!["call", "browser_read", "--help"],
+            vec!["call", "--json", "-h"],
+        ] {
+            let arguments: Vec<OsString> = arguments.into_iter().map(Into::into).collect();
+            assert_eq!(launch_mode(arguments).unwrap(), LaunchMode::CallHelp);
+        }
+        assert_eq!(
+            launch_mode(["call".into(), "browser_tabs".into()]).unwrap(),
+            LaunchMode::Call
+        );
+    }
+
+    #[test]
+    fn call_help_states_the_forms_the_exit_codes_and_the_guide() {
+        let help = call_help_text();
+        for expected in [
+            "ghostlight call <tool> [json]",
+            "--json",
+            "--stdin",
+            "--catalog",
+            "--output <file>",
+            "GHOSTLIGHT_SESSION",
+            "docs/guides/scripting.md",
+        ] {
+            assert!(help.contains(expected), "call help lacks {expected}");
+        }
+        for line in [
+            "0  Succeeded",
+            "1  The call could not be made",
+            "2  Blocked by authority",
+            "4  Failed",
+            "5  Cancelled",
+            "6  The effect cannot be determined",
+        ] {
+            assert!(help.contains(line), "call help lacks the line {line}");
+        }
+        assert!(help.is_ascii());
     }
 
     #[test]

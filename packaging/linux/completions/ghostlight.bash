@@ -29,7 +29,7 @@ _ghostlight() {
             COMPREPLY=($(compgen -W "--json" -- "${current}"))
             ;;
         call)
-            COMPREPLY=($(compgen -W "--json --stdin --output --catalog" -- "${current}"))
+            COMPREPLY=($(compgen -W "--json --stdin --output --catalog --help" -- "${current}"))
             ;;
         policy)
             if [ "${COMP_CWORD}" -eq 2 ]; then

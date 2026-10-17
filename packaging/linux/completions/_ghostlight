@@ -48,7 +48,8 @@ _ghostlight() {
                 '--json[Print the structured result]' \
                 '--stdin[Run a batch over one session]' \
                 '--output[Write bounded content to a file]:file:_files' \
-                '--catalog[List the available browser tools]'
+                '--catalog[List the available browser tools]' \
+                '(-h --help)'{-h,--help}'[Show the usage of call]'
             ;;
         policy)
             _values 'policy command' validate explain simulate keygen pubkey sign publish

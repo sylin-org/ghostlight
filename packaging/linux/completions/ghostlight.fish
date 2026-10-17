@@ -32,4 +32,5 @@ complete -c ghostlight -n "__fish_seen_subcommand_from call" -l json -d "Print t
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l stdin -d "Run a batch over one session"
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l output -d "Write bounded content to a file" -r -F
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l catalog -d "List the available browser tools"
+complete -c ghostlight -n "__fish_seen_subcommand_from call" -l help -s h -d "Show the usage of call"
 complete -c ghostlight -n "__fish_seen_subcommand_from policy" -x -a "validate explain simulate keygen pubkey sign publish"
