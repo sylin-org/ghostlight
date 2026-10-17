@@ -1292,7 +1292,7 @@ test("the command line and an unknown agent are drawn from the glyph their symbo
   assert.equal(Words.symbolMarkup(namedAgent("Unknown agent"), "chip"),
     `<span class="symbol symbol-chip" aria-hidden="true">${Words.SYMBOL_GLYPHS[Words.GLYPH.unknown]}</span>`);
   assert.equal(Words.symbolMarkup(namedAgent("Codex"), "pane"),
-    '<span class="symbol symbol-pane tile" aria-hidden="true"><img src="integrations/codex.svg" alt="" width="46" height="46"></span>');
+    '<span class="symbol symbol-pane" aria-hidden="true"><img src="integrations/codex.svg" alt="" width="46" height="46"></span>');
   for (const size of Object.keys(Words.SYMBOL_SIZES)) {
     assert.ok(naming(`.symbol-${size} img`).length > 0, `the stylesheet sizes a ${size} tile`);
   }

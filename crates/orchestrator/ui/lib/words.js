@@ -543,7 +543,7 @@
     const shown = symbol.src
       ? `<img src="${escapeHtml(symbol.src)}" alt="" width="${pixels}" height="${pixels}">`
       : SYMBOL_GLYPHS[symbol.glyph] ?? SYMBOL_GLYPHS[GLYPH.unknown];
-    return `<span class="symbol symbol-${size}${symbol.src ? " tile" : ""}" aria-hidden="true">${shown}</span>`;
+    return `<span class="symbol symbol-${size}" aria-hidden="true">${shown}</span>`;
   }
 
   /**
