@@ -11,7 +11,8 @@ Decisions live in [adr/](adr/README.md), standing preferences in [MEMORY.md](MEM
 - 1.3.15 is not released. It was submitted for staged Chrome review (PENDING_REVIEW at the last
   recorded read) with a non-public GitHub draft, and the release posture below says 1.x gets no
   patch releases. The owner withdrew it on 2026-10-16: the draft is deleted and the `v1.3.15` tag
-  stays as history. Cancelling the dashboard item is owed; see Owed by the owner.
+  stays as history. The owner cancelled and pulled the Chrome Web Store item on 2026-10-17, so the
+  listing is clear for the 2.0 staged submission.
 - Nothing from the 2.0 break set is published. No `v2*` tag exists.
 
 ## Branches
@@ -83,10 +84,6 @@ pushes.
 
 ## Owed by the owner
 
-- Withdraw or keep the pending 1.3.15 submission and draft: the owner chose to withdraw it, so
-  cancel the 1.3.15 item in the Chrome Web Store dashboard. This must be settled before the 2.0
-  staged submission, because a pending submission blocks other store changes (ADR-0200
-  Decision 16).
 - Publish the sylin.org redirects `/ghostlight/get.ps1` and `/ghostlight/get.sh` to the scripts on
   `main` (separate repository).
 - The dashboard submission for 2.0 (staged, never published ahead of the release order), the
