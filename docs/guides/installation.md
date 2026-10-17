@@ -70,6 +70,10 @@ package. Snap and Flatpak browsers cannot start Ghostlight's browser relay throu
 messaging. Install and doctor identify those package forms and name the native-package remedy. Use
 `--all-browsers` only when deliberately preparing registrations before browser installation.
 
+`ghostlight install --client <id>` sets up only the agents you name: an agent's id selects every
+host it runs on (`--client cline` selects Cline's CLI and its Visual Studio Code, Cursor and
+Windsurf hosts), a host id such as `cline-vscode` selects one, and `ghostlight --help` lists them.
+
 Only checksum-bound, provenance-verified packages and a compatible published extension satisfy
 this journey. Provenance verification, clean-machine install, upgrade, and uninstall are release
 gates, not claims made by this source tree.

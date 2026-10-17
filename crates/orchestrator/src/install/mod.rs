@@ -413,6 +413,52 @@ pub struct HarnessSummary {
     pub manual_setup: String,
 }
 
+impl HarnessSummary {
+    /// Whether the `--client` value `id` selects this host: it is the host's harness id or its
+    /// agent's catalog id, ignoring case. An agent's id therefore selects every host it runs on.
+    #[must_use]
+    pub fn is_selected_by(&self, id: &str) -> bool {
+        self.id.eq_ignore_ascii_case(id) || self.agent.id.eq_ignore_ascii_case(id)
+    }
+}
+
+/// Every value `ghostlight install --client` and `ghostlight uninstall --client` accept, in roster
+/// order, for the help text, the refusal of an unknown value and the shell completions.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientIds {
+    /// Every agent's catalog id, once. Each selects every host the agent runs on.
+    pub agents: Vec<&'static str>,
+    /// The harness id of every host that no agent id names: the hosts of an agent that runs on
+    /// more than one. Each selects that one host.
+    pub hosts: Vec<&'static str>,
+}
+
+impl ClientIds {
+    /// The agent ids, then the host ids.
+    pub fn all(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.agents.iter().chain(&self.hosts).copied()
+    }
+}
+
+/// The `--client` values the roster offers. A harness id is a persisted key (the person's located
+/// paths are stored under it), so every one of them stays a value even when its agent's id is
+/// also listed.
+#[must_use]
+pub fn client_ids() -> ClientIds {
+    let mut agents: Vec<&'static str> = Vec::new();
+    for row in ROSTER {
+        if !agents.contains(&row.agent_id) {
+            agents.push(row.agent_id);
+        }
+    }
+    let hosts = ROSTER
+        .iter()
+        .map(|row| row.id)
+        .filter(|id| !agents.contains(id))
+        .collect();
+    ClientIds { agents, hosts }
+}
+
 /// Definite result of one explicit harness action.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HarnessActionResult {
@@ -2401,7 +2447,7 @@ mod tests {
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        agent_called, command_registration_state, definitions, edit_json, edit_toml,
+        agent_called, client_ids, command_registration_state, definitions, edit_json, edit_toml,
         executable_name, expected_json_entry, fix_toml, harness_roots, inspect, inspect_json,
         inspect_toml, json_entry_args, json_entry_command, jsonc_options, manual_json_setup,
         mcp_command_line, replace_with_backup, resolve_through_symlink, AppContainer,
@@ -2656,6 +2702,51 @@ mod tests {
                 "cline-windsurf"
             ]
         );
+    }
+
+    #[test]
+    fn every_client_id_selects_its_agents_hosts_or_its_one_host() {
+        let directory = temporary("client-ids");
+        let summaries = HarnessRegistry::with_context(context(&directory)).summaries();
+        let ids = client_ids();
+        let selected = |id: &str| -> Vec<String> {
+            summaries
+                .iter()
+                .filter(|summary| summary.is_selected_by(id))
+                .map(|summary| summary.id.clone())
+                .collect()
+        };
+        assert_eq!(
+            ids.hosts,
+            [
+                "cline-cli",
+                "cline-vscode",
+                "cline-cursor",
+                "cline-windsurf"
+            ]
+        );
+        assert_eq!(ids.all().count(), ids.agents.len() + ids.hosts.len());
+        for agent in &ids.agents {
+            let hosts: Vec<String> = ROSTER
+                .iter()
+                .filter(|row| row.agent_id == *agent)
+                .map(|row| row.id.to_owned())
+                .collect();
+            assert_eq!(selected(agent), hosts, "{agent}");
+            assert_eq!(selected(&agent.to_ascii_uppercase()), hosts, "{agent}");
+            assert_eq!(
+                ids.agents.iter().filter(|other| *other == agent).count(),
+                1,
+                "{agent}"
+            );
+        }
+        // Every harness id still selects exactly its own host, whether or not an agent id names it.
+        for row in ROSTER {
+            assert_eq!(selected(row.id), [row.id], "{}", row.id);
+        }
+        assert_eq!(selected("cline").len(), 4);
+        assert!(selected("Cline (Cursor)").is_empty());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -378,9 +378,43 @@ pub fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOption
 /// Render the CLI help text.
 pub fn help_text() -> String {
     format!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve --reason <word>   Start the service without a window (Ghostlight programs run this)\n  ghostlight mcp                     Run as a local stdio MCP server for an MCP client\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an MCP client (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the Ghostlight window\n\nUse 'ghostlight call --catalog' to list browser tools.",
-        version = env!("CARGO_PKG_VERSION")
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve --reason <word>   Start the service without a window (Ghostlight programs run this)\n  ghostlight mcp                     Run as a local stdio MCP server for an MCP client\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an agent, or one host of it (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the Ghostlight window\n\n{clients}\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        version = env!("CARGO_PKG_VERSION"),
+        clients = client_id_lines(),
     )
+}
+
+/// The widest line the help text's id lists fill.
+const HELP_WIDTH: usize = 96;
+
+/// The help text's list of `--client` values, read from the agent catalog: the agent ids, each
+/// of which selects every host the agent runs on, then the host ids, each of which selects one.
+fn client_id_lines() -> String {
+    let ids = crate::install::client_ids();
+    format!(
+        "Client ids (an agent id selects every host the agent runs on):\n{}\n{}",
+        id_list("  Agents: ", &ids.agents),
+        id_list("  Hosts:  ", &ids.hosts)
+    )
+}
+
+/// `ids` after `lead`, comma separated and wrapped at [`HELP_WIDTH`] under the first id.
+fn id_list(lead: &str, ids: &[&str]) -> String {
+    let indent = " ".repeat(lead.len());
+    let mut lines = Vec::new();
+    let mut line = lead.to_owned();
+    for (index, id) in ids.iter().enumerate() {
+        let comma = if index + 1 < ids.len() { "," } else { "" };
+        let word = format!("{id}{comma}");
+        if line.len() > indent.len() && line.len() + 1 + word.len() > HELP_WIDTH {
+            lines.push(std::mem::replace(&mut line, indent.clone()));
+        } else if line.len() > indent.len() {
+            line.push(' ');
+        }
+        line.push_str(&word);
+    }
+    lines.push(line);
+    lines.join("\n")
 }
 
 /// Print the CLI help text to standard output.
@@ -485,20 +519,83 @@ mod tests {
             ("ghostlight.fish", "set -l ghostlight_commands ", "\n"),
         ] {
             let source = std::fs::read_to_string(root.join(file)).expect("completion is readable");
-            let start = source
-                .find(prefix)
-                .unwrap_or_else(|| panic!("{file} declares no command list"))
-                + prefix.len();
-            let end = start
-                + source[start..]
-                    .find(suffix)
-                    .unwrap_or_else(|| panic!("{file} command list is unterminated"));
             assert_eq!(
-                source[start..end].trim(),
+                declared(file, &source, prefix, suffix),
                 expected,
                 "{file} offers a different command list than the command line has"
             );
         }
+    }
+
+    /// The text between the first `prefix` in `source` and the next `suffix`, trimmed.
+    fn declared<'a>(file: &str, source: &'a str, prefix: &str, suffix: &str) -> &'a str {
+        let start = source
+            .find(prefix)
+            .unwrap_or_else(|| panic!("{file} declares no {prefix:?} list"))
+            + prefix.len();
+        let end = start
+            + source[start..]
+                .find(suffix)
+                .unwrap_or_else(|| panic!("{file} {prefix:?} list is unterminated"));
+        source[start..end].trim()
+    }
+
+    /// The shell completions offer exactly the `--client` values the agent catalog has: every
+    /// agent id, then every host id.
+    #[test]
+    fn completion_client_ids_match_the_catalog() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packaging/linux/completions")
+            .canonicalize()
+            .expect("completion directory exists");
+        let expected = crate::install::client_ids()
+            .all()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for (file, prefix, suffix) in [
+            ("ghostlight.bash", "local clients=\"", "\""),
+            ("_ghostlight", "local -a ghostlight_clients=(", ")"),
+            ("ghostlight.fish", "set -l ghostlight_clients ", "\n"),
+        ] {
+            let source = std::fs::read_to_string(root.join(file)).expect("completion is readable");
+            assert_eq!(
+                declared(file, &source, prefix, suffix),
+                expected,
+                "{file} offers different client ids than the agent catalog has"
+            );
+        }
+    }
+
+    /// The manual page lists the `--client` values the agent catalog has, and so does help.
+    #[test]
+    fn the_manual_and_help_list_the_catalogs_client_ids() {
+        let page = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packaging/linux/man/ghostlight.1");
+        let source = std::fs::read_to_string(page).expect("the manual page is readable");
+        let ids = crate::install::client_ids();
+        for (prefix, expected) in [("\nAgent ids: ", &ids.agents), ("\nHost ids: ", &ids.hosts)] {
+            assert_eq!(
+                declared("ghostlight.1", &source, prefix, "\n").replace(r"\-", "-"),
+                expected.join(", "),
+                "the manual page lists different ids than the agent catalog has"
+            );
+        }
+        let help = help_text();
+        let listed: Vec<&str> = help
+            .split_once("Client ids")
+            .expect("help lists the client ids")
+            .1
+            .split_once("\n\n")
+            .expect("the client ids end in a blank line")
+            .0
+            .split([' ', ',', '\n'])
+            .filter(|word| !word.is_empty())
+            .skip_while(|word| *word != "Agents:")
+            .filter(|word| !word.ends_with(':'))
+            .collect();
+        assert_eq!(listed, ids.all().collect::<Vec<_>>());
+        assert!(help.lines().all(|line| line.len() <= 120));
+        assert!(help.is_ascii());
     }
 
     /// Every offered subcommand is documented in help, so the two surfaces cannot drift.

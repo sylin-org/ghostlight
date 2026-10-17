@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Bash completion for ghostlight.
 #
-# The command list below is checked against the command line's own list by a test in the
-# orchestrator. Adding a subcommand without adding it here fails that test.
+# The command list below is checked against the command line's own list, and the client list
+# against the agent catalog, by tests in the orchestrator. Adding a subcommand or an agent
+# without adding it here fails those tests.
 
 _ghostlight() {
     local commands="open install uninstall doctor status call diagnostics policy"
+    local clients="codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf"
     local current previous
     current="${COMP_WORDS[COMP_CWORD]}"
     previous="${COMP_WORDS[COMP_CWORD - 1]}"
@@ -20,7 +22,7 @@ _ghostlight() {
             COMPREPLY=($(compgen -W "--dry-run --browser --all-browsers --client --all-clients --no-clients --no-open" -- "${current}"))
             ;;
         uninstall)
-            COMPREPLY=($(compgen -W "--dry-run --browser" -- "${current}"))
+            COMPREPLY=($(compgen -W "--dry-run --browser --client" -- "${current}"))
             ;;
         doctor)
             COMPREPLY=($(compgen -W "--json --fix --verbose" -- "${current}"))
@@ -43,6 +45,9 @@ _ghostlight() {
             ;;
     esac
 
+    if [ "${previous}" = "--client" ]; then
+        COMPREPLY=($(compgen -W "${clients}" -- "${current}"))
+    fi
     if [ "${previous}" = "--output" ]; then
         COMPREPLY=($(compgen -f -- "${current}"))
     fi

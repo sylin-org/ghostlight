@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Zsh completion for ghostlight.
 #
-# The command list below is checked against the command line's own list by a test in the
-# orchestrator. Adding a subcommand without adding it here fails that test.
+# The command list below is checked against the command line's own list, and the client list
+# against the agent catalog, by tests in the orchestrator. Adding a subcommand or an agent
+# without adding it here fails those tests.
 
 _ghostlight() {
     local -a ghostlight_commands=(open install uninstall doctor status call diagnostics policy)
+    local -a ghostlight_clients=(codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf)
 
     if (( CURRENT == 2 )); then
         _describe -t commands 'ghostlight command' ghostlight_commands
@@ -24,7 +26,7 @@ _ghostlight() {
                 '--dry-run[Show changes without writing them]' \
                 '--browser[Select one supported browser]:browser:(chrome edge brave chromium)' \
                 '--all-browsers[Select every supported browser]' \
-                '--client[Select one MCP client]:client:' \
+                '*--client[Select an agent, or one host of it]:client:compadd -a ghostlight_clients' \
                 '--all-clients[Include clients not currently detected]' \
                 '--no-clients[Leave MCP client configuration unchanged]' \
                 '--no-open[Do not open the Ghostlight window]'
@@ -32,7 +34,8 @@ _ghostlight() {
         uninstall)
             _arguments \
                 '--dry-run[Show changes without writing them]' \
-                '--browser[Select one supported browser]:browser:(chrome edge brave chromium)'
+                '--browser[Select one supported browser]:browser:(chrome edge brave chromium)' \
+                '*--client[Select an agent, or one host of it]:client:compadd -a ghostlight_clients'
             ;;
         doctor)
             _arguments \

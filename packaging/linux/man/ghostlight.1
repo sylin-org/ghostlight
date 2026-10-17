@@ -1,5 +1,5 @@
 .\" SPDX-License-Identifier: Apache-2.0 OR MIT
-.TH GHOSTLIGHT 1 "2026-10-16" "Ghostlight 2.0.0" "Ghostlight Manual"
+.TH GHOSTLIGHT 1 "2026-10-17" "Ghostlight 2.0.0" "Ghostlight Manual"
 .SH NAME
 ghostlight \- governed browser automation for MCP clients
 .SH SYNOPSIS
@@ -37,8 +37,15 @@ Open the desktop workbench, starting the local authority if it is not running.
 .BR install " [" \-\-dry\-run "] [" \-\-browser " \fIid\fR] [" \-\-all\-browsers "] [" \-\-client " \fIid\fR] [" \-\-all\-clients "] [" \-\-no\-clients "] [" \-\-no\-open ]
 Register the browser native-messaging host and every detected MCP client.
 Repeating an install changes nothing that is already current.
+.B \-\-client
+selects one agent by its id, with every host it runs on, or one host by its
+host id, ignoring case; repeat it to select more.
+.br
+Agent ids: codex, claude\-code, claude\-desktop, cursor, vscode, windsurf, devin, zed, zcode, opencode, crush, copilot\-cli, cline, kiro, qwen\-code, junie, kilo\-code, goose, continue, antigravity
+.br
+Host ids: cline\-cli, cline\-vscode, cline\-cursor, cline\-windsurf
 .TP
-.BR uninstall " [" \-\-dry\-run "] [" \-\-browser " \fIid\fR]"
+.BR uninstall " [" \-\-dry\-run "] [" \-\-browser " \fIid\fR] [" \-\-client " \fIid\fR]"
 Remove only Ghostlight-owned registrations. Foreign configuration is preserved
 byte for byte.
 .TP

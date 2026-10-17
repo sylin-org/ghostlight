@@ -24,7 +24,7 @@ use crate::install::reconcile::{
     windows_entries_failure, PendingWindowsEntries, ReconcileReport, Registrations, WindowsRemoval,
 };
 use crate::install::record::InstallRecord;
-use crate::install::{setup_state, version_directories};
+use crate::install::{client_ids, setup_state, version_directories};
 use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::deployment as deployment_words;
 use crate::language::environment::{self, Environment};
@@ -740,23 +740,38 @@ fn client_step(
 
 /// Filter candidate MCP harness summaries based on user selection.
 ///
-/// A run also selects each client it would change if the app container it runs in did not keep
-/// that client's configuration private, so what it leaves is said rather than passed over.
+/// Each `--client` value selects the hosts [`HarnessSummary::is_selected_by`] says, in the order
+/// the values were given and each host once: an agent's id selects every host it runs on, and a
+/// harness id that one host. A value that selects nothing is refused with every valid id.
+///
+/// Without `--client`, a run also selects each client it would change if the app container it
+/// runs in did not keep that client's configuration private, so what it leaves is said rather than
+/// passed over.
 pub fn select_harnesses(
-    summaries: &[crate::install::HarnessSummary],
+    summaries: &[HarnessSummary],
     options: &SetupOptions,
     install: bool,
-) -> anyhow::Result<Vec<crate::install::HarnessSummary>> {
-    use crate::install::HarnessState;
-
+) -> anyhow::Result<Vec<HarnessSummary>> {
     if !options.client_ids.is_empty() {
-        let mut selected = Vec::new();
+        let mut selected: Vec<HarnessSummary> = Vec::new();
         for id in &options.client_ids {
-            let summary = summaries
+            let mut chosen = summaries
                 .iter()
-                .find(|summary| summary.id == *id)
-                .ok_or_else(|| anyhow::anyhow!("unknown MCP client '{id}'"))?;
-            selected.push(summary.clone());
+                .filter(|summary| summary.is_selected_by(id))
+                .peekable();
+            if chosen.peek().is_none() {
+                let valid = client_ids();
+                anyhow::bail!(
+                    "unknown MCP client '{id}'; expected an agent id ({}) or a host id ({})",
+                    valid.agents.join(", "),
+                    valid.hosts.join(", ")
+                );
+            }
+            for summary in chosen {
+                if !selected.iter().any(|kept| kept.id == summary.id) {
+                    selected.push(summary.clone());
+                }
+            }
         }
         return Ok(selected);
     }
@@ -1229,6 +1244,55 @@ mod tests {
             ids(select_harnesses(&summaries, &options, false).unwrap()),
             ["windsurf"]
         );
+    }
+
+    #[test]
+    fn a_client_id_selects_an_agents_every_host_or_one_host_in_the_order_given() {
+        let cline = |id: &str, host: &str| HarnessSummary {
+            agent: crate::agent::Agent::listed("cline", "Cline", "cline.svg"),
+            ..harness(id, &format!("Cline ({host})"), HarnessState::Available)
+        };
+        let summaries = [
+            harness("codex", "Codex", HarnessState::Installed),
+            cline("cline-cli", "CLI"),
+            cline("cline-vscode", "Visual Studio Code"),
+            cline("cline-cursor", "Cursor"),
+            harness("zed", "Zed", HarnessState::NotDetected),
+        ];
+        let select = |values: &[&str], install: bool| -> anyhow::Result<Vec<String>> {
+            let options = SetupOptions {
+                client_ids: values.iter().map(|value| (*value).into()).collect(),
+                ..SetupOptions::default()
+            };
+            Ok(select_harnesses(&summaries, &options, install)?
+                .into_iter()
+                .map(|summary| summary.id)
+                .collect())
+        };
+        assert_eq!(
+            select(&["cline"], true).unwrap(),
+            ["cline-cli", "cline-vscode", "cline-cursor"]
+        );
+        assert_eq!(select(&["CLINE-Cursor"], true).unwrap(), ["cline-cursor"]);
+        // A harness id selects exactly the host it selected before, whatever its state.
+        assert_eq!(select(&["zed", "codex"], true).unwrap(), ["zed", "codex"]);
+        assert_eq!(select(&["codex"], false).unwrap(), ["codex"]);
+        // A host named twice, by its agent and by its own id, is set up once.
+        assert_eq!(
+            select(&["cline-vscode", "cline", "codex"], false).unwrap(),
+            ["cline-vscode", "cline-cli", "cline-cursor", "codex"]
+        );
+        let refusal = select(&["cline", "Cline (Cursor)"], true)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refusal.starts_with("unknown MCP client 'Cline (Cursor)'; expected an agent id ("),
+            "{refusal}"
+        );
+        let valid = crate::install::client_ids();
+        for id in valid.all() {
+            assert!(refusal.contains(id), "{refusal} does not list {id}");
+        }
     }
 
     #[test]

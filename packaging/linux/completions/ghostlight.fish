@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Fish completion for ghostlight.
 #
-# The command list below is checked against the command line's own list by a test in the
-# orchestrator. Adding a subcommand without adding it here fails that test.
+# The command list below is checked against the command line's own list, and the client list
+# against the agent catalog, by tests in the orchestrator. Adding a subcommand or an agent
+# without adding it here fails those tests.
 
 set -l ghostlight_commands open install uninstall doctor status call diagnostics policy
+set -l ghostlight_clients codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf
 
 complete -c ghostlight -f
 
@@ -20,7 +22,7 @@ complete -c ghostlight -n "not __fish_seen_subcommand_from $ghostlight_commands"
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l dry-run -d "Show changes without writing them"
 complete -c ghostlight -n "__fish_seen_subcommand_from install uninstall" -l browser -d "Select one supported browser" -x -a "chrome edge brave chromium"
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l all-browsers -d "Select every supported browser"
-complete -c ghostlight -n "__fish_seen_subcommand_from install" -l client -d "Select one MCP client" -x
+complete -c ghostlight -n "__fish_seen_subcommand_from install uninstall" -l client -d "Select an agent, or one host of it" -x -a "$ghostlight_clients"
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l all-clients -d "Include clients not currently detected"
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l no-clients -d "Leave MCP client configuration unchanged"
 complete -c ghostlight -n "__fish_seen_subcommand_from install" -l no-open -d "Do not open the Ghostlight window"
