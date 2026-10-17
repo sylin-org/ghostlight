@@ -49,6 +49,8 @@ const NEVER_INSTALL_COMMANDS = new Set(["doctor", "status", "help", "--help", "-
 const HELP_COMMANDS = new Set(["install", "uninstall"]);
 /** The flags that ask a command for its help. */
 const HELP_FLAGS = new Set(["--help", "-h"]);
+/** The command a script runs, whose usage the service prints when a help flag is among its arguments. */
+const CALL_COMMAND = "call";
 
 export function releaseTarget(platform = process.platform, architecture = process.arch) {
   const key = `${platform}/${architecture}`;
@@ -88,12 +90,16 @@ export function edgeArguments(arguments_) {
 }
 
 /**
- * True for the commands that never install: `doctor`, `status`, `help`, `--version`, and the
- * help of `install` and `uninstall` (`install --help`). Every other command, including no
- * arguments (the MCP relay), needs the installed set.
+ * True for the commands that never install: `doctor`, `status`, `help`, `--version`, the help of
+ * `install` and `uninstall` (`install --help`), and `call` with a help flag anywhere among its
+ * arguments (`call browser_read --help`), the same rule the service uses to print the call usage.
+ * Every other command, including no arguments (the MCP relay), needs the installed set.
  */
 export function neverInstalls(arguments_) {
   if (arguments_.length === 2 && HELP_COMMANDS.has(arguments_[0]) && HELP_FLAGS.has(arguments_[1])) {
+    return true;
+  }
+  if (arguments_[0] === CALL_COMMAND && arguments_.slice(1).some((argument) => HELP_FLAGS.has(argument))) {
     return true;
   }
   return arguments_.length > 0 && NEVER_INSTALL_COMMANDS.has(arguments_[0]);

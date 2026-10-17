@@ -200,15 +200,17 @@ test("unverified download bytes never replace the cache", async () => {
 });
 
 
-test("only doctor, status, help and version never install", () => {
+test("only doctor, status, help, version and the help of install, uninstall and call never install", () => {
   for (const command of ["doctor", "status", "help", "--help", "-h", "--version", "-V"]) {
     assert.equal(neverInstalls([command, "--json"]), true, command);
   }
-  for (const arguments_ of [["install", "--help"], ["install", "-h"], ["uninstall", "--help"], ["uninstall", "-h"]]) {
+  for (const arguments_ of [["install", "--help"], ["install", "-h"], ["uninstall", "--help"], ["uninstall", "-h"],
+    ["call", "--help"], ["call", "-h"], ["call", "browser_read", "--help"], ["call", "--stdin", "-h", "--json"]]) {
     assert.equal(neverInstalls(arguments_), true, arguments_.join(" "));
   }
   for (const arguments_ of [[], ["install"], ["open"], ["serve"], ["diagnostics", "path"],
-    ["policy", "validate"], ["call", "--catalog"], ["uninstall"], ["install", "--force"], ["deployment", "install"], ["unknown"]]) {
+    ["policy", "validate"], ["call", "--catalog"], ["call", "browser_read", "{\"help\":true}"], ["call", "--helpful"],
+    ["uninstall"], ["install", "--force"], ["deployment", "install"], ["unknown"]]) {
     assert.equal(neverInstalls(arguments_), false, arguments_.join(" ") || "(no arguments)");
   }
 });
@@ -433,7 +435,8 @@ test("a bad download never touches the installed service", async () => {
 
 test("never-install commands run the installed edge whatever its version and never install", async () => {
   for (const arguments_ of [["doctor"], ["status", "--json"], ["help"], ["--help"], ["-h"], ["--version"], ["-V"],
-    ["install", "--help"], ["install", "-h"], ["uninstall", "--help"], ["uninstall", "-h"]]) {
+    ["install", "--help"], ["install", "-h"], ["uninstall", "--help"], ["uninstall", "-h"], ["call", "--help"],
+    ["call", "browser_read", "-h"]]) {
     const f = await launcherFixture();
     try {
       await f.install("1.0.0");
@@ -448,7 +451,7 @@ test("never-install commands run the installed edge whatever its version and nev
 });
 
 test("subcommand help with nothing installed runs the staged service and installs nothing", async () => {
-  for (const arguments_ of [["install", "--help"], ["uninstall", "-h"]]) {
+  for (const arguments_ of [["install", "--help"], ["uninstall", "-h"], ["call", "--help"], ["call", "--stdin", "-h"]]) {
     const f = await launcherFixture();
     try {
       const launch = await f.prepareLaunch({ ...f.options, arguments_ });

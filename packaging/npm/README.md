@@ -4,8 +4,8 @@ Delightful, responsible browser automation for AI coding agents. Ghostlight give
 access to your own authenticated Chromium session, keeps the work visible, and adds inspectable
 boundaries when you want them. All-open is a first-class default.
 
-This npm package is a thin launcher. Every command except `doctor`, `status`, `help` and
-`--version` runs the installed `ghostlight` under `~/.ghostlight/bin/` when its `install.json` records the
+This npm package is a thin launcher. Every command except `doctor`, `status`, `help`, `--version`
+and the help of `install`, `uninstall` and `call` (`call --help`) runs the installed `ghostlight` under `~/.ghostlight/bin/` when its `install.json` records the
 same or a newer service version than this package. Otherwise the launcher downloads the
 version-matched images from the GitHub release into temporary storage (the edge `ghostlight`, the
 service `ghostlight-service` and the window `ghostlight-desktop`), verifies all three against the
