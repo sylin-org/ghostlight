@@ -106,7 +106,7 @@ struct Published {
 #[derive(Debug, Eq, PartialEq)]
 struct SetupInputsKey {
     browsers: Vec<String>,
-    clients: Vec<Option<String>>,
+    clients: Vec<String>,
     complete: bool,
 }
 
@@ -273,8 +273,8 @@ impl Live {
                         .filter(|operation| operation.workspace == workspace.id)
                         .count(),
                     id: workspace.id,
-                    agent: crate::language::provenance::agent_name(
-                        &workspace.client_label,
+                    agent: crate::agent::Agent::of(
+                        Some(&workspace.client_label),
                         workspace.channel,
                     ),
                     connections: workspace.connections,
@@ -420,10 +420,10 @@ impl Live {
             .map(|browser| browser.family.clone())
             .collect();
         browsers.sort();
-        let mut clients: Vec<Option<String>> = gathered
+        let mut clients: Vec<String> = gathered
             .sessions
             .iter()
-            .map(|session| session.agent.clone())
+            .map(|session| session.agent.name.clone())
             .collect();
         clients.sort();
         SetupInputsKey {

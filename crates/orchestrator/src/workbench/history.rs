@@ -53,6 +53,7 @@ pub(super) fn merge_stored(
         let mut item = HistoryItem::from(record.clone());
         item.storage = storage;
         if let Some(provenance) = &provenance {
+            item.agent = crate::agent::Agent::of_evidence(Some(provenance));
             item.provenance = Some(provenance.clone());
         }
         if storage == crate::language::audit_health::Storage::Unconfirmed {

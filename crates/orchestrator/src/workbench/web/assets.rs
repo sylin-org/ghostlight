@@ -112,7 +112,6 @@ pub const ASSETS: &[Asset] = &[
     ),
     asset!("/integrations/crush.svg", Svg, "integrations/crush.svg"),
     asset!("/integrations/cursor.svg", Svg, "integrations/cursor.svg"),
-    asset!("/integrations/generic.svg", Svg, "integrations/generic.svg"),
     asset!("/integrations/goose.svg", Svg, "integrations/goose.svg"),
     asset!("/integrations/junie.svg", Svg, "integrations/junie.svg"),
     asset!(

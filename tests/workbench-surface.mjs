@@ -153,6 +153,20 @@ const pushed = async (change) => {
 };
 let policyReply = null;
 
+/** The agents on the roster these fixtures use, by the name the service gives each. */
+const ROSTER_AGENTS = new Map([["Codex", "codex"], ["Zed", "zed"], ["Claude Code", "claude-code"]]);
+
+/**
+ * An agent as the service names it: a roster agent wears its packaged tile, the command line its
+ * prompt, and any other name, or none, the unknown glyph.
+ */
+const namedAgent = (name) => {
+  if (name === "Command line") return { id: "command_line", name, symbol: { glyph: "command_line" } };
+  const id = ROSTER_AGENTS.get(name);
+  if (id) return { id, name, symbol: { src: `integrations/${id}.svg` } };
+  return { id: "unknown", name: name ?? "Unknown agent", symbol: { glyph: "unknown" } };
+};
+
 const snapshot = () => ({
   seq: ++snapshots,
   service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
@@ -167,13 +181,15 @@ const snapshot = () => ({
     status: "succeeded", effect: "none", allowed: true, summary: "Read 5 words.", complete: true
   }] : [],
   harnesses: [{
-    id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User", icon: "codex.svg", state: "updatable",
+    id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User",
+    agent: { id: "codex", name: "Codex", symbol: { src: "integrations/codex.svg" } }, state: "updatable",
     detail: "The connector path belongs to an older installation.",
     can_install: true, can_fix: false, can_uninstall: false, can_download: true, can_locate: true,
     config_path: "/home/test/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "[mcp_servers.ghostlight]"
   }, {
-    id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI", icon: "qwen-code.svg",
+    id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI",
+    agent: { id: "qwen-code", name: "Qwen Code", symbol: { src: "integrations/qwen-code.svg" } },
     state: "not_detected", detail: "Not detected.", can_install: true, can_fix: false, can_uninstall: false,
     can_download: true, can_locate: true, copy_only: false, config_path: "/home/test/.qwen/settings.json",
     connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup"
@@ -505,7 +521,8 @@ const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error)
 // the booted roster's, so the booted page's own listeners leave this one alone.
 const AGENT_COMMAND = "/opt/ghostlight/ghostlight mcp";
 const agentRow = (id, name, state, extra = {}) => ({
-  id, product_id: id, name, label: name, target: "User", icon: `${id}.svg`, state, detail: "Said by the service.",
+  id, product_id: id, name, label: name, target: "User", agent: { id, name, symbol: { src: `integrations/${id}.svg` } },
+  state, detail: "Said by the service.",
   can_install: ["available", "updatable", "not_detected"].includes(state) && !extra.copy_only,
   can_fix: false, can_uninstall: state === "installed", can_download: true, can_locate: true, copy_only: false,
   config_path: `/home/test/.${id}/settings.json`, connector_command: AGENT_COMMAND,
@@ -531,9 +548,9 @@ const agentRoster = [
 ];
 view.collections({
   sessions: [
-    { id: "w-zed-1", agent: "Zed", channel: "mcp", tab_count: 1, active_operations: 0 },
-    { id: "w-zed-2", agent: "Zed", channel: "mcp", tab_count: 2, active_operations: 1 },
-    { id: "w-cli", agent: "Command line", channel: "cli", tab_count: 1, active_operations: 0 }
+    { id: "w-zed-1", agent: namedAgent("Zed"), channel: "mcp", tab_count: 1, active_operations: 0 },
+    { id: "w-zed-2", agent: namedAgent("Zed"), channel: "mcp", tab_count: 2, active_operations: 1 },
+    { id: "w-cli", agent: namedAgent("Command line"), channel: "cli", tab_count: 1, active_operations: 0 }
   ],
   browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
   configuration: { managed_policy: { configured: false } },
@@ -821,27 +838,28 @@ const provenanceChecks = [];
 {
   const evidence = {
     connection_id: "connection_original", reported_application: "Original <script>claim</script>",
-    agent: "Original <script>claim</script>", channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it."
+    channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it."
   };
-  const laterSession = { id: "shared-workspace", agent: "Later application", channel: "cli" };
+  const claimed = namedAgent("Original <script>claim</script>");
+  const laterSession = { id: "shared-workspace", agent: namedAgent("Later application"), channel: "cli" };
   const connectionView = sandbox.globalThis.GhostlightView.create({ sessionFor: () => laterSession });
   const entries = sandbox.globalThis.GhostlightEntries;
   const operation = { invocation: "provenance-work", workspace: laterSession.id, tool: "browser_read",
-    phase: "running", activity: "Reading", provenance: evidence };
+    phase: "running", activity: "Reading", provenance: evidence, agent: claimed };
   const record = { ...operation, complete: true, summary: "Read 5 words.", status: "succeeded",
-    allowed: true, effect: "none", channel: "mcp", provenance: evidence };
+    allowed: true, effect: "none", channel: "mcp", provenance: evidence, agent: claimed };
   connectionView.hero(entries.entryFromOperation(operation), false);
   let html = nodes.get("hero-body").innerHTML;
   provenanceChecks.push(["live action attribution uses its own connection and escapes the claim",
     html.includes("Original &lt;script&gt;claim&lt;/script&gt;")
       && !html.includes("Later application") && !html.includes("<script>claim")]);
-  const restored = { ...record, provenance: { ...evidence, reported_application: null, agent: null } };
+  const restored = { ...record, provenance: { ...evidence, reported_application: null }, agent: namedAgent(null) };
   connectionView.hero(entries.entryFromRecord(restored), false);
   html = nodes.get("hero-body").innerHTML;
   provenanceChecks.push(["restored history keeps its connection without borrowing a current claim",
     html.includes("Not retained in history") && html.includes("connection_original")
       && !html.includes("Later application") && html.includes("MCP client")]);
-  connectionView.hero(entries.entryFromRecord({ ...record, provenance: null, channel: null }), false);
+  connectionView.hero(entries.entryFromRecord({ ...record, provenance: null, channel: null, agent: namedAgent(null) }), false);
   html = nodes.get("hero-body").innerHTML;
   provenanceChecks.push(["legacy history names missing evidence without borrowing current-session identity",
     html.includes("Connection details were not recorded.") && !html.includes("Later application") && !html.includes("via cli")]);
@@ -859,8 +877,8 @@ const glanceChecks = [];
 {
   const glanceView = sandbox.globalThis.GhostlightView.create({});
   const claim = (id, agent, extra = {}) => ({
-    id, agent, channel: "mcp", tab_count: 0, active_operations: 0,
-    connections: [{ connection_id: `connection_${id}`, reported_application: agent, agent, channel: "mcp",
+    id, agent: namedAgent(agent), channel: "mcp", tab_count: 0, active_operations: 0,
+    connections: [{ connection_id: `connection_${id}`, reported_application: agent, channel: "mcp",
       explanation: `"${agent}" is what the agent calls itself; Ghostlight does not verify it.` }],
     ...extra
   });
@@ -868,7 +886,7 @@ const glanceChecks = [];
     ...Array.from({ length: 5 }, (_, at) => claim(`codex_${at}`, "Codex")),
     claim("claude", "Claude <b>Code</b>", { tab_count: 2, active_operations: 1, browser: "Google Chrome" }),
     { ...claim("script", "Command line"), channel: "cli",
-      connections: [{ connection_id: "connection_script", agent: "Command line", channel: "cli",
+      connections: [{ connection_id: "connection_script", channel: "cli",
         explanation: "A ghostlight call session is a local program." }] }
   ];
   const browsers = [{ id: "chrome", family: "Google Chrome", adapter_version: "2.0.0", tab_count: 2, connected: true }];
@@ -912,7 +930,7 @@ const glanceChecks = [];
       html.includes(`<span class="chip glance-chip missing"><span class="dot"></span>${line}</span>`)
         && html.includes(">no browser<"), html]);
   }
-  const unnamed = { ...claim("unnamed", null), connections: [{ connection_id: "connection_unnamed", agent: null,
+  const unnamed = { ...claim("unnamed", null), connections: [{ connection_id: "connection_unnamed",
     channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it." }] };
   html = draw({ sessions: [unnamed, { ...unnamed, id: "unnamed_2" }], browsers });
   glanceChecks.push(["a session whose client reported no name is one Unknown agent, never a blank chip",
@@ -993,19 +1011,23 @@ const contextFor = (kind) => {
 };
 
 const roster = () => [
-  { id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User", icon: "codex.svg", state: "updatable",
+  { id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User",
+    agent: { id: "codex", name: "Codex", symbol: { src: "integrations/codex.svg" } }, state: "updatable",
     detail: "Old owned connector.", can_install: true, can_fix: false, can_uninstall: false, can_download: true,
     can_locate: true, config_path: "~/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "codex setup", download_url: "https://example.test/codex" },
-  { id: "zed", product_id: "zed", name: "Zed", label: "Zed", target: "User", icon: "zed.svg", state: "installed",
+  { id: "zed", product_id: "zed", name: "Zed", label: "Zed", target: "User",
+    agent: { id: "zed", name: "Zed", symbol: { src: "integrations/zed.svg" } }, state: "installed",
     detail: "Current.", can_install: false, can_fix: false, can_uninstall: true, can_download: true,
     can_locate: true, config_path: "~/.config/zed/settings.json", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "zed setup", download_url: "https://example.test/zed" },
-  { id: "junie", product_id: "junie", name: "Junie", label: "Junie", target: "CLI", icon: "junie.svg", state: "needs_attention",
+  { id: "junie", product_id: "junie", name: "Junie", label: "Junie", target: "CLI",
+    agent: { id: "junie", name: "Junie", symbol: { src: "integrations/junie.svg" } }, state: "needs_attention",
     detail: "Foreign entry preserved.", can_install: false, can_fix: true, can_uninstall: false, can_download: true,
     can_locate: true, config_path: "~/.junie/mcp.json", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "junie setup", download_url: "https://example.test/junie" },
-  { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI", icon: "qwen-code.svg",
+  { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI",
+    agent: { id: "qwen-code", name: "Qwen Code", symbol: { src: "integrations/qwen-code.svg" } },
     state: "not_detected", detail: "Not detected.", can_install: true, can_fix: false, can_uninstall: false,
     can_download: true, can_locate: true, config_path: "~/.qwen/settings.json",
     connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup",
@@ -1132,9 +1154,9 @@ function fakeService(kind, { served = true } = {}) {
 
 /** What a watching screen is shown connected: one agent and no browser, which one starts on request. */
 const WATCHED_CONNECTIONS = {
-  sessions: [{ id: "workspace_codex", agent: "Codex", channel: "mcp",
+  sessions: [{ id: "workspace_codex", agent: namedAgent("Codex"), channel: "mcp",
     tab_count: 0, active_operations: 0,
-    connections: [{ connection_id: "connection_watched", reported_application: "codex-mcp-client", agent: "Codex",
+    connections: [{ connection_id: "connection_watched", reported_application: "codex-mcp-client",
       channel: "mcp", explanation: "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it." }] }],
   browsers: [],
   no_browser: "Starts Google Chrome on request"

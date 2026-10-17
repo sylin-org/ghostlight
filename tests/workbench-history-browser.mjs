@@ -190,9 +190,10 @@ try {
   // C1: a later connection cannot relabel a receipt, and details remain usable across refresh.
   await evaluate(`(() => {
     const provenance = structuredClone(window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0]);
+    const agent = structuredClone(window.__GHOSTLIGHT_PREVIEW__.sessions[0].agent);
     const record = { invocation: 'c1-receipt', workspace: 'workspace_codex', tool: 'browser_read',
       capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
-      complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance };
+      complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance, agent };
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
   })()`);
   const receiptDetails = '[data-history-details="c1-receipt:connection"]';
@@ -203,12 +204,12 @@ try {
   await evaluate("document.querySelector('.session-connections > summary').focus({ preventScroll: true })");
   await evaluate(`(() => {
     const snapshot = window.__GHOSTLIGHT_PREVIEW__;
-    snapshot.sessions[0].agent = 'Later application';
+    snapshot.sessions[0].agent = { id: 'unknown', name: 'Later application', symbol: { glyph: 'unknown' } };
     snapshot.sessions[0].connections = [
       { ...snapshot.sessions[0].connections[0], connection_id: 'connection_later',
-        reported_application: 'Later application', agent: 'Later application' },
+        reported_application: 'Later application' },
       { ...snapshot.sessions[0].connections[0], connection_id: 'connection_unavailable',
-        reported_application: 'Another application', agent: 'Another application',
+        reported_application: 'Another application',
         explanation: 'A ghostlight call session is a local program.' }
     ];
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
@@ -230,7 +231,8 @@ try {
       capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
       complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance: {
         ...window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0],
-        reported_application: null, agent: null } };
+        reported_application: null },
+      agent: { id: 'unknown', name: 'Unknown agent', symbol: { glyph: 'unknown' } } };
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
       ...record, invocation: 'c1-legacy', provenance: null } });

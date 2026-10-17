@@ -670,7 +670,8 @@ function snapshotParts() {
     activity: { operations: [], history: [], document_coverage: [] },
     integrations: {
       harnesses: [{
-        id: "claude-desktop", product_id: "claude-desktop", name: "Claude Desktop", target: "User", icon: "claude-desktop.svg",
+        id: "claude-desktop", product_id: "claude-desktop", name: "Claude Desktop", target: "User",
+        agent: { id: "claude-desktop", name: "Claude Desktop", symbol: { src: "integrations/claude-desktop.svg" } },
         state: "available", detail: "Detected.", can_install: true, can_uninstall: false, can_download: true, can_locate: true,
         config_path: "/home/test/claude.json", connector_command: "ghostlight mcp", manual_setup: "{}"
       }]

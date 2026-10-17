@@ -24,7 +24,7 @@ const jsonSetup = (collection = "mcpServers") => JSON.stringify({
 }, null, 2);
 
 const previewHarness = ({
-  id, productId = id, name, label = name, target, icon = `${id}.svg`, state, configPath,
+  id, productId = id, name, label = name, target, monogram = `${id}.svg`, state, configPath,
   canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false
 }) => ({
   id,
@@ -32,7 +32,8 @@ const previewHarness = ({
   name,
   label,
   target,
-  icon,
+  // The agent the row sets up, as the service names it: its packaged monogram tile.
+  agent: { id, name, symbol: { src: `integrations/${monogram}` } },
   state,
   detail: detail ?? harnessDetail[state],
   ...(evidence ? { evidence } : {}),
@@ -52,20 +53,20 @@ const previewHarness = ({
 // copy-only). The rail must form its groups without inheriting registry or fixture order.
 const harnesses = [
   previewHarness({ id: "qwen-code", name: "Qwen Code", target: "CLI", state: "not_detected", configPath: "/home/test/.qwen/settings.json" }),
-  previewHarness({ id: "cline-vscode", productId: "cline", name: "Cline", label: "Cline (Visual Studio Code)", target: "Visual Studio Code", icon: "cline.svg", state: "available", configPath: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-vscode", productId: "cline", name: "Cline", label: "Cline (Visual Studio Code)", target: "Visual Studio Code", monogram: "cline.svg", state: "available", configPath: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
   previewHarness({
     id: "claude-desktop", name: "Claude Desktop", target: "User", state: "needs_attention",
     configPath: "/home/test/.config/Claude/claude_desktop_config.json", canDownload: false,
     detail: "This configuration could not be parsed; it was left untouched."
   }),
   previewHarness({ id: "windsurf", name: "Windsurf", target: "User", state: "available", configPath: "/home/test/.codeium/windsurf/mcp_config.json" }),
-  previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", icon: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
+  previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", monogram: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
   previewHarness({ id: "crush", name: "Crush", target: "User", state: "not_detected", configPath: "/home/test/.config/crush/crush.json", manualSetup: jsonSetup("mcp") }),
   previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorPath}"\nargs = ["mcp"]\n` }),
   previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "not_detected", copyOnly: true, configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorPath}"\n    args: ["mcp"]\n` }),
   previewHarness({ id: "antigravity", name: "Antigravity", target: "CLI", state: "not_detected", configPath: "/home/test/.gemini/config/mcp_config.json" }),
   previewHarness({
-    id: "cline-cursor", productId: "cline", name: "Cline", label: "Cline (Cursor)", target: "Cursor", icon: "cline.svg",
+    id: "cline-cursor", productId: "cline", name: "Cline", label: "Cline (Cursor)", target: "Cursor", monogram: "cline.svg",
     state: "needs_attention",
     configPath: "/home/test/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
     evidence: `Found another program, \`npx\` with 2 arguments, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
@@ -75,7 +76,7 @@ const harnesses = [
   previewHarness({ id: "zed", name: "Zed", target: "User", state: "installed", configPath: "/home/test/.config/zed/settings.json", manualSetup: jsonSetup("context_servers") }),
   previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "available", copyOnly: true, configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorPath}"\n    args: ["mcp"]\n    envs: {}\n    timeout: 300\n` }),
   previewHarness({ id: "copilot-cli", name: "GitHub Copilot CLI", target: "CLI", state: "available", configPath: "/home/test/.copilot/mcp-config.json" }),
-  previewHarness({ id: "cline-cli", productId: "cline", name: "Cline", label: "Cline (CLI)", target: "CLI", icon: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-cli", productId: "cline", name: "Cline", label: "Cline (CLI)", target: "CLI", monogram: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
   previewHarness({
     id: "junie", name: "Junie", target: "CLI and JetBrains", state: "needs_attention",
     configPath: "/home/test/.junie/mcp/mcp.json",
@@ -89,9 +90,17 @@ const harnesses = [
     evidence: `Found another program, \`alien-cli\` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
   previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "installed", configPath: "/home/test/.claude.json" }),
-  previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", label: "Cline (Windsurf)", target: "Windsurf", icon: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", label: "Cline (Windsurf)", target: "Windsurf", monogram: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
   previewHarness({ id: "vscode", name: "Visual Studio Code", target: "User", state: "available", configPath: "/home/test/.config/Code/User/mcp.json", manualSetup: jsonSetup("servers") })
 ];
+
+/** The command line and an agent nothing names, the catalog's two reserved entries. */
+const COMMAND_LINE_AGENT = { id: "command_line", name: "Command line", symbol: { glyph: "command_line" } };
+const UNKNOWN_AGENT = { id: "unknown", name: "Unknown agent", symbol: { glyph: "unknown" } };
+
+/** The agent the service names by `name`: the roster's first row of that name, or the command line. */
+const agentNamed = (name) => (name === COMMAND_LINE_AGENT.name ? COMMAND_LINE_AGENT
+  : harnesses.find((harness) => harness.name === name)?.agent ?? { ...UNKNOWN_AGENT, name });
 
 const expectedHarnessIds = [
   "antigravity", "claude-code", "claude-desktop", "cline-cli", "cline-cursor",
@@ -144,10 +153,10 @@ const controlsFixture = {
 };
 
 /** The connection evidence a preview record carries, as the service shapes it. */
-function previewEvidence(connection_id, reported_application, agent, channel) {
+function previewEvidence(connection_id, reported_application, channel) {
   const explanation = channel === "cli" ? "A ghostlight call session is a local program."
     : `"${reported_application}" is what the agent calls itself; Ghostlight does not verify it.`;
-  return { connection_id, reported_application, agent, channel, explanation };
+  return { connection_id, reported_application, channel, explanation };
 }
 
 const snapshot = {
@@ -156,11 +165,11 @@ const snapshot = {
   service: { version: "1.0.0", started_at_ms: Date.now() - 540000, runtime_state: "active" },
   overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
-    { id: "workspace_codex", agent: "Codex", channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1, browser: "Chrome" },
+    { id: "workspace_codex", agent: agentNamed("Codex"), channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1, browser: "Chrome" },
     // Codex starts a session per request, so its card holds more lines than it shows.
-    ...[2, 3, 4, 5, 6].map((at) => ({ id: `workspace_codex_${at}`, agent: "Codex", channel: "mcp", leased: false, tab_count: 0, held_tab_count: 0, active_operations: 0 })),
-    { id: "workspace_claude", agent: "Claude Code", channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1, browser: "Edge" },
-    { id: "workspace_script", agent: "Command line", channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0, browser: "Chrome" }
+    ...[2, 3, 4, 5, 6].map((at) => ({ id: `workspace_codex_${at}`, agent: agentNamed("Codex"), channel: "mcp", leased: false, tab_count: 0, held_tab_count: 0, active_operations: 0 })),
+    { id: "workspace_claude", agent: agentNamed("Claude Code"), channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1, browser: "Edge" },
+    { id: "workspace_script", agent: agentNamed("Command line"), channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0, browser: "Chrome" }
   ],
   operations: [
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
@@ -171,11 +180,11 @@ const snapshot = {
     { id: "browser_edge", family: "Edge", adapter_version: "1.0.0", connected: true, tab_count: 1 }
   ],
   // The activity list names each agent, marks the command line, and shows no browser for a call
-  // that never reached one; a record that names no agent reads "Unknown agent".
+  // that never reached one; a restored record whose agent the service cannot name reads "Unknown agent".
   history: [
-    { timestamp_ms: Date.now() - 60000, invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", provenance: previewEvidence("connection_claude", "claude-code", "Claude Code", "mcp") },
-    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", provenance: previewEvidence("connection_codex", "codex-mcp-client", "Codex", "mcp") },
-    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", provenance: previewEvidence("connection_script", null, "Command line", "cli") },
+    { timestamp_ms: Date.now() - 60000, invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", provenance: previewEvidence("connection_claude", "claude-code", "mcp") },
+    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", provenance: previewEvidence("connection_codex", "codex-mcp-client", "mcp") },
+    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", provenance: previewEvidence("connection_script", null, "cli") },
     { timestamp_ms: Date.now() - 420000, invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp" }
   ],
   diagnostics: [
@@ -286,17 +295,18 @@ if (historyScenario) {
 // C1 fixtures carry connection evidence: the name each agent's client reported for itself.
 const REPORTED = { "Codex": "codex-mcp-client", "Claude Code": "claude-code", "Command line": "ghostlight call" };
 for (const session of snapshot.sessions) {
-  const reported = REPORTED[session.agent];
+  const reported = REPORTED[session.agent.name];
   session.connections = [{
-    connection_id: `connection_${session.id}`, reported_application: reported,
-    agent: session.agent, channel: session.channel,
+    connection_id: `connection_${session.id}`, reported_application: reported, channel: session.channel,
     explanation: session.channel === "cli"
       ? "A ghostlight call session is a local program. Ghostlight does not verify the scripts and instructions it runs."
       : `"${reported}" is what the agent calls itself; Ghostlight does not verify it.`
   }];
 }
 const retainConnection = (record) => {
-  record.provenance = structuredClone(snapshot.sessions.find(session => session.id === record.workspace)?.connections[0] ?? null);
+  const session = snapshot.sessions.find(item => item.id === record.workspace);
+  record.provenance = structuredClone(session?.connections[0] ?? null);
+  record.agent = structuredClone(session?.agent ?? UNKNOWN_AGENT);
   for (const step of record.steps ?? []) if (step.record) retainConnection(step.record);
 };
 snapshot.operations.forEach(retainConnection);
@@ -381,7 +391,8 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
       activity: spec.activity,
       capability: spec.capability,
       started_at_ms: Date.now(),
-      phase: "running"
+      phase: "running",
+      agent: session.agent
     };
     preview.operations.push(operation);
     publish({ kind: "operation_started", operation });
@@ -402,15 +413,15 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
         summary: blocked ? "Authority blocked the browser job." : spec.summary,
         duration_ms: spec.ms,
         observed: blocked ? {} : spec.observed,
-        // The record carries the intake and the name of the session that ran it, as the service's do.
+        // The record carries the intake and the agent of the session that ran it, as the service's do.
         channel: session.channel,
+        agent: session.agent,
         provenance: {
           connection_id: "connection_" + session.id,
-          reported_application: session.channel === "cli" ? null : session.agent,
-          agent: session.agent,
+          reported_application: session.channel === "cli" ? null : session.agent.name,
           channel: session.channel,
           explanation: session.channel === "cli" ? "A ghostlight call session is a local program."
-            : '"' + session.agent + '" is what the agent calls itself; Ghostlight does not verify it.'
+            : '"' + session.agent.name + '" is what the agent calls itself; Ghostlight does not verify it.'
         }
       };
       publish({ kind: "operation_settled", record });

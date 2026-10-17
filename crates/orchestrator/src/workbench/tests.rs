@@ -1094,6 +1094,7 @@ fn every_change_the_orchestrator_publishes_carries_the_kind_the_window_reads() {
         started_at_ms: Some(1),
         phase,
         provenance: None,
+        agent: crate::agent::Agent::unknown(),
     };
     let record = || {
         Box::new(HistoryItem::from(AuditRecord::now(
@@ -1359,45 +1360,104 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
         ControlledBrowser::new(false, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
-    let mut named: Vec<(Option<String>, String, Vec<Option<String>>)> = facade
+    let mut named: Vec<(String, String, String)> = facade
         .snapshot()
         .sessions
         .into_iter()
         .map(|session| {
-            let agents = session
-                .connections
-                .iter()
-                .map(|connection| connection.agent.clone())
-                .collect();
             let reported = session
                 .connections
                 .first()
                 .and_then(|connection| connection.reported_application.clone())
                 .unwrap_or_default();
-            (session.agent, reported, agents)
+            (session.agent.name, session.agent.id, reported)
         })
         .collect();
     named.sort();
     assert_eq!(
         named,
         [
+            ("Codex".into(), "codex".into(), "codex-mcp-client".into()),
             (
-                Some("Codex".to_owned()),
-                "codex-mcp-client".to_owned(),
-                vec![Some("Codex".to_owned())]
+                "Command line".into(),
+                crate::agent::COMMAND_LINE_ID.into(),
+                "ghostlight call".into()
             ),
             (
-                Some("Command line".to_owned()),
-                "ghostlight call".to_owned(),
-                vec![Some("Command line".to_owned())]
-            ),
-            (
-                Some("my agent".to_owned()),
-                "my agent".to_owned(),
-                vec![Some("my agent".to_owned())]
+                "my agent".into(),
+                crate::agent::UNKNOWN_ID.into(),
+                "my agent".into()
             ),
         ]
     );
+}
+
+#[test]
+fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
+    use crate::agent::Symbol;
+    use crate::intake::session::IntakeChannel;
+
+    let root = std::env::temp_dir().join(format!("ghostlight-one-agent-{}", uuid::Uuid::new_v4()));
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    let workspace = workspaces.admit("codex-mcp-client".into(), IntakeChannel::Mcp);
+    let evidence = workspaces.single_connection(&workspace).unwrap();
+    let projection = WorkbenchProjection::default();
+    let facade = WorkbenchFacade::new(
+        projection.clone(),
+        workspaces,
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(false, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    )
+    .with_harnesses(crate::install::HarnessRegistry::isolated(
+        &root.join("clients"),
+        &root.join("ghostlight"),
+        &root.join("state"),
+    ));
+    projection.react(&DomainEvent::WorkStarted {
+        provenance: Some(evidence.details()),
+        invocation: "invocation_running".into(),
+        workspace: workspace.as_str().into(),
+        tool: "browser_read".into(),
+        activity: PresentationActivity::Read,
+        capabilities: Capability::Read.into(),
+    });
+    let recorder = AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone());
+    let governance = GovernanceFacade::new(None, None);
+    let record = AuditRecord::now(
+        "invocation_done",
+        workspace.as_str(),
+        "browser_read",
+        Capability::Read,
+        governance.snapshot().id(),
+        Decision::permitted(),
+        "succeeded",
+        "none",
+        &crate::language::outcome::Outcome::TextRead {
+            words: 12,
+            host: Some("example.com".into()),
+        }
+        .audit(),
+        5,
+    )
+    .with_provenance(Some(evidence.attribution()));
+    recorder.record_with_provenance(&record, Some(&evidence));
+    facade.refresh_harnesses().unwrap();
+    let shown = facade.snapshot();
+    let codex = shown
+        .harnesses
+        .iter()
+        .find(|harness| harness.id == "codex")
+        .unwrap();
+    assert_eq!(codex.agent.name, "Codex");
+    assert_eq!(
+        codex.agent.symbol,
+        Symbol::Image("integrations/codex.svg".into())
+    );
+    assert_eq!(shown.sessions[0].agent, codex.agent);
+    assert_eq!(shown.operations[0].agent, codex.agent);
+    assert_eq!(shown.history[0].agent, codex.agent);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1418,7 +1478,9 @@ fn the_search_names_the_integrations_page_as_its_tab_does() {
 }
 
 #[test]
-fn a_session_that_reported_no_name_names_no_agent_and_its_chip_keeps_only_what_its_card_shows() {
+fn a_session_that_reported_no_name_is_the_unknown_agent_and_its_chip_keeps_only_what_its_card_shows(
+) {
+    use crate::agent::Agent;
     use crate::intake::session::IntakeChannel;
 
     let workspaces = crate::workspace::WorkspaceStore::default();
@@ -1433,41 +1495,23 @@ fn a_session_that_reported_no_name_names_no_agent_and_its_chip_keeps_only_what_i
         ControlledBrowser::new(false, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
-    let mut named: Vec<(Option<String>, Vec<Option<String>>)> = facade
+    let mut named: Vec<String> = facade
         .snapshot()
         .sessions
         .into_iter()
         .map(|session| {
-            let agents = session
-                .connections
-                .iter()
-                .map(|connection| connection.agent.clone())
-                .collect();
-            (session.agent, agents)
+            assert_eq!(session.agent.symbol, Agent::unknown().symbol);
+            session.agent.name
         })
         .collect();
     named.sort();
-    assert_eq!(
-        named,
-        [
-            (None, vec![None]),
-            (None, vec![None]),
-            (None, vec![None]),
-            (
-                Some("SomeAgent".to_owned()),
-                vec![Some("SomeAgent".to_owned())]
-            ),
-        ]
-    );
+    let unknown = crate::language::provenance::UNKNOWN_AGENT;
+    assert_eq!(named, ["SomeAgent", unknown, unknown, unknown]);
     let hits = facade.search("unknown agent");
     assert_eq!(hits.len(), 3);
     assert!(hits
         .iter()
         .all(|hit| hit.title == crate::language::provenance::UNKNOWN_AGENT));
-    assert!(include_str!("../../ui/lib/words.js").contains(&format!(
-        "const UNKNOWN_AGENT = \"{}\";",
-        crate::language::provenance::UNKNOWN_AGENT
-    )));
 }
 
 #[test]

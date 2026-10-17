@@ -217,18 +217,14 @@ body.runtime-offline .state-word { color: var(--muted); }
 .glance-side .dot.on { background: var(--ok); }
 .glance-faces { display: inline-flex; }
 .glance-face {
-  display: grid; width: 20px; height: 20px; margin-left: -6px; place-items: center;
+  display: grid; width: 20px; height: 20px; margin-left: -6px; place-items: center; overflow: hidden;
   border: 2px solid var(--bg); border-radius: 50%;
   background: var(--ink-3); color: var(--bg); font: 600 8.5px/1 var(--mono);
 }
 .glance-face:first-child { margin-left: 0; }
-.glance-face.busy { background: var(--a); }
+/* A working agent's face is ringed in the accent, its tile or its glyph alike. */
+.glance-face.busy { border-color: var(--a); background: var(--a); box-shadow: 0 0 6px rgba(var(--argb), .7); }
 .glance-face.glance-rest { background: var(--line-2); color: var(--ink-2); }
-/* An agent the Integrations page knows wears its own tile; a working one gets a teal ring. */
-.glance-face.tile { overflow: hidden; background: var(--bg); }
-.glance-face.tile img { display: block; width: 100%; height: 100%; border-radius: 50%; }
-.glance-face.tile.busy { border-color: var(--a); box-shadow: 0 0 6px rgba(var(--argb), .7); }
-.glance-face svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .glance-toward svg { width: 12px; height: 12px; fill: none; stroke: var(--faint); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .glance-open {
   height: 22px; margin-left: 4px; padding: 0 9px; border-radius: 999px;
@@ -236,6 +232,25 @@ body.runtime-offline .state-word { color: var(--muted); }
 }
 .glance-open-word, .glance[open] .glance-closed-word { display: none; }
 .glance[open] .glance-open-word { display: inline; }
+
+/*
+ * An agent's symbol, as the service names it: a tile the window serves or a glyph the page draws,
+ * at the size of the place that draws it (SYMBOL_SIZES in ui/lib/words.js).
+ */
+.symbol { display: inline-grid; flex: none; place-items: center; }
+.symbol img { display: block; }
+.symbol svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.symbol-face, .symbol-face img { width: 100%; height: 100%; }
+.symbol-face img { border-radius: 50%; }
+.symbol-face svg { width: 11px; height: 11px; stroke-width: 2; }
+.symbol-chip img { width: 14px; height: 14px; border-radius: 3px; }
+.symbol-chip svg { width: 13px; height: 13px; }
+.symbol-card img { width: 16px; height: 16px; border-radius: 4px; }
+.symbol-card svg { width: 14px; height: 14px; }
+.symbol-rail img { width: 22px; height: 22px; border-radius: 5px; }
+.symbol-rail svg { width: 16px; height: 16px; }
+.symbol-pane img { width: 46px; height: 46px; border-radius: 11px; box-shadow: 0 0 0 1px var(--line-2); }
+.symbol-pane svg { width: 30px; height: 30px; }
 
 /* The shelves the summary opens: agents, then the browsers they work in. */
 .glance-shelves {
@@ -251,9 +266,9 @@ body.runtime-offline .state-word { color: var(--muted); }
 .glance-chip.on svg { color: var(--ink-2); }
 button.glance-chip:hover { border-color: var(--line-2); color: var(--ink-2); }
 button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); background: var(--panel); color: var(--ink); }
-/* A working agent's glyph breathes in the accent; reduced motion keeps it lit and still. */
+/* A working agent's symbol breathes in the accent; reduced motion keeps it lit and still. */
 .glance-chip.busy, .glance-card-head.busy { border-color: rgba(var(--argb), .35); color: var(--ink-2); }
-.glance-chip.busy svg, .glance-card-head.busy svg {
+.glance-chip.busy .symbol, .glance-card-head.busy .symbol {
   color: var(--a); filter: drop-shadow(0 0 4px rgba(var(--argb), .9));
   animation: glyph-breathe var(--beat-breathe) ease-in-out infinite;
 }
@@ -267,7 +282,6 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
   border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
 }
 .glance-card-head { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
-.glance-card-head svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .glance-card-head h3 { color: var(--ink); font-size: 13px; }
 .glance-card-head small { color: var(--muted); font: 400 10.5px/1 var(--mono); }
 .glance-lines { margin: 8px 0 0; padding: 0; list-style: none; }
@@ -434,7 +448,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
   padding: 6px 10px; border-radius: 7px; color: var(--ink-2); text-align: left;
   transition: color .2s var(--calm), background .2s var(--calm);
 }
-.agent-entry img { width: 22px; height: 22px; border-radius: 5px; transition: opacity .2s var(--calm), filter .2s var(--calm); }
+.agent-entry img { transition: opacity .2s var(--calm), filter .2s var(--calm); }
 .agent-entry-text { min-width: 0; }
 .agent-entry-name { display: block; overflow: hidden; font-size: 12.5px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .agent-entry-sub { display: block; overflow: hidden; color: var(--muted); font: 400 10.5px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
@@ -489,7 +503,6 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 
 .agent-hero { display: flex; align-items: center; gap: 22px; }
 .agent-link { display: flex; flex: none; align-items: center; }
-.agent-icon { width: 46px; height: 46px; border-radius: 11px; box-shadow: 0 0 0 1px var(--line-2); }
 .agent-ghost { width: 50px; height: 50px; margin-left: 2px; image-rendering: pixelated; }
 .agent-wire { position: relative; width: 58px; height: 2px; margin: 0 6px; border-radius: 2px; background: var(--line-2); }
 .agent-wire i, .agent-wire b { display: none; }
@@ -505,7 +518,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 @keyframes agent-flow { 0% { left: -3px; opacity: 0; } 15%, 85% { opacity: 1; } 100% { left: calc(100% - 3px); opacity: 0; } }
 .s-live .agent-ghost { filter: drop-shadow(0 0 10px rgba(var(--argb), .45)); }
 .s-not_detected .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
-.s-not_detected .agent-icon { opacity: .45; filter: grayscale(.8); }
+.s-not_detected .symbol-pane img { opacity: .45; filter: grayscale(.8); }
 .s-not_detected .agent-ghost { opacity: .7; }
 .s-by_hand .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--muted) 0 2px, transparent 2px 6px); }
 .s-available .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--cap-action) 0 4px, transparent 4px 8px); }

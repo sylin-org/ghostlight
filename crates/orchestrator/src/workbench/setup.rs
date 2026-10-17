@@ -470,10 +470,7 @@ fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<A
 /// person knows it, is that agent's product name. A product on several hosts is one agent here,
 /// because the name a client reports does not say the host.
 fn is_agent_of(session: &SessionSummary, harness: &HarnessSummary) -> bool {
-    session
-        .agent
-        .as_deref()
-        .is_some_and(|agent| agent.eq_ignore_ascii_case(&harness.name))
+    session.agent.name.eq_ignore_ascii_case(&harness.name)
 }
 
 /// The name of the agent whose request finished setup: the roster's product name for the
@@ -655,7 +652,7 @@ pub(super) mod test_support {
             name: label.into(),
             label: label.into(),
             target: label.into(),
-            icon: format!("{id}.svg"),
+            agent: crate::agent::Agent::listed(id, label, &format!("{id}.svg")),
             state,
             detail: String::new(),
             evidence: None,
@@ -676,7 +673,7 @@ pub(super) mod test_support {
     pub fn session(id: &str, reported: &str) -> SessionSummary {
         SessionSummary {
             id: id.into(),
-            agent: crate::language::provenance::agent_name(reported, IntakeChannel::Mcp),
+            agent: crate::agent::Agent::of(Some(reported), IntakeChannel::Mcp),
             connections: Vec::new(),
             channel: IntakeChannel::Mcp,
             leased: false,

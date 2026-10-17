@@ -16,6 +16,7 @@
       activity: operation.activity,
       capability: operation.capability,
       provenance: operation.provenance ?? null,
+      agent: operation.agent ?? null,
       channel: operation.provenance?.channel ?? null,
       browser: operation.browser ?? null,
       startedAt: operation.started_at_ms ?? Date.now(),
@@ -55,6 +56,7 @@
       durationMs: record.duration_ms,
       observed: record.observed ?? null,
       provenance: record.provenance ?? null,
+      agent: record.agent ?? null,
       channel: record.channel ?? null,
       browser: record.browser ?? existing?.browser ?? null,
       settled: record.complete !== false || !existing || existing.settled

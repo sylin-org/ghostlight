@@ -45,6 +45,15 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
    Found, Not on this computer), the pane opening on the most relevant agent, each button's effect
    written beside it, Remove as a quiet link that asks first and names live sessions, numbered fix
    steps for an agent that needs attention, and copy-only agents (Continue, goose) said once.
+7. One catalog of agents (2026-10-17, after looking at the deployed batch): "Shouldn't we have a
+   catalog of agents, including indication of extracted icons, that we simply reuse across the UI
+   and the backend?" On the page, a symbol "would simply contain 'what to show'". Decision: the
+   install roster is the one catalog of agents, with the command line and an unknown agent as its
+   two reserved entries. Every place the window names an agent carries one `{ id, name, symbol }`
+   that the service builds, and the page draws the symbol through one renderer and decides nothing
+   about an agent's looks. The owner's icon order (the app's own extracted icon, then a curated
+   vendor mark, then the neutral monogram) arrives in 2.0.x as symbol sources the service resolves,
+   with no change to the page.
 
 ## Slices
 
@@ -54,11 +63,12 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 4. d03-call-help: decision 3 (its own lane; command line only).
 5. d04-integrations: decision 5.
 6. d05-design-tidy: the review notes of the slices above and of the batch's integration review.
+7. d07-agent-catalog: decision 7.
 
 ## RESUME HERE
 
-The batch has landed: d00 to d05 are on `dev`. Next: the coordinator deploys it and runs the owed
-live checks below with the owner.
+The batch is complete again: d00 to d07 are on `dev`. Next: the coordinator deploys it and the owner
+looks, running the owed live checks below.
 
 ## Landed
 
@@ -71,6 +81,7 @@ live checks below with the owner.
 | d04-integrations | The Integrations tab is the approved master and detail page (decision 5). One header row: the kicker, the computed headline (`agentHeadline` in `ui/lib/words.js`: "Ghostlight is in all 7 of your agents.", "2 of your 5", "none of your 3 agents yet", one agent by name, "Add Ghostlight to your agent."), and on the right Re-check, Set up everything with a caption that says beforehand what it will do (`agentPlan`: "Will connect Claude Code and update Cursor. Junie is left for you."), and one Copy MCP command with the command shown small. A rail grouped Needs a look, Connected, Found, not connected and Not on this computer, with a state dot per agent and a second line only for what is the agent's own (sessions and tabs, Needs an update, Needs your attention, Copy setup only); the agents not on this computer fold into one row ("12 more agents Ghostlight can join") that opens in place, scrolls into view, and that the rail's search reaches (`/` focuses the search). A pane for the picked agent: its icon joined to the mascot by a wire that shows the state, one sentence for it, the next step with each button's effect written beside it, the settings file with Locate, Ghostlight's entry shown whole (one block per line, the indent a class, no scroll of its own) with Copy setup, the service's evidence and numbered fix steps for an agent that needs attention and cannot be fixed, a live line with "See them in At a glance" (it opens that agent's card), and Remove last as a quiet link that asks first and names the live sessions. The page opens on the most relevant agent and keeps the pick by id. An agent in use pulses teal on its rail dot, still under reduced motion. Only the rail and the pane scroll. The service adds `HarnessSummary.copy_only` (Continue and goose). The card grid, its CSS, the category vocabulary and `openHarnessManual` are gone; a failed act shows that agent in the pane instead. ADR-0129 gets a marked amendment. A review fixup: a session that starts or ends after the first paint reaches the rail, the pane and Remove (the page's memo holds each agent's live use and no outer gate hides it); a copy-only agent counts as connected while one of its sessions is live and otherwise, when found, stands in its own group "Found, set up by hand", left out of the headline's count ("2 of the 6 agents it can check"), with a sentence that claims nothing about its file; an agent that needs attention with no evidence gets steps from what the service saw (correct the file yourself, then Re-check), never "what Ghostlight found". | see `git log` |
 | d05-design-tidy | The batch's loose ends, one commit per item. (1) No blank or default agent names: `language::provenance::claimed_name` says a client reported no name when its name is empty after trimming or is Ghostlight's own label for a client that sent none (`intake::mcp::DEFAULT_CLIENT_LABEL`, "MCP client"); `agent_name` then gives none, `ConnectionEvidence::details` gives no agent, no reported application and no claim sentence, and `SessionSummary.agent` is optional. The page groups such sessions as one "Unknown agent" on its shelf, and the service's search names them `language::provenance::UNKNOWN_AGENT`, the page's word, which a test pins. The session's agent is built from the workspace's label, the bounded claim the card shows, so a chip keeps no character the card removed. (2) One roster: `install::ROSTER` holds one `AgentRow` per host with who the agent is (harness id, product id, product name, and the names its client is known to report, `aliases`: `codex-mcp-client` on Codex, `claude-ai` on Claude Desktop, `cursor-vscode` on Cursor) and where its file lives (`path`, a function of the computer). `definitions` builds the registry from it, and `install::agent_name` reads it: a row matches its harness id, its product name and its aliases, ignoring case, never its product id, so `windsurf` names Windsurf and only `devin` names Devin. `AGENT_NAMES`, the `row` builder and `packaged_as` are gone. (3) `SessionSummary.client_label` is gone from the snapshot, the preview server's fixtures and the page tests: nothing in the window read it, and the trust note reads `connections[].reported_application`. The workspace keeps its label for the browser's tab group and released-tab reuse. (4) One name for the page: the page-title vocabulary (`VIEWS` in `ui/lib/words.js`), the service's search hit, INTENT, ACCEPTANCE item 8, README, SUPPORT, ROADMAP, DEV-LOOP, llms-install and the installation and solo-developer guides say "Integrations"; a test pins the search hit to the page's word. (5) The npm launcher's `neverInstalls` answers `call` with `--help` or `-h` anywhere among its arguments without installing, the rule the service's `launch_mode` uses for `CallHelp`: with nothing installed it runs the verified staged service, which prints the usage. The launcher tests cover both, and the npm README names the help commands. The MCPB launcher takes no arguments (it always runs `ghostlight mcp`), so it has no such rule to align. (7) The no-browser line's read of the installed browsers (`BrowserRecovery::starts_on_request`, kept per stretch and posture) runs with the `starts` lock released: a look takes the kept answer or a copy of the recovery under the lock, reads outside it, and keeps the answer only when no browser connected and the installed browsers did not change meanwhile (`BrowserStarts.stretch`). A test holds one read open and shows the change goes through and the held answer is not kept. (6) This ledger gets the d03-call-help row and RESUME HERE says the batch has landed; docs/STATUS.md says the window design batch landed and awaits the owner's live check. | see `git log` |
 | d06-live-look | The coordinator's fixes from looking at the deployed batch (2026-10-17). The summary pill's faces wear the same tile the Integrations rail shows for each agent (`integrations/<icon>`, by the agent's name from the Integrations part, kept across snapshots that lack it), so Claude Code (CC) and Codex (CX) no longer read alike; initials stay for an agent the page has no tile for, and a working agent with a tile gets a teal ring. The preview server's queued rows carry the intake and agent of the session that ran them, as the service's records do (they showed a command-line mark beside "Unknown agent"). The headline's "of the N agents it can check" when some agents are set up by hand is kept as d04 wrote it: it is the truthful form of the approved "of your N agents". | see `git log` |
+| d07-agent-catalog | One catalog of agents and one value that says what to show (decision 7). `install::ROSTER` is the catalog: each `AgentRow` says who the agent is (harness id, product name, aliases), how it looks (`monogram`, its packaged tile under `ui/integrations/`) and where its file lives. The new domain module `crate::agent` holds the value and its closed vocabulary: `Agent { id, name, symbol }`, `Symbol` serialized as `{ "src": "integrations/<file>" }` or `{ "glyph": <word> }`, and `Glyph` (`command_line`, `unknown`). The command line (`COMMAND_LINE_ID`) and an unknown agent (`UNKNOWN_ID`) are the catalog's reserved entries, named by `language::provenance` ("Command line", "Unknown agent"); a test keeps them off every roster row. One function names an agent: `Agent::of(reported, channel)` (the command line for a `ghostlight call` session, the roster's agent for a name it knows through `install::agent_called`, a name it does not know kept as reported with the unknown glyph, and the unknown agent when no name was reported), with `Agent::of_evidence` for work and `Agent::listed` for a roster row. `SessionSummary.agent`, `OperationSummary.agent`, `HistoryItem.agent` (built when the item is projected, never persisted: the audit line is unchanged) and `HarnessSummary.agent` (in place of `icon`) carry it; `ConnectionDetails` is evidence only again. `language::provenance::agent_name` and `install::agent_name` are gone. The page draws every agent through `symbolMarkup(agent, size)` in `ui/lib/words.js` (sizes `face`, `chip`, `card`, `rail`, `pane`; one `.symbol` style family): the pill faces, the shelves chips, the card head, the Integrations rail entries and the pane hero. The page-side icons map and its keep-across-snapshots logic, the initials, the spark glyph, the page's `UNKNOWN_AGENT` word and its pin test, the command-line decision from the intake, the session fallback for an action's agent and the unused `generic.svg` tile are gone; the activity hover shows the workspace id for an agent with the unknown glyph. Tests: every roster row has a packaged symbol and every Integrations row is its own catalog entry; a session, its running work, its history item and its Integrations row carry the same agent; the command line and an unknown agent get their glyphs; the page draws the same symbol in the pill, the shelves, the card and the rail, and no initials or spark; a pin keeps the page's glyph words in step with `Glyph`. The preview server and the page tests use the new shape. | see `git log` |
 
 ## Owed live checks
 
@@ -124,6 +135,14 @@ owner before anything is pushed.
   Continue line.
 - d05-design-tidy: the window's search finds the page as "Integrations". A session whose client
   sent no name shows one "Unknown agent" chip on the At a glance shelf, never a blank one.
+- d07-agent-catalog: with Codex, Claude Code and a `ghostlight call` connected, each agent wears the
+  same tile in the summary pill, on its shelf chip, in its card's head and on the Integrations rail
+  and pane (Codex's CX, Claude Code's CC, never initials or the spark); a working agent's face has
+  a teal ring and its chip's tile breathes (still with reduced motion on). The command line shows
+  the prompt glyph in the pill, on its chip and in its card. A session whose client sent no name
+  shows the unknown glyph (a circled question mark) beside "Unknown agent", and a restored MCP row in
+  Activity reads "Unknown agent" with the workspace id on hover. A watching browser tab shows the
+  same faces.
 
 ## Notes
 
@@ -220,3 +239,28 @@ owner before anything is pushed.
   the short one now. CHANGELOG, release notes and docs/history keep "MCP integrations" as written.
   (7) Two looks that miss at once may each read the installed browsers; neither waits on the
   other. Item 7 landed before item 6, so that RESUME HERE could say the batch has landed.
+
+- d07-agent-catalog: differences from the spec. (1) The agent sits on each item the window reads,
+  not inside the connection evidence: `SessionSummary`, `OperationSummary`, `HistoryItem` and
+  `HarnessSummary` carry it, and `ConnectionDetails` no longer does. A session's connections are
+  that session's agent, and a record that kept no evidence at all (refused before its workspace
+  was known) had no evidence to carry a name, so the page had to say "Unknown agent" itself; now
+  the service names it there too and the page decides nothing. (2) A client that reports a name
+  Ghostlight does not know keeps that name (the d00 rule), with the unknown glyph and the id
+  `unknown`; only a client that reported no name is "Unknown agent". The glance groups agents by
+  name as before, so two different unknown names stay two chips. (3) A product on several hosts
+  names the roster's first row: a Cline session's agent is `cline-cli`, because the reported name
+  does not say the host; the rail still counts it on every Cline row by name (d04 note 1).
+  (4) The Activity rows' agent cell has no mark: the client column is 116 px of 11 px mono, so a
+  14 px tile leaves about 14 characters, and the intake column beside it already carries the prompt
+  for the one exception, the command line. The intake mark draws that glyph from the same
+  vocabulary. (5) No initials are kept as a last resort: every tile is packaged and served beside
+  the page, and the name is beside the symbol everywhere except the pill, whose faces name the agent
+  on hover. (6) `generic.svg`, the page's fallback for a row without an icon, is gone with its
+  served entry, since every row names its monogram. (7) A running operation no longer borrows its
+  session's agent: the service names it from the operation's own evidence, which every request
+  carries. (8) A working agent's face gets the teal ring and glow whether it shows a tile or a
+  glyph (a glyph face was only filled teal before). (9) `ghostlight doctor --json` lists each MCP
+  client with `agent` in place of `icon`, the same summary the window reads. (10) The fixture of
+  `tests/workbench-history-browser.mjs` uses the new shape; that journey still looks for the
+  per-connection list d01 retired and was not run here.

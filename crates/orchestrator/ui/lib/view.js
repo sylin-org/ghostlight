@@ -21,8 +21,8 @@
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
-    KIND_GLYPHS, INTAKE, INTAKE_MARK, UNKNOWN_AGENT, toolWords, GLANCE, GLANCE_CARD_LINES,
-    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine
+    KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
@@ -176,29 +176,19 @@
     function intakeMarkup(entry) {
       const mark = INTAKE_MARK[channelFor(entry)];
       if (!mark) return '<div class="row-channel"></div>';
-      return `<div class="row-channel" title="${escapeHtml(mark)}">${KIND_GLYPHS.commandLine}`
+      return `<div class="row-channel" title="${escapeHtml(mark)}">${SYMBOL_GLYPHS[GLYPH.commandLine]}`
         + `<span class="sr-only">${escapeHtml(mark)}</span></div>`;
     }
 
     /**
-     * The agent behind an action, named as a person knows it, or null when no record says.
-     * Attribution belongs to the action's connection, including after disconnect or restart.
-     */
-    function agentFor(entry) {
-      const evidence = entry.provenance;
-      if (evidence) return evidence.agent ?? null;
-      if (entry.settled) return null;
-      return sessionFor(entry.workspace)?.agent ?? null;
-    }
-
-    /**
-     * The agent's name as text, and the hover it wears. An unknown agent reads "Unknown agent", and
-     * its workspace id is one hover away, never printed.
+     * The agent's name as text, and the hover it wears. The service names the agent of every
+     * action from the action's own connection evidence, including after disconnect or restart; an
+     * agent it does not know keeps its workspace id one hover away, never printed.
      */
     function agentMarkup(tag, className, entry) {
-      const agent = agentFor(entry);
-      const hover = agent ? "" : ` title="${escapeHtml(entry.workspace ?? "")}"`;
-      return `<${tag} class="${className}"${hover}>${escapeHtml(agent ?? UNKNOWN_AGENT)}</${tag}>`;
+      const agent = entry.agent;
+      const hover = agent?.symbol?.glyph === GLYPH.unknown ? ` title="${escapeHtml(entry.workspace ?? "")}"` : "";
+      return `<${tag} class="${className}"${hover}>${escapeHtml(agent?.name ?? "")}</${tag}>`;
     }
 
     /**
@@ -391,7 +381,7 @@
       const note = observed ? READINESS_NOTE[observed.readiness] ?? "" : "";
       // The agent's name already says the command line, so the intake is not said again.
       const meta = [];
-      if (entry.workspace) meta.push(agentMarkup("span", "hero-agent", entry));
+      if (entry.agent) meta.push(agentMarkup("span", "hero-agent", entry));
       const browser = browserFor(entry);
       if (browser) meta.push(`<span><i></i>${escapeHtml(browser)}</span>`);
       if (entry.capability && !entry.steps?.length) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
@@ -702,42 +692,33 @@
     let lastConnections = null;
 
     /**
-     * The agents among `sessions`, each with its sessions, busiest and most tabbed first. Sessions
-     * whose client reported no name form one "Unknown agent".
+     * The agents among `sessions`, each with the agent the service names and its sessions, busiest
+     * and most tabbed first. Sessions whose client reported no name share the service's one
+     * unknown agent.
      */
     function agentGroups(sessions) {
       const groups = new Map();
       for (const session of sessions) {
-        const name = session.agent ?? UNKNOWN_AGENT;
-        const group = groups.get(name)
-          ?? { name, sessions: [], tabs: 0, busy: false, commandLine: session.channel === INTAKE.cli };
+        const agent = session.agent;
+        const group = groups.get(agent.name) ?? { name: agent.name, agent, sessions: [], tabs: 0, busy: false };
         group.sessions.push(session);
         group.tabs += session.tab_count ?? 0;
         group.busy = group.busy || session.active_operations > 0;
-        groups.set(name, group);
+        groups.set(agent.name, group);
       }
       return [...groups.values()]
         .sort((left, right) => right.tabs - left.tabs || left.name.localeCompare(right.name));
     }
 
-    const kindGlyph = (group) => (group.commandLine ? KIND_GLYPHS.commandLine : KIND_GLYPHS.agent);
-
-    /**
-     * The face an agent wears in the closed summary: the tile the Integrations rail shows for it,
-     * its initials when the page knows no tile, or the prompt for the command line.
-     */
-    function faceMarkup(group, icons) {
-      const icon = group.commandLine ? null : icons.get(group.name);
-      const face = group.commandLine ? KIND_GLYPHS.commandLine
-        : icon ? `<img src="integrations/${escapeHtml(icon)}" alt="" width="20" height="20">`
-          : escapeHtml(initials(group.name));
-      const kind = `${group.busy ? " busy" : ""}${icon ? " tile" : ""}`;
-      return `<span class="glance-face${kind}" title="${escapeHtml(group.name)}">${face}</span>`;
+    /** The face an agent wears in the closed summary: its symbol, ringed in the accent while it works. */
+    function faceMarkup(group) {
+      return `<span class="glance-face${group.busy ? " busy" : ""}" title="${escapeHtml(group.name)}">`
+        + `${symbolMarkup(group.agent, "face")}</span>`;
     }
 
     /** The closed summary: who is connected, toward how many browsers, and the way to the details. */
-    function pillMarkup(groups, browsers, icons) {
-      const faces = groups.slice(0, GLANCE_FACES).map((group) => faceMarkup(group, icons)).join("");
+    function pillMarkup(groups, browsers) {
+      const faces = groups.slice(0, GLANCE_FACES).map(faceMarkup).join("");
       const hidden = groups.length - GLANCE_FACES;
       const rest = hidden > 0 ? `<span class="glance-face glance-rest">+${hidden}</span>` : "";
       const stack = groups.length ? `<span class="glance-faces" aria-hidden="true">${faces}${rest}</span>` : "";
@@ -756,7 +737,7 @@
       const many = group.sessions.length > 1 ? ` <span class="tally">${group.sessions.length}</span>` : "";
       return `<button class="chip glance-chip ${group.busy ? "busy" : "on"}" type="button"`
         + ` data-glance-agent="${escapeHtml(group.name)}" aria-expanded="${open}" aria-controls="${GLANCE_CARD_ID}">`
-        + `${kindGlyph(group)}${escapeHtml(group.name)}${many}</button>`;
+        + `${symbolMarkup(group.agent, "chip")}${escapeHtml(group.name)}${many}</button>`;
     }
 
     /** One browser on its shelf, with the tabs its sessions hold. */
@@ -800,7 +781,7 @@
       const notes = [...new Set(sessions.flatMap((session) => (session.connections ?? []).map((connection) => connection.explanation)))]
         .filter(Boolean).map((note) => `<p class="connection-explanation">${escapeHtml(note)}</p>`).join("");
       return `<section class="glance-card" id="${GLANCE_CARD_ID}" aria-label="${escapeHtml(group.name)}">`
-        + `<header class="glance-card-head${group.busy ? " busy" : ""}">${kindGlyph(group)}<h3>${escapeHtml(group.name)}</h3>`
+        + `<header class="glance-card-head${group.busy ? " busy" : ""}">${symbolMarkup(group.agent, "card")}<h3>${escapeHtml(group.name)}</h3>`
         + `<small>${escapeHtml(sessionsCount(group.sessions.length))}</small></header>`
         + `<ul class="glance-lines">${lines}</ul>${more}${notes}</section>`;
     }
@@ -811,19 +792,13 @@
         const open = groups.find((group) => group.name === glanceAgent);
         const body = shelvesMarkup(groups, facts.browsers, facts.no_browser) + (open ? cardMarkup(open) : "");
         const markup = `<details class="glance" data-page-details="${GLANCE_KEY}"${openPage.has(GLANCE_KEY) ? " open" : ""}>`
-          + pillMarkup(groups, facts.browsers, facts.icons) + body + "</details>";
+          + pillMarkup(groups, facts.browsers) + body + "</details>";
         replaceHistoryMarkup(el.connections, markup);
       });
     }
 
     function connections(snapshot) {
-      // Each agent's tile, by its name, from the Integrations part. A snapshot without that part
-      // keeps the tiles already known.
-      const harnesses = snapshot.harnesses ?? [];
-      const icons = harnesses.length
-        ? new Map(harnesses.filter((harness) => harness.icon).map((harness) => [harness.name, harness.icon]))
-        : lastConnections?.icons ?? new Map();
-      lastConnections = { sessions: snapshot.sessions, browsers: snapshot.browsers, no_browser: snapshot.no_browser, icons };
+      lastConnections = { sessions: snapshot.sessions, browsers: snapshot.browsers, no_browser: snapshot.no_browser };
       paintConnections(lastConnections);
     }
 
@@ -880,7 +855,7 @@
 
     /** The live sessions of `harness`'s agent and the tabs they hold. */
     function useOf(harness, sessions) {
-      const own = sessions.filter((session) => session.agent === harness.name);
+      const own = sessions.filter((session) => session.agent.name === harness.name);
       return { sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0) };
     }
 
@@ -984,7 +959,7 @@
       return `<button class="agent-entry e-${escapeHtml(agent.standing)}" type="button" data-agent="${escapeHtml(agent.id)}"`
         + ` aria-controls="agents-pane" aria-current="${agent.id === agentPick}">`
         + `<span class="agent-dot d-${escapeHtml(toneOf(agent))}" aria-hidden="true"></span>`
-        + `<img src="integrations/${escapeHtml(agent.icon ?? "generic.svg")}" alt="" width="22" height="22">`
+        + symbolMarkup(agent.agent, "rail")
         + `<span class="agent-entry-text"><span class="agent-entry-name">${escapeHtml(agent.label)}</span>${second}</span></button>`;
     }
 
@@ -1020,7 +995,7 @@
       const tone = toneOf(agent);
       return `<header class="agent-hero s-${escapeHtml(tone)}">`
         + '<div class="agent-link" aria-hidden="true">'
-        + `<img class="agent-icon" src="integrations/${escapeHtml(agent.icon ?? "generic.svg")}" alt="" width="46" height="46">`
+        + symbolMarkup(agent.agent, "pane")
         + '<span class="agent-wire"><i></i><i></i><i></i><b></b></span>'
         + `<img class="agent-ghost" src="${MASCOT}" alt="" width="50" height="50"></div>`
         + `<div class="agent-hero-text"><h2 id="agents-pane-title">${escapeHtml(agent.label)}</h2>`

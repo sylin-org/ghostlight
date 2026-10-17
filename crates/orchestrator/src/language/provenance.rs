@@ -1,5 +1,5 @@
 //! Human connection details authored from retained evidence, separate from caller claims, and
-//! the name a person knows a connection's agent by.
+//! the words the window names an agent by when no roster row names it.
 
 use crate::intake::session::IntakeChannel;
 use serde::Serialize;
@@ -19,7 +19,7 @@ pub fn claimed_name_explanation(reported: &str) -> String {
     format!("\"{reported}\" is what the agent calls itself; Ghostlight does not verify it.")
 }
 
-/// The name of a command-line session's agent.
+/// The name of a command-line session's agent ([`crate::agent::Agent::command_line`]).
 pub const COMMAND_LINE_AGENT: &str = "Command line";
 
 /// The name a client `reported` for itself, trimmed, or none when it reported none: a name that is
@@ -31,22 +31,8 @@ pub fn claimed_name(reported: &str) -> Option<&str> {
     (!name.is_empty() && name != crate::intake::mcp::DEFAULT_CLIENT_LABEL).then_some(name)
 }
 
-/// The name a person knows a connection's agent by: the command line for a `ghostlight call`
-/// session, the product name for an agent Ghostlight knows, and otherwise the name the client
-/// `reported` ([`claimed_name`]). None when an MCP client reported no name; the window then says
-/// the agent is unknown. Ghostlight never invents one.
-#[must_use]
-pub fn agent_name(reported: &str, channel: IntakeChannel) -> Option<String> {
-    match channel {
-        IntakeChannel::Cli => Some(COMMAND_LINE_AGENT.to_owned()),
-        IntakeChannel::Mcp => claimed_name(reported).map(|name| {
-            crate::install::agent_name(name).map_or_else(|| name.to_owned(), str::to_owned)
-        }),
-    }
-}
-
-/// What a search names a session whose agent reported no name, as the window's activity list
-/// does (`UNKNOWN_AGENT` in `ui/lib/words.js`).
+/// The name of an agent nothing names: a client that reported no name, or a record that kept
+/// none ([`crate::agent::Agent::unknown`]).
 pub const UNKNOWN_AGENT: &str = "Unknown agent";
 
 /// Details for local human surfaces only; a live caller claim must never become audit content.
@@ -56,9 +42,6 @@ pub struct ConnectionDetails {
     pub connection_id: Option<String>,
     /// Bounded live claim, absent when details come from durable history.
     pub reported_application: Option<String>,
-    /// The name a person knows the connection's agent by ([`agent_name`]), absent when durable
-    /// history retained no name for it.
-    pub agent: Option<String>,
     /// Declared intake, never an authorization fact.
     pub channel: IntakeChannel,
     /// What the connection establishes and what it cannot establish.
@@ -80,7 +63,6 @@ pub fn details(attribution: &Attribution) -> ConnectionDetails {
     ConnectionDetails {
         connection_id: attribution.connection_id.clone(),
         reported_application: None,
-        agent: (attribution.channel == IntakeChannel::Cli).then(|| COMMAND_LINE_AGENT.to_owned()),
         channel: attribution.channel,
         explanation: explanation.into(),
     }
@@ -99,32 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_is_named_as_a_person_knows_it_and_an_unknown_one_as_it_reported() {
-        let named = |reported, channel| agent_name(reported, channel);
-        assert_eq!(
-            named("codex-mcp-client", IntakeChannel::Mcp).as_deref(),
-            Some("Codex")
-        );
-        assert_eq!(
-            named("Claude-Code", IntakeChannel::Mcp).as_deref(),
-            Some("Claude Code")
-        );
-        assert_eq!(
-            named("  Some Agent  ", IntakeChannel::Mcp).as_deref(),
-            Some("Some Agent")
-        );
-        assert_eq!(
-            named("ghostlight call", IntakeChannel::Cli).as_deref(),
-            Some("Command line")
-        );
-        assert_eq!(
-            named("codex-mcp-client", IntakeChannel::Cli).as_deref(),
-            Some("Command line")
-        );
-    }
-
-    #[test]
-    fn a_client_that_reported_no_name_names_no_agent() {
+    fn a_client_that_reported_no_name_claims_none() {
         for unnamed in [
             "",
             "   ",
@@ -132,11 +89,7 @@ mod tests {
             " MCP client ",
         ] {
             assert_eq!(claimed_name(unnamed), None, "{unnamed:?}");
-            assert_eq!(agent_name(unnamed, IntakeChannel::Mcp), None, "{unnamed:?}");
         }
-        assert_eq!(
-            agent_name("", IntakeChannel::Cli).as_deref(),
-            Some("Command line")
-        );
+        assert_eq!(claimed_name("  Some Agent  "), Some("Some Agent"));
     }
 }

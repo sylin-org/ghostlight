@@ -51,9 +51,6 @@
    */
   const INTAKE_MARK = Object.freeze({ [INTAKE.cli]: "Command line" });
 
-  /** What the window names when no record says which agent acted, or a session's client reported no name. */
-  const UNKNOWN_AGENT = "Unknown agent";
-
   /** The start every browser tool's name shares, which the activity list leaves out. */
   const SHARED_TOOL_PREFIX = "browser_";
 
@@ -104,17 +101,6 @@
 
   /** The line under a card's capped list of sessions. */
   const andMore = (count) => `and ${count} more`;
-
-  /**
-   * The initials an agent wears in the summary: the first letters of its first two words, or the
-   * first two letters of a one-word name.
-   */
-  function initials(name) {
-    const parts = String(name ?? "").trim().split(/\s+/).filter(Boolean);
-    if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
-    const word = parts[0] ?? "";
-    return word.slice(0, 1).toUpperCase() + word.slice(1, 2).toLowerCase();
-  }
 
   /**
    * One session of an agent, in words: its tabs and the browser it works in, whether it is working,
@@ -529,12 +515,42 @@
   };
 
   /**
-   * The glyph of each kind of connection At a glance draws: an agent's spark, the command line's
-   * prompt, and a browser's window frame.
+   * The glyphs the service names for an agent with no image of its own, in its wire words: the
+   * command line's prompt and the mark of an agent Ghostlight does not know.
+   */
+  const GLYPH = Object.freeze({ commandLine: "command_line", unknown: "unknown" });
+
+  /** The drawing of each glyph in GLYPH. */
+  const SYMBOL_GLYPHS = Object.freeze({
+    [GLYPH.commandLine]: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5 6 8l-3.5 3.5M7.5 11.5h6"/></svg>',
+    [GLYPH.unknown]: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.8"/><path d="M6.4 6.6a1.7 1.7 0 1 1 2.3 1.6c-.5.2-.7.5-.7 1v.3M8 11.3h.01"/></svg>'
+  });
+
+  /**
+   * The sizes an agent's symbol is drawn at, in pixels: a face of the At a glance summary, a chip
+   * on its shelf, the head of an agent's card, an Integrations rail entry and the pane's hero.
+   */
+  const SYMBOL_SIZES = Object.freeze({ face: 20, chip: 14, card: 16, rail: 22, pane: 46 });
+
+  /**
+   * What the window shows for `agent` at `size`, one of SYMBOL_SIZES: the image the service names,
+   * or the glyph it names. The page decides nothing about an agent's looks; every place that draws
+   * an agent draws it through this.
+   */
+  function symbolMarkup(agent, size) {
+    const symbol = agent?.symbol ?? {};
+    const pixels = SYMBOL_SIZES[size];
+    const shown = symbol.src
+      ? `<img src="${escapeHtml(symbol.src)}" alt="" width="${pixels}" height="${pixels}">`
+      : SYMBOL_GLYPHS[symbol.glyph] ?? SYMBOL_GLYPHS[GLYPH.unknown];
+    return `<span class="symbol symbol-${size}${symbol.src ? " tile" : ""}" aria-hidden="true">${shown}</span>`;
+  }
+
+  /**
+   * The glyphs At a glance draws for what is not an agent: a browser's window frame, and the arrow
+   * from the agents toward the browsers.
    */
   const KIND_GLYPHS = Object.freeze({
-    agent: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8v2.4M8 11.8v2.4M1.8 8h2.4M11.8 8h2.4M3.6 3.6l1.6 1.6M10.8 10.8l1.6 1.6M3.6 12.4l1.6-1.6M10.8 5.2l1.6-1.6"/></svg>',
-    commandLine: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5 6 8l-3.5 3.5M7.5 11.5h6"/></svg>',
     browser: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.8"/><path d="M1.8 6h12.4"/></svg>',
     toward: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h10M9.5 5l3 3-3 3"/></svg>'
   });
@@ -906,14 +922,14 @@
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
-    CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, UNKNOWN_AGENT, toolWords, GLANCE, GLANCE_CARD_LINES,
-    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine,
+    CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
-    GLYPHS, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
+    GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, symbolMarkup, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,

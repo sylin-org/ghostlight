@@ -66,13 +66,11 @@ impl ConnectionEvidence {
         &self.reported_application
     }
 
-    /// Present the live connection with its separately identified, bounded application claim and
-    /// the name a person knows its agent by.
+    /// Present the live connection with its separately identified, bounded application claim.
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
         let mut details = self.attribution.details();
         if let Some(claim) = crate::language::provenance::claimed_name(&self.reported_application) {
-            details.agent = crate::language::provenance::agent_name(claim, details.channel);
             if details.channel == IntakeChannel::Mcp {
                 details.explanation = crate::language::provenance::claimed_name_explanation(claim);
             }
@@ -141,6 +139,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::Agent;
+
+    /// The agent the window shows for a connection these details describe.
+    fn agent_of(details: &ConnectionDetails) -> Agent {
+        Agent::of_evidence(Some(details))
+    }
 
     #[test]
     fn live_claim_and_durable_evidence_are_separate() {
@@ -188,35 +192,37 @@ mod tests {
         assert_eq!(absent.connection_id, None);
         assert_eq!(absent.observed_at_ms, None);
         assert_eq!(absent.details().reported_application, None);
-        assert_eq!(absent.details().agent, None);
+        assert_eq!(agent_of(&absent.details()), Agent::unknown());
     }
 
     #[test]
     fn a_live_connection_names_its_agent_and_history_names_only_the_command_line() {
         let codex = ConnectionEvidence::new("codex-mcp-client", IntakeChannel::Mcp);
-        assert_eq!(codex.details().agent.as_deref(), Some("Codex"));
+        assert_eq!(agent_of(&codex.details()).name, "Codex");
+        assert_eq!(agent_of(&codex.details()).id, "codex");
         assert_eq!(
             codex.details().reported_application.as_deref(),
             Some("codex-mcp-client")
         );
-        assert_eq!(codex.attribution().details().agent, None);
+        assert_eq!(agent_of(&codex.attribution().details()), Agent::unknown());
         let unknown = ConnectionEvidence::new(" my agent ", IntakeChannel::Mcp);
-        assert_eq!(unknown.details().agent.as_deref(), Some("my agent"));
+        assert_eq!(agent_of(&unknown.details()).name, "my agent");
+        assert_eq!(agent_of(&unknown.details()).id, crate::agent::UNKNOWN_ID);
         let script = ConnectionEvidence::new("ghostlight call", IntakeChannel::Cli);
-        assert_eq!(script.details().agent.as_deref(), Some("Command line"));
+        assert_eq!(agent_of(&script.details()), Agent::command_line());
         assert_eq!(
-            script.attribution().details().agent.as_deref(),
-            Some("Command line")
+            agent_of(&script.attribution().details()),
+            Agent::command_line()
         );
         let unnamed = ConnectionEvidence::new("", IntakeChannel::Mcp);
-        assert_eq!(unnamed.details().agent, None);
+        assert_eq!(agent_of(&unnamed.details()), Agent::unknown());
     }
 
     #[test]
-    fn a_client_that_reported_no_name_names_no_agent_and_claims_nothing() {
+    fn a_client_that_reported_no_name_is_the_unknown_agent_and_claims_nothing() {
         for unnamed in ["", " \t ", crate::intake::mcp::DEFAULT_CLIENT_LABEL] {
             let details = ConnectionEvidence::new(unnamed, IntakeChannel::Mcp).details();
-            assert_eq!(details.agent, None, "{unnamed:?}");
+            assert_eq!(agent_of(&details), Agent::unknown(), "{unnamed:?}");
             assert_eq!(details.reported_application, None, "{unnamed:?}");
             assert!(!details.explanation.contains('"'), "{unnamed:?}");
         }
@@ -225,7 +231,7 @@ mod tests {
     #[test]
     fn an_agent_is_named_from_the_claim_the_card_shows() {
         let details = ConnectionEvidence::new("Some\u{202e}Agent", IntakeChannel::Mcp).details();
-        assert_eq!(details.agent.as_deref(), Some("SomeAgent"));
+        assert_eq!(agent_of(&details).name, "SomeAgent");
         assert_eq!(details.reported_application.as_deref(), Some("SomeAgent"));
     }
 

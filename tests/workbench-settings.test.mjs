@@ -952,6 +952,17 @@ const WINDOW_CONTEXT = {
   acts: Object.fromEntries(Object.values(Transport.ACT).map((act) => [act, { available: true, why_not: null }]))
 };
 
+/**
+ * An agent as the service names it: an agent on the roster wears its packaged tile, and the
+ * command line and an agent Ghostlight does not know wear their glyphs.
+ */
+function namedAgent(name) {
+  if (name === "Command line") return { id: "command_line", name, symbol: { glyph: "command_line" } };
+  if (name === "Unknown agent") return { id: "unknown", name, symbol: { glyph: "unknown" } };
+  const id = name.toLowerCase().replaceAll(" ", "-");
+  return { id, name, symbol: { src: `integrations/${id}.svg` } };
+}
+
 /** One settled read, as the service records it. */
 function settledRead(overrides = {}) {
   return {
@@ -981,7 +992,7 @@ function snapshotAnswer({ history = [settledRead()], sessions, service = { versi
         }
       },
       connections: {
-        sessions: sessions ?? [{ id: "w1", agent: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 }],
+        sessions: sessions ?? [{ id: "w1", agent: namedAgent("Codex"), channel: "mcp", tab_count: 1, active_operations: 0 }],
         browsers: [{ id: "b1", family: "Chrome", adapter_version: "2.0.0" }]
       },
       activity: { operations: [], history, document_coverage: [] },
@@ -1202,13 +1213,13 @@ test("a paint that throws is tried again with the same facts, and one that drew 
   assert.equal(writes, 2, "a panel that drew is not drawn again for the same facts");
 });
 
-/** A session of `agent`, as the connections part carries it. */
+/** A session of the agent named `agent`, as the connections part carries it. */
 function glanceSession(id, agent, { channel = "mcp", tabs = 0, busy = false, browser, reported = agent } = {}) {
   return {
-    id, agent, channel, tab_count: tabs, active_operations: busy ? 1 : 0,
+    id, agent: namedAgent(agent), channel, tab_count: tabs, active_operations: busy ? 1 : 0,
     ...(browser ? { browser } : {}),
     connections: [{
-      connection_id: `connection_${id}`, reported_application: reported, agent, channel,
+      connection_id: `connection_${id}`, reported_application: reported, channel,
       explanation: channel === "cli" ? "A ghostlight call session is a local program."
         : `"${reported}" is what the agent calls itself; Ghostlight does not verify it.`
     }]
@@ -1242,39 +1253,56 @@ test("the glance is one closed summary: who is connected, toward how many browse
   assert.equal(details.length, 1);
   assert.equal(details[0].tag, "details");
   assert.equal("open" in details[0].attributes, false, "closed by default");
-  assert.deepEqual(bar.wearing("glance-face").map((face) => face.textContent), ["Co", "CC", ""],
-    "initials for each agent, the prompt glyph for the command line");
+  assert.deepEqual(bar.wearing("glance-face").map((face) => face.attributes.title), ["Codex", "Claude Code", "Command line"],
+    "a face for each agent, named on hover");
+  assert.deepEqual(bar.wearing("glance-face").map((face) => face.textContent), ["", "", ""], "no initials");
   assert.equal(bar.wearing("glance-face").filter((face) => face.classes.has("busy")).length, 1);
-  assert.deepEqual(bar.wearing("glance-side").map((side) => side.textContent), ["CoCC3 agents", "1 browser"]);
+  assert.deepEqual(bar.wearing("glance-side").map((side) => side.textContent), ["3 agents", "1 browser"]);
   assert.equal(bar.wearing("glance-closed-word")[0].textContent, "Details");
   assert.equal(bar.wearing("glance-open-word")[0].textContent, "Hide");
   assert.deepEqual(shown.failures, []);
 });
 
-test("an agent the Integrations page knows wears its own tile in the summary, not initials", () => {
+test("an agent wears the symbol the service names, drawn by one renderer in the pill, the shelves, its card and the rail", () => {
   const shown = drawing();
   const answer = snapshotAnswer({ sessions: GLANCE_SESSIONS });
   answer.parts.integrations.harnesses = [agent("claude-code", "Claude Code", "installed"), agent("codex", "Codex", "installed")];
   const snapshot = Transport.flatten(answer);
   shown.view.collections(snapshot, new Set());
-  const html = shown.el("connections").innerHTML;
-  const faces = drawn(html).wearing("glance-face");
-  assert.deepEqual(faces.map((face) => face.classes.has("tile")), [true, true, false],
-    "Codex and Claude Code wear tiles; the command line keeps its prompt");
-  assert.match(html, /<img src="integrations\/codex\.svg"/);
-  assert.match(html, /<img src="integrations\/claude-code\.svg"/);
+  const codex = namedAgent("Codex");
+  const html = () => shown.el("connections").innerHTML;
+  const faces = drawn(html()).wearing("glance-face");
+  assert.ok(html().includes(Words.symbolMarkup(codex, "face")), "the pill");
+  assert.ok(html().includes(Words.symbolMarkup(namedAgent("Claude Code"), "face")));
+  assert.ok(html().includes(Words.symbolMarkup(namedAgent("Command line"), "face")), "the command line wears its prompt");
+  assert.ok(html().includes(Words.symbolMarkup(codex, "chip")), "the shelf");
+  shown.click(drawn(html()).wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  assert.ok(html().includes(Words.symbolMarkup(codex, "card")), "the card");
+  assert.ok(shown.el("agents-list").innerHTML.includes(Words.symbolMarkup(codex, "rail")), "the rail");
+  assert.ok(html().includes('<img src="integrations/codex.svg" alt="" width="20" height="20">'));
+  assert.ok(Words.symbolMarkup(codex, "rail").includes('src="integrations/codex.svg"'), "the same tile at every size");
+  assert.ok(!("agent" in Words.KIND_GLYPHS) && !("initials" in Words), "no spark and no initials for an agent");
   assert.equal(faces.filter((face) => face.classes.has("busy")).length, 1, "the working agent still shows it");
-  // A later snapshot without the Integrations part keeps the tiles already known.
-  shown.view.collections(Transport.flatten(snapshotAnswer({ sessions: GLANCE_SESSIONS })), new Set());
-  assert.equal(drawn(shown.el("connections").innerHTML).wearing("tile").length, 2);
   assert.deepEqual(shown.failures, []);
+});
+
+test("the command line and an unknown agent are drawn from the glyph their symbol names", () => {
+  assert.equal(Words.symbolMarkup(namedAgent("Command line"), "chip"),
+    `<span class="symbol symbol-chip" aria-hidden="true">${Words.SYMBOL_GLYPHS[Words.GLYPH.commandLine]}</span>`);
+  assert.equal(Words.symbolMarkup(namedAgent("Unknown agent"), "chip"),
+    `<span class="symbol symbol-chip" aria-hidden="true">${Words.SYMBOL_GLYPHS[Words.GLYPH.unknown]}</span>`);
+  assert.equal(Words.symbolMarkup(namedAgent("Codex"), "pane"),
+    '<span class="symbol symbol-pane tile" aria-hidden="true"><img src="integrations/codex.svg" alt="" width="46" height="46"></span>');
+  for (const size of Object.keys(Words.SYMBOL_SIZES)) {
+    assert.ok(naming(`.symbol-${size} img`).length > 0, `the stylesheet sizes a ${size} tile`);
+  }
 });
 
 test("the summary counts in words, singular for one and plain for none", () => {
   assert.deepEqual([0, 1, 3].map(Words.agentsCount), ["No agents", "1 agent", "3 agents"]);
   assert.deepEqual([0, 1, 2].map(Words.browsersCount), ["no browser", "1 browser", "2 browsers"]);
   const lone = glance({ sessions: [GLANCE_SESSIONS[0]], browsers: [], noBrowser: "No browser connected" }).read();
-  assert.deepEqual(lone.wearing("glance-side").map((side) => side.textContent), ["CC1 agent", "no browser"]);
+  assert.deepEqual(lone.wearing("glance-side").map((side) => side.textContent), ["1 agent", "no browser"]);
 });
 
 test("the summary stays open across a repaint once a person opened it", () => {
@@ -1310,14 +1338,14 @@ test("the shelves name each agent once with its glyph, a count past one session,
   assert.deepEqual(agents.map((chip) => chip.classes.has("busy")), [false, true, false]);
   assert.deepEqual(agents.map((chip) => chip.attributes["aria-expanded"]), ["false", "false", "false"]);
   const chipMarkup = (name) => shown.el("connections").innerHTML.split(`data-glance-agent="${name}"`)[1].split("</button>")[0];
-  assert.ok(chipMarkup("Codex").includes(Words.KIND_GLYPHS.agent), "an agent wears the spark");
-  assert.ok(chipMarkup("Command line").includes(Words.KIND_GLYPHS.commandLine), "the command line wears the prompt");
+  assert.ok(chipMarkup("Codex").includes(Words.symbolMarkup(namedAgent("Codex"), "chip")), "an agent wears its tile");
+  assert.ok(chipMarkup("Command line").includes(Words.SYMBOL_GLYPHS[Words.GLYPH.commandLine]), "the command line wears the prompt");
   const browsers = bar.wearing("glance-chip").filter((chip) => chip.tag === "span");
   assert.deepEqual(browsers.map((chip) => chip.textContent), ["Google Chrome3 tabs"]);
 });
 
-test("a working agent's glyph breathes in the accent, and reduced motion keeps it still", () => {
-  const breathing = naming(".glance-chip.busy svg").filter((rule) => rule.media === null);
+test("a working agent's symbol breathes in the accent, and reduced motion keeps it still", () => {
+  const breathing = naming(".glance-chip.busy .symbol").filter((rule) => rule.media === null);
   assert.equal(breathing.length, 1);
   assert.match(breathing[0].declarations.animation, /^glyph-breathe /);
   assert.equal(breathing[0].declarations.color, "var(--a)");
@@ -1380,7 +1408,8 @@ test("each line of a card keeps its connection ids behind Copy id", () => {
 /** One agent of the roster, as the integrations part carries it. */
 function agent(id, name, state, extra = {}) {
   return {
-    id, product_id: id, name, label: name, target: "User", icon: `${id}.svg`, state, detail: "Said by the service.",
+    id, product_id: id, name, label: name, target: "User", agent: { id, name, symbol: { src: `integrations/${id}.svg` } },
+    state, detail: "Said by the service.",
     can_install: ["available", "updatable", "not_detected"].includes(state) && !extra.copy_only,
     can_fix: false, can_uninstall: state === "installed", can_download: true, can_locate: true, copy_only: false,
     config_path: `/home/ann/.${id}/mcp.json`, connector_command: "/home/ann/.ghostlight/bin/ghostlight mcp",
@@ -1729,17 +1758,17 @@ test("a row names its tool in words, the exact name on hover and among the detai
   assert.equal(cells.wearing("hero-tool")[0].attributes.title, "browser_fill_form");
 });
 
-test("an action no record names an agent for says Unknown agent, its workspace id only on hover", () => {
+test("an action the service names no agent for says Unknown agent, its workspace id only on hover", () => {
   const workspace = "workspace_0123456789abcdef825";
-  const { cell, text } = rowOf(settledRead({ invocation: "unknown-1", workspace, provenance: null }));
+  const { cell, text } = rowOf(settledRead({ invocation: "unknown-1", workspace, provenance: null, agent: namedAgent("Unknown agent") }));
   assert.equal(cell("row-client").textContent, "Unknown agent");
   assert.equal(cell("row-client").attributes.title, workspace);
   assert.ok(!text.includes("workspace_"), `a raw id is printed in the row: ${text}`);
 });
 
 test("an action names the agent its record names, with no hover id", () => {
-  const { cell } = rowOf(settledRead({ invocation: "codex-1", provenance: {
-    connection_id: "connection_1", reported_application: "codex-mcp-client", agent: "Codex", channel: "mcp",
+  const { cell } = rowOf(settledRead({ invocation: "codex-1", agent: namedAgent("Codex"), provenance: {
+    connection_id: "connection_1", reported_application: "codex-mcp-client", channel: "mcp",
     explanation: "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it."
   } }));
   assert.equal(cell("row-client").textContent, "Codex");
@@ -1758,7 +1787,7 @@ test("the intake is marked only for the command line, never for MCP", () => {
 });
 
 test("a call refused before it reached a browser shows no browser, though its session works in one", () => {
-  const session = { id: "w1", agent: "Codex", channel: "mcp", browser: "Chromium" };
+  const session = { id: "w1", agent: namedAgent("Codex"), channel: "mcp", browser: "Chromium" };
   const refused = rowOf(settledRead({
     invocation: "refused-1", allowed: false, reason: "browser_disconnected", status: "failed",
     summary: "The browser this session works in is not connected. Nothing was sent."
@@ -1770,8 +1799,8 @@ test("a call refused before it reached a browser shows no browser, though its se
 
 test("the hero names the command line once", () => {
   const shown = drawing();
-  shown.view.hero(Entries.entryFromRecord(settledRead({ invocation: "call-1", channel: "cli", provenance: {
-    connection_id: "connection_1", reported_application: null, agent: "Command line", channel: "cli",
+  shown.view.hero(Entries.entryFromRecord(settledRead({ invocation: "call-1", channel: "cli", agent: namedAgent("Command line"), provenance: {
+    connection_id: "connection_1", reported_application: null, channel: "cli",
     explanation: "A ghostlight call session is a local program."
   } }), null), false);
   const meta = drawn(shown.el("hero-body").innerHTML).wearing("hero-meta")[0].textContent;

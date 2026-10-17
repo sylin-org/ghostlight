@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use crate::agent::Agent;
 use crate::browser::adapter::RuntimeControlState;
 use crate::governance::evidence::{PermissionCheck, PermissionTrace};
 use crate::governance::{
@@ -42,7 +43,6 @@ fn details() -> ConnectionDetails {
     ConnectionDetails {
         connection_id: Some("connection_1".into()),
         reported_application: Some("claude-code".into()),
-        agent: Some("Claude Code".into()),
         channel: IntakeChannel::Mcp,
         explanation: "Declared by the client.".into(),
     }
@@ -77,6 +77,7 @@ fn history_item(invocation: &str, check: PermissionCheck) -> HistoryItem {
         },
         channel: Some(IntakeChannel::Mcp),
         provenance: Some(details()),
+        agent: Agent::of_evidence(Some(&details())),
         browser: Some("Chrome".into()),
         complete: true,
         composition: Some(CompositionProgress {
@@ -180,7 +181,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
         },
         sessions: vec![SessionSummary {
             id: "workspace_1".into(),
-            agent: Some("Claude Code".into()),
+            agent: Agent::of(Some("claude-code"), IntakeChannel::Mcp),
             connections: vec![details()],
             channel: IntakeChannel::Mcp,
             leased: true,
@@ -198,6 +199,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             started_at_ms: Some(12),
             phase: OperationPhase::Running,
             provenance: Some(details()),
+            agent: Agent::of_evidence(Some(&details())),
         }],
         browsers: vec![BrowserInstanceSummary {
             id: "browser_1".into(),
@@ -220,7 +222,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
             name: "Cursor".into(),
             label: "Cursor".into(),
             target: "Cursor".into(),
-            icon: "cursor.svg".into(),
+            agent: Agent::listed("cursor", "Cursor", "cursor.svg"),
             state: HarnessState::NeedsAttention,
             detail: "Something else starts here.".into(),
             evidence: Some("A program named other, with 2 arguments.".into()),
@@ -366,10 +368,13 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "sessions",
     "sessions[].active_operations",
     "sessions[].agent",
+    "sessions[].agent.id",
+    "sessions[].agent.name",
+    "sessions[].agent.symbol",
+    "sessions[].agent.symbol.src",
     "sessions[].browser",
     "sessions[].channel",
     "sessions[].connections",
-    "sessions[].connections[].agent",
     "sessions[].connections[].channel",
     "sessions[].connections[].connection_id",
     "sessions[].connections[].explanation",
@@ -400,11 +405,15 @@ const COVERAGE_WINDOW_ONLY: &[&str] = &["document_coverage[].excluded_hosts"];
 const OPERATION_KEYS: &[&str] = &[
     "operations",
     "operations[].activity",
+    "operations[].agent",
+    "operations[].agent.id",
+    "operations[].agent.name",
+    "operations[].agent.symbol",
+    "operations[].agent.symbol.src",
     "operations[].capability",
     "operations[].invocation",
     "operations[].phase",
     "operations[].provenance",
-    "operations[].provenance.agent",
     "operations[].provenance.channel",
     "operations[].provenance.connection_id",
     "operations[].provenance.explanation",
@@ -416,6 +425,11 @@ const OPERATION_KEYS: &[&str] = &[
 
 /// The keys of one history record, relative to the record, without its steps.
 const RECORD_KEYS: &[&str] = &[
+    "agent",
+    "agent.id",
+    "agent.name",
+    "agent.symbol",
+    "agent.symbol.src",
     "allowed",
     "browser",
     "capability",
@@ -465,7 +479,6 @@ const RECORD_KEYS: &[&str] = &[
     "permissions.truncated",
     "policy_tier",
     "provenance",
-    "provenance.agent",
     "provenance.channel",
     "provenance.connection_id",
     "provenance.explanation",
@@ -490,6 +503,11 @@ const STEP_KEYS: &[&str] = &[
 
 const INTEGRATION_KEYS: &[&str] = &[
     "harnesses",
+    "harnesses[].agent",
+    "harnesses[].agent.id",
+    "harnesses[].agent.name",
+    "harnesses[].agent.symbol",
+    "harnesses[].agent.symbol.src",
     "harnesses[].can_download",
     "harnesses[].can_fix",
     "harnesses[].can_install",
@@ -500,7 +518,6 @@ const INTEGRATION_KEYS: &[&str] = &[
     "harnesses[].copy_only",
     "harnesses[].detail",
     "harnesses[].evidence",
-    "harnesses[].icon",
     "harnesses[].id",
     "harnesses[].label",
     "harnesses[].manual_setup",

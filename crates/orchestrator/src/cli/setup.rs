@@ -1109,7 +1109,7 @@ mod tests {
             name: label.into(),
             label: label.into(),
             target: label.into(),
-            icon: format!("{id}.svg"),
+            agent: crate::agent::Agent::listed(id, label, &format!("{id}.svg")),
             state,
             detail: String::new(),
             evidence: None,

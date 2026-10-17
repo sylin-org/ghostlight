@@ -40,6 +40,8 @@ use thiserror::Error;
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
 
+use crate::agent::Agent;
+
 use container::{AppContainer, Residence};
 use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
 
@@ -353,8 +355,8 @@ pub struct HarnessSummary {
     pub label: String,
     /// User-facing concrete target label.
     pub target: String,
-    /// Bundled integration artwork file name.
-    pub icon: String,
+    /// The agent this target sets up, as the window names and shows it.
+    pub agent: Agent,
     /// Current registration state.
     pub state: HarnessState,
     /// Fixed outcome-oriented detail.
@@ -609,7 +611,8 @@ struct HarnessDefinition {
     /// The name a person reads: `name`, with the host added when several targets share the name.
     label: String,
     target: &'static str,
-    icon: &'static str,
+    /// The agent's packaged monogram tile, a file under `ui/integrations/`.
+    monogram: &'static str,
     download_url: Option<&'static str>,
     path: PathBuf,
     default_path: PathBuf,
@@ -665,8 +668,9 @@ enum JsonDialect {
     ZCode,
 }
 
-/// One agent Ghostlight can set up, on one host: who the agent is and where its MCP configuration
-/// lives on a computer. The roster is the one record of both.
+/// One agent Ghostlight can set up, on one host: who the agent is, how the window shows it, and
+/// where its MCP configuration lives on a computer. The roster is the one record of all three, and
+/// the catalog of agents beside the command line and an unknown agent ([`crate::agent`]).
 struct AgentRow {
     /// The harness id: one per host the agent runs on.
     id: &'static str,
@@ -678,7 +682,8 @@ struct AgentRow {
     /// its harness id and product name.
     aliases: &'static [&'static str],
     target: &'static str,
-    icon: &'static str,
+    /// The agent's symbol: its packaged monogram tile, a file under `ui/integrations/`.
+    monogram: &'static str,
     download_url: Option<&'static str>,
     /// Where the configuration file is on the computer a context describes.
     path: fn(&HarnessContext) -> PathBuf,
@@ -699,7 +704,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Codex",
         aliases: &["codex-mcp-client"],
         target: "User",
-        icon: "codex.svg",
+        monogram: "codex.svg",
         download_url: Some("https://developers.openai.com/codex/cli/"),
         path: |context| context.codex_config.clone(),
         executables: &["codex"],
@@ -712,7 +717,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Claude Code",
         aliases: &[],
         target: "User",
-        icon: "claude-code.svg",
+        monogram: "claude-code.svg",
         download_url: Some("https://claude.com/product/claude-code"),
         path: |context| context.home.join(".claude.json"),
         executables: &["claude"],
@@ -725,7 +730,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Claude Desktop",
         aliases: &["claude-ai"],
         target: "User",
-        icon: "claude-desktop.svg",
+        monogram: "claude-desktop.svg",
         download_url: None,
         path: |context| context.roaming.join("Claude/claude_desktop_config.json"),
         executables: &[],
@@ -738,7 +743,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cursor",
         aliases: &["cursor-vscode"],
         target: "User",
-        icon: "cursor.svg",
+        monogram: "cursor.svg",
         download_url: Some("https://cursor.com/downloads"),
         path: |context| context.home.join(".cursor/mcp.json"),
         executables: &["cursor", "cursor-agent"],
@@ -751,7 +756,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Visual Studio Code",
         aliases: &[],
         target: "User",
-        icon: "vscode.svg",
+        monogram: "vscode.svg",
         download_url: Some("https://code.visualstudio.com/download"),
         path: |context| context.roaming.join("Code/User/mcp.json"),
         executables: &["code"],
@@ -764,7 +769,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Windsurf",
         aliases: &[],
         target: "User",
-        icon: "windsurf.svg",
+        monogram: "windsurf.svg",
         download_url: Some("https://windsurf.com/editor/download"),
         path: |context| context.home.join(".codeium/windsurf/mcp_config.json"),
         executables: &["windsurf"],
@@ -780,7 +785,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Devin",
         aliases: &[],
         target: "Devin user",
-        icon: "windsurf.svg",
+        monogram: "windsurf.svg",
         download_url: Some("https://windsurf.com/editor/download"),
         path: |context| context.config.join("devin/mcp_config.json"),
         executables: &["devin", "devin-desktop", "surf"],
@@ -793,7 +798,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Zed",
         aliases: &[],
         target: "User",
-        icon: "zed.svg",
+        monogram: "zed.svg",
         download_url: Some("https://zed.dev/download"),
         path: |context| {
             if context.windows {
@@ -814,7 +819,7 @@ const ROSTER: &[AgentRow] = &[
         name: "ZCode",
         aliases: &[],
         target: "User",
-        icon: "zcode.svg",
+        monogram: "zcode.svg",
         download_url: None,
         path: |context| context.home.join(".zcode/cli/config.json"),
         executables: &["zcode"],
@@ -827,7 +832,7 @@ const ROSTER: &[AgentRow] = &[
         name: "OpenCode",
         aliases: &[],
         target: "User",
-        icon: "opencode.svg",
+        monogram: "opencode.svg",
         download_url: Some("https://opencode.ai/docs"),
         path: |context| {
             let jsonc = context.home.join(".config/opencode/opencode.jsonc");
@@ -847,7 +852,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Crush",
         aliases: &[],
         target: "User",
-        icon: "crush.svg",
+        monogram: "crush.svg",
         download_url: Some("https://github.com/charmbracelet/crush"),
         path: |context| {
             env::var_os("CRUSH_GLOBAL_CONFIG")
@@ -864,7 +869,7 @@ const ROSTER: &[AgentRow] = &[
         name: "GitHub Copilot CLI",
         aliases: &[],
         target: "CLI",
-        icon: "copilot-cli.svg",
+        monogram: "copilot-cli.svg",
         download_url: Some("https://github.com/github/copilot-cli"),
         path: |context| context.home.join(".copilot/mcp-config.json"),
         executables: &["copilot"],
@@ -877,7 +882,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "CLI",
-        icon: "cline.svg",
+        monogram: "cline.svg",
         download_url: Some("https://docs.cline.bot/cline-cli/overview"),
         path: |context| context.home.join(".cline/data").join(CLINE_SETTINGS),
         executables: &["cline"],
@@ -890,7 +895,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "Visual Studio Code",
-        icon: "cline.svg",
+        monogram: "cline.svg",
         download_url: Some(
             "https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev",
         ),
@@ -910,7 +915,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "Cursor",
-        icon: "cline.svg",
+        monogram: "cline.svg",
         download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
         path: |context| {
             context
@@ -928,7 +933,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Cline",
         aliases: &[],
         target: "Windsurf",
-        icon: "cline.svg",
+        monogram: "cline.svg",
         download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
         path: |context| {
             context
@@ -946,7 +951,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Kiro",
         aliases: &[],
         target: "CLI and IDE",
-        icon: "kiro.svg",
+        monogram: "kiro.svg",
         download_url: Some("https://kiro.dev/downloads/"),
         path: |context| context.home.join(".kiro/settings/mcp.json"),
         executables: &["kiro", "kiro-cli"],
@@ -959,7 +964,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Qwen Code",
         aliases: &[],
         target: "CLI",
-        icon: "qwen-code.svg",
+        monogram: "qwen-code.svg",
         download_url: Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
         path: |context| context.home.join(".qwen/settings.json"),
         executables: &["qwen"],
@@ -972,7 +977,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Junie",
         aliases: &[],
         target: "CLI and JetBrains",
-        icon: "junie.svg",
+        monogram: "junie.svg",
         download_url: Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
         path: |context| context.home.join(".junie/mcp/mcp.json"),
         executables: &["junie"],
@@ -985,7 +990,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Kilo Code",
         aliases: &[],
         target: "CLI",
-        icon: "kilo-code.svg",
+        monogram: "kilo-code.svg",
         download_url: Some("https://kilo.ai/"),
         path: |context| {
             let directory = context.config.join("kilo");
@@ -1005,7 +1010,7 @@ const ROSTER: &[AgentRow] = &[
         name: "goose",
         aliases: &[],
         target: "CLI and desktop",
-        icon: "goose.svg",
+        monogram: "goose.svg",
         download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
         path: |context| context.config.join("goose/config.yaml"),
         executables: &["goose"],
@@ -1018,7 +1023,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Continue",
         aliases: &[],
         target: "CLI and IDE",
-        icon: "continue.svg",
+        monogram: "continue.svg",
         download_url: Some("https://docs.continue.dev/cli/quickstart"),
         path: |context| context.home.join(".continue/config.yaml"),
         executables: &["cn"],
@@ -1031,7 +1036,7 @@ const ROSTER: &[AgentRow] = &[
         name: "Antigravity",
         aliases: &[],
         target: "CLI",
-        icon: "antigravity.svg",
+        monogram: "antigravity.svg",
         download_url: Some("https://antigravity.google/download?platform=linux"),
         path: |context| context.home.join(".gemini/config/mcp_config.json"),
         executables: &["agy"],
@@ -1051,6 +1056,11 @@ impl AgentRow {
             .any(|known| known.eq_ignore_ascii_case(reported))
     }
 
+    /// The agent of this row, as the window names and shows it.
+    fn agent(&self) -> Agent {
+        Agent::listed(self.id, self.name, self.monogram)
+    }
+
     /// The row as it stands on the computer `context` describes, before any location the person
     /// chose.
     fn on(&self, context: &HarnessContext) -> HarnessDefinition {
@@ -1061,7 +1071,7 @@ impl AgentRow {
             name: self.name,
             label: self.name.to_owned(),
             target: self.target,
-            icon: self.icon,
+            monogram: self.monogram,
             download_url: self.download_url,
             default_path: path.clone(),
             path,
@@ -1108,18 +1118,19 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
     rows
 }
 
-/// The product name of the agent whose client calls itself `reported`, ignoring case and
-/// surrounding space; none for a name Ghostlight does not know. A roster row matches its harness
-/// id, its product name and its aliases, never its product id.
+/// The roster's agent whose client calls itself `reported`, ignoring case and surrounding space;
+/// none for a name Ghostlight does not know. A roster row matches its harness id, its product name
+/// and its aliases, never its product id, and the first row that matches names a product on
+/// several hosts.
 ///
 /// The name stays the client's own claim: it names the agent for a person and grants nothing.
 #[must_use]
-pub fn agent_name(reported: &str) -> Option<&'static str> {
+pub fn agent_called(reported: &str) -> Option<Agent> {
     let reported = reported.trim();
     ROSTER
         .iter()
         .find(|row| row.is_called(reported))
-        .map(|row| row.name)
+        .map(AgentRow::agent)
 }
 
 fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
@@ -1201,7 +1212,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         name: definition.name.into(),
         label: definition.label.clone(),
         target: definition.target.into(),
-        icon: definition.icon.into(),
+        agent: Agent::listed(definition.id, definition.name, definition.monogram),
         state,
         detail,
         evidence,
@@ -2322,17 +2333,24 @@ mod tests {
 
     use serde_json::Value;
 
+    use crate::agent::Symbol;
+
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        agent_name, command_registration_state, definitions, edit_json, edit_toml, executable_name,
-        expected_json_entry, fix_toml, harness_roots, inspect, inspect_json, inspect_toml,
-        json_entry_args, json_entry_command, jsonc_options, manual_json_setup, mcp_command_line,
-        replace_with_backup, resolve_through_symlink, AppContainer, ForeignCommand, HarnessAction,
-        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
-        JsonDialect, PrivateView, RegistrationState, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME,
-        ROSTER,
+        agent_called, command_registration_state, definitions, edit_json, edit_toml,
+        executable_name, expected_json_entry, fix_toml, harness_roots, inspect, inspect_json,
+        inspect_toml, json_entry_args, json_entry_command, jsonc_options, manual_json_setup,
+        mcp_command_line, replace_with_backup, resolve_through_symlink, AppContainer,
+        ForeignCommand, HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots,
+        HarnessState, HarnessSummary, JsonDialect, PrivateView, RegistrationState,
+        EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
     };
+
+    /// The name of the roster's agent whose client calls itself `reported`.
+    fn named(reported: &str) -> Option<String> {
+        agent_called(reported).map(|agent| agent.name)
+    }
 
     fn temporary(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!(
@@ -2519,12 +2537,12 @@ mod tests {
         let directory = temporary("agent-names-roster");
         let rows = definitions(&context(&directory));
         for row in &rows {
-            assert_eq!(agent_name(row.id), Some(row.name), "{}", row.id);
-            assert_eq!(agent_name(row.name), Some(row.name), "{}", row.id);
+            assert_eq!(named(row.id).as_deref(), Some(row.name), "{}", row.id);
+            assert_eq!(named(row.name).as_deref(), Some(row.name), "{}", row.id);
         }
         for row in ROSTER {
             for alias in row.aliases {
-                assert_eq!(agent_name(alias), Some(row.name), "{alias}");
+                assert_eq!(named(alias).as_deref(), Some(row.name), "{alias}");
                 let others = ROSTER.iter().filter(|other| other.name != row.name);
                 for other in others {
                     assert!(!other.is_called(alias), "{alias} also calls {}", other.id);
@@ -2538,24 +2556,49 @@ mod tests {
     fn a_product_id_two_agents_share_names_only_the_agent_whose_id_it_is() {
         let devin = ROSTER.iter().find(|row| row.id == "devin").unwrap();
         assert_eq!(devin.product_id, "windsurf");
-        assert_eq!(agent_name("windsurf"), Some("Windsurf"));
-        assert_eq!(agent_name("devin"), Some("Devin"));
-        assert_eq!(agent_name("Devin"), Some("Devin"));
+        assert_eq!(named("windsurf").as_deref(), Some("Windsurf"));
+        assert_eq!(named("devin").as_deref(), Some("Devin"));
+        assert_eq!(named("Devin").as_deref(), Some("Devin"));
+    }
+
+    #[test]
+    fn the_command_line_and_the_unknown_agent_are_reserved_entries_no_row_takes() {
+        use crate::agent::{COMMAND_LINE_ID, UNKNOWN_ID};
+        use crate::language::provenance::{COMMAND_LINE_AGENT, UNKNOWN_AGENT};
+
+        for row in ROSTER {
+            assert!(
+                ![COMMAND_LINE_ID, UNKNOWN_ID].contains(&row.id),
+                "{}",
+                row.id
+            );
+            for reserved in [
+                COMMAND_LINE_ID,
+                UNKNOWN_ID,
+                COMMAND_LINE_AGENT,
+                UNKNOWN_AGENT,
+            ] {
+                assert!(!row.is_called(reserved), "{} is called {reserved}", row.id);
+            }
+        }
     }
 
     #[test]
     fn an_agent_is_known_by_the_names_it_reports_in_any_case() {
-        assert_eq!(agent_name("codex-mcp-client"), Some("Codex"));
-        assert_eq!(agent_name("claude-code"), Some("Claude Code"));
-        assert_eq!(agent_name("CLAUDE-CODE"), Some("Claude Code"));
-        assert_eq!(agent_name("  claude code "), Some("Claude Code"));
-        assert_eq!(agent_name("claude-ai"), Some("Claude Desktop"));
-        assert_eq!(agent_name("cursor-vscode"), Some("Cursor"));
-        assert_eq!(agent_name("Visual Studio Code"), Some("Visual Studio Code"));
-        assert_eq!(agent_name("cline"), Some("Cline"));
-        assert_eq!(agent_name("Antigravity"), Some("Antigravity"));
-        assert_eq!(agent_name("my own agent"), None);
-        assert_eq!(agent_name(""), None);
+        assert_eq!(named("codex-mcp-client").as_deref(), Some("Codex"));
+        assert_eq!(named("claude-code").as_deref(), Some("Claude Code"));
+        assert_eq!(named("CLAUDE-CODE").as_deref(), Some("Claude Code"));
+        assert_eq!(named("  claude code ").as_deref(), Some("Claude Code"));
+        assert_eq!(named("claude-ai").as_deref(), Some("Claude Desktop"));
+        assert_eq!(named("cursor-vscode").as_deref(), Some("Cursor"));
+        assert_eq!(
+            named("Visual Studio Code").as_deref(),
+            Some("Visual Studio Code")
+        );
+        assert_eq!(named("cline").as_deref(), Some("Cline"));
+        assert_eq!(named("Antigravity").as_deref(), Some("Antigravity"));
+        assert_eq!(named("my own agent").as_deref(), None);
+        assert_eq!(named("").as_deref(), None);
     }
 
     #[test]
@@ -2572,8 +2615,20 @@ mod tests {
         let registry = HarnessRegistry::with_context(context);
         for summary in registry.summaries() {
             assert!(
-                asset_root.join(&summary.icon).is_file(),
+                matches!(&summary.agent.symbol, Symbol::Image(path)
+                    if path.strip_prefix("integrations/").is_some_and(|file| asset_root.join(file).is_file())),
                 "missing packaged artwork for {}",
+                summary.id
+            );
+            assert_eq!(
+                (summary.agent.id.as_str(), summary.agent.name.as_str()),
+                (summary.id.as_str(), summary.name.as_str()),
+                "every row's agent is its own catalog entry"
+            );
+            assert_eq!(
+                agent_called(&summary.id).as_ref(),
+                Some(&summary.agent),
+                "every harness row is in the catalog: {}",
                 summary.id
             );
             assert_eq!(summary.connector_command, format!("{edge} mcp"));
