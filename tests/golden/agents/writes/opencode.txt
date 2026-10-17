@@ -9,7 +9,7 @@ product: opencode
 name: OpenCode
 label: OpenCode
 target: User
-agent: {"id":"opencode","name":"OpenCode","symbol":{"icon":"agent-icons/opencode?v=6e249b3ff0ef"}}
+agent: opencode (OpenCode)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.config/opencode/opencode.json: no file
@@ -794,7 +794,7 @@ product: opencode
 name: OpenCode
 label: OpenCode
 target: User
-agent: {"id":"opencode","name":"OpenCode","symbol":{"icon":"agent-icons/opencode?v=6e249b3ff0ef"}}
+agent: opencode (OpenCode)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/opencode/opencode.json: no file
@@ -1579,7 +1579,7 @@ product: opencode
 name: OpenCode
 label: OpenCode
 target: User
-agent: {"id":"opencode","name":"OpenCode","symbol":{"icon":"agent-icons/opencode?v=6e249b3ff0ef"}}
+agent: opencode (OpenCode)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.config/opencode/opencode.json: no file

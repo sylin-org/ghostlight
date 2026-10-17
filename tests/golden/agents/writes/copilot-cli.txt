@@ -9,7 +9,7 @@ product: copilot-cli
 name: GitHub Copilot CLI
 label: GitHub Copilot CLI
 target: CLI
-agent: {"id":"copilot-cli","name":"GitHub Copilot CLI","symbol":{"icon":"agent-icons/copilot-cli?v=532e7bc63338"}}
+agent: copilot-cli (GitHub Copilot CLI)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.copilot/mcp-config.json: no file
@@ -713,7 +713,7 @@ product: copilot-cli
 name: GitHub Copilot CLI
 label: GitHub Copilot CLI
 target: CLI
-agent: {"id":"copilot-cli","name":"GitHub Copilot CLI","symbol":{"icon":"agent-icons/copilot-cli?v=532e7bc63338"}}
+agent: copilot-cli (GitHub Copilot CLI)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.copilot/mcp-config.json: no file
@@ -1417,7 +1417,7 @@ product: copilot-cli
 name: GitHub Copilot CLI
 label: GitHub Copilot CLI
 target: CLI
-agent: {"id":"copilot-cli","name":"GitHub Copilot CLI","symbol":{"icon":"agent-icons/copilot-cli?v=532e7bc63338"}}
+agent: copilot-cli (GitHub Copilot CLI)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.copilot/mcp-config.json: no file

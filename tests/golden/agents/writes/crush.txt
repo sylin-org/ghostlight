@@ -9,7 +9,7 @@ product: crush
 name: Crush
 label: Crush
 target: User
-agent: {"id":"crush","name":"Crush","symbol":{"icon":"agent-icons/crush?v=b09970a1c71b"}}
+agent: crush (Crush)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.config/crush/crush.json: no file
@@ -657,7 +657,7 @@ product: crush
 name: Crush
 label: Crush
 target: User
-agent: {"id":"crush","name":"Crush","symbol":{"icon":"agent-icons/crush?v=b09970a1c71b"}}
+agent: crush (Crush)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/crush/crush.json: no file
@@ -1305,7 +1305,7 @@ product: crush
 name: Crush
 label: Crush
 target: User
-agent: {"id":"crush","name":"Crush","symbol":{"icon":"agent-icons/crush?v=b09970a1c71b"}}
+agent: crush (Crush)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.config/crush/crush.json: no file

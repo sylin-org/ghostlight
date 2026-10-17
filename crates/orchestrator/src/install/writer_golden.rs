@@ -660,11 +660,9 @@ fn write_identity(out: &mut String, summary: &HarnessSummary) {
     let _ = writeln!(out, "name: {}", summary.name);
     let _ = writeln!(out, "label: {}", summary.label);
     let _ = writeln!(out, "target: {}", summary.target);
-    let _ = writeln!(
-        out,
-        "agent: {}",
-        serde_json::to_string(&summary.agent).expect("an agent serializes")
-    );
+    // The agent's id and name are what the installer and its words use. How the window draws the
+    // agent is not this golden's subject, so its symbol stays out.
+    let _ = writeln!(out, "agent: {} ({})", summary.agent.id, summary.agent.name);
 }
 
 /// Everything inspection says about the host. Every field is named, so a new one cannot be left

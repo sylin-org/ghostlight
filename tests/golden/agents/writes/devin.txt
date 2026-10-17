@@ -9,7 +9,7 @@ product: windsurf
 name: Devin
 label: Devin
 target: Devin user
-agent: {"id":"devin","name":"Devin","symbol":{"icon":"agent-icons/devin?v=82e0571599f5"}}
+agent: devin (Devin)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/devin/mcp_config.json: no file
@@ -657,7 +657,7 @@ product: windsurf
 name: Devin
 label: Devin
 target: Devin user
-agent: {"id":"devin","name":"Devin","symbol":{"icon":"agent-icons/devin?v=82e0571599f5"}}
+agent: devin (Devin)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/devin/mcp_config.json: no file
@@ -1305,7 +1305,7 @@ product: windsurf
 name: Devin
 label: Devin
 target: Devin user
-agent: {"id":"devin","name":"Devin","symbol":{"icon":"agent-icons/devin?v=82e0571599f5"}}
+agent: devin (Devin)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/devin/mcp_config.json: no file

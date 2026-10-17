@@ -9,7 +9,7 @@ product: junie
 name: Junie
 label: Junie
 target: CLI and JetBrains
-agent: {"id":"junie","name":"Junie","symbol":{"icon":"agent-icons/junie?v=5e3b40f7e389"}}
+agent: junie (Junie)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.junie/mcp/mcp.json: no file
@@ -657,7 +657,7 @@ product: junie
 name: Junie
 label: Junie
 target: CLI and JetBrains
-agent: {"id":"junie","name":"Junie","symbol":{"icon":"agent-icons/junie?v=5e3b40f7e389"}}
+agent: junie (Junie)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.junie/mcp/mcp.json: no file
@@ -1305,7 +1305,7 @@ product: junie
 name: Junie
 label: Junie
 target: CLI and JetBrains
-agent: {"id":"junie","name":"Junie","symbol":{"icon":"agent-icons/junie?v=5e3b40f7e389"}}
+agent: junie (Junie)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.junie/mcp/mcp.json: no file

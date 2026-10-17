@@ -9,7 +9,7 @@ product: cline
 name: Cline
 label: Cline (Visual Studio Code)
 target: Visual Studio Code
-agent: {"id":"cline","name":"Cline","symbol":{"icon":"agent-icons/cline?v=cdd252445edb"}}
+agent: cline (Cline)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json: no file
@@ -657,7 +657,7 @@ product: cline
 name: Cline
 label: Cline (Visual Studio Code)
 target: Visual Studio Code
-agent: {"id":"cline","name":"Cline","symbol":{"icon":"agent-icons/cline?v=cdd252445edb"}}
+agent: cline (Cline)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json: no file
@@ -1305,7 +1305,7 @@ product: cline
 name: Cline
 label: Cline (Visual Studio Code)
 target: Visual Studio Code
-agent: {"id":"cline","name":"Cline","symbol":{"icon":"agent-icons/cline?v=cdd252445edb"}}
+agent: cline (Cline)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json: no file

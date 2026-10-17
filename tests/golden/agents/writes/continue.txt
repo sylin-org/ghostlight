@@ -9,7 +9,7 @@ product: continue
 name: Continue
 label: Continue
 target: CLI and IDE
-agent: {"id":"continue","name":"Continue","symbol":{"icon":"agent-icons/continue?v=e8c964486479"}}
+agent: continue (Continue)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.continue/config.yaml: no file
@@ -172,7 +172,7 @@ product: continue
 name: Continue
 label: Continue
 target: CLI and IDE
-agent: {"id":"continue","name":"Continue","symbol":{"icon":"agent-icons/continue?v=e8c964486479"}}
+agent: continue (Continue)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.continue/config.yaml: no file
@@ -335,7 +335,7 @@ product: continue
 name: Continue
 label: Continue
 target: CLI and IDE
-agent: {"id":"continue","name":"Continue","symbol":{"icon":"agent-icons/continue?v=e8c964486479"}}
+agent: continue (Continue)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.continue/config.yaml: no file

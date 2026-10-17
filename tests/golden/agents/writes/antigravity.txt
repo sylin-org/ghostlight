@@ -9,7 +9,7 @@ product: antigravity
 name: Antigravity
 label: Antigravity
 target: CLI
-agent: {"id":"antigravity","name":"Antigravity","symbol":{"icon":"agent-icons/antigravity?v=fe8cc09fff9e"}}
+agent: antigravity (Antigravity)
 
 === Windows / absent: no file
 seed <root>/Pat Doe/.gemini/config/mcp_config.json: no file
@@ -657,7 +657,7 @@ product: antigravity
 name: Antigravity
 label: Antigravity
 target: CLI
-agent: {"id":"antigravity","name":"Antigravity","symbol":{"icon":"agent-icons/antigravity?v=fe8cc09fff9e"}}
+agent: antigravity (Antigravity)
 
 === Linux / absent: no file
 seed <root>/Pat Doe/.gemini/config/mcp_config.json: no file
@@ -1305,7 +1305,7 @@ product: antigravity
 name: Antigravity
 label: Antigravity
 target: CLI
-agent: {"id":"antigravity","name":"Antigravity","symbol":{"icon":"agent-icons/antigravity?v=fe8cc09fff9e"}}
+agent: antigravity (Antigravity)
 
 === Windows, from inside the OpenAI.Codex app container / absent: no file
 seed <root>/Pat Doe/.gemini/config/mcp_config.json: no file
