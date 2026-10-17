@@ -11,6 +11,7 @@ use ghostlight_relay::spawn::REASON_OPTION;
 
 use super::{EXIT_BLOCKED, EXIT_CANCELLED, EXIT_FAILED, EXIT_SUCCEEDED, EXIT_UNKNOWN, EXIT_USAGE};
 use crate::install::deployment::{DEVELOPMENT_OPTION, PLAN_OPTION, RESTORE_OPTION};
+use crate::install::ALL_CLIENTS_OPTION;
 
 /// Every subcommand a person is offered, in help order.
 ///
@@ -332,7 +333,7 @@ pub fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOption
         match argument {
             "--dry-run" => options.dry_run = true,
             "--all-browsers" => options.all_browsers = true,
-            "--all-clients" => options.all_clients = true,
+            ALL_CLIENTS_OPTION => options.all_clients = true,
             "--no-clients" => options.no_clients = true,
             "--no-open" => options.no_open = true,
             "--browser" => {
@@ -378,7 +379,7 @@ pub fn parse_setup_options(arguments: &[OsString]) -> anyhow::Result<SetupOption
 /// Render the CLI help text.
 pub fn help_text() -> String {
     format!(
-        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve --reason <word>   Start the service without a window (Ghostlight programs run this)\n  ghostlight mcp                     Run as a local stdio MCP server for an MCP client\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an agent, or one host of it (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the Ghostlight window\n\n{clients}\n\nUse 'ghostlight call --catalog' to list browser tools.",
+        "Ghostlight {version}\n\nUsage:\n  ghostlight open                    Open the desktop workbench\n  ghostlight serve --reason <word>   Start the service without a window (Ghostlight programs run this)\n  ghostlight mcp                     Run as a local stdio MCP server for an MCP client\n  ghostlight install [options]       Connect browsers and detected MCP clients\n  ghostlight uninstall [options]     Remove only Ghostlight-owned registrations\n  ghostlight doctor [--json]         Check the complete local installation\n  ghostlight status [--json]         Check the local service endpoint\n  ghostlight call <tool> [json]      Run one browser tool\n  ghostlight diagnostics path|show|prune|on|off\n                                     Read the shared diagnostics log, or turn it on and off\n  ghostlight policy validate <file>  Validate one schema-4 policy\n  ghostlight policy migrate <file>   Move a schema-3 policy to schema 4, keeping a backup\n  ghostlight policy explain <file>   Explain policy and the RAWX capability map\n  ghostlight policy simulate <file> <audit.jsonl>\n                                     Preview denials against existing audit\n  ghostlight policy keygen <dir>     Create customer-owned policy signing keys\n  ghostlight policy pubkey ...       Print public bootstrap verification keys\n  ghostlight policy sign ...         Sign a policy at an explicit sequence\n  ghostlight policy publish ...      Advance sequence and prepare deployment\n\nInstall options:\n  --dry-run                          Show changes without writing them\n  --browser <id>                     Select Chrome, Edge, Brave, or Chromium\n  --all-browsers                     Select every supported browser\n  --client <id>                      Select an agent's detected hosts, or one host (repeatable)\n  --all-clients                      Include clients not currently detected\n  --no-clients                       Leave every MCP client configuration unchanged\n  --no-open                          Do not open the Ghostlight window\n\n{clients}\n\nUse 'ghostlight call --catalog' to list browser tools.",
         version = env!("CARGO_PKG_VERSION"),
         clients = client_id_lines(),
     )
@@ -388,11 +389,11 @@ pub fn help_text() -> String {
 const HELP_WIDTH: usize = 96;
 
 /// The help text's list of `--client` values, read from the agent catalog: the agent ids, each
-/// of which selects every host the agent runs on, then the host ids, each of which selects one.
+/// of which selects the agent's detected hosts, then the host ids, each of which selects one.
 fn client_id_lines() -> String {
     let ids = crate::install::client_ids();
     format!(
-        "Client ids (an agent id selects every host the agent runs on):\n{}\n{}",
+        "Client ids (an agent id selects its detected hosts, or every host with {ALL_CLIENTS_OPTION}):\n{}\n{}",
         id_list("  Agents: ", &ids.agents),
         id_list("  Hosts:  ", &ids.hosts)
     )

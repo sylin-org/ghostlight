@@ -8,6 +8,7 @@
 
 use crate::install::deployment::RESTORE_OPTION;
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
+use crate::install::ALL_CLIENTS_OPTION;
 
 /// Where the get scripts are published.
 const GET_SCRIPT_ROOT: &str = "https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts";
@@ -227,6 +228,29 @@ pub fn client_left_private(client: &str, app: &str, install: bool) -> String {
     format!(
         "{client}: Windows keeps this configuration private to {app}, so its Ghostlight entry \
          {left}. To {act} it, run Ghostlight's {command} from a regular terminal."
+    )
+}
+
+/// The refusal of a `--client` value that is neither an agent's id nor a host's, naming every
+/// value accepted: the agent ids, then the host ids.
+#[must_use]
+pub fn unknown_client(value: &str, agents: &[&str], hosts: &[&str]) -> String {
+    format!(
+        "unknown MCP client '{value}'; expected an agent id ({}) or a host id ({})",
+        agents.join(", "),
+        hosts.join(", ")
+    )
+}
+
+/// The refusal of a `--client` value that names the agent called `agent` when none of its hosts
+/// is found here, naming each host's id, any of which selects that host, and the option that
+/// selects every host.
+#[must_use]
+pub fn no_client_host_found(value: &str, agent: &str, hosts: &[&str]) -> String {
+    format!(
+        "no host of {agent} was found for '{value}'; name one by its host id ({}), or add \
+         {ALL_CLIENTS_OPTION} to select every host of {agent}",
+        hosts.join(", ")
     )
 }
 

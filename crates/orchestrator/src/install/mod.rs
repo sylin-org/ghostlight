@@ -413,12 +413,44 @@ pub struct HarnessSummary {
     pub manual_setup: String,
 }
 
+/// The install and uninstall option that includes clients not currently detected, and widens an
+/// agent id given to `--client` to every host of the agent.
+pub const ALL_CLIENTS_OPTION: &str = "--all-clients";
+
+/// How a `--client` value names a host.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientName {
+    /// The value is the host's own harness id. It selects that host in any state.
+    Host,
+    /// The value is the catalog id of the host's agent and not the host's own id. It selects the
+    /// host when the host is detected, or in any state with [`ALL_CLIENTS_OPTION`], so naming an
+    /// agent never writes into a host the person does not have.
+    Agent,
+}
+
 impl HarnessSummary {
-    /// Whether the `--client` value `id` selects this host: it is the host's harness id or its
-    /// agent's catalog id, ignoring case. An agent's id therefore selects every host it runs on.
+    /// How the `--client` value `id` names this host, ignoring case: by its harness id, by its
+    /// agent's catalog id, or not at all. A harness id that is also its agent's id names the host.
     #[must_use]
-    pub fn is_selected_by(&self, id: &str) -> bool {
-        self.id.eq_ignore_ascii_case(id) || self.agent.id.eq_ignore_ascii_case(id)
+    pub fn named_by(&self, id: &str) -> Option<ClientName> {
+        if self.id.eq_ignore_ascii_case(id) {
+            Some(ClientName::Host)
+        } else if self.agent.id.eq_ignore_ascii_case(id) {
+            Some(ClientName::Agent)
+        } else {
+            None
+        }
+    }
+
+    /// Whether the `--client` value `id` selects this host. Its harness id always does. Its
+    /// agent's id does when the host is detected, or whatever its state when `all_clients` is set.
+    #[must_use]
+    pub fn is_selected_by(&self, id: &str, all_clients: bool) -> bool {
+        match self.named_by(id) {
+            Some(ClientName::Host) => true,
+            Some(ClientName::Agent) => all_clients || self.state != HarnessState::NotDetected,
+            None => false,
+        }
     }
 }
 
@@ -426,7 +458,8 @@ impl HarnessSummary {
 /// order, for the help text, the refusal of an unknown value and the shell completions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClientIds {
-    /// Every agent's catalog id, once. Each selects every host the agent runs on.
+    /// Every agent's catalog id, once. Each selects the agent's detected hosts, or every host of
+    /// it with [`ALL_CLIENTS_OPTION`].
     pub agents: Vec<&'static str>,
     /// The harness id of every host that no agent id names: the hosts of an agent that runs on
     /// more than one. Each selects that one host.
@@ -2450,9 +2483,9 @@ mod tests {
         agent_called, client_ids, command_registration_state, definitions, edit_json, edit_toml,
         executable_name, expected_json_entry, fix_toml, harness_roots, inspect, inspect_json,
         inspect_toml, json_entry_args, json_entry_command, jsonc_options, manual_json_setup,
-        mcp_command_line, replace_with_backup, resolve_through_symlink, AppContainer,
+        mcp_command_line, replace_with_backup, resolve_through_symlink, AppContainer, ClientName,
         ForeignCommand, HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots,
-        HarnessState, HarnessSummary, JsonDialect, PrivateView, RegistrationState,
+        HarnessState, HarnessSummary, JsonDialect, PrivateView, RegistrationState, CLINE_SETTINGS,
         EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
     };
 
@@ -2705,15 +2738,14 @@ mod tests {
     }
 
     #[test]
-    fn every_client_id_selects_its_agents_hosts_or_its_one_host() {
+    fn every_client_id_names_its_agents_hosts_or_its_one_host() {
         let directory = temporary("client-ids");
         let summaries = HarnessRegistry::with_context(context(&directory)).summaries();
         let ids = client_ids();
-        let selected = |id: &str| -> Vec<String> {
+        let names = |id: &str| -> Vec<(String, ClientName)> {
             summaries
                 .iter()
-                .filter(|summary| summary.is_selected_by(id))
-                .map(|summary| summary.id.clone())
+                .filter_map(|summary| Some((summary.id.clone(), summary.named_by(id)?)))
                 .collect()
         };
         assert_eq!(
@@ -2727,25 +2759,67 @@ mod tests {
         );
         assert_eq!(ids.all().count(), ids.agents.len() + ids.hosts.len());
         for agent in &ids.agents {
-            let hosts: Vec<String> = ROSTER
+            let hosts: Vec<(String, ClientName)> = ROSTER
                 .iter()
                 .filter(|row| row.agent_id == *agent)
-                .map(|row| row.id.to_owned())
+                .map(|row| {
+                    let name = if row.id == *agent {
+                        ClientName::Host
+                    } else {
+                        ClientName::Agent
+                    };
+                    (row.id.to_owned(), name)
+                })
                 .collect();
-            assert_eq!(selected(agent), hosts, "{agent}");
-            assert_eq!(selected(&agent.to_ascii_uppercase()), hosts, "{agent}");
+            assert_eq!(names(agent), hosts, "{agent}");
+            assert_eq!(names(&agent.to_ascii_uppercase()), hosts, "{agent}");
             assert_eq!(
                 ids.agents.iter().filter(|other| *other == agent).count(),
                 1,
                 "{agent}"
             );
         }
-        // Every harness id still selects exactly its own host, whether or not an agent id names it.
+        // Every harness id still names exactly its own host, whether or not an agent id names it.
         for row in ROSTER {
-            assert_eq!(selected(row.id), [row.id], "{}", row.id);
+            assert_eq!(
+                names(row.id),
+                [(row.id.to_owned(), ClientName::Host)],
+                "{}",
+                row.id
+            );
         }
-        assert_eq!(selected("cline").len(), 4);
-        assert!(selected("Cline (Cursor)").is_empty());
+        assert_eq!(names("cline").len(), 4);
+        assert!(names("Cline (Cursor)").is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_agent_id_selects_only_the_hosts_found_unless_every_client_is_asked_for() {
+        let directory = temporary("client-ids-detected");
+        let selected = |id: &str, all_clients: bool| -> Vec<String> {
+            HarnessRegistry::with_context(context(&directory))
+                .summaries()
+                .into_iter()
+                .filter(|summary| summary.is_selected_by(id, all_clients))
+                .map(|summary| summary.id)
+                .collect()
+        };
+        assert!(selected("cline", false).is_empty());
+        assert_eq!(selected("cline-vscode", false), ["cline-vscode"]);
+        assert_eq!(selected("zed", false), ["zed"]);
+        let cli = directory.join("home/.cline/data").join(CLINE_SETTINGS);
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(&cli, "{}").unwrap();
+        assert_eq!(selected("cline", false), ["cline-cli"]);
+        assert_eq!(
+            selected("cline", true),
+            [
+                "cline-cli",
+                "cline-vscode",
+                "cline-cursor",
+                "cline-windsurf"
+            ]
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

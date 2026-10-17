@@ -741,8 +741,10 @@ fn client_step(
 /// Filter candidate MCP harness summaries based on user selection.
 ///
 /// Each `--client` value selects the hosts [`HarnessSummary::is_selected_by`] says, in the order
-/// the values were given and each host once: an agent's id selects every host it runs on, and a
-/// harness id that one host. A value that selects nothing is refused with every valid id.
+/// the values were given and each host once: a harness id selects that one host, and an agent's
+/// id the hosts of it that are detected, or every host of it with `--all-clients`. A value that
+/// names no host is refused with every valid id, and an agent id none of whose hosts is detected
+/// is refused with the agent's host ids.
 ///
 /// Without `--client`, a run also selects each client it would change if the app container it
 /// runs in did not keep that client's configuration private, so what it leaves is said rather than
@@ -755,17 +757,30 @@ pub fn select_harnesses(
     if !options.client_ids.is_empty() {
         let mut selected: Vec<HarnessSummary> = Vec::new();
         for id in &options.client_ids {
-            let mut chosen = summaries
+            let named: Vec<&HarnessSummary> = summaries
                 .iter()
-                .filter(|summary| summary.is_selected_by(id))
-                .peekable();
-            if chosen.peek().is_none() {
+                .filter(|summary| summary.named_by(id).is_some())
+                .collect();
+            let Some(first) = named.first() else {
                 let valid = client_ids();
-                anyhow::bail!(
-                    "unknown MCP client '{id}'; expected an agent id ({}) or a host id ({})",
-                    valid.agents.join(", "),
-                    valid.hosts.join(", ")
-                );
+                anyhow::bail!(deployment_words::unknown_client(
+                    id,
+                    &valid.agents,
+                    &valid.hosts
+                ));
+            };
+            let chosen: Vec<&HarnessSummary> = named
+                .iter()
+                .copied()
+                .filter(|summary| summary.is_selected_by(id, options.all_clients))
+                .collect();
+            if chosen.is_empty() {
+                let hosts: Vec<&str> = named.iter().map(|summary| summary.id.as_str()).collect();
+                anyhow::bail!(deployment_words::no_client_host_found(
+                    id,
+                    &first.agent.name,
+                    &hosts
+                ));
             }
             for summary in chosen {
                 if !selected.iter().any(|kept| kept.id == summary.id) {
@@ -1247,42 +1262,82 @@ mod tests {
     }
 
     #[test]
-    fn a_client_id_selects_an_agents_every_host_or_one_host_in_the_order_given() {
-        let cline = |id: &str, host: &str| HarnessSummary {
+    fn a_client_id_selects_an_agents_detected_hosts_or_one_host_in_the_order_given() {
+        let cline = |id: &str, host: &str, state: HarnessState| HarnessSummary {
             agent: crate::agent::Agent::listed("cline", "Cline", "cline.svg"),
-            ..harness(id, &format!("Cline ({host})"), HarnessState::Available)
+            ..harness(id, &format!("Cline ({host})"), state)
         };
         let summaries = [
             harness("codex", "Codex", HarnessState::Installed),
-            cline("cline-cli", "CLI"),
-            cline("cline-vscode", "Visual Studio Code"),
-            cline("cline-cursor", "Cursor"),
+            cline("cline-cli", "CLI", HarnessState::Available),
+            cline(
+                "cline-vscode",
+                "Visual Studio Code",
+                HarnessState::NotDetected,
+            ),
+            cline("cline-cursor", "Cursor", HarnessState::NotDetected),
+            cline("cline-windsurf", "Windsurf", HarnessState::NotDetected),
             harness("zed", "Zed", HarnessState::NotDetected),
         ];
-        let select = |values: &[&str], install: bool| -> anyhow::Result<Vec<String>> {
+        let select = |summaries: &[HarnessSummary],
+                      values: &[&str],
+                      all_clients: bool,
+                      install: bool|
+         -> anyhow::Result<Vec<String>> {
             let options = SetupOptions {
                 client_ids: values.iter().map(|value| (*value).into()).collect(),
+                all_clients,
                 ..SetupOptions::default()
             };
-            Ok(select_harnesses(&summaries, &options, install)?
+            Ok(select_harnesses(summaries, &options, install)?
                 .into_iter()
                 .map(|summary| summary.id)
                 .collect())
         };
+        // An agent id selects only the hosts of it that are found, so naming Cline writes no
+        // file into an editor the person does not have.
         assert_eq!(
-            select(&["cline"], true).unwrap(),
-            ["cline-cli", "cline-vscode", "cline-cursor"]
+            select(&summaries, &["cline"], false, true).unwrap(),
+            ["cline-cli"]
         );
-        assert_eq!(select(&["CLINE-Cursor"], true).unwrap(), ["cline-cursor"]);
+        assert_eq!(
+            select(&summaries, &["cline"], false, false).unwrap(),
+            ["cline-cli"]
+        );
+        assert_eq!(
+            select(&summaries, &["cline"], true, true).unwrap(),
+            [
+                "cline-cli",
+                "cline-vscode",
+                "cline-cursor",
+                "cline-windsurf"
+            ]
+        );
         // A harness id selects exactly the host it selected before, whatever its state.
-        assert_eq!(select(&["zed", "codex"], true).unwrap(), ["zed", "codex"]);
-        assert_eq!(select(&["codex"], false).unwrap(), ["codex"]);
+        assert_eq!(
+            select(&summaries, &["CLINE-Cursor"], false, true).unwrap(),
+            ["cline-cursor"]
+        );
+        assert_eq!(
+            select(&summaries, &["zed", "codex"], false, true).unwrap(),
+            ["zed", "codex"]
+        );
+        assert_eq!(
+            select(&summaries, &["codex"], false, false).unwrap(),
+            ["codex"]
+        );
         // A host named twice, by its agent and by its own id, is set up once.
         assert_eq!(
-            select(&["cline-vscode", "cline", "codex"], false).unwrap(),
-            ["cline-vscode", "cline-cli", "cline-cursor", "codex"]
+            select(
+                &summaries,
+                &["cline-cli", "cline-vscode", "cline", "codex"],
+                false,
+                false
+            )
+            .unwrap(),
+            ["cline-cli", "cline-vscode", "codex"]
         );
-        let refusal = select(&["cline", "Cline (Cursor)"], true)
+        let refusal = select(&summaries, &["cline", "Cline (Cursor)"], false, true)
             .unwrap_err()
             .to_string();
         assert!(
@@ -1293,6 +1348,28 @@ mod tests {
         for id in valid.all() {
             assert!(refusal.contains(id), "{refusal} does not list {id}");
         }
+        // An agent none of whose hosts is found is refused, naming each host and --all-clients.
+        let absent: Vec<HarnessSummary> = summaries
+            .iter()
+            .map(|summary| HarnessSummary {
+                state: HarnessState::NotDetected,
+                ..summary.clone()
+            })
+            .collect();
+        let refusal = select(&absent, &["Cline"], false, true)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            refusal,
+            "no host of Cline was found for 'Cline'; name one by its host id (cline-cli, \
+             cline-vscode, cline-cursor, cline-windsurf), or add --all-clients to select every \
+             host of Cline"
+        );
+        assert_eq!(select(&absent, &["cline"], true, true).unwrap().len(), 4);
+        assert_eq!(
+            select(&absent, &["cline-windsurf"], false, true).unwrap(),
+            ["cline-windsurf"]
+        );
     }
 
     #[test]

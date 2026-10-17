@@ -38,8 +38,10 @@ Open the desktop workbench, starting the local authority if it is not running.
 Register the browser native-messaging host and every detected MCP client.
 Repeating an install changes nothing that is already current.
 .B \-\-client
-selects one agent by its id, with every host it runs on, or one host by its
-host id, ignoring case; repeat it to select more.
+selects one agent by its id, with each of its hosts that is detected, or one
+host by its host id, ignoring case; repeat it to select more. With
+.B \-\-all\-clients
+an agent id selects every host of the agent, detected or not.
 .br
 Agent ids: codex, claude\-code, claude\-desktop, cursor, vscode, windsurf, devin, zed, zcode, opencode, crush, copilot\-cli, cline, kiro, qwen\-code, junie, kilo\-code, goose, continue, antigravity
 .br
