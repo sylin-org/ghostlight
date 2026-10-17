@@ -1,0 +1,440 @@
+# What Ghostlight's installer writes and says for goose.
+# Recorded by install::writer_golden. Rewrite it only on purpose, with
+# GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1, and read the diff line by line.
+# <root> is the run's directory and <edge> the ghostlight program in it.
+
+## Windows
+id: goose
+product: goose
+name: goose
+label: goose
+target: CLI and desktop
+agent: {"id":"goose","name":"goose","symbol":{"src":"integrations/goose.svg"}}
+
+=== Windows / absent: no file
+seed <root>/Pat Doe/AppData/Roaming/goose/config.yaml: no file
+-- inspect
+state: not_detected (not detected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: not_detected (not detected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+=== Windows / empty: a file of no bytes
+seed <root>/Pat Doe/AppData/Roaming/goose/config.yaml:
+  (no bytes)
+-- inspect
+state: available (detected, not connected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+=== Windows / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/goose/config.yaml:
+  | # A person's own settings, kept as written.
+  | extensions:
+  |   other:
+  |     cmd: other-server
+-- inspect
+state: available (detected, not connected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+=== Windows / located: the other seed at a path the person chose
+seed <root>/located/config.yaml:
+  | # A person's own settings, kept as written.
+  | extensions:
+  |   other:
+  |     cmd: other-server
+-- locate
+says: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote <root>/state/harness-locations.json:
+  | {
+  |   "goose": {
+  |     "executable": null,
+  |     "config": "<root>/located/config.yaml"
+  |   }
+  | }
+  (no newline at end)
+-- inspect
+state: available (detected, not connected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/located/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+## Linux
+id: goose
+product: goose
+name: goose
+label: goose
+target: CLI and desktop
+agent: {"id":"goose","name":"goose","symbol":{"src":"integrations/goose.svg"}}
+
+=== Linux / absent: no file
+seed <root>/Pat Doe/.config/goose/config.yaml: no file
+-- inspect
+state: not_detected (not detected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/Pat Doe/.config/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: not_detected (not detected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+=== Linux / empty: a file of no bytes
+seed <root>/Pat Doe/.config/goose/config.yaml:
+  (no bytes)
+-- inspect
+state: available (detected, not connected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/Pat Doe/.config/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+=== Linux / other: comments, a setting and another server
+seed <root>/Pat Doe/.config/goose/config.yaml:
+  | # A person's own settings, kept as written.
+  | extensions:
+  |   other:
+  |     cmd: other-server
+-- inspect
+state: available (detected, not connected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/Pat Doe/.config/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+=== Linux / located: the other seed at a path the person chose
+seed <root>/located/config.yaml:
+  | # A person's own settings, kept as written.
+  | extensions:
+  |   other:
+  |     cmd: other-server
+-- locate
+says: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote <root>/state/harness-locations.json:
+  | {
+  |   "goose": {
+  |     "executable": null,
+  |     "config": "<root>/located/config.yaml"
+  |   }
+  | }
+  (no newline at end)
+-- inspect
+state: available (detected, not connected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: no
+config path: <root>/located/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- fix
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- uninstall
+refused: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+
+## Windows, from inside the OpenAI.Codex app container
+id: goose
+product: goose
+name: goose
+label: goose
+target: CLI and desktop
+agent: {"id":"goose","name":"goose","symbol":{"src":"integrations/goose.svg"}}
+
+=== Windows, from inside the OpenAI.Codex app container / absent: no file
+seed <root>/Pat Doe/AppData/Roaming/goose/config.yaml: no file
+-- inspect
+state: not_detected (not detected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: not_detected (not detected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+
+=== Windows, from inside the OpenAI.Codex app container / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/goose/config.yaml:
+  | # A person's own settings, kept as written.
+  | extensions:
+  |   other:
+  |     cmd: other-server
+-- inspect
+state: available (detected, not connected)
+detail: Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+offers: download, locate
+download: https://block.github.io/goose/docs/getting-started/installation/
+copy only: yes
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/goose/config.yaml
+connector command: "<edge>" mcp
+manual setup:
+  | extensions:
+  |   ghostlight:
+  |     type: stdio
+  |     name: ghostlight
+  |     display_name: Ghostlight
+  |     enabled: true
+  |     cmd: "<edge>"
+  |     args: ["mcp"]
+  |     envs: {}
+  |     timeout: 300
+-- check
+changed: no
+says: goose was checked without changing configuration.
+after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing

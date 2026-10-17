@@ -177,6 +177,8 @@ Before committing, run the checks for what you changed. CI runs the full set on 
   `GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight-service the_catalog_matches`, and the
   result goldens with the same variable on `work::tests::golden`
   (`GHOSTLIGHT_CATALOG_UPDATE=1 cargo test -p ghostlight-service work::tests::golden`).
+- The installer's writes or words change on purpose: regenerate `tests/golden/agents/writes/` with
+  `GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1 cargo test -p ghostlight-service writer_golden`; read the diff.
 - Changed runtime JavaScript that no test runs: `node --check` on it.
 - Docs or other text: `pwsh -NoProfile -File scripts/check-repository-integrity.ps1` (ASCII and links).
 

@@ -1,0 +1,1419 @@
+# What Ghostlight's installer writes and says for claude-desktop.
+# Recorded by install::writer_golden. Rewrite it only on purpose, with
+# GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1, and read the diff line by line.
+# <root> is the run's directory and <edge> the ghostlight program in it.
+
+## Windows
+id: claude-desktop
+product: claude-desktop
+name: Claude Desktop
+label: Claude Desktop
+target: User
+agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"src":"integrations/claude-desktop.svg"}}
+
+=== Windows / absent: no file
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json: no file
+-- inspect
+state: not_detected (not detected)
+detail: Not detected. You can prepare its user configuration before installing it.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+
+=== Windows / empty: a file of no bytes
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  (no bytes)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Windows / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {},
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Windows / foreign: another program under Ghostlight's key
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "node", "args": ["server.js"]},
+  |   },
+  | }
+-- inspect
+state: needs_attention (needs attention)
+detail: A foreign entry holds this target's Ghostlight registration; it was left untouched.
+evidence: Found another program, `node` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `<edge>` there and changed nothing.
+offers: fix, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: needs_attention (needs attention) | A foreign entry holds this target's Ghostlight registration; it was left untouched.
+wrote nothing
+-- install
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+-- fix
+changed: yes
+says: Ghostlight replaced the incorrect entry for Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- uninstall
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+
+=== Windows / current: the entry Ghostlight writes for this edge
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<edge>", "args": ["mcp"], "env": {}},
+  |   },
+  | }
+-- inspect
+state: installed (connected)
+detail: Ghostlight is registered for this user context.
+offers: uninstall, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- install
+changed: no
+says: Claude Desktop already has the current Ghostlight registration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Windows / stale: Ghostlight's entry for an edge somewhere else
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Old Home/.ghostlight/bin/ghostlight.exe", "args": ["mcp"], "env": {}},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Windows / legacy relay: the 1.x relay entry in this install
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Pat Doe/.ghostlight/v0/ghostlight-relay.exe", "args": ["--role", "agent"]},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Windows / retired: an entry starting the retired connector
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Pat Doe/.ghostlight/bin/ghostlight-mcp-connector.exe", "args": []},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: updatable (connected, needs an update) | This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Windows / malformed: a file that does not parse
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "broken": [
+-- inspect
+state: needs_attention (needs attention)
+detail: This configuration could not be parsed at line 4; it was left untouched.
+offers: locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: needs_attention (needs attention) | This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- install
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- fix
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- uninstall
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+
+=== Windows / located: the other seed at a path the person chose
+seed <root>/located/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- locate
+says: Ghostlight will use the located Claude Desktop path after you choose Set up.
+wrote <root>/state/harness-locations.json:
+  | {
+  |   "claude-desktop": {
+  |     "executable": null,
+  |     "config": "<root>/located/claude_desktop_config.json"
+  |   }
+  | }
+  (no newline at end)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/located/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/located/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {},
+  |     },
+  |   },
+  | }
+wrote <root>/located/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+## Linux
+id: claude-desktop
+product: claude-desktop
+name: Claude Desktop
+label: Claude Desktop
+target: User
+agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"src":"integrations/claude-desktop.svg"}}
+
+=== Linux / absent: no file
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json: no file
+-- inspect
+state: not_detected (not detected)
+detail: Not detected. You can prepare its user configuration before installing it.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+
+=== Linux / empty: a file of no bytes
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  (no bytes)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Linux / other: comments, a setting and another server
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {},
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Linux / foreign: another program under Ghostlight's key
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "node", "args": ["server.js"]},
+  |   },
+  | }
+-- inspect
+state: needs_attention (needs attention)
+detail: A foreign entry holds this target's Ghostlight registration; it was left untouched.
+evidence: Found another program, `node` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `<edge>` there and changed nothing.
+offers: fix, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: needs_attention (needs attention) | A foreign entry holds this target's Ghostlight registration; it was left untouched.
+wrote nothing
+-- install
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+-- fix
+changed: yes
+says: Ghostlight replaced the incorrect entry for Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- uninstall
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+
+=== Linux / current: the entry Ghostlight writes for this edge
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<edge>", "args": ["mcp"], "env": {}},
+  |   },
+  | }
+-- inspect
+state: installed (connected)
+detail: Ghostlight is registered for this user context.
+offers: uninstall, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- install
+changed: no
+says: Claude Desktop already has the current Ghostlight registration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Linux / stale: Ghostlight's entry for an edge somewhere else
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Old Home/.ghostlight/bin/ghostlight", "args": ["mcp"], "env": {}},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Linux / legacy relay: the 1.x relay entry in this install
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Pat Doe/.ghostlight/v0/ghostlight-relay", "args": ["--role", "agent"]},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Linux / retired: an entry starting the retired connector
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<edge>-mcp-connector", "args": []},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: updatable (connected, needs an update) | This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Claude Desktop. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Claude/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+
+=== Linux / malformed: a file that does not parse
+seed <root>/Pat Doe/.config/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "broken": [
+-- inspect
+state: needs_attention (needs attention)
+detail: This configuration could not be parsed at line 4; it was left untouched.
+offers: locate
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: needs_attention (needs attention) | This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- install
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- fix
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- uninstall
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+
+=== Linux / located: the other seed at a path the person chose
+seed <root>/located/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- locate
+says: Ghostlight will use the located Claude Desktop path after you choose Set up.
+wrote <root>/state/harness-locations.json:
+  | {
+  |   "claude-desktop": {
+  |     "executable": null,
+  |     "config": "<root>/located/claude_desktop_config.json"
+  |   }
+  | }
+  (no newline at end)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: no
+config path: <root>/located/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Claude Desktop. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/located/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "env": {},
+  |     },
+  |   },
+  | }
+wrote <root>/located/claude_desktop_config.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Claude Desktop had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+## Windows, from inside the OpenAI.Codex app container
+id: claude-desktop
+product: claude-desktop
+name: Claude Desktop
+label: Claude Desktop
+target: User
+agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"src":"integrations/claude-desktop.svg"}}
+
+=== Windows, from inside the OpenAI.Codex app container / absent: no file
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json: no file
+-- inspect
+state: not_detected (not detected)
+detail: Not detected. You can prepare its user configuration before installing it.
+offers: install, locate
+copy only: no
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+
+=== Windows, from inside the OpenAI.Codex app container / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, locate
+copy only: no
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+
+=== Windows, from inside the OpenAI.Codex app container / current: the entry Ghostlight writes for this edge
+seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcpServers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<edge>", "args": ["mcp"], "env": {}},
+  |   },
+  | }
+-- inspect
+state: installed (connected)
+detail: Ghostlight is registered for this user context.
+offers: uninstall, locate
+copy only: no
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcpServers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "env": {}
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Claude Desktop was checked without changing configuration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing

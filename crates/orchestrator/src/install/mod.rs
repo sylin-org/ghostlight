@@ -22,6 +22,8 @@ pub mod user_path;
 pub mod version_directories;
 #[cfg(windows)]
 pub mod windows_entry;
+#[cfg(test)]
+mod writer_golden;
 
 use std::collections::BTreeMap;
 use std::env;

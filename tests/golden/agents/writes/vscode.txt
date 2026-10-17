@@ -1,0 +1,1442 @@
+# What Ghostlight's installer writes and says for vscode.
+# Recorded by install::writer_golden. Rewrite it only on purpose, with
+# GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1, and read the diff line by line.
+# <root> is the run's directory and <edge> the ghostlight program in it.
+
+## Windows
+id: vscode
+product: vscode
+name: Visual Studio Code
+label: Visual Studio Code
+target: User
+agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"src":"integrations/vscode.svg"}}
+
+=== Windows / absent: no file
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json: no file
+-- inspect
+state: not_detected (not detected)
+detail: Not detected. You can prepare its user configuration before installing it.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+
+=== Windows / empty: a file of no bytes
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  (no bytes)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Windows / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio",
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Windows / foreign: another program under Ghostlight's key
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "node", "args": ["server.js"]},
+  |   },
+  | }
+-- inspect
+state: needs_attention (needs attention)
+detail: A foreign entry holds this target's Ghostlight registration; it was left untouched.
+evidence: Found another program, `node` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `<edge>` there and changed nothing.
+offers: fix, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: needs_attention (needs attention) | A foreign entry holds this target's Ghostlight registration; it was left untouched.
+wrote nothing
+-- install
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+-- fix
+changed: yes
+says: Ghostlight replaced the incorrect entry for Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- uninstall
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+
+=== Windows / current: the entry Ghostlight writes for this edge
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<edge>", "args": ["mcp"]},
+  |   },
+  | }
+-- inspect
+state: installed (connected)
+detail: Ghostlight is registered for this user context.
+offers: uninstall, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- install
+changed: no
+says: Visual Studio Code already has the current Ghostlight registration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Windows / stale: Ghostlight's entry for an edge somewhere else
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<root>/Old Home/.ghostlight/bin/ghostlight.exe", "args": ["mcp"]},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Windows / legacy relay: the 1.x relay entry in this install
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Pat Doe/.ghostlight/v0/ghostlight-relay.exe", "args": ["--role", "agent"]},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Windows / retired: an entry starting the retired connector
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Pat Doe/.ghostlight/bin/ghostlight-mcp-connector.exe", "args": []},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: updatable (connected, needs an update) | This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Windows / malformed: a file that does not parse
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "broken": [
+-- inspect
+state: needs_attention (needs attention)
+detail: This configuration could not be parsed at line 4; it was left untouched.
+offers: download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: needs_attention (needs attention) | This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- install
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- fix
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- uninstall
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+
+=== Windows / located: the other seed at a path the person chose
+seed <root>/located/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- locate
+says: Ghostlight will use the located Visual Studio Code path after you choose Set up.
+wrote <root>/state/harness-locations.json:
+  | {
+  |   "vscode": {
+  |     "executable": null,
+  |     "config": "<root>/located/mcp.json"
+  |   }
+  | }
+  (no newline at end)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/located/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/located/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio",
+  |     },
+  |   },
+  | }
+wrote <root>/located/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+## Linux
+id: vscode
+product: vscode
+name: Visual Studio Code
+label: Visual Studio Code
+target: User
+agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"src":"integrations/vscode.svg"}}
+
+=== Linux / absent: no file
+seed <root>/Pat Doe/.config/Code/User/mcp.json: no file
+-- inspect
+state: not_detected (not detected)
+detail: Not detected. You can prepare its user configuration before installing it.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+
+=== Linux / empty: a file of no bytes
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  (no bytes)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Linux / other: comments, a setting and another server
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio",
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+=== Linux / foreign: another program under Ghostlight's key
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "node", "args": ["server.js"]},
+  |   },
+  | }
+-- inspect
+state: needs_attention (needs attention)
+detail: A foreign entry holds this target's Ghostlight registration; it was left untouched.
+evidence: Found another program, `node` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `<edge>` there and changed nothing.
+offers: fix, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: needs_attention (needs attention) | A foreign entry holds this target's Ghostlight registration; it was left untouched.
+wrote nothing
+-- install
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+-- fix
+changed: yes
+says: Ghostlight replaced the incorrect entry for Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- uninstall
+refused: a foreign `ghostlight` entry is present; Ghostlight left it untouched
+wrote nothing
+
+=== Linux / current: the entry Ghostlight writes for this edge
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<edge>", "args": ["mcp"]},
+  |   },
+  | }
+-- inspect
+state: installed (connected)
+detail: Ghostlight is registered for this user context.
+offers: uninstall, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- install
+changed: no
+says: Visual Studio Code already has the current Ghostlight registration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Linux / stale: Ghostlight's entry for an edge somewhere else
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<root>/Old Home/.ghostlight/bin/ghostlight", "args": ["mcp"]},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Linux / legacy relay: the 1.x relay entry in this install
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<root>/Pat Doe/.ghostlight/v0/ghostlight-relay", "args": ["--role", "agent"]},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Linux / retired: an entry starting the retired connector
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"command": "<edge>-mcp-connector", "args": []},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: updatable (connected, needs an update) | This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     },
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Visual Studio Code. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/Code/User/mcp.json.ghostlight-backup: the seed's bytes
+
+=== Linux / malformed: a file that does not parse
+seed <root>/Pat Doe/.config/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "broken": [
+-- inspect
+state: needs_attention (needs attention)
+detail: This configuration could not be parsed at line 4; it was left untouched.
+offers: download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: needs_attention (needs attention) | This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- install
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- fix
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+-- uninstall
+refused: This configuration could not be parsed at line 4; it was left untouched.
+wrote nothing
+
+=== Linux / located: the other seed at a path the person chose
+seed <root>/located/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- locate
+says: Ghostlight will use the located Visual Studio Code path after you choose Set up.
+wrote <root>/state/harness-locations.json:
+  | {
+  |   "vscode": {
+  |     "executable": null,
+  |     "config": "<root>/located/mcp.json"
+  |   }
+  | }
+  (no newline at end)
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: no
+config path: <root>/located/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Visual Studio Code. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/located/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {
+  |       "args": ["mcp"],
+  |       "command": "<edge>",
+  |       "type": "stdio",
+  |     },
+  |   },
+  | }
+wrote <root>/located/mcp.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: no
+says: Visual Studio Code had no owned Ghostlight registration to remove.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+
+## Windows, from inside the OpenAI.Codex app container
+id: vscode
+product: vscode
+name: Visual Studio Code
+label: Visual Studio Code
+target: User
+agent: {"id":"vscode","name":"Visual Studio Code","symbol":{"src":"integrations/vscode.svg"}}
+
+=== Windows, from inside the OpenAI.Codex app container / absent: no file
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json: no file
+-- inspect
+state: not_detected (not detected)
+detail: Not detected. You can prepare its user configuration before installing it.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+
+=== Windows, from inside the OpenAI.Codex app container / other: comments, a setting and another server
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+-- inspect
+state: available (detected, not connected)
+detail: Detected and ready for an explicit Ghostlight registration.
+offers: install, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+
+=== Windows, from inside the OpenAI.Codex app container / current: the entry Ghostlight writes for this edge
+seed <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "servers": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<edge>", "args": ["mcp"]},
+  |   },
+  | }
+-- inspect
+state: installed (connected)
+detail: Ghostlight is registered for this user context.
+offers: uninstall, download, locate
+download: https://code.visualstudio.com/download
+copy only: no
+private view: yes
+config path: <root>/Pat Doe/AppData/Roaming/Code/User/mcp.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "servers": {
+  |     "ghostlight": {
+  |       "args": [
+  |         "mcp"
+  |       ],
+  |       "command": "<edge>",
+  |       "type": "stdio"
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Visual Studio Code was checked without changing configuration.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote nothing
+-- install
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- fix
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing
+-- uninstall
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+wrote nothing

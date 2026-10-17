@@ -89,9 +89,10 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 
 ## RESUME HERE
 
-d00 to d08 are on `dev` (not yet pushed). Decision 8 adds six slices before the release candidate.
-Next: c00-writer-golden, then c01, c02, c03, c11 and c12. Then the coordinator deploys, the owner looks,
-the coordinator pushes and watches the browser lane's `history-browser` journey in CI (d08 note 1).
+d00 to d08 and c00-writer-golden are on `dev` (not yet pushed). Decision 8 adds six slices before the
+release candidate; c00 has landed. Next: c01, then c02, c03, c11 and c12. Then the coordinator deploys,
+the owner looks, the coordinator pushes and watches the browser lane's `history-browser` journey in CI
+(d08 note 1) and the Linux test job's writer golden (c00 note 4).
 
 ## Landed
 
@@ -107,6 +108,7 @@ the coordinator pushes and watches the browser lane's `history-browser` journey 
 | d07-agent-catalog | One catalog of agents and one value that says what to show (decision 7). `install::ROSTER` is the catalog: each `AgentRow` says who the agent is (harness id, product name, aliases), how it looks (`monogram`, its packaged tile under `ui/integrations/`) and where its file lives. The new domain module `crate::agent` holds the value and its closed vocabulary: `Agent { id, name, symbol }`, `Symbol` serialized as `{ "src": "integrations/<file>" }` or `{ "glyph": <word> }`, and `Glyph` (`command_line`, `unknown`). The command line (`COMMAND_LINE_ID`) and an unknown agent (`UNKNOWN_ID`) are the catalog's reserved entries, named by `language::provenance` ("Command line", "Unknown agent"); a test keeps them off every roster row. One function names an agent: `Agent::of(reported, channel)` (the command line for a `ghostlight call` session, the roster's agent for a name it knows through `install::agent_called`, a name it does not know kept as reported with the unknown glyph, and the unknown agent when no name was reported), with `Agent::of_evidence` for work and `Agent::listed` for a roster row. `SessionSummary.agent`, `OperationSummary.agent`, `HistoryItem.agent` (built when the item is projected, never persisted: the audit line is unchanged) and `HarnessSummary.agent` (in place of `icon`) carry it; `ConnectionDetails` is evidence only again. `language::provenance::agent_name` and `install::agent_name` are gone. The page draws every agent through `symbolMarkup(agent, size)` in `ui/lib/words.js` (sizes `face`, `chip`, `card`, `rail`, `pane`; one `.symbol` style family): the pill faces, the shelves chips, the card head, the Integrations rail entries and the pane hero. The page-side icons map and its keep-across-snapshots logic, the initials, the spark glyph, the page's `UNKNOWN_AGENT` word and its pin test, the command-line decision from the intake, the session fallback for an action's agent and the unused `generic.svg` tile are gone; the activity hover shows the workspace id for an agent with the unknown glyph. Tests: every roster row has a packaged symbol and every Integrations row is its own catalog entry; a session, its running work, its history item and its Integrations row carry the same agent; the command line and an unknown agent get their glyphs; the page draws the same symbol in the pill, the shelves, the card and the rail, and no initials or spark; a pin keeps the page's glyph words in step with `Glyph`. The preview server and the page tests use the new shape. | see `git log` |
 
 | d08-catalog-finish | The review of d07, one commit per item. (2) No impersonation: `Agent::of` gives an MCP client whose claimed name is a reserved entry's name ("Command line" or "Unknown agent", ignoring case and space) the unknown agent, so it never wears the command line's glyph or joins its chip; the connection's explanation still quotes the claim. A test covers both names in several spellings. (3) One id per agent: each roster row names its agent's catalog id (`AgentRow.agent_id`), one per agent and shared by every host it runs on, never the product id: the four Cline rows say `cline`, every other row its harness id. A session, its work, its history item and each of its Integrations rows carry that id (`HarnessSummary.agent`), and each row keeps its harness id for its own acts. `agent_called` matches the catalog id too. An agent Ghostlight does not know is identified by the name it reported (`unknown:<name>`, `UNKNOWN_NAME_SEPARATOR`), and one nothing names stays `unknown`. The id replaces every name lookup: the glance groups sessions on `agent.id` and keeps the open card by id (`data-glance-agent`), the Integrations pane's live sessions (`useOf`) and its link to At a glance (`data-show-agent`) use the id, and `workbench/setup.rs` `is_agent_of` compares ids. Tests: rows share an agent id exactly when they share a product name, and no id is reserved or holds the separator; a Cline session, its work, its history item and all four Cline rows carry one agent; the page's shelves make one chip of two hosts and two of two unknown names. (4) `symbolMarkup` no longer adds the `tile` class, which no rule selected: a symbol is styled through `.symbol`, its size class and the `img` or `svg` inside it, and the markup test reads the class list without it. (5) The preview server names each record's agent from the record's own evidence, as `Agent::of_evidence` does, never from its session: a live claim names its agent, the command line is named by its channel, and evidence that keeps no claim is the unknown agent. A record keeps the evidence it carries; one with none takes its live session's connection when its session is in this run, and otherwise only what its channel says (the legacy sentence). The restored row now carries durable evidence (a connection id, no claim, the durable MCP sentence) and reads "Unknown agent". (1) The CI journey `tests/workbench-history-browser.mjs` (the browser lane's `history-browser`, through `tests/hardening-suite.mjs`) no longer drives the session-level Connection details d01 retired: its C1 part opens the At a glance summary and Codex's card and checks both across refreshes that change the session's connection evidence, the card's trust note, and the command-line card's own line. The per-action Connection details checks are kept. It was checked with `node --check` only. | see `git log` |
+| c00-writer-golden | A characterization golden of everything the installer writes and says, with no product behaviour change. `install::writer_golden` sets up every roster host from fixed seed files on three computers (Windows, Linux, and Windows from inside the `OpenAI.Codex` app container) and records, per seed, what inspection says (state, detail, evidence, the acts it offers, the download page, copy only, private view, the config path, the connector command and the manual setup document), what Check, Install, Fix and Uninstall say, and every file each act wrote or removed (backups and the located-path state included), each act from a fresh copy of the seed. The seeds: absent, empty, JSONC with comments and another server, a foreign entry, the current entry, a stale entry, the 1.x relay entry, the retired connector, a malformed file and a located file; OpenCode adds its nested `mcp.servers` files, Codex its entry with the Linux desktop forwarding, and goose and Continue have absent, empty, other and located. Setting up everything at once is recorded per computer. The files are `tests/golden/agents/writes/<harness>.txt` and `setup-everything.txt`, ASCII, with `<root>` and `<edge>` placeholders; `GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1` rewrites them (AGENTS.md lists it). The one product change: the bytes no longer depend on the build OS. The JSON and Codex TOML writers read the computer from the context (`HarnessContext.windows`, and a new `HarnessContext.linux` for the Codex desktop forwarding) instead of `cfg!`; in production both are set from the build target, so nothing a person gets changes. The golden is new, so there is no earlier diff; it records today's behaviour, bugs included. | see `git log` |
 
 ## Owed live checks
 
@@ -170,6 +172,9 @@ owner before anything is pushed.
   shows the unknown glyph (a circled question mark) beside "Unknown agent", and a restored MCP row in
   Activity reads "Unknown agent" with the workspace id on hover. A watching browser tab shows the
   same faces.
+- c00-writer-golden: CI's Linux test job passes `install::writer_golden` against the files recorded
+  on Windows, and compiles the Linux-only Codex tests this slice edited (note 4). Nothing changes for
+  a person, so the deployed window needs no look for this slice.
 
 ## Notes
 
@@ -320,3 +325,35 @@ owner before anything is pushed.
   `.glance-line` says "from the command line". The restored receipt now sets the durable MCP
   sentence as its explanation, since the connection it copies carries a claim sentence. The
   closing C1 log line says what is checked now.
+- c00-writer-golden: differences from the spec and what the golden leaves out. (1) The Linux
+  forwarding was tied to the build OS in two places, not one: `edit_toml_with` passed `cfg!(windows)`,
+  and `missing_codex_desktop_environment` itself refused unless `cfg!(target_os = "linux")`. Reading
+  `context.windows` alone would still have kept the Linux forwarding out of a Windows build's record
+  of the Linux computer. The context now carries `linux` beside `windows`, set once in
+  `HarnessContext::system` from the build target, and every Codex path (inspection, the writer, the
+  manual document) reads it. `edit_json_with` also compared paths with `cfg!(windows)`; it reads
+  `context.windows` now. The writers take the context (`edit_json`, `fix_json`, `edit_toml`,
+  `fix_toml`, `inspect_toml`), and the unit tests pass one; the tests' contexts set `linux` from the
+  build target, so every existing test asserts what it did before. (2) The update variable is its
+  own, `GHOSTLIGHT_AGENTS_GOLDEN_UPDATE`, so regenerating the model catalog never rewrites the
+  freeze proof by accident. The directory is `tests/golden/agents/writes/`, leaving
+  `tests/golden/agents/` for c08's generated catalog. (3) The third computer, Windows from inside
+  another app's container, records absent, other and current only; it is there so c03's change to
+  the offered acts shows as a diff (today Claude Desktop offers Install there and every act is
+  refused). (4) One file holds on both build systems: every path is built with forward slashes, the
+  edge sits in a home with a space (`Pat Doe`) so the command line's quoting is recorded, and paths
+  are shown with forward slashes. So a backslash path's own quoting (a TOML literal string, a JSON
+  escape) is not in the golden; the unit tests keep covering it. The Linux-only Codex tests edited
+  here could not be compiled on this machine (no Linux C toolchain for `ring`), and the golden was
+  recorded on Windows only, so CI's Linux job is its first run there. (5) Left out on purpose:
+  detection through `PATH` (the contexts list no directories), a located executable (its check reads
+  Unix permission bits, which ties it to the build OS), a missing edge, and the CLI's and the
+  window's own words, which come from `language/` and the workbench, not the installer. c05 extends
+  the golden first with the Crush variable, the OpenCode and Kilo candidate files and XDG, as its
+  slice says. (6) Crush reads `CRUSH_GLOBAL_CONFIG` outside the context, so with it set the test
+  would write that real file; the test refuses to run while it is set and says why. (7) Today's bugs
+  the golden records, for the slices that fix them: every Cline host's download is the Cline CLI
+  page (c01); inside another app's container Claude Desktop offers Install although every act is
+  refused (c03). Also worth knowing: the manual JSON documents and every newly written JSON entry
+  list their keys alphabetically (serde's sorted map), not in the order a person writes them. (8) The test records the 23 hosts on one thread
+  each and takes about 8 seconds.
