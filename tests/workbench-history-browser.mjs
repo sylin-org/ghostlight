@@ -200,29 +200,55 @@ try {
   await until(() => evaluate(`!!document.querySelector('${receiptDetails}')`), "recorded connection details");
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').open`), false);
   await evaluate(`document.querySelector('${receiptDetails} > summary').click()`);
-  await evaluate("document.querySelector('.session-connections > summary').click()");
-  await evaluate("document.querySelector('.session-connections > summary').focus({ preventScroll: true })");
-  await evaluate(`(() => {
+  // At a glance: the summary and an agent's card stay open and keep focus across a refresh that
+  // changes the connection evidence, and the card's trust note says the refreshed claims.
+  const glance = "details.glance";
+  const codexChip = '[data-glance-agent="codex"]';
+  const commandLineChip = '[data-glance-agent="command_line"]';
+  const card = "#glance-card";
+  const refreshEvidence = (connections) => evaluate(`(() => {
     const snapshot = window.__GHOSTLIGHT_PREVIEW__;
-    snapshot.sessions[0].agent = { id: 'unknown', name: 'Later application', symbol: { glyph: 'unknown' } };
-    snapshot.sessions[0].connections = [
-      { ...snapshot.sessions[0].connections[0], connection_id: 'connection_later',
-        reported_application: 'Later application' },
-      { ...snapshot.sessions[0].connections[0], connection_id: 'connection_unavailable',
-        reported_application: 'Another application',
-        explanation: 'A ghostlight call session is a local program.' }
-    ];
+    snapshot.sessions[0].connections = ${JSON.stringify(connections)};
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
   })()`);
-  await until(() => evaluate("document.querySelector('.session-connections').textContent.includes('Later application')"), "refreshed connection evidence");
-  assert.equal(await evaluate("document.activeElement.matches('.session-connections > summary')"), true);
-  assert.equal(await evaluate("document.querySelector('.session-connections').open"), true);
-  assert.equal(await evaluate("document.querySelector('.session-connections').textContent.includes('A ghostlight call session is a local program.')"), true);
+  const claimed = (connection_id, name) => ({ connection_id, reported_application: name, channel: "mcp",
+    explanation: `"${name}" is what the agent calls itself; Ghostlight does not verify it.` });
+  await evaluate(`document.querySelector('${glance} > summary').click()`);
+  await until(() => evaluate(`document.querySelector('${glance}').open`), "open glance summary");
+  await evaluate(`document.querySelector('${codexChip}').click()`);
+  await until(() => evaluate(`!!document.querySelector('${card}')`), "open agent card");
+  await evaluate(`document.querySelector('${codexChip}').focus({ preventScroll: true })`);
+  await refreshEvidence([claimed("connection_later", "Later application"), claimed("connection_another", "Another application")]);
+  await until(() => evaluate(`document.querySelector('${card}')?.textContent.includes('Later application')`), "refreshed connection evidence");
+  assert.equal(await evaluate(`document.querySelector('${glance}').open`), true);
+  assert.equal(await evaluate(`document.querySelector('${card}').getAttribute('aria-label')`), "Codex");
+  assert.equal(await evaluate(`document.activeElement.matches('${codexChip}')`), true);
+  assert.equal(await evaluate(`document.querySelector('${codexChip}').getAttribute('aria-expanded')`), "true");
+  assert.equal(await evaluate(`document.querySelector('${card}').textContent.includes('"Another application" is what the agent calls itself')`), true,
+    "every connection's claim is in the trust note");
+  assert.equal(await evaluate(`document.querySelector('${card} [data-copy-connection]').dataset.copyConnection`), "connection_later\nconnection_another",
+    "the session's line keeps both connection ids behind Copy id");
+  assert.equal(await evaluate(`document.querySelector('${card}').textContent.includes('from the command line')`), false);
+  await evaluate(`document.querySelector('${glance} > summary').focus({ preventScroll: true })`);
+  await refreshEvidence([claimed("connection_latest", "Latest application")]);
+  await until(() => evaluate(`document.querySelector('${card}')?.textContent.includes('Latest application')`), "evidence refreshed again");
+  assert.equal(await evaluate(`document.activeElement.matches('${glance} > summary')`), true);
+  assert.equal(await evaluate(`document.querySelector('${glance}').open`), true);
+  assert.equal(await evaluate(`document.querySelector('${card}').getAttribute('aria-label')`), "Codex");
+  assert.equal(await evaluate(`document.querySelector('${card}').textContent.includes('Later application')`), false,
+    "the trust note says the connections the session has now");
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').open`), true);
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('MCP client')`), true);
   assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('Later application')`), false);
+  assert.equal(await evaluate(`document.querySelector('${receiptDetails}').textContent.includes('Latest application')`), false);
   assert.equal(await evaluate("document.querySelector('#hero-body .hero-meta').textContent.includes('Codex')"), true);
   assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
+  await capture("glance-card");
+  await evaluate(`document.querySelector('${commandLineChip}').click()`);
+  await until(() => evaluate(`document.querySelector('${card}')?.getAttribute('aria-label') === 'Command line'`), "command-line card");
+  assert.equal(await evaluate(`document.querySelector('${card} .glance-line').textContent.includes('from the command line')`), true,
+    "the command-line session reads its own line");
+  assert.equal(await evaluate(`document.querySelector('${card}').textContent.includes('Latest application')`), false);
   await capture("connection-details");
   // Restored receipts have no retained application claim. Neither the current session nor an
   // executable name can supply missing evidence, and even live claims remain plain text.
@@ -231,7 +257,8 @@ try {
       capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
       complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance: {
         ...window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0],
-        reported_application: null },
+        reported_application: null,
+        explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it." },
       agent: { id: 'unknown', name: 'Unknown agent', symbol: { glyph: 'unknown' } } };
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
@@ -251,7 +278,7 @@ try {
   assert.equal(await evaluate(`document.querySelector('${escapedDetails}').textContent.includes('<img src=x')`), true);
   assert.equal(await evaluate(`document.querySelector('${escapedDetails} img') !== null || window.__C1_INJECTED__ === true`), false);
   assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
-  console.log("C1 browser history: immutable attribution, plural connections, restored/legacy evidence, escaped claims, quiet details, focus retention, and narrow layout passed.");
+  console.log("C1 browser history: immutable attribution, plural connections on an agent's card, restored/legacy evidence, escaped claims, quiet details, glance and card focus retention, the command line's own line, and narrow layout passed.");
   console.log("H8 browser history: waiting stays live beneath running work, then promotes without duplication.");
   console.log("H7 browser history: persistent health, independent child storage, recovery gaps and unreadable entries, preserved expansion, and narrow layout passed.");
   console.log("H4 browser history: expansion, incremental scroll/focus, no automatic session recovery controls, and narrow layout passed.");
