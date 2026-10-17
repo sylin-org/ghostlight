@@ -2,7 +2,9 @@
 
 When the owner says `execute coordination/CHAT.md`:
 
-1. Identify yourself as `windows-codex` or `linux-codex` from the host OS.
+1. Identify yourself from the host OS and your tool: `windows-codex` or `linux-codex` for a Codex
+   session, `windows-claude` or `linux-claude` for a Claude Code session. A message addressed to
+   another identity is not yours.
 2. Run `git fetch origin dev`. Check whether local `dev` is stale before trusting the local chat.
    Fast-forward when safe. Never discard, stash, or rewrite unrelated work merely to sync chat.
    If a dirty tree prevents a safe update, read the current files with

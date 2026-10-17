@@ -73,8 +73,8 @@ or quarantined during an implementation rewrite.
 ## Cross-session coordination
 
 When the owner says `execute coordination/CHAT.md`, first read and follow
-`coordination/INSTRUCTIONS.md`. The tracked chat carries only messages between active Codex
-sessions; `coordination/RESULTS.md` carries the latest result.
+`coordination/INSTRUCTIONS.md`. The tracked chat carries only messages between active agent
+sessions (Codex or Claude Code, on any host); `coordination/RESULTS.md` carries the latest result.
 
 ## What this project is
 
