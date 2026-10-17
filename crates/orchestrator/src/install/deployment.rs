@@ -1243,11 +1243,11 @@ mod tests {
         LEGACY_STARTUP_NAME, USER_POLICY_FILE_NAME,
     };
     use super::super::native_host::NativeHostRegistry;
-    use super::super::scratch::Scratch;
     use super::super::HarnessRegistry;
     use super::*;
     use crate::intake::listener::{self, control};
     use crate::intake::opening::read_opening;
+    use crate::scratch::Scratch;
     use ghostlight_relay::endpoint::Listener;
     use ghostlight_relay::protocol::{self, Reply, Role};
 

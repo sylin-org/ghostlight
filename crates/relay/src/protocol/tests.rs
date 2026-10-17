@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use super::*;
 use crate::endpoint::pair;
 use crate::frame::{read_frame, write_frame};
+use crate::tests::Scratch;
 
 /// How long a test waits for something that should happen at once.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -323,11 +324,7 @@ fn a_failure_answers_with_the_filled_template_or_the_bare_error() {
 
 #[test]
 fn connect_dials_the_home_and_opens_in_one_step() {
-    let home = std::env::temp_dir().join(format!(
-        "ghostlight-protocol-connect-{}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
+    let home = Scratch::named("protocol-connect");
     let listener = crate::endpoint::Listener::bind_first(&home).unwrap();
     let server = thread::spawn(move || {
         let mut service = listener.accept().unwrap();
@@ -340,18 +337,12 @@ fn connect_dials_the_home_and_opens_in_one_step() {
     let (received, _service) = server.join().unwrap();
     assert_eq!(reply, accepted());
     assert_eq!(received, opening);
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
 fn connect_reports_no_service_when_nothing_listens() {
-    let home = std::env::temp_dir().join(format!(
-        "ghostlight-protocol-connect-none-{}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&home).unwrap();
+    let home = Scratch::named("protocol-connect-none");
     let opening = Opening::new(Role::Control, edge());
     let failure = connect(&home, &opening, Instant::now() + PATIENCE).unwrap_err();
     assert!(matches!(failure, ConnectError::NoService), "{failure:?}");
-    let _ = std::fs::remove_dir_all(&home);
 }

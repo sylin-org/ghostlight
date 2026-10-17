@@ -267,14 +267,11 @@ mod tests {
             serde_json::to_string(&parent).unwrap()
         );
         assert!(!bytes.contains("PRIVATE_REPORTED_APPLICATION"));
-        let path = std::env::temp_dir().join(format!(
-            "ghostlight-c1-history-{}.jsonl",
-            uuid::Uuid::new_v4()
-        ));
+        let path = crate::scratch::Scratch::file("history.jsonl");
         std::fs::write(&path, bytes).unwrap();
         let restored = WorkbenchProjection::default();
         let loaded = restored.load_history(&path);
-        std::fs::remove_file(&path).unwrap();
+        drop(path);
         loaded.unwrap();
         let history = restored.history();
         let details = history[0].provenance.as_ref().unwrap();
@@ -418,14 +415,13 @@ mod tests {
         assert_eq!(projection.operations().len(), 1);
         assert_eq!(projection.history().len(), 1);
         assert!(projection.lock().notified.is_empty());
-        let path =
-            std::env::temp_dir().join(format!("ghostlight-h4-{}.jsonl", uuid::Uuid::new_v4()));
+        let path = crate::scratch::Scratch::file("history-steps.jsonl");
         let sink = crate::governance::JsonlAuditSink::open(&path).unwrap();
         sink.record(&receipt).unwrap();
         drop(sink);
         let restored = super::super::WorkbenchProjection::default();
         restored.load_history(&path).unwrap();
-        std::fs::remove_file(path).unwrap();
+        drop(path);
         assert_eq!(
             restored.history()[0].steps[0].record,
             projection.history()[0].steps[0].record

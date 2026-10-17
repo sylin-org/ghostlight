@@ -196,7 +196,7 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
-    use uuid::Uuid;
+    use crate::scratch::Scratch;
 
     use super::{inspect, BrowserPackage, BrowserPackageContext, BrowserPackageSpec};
 
@@ -206,12 +206,8 @@ mod tests {
         flatpak_ids: &["org.chromium.Chromium"],
     };
 
-    fn context(name: &str) -> (std::path::PathBuf, BrowserPackageContext) {
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-browser-package-{name}-{}-{}",
-            std::process::id(),
-            Uuid::new_v4().simple()
-        ));
+    fn context(name: &str) -> (Scratch, BrowserPackageContext) {
+        let root = Scratch::named(&format!("browser-package-{name}"));
         let context = BrowserPackageContext::isolated(&root);
         (root, context)
     }
@@ -230,7 +226,7 @@ mod tests {
 
     #[test]
     fn package_forms_are_closed_and_native_wins() {
-        let (root, context) = context("forms");
+        let (_root, context) = context("forms");
         assert_eq!(inspect(&context, SPEC), BrowserPackage::NotDetected);
 
         touch(&context.snap_bin.join("chromium"), b"snap");
@@ -249,33 +245,30 @@ mod tests {
         #[cfg(unix)]
         make_executable(&native);
         assert_eq!(inspect(&context, SPEC), BrowserPackage::Native);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
     #[test]
     fn non_executable_path_entry_is_not_a_native_browser() {
-        let (root, context) = context("non-executable");
+        let (_root, context) = context("non-executable");
         touch(&context.path_entries[0].join("chromium"), b"not executable");
         assert_eq!(inspect(&context, SPEC), BrowserPackage::NotDetected);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn snap_wrappers_do_not_masquerade_as_native_packages() {
-        let (root, context) = context("wrapper");
+        let (_root, context) = context("wrapper");
         touch(
             &context.path_entries[0].join("chromium-browser"),
             b"#!/bin/sh\nexec snap run chromium \"$@\"\n",
         );
         touch(&context.snap_bin.join("chromium"), b"snap");
         assert_eq!(inspect(&context, SPEC), BrowserPackage::Snap);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn flatpak_only_is_distinct() {
-        let (root, context) = context("flatpak");
+        let (_root, context) = context("flatpak");
         touch(
             &context
                 .system_flatpak_applications
@@ -283,6 +276,5 @@ mod tests {
             b"flatpak",
         );
         assert_eq!(inspect(&context, SPEC), BrowserPackage::Flatpak);
-        fs::remove_dir_all(root).unwrap();
     }
 }

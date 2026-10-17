@@ -339,8 +339,8 @@ fn create_private(path: &Path) -> io::Result<File> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::scratch::Scratch;
     use super::*;
+    use crate::scratch::Scratch;
 
     fn record(version: &str, sha: &str) -> InstallRecord {
         InstallRecord {

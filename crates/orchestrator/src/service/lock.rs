@@ -47,38 +47,13 @@ impl ServiceLock {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
     use super::*;
-
-    /// A scratch directory removed when dropped.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new() -> Self {
-            static NEXT: AtomicU32 = AtomicU32::new(0);
-            let path = std::env::temp_dir().join(format!(
-                "ghostlight-service-lock-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::scratch::Scratch;
 
     #[test]
     fn a_second_lock_fails_while_the_first_is_held_and_succeeds_after_it_drops() {
         let scratch = Scratch::new();
-        let path = scratch.0.join("run").join("service.lock");
+        let path = scratch.join("run").join("service.lock");
         let first = ServiceLock::try_acquire(&path)
             .unwrap()
             .expect("first lock");
@@ -92,18 +67,19 @@ mod tests {
     #[test]
     fn locks_on_different_files_do_not_exclude_each_other() {
         let scratch = Scratch::new();
-        let first = ServiceLock::try_acquire(&scratch.0.join("a.lock")).unwrap();
-        let second = ServiceLock::try_acquire(&scratch.0.join("b.lock")).unwrap();
+        let first = ServiceLock::try_acquire(&scratch.join("a.lock")).unwrap();
+        let second = ServiceLock::try_acquire(&scratch.join("b.lock")).unwrap();
         assert!(first.is_some() && second.is_some());
     }
 
     #[cfg(unix)]
     #[test]
     fn the_lock_file_and_its_directory_are_owner_private() {
+        use std::fs;
         use std::os::unix::fs::PermissionsExt;
 
         let scratch = Scratch::new();
-        let directory = scratch.0.join("run");
+        let directory = scratch.join("run");
         let path = directory.join("service.lock");
         let _lock = ServiceLock::try_acquire(&path).unwrap().expect("a lock");
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;

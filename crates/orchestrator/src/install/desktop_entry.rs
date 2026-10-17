@@ -409,29 +409,27 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use uuid::Uuid;
+    use crate::scratch::Scratch;
 
     use super::{
         apply_install, apply_uninstall, inspect, render_desktop_entry, DesktopIntegrationContext,
         DesktopIntegrationState, ICON,
     };
 
-    fn context(name: &str) -> DesktopIntegrationContext {
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-desktop-{name}-{}-{}",
-            std::process::id(),
-            Uuid::new_v4().simple()
-        ));
-        DesktopIntegrationContext {
+    /// A context rooted in a fresh scratch directory, which lives as long as the returned guard.
+    fn context(name: &str) -> (Scratch, DesktopIntegrationContext) {
+        let root = Scratch::named(&format!("desktop-{name}"));
+        let context = DesktopIntegrationContext {
             linux: true,
             executable: root.join(".ghostlight/bin/v1.0.0/ghostlight"),
             data_home: root.join("share"),
-        }
+        };
+        (root, context)
     }
 
     #[test]
     fn other_platforms_name_no_linux_paths() {
-        let mut context = context("elsewhere");
+        let (_root, mut context) = context("elsewhere");
         context.linux = false;
         let report = inspect(&context).unwrap();
         assert_eq!(report.state, DesktopIntegrationState::NotApplicable);
@@ -441,7 +439,7 @@ mod tests {
 
     #[test]
     fn user_install_is_exact_idempotent_and_ownership_safe() {
-        let context = context("lifecycle");
+        let (_root, context) = context("lifecycle");
         fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
         fs::write(&context.executable, b"ghostlight").unwrap();
 
@@ -457,12 +455,11 @@ mod tests {
         assert!(removed.changed);
         assert_eq!(removed.report.state, DesktopIntegrationState::Missing);
         assert!(!apply_uninstall(&context).unwrap().changed);
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn upgrade_rewrites_only_an_owned_entry() {
-        let context = context("upgrade");
+        let (_root, context) = context("upgrade");
         let entry = context.desktop_entry();
         let icon = context.icon();
         fs::create_dir_all(entry.parent().unwrap()).unwrap();
@@ -483,12 +480,11 @@ mod tests {
             fs::read_to_string(entry).unwrap(),
             render_desktop_entry(&context.executable)
         );
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn foreign_files_and_symlinks_are_preserved() {
-        let context = context("foreign");
+        let (_root, context) = context("foreign");
         let entry = context.desktop_entry();
         fs::create_dir_all(entry.parent().unwrap()).unwrap();
         fs::write(&entry, b"[Desktop Entry]\nType=Application\nName=Foreign\n").unwrap();
@@ -500,12 +496,11 @@ mod tests {
         assert!(apply_install(&context).is_err());
         assert!(!apply_uninstall(&context).unwrap().changed);
         assert!(entry.exists());
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn system_package_does_not_create_a_user_shadow() {
-        let mut context = context("system");
+        let (_root, mut context) = context("system");
         context.executable = PathBuf::from("/usr/bin/ghostlight");
         assert_eq!(
             apply_install(&context).unwrap().report.state,
@@ -531,7 +526,7 @@ mod tests {
 
     #[test]
     fn an_entry_that_ran_the_service_image_is_owned_and_rewritten() {
-        let context = context("older-entry");
+        let (_root, context) = context("older-entry");
         let entry = context.desktop_entry();
         let icon = context.icon();
         fs::create_dir_all(entry.parent().unwrap()).unwrap();
@@ -548,6 +543,5 @@ mod tests {
         let rewritten = fs::read_to_string(&entry).unwrap();
         assert!(rewritten.contains("StartupWMClass=org.sylin.ghostlight"));
         assert!(!rewritten.contains("ghostlight-service"));
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 }

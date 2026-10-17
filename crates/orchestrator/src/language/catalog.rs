@@ -1646,16 +1646,13 @@ mod tests {
         let all_open = GovernanceFacade::new(None, None).snapshot();
         assert_eq!(catalog_for(&all_open), catalog());
 
-        let path = std::env::temp_dir().join(format!(
-            "ghostlight-catalog-policy-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path = crate::scratch::Scratch::file("catalog-policy.json");
         fs::write(
             &path,
             r#"{"schema":4,"name":"read only","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
-        let read_only = GovernanceFacade::new(Some(path.clone()), None).snapshot();
+        let read_only = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
         let names: Vec<_> = catalog_for(&read_only)
             .into_iter()
             .map(|tool| tool.name)
@@ -1666,7 +1663,6 @@ mod tests {
         assert!(!names.contains(&"browser_click".into()));
         assert!(!names.contains(&"browser_fill_form".into()));
         assert!(!names.contains(&"browser_execute".into()));
-        let _ = fs::remove_file(path);
     }
 
     #[test]

@@ -343,17 +343,15 @@ fn navigate_succeeded() -> AuditRecord {
 }
 
 fn click_refused_by_policy() -> AuditRecord {
-    let home =
-        std::env::temp_dir().join(format!("ghostlight-audit-golden-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&home).unwrap();
-    let policy = home.join("policy.json");
+    let policy = crate::scratch::Scratch::file("policy.json");
     std::fs::write(
         &policy,
         r#"{"schema":4,"name":"research","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
     )
     .unwrap();
-    let snapshot = crate::governance::GovernanceFacade::new(Some(policy), None).snapshot();
-    std::fs::remove_dir_all(&home).unwrap();
+    let snapshot =
+        crate::governance::GovernanceFacade::new(Some(policy.to_path_buf()), None).snapshot();
+    drop(policy);
     let (decision, check) =
         snapshot.authorize_with_evidence(CapabilitySet::ACTION, Some("https://example.com/"));
     assert!(!decision.allowed);
@@ -562,14 +560,11 @@ fn a_line_written_before_audit_v2_reads_and_shows_in_history() {
     check["request_evaluated"] = false.into();
     check["observed"] = false.into();
 
-    let path = std::env::temp_dir().join(format!(
-        "ghostlight-audit-earlier-{}.jsonl",
-        uuid::Uuid::new_v4()
-    ));
+    let path = crate::scratch::Scratch::file("audit-earlier.jsonl");
     std::fs::write(&path, format!("{line}\n")).unwrap();
     let projection = WorkbenchProjection::default();
     projection.load_history(&path).unwrap();
-    std::fs::remove_file(path).unwrap();
+    drop(path);
 
     assert_eq!(projection.audit_health().unreadable_entries, 0);
     let history = crate::workbench::WorkbenchFacade::new(

@@ -133,8 +133,8 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::scratch::Scratch;
     use super::*;
+    use crate::scratch::Scratch;
 
     fn names(dir: &Path) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(dir)

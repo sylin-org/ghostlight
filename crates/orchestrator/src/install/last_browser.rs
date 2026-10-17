@@ -45,7 +45,7 @@ pub fn record(path: &Path, browser: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::scratch::Scratch;
+    use crate::scratch::Scratch;
 
     #[test]
     fn a_recorded_browser_reads_back_and_the_latest_wins() {

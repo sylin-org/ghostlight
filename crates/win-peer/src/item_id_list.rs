@@ -55,8 +55,8 @@ mod tests {
         let list = of_file(&std::env::current_exe().unwrap()).unwrap();
         assert!(list.len() > 2);
         assert_eq!(&list[list.len() - 2..], &[0, 0]);
-        let missing =
-            std::env::temp_dir().join(format!("ghostlight-no-such-file-{}", std::process::id()));
+        let scratch = crate::scratch::Scratch::named("item-id-list");
+        let missing = scratch.join("no-such-file");
         assert!(of_file(&missing).is_err());
     }
 }

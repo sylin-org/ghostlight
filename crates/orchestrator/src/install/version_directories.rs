@@ -154,7 +154,7 @@ pub fn retire(directories: &[PathBuf], archives: &[Move]) -> Retired {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::scratch::Scratch;
+    use crate::scratch::Scratch;
 
     fn layout_with(directories: &[&str], files: &[&str]) -> (Scratch, Layout) {
         let scratch = Scratch::new();

@@ -544,22 +544,20 @@ pub enum CommandPathError {
 mod tests {
     use super::*;
 
-    use uuid::Uuid;
+    use crate::scratch::Scratch;
 
-    fn context(name: &str) -> CommandPathContext {
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-command-{name}-{}-{}",
-            std::process::id(),
-            Uuid::new_v4().simple()
-        ));
-        CommandPathContext {
+    /// A context rooted in a fresh scratch directory, which lives as long as the returned guard.
+    fn context(name: &str) -> (Scratch, CommandPathContext) {
+        let root = Scratch::named(&format!("command-{name}"));
+        let context = CommandPathContext {
             unix: true,
             executable: root.join(".ghostlight/bin/v1.0.0/ghostlight"),
             bin_home: root.join(".local/bin"),
             user_path: None,
             profile: None,
             container: None,
-        }
+        };
+        (root, context)
     }
 
     #[test]
@@ -579,7 +577,7 @@ mod tests {
 
     #[test]
     fn a_platform_with_neither_route_reports_not_applicable() {
-        let mut context = context("neither");
+        let (_root, mut context) = context("neither");
         context.unix = false;
         let report = inspect(&context).unwrap();
         assert_eq!(report.state, CommandPathState::NotApplicable);
@@ -589,7 +587,7 @@ mod tests {
 
     #[test]
     fn a_missing_entry_names_the_absolute_executable() {
-        let context = context("missing");
+        let (_root, context) = context("missing");
         let report = inspect(&context).unwrap();
         assert_eq!(report.state, CommandPathState::Missing);
         assert!(report
@@ -602,7 +600,7 @@ mod tests {
         if !cfg!(unix) {
             return;
         }
-        let context = context("lifecycle");
+        let (_root, context) = context("lifecycle");
         fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
         fs::write(&context.executable, b"ghostlight").unwrap();
 
@@ -618,8 +616,6 @@ mod tests {
         assert!(removed.changed);
         assert_eq!(removed.report.state, CommandPathState::Missing);
         assert!(!apply_uninstall(&context).unwrap().changed);
-
-        fs::remove_dir_all(context.bin_home.parent().unwrap().parent().unwrap()).unwrap();
     }
 
     #[test]
@@ -627,7 +623,7 @@ mod tests {
         if !cfg!(unix) {
             return;
         }
-        let context = context("update");
+        let (_root, context) = context("update");
         fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
         fs::write(&context.executable, b"ghostlight").unwrap();
         let older = context
@@ -650,8 +646,6 @@ mod tests {
         assert!(updated.changed);
         assert_eq!(updated.report.state, CommandPathState::Current);
         assert_eq!(fs::read_link(context.link()).unwrap(), context.executable);
-
-        fs::remove_dir_all(context.bin_home.parent().unwrap().parent().unwrap()).unwrap();
     }
 
     #[test]
@@ -659,7 +653,7 @@ mod tests {
         if !cfg!(unix) {
             return;
         }
-        let context = context("foreign");
+        let (_root, context) = context("foreign");
         fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
         fs::write(&context.executable, b"ghostlight").unwrap();
         fs::create_dir_all(&context.bin_home).unwrap();
@@ -675,8 +669,6 @@ mod tests {
             fs::read(context.link()).unwrap(),
             b"someone else's script".to_vec()
         );
-
-        fs::remove_dir_all(context.bin_home.parent().unwrap().parent().unwrap()).unwrap();
     }
 
     #[test]
@@ -684,7 +676,7 @@ mod tests {
         if !cfg!(unix) {
             return;
         }
-        let context = context("foreign-link");
+        let (_root, context) = context("foreign-link");
         fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
         fs::write(&context.executable, b"ghostlight").unwrap();
         let stranger = context.executable.parent().unwrap().join("other-tool");
@@ -698,8 +690,6 @@ mod tests {
         );
         assert!(!apply_install(&context).unwrap().changed);
         assert_eq!(fs::read_link(context.link()).unwrap(), stranger);
-
-        fs::remove_dir_all(context.bin_home.parent().unwrap().parent().unwrap()).unwrap();
     }
 
     #[cfg(windows)]

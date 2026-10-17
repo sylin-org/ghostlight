@@ -18,6 +18,7 @@ use crate::governance::GovernanceFacade;
 use crate::install::HarnessRegistry;
 use crate::language::coverage::{Coverage, HumanCoverage};
 use crate::language::workbench as words;
+use crate::scratch::Scratch;
 use crate::workbench::context::WebContext;
 use crate::workbench::parts::{Part, USER_HOME_VARIABLE};
 use crate::workbench::tests::RecordingActs;
@@ -209,7 +210,8 @@ impl WorkbenchQuitPort for CountingQuit {
 struct Fixture {
     server: WorkbenchServer,
     facade: WorkbenchFacade,
-    root: PathBuf,
+    /// The temporary home, removed after the server and the facade drop.
+    root: Scratch,
     /// The fake computer an unfinished setup is read from, when the fixture tracks setup.
     computer: Option<Arc<crate::workbench::setup::test_support::Computer>>,
 }
@@ -233,8 +235,7 @@ impl Fixture {
     }
 
     fn build(watching: bool, policy: &str, setting_up: bool) -> Self {
-        let root =
-            std::env::temp_dir().join(format!("ghostlight-web-{}", uuid::Uuid::new_v4().simple()));
+        let root = Scratch::named("web");
         let state = root.join("state");
         std::fs::create_dir_all(&state).unwrap();
         let marker = state.join("watch.off");
@@ -315,7 +316,6 @@ impl Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         self.server.stop();
-        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 

@@ -110,7 +110,8 @@ mod verbatim {
 
     #[test]
     fn the_canonical_form_of_a_directory_is_stable() {
-        let first = canonical(&std::env::temp_dir()).expect("canonical form");
+        let scratch = crate::tests::Scratch::named("canonical");
+        let first = canonical(&scratch).expect("canonical form");
         let second = canonical(&first).expect("canonical form of the canonical form");
         assert_eq!(first, second);
         assert!(first.is_absolute());
@@ -120,7 +121,8 @@ mod verbatim {
 
     #[test]
     fn a_missing_path_has_no_canonical_form() {
-        let missing = std::env::temp_dir().join("ghostlight-canonical-missing");
+        let scratch = crate::tests::Scratch::named("canonical-missing");
+        let missing = scratch.join("missing");
         assert_eq!(
             canonical(&missing).unwrap_err().kind(),
             std::io::ErrorKind::NotFound

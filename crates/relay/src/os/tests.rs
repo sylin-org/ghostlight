@@ -11,6 +11,10 @@ use std::time::Duration;
 
 use super::session::EXCLUSIVE;
 use super::spawn_detached;
+use crate::tests::Scratch;
+
+/// An existing directory for a child to start in. The tests never write there.
+const START_DIRECTORY: &str = env!("CARGO_MANIFEST_DIR");
 
 /// How long a reader of the starter's pipe may wait for end of file.
 const END_OF_FILE_WITHIN: Duration = Duration::from_secs(2);
@@ -165,7 +169,7 @@ fn a_detached_child_holds_none_of_its_starters_handles() {
     let (reader, writer) = platform::inheritable_pipe();
     let (program, arguments) = platform::long_lived_program();
     let arguments: Vec<&OsStr> = arguments.iter().map(OsString::as_os_str).collect();
-    let pid = spawn_detached(&program, &arguments, &std::env::temp_dir())
+    let pid = spawn_detached(&program, &arguments, Path::new(START_DIRECTORY))
         .expect("the long-lived program starts");
     let _end = platform::EndOnDrop(pid);
 
@@ -189,7 +193,7 @@ fn a_program_that_cannot_start_is_an_error() {
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let missing = Path::new("ghostlight-no-such-program");
-    assert!(spawn_detached(missing, &[], &std::env::temp_dir()).is_err());
+    assert!(spawn_detached(missing, &[], Path::new(START_DIRECTORY)).is_err());
 }
 
 #[test]
@@ -199,7 +203,8 @@ fn a_directory_that_does_not_exist_is_an_error() {
         .unwrap_or_else(|poison| poison.into_inner());
     let (program, arguments) = platform::long_lived_program();
     let arguments: Vec<&OsStr> = arguments.iter().map(OsString::as_os_str).collect();
-    let missing: PathBuf = std::env::temp_dir().join("ghostlight-no-such-directory");
+    let scratch = Scratch::named("spawn");
+    let missing: PathBuf = scratch.join("no-such-directory");
     assert!(spawn_detached(&program, &arguments, &missing).is_err());
 }
 

@@ -797,7 +797,7 @@ mod tests {
 
     #[test]
     fn the_shortcut_names_the_shell_when_bin_holds_one_and_the_service_when_it_does_not() {
-        let scratch = crate::install::scratch::Scratch::new();
+        let scratch = crate::scratch::Scratch::new();
         let layout = Layout::new(scratch.path());
         assert_eq!(shortcut_target(&layout), layout.service_executable());
         std::fs::create_dir_all(layout.bin()).unwrap();
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn an_own_shortcut_and_an_own_key_are_removed_and_a_second_removal_changes_nothing() {
-        let scratch = crate::install::scratch::Scratch::new();
+        let scratch = crate::scratch::Scratch::new();
         let layout = Layout::new(scratch.path().join("home"));
         let shortcut = scratch.path().join("Ghostlight.lnk");
         let list = [4, 0, 1, 2, 0, 0];
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn a_shortcut_is_own_by_its_target_and_by_its_id_only_when_it_names_none() {
-        let scratch = crate::install::scratch::Scratch::new();
+        let scratch = crate::scratch::Scratch::new();
         let layout = Layout::new(scratch.path().join("home"));
         let shortcut = scratch.path().join("Ghostlight.lnk");
         let list = [4, 0, 1, 2, 0, 0];
@@ -979,7 +979,7 @@ mod tests {
 
     #[test]
     fn a_shortcut_that_names_another_program_and_a_key_that_names_another_home_are_kept() {
-        let scratch = crate::install::scratch::Scratch::new();
+        let scratch = crate::scratch::Scratch::new();
         let layout = Layout::new(scratch.path().join("home"));
         let shortcut = scratch.path().join("Ghostlight.lnk");
         let elsewhere = Path::new(r"C:\Program Files\Ghostlight\Ghostlight.exe");
@@ -1015,7 +1015,7 @@ mod tests {
 
     #[test]
     fn a_key_is_own_by_its_install_location_alone() {
-        let scratch = crate::install::scratch::Scratch::new();
+        let scratch = crate::scratch::Scratch::new();
         let layout = Layout::new(scratch.path().join("home"));
         let location = layout.bin().to_string_lossy().into_owned();
         let key = FakeKey::with(&[(value::INSTALL_LOCATION, &location)]);

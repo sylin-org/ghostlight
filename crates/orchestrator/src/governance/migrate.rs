@@ -219,12 +219,10 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
 
-    fn temporary(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "ghostlight-migrate-{name}-{}.json",
-            uuid::Uuid::new_v4()
-        ))
+    fn temporary(name: &str) -> Scratch {
+        Scratch::file(&format!("migrate-{name}.json"))
     }
 
     fn moved(text: &str) -> Migration {
@@ -389,8 +387,6 @@ mod tests {
         assert!(manifest::parse(&migration.document, "moved").is_ok());
         assert_eq!(migrate_file(&path).unwrap(), None);
         assert_eq!(fs::read_to_string(&backup).unwrap(), original);
-        let _ = fs::remove_file(path);
-        let _ = fs::remove_file(backup);
     }
 
     #[cfg(unix)]
@@ -406,8 +402,6 @@ mod tests {
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o644);
         assert_eq!(mode(&backup), 0o600);
-        let _ = fs::remove_file(path);
-        let _ = fs::remove_file(backup);
     }
 
     #[test]
@@ -421,7 +415,6 @@ mod tests {
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), original);
         assert!(!backup_path(&path).exists());
-        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -437,7 +430,5 @@ mod tests {
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), original);
         assert_eq!(fs::read_to_string(&backup).unwrap(), "an earlier copy");
-        let _ = fs::remove_file(path);
-        let _ = fs::remove_file(backup);
     }
 }

@@ -2997,6 +2997,7 @@ mod tests {
     use crate::browser::recovery::RecoveryCandidate;
     use crate::browser::testing::{summary, FakeBrowser, FAKE_BROWSER};
     use crate::intake::session::IntakeChannel;
+    use crate::scratch::Scratch;
 
     use crate::audit::AuditRecord;
     use crate::governance::{AuditSink, GovernanceFacade};
@@ -3106,18 +3107,15 @@ mod tests {
         fixture_with_governance(GovernanceFacade::new(None, None))
     }
 
-    fn temporary_policy(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "ghostlight-1.0-work-{name}-{}.json",
-            uuid::Uuid::new_v4()
-        ))
+    fn temporary_policy(name: &str) -> Scratch {
+        Scratch::file(&format!("work-{name}.json"))
     }
 
     /// A real, isolated policy source that tests may edit between invocations.
     ///
     /// An edit through `set` is published to every facade the source gave out, as the refresher
     /// would after a hand edit.
-    struct TestPolicy(PathBuf, Mutex<Vec<GovernanceFacade>>);
+    struct TestPolicy(Scratch, Mutex<Vec<GovernanceFacade>>);
 
     impl TestPolicy {
         fn new() -> Self {
@@ -3127,7 +3125,7 @@ mod tests {
         }
 
         fn facade(&self) -> GovernanceFacade {
-            let facade = GovernanceFacade::new(Some(self.0.clone()), None);
+            let facade = GovernanceFacade::new(Some(self.0.to_path_buf()), None);
             self.1.lock().unwrap().push(facade.clone());
             facade
         }
@@ -3160,12 +3158,6 @@ mod tests {
                 .unwrap()
                 .set_modified(before + Duration::from_secs(2))
                 .unwrap();
-        }
-    }
-
-    impl Drop for TestPolicy {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
         }
     }
 

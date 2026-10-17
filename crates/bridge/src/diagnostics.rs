@@ -748,16 +748,10 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
 
-    fn temp_root(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-diagnostics-test-{}-{}",
-            name,
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).expect("temp root");
-        root
+    fn temp_root(name: &str) -> Scratch {
+        Scratch::named(&format!("diagnostics-{name}"))
     }
 
     /// Drive re-checks until an observable effect lands, bounded. The product contract is
@@ -787,7 +781,7 @@ mod tests {
     #[test]
     fn explicit_layer_wins_over_marker_over_off() {
         let root = temp_root("resolve");
-        let home = root.clone();
+        let home = root.to_path_buf();
         assert_eq!(resolve(None, &home), Activation::Off);
         fs::write(marker_path(&home), b"").expect("marker");
         assert_eq!(
@@ -817,7 +811,7 @@ mod tests {
     #[test]
     fn birth_pins_the_explicit_layer_and_opens_a_headered_file() {
         let root = temp_root("pinned");
-        let home = root.clone();
+        let home = root.to_path_buf();
         let sink = Sink::birth_with(
             Component::Orchestrator,
             "9.9.9-test",
@@ -886,7 +880,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let root = temp_root("private");
-        let home = root.clone();
+        let home = root.to_path_buf();
         set_marker(&home, true).expect("marker");
         let sink = Sink::birth_with(
             Component::EdgeMcp,
@@ -911,7 +905,7 @@ mod tests {
     #[test]
     fn the_marker_layer_toggles_a_live_sink_through_evaluate() {
         let root = temp_root("toggle");
-        let home = root.clone();
+        let home = root.to_path_buf();
         let sink = Sink::birth_with(
             Component::EdgeMcp,
             "9.9.9-test",
@@ -954,7 +948,7 @@ mod tests {
     #[test]
     fn transitions_report_through_the_change_callback() {
         let root = temp_root("callback");
-        let home = root.clone();
+        let home = root.to_path_buf();
         let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_for_callback = Arc::clone(&seen);
         let sink = Sink::birth_with(

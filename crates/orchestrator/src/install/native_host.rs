@@ -1504,6 +1504,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use super::*;
+    use crate::scratch::Scratch;
 
     #[derive(Default)]
     struct MemoryIo {
@@ -1580,14 +1581,8 @@ mod tests {
         }
     }
 
-    fn symlink_probe_directory(name: &str) -> PathBuf {
-        let directory = env::temp_dir().join(format!(
-            "ghostlight-native-host-{name}-{}-{}",
-            std::process::id(),
-            Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        directory
+    fn symlink_probe_directory(name: &str) -> Scratch {
+        Scratch::named(&format!("native-host-{name}"))
     }
 
     #[cfg(unix)]
@@ -1635,17 +1630,14 @@ mod tests {
         assert_eq!(fs::read_to_string(&link).unwrap(), "new");
     }
 
-    fn context(platform: NativeHostPlatform) -> NativeHostContext {
-        let root = env::temp_dir().join(format!(
-            "ghostlight-native-host-{}-{}",
-            std::process::id(),
-            Uuid::new_v4().simple()
-        ));
+    /// A context rooted in a fresh scratch directory, which lives as long as the returned guard.
+    fn context(platform: NativeHostPlatform) -> (Scratch, NativeHostContext) {
+        let root = Scratch::named("native-host");
         let local = root.join("AppData/Local");
         let layout = Layout::new(root.join("Ghostlight"));
-        NativeHostContext {
+        let context = NativeHostContext {
             platform,
-            home: root.clone(),
+            home: root.to_path_buf(),
             config: root.join(".config"),
             local: local.clone(),
             manifests: layout.manifests(),
@@ -1661,7 +1653,8 @@ mod tests {
             ],
             registry_isolated: false,
             residence: Residence::Regular,
-        }
+        };
+        (root, context)
     }
 
     #[test]
@@ -1698,13 +1691,13 @@ mod tests {
 
     #[test]
     fn an_isolated_context_writes_registry_keys_only_ghostlight_owns() {
-        let mut isolated = context(NativeHostPlatform::Windows);
+        let (_isolated_root, mut isolated) = context(NativeHostPlatform::Windows);
         isolated.registry_isolated = true;
         assert_eq!(
             isolated.registry_key(&BROWSERS[0]),
             r"Software\Ghostlight\Isolated\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
         );
-        let real = context(NativeHostPlatform::Windows);
+        let (_real_root, real) = context(NativeHostPlatform::Windows);
         assert_eq!(
             real.registry_key(&BROWSERS[0]),
             r"Software\Google\Chrome\NativeMessagingHosts\org.sylin.ghostlight"
@@ -1728,7 +1721,7 @@ mod tests {
     #[test]
     fn install_removes_only_owned_retired_firefox_registration() {
         for platform in [NativeHostPlatform::Windows, NativeHostPlatform::Linux] {
-            let context = context(platform);
+            let (_root, context) = context(platform);
             let registration_io = MemoryIo::default();
             fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
             fs::write(&context.connector, b"connector").unwrap();
@@ -1760,8 +1753,6 @@ mod tests {
             assert!(!registration_io
                 .registry()
                 .contains_key(r"Software\Mozilla\NativeMessagingHosts\org.sylin.ghostlight"));
-
-            let _ = fs::remove_dir_all(context.home);
         }
     }
 
@@ -1823,8 +1814,8 @@ mod tests {
 
     #[test]
     fn user_data_directories_follow_the_table_on_both_platforms() {
-        let windows = context(NativeHostPlatform::Windows);
-        let linux = context(NativeHostPlatform::Linux);
+        let (_windows_root, windows) = context(NativeHostPlatform::Windows);
+        let (_linux_root, linux) = context(NativeHostPlatform::Linux);
         let windows_tails = [
             "Google/Chrome/User Data",
             "Microsoft/Edge/User Data",
@@ -1849,7 +1840,7 @@ mod tests {
 
     #[test]
     fn the_registry_answers_user_data_and_identities_in_table_order() {
-        let root = env::temp_dir().join("ghostlight-user-data-registry");
+        let root = Scratch::named("user-data-registry");
         let registry = NativeHostRegistry::isolated(&root, &root.join("ghostlight"));
 
         assert_eq!(
@@ -1876,7 +1867,7 @@ mod tests {
 
     #[test]
     fn windows_executable_discovery_uses_only_fixed_roots_for_all_families() {
-        let context = context(NativeHostPlatform::Windows);
+        let (_root, context) = context(NativeHostPlatform::Windows);
         let outside = context.home.join("Portable");
         let decoy = windows_browser_executable_path(&outside, &BROWSERS[0]);
         fs::create_dir_all(decoy.parent().unwrap()).unwrap();
@@ -1894,8 +1885,6 @@ mod tests {
             fs::write(&expected, b"ordinary browser").unwrap();
             assert_eq!(browser_executable(&context, browser), Some(expected));
         }
-
-        fs::remove_dir_all(context.home).unwrap();
     }
 
     #[test]
@@ -1946,7 +1935,7 @@ mod tests {
 
     #[test]
     fn a_registration_owned_elsewhere_is_diagnosed_then_adopted_only_by_install() {
-        let context = context(NativeHostPlatform::Windows);
+        let (_root, context) = context(NativeHostPlatform::Windows);
         let registration_io = MemoryIo::default();
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
@@ -2003,13 +1992,11 @@ mod tests {
             .browsers
             .iter()
             .all(|browser| browser.state == NativeHostState::Current));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn unix_install_is_idempotent_and_uninstall_removes_only_owned_files() {
-        let context = context(NativeHostPlatform::Linux);
+        let (_root, context) = context(NativeHostPlatform::Linux);
         let registration_io = MemoryIo::default();
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
@@ -2035,13 +2022,11 @@ mod tests {
             removed.report.browsers[0].state,
             NativeHostState::NeedsAttention
         );
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn windows_install_repairs_owned_old_paths_and_refuses_unowned_ones() {
-        let context = context(NativeHostPlatform::Windows);
+        let (_root, context) = context(NativeHostPlatform::Windows);
         let registration_io = MemoryIo::default();
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
@@ -2085,13 +2070,11 @@ mod tests {
             NativeHostState::NeedsAttention
         );
         assert_eq!(partial.report.browsers[1].state, NativeHostState::Current);
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn windows_owned_repair_revalidates_before_writing() {
-        let context = context(NativeHostPlatform::Windows);
+        let (_root, context) = context(NativeHostPlatform::Windows);
         let registration_io = MemoryIo::default();
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
@@ -2146,13 +2129,11 @@ mod tests {
                 .unwrap()
                 .changed
         );
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn windows_uninstall_removes_an_unreferenced_owned_shared_manifest() {
-        let context = context(NativeHostPlatform::Windows);
+        let (_root, context) = context(NativeHostPlatform::Windows);
         let registration_io = MemoryIo::default();
         let manifest_path = windows_manifest_path(&context);
         registration_io.files().insert(
@@ -2171,13 +2152,11 @@ mod tests {
             .browsers
             .iter()
             .all(|browser| browser.state == NativeHostState::Missing));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn selected_unix_install_and_uninstall_touch_only_named_browsers() {
-        let context = context(NativeHostPlatform::Linux);
+        let (_root, context) = context(NativeHostPlatform::Linux);
         let registration_io = MemoryIo::default();
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
@@ -2194,13 +2173,11 @@ mod tests {
         assert_eq!(removed.report.browsers[1].state, NativeHostState::Current);
         assert!(select_browsers(&["firefox".into()]).is_err());
         assert!(select_browsers(&["safari".into()]).is_err());
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn selected_windows_uninstall_preserves_a_shared_manifest_still_in_use() {
-        let context = context(NativeHostPlatform::Windows);
+        let (_root, context) = context(NativeHostPlatform::Windows);
         let registration_io = MemoryIo::default();
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
@@ -2212,15 +2189,13 @@ mod tests {
         assert!(registration_io
             .files()
             .contains_key(&windows_manifest_path(&context)));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
-    fn windows_context_with_connector() -> NativeHostContext {
-        let context = context(NativeHostPlatform::Windows);
+    fn windows_context_with_connector() -> (Scratch, NativeHostContext) {
+        let (root, context) = context(NativeHostPlatform::Windows);
         fs::create_dir_all(context.connector.parent().unwrap()).unwrap();
         fs::write(&context.connector, b"connector").unwrap();
-        context
+        (root, context)
     }
 
     fn inside_container(mut context: NativeHostContext, app: &str) -> NativeHostContext {
@@ -2237,7 +2212,7 @@ mod tests {
 
     #[test]
     fn the_windows_manifest_lives_in_the_home_and_every_browser_names_it() {
-        let context = windows_context_with_connector();
+        let (_root, context) = windows_context_with_connector();
         let registration_io = MemoryIo::default();
 
         let result = apply_install(&context, &registration_io).unwrap();
@@ -2262,13 +2237,11 @@ mod tests {
         assert!(result.changed);
         assert!(result.private.is_empty());
         assert_eq!(result.report.private_view, None);
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn a_registry_value_is_written_only_when_it_differs() {
-        let context = windows_context_with_connector();
+        let (_root, context) = windows_context_with_connector();
         let registration_io = MemoryIo::default();
         apply_install(&context, &registration_io).unwrap();
         assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
@@ -2291,13 +2264,12 @@ mod tests {
 
         assert!(!apply_install(&context, &registration_io).unwrap().changed);
         assert_eq!(registration_io.registry_writes().len(), BROWSERS.len());
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn inside_a_container_the_manifest_is_written_and_no_registry_value_is() {
-        let context = inside_container(windows_context_with_connector(), "Claude");
+        let (_root, context) = windows_context_with_connector();
+        let context = inside_container(context, "Claude");
         let registration_io = MemoryIo::default();
 
         let result = apply_install(&context, &registration_io).unwrap();
@@ -2320,13 +2292,11 @@ mod tests {
             .browsers
             .iter()
             .all(|browser| browser.state == NativeHostState::Missing));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn inside_a_container_an_install_that_finds_the_registration_writes_nothing_private() {
-        let regular = windows_context_with_connector();
+        let (_regular_root, regular) = windows_context_with_connector();
         let registration_io = MemoryIo::default();
         apply_install(&regular, &registration_io).unwrap();
         let writes = registration_io.registry_writes().len();
@@ -2350,13 +2320,12 @@ mod tests {
             .iter()
             .all(|browser| browser.state == NativeHostState::Current));
         assert!(!apply_install(&context, &registration_io).unwrap().changed);
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn inside_a_container_an_uninstall_is_refused_before_anything_changes() {
-        let context = inside_container(windows_context_with_connector(), "Claude");
+        let (_root, context) = windows_context_with_connector();
+        let context = inside_container(context, "Claude");
         let registration_io = MemoryIo::default();
         let manifest = windows_manifest_path(&context);
         registration_io.files().insert(
@@ -2372,8 +2341,6 @@ mod tests {
         assert!(refused.to_string().contains("Claude"));
         assert!(refused.to_string().ends_with("uninstall"));
         assert!(registration_io.files().contains_key(&manifest));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     /// Plant an owned manifest in the old per-user `AppData` directory and point `browsers` at it.
@@ -2405,7 +2372,7 @@ mod tests {
 
     #[test]
     fn the_old_appdata_manifest_is_repointed_removed_and_its_directory_goes() {
-        let context = windows_context_with_connector();
+        let (_root, context) = windows_context_with_connector();
         let registration_io = MemoryIo::default();
         let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
         let before = inspect(&context, &registration_io).unwrap();
@@ -2433,13 +2400,11 @@ mod tests {
             .browsers
             .iter()
             .all(|browser| browser.state == NativeHostState::Current));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn the_old_appdata_directory_stays_while_it_holds_anything_else() {
-        let context = windows_context_with_connector();
+        let (_root, context) = windows_context_with_connector();
         let registration_io = MemoryIo::default();
         let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
         let other = legacy.with_file_name("notes.txt");
@@ -2450,13 +2415,11 @@ mod tests {
         assert!(!registration_io.files().contains_key(&legacy));
         assert!(registration_io.files().contains_key(&other));
         assert!(registration_io.has_directory(legacy.parent().unwrap()));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn the_old_manifest_stays_while_a_browser_outside_the_install_still_names_it() {
-        let context = windows_context_with_connector();
+        let (_root, context) = windows_context_with_connector();
         let registration_io = MemoryIo::default();
         let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
 
@@ -2469,13 +2432,12 @@ mod tests {
                 .get(&context.registry_key(&BROWSERS[1])),
             Some(&legacy.to_string_lossy().into_owned())
         );
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn inside_a_container_the_old_manifest_and_its_registry_values_are_left_alone() {
-        let context = inside_container(windows_context_with_connector(), "Claude");
+        let (_root, context) = windows_context_with_connector();
+        let context = inside_container(context, "Claude");
         let registration_io = MemoryIo::default();
         let legacy = plant_legacy_manifest(&context, &registration_io, BROWSERS);
 
@@ -2489,20 +2451,16 @@ mod tests {
         assert!(registration_io
             .files()
             .contains_key(&windows_manifest_path(&context)));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 
     #[test]
     fn uninstall_removes_the_empty_manifests_directory() {
-        let context = windows_context_with_connector();
+        let (_root, context) = windows_context_with_connector();
         let registration_io = MemoryIo::default();
         apply_install(&context, &registration_io).unwrap();
 
         apply_uninstall(&context, &registration_io).unwrap();
 
         assert!(!registration_io.has_directory(&context.manifests));
-
-        let _ = fs::remove_dir_all(context.home);
     }
 }

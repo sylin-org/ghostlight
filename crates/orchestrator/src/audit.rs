@@ -550,6 +550,7 @@ mod tests {
     use super::*;
     use crate::governance::{CapabilitySet, Decision};
     use crate::language::outcome::Outcome;
+    use crate::scratch::Scratch;
     use std::fs;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -775,10 +776,7 @@ mod tests {
         );
 
         // Reload only what the destination confirmed, including its explicit gap marker.
-        let path = std::env::temp_dir().join(format!(
-            "ghostlight-composition-recovery-{}.jsonl",
-            uuid::Uuid::new_v4()
-        ));
+        let path = Scratch::file("composition-recovery.jsonl");
         let mut persisted = Vec::new();
         for gap in sink.gaps.lock().unwrap().iter() {
             assert_eq!(gap.unconfirmed_receipts, 1);
@@ -799,7 +797,7 @@ mod tests {
         fs::write(&path, persisted).unwrap();
         let restored = WorkbenchProjection::default();
         restored.load_history(&path).unwrap();
-        fs::remove_file(path).unwrap();
+        drop(path);
         let history = history(restored.clone());
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].status, "succeeded");
@@ -822,19 +820,17 @@ mod tests {
     fn the_first_append_creates_a_private_file_in_a_private_directory() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = std::env::temp_dir().join(format!("ghostlight-audit-{}", uuid::Uuid::new_v4()));
+        let root = Scratch::named("audit");
         let path = root.join("audit").join("audit.jsonl");
         JsonlAuditSink::new(&path).record(&record("first")).unwrap();
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o600);
         assert_eq!(mode(path.parent().unwrap()), 0o700);
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn actual_file_repair_keeps_good_history_and_reports_torn_and_missing_entries() {
-        let root = std::env::temp_dir().join(format!("ghostlight-h7-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
+        let root = Scratch::named("audit-repair");
         let path = root.join("audit.jsonl");
         fs::write(
             &path,
@@ -863,7 +859,6 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("before") && text.contains("after"));
         assert!(!text.contains("\"missing\""));
-        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

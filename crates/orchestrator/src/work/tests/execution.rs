@@ -1652,7 +1652,7 @@ fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
     )
     .unwrap();
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
     browser.connect(vec![]);
     let started = std::time::Instant::now();
     let absent = executor.execute(
@@ -1668,7 +1668,6 @@ fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
         started.elapsed() < crate::browser::RETURN_GRACE,
         "no evidence of a returning browser, no wait"
     );
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
@@ -1797,7 +1796,7 @@ fn child_receipts_share_authority_without_holding_the_session() {
         r#"{"schema":4,"name":"deny","version":"1","grants":[]}"#,
     )
     .unwrap();
-    let governance = GovernanceFacade::new(Some(path.clone()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
     let (executor, browser, _, workspace, audit) = fixture_with_governance(governance.clone());
     let result = executor.execute(
         &workspace,
@@ -1844,7 +1843,6 @@ fn child_receipts_share_authority_without_holding_the_session() {
         RuntimeControlState::Active,
         "a later direct denial leaves human controls unchanged"
     );
-    fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -2446,7 +2444,7 @@ fn tab_close_policy_blocks_before_browser_dispatch() {
     )
     .unwrap();
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
@@ -2470,7 +2468,6 @@ fn tab_close_policy_blocks_before_browser_dispatch() {
     assert_eq!(closed.effect, Effect::None);
     assert_eq!(closed.facts["reason"], "tab_close_denied");
     assert_eq!(browser.calls().len(), 1);
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
@@ -2574,7 +2571,7 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
         )
         .unwrap();
     let (executor, browser, workspaces, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
 
     // An ordinary, fully governed opener tab, admitted under the narrow policy.
     browser.push(Ok(BrowserOutcome::TabOpened {
@@ -2617,7 +2614,6 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
             .all(|call| !matches!(call, BrowserCommand::Observe { .. })),
         "the browser must never be asked to read a tab whose destination was never checked"
     );
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
@@ -2697,7 +2693,7 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
     )
     .unwrap();
     let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
@@ -2752,7 +2748,6 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
     assert_eq!(clicked.summary, "Clicked a button on example.com.");
     let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
     assert!(!encoded.contains("Save patient record"));
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
@@ -3074,7 +3069,7 @@ fn denied_redirect_remains_visibly_open_when_close_policy_refuses_compensation()
     document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
     fs::write(&policy, serde_json::to_vec(&document).unwrap()).unwrap();
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "http://127.0.0.1/private"),
         committed_urls: vec![
@@ -3095,7 +3090,6 @@ fn denied_redirect_remains_visibly_open_when_close_policy_refuses_compensation()
     assert_eq!(result.facts["compensated"], false);
     assert_eq!(result.facts["retained"], true);
     assert_eq!(browser.calls().len(), 1);
-    let _ = fs::remove_file(policy);
 }
 
 #[test]

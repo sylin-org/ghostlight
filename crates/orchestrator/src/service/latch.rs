@@ -34,7 +34,7 @@ pub fn clear(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::scratch::Scratch;
+    use crate::scratch::Scratch;
 
     #[test]
     fn setting_creates_the_latch_and_clearing_removes_it() {

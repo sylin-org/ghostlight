@@ -87,14 +87,17 @@ fn relay_fixture(
 
 /// Governance that leaves browser startup to the person, so a call that reached recovery would
 /// answer `browser_startup_manual` instead of quietly succeeding.
-fn manual_startup() -> (GovernanceFacade, PathBuf) {
+fn manual_startup() -> (GovernanceFacade, Scratch) {
     let policy = temporary_policy("manual-browser-startup");
     fs::write(
         &policy,
         all_open_policy_with(r#"[{"key":"browser.startup","value":"manual","level":"mandatory"}]"#),
     )
     .unwrap();
-    (GovernanceFacade::new(Some(policy.clone()), None), policy)
+    (
+        GovernanceFacade::new(Some(policy.to_path_buf()), None),
+        policy,
+    )
 }
 
 fn list_tabs(
@@ -216,7 +219,7 @@ fn a_silent_pinned_browser_that_answers_again_takes_the_call() {
 #[test]
 fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, policy) = manual_startup();
+    let (governance, _policy) = manual_startup();
     let (executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
 
     let reconnecting = attach_later(&port, Duration::from_millis(300));
@@ -228,7 +231,6 @@ fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
         Some(RELAY_BROWSER)
     );
     drop(reconnecting.join().unwrap());
-    let _ = fs::remove_file(policy);
 }
 
 /// A browser the person used and then closed is not on its way back. Once its departure is
@@ -238,7 +240,7 @@ fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
 #[test]
 fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, policy) = manual_startup();
+    let (governance, _policy) = manual_startup();
     let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
     // Long past the port's own reconnect window, so the departure is the only evidence.
     port.backdate(RETURN_GRACE);
@@ -266,7 +268,6 @@ fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
         "browser startup ran at once instead of after a wait, took {:?}",
         started.elapsed()
     );
-    let _ = fs::remove_file(policy);
 }
 
 /// Publishing the endpoint opens a short window for relays that served an earlier service. When
@@ -275,7 +276,7 @@ fn a_browser_closed_longer_ago_than_the_grace_is_not_waited_for() {
 #[test]
 fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_window() {
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, policy) = manual_startup();
+    let (governance, _policy) = manual_startup();
     let (executor, _, workspace) = relay_fixture(Arc::clone(&port), governance);
     port.backdate(RETURN_GRACE);
     assert!(!port.browser_returning(), "an old port with no relay");
@@ -295,12 +296,11 @@ fn a_freshly_published_port_with_no_relay_stops_waiting_after_the_reconnect_wind
         "the wait ended with the reconnect window, not the grace, took {:?}",
         published.elapsed()
     );
-    let _ = fs::remove_file(policy);
 }
 
 /// Governance that starts a browser on demand, the Windows default, written out so the tests
 /// read the same on every platform.
-fn on_demand_startup() -> (GovernanceFacade, PathBuf) {
+fn on_demand_startup() -> (GovernanceFacade, Scratch) {
     let policy = temporary_policy("on-demand-browser-startup");
     fs::write(
         &policy,
@@ -309,7 +309,10 @@ fn on_demand_startup() -> (GovernanceFacade, PathBuf) {
         ),
     )
     .unwrap();
-    (GovernanceFacade::new(Some(policy.clone()), None), policy)
+    (
+        GovernanceFacade::new(Some(policy.to_path_buf()), None),
+        policy,
+    )
 }
 
 /// The installed browser the relay fixture's scripted extensions connect as: their hello
@@ -334,7 +337,7 @@ fn chrome_installed() -> Vec<RecoveryCandidate> {
 #[test]
 fn a_pinned_browser_closed_long_ago_is_started_again_and_takes_the_call() {
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, policy) = on_demand_startup();
+    let (governance, _policy) = on_demand_startup();
     let (mut executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
     executor.recovery.set_test_candidates(chrome_installed());
     let launches = Arc::new(AtomicUsize::new(0));
@@ -378,7 +381,6 @@ fn a_pinned_browser_closed_long_ago_is_started_again_and_takes_the_call() {
         workspaces.browser_of(workspace.as_str()).as_deref(),
         Some(RELAY_BROWSER)
     );
-    let _ = fs::remove_file(policy);
 }
 
 /// A session's browser that comes back inside the grace takes the call, and nothing is
@@ -386,7 +388,7 @@ fn a_pinned_browser_closed_long_ago_is_started_again_and_takes_the_call() {
 #[test]
 fn a_pinned_browser_that_returns_within_the_grace_starts_nothing() {
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
-    let (governance, policy) = on_demand_startup();
+    let (governance, _policy) = on_demand_startup();
     let (mut executor, workspaces, workspace) = relay_fixture(Arc::clone(&port), governance);
     executor.recovery.set_test_candidates(chrome_installed());
     let launches = Arc::new(AtomicUsize::new(0));
@@ -409,7 +411,6 @@ fn a_pinned_browser_that_returns_within_the_grace_starts_nothing() {
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
     assert_eq!(launches.load(Ordering::SeqCst), 0);
     drop(second.join().unwrap());
-    let _ = fs::remove_file(policy);
 }
 
 /// A fake-port executor whose session works in `browser_chrome`, a browser that connected as
@@ -452,7 +453,7 @@ fn navigate_within_a_second(
 /// call goes to the session's browser once it is back.
 #[test]
 fn a_pinned_browser_started_again_beside_another_browser_takes_the_call() {
-    let (governance, policy) = on_demand_startup();
+    let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspace, launches) = closed_session_browser(governance, |browser| {
         browser.connect(vec![
             summary("browser_edge", false),
@@ -470,7 +471,6 @@ fn a_pinned_browser_started_again_beside_another_browser_takes_the_call() {
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert_eq!(browser.routed(), vec!["browser_chrome".to_owned()]);
-    let _ = fs::remove_file(policy);
 }
 
 /// When the start brings back another profile of the same browser instead, the call waits out
@@ -478,7 +478,7 @@ fn a_pinned_browser_started_again_beside_another_browser_takes_the_call() {
 /// sent and the session is not moved.
 #[test]
 fn a_started_browser_that_connects_as_another_profile_is_the_wrong_profile() {
-    let (governance, policy) = on_demand_startup();
+    let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspace, launches) = closed_session_browser(governance, |browser| {
         browser.remember_installed("browser_other_profile", "chromium");
         browser.connect(vec![summary("browser_other_profile", true)]);
@@ -496,14 +496,13 @@ fn a_started_browser_that_connects_as_another_profile_is_the_wrong_profile() {
     assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert!(browser.routed().is_empty());
-    let _ = fs::remove_file(policy);
 }
 
 /// Another profile of the session's browser can connect before the session's own profile does.
 /// The call keeps waiting within its deadline and goes to its own profile once it arrives.
 #[test]
 fn a_started_browser_whose_other_profile_connects_first_takes_the_call_in_its_own() {
-    let (governance, policy) = on_demand_startup();
+    let (governance, _policy) = on_demand_startup();
     let (mut executor, browser, workspace, _) = closed_session_browser(governance, |_| {});
     browser.remember_installed("browser_other_profile", "chromium");
     let launches = Arc::new(AtomicUsize::new(0));
@@ -537,14 +536,13 @@ fn a_started_browser_whose_other_profile_connects_first_takes_the_call_in_its_ow
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert_eq!(browser.routed(), vec!["browser_chrome".to_owned()]);
-    let _ = fs::remove_file(policy);
 }
 
 /// When the started browser never connects, the call ends with the handshake timeout every
 /// browser start gets.
 #[test]
 fn a_started_browser_that_never_connects_is_the_handshake_timeout() {
-    let (governance, policy) = on_demand_startup();
+    let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspace, launches) = closed_session_browser(governance, |_| {});
 
     let refused = navigate_within_a_second(&executor, &workspace);
@@ -558,14 +556,13 @@ fn a_started_browser_that_never_connects_is_the_handshake_timeout() {
     );
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert!(browser.routed().is_empty());
-    let _ = fs::remove_file(policy);
 }
 
 /// Under `manual`, the session's browser is never started: the refusals are the ones a session
 /// that waited for its browser always got.
 #[test]
 fn under_manual_startup_a_pinned_browser_is_never_started() {
-    let (governance, policy) = manual_startup();
+    let (governance, _policy) = manual_startup();
     let (executor, browser, workspace, launches) = closed_session_browser(governance, |_| {});
 
     let refused = navigate_within_a_second(&executor, &workspace);
@@ -574,7 +571,6 @@ fn under_manual_startup_a_pinned_browser_is_never_started() {
     let refused = navigate_within_a_second(&executor, &workspace);
     assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
     assert_eq!(launches.load(Ordering::SeqCst), 0);
-    let _ = fs::remove_file(policy);
 }
 
 /// A session's browser this service never saw connect as one installed browser, as after a
@@ -582,7 +578,7 @@ fn under_manual_startup_a_pinned_browser_is_never_started() {
 /// unchanged.
 #[test]
 fn a_pinned_browser_with_no_known_installed_browser_is_never_started() {
-    let (governance, policy) = on_demand_startup();
+    let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
     browser.connect(vec![]);
     workspaces
@@ -603,7 +599,6 @@ fn a_pinned_browser_with_no_known_installed_browser_is_never_started() {
     let refused = navigate_within_a_second(&executor, &workspace);
     assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
     assert_eq!(launches.load(Ordering::SeqCst), 0);
-    let _ = fs::remove_file(policy);
 }
 
 /// A call that reaches its session's connected browser names that browser in the record.
@@ -848,7 +843,7 @@ fn a_pinned_browser_absent_with_nothing_connected_is_not_connected_and_never_rec
 /// inside the grace, recovery runs as it always did.
 #[test]
 fn a_returning_browser_that_never_arrives_falls_back_to_recovery() {
-    let (governance, policy) = manual_startup();
+    let (governance, _policy) = manual_startup();
     let (executor, browser, _, workspace, _) = fixture_with_governance(governance);
     browser.connect(vec![]);
     browser.set_returning(true);
@@ -862,7 +857,6 @@ fn a_returning_browser_that_never_arrives_falls_back_to_recovery() {
     );
     assert_eq!(refused.status, Status::Failed);
     assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
-    let _ = fs::remove_file(policy);
 }
 
 /// The refusal a session with no browser hears under manual startup, with the setup record
@@ -871,7 +865,7 @@ fn manual_refusal(
     setup_complete: bool,
     extension_in_a_profile: bool,
 ) -> crate::work::result::InvocationResult {
-    let scratch = crate::install::scratch::Scratch::new();
+    let scratch = crate::scratch::Scratch::new();
     let record = scratch.path().join("setup.json");
     if setup_complete {
         crate::install::setup_state::record_if_absent(
@@ -891,7 +885,7 @@ fn manual_refusal(
     executor.extension_probe = Arc::new(move || extension_in_a_profile);
     port.backdate(RETURN_GRACE);
     let refused = navigate(&executor, &workspace);
-    let _ = fs::remove_file(policy);
+    drop(policy);
     assert_eq!(refused.facts["reason"], json!("browser_startup_manual"));
     refused
 }
@@ -925,7 +919,7 @@ fn launch_without_extension(
     setup_complete: bool,
     extension_in_a_profile: bool,
 ) -> crate::work::result::InvocationResult {
-    let scratch = crate::install::scratch::Scratch::new();
+    let scratch = crate::scratch::Scratch::new();
     let record = scratch.path().join("setup.json");
     if setup_complete {
         crate::install::setup_state::record_if_absent(
@@ -947,7 +941,7 @@ fn launch_without_extension(
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (mut executor, _, workspace) = relay_fixture(
         Arc::clone(&port),
-        GovernanceFacade::new(Some(policy.clone()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf()), None),
     );
     executor
         .workbench
@@ -956,7 +950,7 @@ fn launch_without_extension(
     executor.recovery.set_test_launch_without_adapter();
     port.backdate(RETURN_GRACE);
     let refused = navigate_for(&executor, &workspace, 300);
-    let _ = fs::remove_file(policy);
+    drop(policy);
     assert_eq!(
         refused.facts["reason"],
         json!("browser_handshake_timeout"),

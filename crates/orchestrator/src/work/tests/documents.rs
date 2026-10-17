@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::browser::adapter::documents::{DocumentInventory, PhysicalDocument};
+use crate::scratch::Scratch;
 use crate::workbench::WorkbenchFacade;
 use crate::workspace::WorkspaceId;
-use uuid::Uuid;
 
 fn inventory(child_supported: bool) -> DocumentInventory {
     DocumentInventory {
@@ -65,8 +65,8 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
     }
 }
 
-fn policy_file(child_read: bool) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("ghostlight-h6-{}.json", Uuid::new_v4()));
+fn policy_file(child_read: bool) -> Scratch {
+    let path = Scratch::file("documents-policy.json");
     let mut grants = vec![
         json!({"id":"main","hosts":{"allow":["example.com"]},"allowed":["read","action","write","execute"]}),
     ];
@@ -131,8 +131,10 @@ fn captured_image() -> BrowserOutcome {
 fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
     for governed in [false, true] {
         let path = governed.then(|| policy_file(false));
-        let (executor, browser, _, workspace, _) =
-            fixture_with_governance(GovernanceFacade::new(path.clone(), None));
+        let (executor, browser, _, workspace, _) = fixture_with_governance(GovernanceFacade::new(
+            path.as_ref().map(|path| path.to_path_buf()),
+            None,
+        ));
         open(&executor, &browser, &workspace);
         browser.set_documents(7, DocumentInventory::default());
         for arguments in [json!({}), json!({"full_page":true})] {
@@ -151,16 +153,13 @@ fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
                 "capture never enters document filtering"
             );
         }
-        if let Some(path) = path {
-            fs::remove_file(path).unwrap();
-        }
     }
 }
 
 #[test]
 fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
     let path = policy_file(true);
-    let governance = GovernanceFacade::new(Some(path.clone()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
     let (executor, browser, _, workspace, audit) = fixture_with_governance(governance.clone());
     open(&executor, &browser, &workspace);
     browser.push(Ok(BrowserOutcome::targets(
@@ -223,14 +222,13 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
             crate::governance::ReasonCode::ScreenshotDenied
         );
     }
-    fs::remove_file(path).unwrap();
 }
 
 #[test]
 fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_details() {
     let path = policy_file(false);
     let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::Text {
@@ -278,7 +276,6 @@ fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_det
         "an exclusion that affects the work is announced"
     );
     assert!(audit.0.lock().unwrap().last().unwrap().coverage.is_some());
-    fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -286,7 +283,7 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
     for child_supported in [true, false] {
         let path = policy_file(false);
         let (executor, browser, _, workspace, _) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
         open(&executor, &browser, &workspace);
         browser.push(Ok(BrowserOutcome::targets(
             7,
@@ -328,7 +325,6 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
             result.facts["coverage"]["page_excluded_documents"],
             usize::from(child_supported)
         );
-        fs::remove_file(path).unwrap();
     }
 }
 
@@ -336,7 +332,7 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
 fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
     let path = policy_file(true);
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::targets(
@@ -371,14 +367,13 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
     assert_eq!(result.status, Status::Blocked, "{}", result.summary);
     assert_eq!(result.effect, Effect::None);
     assert_eq!(browser.calls().len(), 2);
-    fs::remove_file(path).unwrap();
 }
 
 #[test]
 fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
     let path = policy_file(false);
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::Observed {
@@ -424,7 +419,6 @@ fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
     assert_eq!(read.status, Status::Succeeded);
     assert_eq!(read.facts["coverage"]["unavailable_documents"], 1);
     assert_eq!(read.facts["coverage"]["excluded_documents"], 0);
-    fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -475,7 +469,7 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
     ] {
         let path = policy_file(false);
         let (executor, browser, _, workspace, _) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
         open(&executor, &browser, &workspace);
         let mut summary = recording_summary(RecordingState::Frozen, "https://example.com/");
         summary
@@ -500,7 +494,6 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
             2,
             "no encoder or destination receives captured content"
         );
-        fs::remove_file(path).unwrap();
     }
 }
 
@@ -509,7 +502,7 @@ fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch(
     for supported in [false, true] {
         let path = policy_file(false);
         let (executor, browser, _, workspace, audit) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
         open(&executor, &browser, &workspace);
         browser.set_documents(
             7,
@@ -563,6 +556,5 @@ fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch(
                 Some(crate::language::audit::AuditRefusal::DocumentUnavailable)
             );
         }
-        fs::remove_file(path).unwrap();
     }
 }

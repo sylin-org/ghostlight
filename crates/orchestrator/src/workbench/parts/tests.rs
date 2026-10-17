@@ -20,6 +20,7 @@ use crate::language::coverage::Coverage;
 use crate::language::outcome::Observed;
 use crate::language::workbench::ConnectionCounts;
 use crate::provenance::ConnectionDetails;
+use crate::scratch::Scratch;
 use crate::workbench::{
     ConfigurationSummary, DiagnosticSeverity, HistoryStep, OperationPhase, OverviewSummary,
     StepHistoryState,
@@ -30,11 +31,8 @@ const NEVER_TOUCH: &str = "never-touch.invalid";
 const POLICY: &str = r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["never-touch.invalid"],"level":"mandatory"}]}"#;
 const HOME: &str = "/home/ann";
 
-fn temp_policy() -> PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "ghostlight-parts-{}.json",
-        uuid::Uuid::new_v4().simple()
-    ));
+fn temp_policy() -> Scratch {
+    let path = Scratch::file("parts-policy.json");
     std::fs::write(&path, POLICY).unwrap();
     path
 }
@@ -134,9 +132,9 @@ fn setup_view() -> crate::language::setup::SetupView {
 }
 
 /// A snapshot with every field filled, so the keys of each part are all the keys it can have.
-fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
+fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
     let path = temp_policy();
-    let governance = GovernanceFacade::new(Some(path.clone()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
     let (_, check) = governance
         .snapshot()
         .authorize_with_evidence(CapabilitySet::READ, Some("https://example.com/"));
@@ -732,7 +730,7 @@ fn part_tokens_round_trip_and_unknown_tokens_are_errors() {
 
 #[test]
 fn each_part_holds_exactly_the_keys_classified_for_its_audience() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     for audience in [Audience::Control, Audience::Watch] {
         let projection = projection(audience);
         let shown = |part| key_paths(&projection.part(part, &snapshot, setup_view));
@@ -763,12 +761,11 @@ fn each_part_holds_exactly_the_keys_classified_for_its_audience() {
         );
         assert_eq!(shown(Part::Controls), controls_keys(), "{audience:?}");
     }
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn only_the_window_is_shown_the_setup_part() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     let window = projection(Audience::Control);
     assert!(window.shows(Part::Setup));
     assert_eq!(
@@ -786,7 +783,6 @@ fn only_the_window_is_shown_the_setup_part() {
             assert!(watcher.shows(part), "{part:?}");
         }
     }
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -818,12 +814,11 @@ fn the_policy_holds_exactly_the_keys_classified_for_its_audience() {
         key_paths(&projection(Audience::Watch).policy(&authority)),
         expected(&[POLICY_KEYS, POLICY_WATCH_ONLY])
     );
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn nothing_nobody_reads_is_sent_to_anyone() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     for audience in [Audience::Control, Audience::Watch] {
         let projection = projection(audience);
         let mut text = String::new();
@@ -842,12 +837,11 @@ fn nothing_nobody_reads_is_sent_to_anyone() {
             assert!(!text.contains(dropped), "{audience:?}: {dropped}");
         }
     }
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn a_watcher_is_told_how_many_sites_are_excluded_and_not_which() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     let watcher = projection(Audience::Watch).part(Part::Activity, &snapshot, setup_view);
     assert!(!watcher.to_string().contains(EXCLUDED));
     assert!(!watcher.to_string().contains("second.invalid"));
@@ -858,7 +852,6 @@ fn a_watcher_is_told_how_many_sites_are_excluded_and_not_which() {
         json!([EXCLUDED, "second.invalid"])
     );
     assert_eq!(window["document_coverage"][0]["excluded_host_count"], 2);
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -889,7 +882,6 @@ fn a_watcher_is_told_how_many_sites_are_never_touched_and_gets_no_policy_text() 
         .contains(NEVER_TOUCH));
     assert!(window.to_string().contains(NEVER_TOUCH));
     assert!(window["layers"][0]["settings"][0].get("count").is_none());
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -934,7 +926,6 @@ fn paths_are_home_relative_in_every_part_and_the_policy_for_both_audiences() {
             snapshot.harnesses[0].connector_command
         );
     }
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -1008,7 +999,6 @@ fn the_rules_tag_ignores_formatting_key_order_and_version() {
     assert_ne!(policy_etag(&authority), tag);
     authority.layers.clear();
     assert_eq!(policy_etag(&authority), NO_POLICY_ETAG);
-    let _ = std::fs::remove_file(path);
 }
 
 /// The acts of a controls part, by name, with whether each is available.
@@ -1030,7 +1020,7 @@ fn available(controls: &Value) -> Vec<(String, bool)> {
 
 #[test]
 fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     let window = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert!(available(&window).iter().all(|(_, may)| *may), "{window}");
     assert_eq!(window["you"]["context"], "control");
@@ -1050,12 +1040,11 @@ fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() 
     );
     assert_eq!(watcher["you"]["context"], "watch");
     assert_eq!(watcher["you"]["sentence"], words::SENTENCE_WATCH);
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn settings_say_what_they_are_told_in_the_service_words() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     let controls = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert_eq!(controls["runtime"]["state"], "held");
     assert_eq!(controls["runtime"]["word"], words::CONTROLS_RUNTIME_HELD);
@@ -1069,23 +1058,21 @@ fn settings_say_what_they_are_told_in_the_service_words() {
         controls["service"]["word"],
         "Ghostlight service is up; 1 MCP client and 1 browser connected."
     );
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn watching_off_changes_the_word_and_the_sentence_the_window_is_told() {
-    let (mut snapshot, _, path) = populated();
+    let (mut snapshot, _, _path) = populated();
     snapshot.controls.viewing.watch = false;
     snapshot.controls.viewing.word = words::CONTROLS_VIEWING_OFF;
     let window = projection(Audience::Control).part(Part::Controls, &snapshot, setup_view);
     assert_eq!(window["viewing"]["word"], words::CONTROLS_VIEWING_OFF);
     assert_eq!(window["you"]["sentence"], words::SENTENCE_CONTROL_PRIVATE);
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn the_log_folder_is_shown_relative_to_the_users_home() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     let sep = std::path::MAIN_SEPARATOR;
     let controls = projection(Audience::Watch).part(Part::Controls, &snapshot, setup_view);
     assert_eq!(
@@ -1093,12 +1080,11 @@ fn the_log_folder_is_shown_relative_to_the_users_home() {
         format!("~{sep}.ghostlight{sep}logs")
     );
     assert!(!controls.to_string().contains("/home/ann"));
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn an_event_that_carries_the_controls_is_projected_for_each_audience() {
-    let (snapshot, _, path) = populated();
+    let (snapshot, _, _path) = populated();
     let event = WorkbenchEvent {
         seq: 4,
         change: WorkbenchChange::ControlsChanged {
@@ -1118,5 +1104,4 @@ fn an_event_that_carries_the_controls_is_projected_for_each_audience() {
         watcher["change"]["controls"]["runtime"]["acts"]["end_session"]["available"],
         false
     );
-    let _ = std::fs::remove_file(path);
 }

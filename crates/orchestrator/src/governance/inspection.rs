@@ -238,13 +238,7 @@ mod tests {
     use std::fs;
 
     use super::{parse, run, Command};
-
-    fn temporary(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "ghostlight-policy-inspection-{name}-{}",
-            uuid::Uuid::new_v4()
-        ))
-    }
+    use crate::scratch::Scratch;
 
     #[test]
     fn commands_are_small_and_unambiguous() {
@@ -269,8 +263,8 @@ mod tests {
 
     #[test]
     fn explain_and_simulate_share_the_production_policy_vocabulary() {
-        let policy = temporary("policy.json");
-        let audit = temporary("audit.jsonl");
+        let policy = Scratch::file("policy.json");
+        let audit = Scratch::file("audit.jsonl");
         fs::write(
             &policy,
             r#"{"schema":4,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
@@ -283,7 +277,7 @@ mod tests {
         .unwrap();
 
         let mut explanation = Vec::new();
-        run(&Command::Explain(policy.clone()), &mut explanation).unwrap();
+        run(&Command::Explain(policy.to_path_buf()), &mut explanation).unwrap();
         let explanation = String::from_utf8(explanation).unwrap();
         assert!(explanation.contains("research: read on example.com"));
         assert!(explanation.contains("browser_fill_form (submit): read + action + write"));
@@ -291,8 +285,8 @@ mod tests {
         let mut simulation = Vec::new();
         run(
             &Command::Simulate {
-                policy: policy.clone(),
-                audit: audit.clone(),
+                policy: policy.to_path_buf(),
+                audit: audit.to_path_buf(),
             },
             &mut simulation,
         )
@@ -300,14 +294,12 @@ mod tests {
         let simulation = String::from_utf8(simulation).unwrap();
         assert!(simulation.contains("Would deny line 1: browser_click [action]"));
         assert!(simulation.contains("1 would be denied"));
-        let _ = fs::remove_file(policy);
-        let _ = fs::remove_file(audit);
     }
 
     #[test]
     fn simulate_replays_the_golden_audit_lines() {
-        let policy = temporary("policy.json");
-        let audit = temporary("audit.jsonl");
+        let policy = Scratch::file("policy.json");
+        let audit = Scratch::file("audit.jsonl");
         fs::write(
             &policy,
             r#"{"schema":4,"name":"read only","version":"4","grants":[{"id":"research","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
@@ -330,8 +322,8 @@ mod tests {
         let mut simulation = Vec::new();
         run(
             &Command::Simulate {
-                policy: policy.clone(),
-                audit: audit.clone(),
+                policy: policy.to_path_buf(),
+                audit: audit.to_path_buf(),
             },
             &mut simulation,
         )
@@ -340,7 +332,5 @@ mod tests {
         assert!(simulation.contains("Would deny line 2: browser_click [action] on example.com"));
         assert!(simulation.contains("Simulated 2 record(s)"));
         assert!(simulation.contains("1 would be denied"));
-        let _ = fs::remove_file(policy);
-        let _ = fs::remove_file(audit);
     }
 }

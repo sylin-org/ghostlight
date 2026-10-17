@@ -7,6 +7,7 @@ use crate::browser::adapter::PresentationActivity;
 use crate::events::{DenialPresentation, DomainEvent};
 use crate::governance::{AuditSink, Capability, CapabilitySet, Decision, GovernanceFacade};
 use crate::language::outcome::Observed;
+use crate::scratch::Scratch;
 
 use super::{
     HistoryItem, NotificationKind, PageAddress, WorkbenchChange, WorkbenchEvent,
@@ -481,11 +482,8 @@ fn authority_card(snapshot: &super::WorkbenchSnapshot) -> super::DiagnosticItem 
         .expect("the Status page always carries an authority card")
 }
 
-fn temporary_policy(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "ghostlight-workbench-{name}-{}.json",
-        uuid::Uuid::new_v4()
-    ))
+fn temporary_policy(name: &str) -> Scratch {
+    Scratch::file(&format!("workbench-{name}.json"))
 }
 
 const READ_ONLY_POLICY: &str = r#"{"schema":4,"name":"read","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[]}"#;
@@ -575,7 +573,7 @@ fn an_invalid_policy_reads_as_not_ready_on_every_surface() {
     let path = temporary_policy("invalid");
     std::fs::write(&path, "{half-written").unwrap();
     let facade = facade_over(
-        GovernanceFacade::new(Some(path.clone()), None),
+        GovernanceFacade::new(Some(path.to_path_buf()), None),
         ControlledBrowser::new(true, false),
     );
     let snapshot = facade.snapshot();
@@ -593,7 +591,6 @@ fn an_invalid_policy_reads_as_not_ready_on_every_surface() {
         Situation::FailingClosed
     );
     assert_eq!(facade.policy().situation, Situation::FailingClosed);
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -603,7 +600,7 @@ fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
 
     let path = temporary_policy("retained");
     std::fs::write(&path, READ_ONLY_POLICY).unwrap();
-    let governance = GovernanceFacade::new(Some(path.clone()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
     let facade = facade_over(governance.clone(), ControlledBrowser::new(true, false));
     let applied = facade.snapshot();
     assert_eq!(applied.readiness.state, Readiness::Ready);
@@ -624,7 +621,6 @@ fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
         authority_card(&retained).severity,
         super::DiagnosticSeverity::Warning
     );
-    let _ = std::fs::remove_file(path);
 }
 
 /// The changes a sink has been handed, in the order it got them.
@@ -859,7 +855,7 @@ fn work_and_saving_health_refresh_the_status_and_connections_without_a_pull() {
 #[test]
 fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_not_repeat_it() {
     let path = temporary_policy("hint");
-    let governance = GovernanceFacade::owning_user_policy(path.clone(), None);
+    let governance = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
     let facade = facade_over(governance.clone(), ControlledBrowser::new(true, false));
     let events = Arc::new(Events::default());
     facade.attach_events(events.clone());
@@ -907,7 +903,6 @@ fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_no
     let tag = super::parts::policy_etag(&facade.policy());
     facade.remove_user_policy_if(&tag).unwrap();
     assert_eq!(hints(&heard(&events)).len(), 3);
-    let _ = std::fs::remove_file(path);
 }
 
 /// A set of native acts that records what it was asked for and answers from a script.
@@ -948,9 +943,10 @@ impl super::WorkbenchNativeActs for RecordingActs {
     }
 }
 
-/// A facade over a temporary home and a client roster of its own, with acts attached when asked.
-fn facade_with_acts(attach: bool) -> (WorkbenchFacade, Arc<RecordingActs>, std::path::PathBuf) {
-    let root = std::env::temp_dir().join(format!("ghostlight-acts-{}", uuid::Uuid::new_v4()));
+/// A temporary home, a facade over it with a client roster of its own, and acts attached when
+/// asked. The home goes when its guard drops, which comes first so it outlives the facade.
+fn facade_with_acts(attach: bool) -> (Scratch, WorkbenchFacade, Arc<RecordingActs>) {
+    let root = Scratch::named("acts");
     let state = root.join("state");
     std::fs::create_dir_all(&state).unwrap();
     let facade = WorkbenchFacade::new(
@@ -972,12 +968,12 @@ fn facade_with_acts(attach: bool) -> (WorkbenchFacade, Arc<RecordingActs>, std::
     if attach {
         facade.attach_native_acts(acts.clone());
     }
-    (facade, acts, root)
+    (root, facade, acts)
 }
 
 #[test]
 fn a_destination_opens_exactly_its_own_address() {
-    let (facade, acts, root) = facade_with_acts(true);
+    let (_root, facade, acts) = facade_with_acts(true);
     facade
         .open_destination(super::WorkbenchDestination::Home)
         .unwrap();
@@ -985,7 +981,6 @@ fn a_destination_opens_exactly_its_own_address() {
         *acts.urls.lock().unwrap(),
         [super::WorkbenchDestination::Home.url()]
     );
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1207,7 +1202,7 @@ fn every_runtime_intent_reads_from_the_name_the_page_sends() {
 
 #[test]
 fn each_host_opens_its_own_download_page_and_an_unknown_one_opens_nothing() {
-    let (facade, acts, root) = facade_with_acts(true);
+    let (_root, facade, acts) = facade_with_acts(true);
     let cline: Vec<_> = facade
         .cached_harnesses()
         .into_iter()
@@ -1252,12 +1247,11 @@ fn each_host_opens_its_own_download_page_and_an_unknown_one_opens_nothing() {
         super::NativeActError::Harness(crate::install::HarnessError::NoDownload(_))
     ));
     assert_eq!(acts.urls.lock().unwrap().len(), cline.len());
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
 fn the_diagnostics_folder_opens_whether_diagnostics_are_on_or_off() {
-    let (facade, acts, root) = facade_with_acts(true);
+    let (root, facade, acts) = facade_with_acts(true);
     // The folder is named even while diagnostics are off, so retained logs stay readable.
     facade.reveal_diagnostics().unwrap();
     facade.set_diagnostics(true);
@@ -1265,7 +1259,6 @@ fn the_diagnostics_folder_opens_whether_diagnostics_are_on_or_off() {
     let wanted = std::path::PathBuf::from(facade.diagnostics_report().directory.unwrap());
     assert_eq!(acts.folders.lock().unwrap().last(), Some(&wanted));
     assert!(wanted.starts_with(&root));
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1278,7 +1271,7 @@ fn a_refusal_to_show_diagnostics_reads_as_the_moved_sentence() {
 
 #[test]
 fn locating_by_picking_remembers_the_file_and_a_closed_dialog_changes_nothing() {
-    let (facade, acts, root) = facade_with_acts(true);
+    let (root, facade, acts) = facade_with_acts(true);
     let before = facade.cached_harnesses();
     assert!(facade.locate_harness_by_picking("goose").unwrap().is_none());
     assert_eq!(
@@ -1299,12 +1292,11 @@ fn locating_by_picking_remembers_the_file_and_a_closed_dialog_changes_nothing() 
         facade.locate_harness_by_picking("goose"),
         Err(super::NativeActError::Harness(_))
     ));
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
 fn without_native_acts_every_act_is_unavailable() {
-    let (facade, acts, root) = facade_with_acts(false);
+    let (_root, facade, acts) = facade_with_acts(false);
     let unavailable = |result: Result<(), super::NativeActError>| {
         assert!(matches!(
             result,
@@ -1318,12 +1310,11 @@ fn without_native_acts_every_act_is_unavailable() {
     unavailable(facade.reveal_diagnostics());
     unavailable(facade.locate_harness_by_picking("goose").map(|_| ()));
     assert_eq!(acts.asked(), 0);
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
 fn an_address_that_is_not_secure_never_reaches_the_computer() {
-    let (facade, acts, root) = facade_with_acts(true);
+    let (_root, facade, acts) = facade_with_acts(true);
     for url in [
         "http://example.com/",
         "file:///etc/passwd",
@@ -1337,7 +1328,6 @@ fn an_address_that_is_not_secure_never_reaches_the_computer() {
         ));
     }
     assert_eq!(acts.asked(), 0);
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1452,7 +1442,7 @@ fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
 fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::Agent {
     use crate::intake::session::IntakeChannel;
 
-    let root = std::env::temp_dir().join(format!("ghostlight-one-agent-{}", uuid::Uuid::new_v4()));
+    let root = Scratch::named("one-agent");
     let workspaces = crate::workspace::WorkspaceStore::default();
     let workspace = workspaces.admit(reported.into(), IntakeChannel::Mcp);
     let evidence = workspaces.single_connection(&workspace).unwrap();
@@ -1509,7 +1499,6 @@ fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::
         .map(|harness| harness.id.as_str())
         .collect();
     assert_eq!(rows, hosts, "every Integrations row of {reported}");
-    let _ = std::fs::remove_dir_all(root);
     agent
 }
 
@@ -1678,18 +1667,18 @@ struct SetupBench {
     browser: Arc<ComingAndGoing>,
     computer: Arc<super::setup::test_support::Computer>,
     events: Arc<Events>,
-    _scratch: crate::install::scratch::Scratch,
+    _scratch: Scratch,
 }
 
 impl SetupBench {
     fn start() -> Self {
-        Self::over(crate::install::scratch::Scratch::new())
+        Self::over(Scratch::new())
     }
 
     /// Like [`Self::start`], with the Ghostlight edge in place and one client found on the
     /// computer that Ghostlight can write its entry into.
     fn with_a_client_to_connect() -> Self {
-        let scratch = crate::install::scratch::Scratch::new();
+        let scratch = Scratch::new();
         std::fs::write(scratch.path().join("ghostlight"), b"edge").unwrap();
         let configuration = scratch.path().join("clients/home/.cursor/mcp.json");
         std::fs::create_dir_all(configuration.parent().unwrap()).unwrap();
@@ -1697,7 +1686,7 @@ impl SetupBench {
         Self::over(scratch)
     }
 
-    fn over(scratch: crate::install::scratch::Scratch) -> Self {
+    fn over(scratch: Scratch) -> Self {
         let projection = WorkbenchProjection::default();
         let workspaces = crate::workspace::WorkspaceStore::default();
         let browser = ComingAndGoing::new();
@@ -2018,11 +2007,8 @@ fn a_session_puts_a_client_in_use_only_once_its_entry_is_in_place_and_the_connec
 }
 
 /// A policy file that sets the browser startup posture to `posture`.
-fn startup_policy(posture: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "ghostlight-workbench-startup-{}.json",
-        uuid::Uuid::new_v4().simple()
-    ));
+fn startup_policy(posture: &str) -> Scratch {
+    let path = Scratch::file("workbench-startup.json");
     std::fs::write(
         &path,
         format!(
@@ -2054,7 +2040,7 @@ fn with_no_browser_the_glance_says_which_browser_a_request_starts_and_only_then(
     ] {
         let path = startup_policy(posture);
         let facade = facade_over(
-            GovernanceFacade::new(Some(path.clone()), None),
+            GovernanceFacade::new(Some(path.to_path_buf()), None),
             ControlledBrowser::new(false, false),
         )
         .with_installed_browsers(vec![chrome()]);
@@ -2063,12 +2049,11 @@ fn with_no_browser_the_glance_says_which_browser_a_request_starts_and_only_then(
             Some(said),
             "{posture}"
         );
-        let _ = std::fs::remove_file(path);
     }
 
     let path = startup_policy("on_demand");
     let facade = facade_over(
-        GovernanceFacade::new(Some(path.clone()), None),
+        GovernanceFacade::new(Some(path.to_path_buf()), None),
         ControlledBrowser::new(false, false),
     )
     .with_installed_browsers(Vec::new());
@@ -2077,7 +2062,7 @@ fn with_no_browser_the_glance_says_which_browser_a_request_starts_and_only_then(
         Some(words::NO_BROWSER),
         "no installed browser starts"
     );
-    let _ = std::fs::remove_file(path);
+    drop(path);
 
     let connected = facade_over(
         GovernanceFacade::new(None, None),
@@ -2097,7 +2082,7 @@ fn a_snapshot_never_waits_on_another_reading_the_installed_browsers() {
 
     let path = startup_policy("on_demand");
     let facade = facade_over(
-        GovernanceFacade::new(Some(path.clone()), None),
+        GovernanceFacade::new(Some(path.to_path_buf()), None),
         ControlledBrowser::new(false, false),
     );
     let (entered, reading) = mpsc::channel();
@@ -2128,7 +2113,6 @@ fn a_snapshot_never_waits_on_another_reading_the_installed_browsers() {
         facade.snapshot().no_browser.as_deref(),
         Some("Starts Google Chrome on request")
     );
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]

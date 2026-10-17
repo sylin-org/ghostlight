@@ -34,6 +34,8 @@ mod private_file;
 mod process;
 #[cfg(target_os = "windows")]
 mod program_icon;
+#[cfg(test)]
+mod scratch;
 #[cfg(target_os = "windows")]
 mod settings_change;
 #[cfg(target_os = "windows")]

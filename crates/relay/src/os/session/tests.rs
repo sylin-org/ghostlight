@@ -139,10 +139,10 @@ fn a_detached_start_refuses_while_the_session_is_ending_and_not_after_the_cancel
     let _exclusive = exclusive();
     let missing = Path::new("ghostlight-no-such-program");
     let arguments: [&OsStr; 0] = [];
-    let directory = std::env::temp_dir();
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"));
 
     dispatch(SessionEvent::Terminating);
-    let refused = crate::os::spawn_detached(missing, &arguments, &directory)
+    let refused = crate::os::spawn_detached(missing, &arguments, directory)
         .expect_err("a program is not started while the session is ending");
     assert_eq!(
         refused.to_string(),
@@ -151,7 +151,7 @@ fn a_detached_start_refuses_while_the_session_is_ending_and_not_after_the_cancel
     );
 
     dispatch(SessionEvent::Cancelled);
-    let missing_now = crate::os::spawn_detached(missing, &arguments, &directory)
+    let missing_now = crate::os::spawn_detached(missing, &arguments, directory)
         .expect_err("a program that does not exist cannot start");
     assert_ne!(
         missing_now.to_string(),

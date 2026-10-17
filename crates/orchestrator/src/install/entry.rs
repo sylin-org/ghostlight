@@ -165,8 +165,8 @@ const VERBATIM_UNC_PREFIX: &str = "\\\\?\\UNC\\";
 mod tests {
     use std::fs;
 
-    use super::super::scratch::Scratch;
     use super::*;
+    use crate::scratch::Scratch;
 
     #[cfg(windows)]
     const ROOT: &str = "C:\\Users\\person\\.ghostlight";

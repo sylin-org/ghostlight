@@ -142,16 +142,12 @@ pub fn served(agent_id: &str, cache: Option<&IconCache>) -> Option<ServedImage> 
 mod tests {
     use super::*;
     use crate::install::icons::IconPlaces;
-    use std::path::PathBuf;
+    use crate::scratch::Scratch;
 
     /// A cache in a fresh temp directory that has found Zed's icon on a Linux computer, and the
     /// icon's bytes.
-    fn zed_cache(name: &str) -> (PathBuf, IconCache, Vec<u8>) {
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-agent-image-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
+    fn zed_cache(name: &str) -> (Scratch, IconCache, Vec<u8>) {
+        let root = Scratch::named(&format!("agent-image-{name}"));
         let share = root.join("share");
         let entry = share.join("applications").join("dev.zed.Zed.desktop");
         std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
@@ -177,7 +173,7 @@ mod tests {
 
     #[test]
     fn an_agent_with_a_cached_icon_is_served_that_icon_and_its_version_moves_with_it() {
-        let (root, cache, bytes) = zed_cache("served");
+        let (_root, cache, bytes) = zed_cache("served");
         let before = served("zed", None).unwrap();
         let after = served("zed", Some(&cache)).unwrap();
         assert_eq!(after.media_type, "image/png");
@@ -209,7 +205,6 @@ mod tests {
             AgentImage::best("codex", monogram!("codex.svg"), Some(&cache)).about(),
             None
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

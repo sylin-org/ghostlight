@@ -222,7 +222,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::install::scratch::Scratch;
+    use crate::scratch::Scratch;
 
     const ID: &str = "abcdefghijklmnopabcdefghijklmnop";
 

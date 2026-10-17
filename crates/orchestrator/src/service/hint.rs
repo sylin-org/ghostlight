@@ -24,7 +24,7 @@ pub fn first_close(marker: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::scratch::Scratch;
+    use crate::scratch::Scratch;
 
     #[test]
     fn only_the_first_close_is_the_first() {

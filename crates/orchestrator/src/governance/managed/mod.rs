@@ -647,14 +647,10 @@ mod tests {
     use std::fs;
 
     use super::{bundle, crypto, encode_hex, Bootstrap, ManagedAuthority, ManagedPaths};
+    use crate::scratch::Scratch;
 
-    fn directory(name: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "ghostlight-managed-{name}-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        path
+    fn directory(name: &str) -> Scratch {
+        Scratch::named(&format!("managed-{name}"))
     }
 
     fn manifest(name: &str, capability: &str) -> serde_json::Value {
@@ -686,7 +682,6 @@ mod tests {
         assert!(!authority.configured());
         assert!(authority.valid());
         assert!(authority.manifest().is_none());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
@@ -760,7 +755,6 @@ mod tests {
         assert!(status.contains("security@example.com"));
         assert!(!status.contains("pubkey"));
         assert!(!status.contains("grants"));
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -798,7 +792,6 @@ mod tests {
         );
         assert_eq!(authority.sequence(), Some(4));
         assert_eq!(authority.manifest().unwrap().name, "org");
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -827,7 +820,6 @@ mod tests {
                 .allowed
         );
         assert_eq!(snapshot.managed_sequence, Some(12));
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -860,7 +852,6 @@ mod tests {
         authority.refresh();
         assert_eq!(authority.sequence(), Some(8));
         assert_eq!(authority.manifest().unwrap().name, "current");
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -884,7 +875,6 @@ mod tests {
         assert!(recovered.valid());
         assert_eq!(recovered.sequence(), Some(9));
         assert_eq!(recovered.manifest().unwrap().name, "cached");
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -951,7 +941,6 @@ mod tests {
         let republished = facade.snapshot();
         assert_eq!(republished.managed_sequence, Some(13));
         assert_ne!(republished.id(), first.id());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -976,7 +965,6 @@ mod tests {
             authority.needs_refresh(),
             "the first poll is still owed to the refresher"
         );
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1002,6 +990,5 @@ mod tests {
 
         fs::remove_file(&paths.bootstrap).unwrap();
         assert!(authority.needs_refresh());
-        fs::remove_dir_all(root).unwrap();
     }
 }

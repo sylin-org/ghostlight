@@ -59,7 +59,7 @@ pub fn record_if_absent(path: &Path, record: &SetupRecord) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::scratch::Scratch;
+    use crate::scratch::Scratch;
 
     fn record(ms: u64) -> SetupRecord {
         SetupRecord {

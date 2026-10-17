@@ -15,6 +15,8 @@ pub mod intake;
 pub mod language;
 pub mod presentation;
 pub mod provenance;
+#[cfg(test)]
+pub(crate) mod scratch;
 pub mod service;
 pub mod work;
 pub mod workbench;

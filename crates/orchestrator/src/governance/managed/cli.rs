@@ -427,13 +427,7 @@ mod tests {
     use std::fs;
 
     use super::{parse, run, Command};
-
-    fn directory() -> std::path::PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("ghostlight-policy-cli-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&path).unwrap();
-        path
-    }
+    use crate::scratch::Scratch;
 
     #[test]
     fn command_parser_requires_explicit_signing_inputs() {
@@ -456,7 +450,7 @@ mod tests {
 
     #[test]
     fn publication_advances_sequence_and_emits_a_bootstrap() {
-        let root = directory();
+        let root = Scratch::named("policy-cli");
         let keys = root.join("keys");
         let manifest = root.join("policy.json");
         let output = root.join("policy.bundle");
@@ -493,6 +487,5 @@ mod tests {
         assert!(second.contains("sequence 2"));
         assert!(second.contains("managed.json"));
         assert!(second.contains("https://policy.example/ghostlight.bundle"));
-        fs::remove_dir_all(root).unwrap();
     }
 }

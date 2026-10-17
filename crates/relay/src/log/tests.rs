@@ -1,25 +1,18 @@
 //! Tests for the edge's diagnostics writer.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::Value;
 
 use super::*;
+use crate::tests::Scratch;
 
-/// A scratch directory removed when dropped.
-struct Scratch(PathBuf);
+/// A home in a scratch directory, with the diagnostics marker and directory the writer uses.
+struct LogHome(Scratch);
 
-impl Scratch {
+impl LogHome {
     fn new() -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "ghostlight-relay-log-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Self(path)
+        Self(Scratch::named("log"))
     }
 
     fn marker(&self) -> PathBuf {
@@ -46,26 +39,20 @@ impl Scratch {
     }
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
 #[test]
 fn nothing_is_written_without_the_marker() {
-    let scratch = Scratch::new();
-    scratch.write("hello").unwrap();
-    assert!(!scratch.directory().exists());
+    let home = LogHome::new();
+    home.write("hello").unwrap();
+    assert!(!home.directory().exists());
 }
 
 #[test]
 fn a_line_is_appended_while_the_marker_exists() {
-    let scratch = Scratch::new();
-    fs::write(scratch.marker(), "").unwrap();
-    scratch.write("first").unwrap();
-    scratch.write("second").unwrap();
-    let text = fs::read_to_string(scratch.log()).unwrap();
+    let home = LogHome::new();
+    fs::write(home.marker(), "").unwrap();
+    home.write("first").unwrap();
+    home.write("second").unwrap();
+    let text = fs::read_to_string(home.log()).unwrap();
     let lines: Vec<Value> = text
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -87,24 +74,20 @@ fn a_line_is_appended_while_the_marker_exists() {
 
 #[test]
 fn removing_the_marker_stops_the_writing() {
-    let scratch = Scratch::new();
-    fs::write(scratch.marker(), "").unwrap();
-    scratch.write("kept").unwrap();
-    fs::remove_file(scratch.marker()).unwrap();
-    scratch.write("dropped").unwrap();
-    assert_eq!(
-        fs::read_to_string(scratch.log()).unwrap().lines().count(),
-        1
-    );
+    let home = LogHome::new();
+    fs::write(home.marker(), "").unwrap();
+    home.write("kept").unwrap();
+    fs::remove_file(home.marker()).unwrap();
+    home.write("dropped").unwrap();
+    assert_eq!(fs::read_to_string(home.log()).unwrap().lines().count(), 1);
 }
 
 #[test]
 fn the_detail_is_bounded() {
-    let scratch = Scratch::new();
-    fs::write(scratch.marker(), "").unwrap();
-    scratch.write(&"x".repeat(MAX_DETAIL_CHARS * 3)).unwrap();
-    let line: Value =
-        serde_json::from_str(fs::read_to_string(scratch.log()).unwrap().trim()).unwrap();
+    let home = LogHome::new();
+    fs::write(home.marker(), "").unwrap();
+    home.write(&"x".repeat(MAX_DETAIL_CHARS * 3)).unwrap();
+    let line: Value = serde_json::from_str(fs::read_to_string(home.log()).unwrap().trim()).unwrap();
     assert_eq!(
         line["detail"].as_str().unwrap().chars().count(),
         MAX_DETAIL_CHARS
@@ -113,22 +96,22 @@ fn the_detail_is_bounded() {
 
 #[test]
 fn a_full_file_stops_growing() {
-    let scratch = Scratch::new();
-    fs::write(scratch.marker(), "").unwrap();
-    fs::create_dir_all(scratch.directory()).unwrap();
+    let home = LogHome::new();
+    fs::write(home.marker(), "").unwrap();
+    fs::create_dir_all(home.directory()).unwrap();
     let full = vec![b' '; usize::try_from(MAX_FILE_BYTES).unwrap()];
-    fs::write(scratch.log(), &full).unwrap();
-    scratch.write("refused").unwrap();
-    assert_eq!(fs::metadata(scratch.log()).unwrap().len(), MAX_FILE_BYTES);
+    fs::write(home.log(), &full).unwrap();
+    home.write("refused").unwrap();
+    assert_eq!(fs::metadata(home.log()).unwrap().len(), MAX_FILE_BYTES);
 }
 
 #[test]
 fn a_write_fault_is_an_error_only_below_record() {
     // `record` returns nothing, so this internal error is all a fault ever becomes.
-    let scratch = Scratch::new();
-    fs::write(scratch.marker(), "").unwrap();
-    fs::write(scratch.directory(), "not a directory").unwrap();
-    assert!(scratch.write("x").is_err());
+    let home = LogHome::new();
+    fs::write(home.marker(), "").unwrap();
+    fs::write(home.directory(), "not a directory").unwrap();
+    assert!(home.write("x").is_err());
 }
 
 #[cfg(unix)]
@@ -136,10 +119,10 @@ fn a_write_fault_is_an_error_only_below_record() {
 fn the_first_line_creates_a_private_file_in_a_private_directory() {
     use std::os::unix::fs::PermissionsExt;
 
-    let scratch = Scratch::new();
-    fs::write(scratch.marker(), "").unwrap();
-    scratch.write("first").unwrap();
+    let home = LogHome::new();
+    fs::write(home.marker(), "").unwrap();
+    home.write("first").unwrap();
     let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode(&scratch.log()), 0o600);
-    assert_eq!(mode(&scratch.directory()), 0o700);
+    assert_eq!(mode(&home.log()), 0o600);
+    assert_eq!(mode(&home.directory()), 0o700);
 }

@@ -88,6 +88,7 @@ test("cleanup keeps each program's exit and output as evidence, then removes the
   } finally {
     if (earlier === undefined) delete process.env[EVIDENCE_VARIABLE];
     else process.env[EVIDENCE_VARIABLE] = earlier;
+    rmSync(home.area, { recursive: true, force: true });
     rmSync(evidence, { recursive: true, force: true });
   }
 });

@@ -1167,10 +1167,7 @@ mod tests {
 
     fn coordinator(policy: Option<&str>, inventory: Arc<FakeInventory>) -> BrowserRecovery {
         let governance = if let Some(value) = policy {
-            let path = std::env::temp_dir().join(format!(
-                "ghostlight-recovery-policy-{}.json",
-                uuid::Uuid::new_v4().simple()
-            ));
+            let path = crate::scratch::Scratch::file("recovery-policy.json");
             std::fs::write(
                 &path,
                 format!(
@@ -1178,7 +1175,8 @@ mod tests {
                 ),
             )
             .unwrap();
-            GovernanceFacade::new(Some(path), None)
+            // The facade reads the file once here; nothing in these tests refreshes it.
+            GovernanceFacade::new(Some(path.to_path_buf()), None)
         } else {
             GovernanceFacade::new(None, None)
         };
@@ -2471,11 +2469,7 @@ mod tests {
 
     #[test]
     fn recovery_changes_no_authority_and_no_foreign_state() {
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-recovery-foreign-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = crate::scratch::Scratch::named("recovery-foreign");
         let foreign = root.join("foreign.json");
         std::fs::write(&foreign, b"foreign bytes").unwrap();
         let before = std::fs::read(&foreign).unwrap();
@@ -2497,7 +2491,6 @@ mod tests {
             }
         ));
         assert_eq!(std::fs::read(&foreign).unwrap(), before);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

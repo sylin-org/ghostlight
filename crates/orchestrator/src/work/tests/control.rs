@@ -53,7 +53,7 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
         RuntimeControlIntent::EndSession,
     ] {
         let (executor, browser, workspaces, workspace, audit) =
-            fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+            fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
         let control = executor.governance.apply_runtime_intent(intent);
         let lease = workspaces.acquire(&workspace).unwrap();
         let result = executor.execute(
@@ -93,7 +93,6 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
         assert_ne!(blocked.status, Status::Succeeded);
         assert!(browser.calls().is_empty());
     }
-    fs::remove_file(policy).unwrap();
 }
 
 #[test]
@@ -244,7 +243,7 @@ fn obsolete_arguments_are_rejected_before_any_policy_check() {
                 .unwrap()
                 .extend(restriction.as_object().unwrap().clone());
             let (executor, browser, _, workspace, audit) =
-                fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+                fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
             let result = executor.execute(
                 &workspace,
                 tool,
@@ -267,7 +266,7 @@ fn obsolete_arguments_are_rejected_before_any_policy_check() {
         }
     }
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
     for _ in 0..6 {
         browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
         assert_eq!(
@@ -287,7 +286,6 @@ fn obsolete_arguments_are_rejected_before_any_policy_check() {
         executor.governance.runtime_state(),
         RuntimeControlState::Active
     );
-    fs::remove_file(path).unwrap();
 }
 
 // The hook changes controls after an actual preparation receipt or at the final port boundary.

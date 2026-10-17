@@ -271,6 +271,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::scratch::Scratch;
 
     const CLAUDE_IMAGE: &str =
         r"C:\Program Files\WindowsApps\Claude_1.4.2.0_x64__pzs8sxrjxfjjc\app\Claude.exe";
@@ -283,14 +284,8 @@ mod tests {
         )
     }
 
-    fn temporary(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-container-{name}-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        directory
+    fn temporary(name: &str) -> Scratch {
+        Scratch::named(&format!("container-{name}"))
     }
 
     #[test]
@@ -380,7 +375,7 @@ mod tests {
     #[test]
     fn a_probe_counts_only_when_it_also_lands_in_the_packages_private_copy() {
         let local = temporary("probe");
-        let probe = Probe::write_in(local.clone()).unwrap();
+        let probe = Probe::write_in(local.to_path_buf()).unwrap();
         let file = local.join(&probe.name);
         assert!(file.is_file());
         assert!(!probe.landed_privately("Claude_pzs8sxrjxfjjc"));
@@ -397,7 +392,6 @@ mod tests {
 
         drop(probe);
         assert!(!file.exists());
-        fs::remove_dir_all(local).unwrap();
     }
 
     #[test]

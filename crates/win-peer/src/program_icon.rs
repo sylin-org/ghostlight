@@ -365,14 +365,10 @@ mod tests {
     fn a_program_without_an_icon_resource_gives_none_and_a_non_program_is_an_error() {
         let this_test = std::env::current_exe().unwrap();
         assert_eq!(of_program(&this_test, 1024 * 1024).unwrap(), None);
-        let text = std::env::temp_dir().join(format!(
-            "ghostlight-not-a-program-{}.exe",
-            std::process::id()
-        ));
+        let scratch = crate::scratch::Scratch::named("program-icon");
+        let text = scratch.join("not-a-program.exe");
         std::fs::write(&text, b"MZ not a program").unwrap();
-        let result = of_program(&text, 1024 * 1024);
-        std::fs::remove_file(&text).unwrap();
-        assert!(result.is_err());
+        assert!(of_program(&text, 1024 * 1024).is_err());
     }
 
     #[test]

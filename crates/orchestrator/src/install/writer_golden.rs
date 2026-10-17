@@ -27,6 +27,7 @@ use super::{
     HARNESS_LOCATIONS_FILE, ROSTER,
 };
 use crate::language::self_check::golden::{check_golden_with, repository_path};
+use crate::scratch::Scratch;
 
 /// The environment variable that rewrites the writer golden instead of comparing it.
 const UPDATE_VARIABLE: &str = "GHOSTLIGHT_AGENTS_GOLDEN_UPDATE";
@@ -238,7 +239,8 @@ fn spelled(root: &str, separator: char, parts: &[&str]) -> String {
 
 /// One fresh directory standing for a computer, removed when dropped.
 struct Run {
-    directory: PathBuf,
+    /// The run's directory, which the guard removes with the run.
+    _directory: Scratch,
     /// The directory as text, spelled with [`Run::separator`], the prefix of every path the run
     /// builds.
     root: String,
@@ -257,12 +259,7 @@ impl Run {
 
     /// A fresh run on `computer` whose paths are spelled as `spelling` says.
     fn spelled(computer: Computer, spelling: Spelling) -> Self {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-writer-golden-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&directory).expect("the run's directory is writable");
+        let directory = Scratch::named("writer-golden");
         let separator = spelling.separator();
         let root = directory
             .to_string_lossy()
@@ -329,7 +326,7 @@ impl Run {
             private_view,
         };
         Self {
-            directory,
+            _directory: directory,
             root,
             separator,
             computer,
@@ -420,12 +417,6 @@ impl Run {
             bytes,
             HarnessRegistry::with_context(self.context.clone()),
         )
-    }
-}
-
-impl Drop for Run {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
     }
 }
 

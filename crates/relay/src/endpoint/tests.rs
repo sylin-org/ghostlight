@@ -2,8 +2,7 @@
 //! listener on a temporary home.
 
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::path::Path;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -13,37 +12,25 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::frame::{read_frame, write_frame};
+use crate::tests::Scratch;
 
 /// How long a test waits for something that should happen at once.
 const PATIENCE: Duration = Duration::from_secs(10);
 
-/// A home under the temporary directory, removed when dropped.
-struct TempHome(PathBuf);
+/// A home in a scratch directory, removed when dropped.
+struct TempHome(Scratch);
 
 impl TempHome {
     fn new() -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "ghostlight-endpoint-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
+        Self(Scratch::named("endpoint"))
     }
 
     fn path(&self) -> &Path {
-        &self.0
+        self.0.path()
     }
 
     fn connect(&self) -> Result<Connection, ConnectError> {
         connect(self.path(), Instant::now() + PATIENCE)
-    }
-}
-
-impl Drop for TempHome {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

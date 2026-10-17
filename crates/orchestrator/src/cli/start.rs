@@ -164,7 +164,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::install::scratch::Scratch;
+    use crate::scratch::Scratch;
     use ghostlight_relay::protocol::StartReason;
 
     /// Exit code the fake launcher reports for every run.

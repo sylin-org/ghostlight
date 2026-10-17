@@ -4,17 +4,19 @@
 //! process-wide `GHOSTLIGHT_TEST_HOME`. Tests that rely on it hold one shared lock for their whole
 //! run, so two of them never point the variable at different homes at once.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use ghostlight_relay::home::TEST_HOME_VARIABLE;
+
+use crate::scratch::Scratch;
 
 /// Serializes every test that sets the home variable.
 static HOME: Mutex<()> = Mutex::new(());
 
 /// A temporary home the relay resolves to while this value lives.
 pub(crate) struct TestHome {
-    directory: PathBuf,
+    directory: Scratch,
     _exclusive: MutexGuard<'static, ()>,
 }
 
@@ -24,12 +26,8 @@ impl TestHome {
         let exclusive = HOME
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-home-{name}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        std::env::set_var(TEST_HOME_VARIABLE, &directory);
+        let directory = Scratch::named(&format!("home-{name}"));
+        std::env::set_var(TEST_HOME_VARIABLE, directory.path());
         Self {
             directory,
             _exclusive: exclusive,
@@ -38,13 +36,12 @@ impl TestHome {
 
     /// The home directory.
     pub(crate) fn path(&self) -> &Path {
-        &self.directory
+        self.directory.path()
     }
 }
 
 impl Drop for TestHome {
     fn drop(&mut self) {
         std::env::remove_var(TEST_HOME_VARIABLE);
-        let _ = std::fs::remove_dir_all(&self.directory);
     }
 }

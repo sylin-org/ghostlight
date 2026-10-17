@@ -453,7 +453,7 @@ fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
     .unwrap();
     let (executor, fake, workspace, audit) = opened_audited(
         dialog_fault(Some(DIALOG_FRAME)),
-        GovernanceFacade::new(Some(policy.clone()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf()), None),
     );
     let before = requests_so_far(&fake);
     for arguments in [json!({"action": "status"}), json!({"action": "dismiss"})] {
@@ -485,7 +485,6 @@ fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
         !audited.contains("private-frame.invalid"),
         "an embedded document's host never enters the durable audit: {audited}"
     );
-    fs::remove_file(policy).unwrap();
 }
 
 #[test]
@@ -768,7 +767,7 @@ fn a_refused_fill_without_target_names_speaks_in_unnamed_nouns() {
     ]});
     let (executor, _fake, workspace) = opened_under(
         refusing_form(detail),
-        GovernanceFacade::new(Some(policy.clone()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf()), None),
     );
     let (role, _) = form_handles(&executor, &workspace);
 
@@ -790,7 +789,6 @@ fn a_refused_fill_without_target_names_speaks_in_unnamed_nouns() {
     );
     assert!(!result.facts.to_string().contains("PRIVATE_VALUE"));
     assert!(!result.model_text().contains("PRIVATE"));
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
@@ -886,7 +884,7 @@ fn a_fill_without_target_names_says_only_how_many_fields_it_filled() {
         returned(json!({"retained": true, "fields": [{"field": 0, "now": "Administrator"}]}));
     let (executor, _fake, workspace) = opened_under(
         verifying_form(verify),
-        GovernanceFacade::new(Some(policy.clone()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf()), None),
     );
     let (role, _) = form_handles(&executor, &workspace);
 
@@ -903,7 +901,6 @@ fn a_fill_without_target_names_says_only_how_many_fields_it_filled() {
         result.facts["fields"],
         json!([{"target": role, "now": "Administrator"}])
     );
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
@@ -952,7 +949,7 @@ fn a_normalized_match_without_target_names_keeps_the_given_value_out_of_the_sent
     ]}));
     let (executor, _fake, workspace) = opened_under(
         verifying_form(verify),
-        GovernanceFacade::new(Some(policy.clone()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf()), None),
     );
     let (role, _) = form_handles(&executor, &workspace);
 
@@ -967,7 +964,6 @@ fn a_normalized_match_without_target_names_keeps_the_given_value_out_of_the_sent
     assert_eq!(result.facts["fields"][0]["match"], "normalized");
     assert!(!result.model_text().contains("PRIVATE_GIVEN"));
     assert!(!result.facts.to_string().contains("PRIVATE_GIVEN"));
-    let _ = fs::remove_file(policy);
 }
 
 #[test]

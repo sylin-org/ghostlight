@@ -712,10 +712,10 @@ mod tests {
     use super::*;
     use crate::governance::{CapabilitySet, Decision};
     use crate::install::browser_profiles::{ExtensionProfile, ProfileScan};
-    use crate::install::scratch::Scratch;
     use crate::language::history::{CompositionKind, StepReceipt};
     use crate::language::outcome::Outcome;
     use crate::language::setup::{RowTone, SetupAction, Stage};
+    use crate::scratch::Scratch;
 
     fn request(status: &str) -> AuditRecord {
         let mut record = AuditRecord::now(

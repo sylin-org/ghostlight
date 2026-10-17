@@ -593,7 +593,16 @@ export class JourneyHome {
   }
 }
 
-/** Make a home, install the built executables into it and return it. */
+/**
+ * Make a home, install the built executables into it and return it. A home whose executables
+ * cannot be installed is removed before the error reaches the journey, which never got it to clean.
+ */
 export function createHome(options = {}) {
-  return new JourneyHome(options).installImages(options.images);
+  const home = new JourneyHome(options);
+  try {
+    return home.installImages(options.images);
+  } catch (error) {
+    rmSync(home.area, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
+    throw error;
+  }
 }

@@ -368,19 +368,17 @@ pub enum UserAssetError {
 mod tests {
     use super::*;
 
-    use uuid::Uuid;
+    use crate::scratch::Scratch;
 
-    fn context(name: &str) -> UserAssetContext {
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-assets-{name}-{}-{}",
-            std::process::id(),
-            Uuid::new_v4().simple()
-        ));
-        UserAssetContext {
+    /// A context rooted in a fresh scratch directory, which lives as long as the returned guard.
+    fn context(name: &str) -> (Scratch, UserAssetContext) {
+        let root = Scratch::named(&format!("assets-{name}"));
+        let context = UserAssetContext {
             linux: true,
             executable: root.join(".ghostlight/bin/v1.0.0/ghostlight"),
             data_home: root.join("share"),
-        }
+        };
+        (root, context)
     }
 
     #[test]
@@ -398,7 +396,7 @@ mod tests {
 
     #[test]
     fn assets_are_written_idempotently_and_removed() {
-        let context = context("lifecycle");
+        let (_root, context) = context("lifecycle");
         let first = apply_install(&context).unwrap();
         assert!(first.changed);
         assert_eq!(first.report.state, UserAssetState::Current);
@@ -413,13 +411,11 @@ mod tests {
         assert!(removed.changed);
         assert_eq!(removed.report.state, UserAssetState::Missing);
         assert!(!apply_uninstall(&context).unwrap().changed);
-
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn an_edited_file_is_refreshed_on_install_and_kept_on_uninstall() {
-        let context = context("edited");
+        let (_root, context) = context("edited");
         apply_install(&context).unwrap();
         let edited = context.data_home.join(ASSETS[0].0);
         fs::write(&edited, "someone's own notes").unwrap();
@@ -433,8 +429,6 @@ mod tests {
         apply_uninstall(&context).unwrap();
         assert_eq!(fs::read_to_string(&edited).unwrap(), "someone's own notes");
         assert!(!context.data_home.join(ASSETS[1].0).exists());
-
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
     /// The `.TH` line a 1.x release wrote for `title`.
@@ -509,7 +503,7 @@ mod tests {
 
     #[test]
     fn a_non_linux_platform_installs_nothing() {
-        let mut context = context("windows");
+        let (_root, mut context) = context("windows");
         context.linux = false;
         assert_eq!(
             inspect(&context).unwrap().state,

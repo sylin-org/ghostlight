@@ -176,12 +176,16 @@ test("chrome arguments never include --load-extension and end at about:blank", (
 
 test("scratch directories carry the installed prefix and removal refuses anything else", async () => {
   const scratch = createScratch();
-  assert.ok(scratch.includes(SCRATCH_PREFIX));
-  writeFileSync(join(scratch, "marker"), "x");
-  await assert.rejects(removeScratch(tmpdir()), /Refusing/);
-  await assert.rejects(removeScratch(join(tmpdir(), "other-dir")), /Refusing/);
-  await removeScratch(scratch);
-  assert.equal(existsSync(scratch), false);
+  try {
+    assert.ok(scratch.includes(SCRATCH_PREFIX));
+    writeFileSync(join(scratch, "marker"), "x");
+    await assert.rejects(removeScratch(tmpdir()), /Refusing/);
+    await assert.rejects(removeScratch(join(tmpdir(), "other-dir")), /Refusing/);
+    await removeScratch(scratch);
+    assert.equal(existsSync(scratch), false);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("the Linux manifest is found under the ghostlight home first and copied into the scratch profile", () => {
@@ -190,22 +194,28 @@ test("the Linux manifest is found under the ghostlight home first and copied int
   mkdirSync(manifests, { recursive: true });
   writeFileSync(join(manifests, "org.sylin.ghostlight.json"), '{"name":"org.sylin.ghostlight"}');
   const scratch = createScratch();
-  const copy = installScratchNativeHost(scratch, { platform: "linux", home, env: {} });
-  assert.equal(copy, join(scratch, "NativeMessagingHosts", "org.sylin.ghostlight.json"));
-  assert.equal(readFileSync(copy, "utf8"), '{"name":"org.sylin.ghostlight"}');
-  rmSync(home, { recursive: true, force: true });
-  rmSync(scratch, { recursive: true, force: true });
+  try {
+    const copy = installScratchNativeHost(scratch, { platform: "linux", home, env: {} });
+    assert.equal(copy, join(scratch, "NativeMessagingHosts", "org.sylin.ghostlight.json"));
+    assert.equal(readFileSync(copy, "utf8"), '{"name":"org.sylin.ghostlight"}');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("the browser config directory is the fallback, a missing manifest is an error, Windows copies nothing", () => {
   const home = mkdtempSync(join(tmpdir(), "cdp-pipe-home-"));
-  assert.throws(() => nativeHostManifestSource({ platform: "linux", home, env: {} }), /No user-level native host manifest/);
-  const config = join(home, "xdg", "google-chrome", "NativeMessagingHosts");
-  mkdirSync(config, { recursive: true });
-  writeFileSync(join(config, "org.sylin.ghostlight.json"), "{}");
-  assert.equal(nativeHostManifestSource({ platform: "linux", home, env: { XDG_CONFIG_HOME: join(home, "xdg") } }),
-    join(config, "org.sylin.ghostlight.json"));
-  assert.equal(nativeHostManifestSource({ platform: "win32", home, env: {} }), null);
-  assert.equal(installScratchNativeHost(join(home, "unused"), { platform: "win32", home, env: {} }), null);
-  rmSync(home, { recursive: true, force: true });
+  try {
+    assert.throws(() => nativeHostManifestSource({ platform: "linux", home, env: {} }), /No user-level native host manifest/);
+    const config = join(home, "xdg", "google-chrome", "NativeMessagingHosts");
+    mkdirSync(config, { recursive: true });
+    writeFileSync(join(config, "org.sylin.ghostlight.json"), "{}");
+    assert.equal(nativeHostManifestSource({ platform: "linux", home, env: { XDG_CONFIG_HOME: join(home, "xdg") } }),
+      join(config, "org.sylin.ghostlight.json"));
+    assert.equal(nativeHostManifestSource({ platform: "win32", home, env: {} }), null);
+    assert.equal(installScratchNativeHost(join(home, "unused"), { platform: "win32", home, env: {} }), null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

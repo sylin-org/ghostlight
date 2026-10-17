@@ -82,29 +82,20 @@ impl Watching {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn scratch() -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-watching-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        directory
-    }
+    use crate::scratch::Scratch;
 
     #[test]
     fn watching_is_off_exactly_while_the_marker_exists() {
-        let directory = scratch();
+        let directory = Scratch::named("watching");
         let marker = directory.join("watch.off");
         assert!(Watching::load(marker.clone()).is_on());
         std::fs::write(&marker, b"").unwrap();
         assert!(!Watching::load(marker).is_on());
-        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
     fn setting_writes_and_removes_the_marker_and_reports_a_change_only_when_there_is_one() {
-        let directory = scratch();
+        let directory = Scratch::named("watching");
         let marker = directory.join("state").join("watch.off");
         let watching = Watching::load(marker.clone());
         assert!(!watching.set(true).unwrap(), "a fresh home is already on");
@@ -119,18 +110,16 @@ mod tests {
         assert!(watching.set(true).unwrap());
         assert!(watching.is_on());
         assert!(!marker.exists());
-        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
     fn a_marker_that_cannot_be_written_leaves_watching_on() {
-        let directory = scratch();
+        let directory = Scratch::named("watching");
         // A file where the state directory should be makes the marker impossible to create.
         let blocker = directory.join("state");
         std::fs::write(&blocker, b"").unwrap();
         let watching = Watching::load(blocker.join("watch.off"));
         assert!(watching.set(false).is_err());
         assert!(watching.is_on());
-        std::fs::remove_dir_all(&directory).unwrap();
     }
 }

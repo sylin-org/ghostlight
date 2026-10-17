@@ -16,8 +16,6 @@ pub mod migration;
 pub mod native_host;
 pub mod reconcile;
 pub mod record;
-#[cfg(test)]
-pub(crate) mod scratch;
 pub mod setup_state;
 pub mod swap;
 pub mod user_assets;
@@ -2700,6 +2698,7 @@ mod tests {
     use serde_json::Value;
 
     use crate::agent::Symbol;
+    use crate::scratch::Scratch;
 
     use jsonc_parser::parse_to_serde_value;
 
@@ -2718,14 +2717,8 @@ mod tests {
         agent_called(reported).map(|agent| agent.name)
     }
 
-    fn temporary(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-harness-{name}-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        directory
+    fn temporary(name: &str) -> Scratch {
+        Scratch::named(&format!("harness-{name}"))
     }
 
     fn edge(directory: &Path) -> PathBuf {
@@ -2868,7 +2861,6 @@ mod tests {
             .unwrap();
         assert_eq!(zed.state, HarnessState::Available);
         assert!(zed.can_install);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -2899,7 +2891,6 @@ mod tests {
         assert_eq!(devin.product_id, "windsurf");
         assert_eq!(devin.path, context.config.join("devin/mcp_config.json"));
         assert_eq!(devin.executables, ["devin", "devin-desktop", "surf"]);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -2919,7 +2910,6 @@ mod tests {
                 }
             }
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3016,7 +3006,6 @@ mod tests {
         }
         assert_eq!(names("cline").len(), 4);
         assert!(names("Cline (Cursor)").is_empty());
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3046,7 +3035,6 @@ mod tests {
                 "cline-windsurf"
             ]
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3146,7 +3134,6 @@ mod tests {
                 summary.id
             );
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3173,7 +3160,6 @@ mod tests {
             registry.download_url("not-a-harness"),
             Err(HarnessError::UnknownHarness(_))
         ));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3196,7 +3182,6 @@ mod tests {
         fs::write(&located, "{}\n").unwrap();
         let result = registry.locate("kilo-code", &located).unwrap();
         assert_eq!(result.summary.config_path, located.to_string_lossy());
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3225,7 +3210,6 @@ mod tests {
                 );
             }
             assert!(!definition.accepts_config_path(&directory.join("settings.json")));
-            fs::remove_dir_all(directory).unwrap();
         }
     }
 
@@ -3238,7 +3222,6 @@ mod tests {
             ..context(&directory)
         };
         assert_eq!(definition(&context, "crush").unwrap().path, named);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3255,7 +3238,6 @@ mod tests {
         assert!(result.message.contains("Copy setup"));
         assert!(!result.message.contains("Set up"));
         assert_eq!(fs::read_to_string(&located).unwrap(), source);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(unix)]
@@ -3281,7 +3263,6 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o640
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3296,7 +3277,6 @@ mod tests {
             value["mcpServers"]["ghostlight"]["command"].as_str(),
             Some(edge.to_string_lossy().as_ref())
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(unix)]
@@ -3320,7 +3300,6 @@ mod tests {
             .find(|summary| summary.id == "qwen-code")
             .unwrap();
         assert_eq!(qwen.state, HarnessState::Available);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3346,7 +3325,6 @@ mod tests {
             .find(|summary| summary.id == "claude-code")
             .unwrap();
         assert_eq!(detected.state, HarnessState::Available);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(unix)]
@@ -3374,7 +3352,6 @@ mod tests {
         assert!(summary
             .detail
             .contains("previously located path is missing"));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3396,7 +3373,6 @@ mod tests {
             registry.locate("qwen-code", &malformed),
             Err(HarnessError::Malformed(_))
         ));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3433,7 +3409,6 @@ mod tests {
         ))
         .unwrap();
         assert!(vscode.contains("ghostlight"));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3458,7 +3433,6 @@ mod tests {
             fs::read_to_string(&windsurf).unwrap(),
             "{\n  \"mcpServers\": {}\n}\n"
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3557,7 +3531,6 @@ mod tests {
             fs::read_to_string(&blocked).unwrap(),
             r#"{"mcpServers":{"ghostlight":{"command":"alien-agent","args":[]}}}"#
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3611,7 +3584,6 @@ mod tests {
                 ));
                 assert_eq!(fs::read_to_string(&path).unwrap(), source);
             }
-            fs::remove_dir_all(directory).unwrap();
         }
     }
 
@@ -3629,7 +3601,6 @@ mod tests {
             assert!(!summary.can_install);
             assert!(summary.copy_only, "{id}");
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3675,7 +3646,6 @@ mod tests {
             ),
             RegistrationState::Foreign(Some(_))
         ));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3707,7 +3677,6 @@ mod tests {
         assert!(edit_json(&context, &path, JsonDialect::McpServers, false).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(value["mcpServers"].get("ghostlight").is_none());
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3748,7 +3717,6 @@ mod tests {
         assert!(removed.contains("// keep this thought"));
         assert!(!removed.contains("\"ghostlight\""));
         assert!(removed.contains("\"context_servers\": {},"));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3781,7 +3749,6 @@ mod tests {
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("\"other\""));
         assert!(!removed.contains("\"ghostlight\""));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3806,7 +3773,6 @@ mod tests {
         assert_eq!(zcode.config_path, config.to_string_lossy());
         assert!(zcode.manual_setup.contains("\"mcp\""));
         assert!(zcode.manual_setup.contains("\"servers\""));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3838,7 +3804,6 @@ mod tests {
             matches!(state, RegistrationState::Foreign(Some(_))),
             "{state:?}"
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3855,7 +3820,6 @@ mod tests {
             ));
         }
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3918,7 +3882,6 @@ mod tests {
             Err(HarnessError::NotFixable)
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), unchanged);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3941,8 +3904,6 @@ mod tests {
             fs::read_to_string(toml.with_extension("toml.ghostlight-backup")).unwrap(),
             toml_source
         );
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4044,7 +4005,6 @@ mod tests {
         }
         assert!(!summary.can_install);
         assert!(summary.can_fix);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4075,7 +4035,6 @@ mod tests {
             !line.contains("--token") && !line.contains("sk-test-secret"),
             "{line}"
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4111,7 +4070,6 @@ mod tests {
         assert!(summary.evidence.is_none(), "{:?}", summary.evidence);
         let serialized = serde_json::to_string(&summary).unwrap();
         assert!(!serialized.contains("sk-test-secret"), "{serialized}");
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4132,7 +4090,6 @@ mod tests {
             "This configuration could not be parsed; it was left untouched."
         );
         assert!(summary.evidence.is_none());
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4161,7 +4118,6 @@ mod tests {
             .expect("a program is named");
         assert_eq!(whole.program, "other-server");
         assert_eq!(whole.arguments, 1);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4195,7 +4151,6 @@ mod tests {
         let summary = inspected_summary(&directory);
         assert_eq!(summary.state, HarnessState::NotDetected);
         assert!(summary.evidence.is_none());
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4215,8 +4170,6 @@ mod tests {
             Ok(RegistrationState::Foreign(Some(ForeignCommand { program, arguments: 1 })))
                 if program == "alien-tool"
         ));
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4240,7 +4193,6 @@ mod tests {
             inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
             RegistrationState::Retired
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4264,7 +4216,6 @@ mod tests {
                 RegistrationState::Updatable
             );
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4293,7 +4244,6 @@ mod tests {
                 "{dialect:?}"
             );
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4309,7 +4259,6 @@ mod tests {
             mcp_command_line(Path::new("/with space/ghostlight")),
             "\"/with space/ghostlight\" mcp"
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4337,7 +4286,6 @@ mod tests {
         let rewritten = fs::read_to_string(&codex).unwrap();
         assert!(!rewritten.contains("ghostlight-mcp-connector"));
         assert!(rewritten.contains("args = [\"mcp\"]"));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4358,7 +4306,6 @@ mod tests {
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("# keep me"));
         assert!(!removed.contains("mcp_servers"));
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(target_os = "linux")]
@@ -4411,7 +4358,6 @@ mod tests {
         );
         assert!(!edit_toml(&context, &path, true).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), installed);
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(target_os = "linux")]
@@ -4442,7 +4388,6 @@ mod tests {
             .unwrap(),
             RegistrationState::Current
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(target_os = "linux")]
@@ -4488,7 +4433,6 @@ mod tests {
                 }
             }
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(target_os = "linux")]
@@ -4514,7 +4458,6 @@ mod tests {
             inspect_toml(&installed, &context).unwrap(),
             RegistrationState::Current
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4528,7 +4471,6 @@ mod tests {
         let manual = super::manual_setup(&context, &definition).unwrap();
         assert!(edit_toml(&context, &definition.path, true).unwrap());
         assert_eq!(manual, fs::read_to_string(&definition.path).unwrap());
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4558,8 +4500,6 @@ mod tests {
             .unwrap(),
             RegistrationState::Current
         );
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4585,8 +4525,6 @@ mod tests {
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(value["mcp"]["servers"].get("ghostlight").is_none());
         assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     /// A context run from inside the container of the app `package`, whose `AppData` is the
@@ -4652,8 +4590,6 @@ mod tests {
         let everything = registry.setup_detected().unwrap();
         assert!(everything.failures.is_empty(), "{:?}", everything.failures);
         assert_eq!(fs::read(&desktop).unwrap(), before);
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4676,8 +4612,6 @@ mod tests {
         );
         let value: Value = serde_json::from_str(&fs::read_to_string(&desktop).unwrap()).unwrap();
         assert!(value["mcpServers"].get("ghostlight").is_some());
-
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

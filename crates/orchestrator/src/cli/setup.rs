@@ -1010,7 +1010,7 @@ mod tests {
 
         use super::remove_version_directories;
         use crate::install::layout::Layout;
-        use crate::install::scratch::Scratch;
+        use crate::scratch::Scratch;
 
         let scratch = Scratch::new();
         let layout = Layout::new(scratch.path());

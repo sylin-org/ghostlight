@@ -1561,8 +1561,8 @@ fn running_from(system: &System, images: &[PathBuf]) -> Vec<Pid> {
 mod tests {
     use serde_json::json;
 
-    use super::super::scratch::Scratch;
     use super::*;
+    use crate::scratch::Scratch;
 
     /// Bytes of the audit log the fake 1.x installation holds.
     const AUDIT: &str = "{\"event\":\"old\"}\n";

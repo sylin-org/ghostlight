@@ -449,7 +449,7 @@ fn after_a_navigation_the_step_is_browser_inspect_with_candidates_as_handles() {
 }
 
 /// A workspace under a policy that withholds target names, holding one inspected button, with
-/// the policy file the test removes.
+/// the policy file, which goes when its guard drops.
 fn workspace_without_target_names(
     name: &str,
 ) -> (
@@ -458,7 +458,7 @@ fn workspace_without_target_names(
     crate::workspace::WorkspaceId,
     String,
     String,
-    std::path::PathBuf,
+    Scratch,
 ) {
     let policy = temporary_policy(name);
     fs::write(
@@ -469,7 +469,7 @@ fn workspace_without_target_names(
     )
     .unwrap();
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
@@ -507,7 +507,7 @@ fn workspace_without_target_names(
 
 #[test]
 fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_or_contexts() {
-    let (executor, browser, workspace, tab_handle, target, policy) =
+    let (executor, browser, workspace, tab_handle, target, _policy) =
         workspace_without_target_names("replacement-no-names");
     let mut lookup = one_same();
     for entry in &mut lookup.candidates {
@@ -541,12 +541,11 @@ fn without_target_names_the_replacement_is_named_and_candidates_carry_no_names_o
         !shown.contains("Delete patient") && !shown.contains("Beta"),
         "{shown}"
     );
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
 fn without_target_names_the_pick_step_does_not_ask_for_a_context_nobody_sent() {
-    let (executor, browser, workspace, tab_handle, target, policy) =
+    let (executor, browser, workspace, tab_handle, target, _policy) =
         workspace_without_target_names("pick-no-names");
     browser.push(Err(removed(StaleLookup {
         matched: 2,
@@ -571,7 +570,6 @@ fn without_target_names_the_pick_step_does_not_ask_for_a_context_nobody_sent() {
         assert!(entry.get("name").is_none(), "{entry}");
         assert!(entry.get("context").is_none(), "{entry}");
     }
-    let _ = fs::remove_file(policy);
 }
 
 #[test]
@@ -583,7 +581,7 @@ fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
     )
     .unwrap();
     let (executor, browser, workspaces, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.clone()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
@@ -628,7 +626,6 @@ fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
     assert!(refused.facts.get("recovery_candidates").is_none());
     assert_eq!(refused.next_steps, vec![REMOVED_STEP]);
     assert_eq!(refused.summary, "That target is no longer on the page.");
-    let _ = fs::remove_file(policy);
 }
 
 #[test]

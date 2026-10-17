@@ -6,12 +6,10 @@ use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 
 use super::{AuthoringError, Capability, CapabilitySet, GovernanceFacade, ReasonCode};
 use crate::audit::AuditRecord;
+use crate::scratch::Scratch;
 
-fn temporary(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "ghostlight-1.0-{name}-{}.json",
-        uuid::Uuid::new_v4()
-    ))
+fn temporary(name: &str) -> Scratch {
+    Scratch::file(&format!("{name}.json"))
 }
 
 fn policy(name: &str, grants: &str, config: &str) -> String {
@@ -38,7 +36,9 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
                 r#"[{{"key":"{SCREENSHOTS_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
             ))).unwrap();
         }
-        let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
+        let snapshot =
+            GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()))
+                .snapshot();
         let decision = snapshot.authorize_screenshot();
         assert!(!decision.allowed);
         assert_eq!(decision.reason, ReasonCode::ScreenshotDenied);
@@ -56,8 +56,6 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
         "test"
     )
     .is_err());
-    fs::remove_file(local).unwrap();
-    fs::remove_file(managed).unwrap();
 }
 
 /// The workspace forbids raw memory access everywhere except the two audited crates (ADR-0105
@@ -144,8 +142,8 @@ fn rewrite(path: &Path, content: impl AsRef<[u8]>) {
 fn snapshot_for(name: &str, source: impl AsRef<[u8]>) -> super::AuthoritySnapshot {
     let path = temporary(name);
     fs::write(&path, source).unwrap();
-    let snapshot = GovernanceFacade::new(Some(path.clone()), None).snapshot();
-    let _ = fs::remove_file(path);
+    let snapshot = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
+    drop(path);
     snapshot.as_ref().clone()
 }
 
@@ -226,8 +224,8 @@ fn a_policy_grant_cannot_open_the_workbench_origin() {
         r#"{"schema":4,"name":"loopback","version":"1","grants":[{"id":"loopback","hosts":{"allow":["127.0.0.1"]},"allowed":["read","action","write","execute"]}]}"#,
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.clone()), None);
-    let _ = fs::remove_file(path);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    drop(path);
     facade.protect_workbench_port(WORKBENCH_PORT);
     let snapshot = facade.snapshot();
     assert!(
@@ -338,14 +336,13 @@ fn tab_close_policy_is_monotonic_across_authority_layers() {
         ),
     )
     .unwrap();
-    let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
+    let snapshot =
+        GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf())).snapshot();
     assert_eq!(
         snapshot.authorize_tab_close().reason,
         ReasonCode::TabCloseDenied
     );
     assert!(snapshot.authorize_capability(Capability::Action).allowed);
-    let _ = fs::remove_file(local);
-    let _ = fs::remove_file(managed);
 }
 
 #[test]
@@ -371,7 +368,8 @@ fn target_name_preservation_is_default_on_and_monotonic_across_layers() {
     )
     .unwrap();
 
-    let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
+    let snapshot =
+        GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf())).snapshot();
     assert!(!snapshot.preserves_target_names());
 
     fs::write(
@@ -392,11 +390,9 @@ fn target_name_preservation_is_default_on_and_monotonic_across_layers() {
         ),
     )
     .unwrap();
-    let snapshot = GovernanceFacade::new(Some(local.clone()), Some(managed.clone())).snapshot();
+    let snapshot =
+        GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf())).snapshot();
     assert!(!snapshot.preserves_target_names());
-
-    let _ = fs::remove_file(local);
-    let _ = fs::remove_file(managed);
 }
 
 #[test]
@@ -411,8 +407,8 @@ fn configured_policy_bounds_hosts_and_capabilities() {
         ),
     )
     .unwrap();
-    let snapshot = GovernanceFacade::new(Some(path.clone()), None).snapshot();
-    fs::remove_file(path).unwrap();
+    let snapshot = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
+    drop(path);
     assert!(
         snapshot
             .authorize_landing(Capability::Read, "https://example.com")
@@ -456,7 +452,7 @@ fn authority_requires_every_independent_capability_in_a_compound_set() {
             ),
         )
         .unwrap();
-    let snapshot = GovernanceFacade::new(Some(path.clone()), None).snapshot();
+    let snapshot = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
     assert!(
         snapshot
             .authorize_requirements(CapabilitySet::READ.union(CapabilitySet::WRITE))
@@ -477,7 +473,6 @@ fn authority_requires_every_independent_capability_in_a_compound_set() {
             .authorize_requirements(CapabilitySet::EMPTY)
             .allowed
     );
-    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -654,7 +649,7 @@ fn layers_compose_by_intersection_and_snapshots_have_deterministic_identity() {
             r#"{"schema":4,"name":"local","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
-    let facade = GovernanceFacade::new(Some(local.clone()), Some(managed.clone()));
+    let facade = GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()));
     let first = facade.snapshot();
     let same = facade.snapshot();
     let denied = first.authorize_landing(Capability::Read, "https://example.com");
@@ -671,8 +666,6 @@ fn layers_compose_by_intersection_and_snapshots_have_deterministic_identity() {
     facade.refresh_tick();
     let changed = facade.snapshot();
     assert_ne!(first.id(), changed.id());
-    let _ = fs::remove_file(managed);
-    let _ = fs::remove_file(local);
 }
 
 #[test]
@@ -729,14 +722,13 @@ fn maintained_policy_examples_match_the_schema_four_decoder() {
             super::read_policy(&path, false).is_ok(),
             "{name} must remain a valid policy"
         );
-        let _ = fs::remove_file(path);
     }
 }
 
 #[test]
 fn authoring_validates_before_it_replaces_and_never_leaves_the_product_failing_closed() {
     let path = temporary("authored-policy");
-    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
     // A machine that has never authored one is open, not failing closed.
     assert!(
         facade
@@ -798,7 +790,7 @@ fn a_policy_file_ghostlight_does_not_own_is_never_written_back() {
         br#"{"schema":4,"name":"theirs","version":"1","grants":[]}"#,
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
     assert!(matches!(
         facade
             .apply_user_policy(r#"{"schema":4,"name":"mine","version":"1","grants":[]}"#)
@@ -810,7 +802,6 @@ fn a_policy_file_ghostlight_does_not_own_is_never_written_back() {
         AuthoringError::NotOwned
     ));
     assert!(path.exists());
-    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -822,7 +813,8 @@ fn a_candidate_policy_is_decided_under_the_organization_ceiling_without_being_ap
             br#"{"schema":4,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
         )
         .unwrap();
-    let facade = GovernanceFacade::owning_user_policy(owned.clone(), Some(managed.clone()));
+    let facade =
+        GovernanceFacade::owning_user_policy(owned.to_path_buf(), Some(managed.to_path_buf()));
 
     let decided = facade
             .candidate_snapshot(
@@ -850,8 +842,6 @@ fn a_candidate_policy_is_decided_under_the_organization_ceiling_without_being_ap
     // Previewing writes nothing.
     assert!(!owned.exists());
     assert!(facade.candidate_snapshot("not json").is_err());
-
-    let _ = fs::remove_file(managed);
 }
 
 #[test]
@@ -859,7 +849,7 @@ fn an_owned_schema_three_user_policy_moves_at_load_and_keeps_a_backup() {
     let path = temporary("owned-schema-three");
     let original = r#"{"schema":3,"name":"mine","version":"1","mode":"enforce","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}],"config":[{"key":"channels.cli.enabled","value":true,"level":"mandatory"},{"key":"policy.user.enabled","value":false,"level":"mandatory"},{"key":"content.frames.handling","value":"permitted_content","level":"mandatory"}]}"#;
     fs::write(&path, original).unwrap();
-    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
     let snapshot = facade.snapshot();
     assert!(facade.diagnostics().authority_valid);
     assert!(
@@ -876,8 +866,6 @@ fn an_owned_schema_three_user_policy_moves_at_load_and_keeps_a_backup() {
     assert!(manifest::parse(&moved, "moved").is_ok());
     let backup = migrate::backup_path(&path);
     assert_eq!(fs::read_to_string(&backup).unwrap(), original);
-    let _ = fs::remove_file(path);
-    let _ = fs::remove_file(backup);
 }
 
 #[test]
@@ -885,7 +873,7 @@ fn an_owned_schema_three_user_policy_that_would_change_meaning_fails_closed_unto
     let path = temporary("owned-observe");
     let original = r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[]}"#;
     fs::write(&path, original).unwrap();
-    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
     assert_eq!(
         facade
             .snapshot()
@@ -896,7 +884,6 @@ fn an_owned_schema_three_user_policy_that_would_change_meaning_fails_closed_unto
     assert!(!facade.diagnostics().authority_valid);
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
     assert!(!migrate::backup_path(&path).exists());
-    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -904,7 +891,10 @@ fn administrator_schema_three_files_fail_closed_and_are_never_rewritten() {
     let managed = temporary("admin-managed");
     let named = temporary("admin-named");
     let document = r#"{"schema":3,"name":"theirs","version":"1","grants":[]}"#;
-    for (user, organization) in [(Some(named.clone()), None), (None, Some(managed.clone()))] {
+    for (user, organization) in [
+        (Some(named.to_path_buf()), None),
+        (None, Some(managed.to_path_buf())),
+    ] {
         fs::write(&managed, document).unwrap();
         fs::write(&named, document).unwrap();
         let facade = GovernanceFacade::new(user, organization);
@@ -920,29 +910,26 @@ fn administrator_schema_three_files_fail_closed_and_are_never_rewritten() {
             assert!(!migrate::backup_path(path).exists());
         }
     }
-    let _ = fs::remove_file(managed);
-    let _ = fs::remove_file(named);
 }
 
 #[test]
 fn invalid_managed_authority_fails_closed() {
     let path = temporary("invalid-managed");
     fs::write(&path, br#"{"version":1,"managed":false}"#).unwrap();
-    let facade = GovernanceFacade::new(None, Some(path.clone()));
+    let facade = GovernanceFacade::new(None, Some(path.to_path_buf()));
     let snapshot = facade.snapshot();
     assert_eq!(
         snapshot.authorize_capability(Capability::Read).reason,
         ReasonCode::InvalidAuthority
     );
     assert!(!facade.diagnostics().authority_valid);
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn a_local_policy_that_never_validated_fails_closed_everywhere_it_is_reported() {
     let path = temporary("invalid-local");
     fs::write(&path, "{half-written").unwrap();
-    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
     assert_eq!(
         facade
             .snapshot()
@@ -957,14 +944,12 @@ fn a_local_policy_that_never_validated_fails_closed_everywhere_it_is_reported() 
         facade.policy_chip().situation,
         effective::Situation::FailingClosed
     );
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn an_unreachable_managed_authority_fails_closed_from_cold_start() {
     let path = temporary("missing-managed");
-    let _ = fs::remove_file(&path);
-    let facade = GovernanceFacade::new(None, Some(path));
+    let facade = GovernanceFacade::new(None, Some(path.to_path_buf()));
     let snapshot = facade.snapshot();
     assert_eq!(
         snapshot.authorize_capability(Capability::Read).reason,
@@ -984,7 +969,7 @@ fn snapshot_does_not_change_when_policy_file_changes() {
         ),
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
     let first = facade.snapshot();
     rewrite(
         &path,
@@ -1005,7 +990,6 @@ fn snapshot_does_not_change_when_policy_file_changes() {
     let second = facade.snapshot();
     assert!(!second.authorize_capability(Capability::Read).allowed);
     assert!(second.authorize_capability(Capability::Action).allowed);
-    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -1020,7 +1004,7 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
         ),
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
     assert!(
         facade
             .snapshot()
@@ -1061,7 +1045,6 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
     assert!(replaced_diagnostics.local_policy_active);
     assert!(replaced_diagnostics.local_policy_valid);
     assert!(replaced_diagnostics.authority_valid);
-    let _ = fs::remove_file(path);
 }
 
 /// A pause denies before any effect and a resume restores work, without anything waiting.
@@ -1158,7 +1141,7 @@ fn a_reader_is_never_held_up_by_the_sources_lock() {
         ),
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.clone()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
     let sources = facade.hold_sources();
 
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -1175,7 +1158,7 @@ fn a_reader_is_never_held_up_by_the_sources_lock() {
     let elapsed = receiver.recv_timeout(std::time::Duration::from_secs(10));
     drop(sources);
     thread.join().unwrap();
-    let _ = fs::remove_file(path);
+    drop(path);
 
     let elapsed = elapsed.expect("a reader waited on the sources lock");
     assert!(
@@ -1187,7 +1170,7 @@ fn a_reader_is_never_held_up_by_the_sources_lock() {
 #[test]
 fn a_workbench_edit_is_visible_at_once_and_a_removal_returns_to_all_open() {
     let path = temporary("workbench-edit");
-    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
     assert!(
         facade
             .snapshot()
@@ -1221,7 +1204,6 @@ fn a_workbench_edit_is_visible_at_once_and_a_removal_returns_to_all_open() {
         facade.policy_chip().situation,
         effective::Situation::AllOpen
     );
-    let _ = fs::remove_file(path);
 }
 
 #[test]
@@ -1259,7 +1241,7 @@ fn control_changes_reach_the_observer_once_each() {
 fn the_authored_policy_and_its_directory_are_private() {
     use std::os::unix::fs::PermissionsExt;
 
-    let directory = std::env::temp_dir().join(format!("ghostlight-1.0-{}", uuid::Uuid::new_v4()));
+    let directory = Scratch::named("authored-policy");
     let path = directory.join("policy").join("user.json");
     let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
     facade
@@ -1268,5 +1250,4 @@ fn the_authored_policy_and_its_directory_are_private() {
     let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&path), 0o600);
     assert_eq!(mode(path.parent().unwrap()), 0o700);
-    let _ = fs::remove_dir_all(directory);
 }

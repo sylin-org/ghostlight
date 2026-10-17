@@ -106,14 +106,8 @@ mod tests {
     fn linux_runtime_directory_must_be_real_private_and_same_user() {
         use std::os::unix::fs::{symlink, MetadataExt as _, PermissionsExt as _};
 
-        let root = std::env::temp_dir().join(format!(
-            "ghostlight-session-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let scratch = crate::scratch::Scratch::named("session");
+        let root = scratch.join("runtime");
         std::fs::create_dir(&root).unwrap();
         let uid = std::fs::metadata(&root).unwrap().uid();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -125,7 +119,5 @@ mod tests {
         let link = root.with_extension("link");
         symlink(&root, &link).unwrap();
         assert!(!secure_runtime_directory(&link, uid).unwrap());
-        std::fs::remove_file(link).unwrap();
-        std::fs::remove_dir(root).unwrap();
     }
 }

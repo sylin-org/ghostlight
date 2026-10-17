@@ -561,8 +561,8 @@ mod tests {
 
     use super::super::layout::RETIRED_MCP_CONNECTOR_NAME;
     use super::super::native_host::HOST_NAME;
-    use super::super::scratch::Scratch;
     use super::*;
+    use crate::scratch::Scratch;
 
     /// File name of the retired MCP connector, which client entries written for earlier builds
     /// still name.

@@ -1440,8 +1440,8 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::super::scratch::Scratch;
     use super::*;
+    use crate::scratch::Scratch;
 
     /// A tiny file that starts like a PNG, told apart from others by `mark`.
     fn png(mark: &str) -> Vec<u8> {

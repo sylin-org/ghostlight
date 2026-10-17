@@ -351,6 +351,7 @@ fn write_stream(
 mod tests {
     use super::*;
     use crate::browser::adapter::RuntimeControlState;
+    use crate::scratch::Scratch;
     use crate::workbench::{WorkbenchChange, WorkbenchEvent};
 
     fn change(seq: u64) -> WorkbenchEvent {
@@ -363,26 +364,19 @@ mod tests {
     }
 
     fn hub() -> Arc<EventHub> {
-        hub_watching(Arc::new(Watching::load(
-            std::env::temp_dir().join("ghostlight-events-never-written"),
-        )))
+        let directory = Scratch::named("events-never-written");
+        hub_watching(Arc::new(Watching::load(directory.join("watch.off"))))
     }
 
     fn hub_watching(watching: Arc<Watching>) -> Arc<EventHub> {
         Arc::new(EventHub::new("instance_test".into(), watching))
     }
 
-    /// A watching state whose marker lives in a directory of its own, and that directory.
-    fn switchable() -> (Arc<Watching>, std::path::PathBuf) {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-events-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        (
-            Arc::new(Watching::load(directory.join("watch.off"))),
-            directory,
-        )
+    /// A directory of its own, and a watching state whose marker lives in it.
+    fn switchable() -> (Scratch, Arc<Watching>) {
+        let directory = Scratch::named("events");
+        let watching = Arc::new(Watching::load(directory.join("watch.off")));
+        (directory, watching)
     }
 
     #[test]
@@ -473,7 +467,7 @@ mod tests {
 
     #[test]
     fn a_watcher_is_refused_once_watching_is_off_and_the_window_is_not() {
-        let (watching, directory) = switchable();
+        let (_directory, watching) = switchable();
         let hub = hub_watching(Arc::clone(&watching));
         assert!(watching.set(false).unwrap());
         hub.publish(change(1));
@@ -490,12 +484,11 @@ mod tests {
         ));
         assert!(watching.set(true).unwrap());
         assert!(hub.open(WebContext::Watch, || 2).is_ok());
-        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
     fn a_watching_stream_ends_on_the_first_change_after_watching_goes_off() {
-        let (watching, directory) = switchable();
+        let (_directory, watching) = switchable();
         let hub = hub_watching(Arc::clone(&watching));
         let watcher = hub.open(WebContext::Watch, || 0).unwrap();
         let window = hub.open(WebContext::Control, || 0).unwrap();
@@ -512,6 +505,5 @@ mod tests {
         assert!(matches!(window.next(Duration::ZERO), Frame::Change(_)));
         assert!(matches!(window.next(Duration::ZERO), Frame::Change(_)));
         assert_eq!(hub.open_streams(WebContext::Control), 1);
-        std::fs::remove_dir_all(&directory).unwrap();
     }
 }

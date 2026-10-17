@@ -49,7 +49,7 @@ mod tests {
 
     #[test]
     fn every_similar_page_tool_defaults_to_bounded_settlement_and_accepts_opt_out() {
-        let attachment = std::env::temp_dir().join("settlement-attachment.txt");
+        let attachment = crate::scratch::Scratch::file("settlement-attachment.txt");
         let cases = [
             ("browser_read", json!({})),
             ("browser_inspect", json!({})),
@@ -73,7 +73,7 @@ mod tests {
             ),
             (
                 "browser_upload",
-                json!({"target":"target_one","paths":[attachment]}),
+                json!({"target":"target_one","paths":[attachment.path()]}),
             ),
             ("browser_execute", json!({"script":"return 1"})),
         ];

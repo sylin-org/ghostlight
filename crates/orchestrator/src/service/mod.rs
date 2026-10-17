@@ -2115,6 +2115,7 @@ mod tests {
     use crate::intake::mcp::failure_templates;
     use crate::intake::mcp::ResumeState;
     use crate::language::intake::OpeningRefusal;
+    use crate::scratch::Scratch;
     use crate::workbench::{
         PageAddress, RuntimeSource, WorkbenchNativeActs, WorkbenchNotification,
         WorkbenchPresentationError, WorkbenchPresentationPort,
@@ -2131,14 +2132,9 @@ mod tests {
         StartTerms::asking_once(StartReason::Agent)
     }
 
-    /// A fresh directory to serve from, which the test removes.
-    fn temp_home(name: &str) -> std::path::PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-service-{name}-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        directory
+    /// A fresh directory to serve from, removed when the returned guard drops.
+    fn temp_home(name: &str) -> Scratch {
+        Scratch::named(&format!("service-{name}"))
     }
 
     #[test]
@@ -2277,7 +2273,6 @@ mod tests {
         let bytes = std::fs::read_to_string(&audit_path).unwrap();
         assert!(!bytes.contains("browser_landing"));
         assert!(!bytes.contains("secret"));
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     /// The client label of the session whose tabs the release cleanup tests leave behind.
@@ -3510,8 +3505,6 @@ mod tests {
         assert!(cli_client::status_at(&first).is_err());
         assert!(cli_client::status_at(&second).is_ok());
         drop(two);
-        std::fs::remove_dir_all(first).unwrap();
-        std::fs::remove_dir_all(second).unwrap();
     }
 
     #[test]
@@ -3527,12 +3520,11 @@ mod tests {
             "{detail}"
         );
         assert!(!super::ServiceLock::is_free(
-            &crate::install::layout::Layout::new(&directory).service_lock()
+            &crate::install::layout::Layout::new(directory.path()).service_lock()
         ));
         drop(first);
         let replacement = ServiceHost::start(&directory).unwrap();
         drop(replacement);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     /// The terms of a start for `reason` that waits `lock_wait` for a held lock.
@@ -3571,7 +3563,7 @@ mod tests {
     #[test]
     fn a_start_that_waits_no_time_for_a_held_lock_gives_way_at_once_and_touches_no_state() {
         let directory = temp_home("lock-held-gives-way");
-        let layout = crate::install::layout::Layout::new(&directory);
+        let layout = crate::install::layout::Layout::new(directory.path());
         let holder = start_for(&directory, agent()).unwrap();
         super::latch::set(&layout.quit_latch()).unwrap();
         let before = files_under(&directory);
@@ -3595,7 +3587,6 @@ mod tests {
         }
         assert_eq!(files_under(&directory), before, "no state was opened");
         drop(holder);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3614,7 +3605,6 @@ mod tests {
         );
         release.join().unwrap();
         drop(taken);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3631,13 +3621,12 @@ mod tests {
         assert!(error.is::<AuthorityAlreadyRunning>());
         assert!(started.elapsed() >= Duration::from_millis(200));
         drop(holder);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn a_browser_start_that_waited_for_the_lock_is_refused_when_a_quit_began_meanwhile() {
         let directory = temp_home("latch-set-while-waiting");
-        let layout = crate::install::layout::Layout::new(&directory);
+        let layout = crate::install::layout::Layout::new(directory.path());
         let holder = start_for(&directory, agent()).unwrap();
         let quitting = {
             let latch = layout.quit_latch();
@@ -3660,13 +3649,12 @@ mod tests {
             super::ServiceLock::is_free(&layout.service_lock()),
             "the refused start released the lock"
         );
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn a_browser_or_recover_start_is_refused_while_the_latch_is_set_and_never_takes_the_lock() {
         let directory = temp_home("latch-refuses");
-        let layout = crate::install::layout::Layout::new(&directory);
+        let layout = crate::install::layout::Layout::new(directory.path());
         super::latch::set(&layout.quit_latch()).unwrap();
         for reason in [StartReason::Browser, StartReason::Recover] {
             let error = start_for(&directory, StartTerms::for_reason(reason))
@@ -3682,7 +3670,6 @@ mod tests {
                 "{reason:?}: the lock was never taken"
             );
         }
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3691,7 +3678,6 @@ mod tests {
         let started = start_for(&directory, StartTerms::for_reason(StartReason::Browser));
         assert!(started.is_ok());
         drop(started);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3703,12 +3689,11 @@ mod tests {
             StartReason::Update,
         ] {
             let directory = temp_home("latch-cleared");
-            let layout = crate::install::layout::Layout::new(&directory);
+            let layout = crate::install::layout::Layout::new(directory.path());
             super::latch::set(&layout.quit_latch()).unwrap();
             let started = start_for(&directory, StartTerms::for_reason(reason)).unwrap();
             assert!(!super::latch::is_set(&layout.quit_latch()), "{reason:?}");
             drop(started);
-            std::fs::remove_dir_all(directory).unwrap();
         }
     }
 
@@ -3759,7 +3744,6 @@ mod tests {
         let started = ServiceHost::start_with_token(&directory, agent(), || Ok(false));
         assert!(started.is_ok());
         drop(started);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     /// A presentation port whose reveal waits until it is released, as one does while a shell
@@ -4244,7 +4228,6 @@ mod tests {
         .unwrap();
         assert!(fired.recv_timeout(Duration::from_secs(5)).is_ok());
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4259,7 +4242,6 @@ mod tests {
         host.publish_ready().unwrap();
         assert!(fired.recv_timeout(Duration::from_millis(600)).is_err());
         drop(host);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4268,11 +4250,7 @@ mod tests {
 
         use super::AdvertisedCatalog;
 
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-service-catalog-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
+        let directory = temp_home("catalog");
         let path = directory.join("policy.json");
         let write = |name: &str, allowed: Value| {
             std::fs::write(
@@ -4317,7 +4295,6 @@ mod tests {
             advertised.changed_by(&governance.snapshot()).is_none(),
             "one change is told once"
         );
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     /// An opening for the shell of this build.
