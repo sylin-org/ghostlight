@@ -623,12 +623,6 @@ struct HarnessDefinition {
 }
 
 impl HarnessDefinition {
-    /// The same definition, for a client that is the packaged app `package`.
-    fn packaged_as(mut self, package: &'static str) -> Self {
-        self.own_package = Some(package);
-        self
-    }
-
     fn accepts_config_path(&self, path: &Path) -> bool {
         let Some(name) = path.file_name().and_then(OsStr::to_str) else {
             return false;
@@ -671,302 +665,417 @@ enum JsonDialect {
     ZCode,
 }
 
-fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
-    let zed = if context.windows {
-        context.roaming.join("Zed/settings.json")
-    } else {
-        context.config.join("zed/settings.json")
-    };
-    let zcode = context.home.join(".zcode/cli/config.json");
-    let claude_desktop = context.roaming.join("Claude/claude_desktop_config.json");
-    let vscode = context.roaming.join("Code/User/mcp.json");
-    let opencode_jsonc = context.home.join(".config/opencode/opencode.jsonc");
-    let opencode = if opencode_jsonc.exists() {
-        opencode_jsonc
-    } else {
-        context.home.join(".config/opencode/opencode.json")
-    };
-    let crush = env::var_os("CRUSH_GLOBAL_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| context.home.join(".config/crush/crush.json"));
-    let kilo = ["kilo.jsonc", "kilo.json", "opencode.jsonc", "opencode.json"]
-        .into_iter()
-        .map(|name| context.config.join("kilo").join(name))
-        .find(|path| path.exists())
-        .unwrap_or_else(|| context.config.join("kilo").join("kilo.json"));
-    let cline_file = "settings/cline_mcp_settings.json";
-    let mut rows = vec![
-        row(
-            "codex",
-            "codex",
-            "Codex",
-            "User",
-            "codex.svg",
-            Some("https://developers.openai.com/codex/cli/"),
-            context.codex_config.clone(),
-            &["codex"],
-            ConfigDialect::CodexToml,
+/// One agent Ghostlight can set up, on one host: who the agent is and where its MCP configuration
+/// lives on a computer. The roster is the one record of both.
+struct AgentRow {
+    /// The harness id: one per host the agent runs on.
+    id: &'static str,
+    /// The product id, shared by every host of one product.
+    product_id: &'static str,
+    /// The product name, as the install summary says it.
+    name: &'static str,
+    /// The names the agent's client is known to report for itself on an MCP connection besides
+    /// its harness id and product name.
+    aliases: &'static [&'static str],
+    target: &'static str,
+    icon: &'static str,
+    download_url: Option<&'static str>,
+    /// Where the configuration file is on the computer a context describes.
+    path: fn(&HarnessContext) -> PathBuf,
+    executables: &'static [&'static str],
+    dialect: ConfigDialect,
+    /// The package name of the packaged app that reads this configuration, when the client is one.
+    own_package: Option<&'static str>,
+}
+
+/// Where every Cline host keeps its MCP settings below its own storage directory.
+const CLINE_SETTINGS: &str = "settings/cline_mcp_settings.json";
+
+/// Every agent Ghostlight can set up, one row per host.
+const ROSTER: &[AgentRow] = &[
+    AgentRow {
+        id: "codex",
+        product_id: "codex",
+        name: "Codex",
+        aliases: &["codex-mcp-client"],
+        target: "User",
+        icon: "codex.svg",
+        download_url: Some("https://developers.openai.com/codex/cli/"),
+        path: |context| context.codex_config.clone(),
+        executables: &["codex"],
+        dialect: ConfigDialect::CodexToml,
+        own_package: None,
+    },
+    AgentRow {
+        id: "claude-code",
+        product_id: "claude-code",
+        name: "Claude Code",
+        aliases: &[],
+        target: "User",
+        icon: "claude-code.svg",
+        download_url: Some("https://claude.com/product/claude-code"),
+        path: |context| context.home.join(".claude.json"),
+        executables: &["claude"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "claude-desktop",
+        product_id: "claude-desktop",
+        name: "Claude Desktop",
+        aliases: &["claude-ai"],
+        target: "User",
+        icon: "claude-desktop.svg",
+        download_url: None,
+        path: |context| context.roaming.join("Claude/claude_desktop_config.json"),
+        executables: &[],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: Some(CLAUDE_DESKTOP_PACKAGE),
+    },
+    AgentRow {
+        id: "cursor",
+        product_id: "cursor",
+        name: "Cursor",
+        aliases: &["cursor-vscode"],
+        target: "User",
+        icon: "cursor.svg",
+        download_url: Some("https://cursor.com/downloads"),
+        path: |context| context.home.join(".cursor/mcp.json"),
+        executables: &["cursor", "cursor-agent"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "vscode",
+        product_id: "vscode",
+        name: "Visual Studio Code",
+        aliases: &[],
+        target: "User",
+        icon: "vscode.svg",
+        download_url: Some("https://code.visualstudio.com/download"),
+        path: |context| context.roaming.join("Code/User/mcp.json"),
+        executables: &["code"],
+        dialect: ConfigDialect::Json(JsonDialect::Servers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "windsurf",
+        product_id: "windsurf",
+        name: "Windsurf",
+        aliases: &[],
+        target: "User",
+        icon: "windsurf.svg",
+        download_url: Some("https://windsurf.com/editor/download"),
+        path: |context| context.home.join(".codeium/windsurf/mcp_config.json"),
+        executables: &["windsurf"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    // Windsurf's current official distribution is named Devin and moved its user MCP
+    // configuration. Keep the historical target above so either installed generation can be
+    // managed without guessing one path from the other (ADR-0148).
+    AgentRow {
+        id: "devin",
+        product_id: "windsurf",
+        name: "Devin",
+        aliases: &[],
+        target: "Devin user",
+        icon: "windsurf.svg",
+        download_url: Some("https://windsurf.com/editor/download"),
+        path: |context| context.config.join("devin/mcp_config.json"),
+        executables: &["devin", "devin-desktop", "surf"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "zed",
+        product_id: "zed",
+        name: "Zed",
+        aliases: &[],
+        target: "User",
+        icon: "zed.svg",
+        download_url: Some("https://zed.dev/download"),
+        path: |context| {
+            if context.windows {
+                context.roaming.join("Zed/settings.json")
+            } else {
+                context.config.join("zed/settings.json")
+            }
+        },
+        executables: &["zed", "zeditor"],
+        dialect: ConfigDialect::Json(JsonDialect::ContextServers),
+        own_package: None,
+    },
+    // ZCode's MCP registration lives in its shared CLI configuration under `mcp.servers`
+    // (ADR-0141). No official download destination is pinned until one is verified.
+    AgentRow {
+        id: "zcode",
+        product_id: "zcode",
+        name: "ZCode",
+        aliases: &[],
+        target: "User",
+        icon: "zcode.svg",
+        download_url: None,
+        path: |context| context.home.join(".zcode/cli/config.json"),
+        executables: &["zcode"],
+        dialect: ConfigDialect::Json(JsonDialect::ZCode),
+        own_package: None,
+    },
+    AgentRow {
+        id: "opencode",
+        product_id: "opencode",
+        name: "OpenCode",
+        aliases: &[],
+        target: "User",
+        icon: "opencode.svg",
+        download_url: Some("https://opencode.ai/docs"),
+        path: |context| {
+            let jsonc = context.home.join(".config/opencode/opencode.jsonc");
+            if jsonc.exists() {
+                jsonc
+            } else {
+                context.home.join(".config/opencode/opencode.json")
+            }
+        },
+        executables: &["opencode", "opencode2"],
+        dialect: ConfigDialect::OpenCode,
+        own_package: None,
+    },
+    AgentRow {
+        id: "crush",
+        product_id: "crush",
+        name: "Crush",
+        aliases: &[],
+        target: "User",
+        icon: "crush.svg",
+        download_url: Some("https://github.com/charmbracelet/crush"),
+        path: |context| {
+            env::var_os("CRUSH_GLOBAL_CONFIG")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| context.home.join(".config/crush/crush.json"))
+        },
+        executables: &["crush"],
+        dialect: ConfigDialect::Json(JsonDialect::Crush),
+        own_package: None,
+    },
+    AgentRow {
+        id: "copilot-cli",
+        product_id: "copilot-cli",
+        name: "GitHub Copilot CLI",
+        aliases: &[],
+        target: "CLI",
+        icon: "copilot-cli.svg",
+        download_url: Some("https://github.com/github/copilot-cli"),
+        path: |context| context.home.join(".copilot/mcp-config.json"),
+        executables: &["copilot"],
+        dialect: ConfigDialect::Json(JsonDialect::Copilot),
+        own_package: None,
+    },
+    AgentRow {
+        id: "cline-cli",
+        product_id: "cline",
+        name: "Cline",
+        aliases: &[],
+        target: "CLI",
+        icon: "cline.svg",
+        download_url: Some("https://docs.cline.bot/cline-cli/overview"),
+        path: |context| context.home.join(".cline/data").join(CLINE_SETTINGS),
+        executables: &["cline"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "cline-vscode",
+        product_id: "cline",
+        name: "Cline",
+        aliases: &[],
+        target: "Visual Studio Code",
+        icon: "cline.svg",
+        download_url: Some(
+            "https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev",
         ),
-        row(
-            "claude-code",
-            "claude-code",
-            "Claude Code",
-            "User",
-            "claude-code.svg",
-            Some("https://claude.com/product/claude-code"),
-            context.home.join(".claude.json"),
-            &["claude"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "claude-desktop",
-            "claude-desktop",
-            "Claude Desktop",
-            "User",
-            "claude-desktop.svg",
-            None,
-            claude_desktop,
-            &[],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        )
-        .packaged_as(CLAUDE_DESKTOP_PACKAGE),
-        row(
-            "cursor",
-            "cursor",
-            "Cursor",
-            "User",
-            "cursor.svg",
-            Some("https://cursor.com/downloads"),
-            context.home.join(".cursor/mcp.json"),
-            &["cursor", "cursor-agent"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "vscode",
-            "vscode",
-            "Visual Studio Code",
-            "User",
-            "vscode.svg",
-            Some("https://code.visualstudio.com/download"),
-            vscode,
-            &["code"],
-            ConfigDialect::Json(JsonDialect::Servers),
-        ),
-        row(
-            "windsurf",
-            "windsurf",
-            "Windsurf",
-            "User",
-            "windsurf.svg",
-            Some("https://windsurf.com/editor/download"),
-            context.home.join(".codeium/windsurf/mcp_config.json"),
-            &["windsurf"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        // Windsurf's current official distribution is named Devin and moved its user MCP
-        // configuration. Keep the historical target above so either installed generation can be
-        // managed without guessing one path from the other (ADR-0148).
-        row(
-            "devin",
-            "windsurf",
-            "Devin",
-            "Devin user",
-            "windsurf.svg",
-            Some("https://windsurf.com/editor/download"),
-            context.config.join("devin/mcp_config.json"),
-            &["devin", "devin-desktop", "surf"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "zed",
-            "zed",
-            "Zed",
-            "User",
-            "zed.svg",
-            Some("https://zed.dev/download"),
-            zed,
-            &["zed", "zeditor"],
-            ConfigDialect::Json(JsonDialect::ContextServers),
-        ),
-        // ZCode's MCP registration lives in its shared CLI configuration under `mcp.servers`
-        // (ADR-0141). No official download destination is pinned until one is verified.
-        row(
-            "zcode",
-            "zcode",
-            "ZCode",
-            "User",
-            "zcode.svg",
-            None,
-            zcode,
-            &["zcode"],
-            ConfigDialect::Json(JsonDialect::ZCode),
-        ),
-        row(
-            "opencode",
-            "opencode",
-            "OpenCode",
-            "User",
-            "opencode.svg",
-            Some("https://opencode.ai/docs"),
-            opencode,
-            &["opencode", "opencode2"],
-            ConfigDialect::OpenCode,
-        ),
-        row(
-            "crush",
-            "crush",
-            "Crush",
-            "User",
-            "crush.svg",
-            Some("https://github.com/charmbracelet/crush"),
-            crush,
-            &["crush"],
-            ConfigDialect::Json(JsonDialect::Crush),
-        ),
-        row(
-            "copilot-cli",
-            "copilot-cli",
-            "GitHub Copilot CLI",
-            "CLI",
-            "copilot-cli.svg",
-            Some("https://github.com/github/copilot-cli"),
-            context.home.join(".copilot/mcp-config.json"),
-            &["copilot"],
-            ConfigDialect::Json(JsonDialect::Copilot),
-        ),
-        row(
-            "cline-cli",
-            "cline",
-            "Cline",
-            "CLI",
-            "cline.svg",
-            Some("https://docs.cline.bot/cline-cli/overview"),
-            context
-                .home
-                .join(".cline/data/settings/cline_mcp_settings.json"),
-            &["cline"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "cline-vscode",
-            "cline",
-            "Cline",
-            "Visual Studio Code",
-            "cline.svg",
-            Some("https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev"),
+        path: |context| {
             context
                 .roaming
                 .join("Code/User/globalStorage/saoudrizwan.claude-dev")
-                .join(cline_file),
-            &[],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "cline-cursor",
-            "cline",
-            "Cline",
-            "Cursor",
-            "cline.svg",
-            Some("https://docs.cline.bot/getting-started/installing-cline"),
+                .join(CLINE_SETTINGS)
+        },
+        executables: &[],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "cline-cursor",
+        product_id: "cline",
+        name: "Cline",
+        aliases: &[],
+        target: "Cursor",
+        icon: "cline.svg",
+        download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
+        path: |context| {
             context
                 .roaming
                 .join("Cursor/User/globalStorage/saoudrizwan.claude-dev")
-                .join(cline_file),
-            &[],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "cline-windsurf",
-            "cline",
-            "Cline",
-            "Windsurf",
-            "cline.svg",
-            Some("https://docs.cline.bot/getting-started/installing-cline"),
+                .join(CLINE_SETTINGS)
+        },
+        executables: &[],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "cline-windsurf",
+        product_id: "cline",
+        name: "Cline",
+        aliases: &[],
+        target: "Windsurf",
+        icon: "cline.svg",
+        download_url: Some("https://docs.cline.bot/getting-started/installing-cline"),
+        path: |context| {
             context
                 .roaming
                 .join("Windsurf/User/globalStorage/saoudrizwan.claude-dev")
-                .join(cline_file),
-            &[],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "kiro",
-            "kiro",
-            "Kiro",
-            "CLI and IDE",
-            "kiro.svg",
-            Some("https://kiro.dev/downloads/"),
-            context.home.join(".kiro/settings/mcp.json"),
-            &["kiro", "kiro-cli"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "qwen-code",
-            "qwen-code",
-            "Qwen Code",
-            "CLI",
-            "qwen-code.svg",
-            Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
-            context.home.join(".qwen/settings.json"),
-            &["qwen"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "junie",
-            "junie",
-            "Junie",
-            "CLI and JetBrains",
-            "junie.svg",
-            Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
-            context.home.join(".junie/mcp/mcp.json"),
-            &["junie"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-        row(
-            "kilo-code",
-            "kilo-code",
-            "Kilo Code",
-            "CLI",
-            "kilo-code.svg",
-            Some("https://kilo.ai/"),
-            kilo,
-            &["kilo"],
-            ConfigDialect::Json(JsonDialect::OpenCodeV1),
-        ),
-        row(
-            "goose",
-            "goose",
-            "goose",
-            "CLI and desktop",
-            "goose.svg",
-            Some("https://block.github.io/goose/docs/getting-started/installation/"),
-            context.config.join("goose/config.yaml"),
-            &["goose"],
-            ConfigDialect::Manual(ManualDialect::Goose),
-        ),
-        row(
-            "continue",
-            "continue",
-            "Continue",
-            "CLI and IDE",
-            "continue.svg",
-            Some("https://docs.continue.dev/cli/quickstart"),
-            context.home.join(".continue/config.yaml"),
-            &["cn"],
-            ConfigDialect::Manual(ManualDialect::Continue),
-        ),
-        row(
-            "antigravity",
-            "antigravity",
-            "Antigravity",
-            "CLI",
-            "antigravity.svg",
-            Some("https://antigravity.google/download?platform=linux"),
-            context.home.join(".gemini/config/mcp_config.json"),
-            &["agy"],
-            ConfigDialect::Json(JsonDialect::McpServers),
-        ),
-    ];
+                .join(CLINE_SETTINGS)
+        },
+        executables: &[],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "kiro",
+        product_id: "kiro",
+        name: "Kiro",
+        aliases: &[],
+        target: "CLI and IDE",
+        icon: "kiro.svg",
+        download_url: Some("https://kiro.dev/downloads/"),
+        path: |context| context.home.join(".kiro/settings/mcp.json"),
+        executables: &["kiro", "kiro-cli"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "qwen-code",
+        product_id: "qwen-code",
+        name: "Qwen Code",
+        aliases: &[],
+        target: "CLI",
+        icon: "qwen-code.svg",
+        download_url: Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
+        path: |context| context.home.join(".qwen/settings.json"),
+        executables: &["qwen"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "junie",
+        product_id: "junie",
+        name: "Junie",
+        aliases: &[],
+        target: "CLI and JetBrains",
+        icon: "junie.svg",
+        download_url: Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
+        path: |context| context.home.join(".junie/mcp/mcp.json"),
+        executables: &["junie"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+    AgentRow {
+        id: "kilo-code",
+        product_id: "kilo-code",
+        name: "Kilo Code",
+        aliases: &[],
+        target: "CLI",
+        icon: "kilo-code.svg",
+        download_url: Some("https://kilo.ai/"),
+        path: |context| {
+            let directory = context.config.join("kilo");
+            ["kilo.jsonc", "kilo.json", "opencode.jsonc", "opencode.json"]
+                .into_iter()
+                .map(|name| directory.join(name))
+                .find(|path| path.exists())
+                .unwrap_or_else(|| directory.join("kilo.json"))
+        },
+        executables: &["kilo"],
+        dialect: ConfigDialect::Json(JsonDialect::OpenCodeV1),
+        own_package: None,
+    },
+    AgentRow {
+        id: "goose",
+        product_id: "goose",
+        name: "goose",
+        aliases: &[],
+        target: "CLI and desktop",
+        icon: "goose.svg",
+        download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
+        path: |context| context.config.join("goose/config.yaml"),
+        executables: &["goose"],
+        dialect: ConfigDialect::Manual(ManualDialect::Goose),
+        own_package: None,
+    },
+    AgentRow {
+        id: "continue",
+        product_id: "continue",
+        name: "Continue",
+        aliases: &[],
+        target: "CLI and IDE",
+        icon: "continue.svg",
+        download_url: Some("https://docs.continue.dev/cli/quickstart"),
+        path: |context| context.home.join(".continue/config.yaml"),
+        executables: &["cn"],
+        dialect: ConfigDialect::Manual(ManualDialect::Continue),
+        own_package: None,
+    },
+    AgentRow {
+        id: "antigravity",
+        product_id: "antigravity",
+        name: "Antigravity",
+        aliases: &[],
+        target: "CLI",
+        icon: "antigravity.svg",
+        download_url: Some("https://antigravity.google/download?platform=linux"),
+        path: |context| context.home.join(".gemini/config/mcp_config.json"),
+        executables: &["agy"],
+        dialect: ConfigDialect::Json(JsonDialect::McpServers),
+        own_package: None,
+    },
+];
+
+impl AgentRow {
+    /// Whether the agent's client calls itself `reported`: its harness id, its product name or
+    /// one of its aliases, ignoring case. The product id is not matched, because two products can
+    /// share one: Devin's product id is Windsurf's id.
+    fn is_called(&self, reported: &str) -> bool {
+        [self.id, self.name]
+            .iter()
+            .chain(self.aliases)
+            .any(|known| known.eq_ignore_ascii_case(reported))
+    }
+
+    /// The row as it stands on the computer `context` describes, before any location the person
+    /// chose.
+    fn on(&self, context: &HarnessContext) -> HarnessDefinition {
+        let path = (self.path)(context);
+        HarnessDefinition {
+            id: self.id,
+            product_id: self.product_id,
+            name: self.name,
+            label: self.name.to_owned(),
+            target: self.target,
+            icon: self.icon,
+            download_url: self.download_url,
+            default_path: path.clone(),
+            path,
+            located_executable: None,
+            located_stale: false,
+            executables: self.executables,
+            dialect: self.dialect,
+            own_package: self.own_package,
+        }
+    }
+}
+
+fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
+    let mut rows: Vec<HarnessDefinition> = ROSTER.iter().map(|row| row.on(context)).collect();
     let overrides = read_location_overrides(context).unwrap_or_default();
     for definition in &mut rows {
         if let Some(located) = overrides.get(definition.id) {
@@ -999,90 +1108,18 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
     rows
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one argument per fixed field of a harness row, so each row of the table reads as one call"
-)]
-fn row(
-    id: &'static str,
-    product_id: &'static str,
-    name: &'static str,
-    target: &'static str,
-    icon: &'static str,
-    download_url: Option<&'static str>,
-    path: PathBuf,
-    executables: &'static [&'static str],
-    dialect: ConfigDialect,
-) -> HarnessDefinition {
-    HarnessDefinition {
-        id,
-        product_id,
-        name,
-        label: name.to_owned(),
-        target,
-        icon,
-        download_url,
-        default_path: path.clone(),
-        path,
-        located_executable: None,
-        located_stale: false,
-        executables,
-        dialect,
-        own_package: None,
-    }
-}
-
-/// The agents Ghostlight knows, by the names they report on an MCP connection: each product name
-/// as the install summary says it, with the harness and product ids that name it and the client
-/// names the agent is known to send. The harness tests keep it in step with `definitions`.
-const AGENT_NAMES: &[(&str, &[&str])] = &[
-    ("Codex", &["codex", "codex-mcp-client"]),
-    ("Claude Code", &["claude-code"]),
-    ("Claude Desktop", &["claude-desktop", "claude-ai"]),
-    ("Cursor", &["cursor", "cursor-vscode"]),
-    ("Visual Studio Code", &["vscode"]),
-    ("Windsurf", &["windsurf"]),
-    ("Devin", &["devin"]),
-    ("Zed", &["zed"]),
-    ("ZCode", &["zcode"]),
-    ("OpenCode", &["opencode"]),
-    ("Crush", &["crush"]),
-    ("GitHub Copilot CLI", &["copilot-cli"]),
-    (
-        "Cline",
-        &[
-            "cline",
-            "cline-cli",
-            "cline-vscode",
-            "cline-cursor",
-            "cline-windsurf",
-        ],
-    ),
-    ("Kiro", &["kiro"]),
-    ("Qwen Code", &["qwen-code"]),
-    ("Junie", &["junie"]),
-    ("Kilo Code", &["kilo-code"]),
-    ("goose", &["goose"]),
-    ("Continue", &["continue"]),
-    ("Antigravity", &["antigravity"]),
-];
-
-/// The product name of the agent Ghostlight knows by `reported`, the name a client sent for
-/// itself, ignoring case and surrounding space; none for a name Ghostlight does not know.
+/// The product name of the agent whose client calls itself `reported`, ignoring case and
+/// surrounding space; none for a name Ghostlight does not know. A roster row matches its harness
+/// id, its product name and its aliases, never its product id.
 ///
 /// The name stays the client's own claim: it names the agent for a person and grants nothing.
 #[must_use]
 pub fn agent_name(reported: &str) -> Option<&'static str> {
     let reported = reported.trim();
-    AGENT_NAMES
+    ROSTER
         .iter()
-        .find(|(name, names)| {
-            name.eq_ignore_ascii_case(reported)
-                || names
-                    .iter()
-                    .any(|known| known.eq_ignore_ascii_case(reported))
-        })
-        .map(|(name, _)| *name)
+        .find(|row| row.is_called(reported))
+        .map(|row| row.name)
 }
 
 fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
@@ -2293,8 +2330,8 @@ mod tests {
         json_entry_args, json_entry_command, jsonc_options, manual_json_setup, mcp_command_line,
         replace_with_backup, resolve_through_symlink, AppContainer, ForeignCommand, HarnessAction,
         HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
-        JsonDialect, PrivateView, RegistrationState, AGENT_NAMES, EDGE_COMMAND_NAME,
-        RETIRED_MCP_CONNECTOR_NAME,
+        JsonDialect, PrivateView, RegistrationState, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME,
+        ROSTER,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -2478,18 +2515,32 @@ mod tests {
     }
 
     #[test]
-    fn every_agent_in_the_roster_is_known_by_its_id_and_its_name() {
+    fn every_agent_in_the_roster_is_known_by_its_id_its_name_and_its_aliases() {
         let directory = temporary("agent-names-roster");
         let rows = definitions(&context(&directory));
         for row in &rows {
             assert_eq!(agent_name(row.id), Some(row.name), "{}", row.id);
             assert_eq!(agent_name(row.name), Some(row.name), "{}", row.id);
         }
-        let named = |name: &str| rows.iter().any(|row| row.name == name);
-        for (name, _) in AGENT_NAMES {
-            assert!(named(name), "{name} names no agent in the roster");
+        for row in ROSTER {
+            for alias in row.aliases {
+                assert_eq!(agent_name(alias), Some(row.name), "{alias}");
+                let others = ROSTER.iter().filter(|other| other.name != row.name);
+                for other in others {
+                    assert!(!other.is_called(alias), "{alias} also calls {}", other.id);
+                }
+            }
         }
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_product_id_two_agents_share_names_only_the_agent_whose_id_it_is() {
+        let devin = ROSTER.iter().find(|row| row.id == "devin").unwrap();
+        assert_eq!(devin.product_id, "windsurf");
+        assert_eq!(agent_name("windsurf"), Some("Windsurf"));
+        assert_eq!(agent_name("devin"), Some("Devin"));
+        assert_eq!(agent_name("Devin"), Some("Devin"));
     }
 
     #[test]
