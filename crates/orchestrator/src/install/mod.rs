@@ -55,6 +55,18 @@ const MCP_ARGUMENTS: [&str; 1] = [MCP_ARGUMENT];
 const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
 /// File in the state directory recording where each MCP client's configuration was found.
 const HARNESS_LOCATIONS_FILE: &str = "harness-locations.json";
+/// The Windows variable that names the person's home, read before `HOME`.
+const USER_PROFILE_VARIABLE: &str = "USERPROFILE";
+/// The variable that names the person's home where `USERPROFILE` is not set, and on Linux.
+const HOME_VARIABLE: &str = "HOME";
+/// The Windows variable that names the roaming application data directory.
+const APP_DATA_VARIABLE: &str = "APPDATA";
+/// The Linux variable that names the configuration directory (XDG base directories).
+const XDG_CONFIG_HOME_VARIABLE: &str = "XDG_CONFIG_HOME";
+/// The variable that names Codex's own directory, which holds its `config.toml`.
+const CODEX_HOME_VARIABLE: &str = "CODEX_HOME";
+/// The variable that names Crush's whole configuration file, in place of its default.
+const CRUSH_CONFIG_VARIABLE: &str = "CRUSH_GLOBAL_CONFIG";
 // Codex filters its stdio child's environment. Linux demand-start needs the invoking
 // desktop session, not captured machine-local values or a second service-only route.
 const CODEX_DESKTOP_ENVIRONMENT: &[&str] = &[
@@ -288,6 +300,7 @@ fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessConte
         config: directory.join("config"),
         roaming: directory.join("config"),
         codex_config: directory.join("codex").join("config.toml"),
+        crush_config: None,
         edge: edge.to_path_buf(),
         path_entries: Vec::new(),
         locations: state.join(HARNESS_LOCATIONS_FILE),
@@ -564,6 +577,9 @@ struct HarnessContext {
     config: PathBuf,
     roaming: PathBuf,
     codex_config: PathBuf,
+    /// The file [`CRUSH_CONFIG_VARIABLE`] names, when it is set: Crush reads it in place of its
+    /// default file.
+    crush_config: Option<PathBuf>,
     edge: PathBuf,
     path_entries: Vec<PathBuf>,
     locations: PathBuf,
@@ -607,17 +623,17 @@ impl HarnessContext {
     fn system() -> Self {
         let windows = cfg!(target_os = "windows");
         let home = if windows {
-            env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))
+            env::var_os(USER_PROFILE_VARIABLE).or_else(|| env::var_os(HOME_VARIABLE))
         } else {
-            env::var_os("HOME")
+            env::var_os(HOME_VARIABLE)
         }
         .map(PathBuf::from)
         .unwrap_or_default();
         let roots = harness_roots(
             &home,
-            env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-            env::var_os("APPDATA").map(PathBuf::from),
-            env::var_os("CODEX_HOME").map(PathBuf::from),
+            env::var_os(XDG_CONFIG_HOME_VARIABLE).map(PathBuf::from),
+            env::var_os(APP_DATA_VARIABLE).map(PathBuf::from),
+            env::var_os(CODEX_HOME_VARIABLE).map(PathBuf::from),
             windows,
         );
         let layout = layout::Layout::current();
@@ -652,6 +668,7 @@ impl HarnessContext {
             config: roots.config,
             roaming: roots.roaming,
             codex_config: roots.codex_config,
+            crush_config: env::var_os(CRUSH_CONFIG_VARIABLE).map(PathBuf::from),
             edge,
             path_entries,
             locations,
@@ -721,6 +738,8 @@ struct HarnessDefinition {
     download_url: Option<&'static str>,
     path: PathBuf,
     default_path: PathBuf,
+    /// The file names the agent reads beside its configuration file ([`AgentRow::candidates`]).
+    candidates: &'static [&'static str],
     located_executable: Option<PathBuf>,
     located_stale: bool,
     executables: &'static [&'static str],
@@ -735,14 +754,7 @@ impl HarnessDefinition {
         let Some(name) = path.file_name().and_then(OsStr::to_str) else {
             return false;
         };
-        match self.id {
-            "opencode" => matches!(name, "opencode.json" | "opencode.jsonc"),
-            "kilo-code" => matches!(
-                name,
-                "kilo.json" | "kilo.jsonc" | "opencode.json" | "opencode.jsonc"
-            ),
-            _ => self.default_path.file_name() == Some(OsStr::new(name)),
-        }
+        self.default_path.file_name() == Some(OsStr::new(name)) || self.candidates.contains(&name)
     }
 }
 
@@ -794,8 +806,12 @@ struct AgentRow {
     /// The agent's symbol: its packaged monogram tile, a file under `ui/integrations/`.
     monogram: &'static str,
     download_url: Option<&'static str>,
-    /// Where the configuration file is on the computer a context describes.
+    /// Where the configuration file is on the computer a context describes when the agent has
+    /// none yet: the file a new configuration is written to.
     path: fn(&HarnessContext) -> PathBuf,
+    /// The file names the agent reads beside `path`, in the order it prefers them, when it reads
+    /// more than one: the first that exists is its file. Empty when it reads only `path`.
+    candidates: &'static [&'static str],
     executables: &'static [&'static str],
     dialect: ConfigDialect,
     /// The package name of the packaged app that reads this configuration, when the client is one.
@@ -804,6 +820,13 @@ struct AgentRow {
 
 /// Where every Cline host keeps its MCP settings below its own storage directory.
 const CLINE_SETTINGS: &str = "settings/cline_mcp_settings.json";
+
+/// The files OpenCode reads in its configuration directory, in the order it prefers them.
+const OPENCODE_FILES: &[&str] = &["opencode.jsonc", "opencode.json"];
+
+/// The files Kilo Code reads in its configuration directory, in the order it prefers them: its
+/// own, then OpenCode's.
+const KILO_FILES: &[&str] = &["kilo.jsonc", "kilo.json", "opencode.jsonc", "opencode.json"];
 
 /// Every agent Ghostlight can set up, one row per host.
 const ROSTER: &[AgentRow] = &[
@@ -817,6 +840,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "codex.svg",
         download_url: Some("https://developers.openai.com/codex/cli/"),
         path: |context| context.codex_config.clone(),
+        candidates: &[],
         executables: &["codex"],
         dialect: ConfigDialect::CodexToml,
         own_package: None,
@@ -831,6 +855,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "claude-code.svg",
         download_url: Some("https://claude.com/product/claude-code"),
         path: |context| context.home.join(".claude.json"),
+        candidates: &[],
         executables: &["claude"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -845,6 +870,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "claude-desktop.svg",
         download_url: None,
         path: |context| context.roaming.join("Claude/claude_desktop_config.json"),
+        candidates: &[],
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: Some(CLAUDE_DESKTOP_PACKAGE),
@@ -859,6 +885,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "cursor.svg",
         download_url: Some("https://cursor.com/downloads"),
         path: |context| context.home.join(".cursor/mcp.json"),
+        candidates: &[],
         executables: &["cursor", "cursor-agent"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -873,6 +900,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "vscode.svg",
         download_url: Some("https://code.visualstudio.com/download"),
         path: |context| context.roaming.join("Code/User/mcp.json"),
+        candidates: &[],
         executables: &["code"],
         dialect: ConfigDialect::Json(JsonDialect::Servers),
         own_package: None,
@@ -887,6 +915,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "windsurf.svg",
         download_url: Some("https://windsurf.com/editor/download"),
         path: |context| context.home.join(".codeium/windsurf/mcp_config.json"),
+        candidates: &[],
         executables: &["windsurf"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -904,6 +933,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "windsurf.svg",
         download_url: Some("https://windsurf.com/editor/download"),
         path: |context| context.config.join("devin/mcp_config.json"),
+        candidates: &[],
         executables: &["devin", "devin-desktop", "surf"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -924,6 +954,7 @@ const ROSTER: &[AgentRow] = &[
                 context.config.join("zed/settings.json")
             }
         },
+        candidates: &[],
         executables: &["zed", "zeditor"],
         dialect: ConfigDialect::Json(JsonDialect::ContextServers),
         own_package: None,
@@ -940,6 +971,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "zcode.svg",
         download_url: None,
         path: |context| context.home.join(".zcode/cli/config.json"),
+        candidates: &[],
         executables: &["zcode"],
         dialect: ConfigDialect::Json(JsonDialect::ZCode),
         own_package: None,
@@ -953,14 +985,8 @@ const ROSTER: &[AgentRow] = &[
         target: "User",
         monogram: "opencode.svg",
         download_url: Some("https://opencode.ai/docs"),
-        path: |context| {
-            let jsonc = context.home.join(".config/opencode/opencode.jsonc");
-            if jsonc.exists() {
-                jsonc
-            } else {
-                context.home.join(".config/opencode/opencode.json")
-            }
-        },
+        path: |context| context.home.join(".config/opencode/opencode.json"),
+        candidates: OPENCODE_FILES,
         executables: &["opencode", "opencode2"],
         dialect: ConfigDialect::OpenCode,
         own_package: None,
@@ -975,10 +1001,12 @@ const ROSTER: &[AgentRow] = &[
         monogram: "crush.svg",
         download_url: Some("https://github.com/charmbracelet/crush"),
         path: |context| {
-            env::var_os("CRUSH_GLOBAL_CONFIG")
-                .map(PathBuf::from)
+            context
+                .crush_config
+                .clone()
                 .unwrap_or_else(|| context.home.join(".config/crush/crush.json"))
         },
+        candidates: &[],
         executables: &["crush"],
         dialect: ConfigDialect::Json(JsonDialect::Crush),
         own_package: None,
@@ -993,6 +1021,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "copilot-cli.svg",
         download_url: Some("https://github.com/github/copilot-cli"),
         path: |context| context.home.join(".copilot/mcp-config.json"),
+        candidates: &[],
         executables: &["copilot"],
         dialect: ConfigDialect::Json(JsonDialect::Copilot),
         own_package: None,
@@ -1007,6 +1036,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "cline.svg",
         download_url: Some("https://docs.cline.bot/cline-cli/overview"),
         path: |context| context.home.join(".cline/data").join(CLINE_SETTINGS),
+        candidates: &[],
         executables: &["cline"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1028,6 +1058,7 @@ const ROSTER: &[AgentRow] = &[
                 .join("Code/User/globalStorage/saoudrizwan.claude-dev")
                 .join(CLINE_SETTINGS)
         },
+        candidates: &[],
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1047,6 +1078,7 @@ const ROSTER: &[AgentRow] = &[
                 .join("Cursor/User/globalStorage/saoudrizwan.claude-dev")
                 .join(CLINE_SETTINGS)
         },
+        candidates: &[],
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1066,6 +1098,7 @@ const ROSTER: &[AgentRow] = &[
                 .join("Windsurf/User/globalStorage/saoudrizwan.claude-dev")
                 .join(CLINE_SETTINGS)
         },
+        candidates: &[],
         executables: &[],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1080,6 +1113,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "kiro.svg",
         download_url: Some("https://kiro.dev/downloads/"),
         path: |context| context.home.join(".kiro/settings/mcp.json"),
+        candidates: &[],
         executables: &["kiro", "kiro-cli"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1094,6 +1128,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "qwen-code.svg",
         download_url: Some("https://qwenlm.github.io/qwen-code-docs/en/users/installation/"),
         path: |context| context.home.join(".qwen/settings.json"),
+        candidates: &[],
         executables: &["qwen"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1108,6 +1143,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "junie.svg",
         download_url: Some("https://junie.jetbrains.com/docs/get-started-with-junie-cli.html"),
         path: |context| context.home.join(".junie/mcp/mcp.json"),
+        candidates: &[],
         executables: &["junie"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1121,14 +1157,8 @@ const ROSTER: &[AgentRow] = &[
         target: "CLI",
         monogram: "kilo-code.svg",
         download_url: Some("https://kilo.ai/"),
-        path: |context| {
-            let directory = context.config.join("kilo");
-            ["kilo.jsonc", "kilo.json", "opencode.jsonc", "opencode.json"]
-                .into_iter()
-                .map(|name| directory.join(name))
-                .find(|path| path.exists())
-                .unwrap_or_else(|| directory.join("kilo.json"))
-        },
+        path: |context| context.config.join("kilo").join("kilo.json"),
+        candidates: KILO_FILES,
         executables: &["kilo"],
         dialect: ConfigDialect::Json(JsonDialect::OpenCodeV1),
         own_package: None,
@@ -1143,6 +1173,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "goose.svg",
         download_url: Some("https://block.github.io/goose/docs/getting-started/installation/"),
         path: |context| context.config.join("goose/config.yaml"),
+        candidates: &[],
         executables: &["goose"],
         dialect: ConfigDialect::Manual(ManualDialect::Goose),
         own_package: None,
@@ -1157,6 +1188,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "continue.svg",
         download_url: Some("https://docs.continue.dev/cli/quickstart"),
         path: |context| context.home.join(".continue/config.yaml"),
+        candidates: &[],
         executables: &["cn"],
         dialect: ConfigDialect::Manual(ManualDialect::Continue),
         own_package: None,
@@ -1171,6 +1203,7 @@ const ROSTER: &[AgentRow] = &[
         monogram: "antigravity.svg",
         download_url: Some("https://antigravity.google/download?platform=linux"),
         path: |context| context.home.join(".gemini/config/mcp_config.json"),
+        candidates: &[],
         executables: &["agy"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
         own_package: None,
@@ -1194,10 +1227,21 @@ impl AgentRow {
         Agent::listed(self.agent_id, self.name, self.monogram)
     }
 
+    /// The configuration file on the computer `context` describes, before any location the
+    /// person chose: the first of the candidates that exists, else `path`.
+    fn file_on(&self, context: &HarnessContext) -> PathBuf {
+        let default = (self.path)(context);
+        self.candidates
+            .iter()
+            .map(|name| default.with_file_name(name))
+            .find(|candidate| candidate.exists())
+            .unwrap_or(default)
+    }
+
     /// The row as it stands on the computer `context` describes, before any location the person
     /// chose.
     fn on(&self, context: &HarnessContext) -> HarnessDefinition {
-        let path = (self.path)(context);
+        let path = self.file_on(context);
         HarnessDefinition {
             id: self.id,
             agent_id: self.agent_id,
@@ -1209,6 +1253,7 @@ impl AgentRow {
             download_url: self.download_url,
             default_path: path.clone(),
             path,
+            candidates: self.candidates,
             located_executable: None,
             located_stale: false,
             executables: self.executables,
@@ -2480,13 +2525,13 @@ mod tests {
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        agent_called, client_ids, command_registration_state, definitions, edit_json, edit_toml,
-        executable_name, expected_json_entry, fix_toml, harness_roots, inspect, inspect_json,
-        inspect_toml, json_entry_args, json_entry_command, jsonc_options, manual_json_setup,
-        mcp_command_line, replace_with_backup, resolve_through_symlink, AppContainer, ClientName,
-        ForeignCommand, HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots,
-        HarnessState, HarnessSummary, JsonDialect, PrivateView, RegistrationState, CLINE_SETTINGS,
-        EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
+        agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
+        edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots, inspect,
+        inspect_json, inspect_toml, json_entry_args, json_entry_command, jsonc_options,
+        manual_json_setup, mcp_command_line, replace_with_backup, resolve_through_symlink,
+        AppContainer, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
+        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, PrivateView,
+        RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -2516,6 +2561,7 @@ mod tests {
             config: directory.join("config"),
             roaming: directory.join("config"),
             codex_config: directory.join("codex/config.toml"),
+            crush_config: None,
             edge: edge(directory),
             path_entries: Vec::new(),
             locations: directory.join("config/ghostlight/harness-locations.json"),
@@ -2627,6 +2673,7 @@ mod tests {
             config: directory.join("config"),
             roaming: directory.join("config"),
             codex_config: directory.join("codex/config.toml"),
+            crush_config: None,
             edge,
             path_entries: vec![binary_directory],
             locations: directory.join("locations.json"),
@@ -2965,6 +3012,48 @@ mod tests {
         fs::write(&located, "{}\n").unwrap();
         let result = registry.locate("kilo-code", &located).unwrap();
         assert_eq!(result.summary.config_path, located.to_string_lossy());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_host_reads_the_first_of_its_candidates_that_exists_and_otherwise_its_default() {
+        for row in ROSTER.iter().filter(|row| !row.candidates.is_empty()) {
+            let directory = temporary(&format!("candidates-{}", row.id));
+            let context = context(&directory);
+            let default = (row.path)(&context);
+            assert_eq!(row.file_on(&context), default, "{}", row.id);
+            fs::create_dir_all(default.parent().unwrap()).unwrap();
+            // Each candidate, written after every later one, wins over all of them.
+            for (index, name) in row.candidates.iter().enumerate().rev() {
+                fs::write(default.with_file_name(name), "{}\n").unwrap();
+                assert_eq!(
+                    row.file_on(&context),
+                    default.with_file_name(row.candidates[index]),
+                    "{}",
+                    row.id
+                );
+            }
+            let definition = definition(&context, row.id).unwrap();
+            for name in row.candidates {
+                assert!(
+                    definition.accepts_config_path(&directory.join(name)),
+                    "{name}"
+                );
+            }
+            assert!(!definition.accepts_config_path(&directory.join("settings.json")));
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn crush_reads_the_file_its_variable_names_from_the_context() {
+        let directory = temporary("crush-variable");
+        let named = directory.join("elsewhere/crush.json");
+        let context = HarnessContext {
+            crush_config: Some(named.clone()),
+            ..context(&directory)
+        };
+        assert_eq!(definition(&context, "crush").unwrap().path, named);
         fs::remove_dir_all(directory).unwrap();
     }
 

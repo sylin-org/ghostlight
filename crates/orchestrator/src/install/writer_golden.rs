@@ -67,9 +67,6 @@ const EDGE_ARGUMENT: &str = "mcp";
 const LEGACY_RELAY: &str = "ghostlight-relay";
 const LEGACY_RELAY_ARGUMENTS: [&str; 2] = ["--role", "agent"];
 
-/// Crush reads its file's location from this variable, outside the context a test controls.
-const CRUSH_LOCATION_VARIABLE: &str = "CRUSH_GLOBAL_CONFIG";
-
 /// The opening of every seed that holds a person's own settings.
 const KEPT_COMMENT: &str = "A person's own settings, kept as written.";
 
@@ -319,6 +316,7 @@ impl Run {
             config: roots.config,
             roaming: roots.roaming,
             codex_config: roots.codex_config,
+            crush_config: None,
             edge,
             path_entries: Vec::new(),
             locations: PathBuf::from(spelled(
@@ -985,18 +983,8 @@ fn golden_file(name: &str) -> String {
     format!("{GOLDEN_DIRECTORY}/{name}")
 }
 
-/// Refuse to run while Crush would read this computer's real file instead of the run's.
-fn refuse_a_real_crush_file() {
-    assert!(
-        std::env::var_os(CRUSH_LOCATION_VARIABLE).is_none(),
-        "{CRUSH_LOCATION_VARIABLE} is set, so Crush's file would be this computer's real one; \
-         unset it to run the writer golden"
-    );
-}
-
 #[test]
 fn every_host_writes_and_says_what_the_writer_golden_records() {
-    refuse_a_real_crush_file();
     // Every host runs in directories of its own, so the hosts are recorded side by side.
     let goldens: Vec<(String, String)> = std::thread::scope(|scope| {
         let hosts: Vec<_> = ROSTER
@@ -1132,7 +1120,6 @@ mod native {
 
     #[test]
     fn this_computer_s_own_paths_are_written_as_the_native_golden_records() {
-        refuse_a_real_crush_file();
         let (name, computer) = SYSTEM;
         check_golden_with(
             &format!("{NATIVE_DIRECTORY}/{name}"),
