@@ -5,15 +5,37 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `pass`, `fail` (wi
 
 ## RESUME HERE
 
-Nothing has run yet. Start with L01.
+L01 passed. Next: L02, the full gate.
 
 ## Tasks
 
-### L01 Prepare the machine (todo)
+### L01 Prepare the machine (pass)
 
 Install the prerequisites (see BOOTSTRAP), clone or update the repository on `dev`, and record
 the versions: CachyOS release, kernel, desktop and session type (KDE or GNOME, Wayland or X11),
 `rustc`, `cargo`, `node`, `pwsh`, the browser and its version.
+
+Result, 2026-10-17, host test-01, repository on `dev` at 17a0c060:
+
+- CachyOS rolling (ID_LIKE arch), kernel 7.2.9-2-cachyos, KDE Plasma 6.8.0 on Wayland
+  (`WAYLAND_DISPLAY=wayland-1`, XWayland `DISPLAY=:0`).
+- rustc 1.95.0 (59807616e 2026-04-14) and cargo 1.95.0 from `rust-toolchain.toml`; node v22.22.1,
+  npm 10.9.4; Python 3.14.8; gh 2.96.0.
+- pwsh 7.6.5: the extracted build already in the ignored `.tmp/linux-tools/powershell-7.6.5`,
+  linked as `~/.local/bin/pwsh`. pacman needs a sudo password this session does not have; nothing
+  else needed it.
+- Browser: Chromium 154.0.8037.97 (Arch package, `/usr/bin/chromium`). Chrome for Testing
+  152.0.7977.82 is in `.tmp/linux-tools/chrome-linux64`. No Google Chrome, no Brave.
+- webkit2gtk-4.1 2.54.1, dbus 1.16.2, libayatana-appindicator 0.6.1, gtk3 3.24.52.
+- Zed 1.24.3 from pacman (for L09). No Visual Studio Code.
+
+Baseline before any install: no Ghostlight process ran. `~/.ghostlight` held only 1.x-launcher
+directories (`bin/v0.5.7` to `bin/v1.3.4`, `adapters/v1.1.1`, three `extension/v0.*`), with no
+`bin/install.json` and no service in `bin`. Chromium's `org.sylin.ghostlight` host manifest,
+`~/.local/bin/ghostlight` and the Ghostlight entries of 14 agent files (Claude Code, Codex,
+Cursor, Zed, VS Code, Goose, OpenCode, Crush, Qwen Code, Kiro, Windsurf, Junie, Copilot CLI,
+Continue) named a `.tmp/fleet-test-01` build that no longer exists. All of it is backed up in the
+ignored `.tmp/linux-1/baseline-2026-10-17/`.
 
 ### L02 The full gate on Linux (todo)
 
