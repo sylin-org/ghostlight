@@ -207,7 +207,7 @@ mod tests {
         assert_eq!(agent_of(&codex.attribution().details()), Agent::unknown());
         let unknown = ConnectionEvidence::new(" my agent ", IntakeChannel::Mcp);
         assert_eq!(agent_of(&unknown.details()).name, "my agent");
-        assert_eq!(agent_of(&unknown.details()).id, crate::agent::UNKNOWN_ID);
+        assert_eq!(agent_of(&unknown.details()).id, "unknown:my agent");
         let script = ConnectionEvidence::new("ghostlight call", IntakeChannel::Cli);
         assert_eq!(agent_of(&script.details()), Agent::command_line());
         assert_eq!(

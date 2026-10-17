@@ -1385,7 +1385,7 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
             ),
             (
                 "my agent".into(),
-                crate::agent::UNKNOWN_ID.into(),
+                "unknown:my agent".into(),
                 "my agent".into()
             ),
         ]
@@ -1395,11 +1395,32 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
 #[test]
 fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
     use crate::agent::Symbol;
+
+    let codex = one_agent_across_the_window("codex-mcp-client", &["codex"]);
+    assert_eq!(codex.name, "Codex");
+    assert_eq!(codex.symbol, Symbol::Image("integrations/codex.svg".into()));
+    let cline = one_agent_across_the_window(
+        "cline",
+        &[
+            "cline-cli",
+            "cline-vscode",
+            "cline-cursor",
+            "cline-windsurf",
+        ],
+    );
+    assert_eq!(cline.id, "cline");
+    assert_eq!(cline.name, "Cline");
+    assert_eq!(cline.symbol, Symbol::Image("integrations/cline.svg".into()));
+}
+
+/// The agent a session whose client calls itself `reported` carries, after showing that its
+/// running work, its history item and each of the Integrations rows `hosts` carry the same one.
+fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::Agent {
     use crate::intake::session::IntakeChannel;
 
     let root = std::env::temp_dir().join(format!("ghostlight-one-agent-{}", uuid::Uuid::new_v4()));
     let workspaces = crate::workspace::WorkspaceStore::default();
-    let workspace = workspaces.admit("codex-mcp-client".into(), IntakeChannel::Mcp);
+    let workspace = workspaces.admit(reported.into(), IntakeChannel::Mcp);
     let evidence = workspaces.single_connection(&workspace).unwrap();
     let projection = WorkbenchProjection::default();
     let facade = WorkbenchFacade::new(
@@ -1444,20 +1465,18 @@ fn a_session_its_work_its_history_and_its_integrations_row_carry_one_agent() {
     recorder.record_with_provenance(&record, Some(&evidence));
     facade.refresh_harnesses().unwrap();
     let shown = facade.snapshot();
-    let codex = shown
+    let agent = shown.sessions[0].agent.clone();
+    assert_eq!(shown.operations[0].agent, agent);
+    assert_eq!(shown.history[0].agent, agent);
+    let rows: Vec<&str> = shown
         .harnesses
         .iter()
-        .find(|harness| harness.id == "codex")
-        .unwrap();
-    assert_eq!(codex.agent.name, "Codex");
-    assert_eq!(
-        codex.agent.symbol,
-        Symbol::Image("integrations/codex.svg".into())
-    );
-    assert_eq!(shown.sessions[0].agent, codex.agent);
-    assert_eq!(shown.operations[0].agent, codex.agent);
-    assert_eq!(shown.history[0].agent, codex.agent);
+        .filter(|harness| harness.agent == agent)
+        .map(|harness| harness.id.as_str())
+        .collect();
+    assert_eq!(rows, hosts, "every Integrations row of {reported}");
     let _ = std::fs::remove_dir_all(root);
+    agent
 }
 
 #[test]

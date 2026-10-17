@@ -606,6 +606,8 @@ fn harness_roots(
 #[derive(Clone)]
 struct HarnessDefinition {
     id: &'static str,
+    /// The agent's catalog id, shared by every host of one agent.
+    agent_id: &'static str,
     product_id: &'static str,
     name: &'static str,
     /// The name a person reads: `name`, with the host added when several targets share the name.
@@ -674,6 +676,10 @@ enum JsonDialect {
 struct AgentRow {
     /// The harness id: one per host the agent runs on.
     id: &'static str,
+    /// The agent's catalog id: one per agent, shared by every host it runs on, and the id every
+    /// place the window names the agent carries ([`Agent::id`]). It is the catalog's own, never
+    /// the product id, which two agents can share.
+    agent_id: &'static str,
     /// The product id, shared by every host of one product.
     product_id: &'static str,
     /// The product name, as the install summary says it.
@@ -700,6 +706,7 @@ const CLINE_SETTINGS: &str = "settings/cline_mcp_settings.json";
 const ROSTER: &[AgentRow] = &[
     AgentRow {
         id: "codex",
+        agent_id: "codex",
         product_id: "codex",
         name: "Codex",
         aliases: &["codex-mcp-client"],
@@ -713,6 +720,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "claude-code",
+        agent_id: "claude-code",
         product_id: "claude-code",
         name: "Claude Code",
         aliases: &[],
@@ -726,6 +734,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "claude-desktop",
+        agent_id: "claude-desktop",
         product_id: "claude-desktop",
         name: "Claude Desktop",
         aliases: &["claude-ai"],
@@ -739,6 +748,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "cursor",
+        agent_id: "cursor",
         product_id: "cursor",
         name: "Cursor",
         aliases: &["cursor-vscode"],
@@ -752,6 +762,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "vscode",
+        agent_id: "vscode",
         product_id: "vscode",
         name: "Visual Studio Code",
         aliases: &[],
@@ -765,6 +776,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "windsurf",
+        agent_id: "windsurf",
         product_id: "windsurf",
         name: "Windsurf",
         aliases: &[],
@@ -781,6 +793,7 @@ const ROSTER: &[AgentRow] = &[
     // managed without guessing one path from the other (ADR-0148).
     AgentRow {
         id: "devin",
+        agent_id: "devin",
         product_id: "windsurf",
         name: "Devin",
         aliases: &[],
@@ -794,6 +807,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "zed",
+        agent_id: "zed",
         product_id: "zed",
         name: "Zed",
         aliases: &[],
@@ -815,6 +829,7 @@ const ROSTER: &[AgentRow] = &[
     // (ADR-0141). No official download destination is pinned until one is verified.
     AgentRow {
         id: "zcode",
+        agent_id: "zcode",
         product_id: "zcode",
         name: "ZCode",
         aliases: &[],
@@ -828,6 +843,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "opencode",
+        agent_id: "opencode",
         product_id: "opencode",
         name: "OpenCode",
         aliases: &[],
@@ -848,6 +864,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "crush",
+        agent_id: "crush",
         product_id: "crush",
         name: "Crush",
         aliases: &[],
@@ -865,6 +882,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "copilot-cli",
+        agent_id: "copilot-cli",
         product_id: "copilot-cli",
         name: "GitHub Copilot CLI",
         aliases: &[],
@@ -878,6 +896,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "cline-cli",
+        agent_id: "cline",
         product_id: "cline",
         name: "Cline",
         aliases: &[],
@@ -891,6 +910,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "cline-vscode",
+        agent_id: "cline",
         product_id: "cline",
         name: "Cline",
         aliases: &[],
@@ -911,6 +931,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "cline-cursor",
+        agent_id: "cline",
         product_id: "cline",
         name: "Cline",
         aliases: &[],
@@ -929,6 +950,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "cline-windsurf",
+        agent_id: "cline",
         product_id: "cline",
         name: "Cline",
         aliases: &[],
@@ -947,6 +969,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "kiro",
+        agent_id: "kiro",
         product_id: "kiro",
         name: "Kiro",
         aliases: &[],
@@ -960,6 +983,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "qwen-code",
+        agent_id: "qwen-code",
         product_id: "qwen-code",
         name: "Qwen Code",
         aliases: &[],
@@ -973,6 +997,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "junie",
+        agent_id: "junie",
         product_id: "junie",
         name: "Junie",
         aliases: &[],
@@ -986,6 +1011,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "kilo-code",
+        agent_id: "kilo-code",
         product_id: "kilo-code",
         name: "Kilo Code",
         aliases: &[],
@@ -1006,6 +1032,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "goose",
+        agent_id: "goose",
         product_id: "goose",
         name: "goose",
         aliases: &[],
@@ -1019,6 +1046,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "continue",
+        agent_id: "continue",
         product_id: "continue",
         name: "Continue",
         aliases: &[],
@@ -1032,6 +1060,7 @@ const ROSTER: &[AgentRow] = &[
     },
     AgentRow {
         id: "antigravity",
+        agent_id: "antigravity",
         product_id: "antigravity",
         name: "Antigravity",
         aliases: &[],
@@ -1046,19 +1075,20 @@ const ROSTER: &[AgentRow] = &[
 ];
 
 impl AgentRow {
-    /// Whether the agent's client calls itself `reported`: its harness id, its product name or
-    /// one of its aliases, ignoring case. The product id is not matched, because two products can
-    /// share one: Devin's product id is Windsurf's id.
+    /// Whether the agent's client calls itself `reported`: its catalog id, its harness id, its
+    /// product name or one of its aliases, ignoring case. The product id is not matched, because
+    /// two products can share one: Devin's product id is Windsurf's id.
     fn is_called(&self, reported: &str) -> bool {
-        [self.id, self.name]
+        [self.agent_id, self.id, self.name]
             .iter()
             .chain(self.aliases)
             .any(|known| known.eq_ignore_ascii_case(reported))
     }
 
-    /// The agent of this row, as the window names and shows it.
+    /// The agent of this row, as the window names and shows it: the same for every host of one
+    /// agent.
     fn agent(&self) -> Agent {
-        Agent::listed(self.id, self.name, self.monogram)
+        Agent::listed(self.agent_id, self.name, self.monogram)
     }
 
     /// The row as it stands on the computer `context` describes, before any location the person
@@ -1067,6 +1097,7 @@ impl AgentRow {
         let path = (self.path)(context);
         HarnessDefinition {
             id: self.id,
+            agent_id: self.agent_id,
             product_id: self.product_id,
             name: self.name,
             label: self.name.to_owned(),
@@ -1119,9 +1150,9 @@ fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
 }
 
 /// The roster's agent whose client calls itself `reported`, ignoring case and surrounding space;
-/// none for a name Ghostlight does not know. A roster row matches its harness id, its product name
-/// and its aliases, never its product id, and the first row that matches names a product on
-/// several hosts.
+/// none for a name Ghostlight does not know. A roster row matches its catalog id, its harness id,
+/// its product name and its aliases, never its product id. Every host of one agent names the same
+/// agent, because the name a client reports does not say the host.
 ///
 /// The name stays the client's own claim: it names the agent for a person and grants nothing.
 #[must_use]
@@ -1212,7 +1243,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         name: definition.name.into(),
         label: definition.label.clone(),
         target: definition.target.into(),
-        agent: Agent::listed(definition.id, definition.name, definition.monogram),
+        agent: Agent::listed(definition.agent_id, definition.name, definition.monogram),
         state,
         detail,
         evidence,
@@ -2562,16 +2593,47 @@ mod tests {
     }
 
     #[test]
+    fn every_agent_has_one_catalog_id_on_every_host_it_runs_on() {
+        for row in ROSTER {
+            for other in ROSTER {
+                assert_eq!(
+                    row.agent_id == other.agent_id,
+                    row.name == other.name,
+                    "{} and {}",
+                    row.id,
+                    other.id
+                );
+                if row.agent_id == other.agent_id {
+                    assert_eq!(row.monogram, other.monogram, "{}", row.agent_id);
+                }
+            }
+        }
+        let cline: Vec<&str> = ROSTER
+            .iter()
+            .filter(|row| row.agent_id == "cline")
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(
+            cline,
+            [
+                "cline-cli",
+                "cline-vscode",
+                "cline-cursor",
+                "cline-windsurf"
+            ]
+        );
+    }
+
+    #[test]
     fn the_command_line_and_the_unknown_agent_are_reserved_entries_no_row_takes() {
-        use crate::agent::{COMMAND_LINE_ID, UNKNOWN_ID};
+        use crate::agent::{COMMAND_LINE_ID, UNKNOWN_ID, UNKNOWN_NAME_SEPARATOR};
         use crate::language::provenance::{COMMAND_LINE_AGENT, UNKNOWN_AGENT};
 
         for row in ROSTER {
-            assert!(
-                ![COMMAND_LINE_ID, UNKNOWN_ID].contains(&row.id),
-                "{}",
-                row.id
-            );
+            for id in [row.id, row.agent_id] {
+                assert!(![COMMAND_LINE_ID, UNKNOWN_ID].contains(&id), "{id}");
+                assert!(!id.contains(UNKNOWN_NAME_SEPARATOR), "{id}");
+            }
             for reserved in [
                 COMMAND_LINE_ID,
                 UNKNOWN_ID,
@@ -2621,14 +2683,19 @@ mod tests {
                 summary.id
             );
             assert_eq!(
-                (summary.agent.id.as_str(), summary.agent.name.as_str()),
-                (summary.id.as_str(), summary.name.as_str()),
-                "every row's agent is its own catalog entry"
+                summary.agent.name, summary.name,
+                "every row's agent is its product"
             );
             assert_eq!(
                 agent_called(&summary.id).as_ref(),
                 Some(&summary.agent),
                 "every harness row is in the catalog: {}",
+                summary.id
+            );
+            assert_eq!(
+                agent_called(&summary.agent.id).as_ref(),
+                Some(&summary.agent),
+                "every agent id names its agent: {}",
                 summary.id
             );
             assert_eq!(summary.connector_command, format!("{edge} mcp"));

@@ -21,9 +21,12 @@ use crate::provenance::ConnectionDetails;
 /// roster row uses it.
 pub const COMMAND_LINE_ID: &str = "command_line";
 
-/// The id of an agent Ghostlight does not know, the catalog's other reserved entry. No roster row
-/// uses it.
+/// The id of an agent nothing names, the catalog's other reserved entry. No roster row uses it.
 pub const UNKNOWN_ID: &str = "unknown";
+
+/// What joins [`UNKNOWN_ID`] to the name an agent Ghostlight does not know reported, in that
+/// agent's id. No roster id holds it.
+pub const UNKNOWN_NAME_SEPARATOR: char = ':';
 
 /// The directory beside the window's page that serves the packaged agent tiles.
 pub const TILE_DIRECTORY: &str = "integrations";
@@ -40,7 +43,11 @@ const RESERVED_NAMES: [&str; 2] = [COMMAND_LINE_AGENT, UNKNOWN_AGENT];
 /// One agent as the window names and shows it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Agent {
-    /// The catalog id: a roster row's harness id, [`COMMAND_LINE_ID`] or [`UNKNOWN_ID`].
+    /// The catalog id, the one key that says two places name the same agent: a roster agent's id,
+    /// shared by every host it runs on; [`COMMAND_LINE_ID`]; [`UNKNOWN_ID`] for an agent nothing
+    /// names; or, for an agent Ghostlight does not know, [`UNKNOWN_ID`] and the name it reported
+    /// joined by [`UNKNOWN_NAME_SEPARATOR`], so two such agents are one only when they report the
+    /// same name.
     pub id: String,
     /// The name a person knows the agent by. An agent Ghostlight does not know keeps the name its
     /// client reported, which stays the client's own claim.
@@ -101,7 +108,7 @@ impl Serialize for Symbol {
 }
 
 impl Agent {
-    /// A roster row's agent: its harness id, its product name and its packaged monogram tile.
+    /// A roster agent: its catalog id, its product name and its packaged monogram tile.
     #[must_use]
     pub fn listed(id: &str, name: &str, monogram: &str) -> Self {
         Self {
@@ -131,6 +138,16 @@ impl Agent {
         }
     }
 
+    /// An agent Ghostlight does not know, under the `name` its client reported, with the unknown
+    /// glyph.
+    fn unknown_named(name: &str) -> Self {
+        Self {
+            id: format!("{UNKNOWN_ID}{UNKNOWN_NAME_SEPARATOR}{name}"),
+            name: name.to_owned(),
+            symbol: Symbol::Glyph(Glyph::Unknown),
+        }
+    }
+
     /// The agent of a connection on `channel` whose client `reported` a name for itself, if it
     /// is known: the command line for a `ghostlight call` session; the roster's agent for a
     /// name it knows; an agent Ghostlight does not know under the name it reported
@@ -148,10 +165,9 @@ impl Agent {
             IntakeChannel::Mcp => match reported.and_then(claimed_name) {
                 None => Self::unknown(),
                 Some(name) if takes_a_reserved_name(name) => Self::unknown(),
-                Some(name) => crate::install::agent_called(name).unwrap_or_else(|| Self {
-                    name: name.to_owned(),
-                    ..Self::unknown()
-                }),
+                Some(name) => {
+                    crate::install::agent_called(name).unwrap_or_else(|| Self::unknown_named(name))
+                }
             },
         }
     }
@@ -310,10 +326,30 @@ mod tests {
         assert_eq!(
             Agent::of(Some("  Some Agent  "), IntakeChannel::Mcp),
             Agent {
-                id: UNKNOWN_ID.into(),
+                id: "unknown:Some Agent".into(),
                 name: "Some Agent".into(),
                 symbol: Symbol::Glyph(Glyph::Unknown),
             }
         );
+        assert_ne!(
+            Agent::of(Some("Some Agent"), IntakeChannel::Mcp).id,
+            Agent::of(Some("Other Agent"), IntakeChannel::Mcp).id,
+            "two agents Ghostlight does not know stay two"
+        );
+    }
+
+    #[test]
+    fn every_host_of_one_agent_names_one_agent() {
+        let cline = Agent::of(Some("cline"), IntakeChannel::Mcp);
+        assert_eq!(cline.id, "cline");
+        assert_eq!(cline.name, "Cline");
+        for host in [
+            "cline-cli",
+            "cline-vscode",
+            "cline-cursor",
+            "cline-windsurf",
+        ] {
+            assert_eq!(Agent::of(Some(host), IntakeChannel::Mcp), cline, "{host}");
+        }
     }
 }

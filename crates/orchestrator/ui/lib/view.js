@@ -229,8 +229,8 @@
       }
       const agent = event.target.closest?.("[data-glance-agent]");
       if (agent) {
-        const name = agent.dataset.glanceAgent;
-        glanceAgent = glanceAgent === name ? null : name;
+        const id = agent.dataset.glanceAgent;
+        glanceAgent = glanceAgent === id ? null : id;
         if (lastConnections) paintConnections(lastConnections);
         return;
       }
@@ -682,7 +682,7 @@
     /*
      * At a glance: one summary of who is connected and where they work.
      *
-     * Agents are grouped by the name a person knows them by, not per connection: an editor that
+     * Agents are grouped by the agent id the service gives them, not per connection: an editor that
      * starts a session per request, or a shell running `ghostlight call` in a loop, is one agent
      * the user recognizes. The summary opens into two shelves, agents and browsers, and an agent
      * on its shelf opens its card, one line per session. The sessions themselves stay separate
@@ -692,19 +692,20 @@
     let lastConnections = null;
 
     /**
-     * The agents among `sessions`, each with the agent the service names and its sessions, busiest
-     * and most tabbed first. Sessions whose client reported no name share the service's one
-     * unknown agent.
+     * The agents among `sessions`, each with the agent the service names and its sessions, most
+     * tabbed first. Sessions are one agent's when the service gives them one agent id: every host
+     * of a roster agent shares one, and sessions whose client reported no name share the unknown
+     * agent's.
      */
     function agentGroups(sessions) {
       const groups = new Map();
       for (const session of sessions) {
         const agent = session.agent;
-        const group = groups.get(agent.name) ?? { name: agent.name, agent, sessions: [], tabs: 0, busy: false };
+        const group = groups.get(agent.id) ?? { id: agent.id, name: agent.name, agent, sessions: [], tabs: 0, busy: false };
         group.sessions.push(session);
         group.tabs += session.tab_count ?? 0;
         group.busy = group.busy || session.active_operations > 0;
-        groups.set(agent.name, group);
+        groups.set(agent.id, group);
       }
       return [...groups.values()]
         .sort((left, right) => right.tabs - left.tabs || left.name.localeCompare(right.name));
@@ -733,10 +734,10 @@
 
     /** One agent on its shelf: a button that opens its card. */
     function agentChipMarkup(group) {
-      const open = glanceAgent === group.name;
+      const open = glanceAgent === group.id;
       const many = group.sessions.length > 1 ? ` <span class="tally">${group.sessions.length}</span>` : "";
       return `<button class="chip glance-chip ${group.busy ? "busy" : "on"}" type="button"`
-        + ` data-glance-agent="${escapeHtml(group.name)}" aria-expanded="${open}" aria-controls="${GLANCE_CARD_ID}">`
+        + ` data-glance-agent="${escapeHtml(group.id)}" aria-expanded="${open}" aria-controls="${GLANCE_CARD_ID}">`
         + `${symbolMarkup(group.agent, "chip")}${escapeHtml(group.name)}${many}</button>`;
     }
 
@@ -789,7 +790,7 @@
     function paintConnections(facts) {
       ifChanged("connections", [facts, glanceAgent], () => {
         const groups = agentGroups(facts.sessions);
-        const open = groups.find((group) => group.name === glanceAgent);
+        const open = groups.find((group) => group.id === glanceAgent);
         const body = shelvesMarkup(groups, facts.browsers, facts.no_browser) + (open ? cardMarkup(open) : "");
         const markup = `<details class="glance" data-page-details="${GLANCE_KEY}"${openPage.has(GLANCE_KEY) ? " open" : ""}>`
           + pillMarkup(groups, facts.browsers) + body + "</details>";
@@ -853,9 +854,9 @@
     /** The file an agent reads, from its settings path. */
     const fileOf = (path) => String(path ?? "").split(/[\\/]/).filter(Boolean).at(-1) ?? "";
 
-    /** The live sessions of `harness`'s agent and the tabs they hold. */
+    /** The live sessions of `harness`'s agent, those with its agent id, and the tabs they hold. */
     function useOf(harness, sessions) {
-      const own = sessions.filter((session) => session.agent.name === harness.name);
+      const own = sessions.filter((session) => session.agent.id === harness.agent.id);
       return { sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0) };
     }
 
@@ -1081,7 +1082,7 @@
       if (inUse(agent)) {
         html += `<div class="agent-live"><span class="agent-dot d-live" aria-hidden="true"></span>`
           + `<span>${escapeHtml(agentLive(agent.name, agent.use))}</span>`
-          + `<button class="link-button" type="button" data-view="monitor" data-show-agent="${escapeHtml(agent.name)}">`
+          + `<button class="link-button" type="button" data-view="monitor" data-show-agent="${escapeHtml(agent.agent.id)}">`
           + `${escapeHtml(AGENTS.showSessions)}</button></div>`;
       }
       html += nextMarkup(agent, acts, used);

@@ -1136,7 +1136,7 @@ test("Copy id puts the connection id on the clipboard and says so", async () => 
   const sessions = [glanceSession("w1", "Codex", { tabs: 1, browser: "Google Chrome" })];
   const shown = await windowOver({ answer: healthy(snapshotAnswer({ sessions })) });
   const bar = drawn(shown.el("connections").innerHTML);
-  shown.click(bar.wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  shown.click(bar.wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex"));
   const card = drawn(shown.el("connections").innerHTML);
   shown.click(card.wearing("glance-line")[0].children.find((child) => child.tag === "button"));
   await settle();
@@ -1276,7 +1276,7 @@ test("an agent wears the symbol the service names, drawn by one renderer in the 
   assert.ok(html().includes(Words.symbolMarkup(namedAgent("Claude Code"), "face")));
   assert.ok(html().includes(Words.symbolMarkup(namedAgent("Command line"), "face")), "the command line wears its prompt");
   assert.ok(html().includes(Words.symbolMarkup(codex, "chip")), "the shelf");
-  shown.click(drawn(html()).wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  shown.click(drawn(html()).wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex"));
   assert.ok(html().includes(Words.symbolMarkup(codex, "card")), "the card");
   assert.ok(shown.el("agents-list").innerHTML.includes(Words.symbolMarkup(codex, "rail")), "the rail");
   assert.ok(html().includes('<img src="integrations/codex.svg" alt="" width="20" height="20">'));
@@ -1337,11 +1337,26 @@ test("the shelves name each agent once with its glyph, a count past one session,
   assert.deepEqual(agents.map((chip) => chip.textContent), ["Codex 2", "Claude Code", "Command line"]);
   assert.deepEqual(agents.map((chip) => chip.classes.has("busy")), [false, true, false]);
   assert.deepEqual(agents.map((chip) => chip.attributes["aria-expanded"]), ["false", "false", "false"]);
-  const chipMarkup = (name) => shown.el("connections").innerHTML.split(`data-glance-agent="${name}"`)[1].split("</button>")[0];
-  assert.ok(chipMarkup("Codex").includes(Words.symbolMarkup(namedAgent("Codex"), "chip")), "an agent wears its tile");
-  assert.ok(chipMarkup("Command line").includes(Words.SYMBOL_GLYPHS[Words.GLYPH.commandLine]), "the command line wears the prompt");
+  const chipMarkup = (id) => shown.el("connections").innerHTML.split(`data-glance-agent="${id}"`)[1].split("</button>")[0];
+  assert.ok(chipMarkup("codex").includes(Words.symbolMarkup(namedAgent("Codex"), "chip")), "an agent wears its tile");
+  assert.ok(chipMarkup("command_line").includes(Words.SYMBOL_GLYPHS[Words.GLYPH.commandLine]), "the command line wears the prompt");
   const browsers = bar.wearing("glance-chip").filter((chip) => chip.tag === "span");
   assert.deepEqual(browsers.map((chip) => chip.textContent), ["Google Chrome3 tabs"]);
+});
+
+test("the shelves group sessions by the agent id the service gives, never by name", () => {
+  const cline = { id: "cline", name: "Cline", symbol: { src: "integrations/cline.svg" } };
+  const stranger = (name) => ({ id: `unknown:${name}`, name, symbol: { glyph: "unknown" } });
+  const sessions = [
+    { ...glanceSession("on-cli", "Cline"), agent: cline },
+    { ...glanceSession("in-cursor", "Cline"), agent: cline },
+    { ...glanceSession("one", "Helper"), agent: stranger("Helper") },
+    { ...glanceSession("two", "Other helper"), agent: stranger("Other helper") }
+  ];
+  const agents = glance({ sessions, browsers: [] }).read().wearing("glance-chip").filter((chip) => chip.tag === "button");
+  assert.deepEqual(agents.map((chip) => [chip.dataset.glanceAgent, chip.textContent]),
+    [["cline", "Cline 2"], ["unknown:Helper", "Helper"], ["unknown:Other helper", "Other helper"]],
+    "an agent on two hosts is one chip, and two agents Ghostlight does not know stay two");
 });
 
 test("a working agent's symbol breathes in the accent, and reduced motion keeps it still", () => {
@@ -1369,11 +1384,11 @@ test("an agent on its shelf opens its card: a few sessions in words, and the tru
     glanceSession("c9", "Codex", { tabs: 2, busy: true, browser: "Google Chrome", reported: "codex-mcp-client" })
   ];
   const shown = glance({ sessions: many });
-  const chip = shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex");
+  const chip = shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex");
   shown.click(chip);
   const card = shown.read().wearing("glance-card");
   assert.equal(card.length, 1);
-  assert.equal(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex").attributes["aria-expanded"], "true");
+  assert.equal(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex").attributes["aria-expanded"], "true");
   const lines = shown.read().wearing("glance-line");
   assert.equal(lines.length, Words.GLANCE_CARD_LINES);
   assert.equal(lines[0].children[0].textContent, "2 tabs in Google Chrome, working", "working sessions first");
@@ -1382,7 +1397,7 @@ test("an agent on its shelf opens its card: a few sessions in words, and the tru
   const notes = card[0].children.filter((child) => child.classes.has("connection-explanation"));
   assert.deepEqual(notes.map((note) => note.textContent), ["&quot;codex-mcp-client&quot; is what the agent calls itself; Ghostlight does not verify it."]);
   assert.ok(!shown.el("connections").innerHTML.includes("Intake"), "the intake is not a field of the card");
-  shown.click(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  shown.click(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex"));
   assert.equal(shown.read().wearing("glance-card").length, 0, "the same chip closes it");
 });
 
@@ -1395,7 +1410,7 @@ test("a session line says the command line only for the command line", () => {
 
 test("each line of a card keeps its connection ids behind Copy id", () => {
   const shown = glance();
-  shown.click(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "Codex"));
+  shown.click(shown.read().wearing("glance-chip").find((node) => node.dataset.glanceAgent === "codex"));
   const copies = shown.read().wearing("glance-line").map((line) => line.children.find((child) => child.tag === "button"));
   assert.deepEqual(copies.map((button) => button.textContent), ["Copy id", "Copy id"]);
   assert.deepEqual(copies.map((button) => button.dataset.copyConnection), ["connection_w3", "connection_w2"]);

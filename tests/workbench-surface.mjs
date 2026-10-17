@@ -158,13 +158,15 @@ const ROSTER_AGENTS = new Map([["Codex", "codex"], ["Zed", "zed"], ["Claude Code
 
 /**
  * An agent as the service names it: a roster agent wears its packaged tile, the command line its
- * prompt, and any other name, or none, the unknown glyph.
+ * prompt, and any other name, or none, the unknown glyph. An agent Ghostlight does not know is
+ * identified by the name it reported.
  */
 const namedAgent = (name) => {
   if (name === "Command line") return { id: "command_line", name, symbol: { glyph: "command_line" } };
   const id = ROSTER_AGENTS.get(name);
   if (id) return { id, name, symbol: { src: `integrations/${id}.svg` } };
-  return { id: "unknown", name: name ?? "Unknown agent", symbol: { glyph: "unknown" } };
+  if (name == null) return { id: "unknown", name: "Unknown agent", symbol: { glyph: "unknown" } };
+  return { id: `unknown:${name}`, name, symbol: { glyph: "unknown" } };
 };
 
 const snapshot = () => ({
@@ -900,8 +902,8 @@ const glanceChecks = [];
       && html.includes(">3 agents<") && html.includes(">1 browser<") && html.includes(">Details<")
       && !html.includes("Connection details") && !html.includes("Intake"), html]);
   glanceChecks.push(["the shelves give each agent one chip with a count, and the working one wears the busy glyph",
-    html.includes('data-glance-agent="Codex"') && html.includes('<span class="tally">5</span>')
-      && /class="chip glance-chip busy"[^>]*data-glance-agent="Claude &lt;b&gt;Code&lt;\/b&gt;"/.test(html)
+    html.includes('data-glance-agent="codex"') && html.includes('<span class="tally">5</span>')
+      && /class="chip glance-chip busy"[^>]*data-glance-agent="unknown:Claude &lt;b&gt;Code&lt;\/b&gt;"/.test(html)
       && html.includes(">Google Chrome<small>2 tabs</small>") && !html.includes("<b>Code</b>"), html]);
   documentHandlers.get("toggle").at(-1)({ target: { dataset: { pageDetails: "glance" }, open: true,
     classList: { contains: () => false } } });
@@ -914,14 +916,14 @@ const glanceChecks = [];
     html.startsWith('<details class="glance" data-page-details="glance" open>'), html.slice(0, 80)]);
   const press = (name) => documentHandlers.get("click").forEach((handler) => handler({ target: {
     closest: (selector) => (selector === "[data-glance-agent]" ? { dataset: { glanceAgent: name } } : null) } }));
-  press("Codex");
+  press("codex");
   html = draw({ sessions, browsers });
   glanceChecks.push(["an agent's card says at most four sessions, how many more, and the trust note once",
     (html.match(/class="glance-line"/g) ?? []).length === 4 && html.includes(">and 1 more<")
       && (html.match(/is what the agent calls itself/g) ?? []).length === 1
       && html.includes('data-copy-connection="connection_codex_0"') && html.includes(">Copy id<")
       && !html.includes(">connection_codex_0<"), html]);
-  press("Codex");
+  press("codex");
   html = draw({ sessions, browsers });
   glanceChecks.push(["pressing the agent again closes its card", !html.includes('class="glance-card"'), html]);
   for (const line of ["Starts Google Chrome on request", "No browser connected"]) {
@@ -934,7 +936,7 @@ const glanceChecks = [];
     channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it." }] };
   html = draw({ sessions: [unnamed, { ...unnamed, id: "unnamed_2" }], browsers });
   glanceChecks.push(["a session whose client reported no name is one Unknown agent, never a blank chip",
-    html.includes('data-glance-agent="Unknown agent"') && html.includes('<span class="tally">2</span>')
+    html.includes('data-glance-agent="unknown"') && html.includes('>Unknown agent <span class="tally">2</span>')
       && !html.includes('data-glance-agent=""') && html.includes(">1 agent<"), html]);
 }
 
@@ -1271,13 +1273,13 @@ const watchOpening = {
 watching.clickOn("[data-agent]", { dataset: { agent: "qwen-code" } });
 const watchQwenPane = watching.text("agents-pane").innerHTML;
 const watchGlance = { closed: watching.text("connections").innerHTML };
-watching.clickOn("[data-glance-agent]", { dataset: { glanceAgent: "Codex" } });
+watching.clickOn("[data-glance-agent]", { dataset: { glanceAgent: "codex" } });
 watchGlance.card = watching.text("connections").innerHTML;
 watching.clickOn("[data-copy-connection]", { dataset: { copyConnection: "connection_watched" } });
 await watching.settle();
 watchGlance.copied = [...watching.copied];
 watchGlance.toast = watching.text("toast").textContent;
-watching.clickOn("[data-glance-agent]", { dataset: { glanceAgent: "Codex" } });
+watching.clickOn("[data-glance-agent]", { dataset: { glanceAgent: "codex" } });
 const watchBeforeFocus = watchRequests().length;
 watching.windowHandlers.get("focus")?.();
 await watching.settle();
@@ -1892,7 +1894,7 @@ const checks = [
     JSON.stringify(agentPanes)],
   ["an agent in use says its sessions and tabs, links to At a glance, and pulses on its wire",
     agentPanes.zed.includes("2 Zed sessions are connected right now, with 3 browser tabs open.")
-      && agentPanes.zed.includes('data-view="monitor" data-show-agent="Zed"')
+      && agentPanes.zed.includes('data-view="monitor" data-show-agent="zed"')
       && agentPanes.zed.includes('class="agent-hero s-live"'),
     agentPanes.zed],
   ["a copy-only agent is connected by pasting, claims nothing about its file, and is never offered Connect or Prepare",

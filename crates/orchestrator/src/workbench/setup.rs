@@ -466,11 +466,11 @@ fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<A
     })
 }
 
-/// Whether `session` is a session of the agent `harness` sets up: the session's agent, named as a
-/// person knows it, is that agent's product name. A product on several hosts is one agent here,
-/// because the name a client reports does not say the host.
+/// Whether `session` is a session of the agent `harness` sets up: both carry the same catalog id.
+/// An agent on several hosts is one agent here, because the name a client reports does not say
+/// the host.
 fn is_agent_of(session: &SessionSummary, harness: &HarnessSummary) -> bool {
-    session.agent.name.eq_ignore_ascii_case(&harness.name)
+    session.agent.id == harness.agent.id
 }
 
 /// The name of the agent whose request finished setup: the roster's product name for the
@@ -1167,6 +1167,7 @@ mod tests {
         for host in &mut two_hosts {
             host.product_id = "cline".into();
             host.name = "Cline".into();
+            host.agent = crate::agent::Agent::listed("cline", "Cline", "cline.svg");
         }
         assert_eq!(
             agent_name(&finished, &[session("workspace_1", "Cline")], &two_hosts).as_deref(),

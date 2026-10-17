@@ -24,7 +24,7 @@ const jsonSetup = (collection = "mcpServers") => JSON.stringify({
 }, null, 2);
 
 const previewHarness = ({
-  id, productId = id, name, label = name, target, monogram = `${id}.svg`, state, configPath,
+  id, agentId = id, productId = id, name, label = name, target, monogram = `${id}.svg`, state, configPath,
   canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false
 }) => ({
   id,
@@ -32,8 +32,9 @@ const previewHarness = ({
   name,
   label,
   target,
-  // The agent the row sets up, as the service names it: its packaged monogram tile.
-  agent: { id, name, symbol: { src: `integrations/${monogram}` } },
+  // The agent the row sets up, as the service names it: one id for every host of one agent, and
+  // its packaged monogram tile.
+  agent: { id: agentId, name, symbol: { src: `integrations/${monogram}` } },
   state,
   detail: detail ?? harnessDetail[state],
   ...(evidence ? { evidence } : {}),
@@ -53,7 +54,7 @@ const previewHarness = ({
 // copy-only). The rail must form its groups without inheriting registry or fixture order.
 const harnesses = [
   previewHarness({ id: "qwen-code", name: "Qwen Code", target: "CLI", state: "not_detected", configPath: "/home/test/.qwen/settings.json" }),
-  previewHarness({ id: "cline-vscode", productId: "cline", name: "Cline", label: "Cline (Visual Studio Code)", target: "Visual Studio Code", monogram: "cline.svg", state: "available", configPath: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-vscode", agentId: "cline", productId: "cline", name: "Cline", label: "Cline (Visual Studio Code)", target: "Visual Studio Code", monogram: "cline.svg", state: "available", configPath: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
   previewHarness({
     id: "claude-desktop", name: "Claude Desktop", target: "User", state: "needs_attention",
     configPath: "/home/test/.config/Claude/claude_desktop_config.json", canDownload: false,
@@ -66,7 +67,7 @@ const harnesses = [
   previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "not_detected", copyOnly: true, configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorPath}"\n    args: ["mcp"]\n` }),
   previewHarness({ id: "antigravity", name: "Antigravity", target: "CLI", state: "not_detected", configPath: "/home/test/.gemini/config/mcp_config.json" }),
   previewHarness({
-    id: "cline-cursor", productId: "cline", name: "Cline", label: "Cline (Cursor)", target: "Cursor", monogram: "cline.svg",
+    id: "cline-cursor", agentId: "cline", productId: "cline", name: "Cline", label: "Cline (Cursor)", target: "Cursor", monogram: "cline.svg",
     state: "needs_attention",
     configPath: "/home/test/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
     evidence: `Found another program, \`npx\` with 2 arguments, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
@@ -76,7 +77,7 @@ const harnesses = [
   previewHarness({ id: "zed", name: "Zed", target: "User", state: "installed", configPath: "/home/test/.config/zed/settings.json", manualSetup: jsonSetup("context_servers") }),
   previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "available", copyOnly: true, configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorPath}"\n    args: ["mcp"]\n    envs: {}\n    timeout: 300\n` }),
   previewHarness({ id: "copilot-cli", name: "GitHub Copilot CLI", target: "CLI", state: "available", configPath: "/home/test/.copilot/mcp-config.json" }),
-  previewHarness({ id: "cline-cli", productId: "cline", name: "Cline", label: "Cline (CLI)", target: "CLI", monogram: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-cli", agentId: "cline", productId: "cline", name: "Cline", label: "Cline (CLI)", target: "CLI", monogram: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
   previewHarness({
     id: "junie", name: "Junie", target: "CLI and JetBrains", state: "needs_attention",
     configPath: "/home/test/.junie/mcp/mcp.json",
@@ -90,7 +91,7 @@ const harnesses = [
     evidence: `Found another program, \`alien-cli\` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
   previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "installed", configPath: "/home/test/.claude.json" }),
-  previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", label: "Cline (Windsurf)", target: "Windsurf", monogram: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-windsurf", agentId: "cline", productId: "cline", name: "Cline", label: "Cline (Windsurf)", target: "Windsurf", monogram: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
   previewHarness({ id: "vscode", name: "Visual Studio Code", target: "User", state: "available", configPath: "/home/test/.config/Code/User/mcp.json", manualSetup: jsonSetup("servers") })
 ];
 
@@ -98,9 +99,12 @@ const harnesses = [
 const COMMAND_LINE_AGENT = { id: "command_line", name: "Command line", symbol: { glyph: "command_line" } };
 const UNKNOWN_AGENT = { id: "unknown", name: "Unknown agent", symbol: { glyph: "unknown" } };
 
-/** The agent the service names by `name`: the roster's first row of that name, or the command line. */
+/**
+ * The agent the service names by `name`: the roster's agent of that name, the command line, or an
+ * agent Ghostlight does not know, identified by the name it reported.
+ */
 const agentNamed = (name) => (name === COMMAND_LINE_AGENT.name ? COMMAND_LINE_AGENT
-  : harnesses.find((harness) => harness.name === name)?.agent ?? { ...UNKNOWN_AGENT, name });
+  : harnesses.find((harness) => harness.name === name)?.agent ?? { ...UNKNOWN_AGENT, id: `${UNKNOWN_AGENT.id}:${name}`, name });
 
 const expectedHarnessIds = [
   "antigravity", "claude-code", "claude-desktop", "cline-cli", "cline-cursor",
