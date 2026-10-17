@@ -632,6 +632,95 @@ fn a_call_that_reaches_the_session_browser_names_it_in_the_record() {
     );
 }
 
+/// A session pinned to a connected browser, as the record tests below need it: the browser is
+/// named, so a record that names it would say so.
+fn pinned_to_chrome() -> (
+    ApplicationExecutor,
+    Arc<FakeBrowser>,
+    crate::workspace::WorkspaceId,
+    Arc<MemoryAudit>,
+) {
+    let (executor, browser, workspaces, workspace, audit) = fixture();
+    let mut chrome = summary("browser_chrome", true);
+    chrome.name = Some("Google Chrome".into());
+    browser.connect(vec![chrome]);
+    workspaces
+        .pin_browser(workspace.as_str(), "browser_chrome")
+        .unwrap();
+    (executor, browser, workspace, audit)
+}
+
+/// Explaining the policy sends nothing to a browser, so its record names none although the
+/// session works in a connected one.
+#[test]
+fn policy_explain_names_no_browser_in_the_record() {
+    let (executor, browser, workspace, audit) = pinned_to_chrome();
+
+    let explained = executor.execute(
+        &workspace,
+        "policy_explain",
+        json!({}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(explained.status, Status::Succeeded, "{}", explained.summary);
+    assert!(browser.routed().is_empty());
+    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
+}
+
+/// Input refused before the call starts never reaches the session's connected browser, and its
+/// record names none.
+#[test]
+fn invalid_input_names_no_browser_in_the_record() {
+    let (executor, browser, workspace, audit) = pinned_to_chrome();
+
+    let refused = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"juggle"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(refused.status, Status::Failed, "{}", refused.summary);
+    assert_eq!(refused.facts["reason"], "invalid_input");
+    assert!(browser.routed().is_empty());
+    assert_eq!(audit.0.lock().unwrap()[0].browser, None);
+}
+
+/// A flow's steps share the flow's invocation: the step that reached the browser names it, a
+/// later step that reached none names none, and the flow's own record names the browser its work
+/// reached.
+#[test]
+fn a_flow_names_the_browser_only_on_the_records_of_work_that_reached_it() {
+    let (executor, browser, workspace, audit) = pinned_to_chrome();
+    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
+
+    let flowed = executor.execute(
+        &workspace,
+        "browser_flow",
+        json!({"on_error":"continue","steps":[
+            {"id":"tabs","tool":"browser_tabs","arguments":{"action":"list"}},
+            {"id":"policy","tool":"policy_explain","arguments":{}}
+        ]}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(flowed.status, Status::Succeeded, "{}", flowed.summary);
+    let records = audit.0.lock().unwrap();
+    let named: Vec<_> = records
+        .iter()
+        .map(|record| (record.tool.as_str(), record.browser.as_deref()))
+        .collect();
+    assert_eq!(
+        named,
+        vec![
+            ("browser_tabs", Some("Google Chrome")),
+            ("policy_explain", None),
+            ("browser_flow", Some("Google Chrome")),
+        ]
+    );
+}
+
 /// A pinned browser that stays gone while a different browser is connected is the one case
 /// that names another profile. Nothing is sent, the session is not moved, and the record names
 /// no browser, because none was reached.

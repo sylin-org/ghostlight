@@ -95,18 +95,8 @@ impl ApplicationExecutor {
         let observed = self
             .take_observation(&terminal.result.invocation)
             .merged(terminal.observed.clone());
-        // The record names only a browser that is connected: a call refused because the
-        // session's browser is gone never reached one, and a guessed family would say it did.
-        let browser_label = self
-            .workspaces
-            .browser_of(workspace.as_str())
-            .and_then(|id| {
-                self.browser
-                    .browsers()
-                    .into_iter()
-                    .find(|b| b.id == id)
-                    .map(|b| b.name.unwrap_or_else(|| "Chromium".into()))
-            });
+        // The record names a browser only when one received a command of this work.
+        let browser_label = self.take_reached(&terminal.result.invocation, step.is_some());
         let mut record = AuditRecord::now(
             &terminal.result.invocation,
             workspace.as_str(),

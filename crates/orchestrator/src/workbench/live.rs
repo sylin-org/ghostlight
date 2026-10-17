@@ -34,7 +34,7 @@ use super::{
 };
 use crate::browser::adapter::RuntimeControlState;
 use crate::browser::recovery::BrowserRecovery;
-use crate::browser::BrowserPort;
+use crate::browser::{BrowserPort, BrowserSummary};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
 use crate::governance::manifest::BrowserStartup;
@@ -266,7 +266,7 @@ impl Live {
                     browser_list
                         .iter()
                         .find(|b| b.id == id)
-                        .map(|b| b.name.clone().unwrap_or_else(|| "Chromium".into()))
+                        .map(BrowserSummary::display_name)
                 });
                 SessionSummary {
                     active_operations: operations
@@ -292,8 +292,8 @@ impl Live {
             .into_iter()
             .map(|browser| BrowserInstanceSummary {
                 tab_count: tabs_in.get(&browser.id).copied().unwrap_or_default(),
+                family: browser.display_name(),
                 id: browser.id,
-                family: browser.name.unwrap_or_else(|| "Chromium".into()),
                 adapter_version: Some(browser.adapter_version),
                 connected: true,
             })

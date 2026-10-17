@@ -121,7 +121,9 @@ pub struct AuditRecord {
     /// Bounded original-connection evidence; claimed labels never enter this durable type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<crate::provenance::Attribution>,
-    /// Persistent browser family or product name that performed this work.
+    /// Product name, or family when it reports none, of the browser that received this work's
+    /// commands. Absent when no browser received any: a call refused or finished before dispatch,
+    /// or one that needed no browser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<String>,
 }
@@ -181,7 +183,7 @@ impl AuditRecord {
         }
     }
 
-    /// Attach the browser family or product name that performed the work.
+    /// Attach the name of the browser that received the work's commands, if one did.
     #[must_use]
     pub fn with_browser(mut self, browser: Option<String>) -> Self {
         self.browser = browser;

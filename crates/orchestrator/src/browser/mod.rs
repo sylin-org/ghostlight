@@ -353,6 +353,19 @@ pub struct BrowserSummary {
     pub attended: bool,
 }
 
+/// The name a connected browser goes by when its adapter reports no product name: the browser
+/// family every adapter this service serves belongs to.
+const UNNAMED_BROWSER: &str = "Chromium";
+
+impl BrowserSummary {
+    /// The name a person and the history know this browser by: its reported product name, or
+    /// its family when it reports none.
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        self.name.clone().unwrap_or_else(|| UNNAMED_BROWSER.into())
+    }
+}
+
 /// Every connected browser, and the reported order in which they were last attended.
 ///
 /// Browsers are plural. One person routinely runs Chrome and Edge at once, or two profiles of
@@ -1322,6 +1335,29 @@ impl BrowserError {
             reason,
             lookup: None,
         }
+    }
+
+    /// Whether the failure was seen before any part of the request was sent to a browser, so no
+    /// browser took part in the work.
+    #[must_use]
+    pub const fn before_dispatch(&self) -> bool {
+        matches!(
+            self,
+            Self::DocumentAccess(_)
+                | Self::DocumentUnavailable
+                | Self::RuntimeControl(_)
+                | Self::DisconnectedBeforeDispatch
+                | Self::NotAnsweringBeforeDispatch
+                | Self::BusyBeforeDispatch
+                | Self::WrongProfile
+                | Self::CancelledBeforeDispatch
+                | Self::DeadlineBeforeDispatch
+                | Self::UnknownBrowser(_)
+                | Self::BrowserPinned
+                | Self::AmbiguousBrowser(_)
+                | Self::RecoveryManual { .. }
+                | Self::RecoveryFailed { .. }
+        )
     }
 
     /// Whether dispatch could have caused a physical effect.

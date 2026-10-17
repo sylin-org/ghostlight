@@ -164,6 +164,7 @@ pub struct ApplicationExecutor {
     audit: Arc<crate::audit::AuditRecorder>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
     observations: ObservationRegistry,
+    reached: ReachedRegistry,
     stale_offers: StaleOfferRegistry,
     permissions: Mutex<HashMap<String, crate::governance::evidence::PermissionTrace>>,
     coverage: Mutex<HashMap<String, language::coverage::Coverage>>,
@@ -190,6 +191,26 @@ fn extension_in_a_browser_profile() -> bool {
 /// An entry lives from the invocation's first browser crossing until the completion path reads it,
 /// which happens exactly once per invocation.
 type ObservationRegistry = Arc<Mutex<HashMap<String, Observed>>>;
+
+/// The browser each in-flight invocation's commands reached, by invocation.
+///
+/// An entry lives from the invocation's first command a browser received until the invocation
+/// itself completes. A call refused or finished before any browser received a command never has
+/// one, so its record names no browser.
+type ReachedRegistry = Mutex<HashMap<String, Reached>>;
+
+/// The browser one invocation reached, by name.
+///
+/// A flow's steps run under the flow's invocation, so each step's record names only a browser
+/// reached since the previous step completed, while the flow's own record names the browser any
+/// of its steps reached.
+#[derive(Default)]
+struct Reached {
+    /// The browser the invocation reached, kept until the invocation completes.
+    invocation: Option<String>,
+    /// The browser reached since the invocation's last step completed.
+    step: Option<String>,
+}
 
 /// What one invocation's stale-target refusal offers, consumed by the completion path exactly once.
 type StaleOfferRegistry = Arc<Mutex<HashMap<String, StaleOffer>>>;
@@ -227,6 +248,7 @@ impl ApplicationExecutor {
             audit,
             diagnostics,
             observations: Arc::new(Mutex::new(HashMap::new())),
+            reached: Mutex::new(HashMap::new()),
             stale_offers: Arc::new(Mutex::new(HashMap::new())),
             permissions: Mutex::new(HashMap::new()),
             coverage: Mutex::new(HashMap::new()),
@@ -1299,9 +1321,9 @@ impl ApplicationExecutor {
         self.presentation
             .bind_command(context.workspace.as_str(), context.invocation, &command);
         let admit = || self.admit_dispatch(context);
-        let outcome = self.browser.call_guarded(
+        let outcome = self.send(
+            context,
             &browser,
-            context.workspace.as_str(),
             command,
             crate::browser::BrowserDispatch {
                 deadline: context.deadline,
@@ -1318,6 +1340,62 @@ impl ApplicationExecutor {
             }
             outcome => outcome,
         }
+    }
+
+    /// Send one command to `browser` and remember that the invocation reached it, unless the
+    /// command failed before any of it was sent.
+    ///
+    /// The name is read before sending, so a browser that disconnects after taking the command is
+    /// still named in the record of the work it took part in.
+    fn send(
+        &self,
+        context: &InvocationContext<'_>,
+        browser: &str,
+        command: BrowserCommand,
+        dispatch: crate::browser::BrowserDispatch<'_>,
+    ) -> Result<BrowserOutcome, BrowserError> {
+        let name = self
+            .browser
+            .browsers()
+            .into_iter()
+            .find(|summary| summary.id == browser)
+            .map(|summary| summary.display_name());
+        let outcome =
+            self.browser
+                .call_guarded(browser, context.workspace.as_str(), command, dispatch);
+        let sent = !matches!(&outcome, Err(error) if error.before_dispatch());
+        if let Some(name) = name.filter(|_| sent) {
+            let mut reached = self.reached();
+            let entry = reached.entry(context.invocation.into()).or_default();
+            entry.invocation = Some(name.clone());
+            entry.step = Some(name);
+        }
+        outcome
+    }
+
+    /// Take the name of the browser the invocation reached, or None when no browser received
+    /// any of its commands.
+    ///
+    /// A step's completion takes only what was reached since the previous step; the
+    /// invocation's own completion takes the rest and leaves nothing behind, which keeps the
+    /// registry bounded by work in flight.
+    fn take_reached(&self, invocation: &str, step: bool) -> Option<String> {
+        let mut reached = self.reached();
+        if step {
+            reached
+                .get_mut(invocation)
+                .and_then(|entry| entry.step.take())
+        } else {
+            reached
+                .remove(invocation)
+                .and_then(|entry| entry.invocation)
+        }
+    }
+
+    fn reached(&self) -> std::sync::MutexGuard<'_, HashMap<String, Reached>> {
+        self.reached
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Admit this invocation's next browser crossing and name the browser it goes to.
@@ -1542,9 +1620,9 @@ impl ApplicationExecutor {
         let Some(browser) = self.workspaces.browser_of(context.workspace.as_str()) else {
             return CloseCompensation::Unknown;
         };
-        match self.browser.call_guarded(
+        match self.send(
+            context,
             &browser,
-            context.workspace.as_str(),
             BrowserCommand::CloseTab {
                 tab_id: tab.physical_id,
                 released: false,
