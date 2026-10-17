@@ -80,7 +80,7 @@ bare `npx -y ghostlight` remains the stdio command for another compatible MCP cl
 
 ## Workbench installation behavior
 
-MCP integrations supports these explicit user-level configurations:
+The **Integrations** page supports these explicit user-level configurations:
 
 | Harness | Configuration family |
 | --- | --- |
@@ -156,7 +156,7 @@ Open **Status**. A useful report distinguishes:
 The terminal equivalent is `ghostlight doctor`; `ghostlight doctor --fix` applies only
 ownership-safe repairs. Use `ghostlight install --dry-run` before a scripted rollout.
 
-Open **MCP integrations** and confirm your client reads Connected. Then ask it:
+Open **Integrations** and confirm your client reads Connected. Then ask it:
 
 > Open https://example.com in a new Ghostlight tab, summarize the page, and tell me which tab you
 > used. Do not click, type, submit, or change the page after it opens.
@@ -179,7 +179,7 @@ opens in a dedicated normal window rather than disrupting the user's active wind
   (WebView2 on Windows, WebKitGTK 4.1 on Linux), or no tray. Fix that, then run
   `ghostlight open`. A desktop that shows no tray icons can still open the window from
   Applications or `ghostlight open`.
-- **Tools are absent:** re-check the registration in MCP integrations, then reconnect that MCP
+- **Tools are absent:** re-check the registration in Integrations, then reconnect that MCP
   server in its own client.
 - **Browser is disconnected:** keep Ghostlight running, enable the matching extension, and inspect
   Status again.
@@ -219,7 +219,7 @@ the Start-menu shortcut and the installed-apps entry among them while they are o
 `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal to finish them. After that,
 installs from inside the container only rewrite the manifest.
 
-Before removing Ghostlight, run `ghostlight uninstall` or use **MCP integrations** to remove Ghostlight
+Before removing Ghostlight, run `ghostlight uninstall` or use **Integrations** to remove Ghostlight
 from each agent it was added to.
 Then remove the matching browser extension and use the operating system's package uninstall. A
 release package must remove only its own native-messaging registration and files; clean-machine

@@ -200,7 +200,7 @@
 
   /** Destinations this surface renders, keyed by the orchestrator's search vocabulary. */
   const VIEWS = {
-    monitor: "At a glance", integrations: "MCP integrations", status: "Status", policy: "Policy",
+    monitor: "At a glance", integrations: "Integrations", status: "Status", policy: "Policy",
     settings: "Settings", about: "About"
   };
 

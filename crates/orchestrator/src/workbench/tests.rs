@@ -1401,6 +1401,23 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
 }
 
 #[test]
+fn the_search_names_the_integrations_page_as_its_tab_does() {
+    let facade = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(false, false),
+    );
+    let hit = facade
+        .search("integrations")
+        .into_iter()
+        .find(|hit| hit.id == "integrations")
+        .expect("the search reaches the Integrations page");
+    assert_eq!(hit.title, "Integrations");
+    assert!(
+        include_str!("../../ui/lib/words.js").contains(&format!("integrations: \"{}\"", hit.title))
+    );
+}
+
+#[test]
 fn a_session_that_reported_no_name_names_no_agent_and_its_chip_keeps_only_what_its_card_shows() {
     use crate::intake::session::IntakeChannel;
 

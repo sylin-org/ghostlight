@@ -55,7 +55,7 @@ script source enters audit or desktop history.
 
 ## When something needs attention
 
-Open **Status** for service, browser, authority, and notification state, and **MCP integrations**
+Open **Status** for service, browser, authority, and notification state, and **Integrations**
 to see exactly which clients Ghostlight is registered with. If transport dropped during a call that
 had effects, look at the page before you act again. The relays reconnect on their own, but work
 whose outcome is unknown is never replayed for you.

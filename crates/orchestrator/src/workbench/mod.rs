@@ -926,7 +926,7 @@ impl WorkbenchFacade {
             ),
             (
                 "integrations",
-                "MCP integrations",
+                "Integrations",
                 "Supported MCP client registrations",
                 SearchDestination::Install,
             ),

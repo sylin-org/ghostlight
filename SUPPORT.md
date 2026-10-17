@@ -13,7 +13,7 @@ Use the narrowest lane that fits:
 Before you share diagnostics, strip credentials, cookies, private page content, opaque identities,
 and personal paths. Ghostlight's audit trail and workbench history hold no payloads, but they still
 describe which tools ran, what was decided, and when. Open **Status** in the workbench for service,
-browser, authority, and notification health, and **MCP integrations** to see exactly which clients
+browser, authority, and notification health, and **Integrations** to see exactly which clients
 Ghostlight is registered with.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers how requests are evaluated and how to prepare a code

@@ -57,7 +57,7 @@ Use only the catalog returned by the client. For the first proof:
 
 Success proves the MCP client, MCP relay, service, browser relay, native messaging,
 extension, and visible browser path. On failure, ask the user to open **Status** and
-**MCP integrations** in the workbench. Follow the named condition instead of inventing a second stack.
+**Integrations** in the workbench. Follow the named condition instead of inventing a second stack.
 
 ## 3. Choose the narrowest tool
 

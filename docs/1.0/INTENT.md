@@ -97,9 +97,8 @@ Internal browser commands are combined when a person experiences them as one job
 - Every Linux install has an Applications entry. It runs the shell, which starts the service when
   none runs and shows the window. A tray is never the only route to the workbench.
 - Six destinations and one global search reach every workbench surface and user-visible record:
-  At a glance, MCP integrations, Status, Policy, Settings, and About. At a glance is where the window opens;
-  it carries the current action in full and the recent ones beneath it, so a glance is enough. The
-  narrow tab row abbreviates the integrations label to Integrations.
+  At a glance, Integrations, Status, Policy, Settings, and About. At a glance is where the window opens;
+  it carries the current action in full and the recent ones beneath it, so a glance is enough.
 - ADR-0126 Decision 9 made the landing destination At a glance, leading with whether Ghostlight is
   ready, connected, working, paused, recovering, or in need of attention, with the action queue
   beneath that answer and no sixth destination added then; Settings (ADR-0199) is the sixth, holds
@@ -132,7 +131,7 @@ a tray retains `ghostlight open` and the Applications entry as interaction route
   `Clicked the "Save" button`; governance can remove target names without making the action vague.
 - At a glance can clear completed actions from the current view without deleting the local audit.
   Running work remains visible, and a fresh desktop process can reconstruct history from audit.
-- MCP integrations checks, connects, and disconnects Ghostlight's owned registration for explicitly
+- Integrations checks, connects, and disconnects Ghostlight's owned registration for explicitly
   supported MCP clients. `Set up everything` connects or updates every detected target Ghostlight
   can change safely in one pass. It never installs a third-party product or overwrites a foreign
   entry. A separate confirmed per-target Fix may replace one parseable foreign entry under

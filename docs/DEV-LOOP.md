@@ -258,7 +258,7 @@ change.
 
 Run `ghostlight open` to restore the backgrounded workbench, open Status, and verify a compatible
 browser instance appears. Use a
-supported MCP client registration from MCP integrations, reconnect that client, and execute the
+supported MCP client registration from Integrations, reconnect that client, and execute the
 journeys in [`1.0/ACCEPTANCE.md`](1.0/ACCEPTANCE.md). Use the `sylin.org` demo pages for visible
 form, embedded-frame form, upload, dialog, navigation, policy-denial, and screenshot work.
 

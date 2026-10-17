@@ -181,7 +181,7 @@ is in [`docs/guides/governance-configuration.md`](docs/guides/governance-configu
 Open the tray icon and you land **At a glance**: the action running right now in full, finished
 actions stacking below it, newest first, each in Ghostlight's own words -- "Opened example.com.",
 "Read 1,240 words.", "Filled 3 fields and submitted the form." -- never the page's. Beside it sit
-**MCP integrations**, which connects the coding clients you already have and merges into their
+**Integrations**, which connects the coding clients you already have and merges into their
 configuration with a backup (goose and Continue get Copy setup to paste, never an edit); **Status**, which answers whether the stack is healthy; **Policy**,
 which states what the current rules allow, one plain line per capability, naming the layer that
 decided each one; **Settings**, a tab with a rail for this screen, who else can watch, browser
