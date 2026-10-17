@@ -1029,6 +1029,59 @@ fn row(
     }
 }
 
+/// The agents Ghostlight knows, by the names they report on an MCP connection: each product name
+/// as the install summary says it, with the harness and product ids that name it and the client
+/// names the agent is known to send. The harness tests keep it in step with `definitions`.
+const AGENT_NAMES: &[(&str, &[&str])] = &[
+    ("Codex", &["codex", "codex-mcp-client"]),
+    ("Claude Code", &["claude-code"]),
+    ("Claude Desktop", &["claude-desktop", "claude-ai"]),
+    ("Cursor", &["cursor", "cursor-vscode"]),
+    ("Visual Studio Code", &["vscode"]),
+    ("Windsurf", &["windsurf"]),
+    ("Devin", &["devin"]),
+    ("Zed", &["zed"]),
+    ("ZCode", &["zcode"]),
+    ("OpenCode", &["opencode"]),
+    ("Crush", &["crush"]),
+    ("GitHub Copilot CLI", &["copilot-cli"]),
+    (
+        "Cline",
+        &[
+            "cline",
+            "cline-cli",
+            "cline-vscode",
+            "cline-cursor",
+            "cline-windsurf",
+        ],
+    ),
+    ("Kiro", &["kiro"]),
+    ("Qwen Code", &["qwen-code"]),
+    ("Junie", &["junie"]),
+    ("Kilo Code", &["kilo-code"]),
+    ("goose", &["goose"]),
+    ("Continue", &["continue"]),
+    ("Antigravity", &["antigravity"]),
+];
+
+/// The product name of the agent Ghostlight knows by `reported`, the name a client sent for
+/// itself, ignoring case and surrounding space; none for a name Ghostlight does not know.
+///
+/// The name stays the client's own claim: it names the agent for a person and grants nothing.
+#[must_use]
+pub fn agent_name(reported: &str) -> Option<&'static str> {
+    let reported = reported.trim();
+    AGENT_NAMES
+        .iter()
+        .find(|(name, names)| {
+            name.eq_ignore_ascii_case(reported)
+                || names
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(reported))
+        })
+        .map(|(name, _)| *name)
+}
+
 fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessSummary {
     let detected = definition.path.exists()
         || product_config_parent_exists(context, &definition.path)
@@ -2231,12 +2284,13 @@ mod tests {
     use jsonc_parser::parse_to_serde_value;
 
     use super::{
-        command_registration_state, definitions, edit_json, edit_toml, executable_name,
+        agent_name, command_registration_state, definitions, edit_json, edit_toml, executable_name,
         expected_json_entry, fix_toml, harness_roots, inspect, inspect_json, inspect_toml,
         json_entry_args, json_entry_command, jsonc_options, manual_json_setup, mcp_command_line,
         replace_with_backup, resolve_through_symlink, AppContainer, ForeignCommand, HarnessAction,
         HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
-        JsonDialect, PrivateView, RegistrationState, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME,
+        JsonDialect, PrivateView, RegistrationState, AGENT_NAMES, EDGE_COMMAND_NAME,
+        RETIRED_MCP_CONNECTOR_NAME,
     };
 
     fn temporary(name: &str) -> PathBuf {
@@ -2417,6 +2471,36 @@ mod tests {
         assert_eq!(devin.path, context.config.join("devin/mcp_config.json"));
         assert_eq!(devin.executables, ["devin", "devin-desktop", "surf"]);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn every_agent_in_the_roster_is_known_by_its_id_and_its_name() {
+        let directory = temporary("agent-names-roster");
+        let rows = definitions(&context(&directory));
+        for row in &rows {
+            assert_eq!(agent_name(row.id), Some(row.name), "{}", row.id);
+            assert_eq!(agent_name(row.name), Some(row.name), "{}", row.id);
+        }
+        let named = |name: &str| rows.iter().any(|row| row.name == name);
+        for (name, _) in AGENT_NAMES {
+            assert!(named(name), "{name} names no agent in the roster");
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn an_agent_is_known_by_the_names_it_reports_in_any_case() {
+        assert_eq!(agent_name("codex-mcp-client"), Some("Codex"));
+        assert_eq!(agent_name("claude-code"), Some("Claude Code"));
+        assert_eq!(agent_name("CLAUDE-CODE"), Some("Claude Code"));
+        assert_eq!(agent_name("  claude code "), Some("Claude Code"));
+        assert_eq!(agent_name("claude-ai"), Some("Claude Desktop"));
+        assert_eq!(agent_name("cursor-vscode"), Some("Cursor"));
+        assert_eq!(agent_name("Visual Studio Code"), Some("Visual Studio Code"));
+        assert_eq!(agent_name("cline"), Some("Cline"));
+        assert_eq!(agent_name("Antigravity"), Some("Antigravity"));
+        assert_eq!(agent_name("my own agent"), None);
+        assert_eq!(agent_name(""), None);
     }
 
     #[test]

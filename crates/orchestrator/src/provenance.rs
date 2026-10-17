@@ -66,12 +66,18 @@ impl ConnectionEvidence {
         &self.reported_application
     }
 
-    /// Present the live connection with its separately identified, bounded application claim.
+    /// Present the live connection with its separately identified, bounded application claim and
+    /// the name a person knows its agent by.
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
         let mut details = self.attribution.details();
-        details.reported_application =
-            (!self.reported_application.is_empty()).then(|| self.reported_application.clone());
+        if !self.reported_application.is_empty() {
+            details.agent = Some(crate::language::provenance::agent_name(
+                &self.reported_application,
+                details.channel,
+            ));
+            details.reported_application = Some(self.reported_application.clone());
+        }
         details
     }
 }
@@ -182,6 +188,28 @@ mod tests {
         assert_eq!(absent.connection_id, None);
         assert_eq!(absent.observed_at_ms, None);
         assert_eq!(absent.details().reported_application, None);
+        assert_eq!(absent.details().agent, None);
+    }
+
+    #[test]
+    fn a_live_connection_names_its_agent_and_history_names_only_the_command_line() {
+        let codex = ConnectionEvidence::new("codex-mcp-client", IntakeChannel::Mcp);
+        assert_eq!(codex.details().agent.as_deref(), Some("Codex"));
+        assert_eq!(
+            codex.details().reported_application.as_deref(),
+            Some("codex-mcp-client")
+        );
+        assert_eq!(codex.attribution().details().agent, None);
+        let unknown = ConnectionEvidence::new(" my agent ", IntakeChannel::Mcp);
+        assert_eq!(unknown.details().agent.as_deref(), Some("my agent"));
+        let script = ConnectionEvidence::new("ghostlight call", IntakeChannel::Cli);
+        assert_eq!(script.details().agent.as_deref(), Some("Command line"));
+        assert_eq!(
+            script.attribution().details().agent.as_deref(),
+            Some("Command line")
+        );
+        let unnamed = ConnectionEvidence::new("", IntakeChannel::Mcp);
+        assert_eq!(unnamed.details().agent, None);
     }
 
     #[test]

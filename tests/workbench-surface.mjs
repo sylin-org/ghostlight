@@ -785,9 +785,9 @@ const provenanceChecks = [];
 {
   const evidence = {
     connection_id: "connection_original", reported_application: "Original <script>claim</script>",
-    channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it."
+    agent: "Original <script>claim</script>", channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it."
   };
-  const laterSession = { id: "shared-workspace", client_label: "Later application", channel: "cli" };
+  const laterSession = { id: "shared-workspace", client_label: "Later application", agent: "Later application", channel: "cli" };
   const connectionView = sandbox.globalThis.GhostlightView.create({ sessionFor: () => laterSession });
   const entries = sandbox.globalThis.GhostlightEntries;
   const operation = { invocation: "provenance-work", workspace: laterSession.id, tool: "browser_read",
@@ -799,7 +799,7 @@ const provenanceChecks = [];
   provenanceChecks.push(["live action attribution uses its own connection and escapes the claim",
     html.includes("Original &lt;script&gt;claim&lt;/script&gt;")
       && !html.includes("Later application") && !html.includes("<script>claim")]);
-  const restored = { ...record, provenance: { ...evidence, reported_application: null } };
+  const restored = { ...record, provenance: { ...evidence, reported_application: null, agent: null } };
   connectionView.hero(entries.entryFromRecord(restored), false);
   html = nodes.get("hero-body").innerHTML;
   provenanceChecks.push(["restored history keeps its connection without borrowing a current claim",
@@ -818,7 +818,7 @@ const provenanceChecks = [];
       && !html.includes('data-history-details="provenance-work:connection" open')]);
   const sessions = [{ ...laterSession, tab_count: 2, active_operations: 0, connections: [evidence,
     { ...evidence, connection_id: "connection_other", reported_application: "Second application",
-      channel: "cli", explanation: "A ghostlight call session is a local program." }] }];
+      agent: "Command line", channel: "cli", explanation: "A ghostlight call session is a local program." }] }];
   const sessionSnapshot = { ...snapshot(), sessions };
   connectionView.collections(sessionSnapshot, new Set());
   html = nodes.get("connections").innerHTML;

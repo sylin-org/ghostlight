@@ -145,9 +145,9 @@ const snapshot = {
   service: { version: "1.0.0", started_at_ms: Date.now() - 540000, runtime_state: "active" },
   overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
-    { id: "workspace_codex", client_label: "Codex", channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1 },
-    { id: "workspace_claude", client_label: "Claude Code", channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1 },
-    { id: "workspace_script", client_label: "ghostlight call", channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0 }
+    { id: "workspace_codex", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1 },
+    { id: "workspace_claude", client_label: "claude-code", agent: "Claude Code", channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1 },
+    { id: "workspace_script", client_label: "ghostlight call", agent: "Command line", channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0 }
   ],
   operations: [
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
@@ -270,7 +270,7 @@ if (historyScenario) {
 for (const session of snapshot.sessions) {
   session.connections = [{
     connection_id: `connection_${session.id}`, reported_application: session.client_label,
-    channel: session.channel,
+    agent: session.agent, channel: session.channel,
     explanation: session.channel === "cli"
       ? "A ghostlight call session is a local program. Ghostlight does not verify the scripts and instructions it runs."
       : "The application name is the MCP client's own claim. Ghostlight does not verify it."

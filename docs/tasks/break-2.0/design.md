@@ -56,16 +56,35 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 
 ## RESUME HERE
 
-The batch starts. Next: d00-agent-names, with d03-call-help in parallel.
+d00-agent-names has landed. Next: d01-glance-summary, then d02-activity-names and
+d04-integrations; d03-call-help runs in its own lane.
 
 ## Landed
 
 | Slice | What | Commits |
 |---|---|---|
+| d00-agent-names | The service names each session's agent as a person knows it. `install::agent_name` is one closed table beside the harness registry (`AGENT_NAMES`): each product name as the install summary says it, with its harness and product ids and the client names it is known to send (`codex-mcp-client`, `claude-ai`, `cursor-vscode`), matched ignoring case and surrounding space; a test keeps it in step with every registry row. `language::provenance::agent_name` adds the command line (`COMMAND_LINE_AGENT`, "Command line") and shows an unknown name as reported, trimmed. `SessionSummary.agent` and `ConnectionDetails.agent` carry it on sessions, operations and history items; `client_label` and `reported_application` keep the reported name for the trust note. Durable history names only the command line, from its channel. The setup view matches a session to an agent by that name, so a Codex session turns the Codex row Connected, and names the finishing agent by product name. The window's chips, activity client column, hero and search name the agent. | see `git log` |
 
 ## Owed live checks
 
 The coordinator deploys the batch in place on the owner's machine and checks each view with the
 owner before anything is pushed.
 
+- d00-agent-names: with Codex and Claude Code connected and a `ghostlight call` run, the At a
+  glance chips read "Codex", "Claude Code" and "Command line", and the Activity client column and
+  the hero name the same agents (never `codex-mcp-client` or `ghostlight call`). Connection details
+  still show the reported name ("Reported application: codex-mcp-client"). With setup incomplete,
+  a Codex session turns the setup view's Codex row Connected. A restored history row of an MCP
+  agent still shows its short workspace id until d02 says "Unknown agent".
+
 ## Notes
+
+- d00-agent-names: the mapping matches harness ids, product ids, product names and known client
+  aliases, not the host-qualified labels such as "Cline (CLI)": no client reports a label, and the
+  setup view now matches on the product name instead. A Cline session therefore turns every Cline
+  row of the setup view Connected, because the reported name does not say the host. The browser's
+  tab group title ("Ghostlight - <reported name>") and released-tab reuse still use the reported
+  name; the slice changes only what the window shows. The hero still adds "via cli" beside
+  "Command line"; d02 drops it. The aliases are the ones the tree or the spec names plus
+  `claude-ai` (Claude Desktop) and `cursor-vscode` (Cursor); add others only when a client is seen
+  sending them.

@@ -204,11 +204,12 @@ try {
   await evaluate(`(() => {
     const snapshot = window.__GHOSTLIGHT_PREVIEW__;
     snapshot.sessions[0].client_label = 'Later application';
+    snapshot.sessions[0].agent = 'Later application';
     snapshot.sessions[0].connections = [
       { ...snapshot.sessions[0].connections[0], connection_id: 'connection_later',
-        reported_application: 'Later application' },
+        reported_application: 'Later application', agent: 'Later application' },
       { ...snapshot.sessions[0].connections[0], connection_id: 'connection_unavailable',
-        reported_application: 'Another application',
+        reported_application: 'Another application', agent: 'Another application',
         explanation: 'A ghostlight call session is a local program.' }
     ];
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'audit_health_changed', health: snapshot.audit_health });
@@ -230,7 +231,7 @@ try {
       capability: 'read', allowed: true, status: 'succeeded', effect: 'none', summary: 'Read 5 words.',
       complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance: {
         ...window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0],
-        reported_application: null } };
+        reported_application: null, agent: null } };
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
       ...record, invocation: 'c1-legacy', provenance: null } });

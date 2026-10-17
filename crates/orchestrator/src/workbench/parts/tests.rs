@@ -41,7 +41,8 @@ fn temp_policy() -> PathBuf {
 fn details() -> ConnectionDetails {
     ConnectionDetails {
         connection_id: Some("connection_1".into()),
-        reported_application: Some("Claude Code".into()),
+        reported_application: Some("claude-code".into()),
+        agent: Some("Claude Code".into()),
         channel: IntakeChannel::Mcp,
         explanation: "Declared by the client.".into(),
     }
@@ -179,7 +180,8 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, PathBuf) {
         },
         sessions: vec![SessionSummary {
             id: "workspace_1".into(),
-            client_label: "Claude Code".into(),
+            client_label: "claude-code".into(),
+            agent: "Claude Code".into(),
             connections: vec![details()],
             channel: IntakeChannel::Mcp,
             leased: true,
@@ -359,10 +361,12 @@ const CONNECTIONS_KEYS: &[&str] = &[
     "browsers[].id",
     "sessions",
     "sessions[].active_operations",
+    "sessions[].agent",
     "sessions[].browser",
     "sessions[].channel",
     "sessions[].client_label",
     "sessions[].connections",
+    "sessions[].connections[].agent",
     "sessions[].connections[].channel",
     "sessions[].connections[].connection_id",
     "sessions[].connections[].explanation",
@@ -397,6 +401,7 @@ const OPERATION_KEYS: &[&str] = &[
     "operations[].invocation",
     "operations[].phase",
     "operations[].provenance",
+    "operations[].provenance.agent",
     "operations[].provenance.channel",
     "operations[].provenance.connection_id",
     "operations[].provenance.explanation",
@@ -457,6 +462,7 @@ const RECORD_KEYS: &[&str] = &[
     "permissions.truncated",
     "policy_tier",
     "provenance",
+    "provenance.agent",
     "provenance.channel",
     "provenance.connection_id",
     "provenance.explanation",

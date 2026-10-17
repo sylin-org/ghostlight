@@ -228,6 +228,10 @@ impl Live {
                         .filter(|operation| operation.workspace == workspace.id)
                         .count(),
                     id: workspace.id,
+                    agent: crate::language::provenance::agent_name(
+                        &workspace.client_label,
+                        workspace.channel,
+                    ),
                     client_label: workspace.client_label,
                     connections: workspace.connections,
                     channel: workspace.channel,
@@ -366,7 +370,7 @@ impl Live {
         let mut clients: Vec<String> = gathered
             .sessions
             .iter()
-            .map(|session| session.client_label.clone())
+            .map(|session| session.agent.clone())
             .collect();
         clients.sort();
         SetupInputsKey {

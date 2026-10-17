@@ -462,37 +462,32 @@ fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<A
         label: harness.label.clone(),
         state,
         private_view: harness.private_view,
-        seen: sessions.iter().any(|session| {
-            session.client_label.eq_ignore_ascii_case(&harness.label)
-                || session.client_label.eq_ignore_ascii_case(&harness.id)
-        }),
+        seen: sessions.iter().any(|session| is_agent_of(session, harness)),
     })
 }
 
-/// The name of the agent whose request finished setup: the roster's name for the client whose
-/// label the finishing session reported, and none when the session is gone or the label is not a
-/// client Ghostlight knows.
+/// Whether `session` is a session of the agent `harness` sets up: the session's agent, named as a
+/// person knows it, is that agent's product name. A product on several hosts is one agent here,
+/// because the name a client reports does not say the host.
+fn is_agent_of(session: &SessionSummary, harness: &HarnessSummary) -> bool {
+    session.agent.eq_ignore_ascii_case(&harness.name)
+}
+
+/// The name of the agent whose request finished setup: the roster's product name for the
+/// finishing session's agent, and none when the session is gone or its agent is not one
+/// Ghostlight knows.
 pub(super) fn agent_name(
     finished: &Finished,
     sessions: &[SessionSummary],
     harnesses: &[HarnessSummary],
 ) -> Option<String> {
-    let label = &sessions
+    let session = sessions
         .iter()
-        .find(|session| session.id == finished.workspace)?
-        .client_label;
+        .find(|session| session.id == finished.workspace)?;
     harnesses
         .iter()
-        .find(|harness| {
-            label.eq_ignore_ascii_case(&harness.id) || label.eq_ignore_ascii_case(&harness.label)
-        })
-        .map(|harness| harness.label.clone())
-        .or_else(|| {
-            harnesses
-                .iter()
-                .find(|harness| label.eq_ignore_ascii_case(&harness.product_id))
-                .map(|harness| harness.name.clone())
-        })
+        .find(|harness| is_agent_of(session, harness))
+        .map(|harness| harness.name.clone())
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -678,6 +673,7 @@ pub(super) mod test_support {
         SessionSummary {
             id: id.into(),
             client_label: client_label.into(),
+            agent: crate::language::provenance::agent_name(client_label, IntakeChannel::Mcp),
             connections: Vec::new(),
             channel: IntakeChannel::Mcp,
             leased: false,
@@ -1017,6 +1013,21 @@ mod tests {
             &roster,
         );
         assert_eq!(row(&by_label, "claude-code").detail, "Connected");
+    }
+
+    #[test]
+    fn a_codex_session_turns_the_codex_row_connected() {
+        let computer = Computer::default();
+        let roster = [harness("codex", "Codex", HarnessState::Installed)];
+        let view = incomplete(
+            &computer,
+            &[connected("Chrome")],
+            &[session("workspace_1", "codex-mcp-client")],
+            &roster,
+        );
+        let codex = row(&view, "codex");
+        assert_eq!(codex.detail, "Connected");
+        assert_eq!(codex.tone, RowTone::Done);
     }
 
     #[test]

@@ -147,12 +147,15 @@
       return sessionFor(entry.workspace)?.channel ?? "";
     }
 
-    /** Attribution belongs to the action's connection, including after disconnect or restart. */
+    /**
+     * The agent behind an action, named as a person knows it. Attribution belongs to the action's
+     * connection, including after disconnect or restart.
+     */
     function clientFor(entry) {
       const evidence = entry.provenance;
-      if (evidence) return evidence.reported_application ?? shortId(entry.workspace);
+      if (evidence) return evidence.agent ?? shortId(entry.workspace);
       if (entry.settled) return shortId(entry.workspace);
-      return sessionFor(entry.workspace)?.client_label ?? shortId(entry.workspace);
+      return sessionFor(entry.workspace)?.agent ?? shortId(entry.workspace);
     }
 
     /** Browser that performed or is performing this action. */
@@ -608,12 +611,12 @@
     function connectionGroups(sessions) {
       const groups = new Map();
       for (const session of sessions) {
-        const group = groups.get(session.client_label)
-          ?? { label: session.client_label, count: 0, tabs: 0, busy: false };
+        const group = groups.get(session.agent)
+          ?? { label: session.agent, count: 0, tabs: 0, busy: false };
         group.count += 1;
         group.tabs += session.tab_count;
         group.busy = group.busy || session.active_operations > 0;
-        groups.set(session.client_label, group);
+        groups.set(session.agent, group);
       }
       return [...groups.values()]
         .sort((left, right) => right.tabs - left.tabs || left.label.localeCompare(right.label));

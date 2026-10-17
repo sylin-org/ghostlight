@@ -981,7 +981,7 @@ function snapshotAnswer({ history = [settledRead()], sessions, service = { versi
         }
       },
       connections: {
-        sessions: sessions ?? [{ id: "w1", client_label: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 }],
+        sessions: sessions ?? [{ id: "w1", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 }],
         browsers: [{ id: "b1", family: "Chrome", adapter_version: "2.0.0" }]
       },
       activity: { operations: [], history, document_coverage: [] },
@@ -1187,12 +1187,12 @@ test("a paint that throws is tried again with the same facts, and one that drew 
   assert.equal(writes, 2, "a panel that drew is not drawn again for the same facts");
 });
 
-test("the connections bar shows one chip per client, with a count when a client holds several", () => {
+test("the connections bar shows one chip per agent by its name, with a count when an agent holds several", () => {
   const shown = drawing();
   const sessions = [
-    { id: "w1", client_label: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 },
-    { id: "w2", client_label: "Codex", channel: "cli", tab_count: 2, active_operations: 1 },
-    { id: "w3", client_label: "Zed", channel: "mcp", tab_count: 0, active_operations: 0 }
+    { id: "w1", client_label: "codex-mcp-client", agent: "Codex", channel: "mcp", tab_count: 1, active_operations: 0 },
+    { id: "w2", client_label: "Codex", agent: "Codex", channel: "mcp", tab_count: 2, active_operations: 1 },
+    { id: "w3", client_label: "zed", agent: "Zed", channel: "mcp", tab_count: 0, active_operations: 0 }
   ];
   shown.view.collections(Transport.flatten(snapshotAnswer({ sessions })), new Set());
   const bar = drawn(shown.el("connections").innerHTML);

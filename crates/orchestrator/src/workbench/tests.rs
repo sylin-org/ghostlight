@@ -1345,6 +1345,57 @@ fn connections_are_counted_by_the_intake_that_admitted_each_and_browsers_by_adap
 }
 
 #[test]
+fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name() {
+    use crate::intake::session::IntakeChannel;
+
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    workspaces.admit("codex-mcp-client".into(), IntakeChannel::Mcp);
+    workspaces.admit("ghostlight call".into(), IntakeChannel::Cli);
+    workspaces.admit(" my agent ".into(), IntakeChannel::Mcp);
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        workspaces,
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(false, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    let mut named: Vec<(String, String, Vec<Option<String>>)> = facade
+        .snapshot()
+        .sessions
+        .into_iter()
+        .map(|session| {
+            let agents = session
+                .connections
+                .iter()
+                .map(|connection| connection.agent.clone())
+                .collect();
+            (session.agent, session.client_label, agents)
+        })
+        .collect();
+    named.sort();
+    assert_eq!(
+        named,
+        [
+            (
+                "Codex".to_owned(),
+                "codex-mcp-client".to_owned(),
+                vec![Some("Codex".to_owned())]
+            ),
+            (
+                "Command line".to_owned(),
+                "ghostlight call".to_owned(),
+                vec![Some("Command line".to_owned())]
+            ),
+            (
+                "my agent".to_owned(),
+                "my agent".to_owned(),
+                vec![Some("my agent".to_owned())]
+            ),
+        ]
+    );
+}
+
+#[test]
 fn a_service_with_nothing_connected_counts_nothing() {
     let facade = facade_over(
         GovernanceFacade::new(None, None),
