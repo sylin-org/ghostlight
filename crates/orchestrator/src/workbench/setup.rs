@@ -465,7 +465,6 @@ fn agent_fact(harness: &HarnessSummary, sessions: &[SessionSummary]) -> Option<A
         id: harness.id.clone(),
         label: harness.label.clone(),
         state,
-        private_view: harness.private_view,
         can_install: harness.can_install,
         copy_only: harness.copy_only,
         in_use: parts::in_use(harness, sessions),

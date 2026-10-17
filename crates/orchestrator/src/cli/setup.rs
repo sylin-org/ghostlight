@@ -694,6 +694,9 @@ fn finish_setup(
 }
 
 /// Filter candidate MCP harness summaries based on user selection.
+///
+/// An install also selects each client it would write if the app container it runs in did not
+/// keep that client's configuration private, so the closing lines name what is left to finish.
 pub fn select_harnesses(
     summaries: &[crate::install::HarnessSummary],
     options: &SetupOptions,
@@ -716,7 +719,7 @@ pub fn select_harnesses(
         .iter()
         .filter(|summary| {
             if install {
-                summary.can_install
+                (summary.can_install || left_private(summary))
                     && (options.all_clients || summary.state != HarnessState::NotDetected)
             } else {
                 summary.can_uninstall
@@ -724,6 +727,12 @@ pub fn select_harnesses(
         })
         .cloned()
         .collect())
+}
+
+/// Whether an install would write `summary`'s entry but leaves it to a regular terminal, because
+/// the app container this process runs in keeps the client's configuration private.
+fn left_private(summary: &crate::install::HarnessSummary) -> bool {
+    summary.private_view && !summary.copy_only && summary.state.takes_install()
 }
 
 /// Print the line that names the Ghostlight program browsers start.
@@ -839,7 +848,8 @@ mod tests {
     use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
 
     use super::{
-        private_browser_registrations, select_install_browsers, stray_not_stopped_lines, Collected,
+        private_browser_registrations, select_harnesses, select_install_browsers,
+        stray_not_stopped_lines, Collected,
     };
     use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
     use crate::language::setup::{BrowserFact, BrowserForm, InstallAgent};
@@ -1125,6 +1135,47 @@ mod tests {
             connector_command: "/home/ghostlight mcp".into(),
             manual_setup: String::new(),
         }
+    }
+
+    #[test]
+    fn an_install_inside_a_container_selects_the_private_clients_it_leaves_to_finish() {
+        let private = |id: &str, state: HarnessState| HarnessSummary {
+            can_install: false,
+            private_view: true,
+            ..harness(id, id, state)
+        };
+        let summaries = [
+            harness("cursor", "Cursor", HarnessState::Available),
+            private("claude-desktop", HarnessState::Available),
+            private("zed", HarnessState::Updatable),
+            private("windsurf", HarnessState::Installed),
+            private("kiro", HarnessState::NeedsAttention),
+            HarnessSummary {
+                copy_only: true,
+                ..private("goose", HarnessState::Available)
+            },
+            private("vscode", HarnessState::NotDetected),
+        ];
+        let ids = |selected: Vec<HarnessSummary>| -> Vec<String> {
+            selected.into_iter().map(|summary| summary.id).collect()
+        };
+        let options = SetupOptions::default();
+        assert_eq!(
+            ids(select_harnesses(&summaries, &options, true).unwrap()),
+            ["cursor", "claude-desktop", "zed"]
+        );
+        let every = SetupOptions {
+            all_clients: true,
+            ..SetupOptions::default()
+        };
+        assert_eq!(
+            ids(select_harnesses(&summaries, &every, true).unwrap()),
+            ["cursor", "claude-desktop", "zed", "vscode"]
+        );
+        // A removal selects only what inspection offers to remove, which is nothing private.
+        assert!(select_harnesses(&summaries, &options, false)
+            .unwrap()
+            .is_empty());
     }
 
     fn applied(id: &str, label: &str, changed: bool) -> HarnessActionResult {

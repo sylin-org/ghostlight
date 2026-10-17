@@ -132,7 +132,10 @@ browser's `HKCU` value names it; a value is written only when it differs from wh
 and `AppData` writes reach only that app (a packaged terminal that is not redirected is not). There
 the install (`install/container.rs`) writes the manifest, leaves those redirected registrations
 unwritten, except the configuration of the container's own app, and reports them with the one
-command that finishes them from a regular terminal, `<home>/bin/ghostlight.exe install`; `doctor` says it cannot see what other apps see. An install
+command that finishes them from a regular terminal, `<home>/bin/ghostlight.exe install`; `doctor` says it cannot see what other apps see.
+Inspection there offers no Install, Fix or Uninstall for a client whose configuration the container
+keeps private, and its detail says why, so neither the setup view nor Integrations offers a change
+that would be refused, and Set up everything leaves that client out. An install
 outside a container moves the older manifest out of `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts`
 and removes that directory when it is empty.
 Only then does the installer stop the 1.x images (and look again for a few rounds for any that

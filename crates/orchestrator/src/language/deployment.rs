@@ -203,6 +203,17 @@ pub fn client_entry_unchangeable(client: &str) -> String {
     format!("{client} has a Ghostlight entry Ghostlight cannot change; it was not changed.")
 }
 
+/// Why a client's entry is not changed from here: the app container this process runs in, named
+/// `app`, keeps the client's configuration private. Inspection says it as the client's detail and
+/// every change Ghostlight is asked for there is refused with it.
+#[must_use]
+pub fn client_kept_private(app: &str) -> String {
+    format!(
+        "Windows keeps this configuration private to {app}, so a change made from here would not \
+         reach other apps. To change it, run Ghostlight's install from a regular terminal."
+    )
+}
+
 /// A platform entry was written.
 #[must_use]
 pub fn platform_entry_updated(entry: &str) -> String {

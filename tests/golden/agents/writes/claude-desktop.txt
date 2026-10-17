@@ -1291,8 +1291,8 @@ agent: {"id":"claude-desktop","name":"Claude Desktop","symbol":{"src":"integrati
 seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json: no file
 -- inspect
 state: not_detected (not detected)
-detail: Not detected. You can prepare its user configuration before installing it.
-offers: install, locate
+detail: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
+offers: locate
 copy only: no
 private view: yes
 config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
@@ -1313,16 +1313,16 @@ manual setup:
 -- check
 changed: no
 says: Claude Desktop was checked without changing configuration.
-after: not_detected (not detected) | Not detected. You can prepare its user configuration before installing it.
+after: not_detected (not detected) | Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- install
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- fix
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- uninstall
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 
 === Windows, from inside the OpenAI.Codex app container / other: comments, a setting and another server
@@ -1337,8 +1337,8 @@ seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
   | }
 -- inspect
 state: available (detected, not connected)
-detail: Detected and ready for an explicit Ghostlight registration.
-offers: install, locate
+detail: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
+offers: locate
 copy only: no
 private view: yes
 config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
@@ -1359,16 +1359,16 @@ manual setup:
 -- check
 changed: no
 says: Claude Desktop was checked without changing configuration.
-after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+after: available (detected, not connected) | Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- install
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- fix
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- uninstall
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 
 === Windows, from inside the OpenAI.Codex app container / current: the entry Ghostlight writes for this edge
@@ -1384,8 +1384,8 @@ seed <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json:
   | }
 -- inspect
 state: installed (connected)
-detail: Ghostlight is registered for this user context.
-offers: uninstall, locate
+detail: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
+offers: locate
 copy only: no
 private view: yes
 config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
@@ -1406,14 +1406,14 @@ manual setup:
 -- check
 changed: no
 says: Claude Desktop was checked without changing configuration.
-after: installed (connected) | Ghostlight is registered for this user context.
+after: installed (connected) | Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- install
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- fix
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- uninstall
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing

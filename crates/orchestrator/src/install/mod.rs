@@ -43,6 +43,7 @@ use toml_edit::{value, Array, DocumentMut, Item, Table};
 use uuid::Uuid;
 
 use crate::agent::Agent;
+use crate::language::deployment as words;
 
 use container::{AppContainer, Residence};
 use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
@@ -166,8 +167,9 @@ impl HarnessRegistry {
 
     /// Set up or update every detected target Ghostlight can change safely.
     ///
-    /// Current registrations and targets that are not detected are left alone. Malformed and
-    /// foreign registrations remain blocked by the same per-target ownership check used by
+    /// Current registrations, targets that are not detected and targets whose configuration the
+    /// app container this process runs in keeps private are left alone. Malformed and foreign
+    /// registrations remain blocked by the same per-target ownership check used by
     /// [`Self::apply`]. One target failing does not prevent an independent target from becoming
     /// ready; the result names the failures and the refreshed roster carries their evidence.
     pub fn setup_detected(&self) -> Result<HarnessSetupResult, HarnessError> {
@@ -181,6 +183,7 @@ impl HarnessRegistry {
             .into_iter()
             .filter(|definition| {
                 !matches!(definition.dialect, ConfigDialect::Manual(_))
+                    && self.inner.context.private_to(definition).is_none()
                     && matches!(
                         states.get(definition.id),
                         Some(HarnessState::Available | HarnessState::Updatable)
@@ -343,6 +346,13 @@ impl HarnessState {
             Self::NeedsAttention => "needs attention",
         }
     }
+
+    /// Whether an install writes an entry for a target in this state: one that has none yet,
+    /// detected or not, or one an older Ghostlight wrote.
+    #[must_use]
+    pub const fn takes_install(self) -> bool {
+        matches!(self, Self::NotDetected | Self::Available | Self::Updatable)
+    }
 }
 
 /// Immutable user-facing integration summary.
@@ -393,6 +403,7 @@ pub struct HarnessSummary {
     pub copy_only: bool,
     /// Whether this process runs inside an app container that keeps this target's configuration
     /// private: what it reads here is that app's view, and a change would reach only that app.
+    /// Install, Fix and Uninstall are then never offered, and `detail` says why.
     pub private_view: bool,
     /// Exact configuration destination currently resolved for this target.
     pub config_path: String,
@@ -1190,6 +1201,8 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             .any(|name| executable_on_path(context, name));
     let edge_ready = context.edge.is_file();
     let manual = matches!(definition.dialect, ConfigDialect::Manual(_));
+    // A change made inside another app's container would reach only that app, so none is offered.
+    let private = context.private_to(definition);
     let registration = registration_state(context, definition);
     let retired = matches!(registration, Ok(RegistrationState::Retired));
     let state = match &registration {
@@ -1201,13 +1214,14 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     };
     // The blocked causes are named from what the inspection actually saw, never conflated
     // (ADR-0135). The evidence line carries the specifics beside the claim.
-    let mut detail: String = match &registration {
-        Ok(RegistrationState::Foreign(_)) => {
+    let mut detail: String = match (&registration, private) {
+        (_, Some(container)) if !manual => words::client_kept_private(&container.app),
+        (Ok(RegistrationState::Foreign(_)), _) => {
             "A foreign entry holds this target's Ghostlight registration; it was left untouched."
                 .into()
         }
-        Err(error @ HarnessError::Malformed(_)) => error.to_string(),
-        Err(_) => "This configuration could not be read; it was left untouched.".into(),
+        (Err(error @ HarnessError::Malformed(_)), _) => error.to_string(),
+        (Err(_), _) => "This configuration could not be read; it was left untouched.".into(),
         _ if manual => manual_setup_sentence(definition),
         _ => match state {
             HarnessState::Installed => "Ghostlight is registered for this user context.".into(),
@@ -1249,7 +1263,9 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     if definition.located_stale {
         detail.push_str(" A previously located path is missing; the normal location is shown.");
     }
-    let can_fix = edge_ready && matches!(registration, Ok(RegistrationState::Foreign(_)));
+    let changeable = private.is_none();
+    let can_fix =
+        changeable && edge_ready && matches!(registration, Ok(RegistrationState::Foreign(_)));
     HarnessSummary {
         id: definition.id.into(),
         product_id: definition.product_id.into(),
@@ -1260,19 +1276,14 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         state,
         detail,
         evidence,
-        can_install: edge_ready
-            && !manual
-            && matches!(
-                state,
-                HarnessState::Available | HarnessState::NotDetected | HarnessState::Updatable
-            ),
+        can_install: changeable && edge_ready && !manual && state.takes_install(),
         can_fix,
-        can_uninstall: state == HarnessState::Installed,
+        can_uninstall: changeable && state == HarnessState::Installed,
         can_download: definition.download_url.is_some(),
         download_url: definition.download_url.map(str::to_owned),
         can_locate: true,
         copy_only: manual,
-        private_view: context.private_to(definition).is_some(),
+        private_view: !changeable,
         config_path: definition.path.to_string_lossy().into_owned(),
         connector_command: mcp_command_line(&context.edge),
         manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
@@ -2373,11 +2384,8 @@ pub enum HarnessError {
     /// A path has no writable parent.
     #[error("harness configuration path has no parent: {0}")]
     InvalidPath(PathBuf),
-    /// The change would reach only the private view of an app container.
-    #[error(
-        "Windows keeps this configuration private to {0}, so a change made from here would not \
-         reach other apps; run Ghostlight's install from a regular terminal"
-    )]
+    /// The change would reach only the private view of the app container named here.
+    #[error("{}", words::client_kept_private(.0))]
     PrivateView(String),
 }
 
@@ -4172,16 +4180,29 @@ mod tests {
             .find(|summary| summary.id == "claude-desktop")
             .unwrap();
         assert!(claude.private_view);
+        assert_eq!(claude.state, HarnessState::Available);
+        assert!(!claude.can_install && !claude.can_fix && !claude.can_uninstall);
+        assert!(
+            claude.can_locate,
+            "Locate writes only Ghostlight's own state"
+        );
         let codex = summaries
             .iter()
             .find(|summary| summary.id == "codex")
             .unwrap();
         assert!(!codex.private_view);
+        assert!(codex.can_install);
 
-        let refused = registry
-            .apply("claude-desktop", HarnessAction::Install)
-            .unwrap_err();
-        assert!(matches!(refused, HarnessError::PrivateView(ref app) if app == "OpenAI.Codex"));
+        // Every act inspection does not offer is refused, with the sentence that says why.
+        for action in [
+            HarnessAction::Install,
+            HarnessAction::Fix,
+            HarnessAction::Uninstall,
+        ] {
+            let refused = registry.apply("claude-desktop", action).unwrap_err();
+            assert!(matches!(refused, HarnessError::PrivateView(ref app) if app == "OpenAI.Codex"));
+            assert_eq!(refused.to_string(), claude.detail);
+        }
         assert_eq!(fs::read(&desktop).unwrap(), before);
         assert!(
             registry
@@ -4189,6 +4210,10 @@ mod tests {
                 .unwrap()
                 .changed
         );
+        // Setting up everything leaves the private one out rather than failing on it.
+        let everything = registry.setup_detected().unwrap();
+        assert!(everything.failures.is_empty(), "{:?}", everything.failures);
+        assert_eq!(fs::read(&desktop).unwrap(), before);
 
         fs::remove_dir_all(directory).unwrap();
     }

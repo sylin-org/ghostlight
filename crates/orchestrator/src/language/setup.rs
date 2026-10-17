@@ -162,9 +162,9 @@ pub struct AgentFact {
     pub label: String,
     /// What the scan found.
     pub state: AgentState,
-    /// Whether the agent runs in an app container, where Ghostlight cannot write its entry.
-    pub private_view: bool,
-    /// Whether Ghostlight can write or update the agent's entry now, as the client roster says.
+    /// Whether Ghostlight can write or update the agent's entry now, as the client roster says. It
+    /// is false while the app container this service runs in keeps the agent's configuration
+    /// private.
     pub can_install: bool,
     /// Whether Ghostlight never edits the agent's file, so copying its setup is the only way in.
     pub copy_only: bool,
@@ -811,7 +811,7 @@ fn agent_row(agent: &AgentFact) -> Row {
     if agent.in_use {
         return row(WORD_CONNECTED.to_owned(), RowTone::Done, None);
     }
-    let writes = agent.can_install && !agent.private_view;
+    let writes = agent.can_install;
     match agent.state {
         AgentState::Written => row(
             format!("Restart {} to finish.", agent.label),
@@ -1055,7 +1055,6 @@ mod tests {
             id: id.to_owned(),
             label: label.to_owned(),
             state,
-            private_view: false,
             can_install: true,
             copy_only: false,
             in_use: false,
@@ -1369,8 +1368,7 @@ mod tests {
 
     #[test]
     fn the_agent_stage_asks_the_agent() {
-        let mut found = agent("claude-code", "Claude Code", AgentState::Found);
-        found.private_view = false;
+        let found = agent("claude-code", "Claude Code", AgentState::Found);
         let view = compose(&facts(
             vec![connected(chrome(BrowserForm::Native))],
             vec![found],
@@ -1442,12 +1440,12 @@ mod tests {
         in_use.in_use = true;
         let written = agent("codex", "Codex", AgentState::Written);
         let found = agent("cursor", "Cursor", AgentState::Found);
-        let mut private = agent("desktop", "Claude Desktop", AgentState::Found);
-        private.private_view = true;
+        let mut unwritable = agent("desktop", "Claude Desktop", AgentState::Found);
+        unwritable.can_install = false;
         let attention = agent("zed", "Zed", AgentState::NeedsAttention);
         let view = compose(&facts(
             vec![connected(chrome(BrowserForm::Native))],
-            vec![in_use, written, found, private, attention],
+            vec![in_use, written, found, unwritable, attention],
         ));
 
         let connected_row = row(&view, "claude-code");
@@ -1481,9 +1479,9 @@ mod tests {
             })
         );
 
-        let private_row = row(&view, "desktop");
-        assert_eq!(private_row.detail, "Found");
-        assert!(private_row.action.is_none());
+        let unwritable_row = row(&view, "desktop");
+        assert_eq!(unwritable_row.detail, "Found");
+        assert!(unwritable_row.action.is_none());
 
         let review_row = row(&view, "zed");
         assert_eq!(review_row.detail, "Needs attention");
@@ -1532,14 +1530,11 @@ mod tests {
         for state in [AgentState::Found, AgentState::Updatable] {
             let mut refused = agent("cursor", "Cursor", state);
             refused.can_install = false;
-            let mut private = agent("desktop", "Claude Desktop", state);
-            private.private_view = true;
             let view = compose(&facts(
                 vec![connected(chrome(BrowserForm::Native))],
-                vec![refused, private],
+                vec![refused],
             ));
             assert!(row(&view, "cursor").action.is_none(), "{state:?}");
-            assert!(row(&view, "desktop").action.is_none(), "{state:?}");
         }
     }
 

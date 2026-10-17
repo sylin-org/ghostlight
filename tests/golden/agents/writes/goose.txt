@@ -389,13 +389,13 @@ says: goose was checked without changing configuration.
 after: not_detected (not detected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
 wrote nothing
 -- install
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- fix
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- uninstall
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 
 === Windows, from inside the OpenAI.Codex app container / other: comments, a setting and another server
@@ -430,11 +430,11 @@ says: goose was checked without changing configuration.
 after: available (detected, not connected) | Ghostlight does not edit this client's file. Copy setup and paste it into config.yaml.
 wrote nothing
 -- install
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- fix
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
 -- uninstall
-refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps; run Ghostlight's install from a regular terminal
+refused: Windows keeps this configuration private to OpenAI.Codex, so a change made from here would not reach other apps. To change it, run Ghostlight's install from a regular terminal.
 wrote nothing
