@@ -473,8 +473,9 @@ fn a_pinned_browser_started_again_beside_another_browser_takes_the_call() {
     let _ = fs::remove_file(policy);
 }
 
-/// When the start brings back another profile of the same browser instead, the call is
-/// refused as the wrong profile, nothing is sent and the session is not moved.
+/// When the start brings back another profile of the same browser instead, the call waits out
+/// its deadline for the session's own profile, then is refused as the wrong profile; nothing is
+/// sent and the session is not moved.
 #[test]
 fn a_started_browser_that_connects_as_another_profile_is_the_wrong_profile() {
     let (governance, policy) = on_demand_startup();
@@ -483,12 +484,59 @@ fn a_started_browser_that_connects_as_another_profile_is_the_wrong_profile() {
         browser.connect(vec![summary("browser_other_profile", true)]);
     });
 
+    let began = Instant::now();
     let refused = navigate_within_a_second(&executor, &workspace);
+    assert!(
+        began.elapsed() >= Duration::from_millis(900),
+        "the call did not wait for its own profile, took {:?}",
+        began.elapsed()
+    );
     assert_eq!(refused.status, Status::Failed);
     assert_eq!(refused.effect, Effect::None);
     assert_eq!(refused.facts["reason"], json!("browser_wrong_profile"));
     assert_eq!(launches.load(Ordering::SeqCst), 1);
     assert!(browser.routed().is_empty());
+    let _ = fs::remove_file(policy);
+}
+
+/// Another profile of the session's browser can connect before the session's own profile does.
+/// The call keeps waiting within its deadline and goes to its own profile once it arrives.
+#[test]
+fn a_started_browser_whose_other_profile_connects_first_takes_the_call_in_its_own() {
+    let (governance, policy) = on_demand_startup();
+    let (mut executor, browser, workspace, _) = closed_session_browser(governance, |_| {});
+    browser.remember_installed("browser_other_profile", "chromium");
+    let launches = Arc::new(AtomicUsize::new(0));
+    let own_profile = Arc::new(Mutex::new(None));
+    {
+        let (browser, launches, own_profile) = (
+            Arc::clone(&browser),
+            Arc::clone(&launches),
+            Arc::clone(&own_profile),
+        );
+        executor.recovery.set_test_launch(move || {
+            launches.fetch_add(1, Ordering::SeqCst);
+            browser.connect(vec![summary("browser_other_profile", true)]);
+            let browser = Arc::clone(&browser);
+            *own_profile.lock().unwrap() = Some(thread::spawn(move || {
+                thread::sleep(Duration::from_millis(300));
+                browser.connect(vec![
+                    summary("browser_other_profile", true),
+                    summary("browser_chrome", false),
+                ]);
+            }));
+        });
+    }
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+
+    let opened = navigate_within_a_second(&executor, &workspace);
+    own_profile.lock().unwrap().take().unwrap().join().unwrap();
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
+    assert_eq!(launches.load(Ordering::SeqCst), 1);
+    assert_eq!(browser.routed(), vec!["browser_chrome".to_owned()]);
     let _ = fs::remove_file(policy);
 }
 

@@ -236,9 +236,12 @@ Refusals say what is true, and their next steps suggest only what the caller can
   A silent browser gets one liveness probe at once. Under `on_demand`, when Ghostlight knows
   which installed browser a session's own browser is, the session waits only while a browser is
   evidently returning, and a browser still gone after that is started again, so the start keeps
-  the call's budget. The call then goes through when the same browser connects; another
-  profile of it connecting is `browser_wrong_profile`, and a start whose adapter never connects
-  is `browser_handshake_timeout`, with the words every browser start has. No new sentence is
+  the call's budget. The call then goes through when the same browser connects within the
+  deadline, even after another profile of it connected first; another profile alone at the
+  deadline is `browser_wrong_profile`, and a start whose adapter never connects is
+  `browser_handshake_timeout`, with the words every browser start has. A retry within 30 seconds
+  of a start that has not connected waits for that start instead of starting the browser again,
+  so repeating the call after a handshake timeout is safe. No new sentence is
   needed (ADR-0196 Decision 12 amendment, 2026-10-17). Otherwise a session that already works in
   a browser is never sent to browser startup. Then the refusal says which fact stopped the call,
   with `failed`, no effect, and `repeat_safe: true`:

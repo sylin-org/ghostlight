@@ -412,9 +412,13 @@ is evidently returning (`await_returning`), and `BrowserRecovery::request_browse
 scoped to that installed browser: registration checks, owned repair, one launch and the handshake
 wait. It answers ready when a connection of that browser arrives, or at once when one is already
 connected in another profile, since starting it again would only open a window there. The
-executor takes the call only when the bound identity is back and otherwise refuses with
-`browser_wrong_profile`. With no mapping, as after a service restart, the bound workspace waits
-the whole grace and keeps its refusals.
+executor then waits within the call's deadline for the bound identity itself, since another
+profile may connect first, and refuses with `browser_wrong_profile` only when the deadline ends
+without it. With no mapping, as after a service restart, the bound workspace waits the whole
+grace and keeps its refusals. Every flight, unbound or scoped, shares one launch guard per
+installed browser: while a start Ghostlight made is younger than `LAUNCH_HANDSHAKE_WINDOW` (30
+seconds, the longest call timeout) and no connection of that browser has arrived since, no flight
+starts it again, and each waits for that start's connection as if it had made it.
 
 An adapter that advertises end-to-end liveness acknowledges content-free service heartbeats at the
 extension shore, independently of browser operations. Relay attachment and adapter availability are

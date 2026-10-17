@@ -1407,7 +1407,9 @@ impl ApplicationExecutor {
     /// Start `installed`, the installed browser this session's browser `pinned` connected as,
     /// and take the call there once `pinned` is back.
     ///
-    /// Another profile of that browser connecting instead is the wrong profile. A browser that
+    /// Once that browser is connected, the call waits within its deadline for `pinned` itself,
+    /// since another profile of the browser may connect first; it is the wrong profile only when
+    /// the deadline ends without `pinned` while another browser is connected. A browser that
     /// recovery leaves to the person gets the refusal a session that waited for its browser
     /// always got.
     fn restart_pinned_browser(
@@ -1421,16 +1423,19 @@ impl ApplicationExecutor {
             .recovery
             .request_browser(installed, context.deadline, cancelled)
         {
-            Ok(RecoveryDecision::Ready { .. })
-                if self
+            Ok(RecoveryDecision::Ready { .. }) => {
+                match self
                     .browser
-                    .browsers()
-                    .iter()
-                    .any(|connected| connected.id == pinned) =>
-            {
-                Ok(pinned.into())
+                    .await_available(pinned, context.deadline, cancelled)
+                {
+                    Availability::Available => Ok(pinned.into()),
+                    _ if cancelled.load(Ordering::SeqCst) => {
+                        Err(BrowserError::CancelledBeforeDispatch)
+                    }
+                    Availability::NotAnswering => Err(BrowserError::NotAnsweringBeforeDispatch),
+                    Availability::Absent => Err(self.pinned_browser_absent()),
+                }
             }
-            Ok(RecoveryDecision::Ready { .. }) => Err(BrowserError::WrongProfile),
             Ok(RecoveryDecision::Manual { .. }) => Err(self.pinned_browser_absent()),
             Ok(RecoveryDecision::Failed { reason, details }) => {
                 Err(BrowserError::RecoveryFailed { reason, details })

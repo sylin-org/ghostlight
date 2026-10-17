@@ -143,10 +143,11 @@ a tray retains `ghostlight open` and the Applications entry as interaction route
   the explicit end-session intent through the same governance owner used by browser and MCP flows.
 - Policy names `browser.startup` as `Auto-open browser on request`. When it is on and no browser
   is connected, Ghostlight starts the browser the person uses with it: the only installed one, or
-  the one that last connected. With several installed and none remembered, and whenever the
-  setting is off, Ghostlight does not launch a browser; a refused browser call tells the model to
-  ask the person to open any eligible installed browser it names, with the Ghostlight extension
-  installed.
+  the one that last connected; when a session's own browser has closed, Ghostlight starts that
+  browser again, even while another browser is connected. With several installed and none
+  remembered, and whenever the setting is off, Ghostlight does not launch a browser; a refused
+  browser call tells the model to ask the person to open any eligible installed browser it names,
+  with the Ghostlight extension installed.
 - Pause, resume, and start-session apply from the persistent header before At a glance
   and match the tray, so taking the wheel has one affordance rather than several. They are the
   authority's own state, so they stay available whenever the authority answers, with or without a

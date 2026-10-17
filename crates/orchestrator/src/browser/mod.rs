@@ -143,6 +143,13 @@ pub trait BrowserPort: Send + Sync {
         None
     }
 
+    /// How many connections reporting the installed browser `installed` (a native-host id) this
+    /// port has registered in its life. Two readings tell recovery whether a browser it started
+    /// has connected in between. The default counts none.
+    fn arrivals_of(&self, _installed: &str) -> u64 {
+        0
+    }
+
     /// Wait until one exact browser can take work, `until` passes, or the call is cancelled.
     ///
     /// The default reads `browsers()`, so a port that cannot tell a silent connection from an
@@ -374,6 +381,8 @@ struct AdapterRegistry {
     /// connected, kept for the service's life in memory only, so a session whose browser closed
     /// can start that same browser again.
     installed: HashMap<String, &'static str>,
+    /// How many connections reported each installed browser, for the service's life.
+    arrivals: HashMap<&'static str, u64>,
 }
 
 impl AdapterRegistry {
@@ -816,6 +825,7 @@ impl RelayBrowserPort {
             }
             if let Some(installed) = installed {
                 adapters.installed.insert(browser_id.clone(), installed);
+                *adapters.arrivals.entry(installed).or_default() += 1;
             }
             let previous = adapters.connections.insert(browser_id.clone(), connection);
             if let Some(previous) = &previous {
@@ -1007,6 +1017,14 @@ impl BrowserPort for RelayBrowserPort {
             .installed
             .get(browser)
             .map(|installed| (*installed).to_owned())
+    }
+
+    fn arrivals_of(&self, installed: &str) -> u64 {
+        lock(&self.adapters)
+            .arrivals
+            .get(installed)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// A silent connection is waited on until it answers a timer heartbeat again.
@@ -1351,6 +1369,7 @@ pub(crate) mod testing {
         returning: Mutex<bool>,
         last_connected: Mutex<Option<String>>,
         installed: Mutex<std::collections::HashMap<String, String>>,
+        arrivals: Mutex<std::collections::HashMap<String, u64>>,
     }
 
     impl Default for FakeBrowser {
@@ -1366,6 +1385,7 @@ pub(crate) mod testing {
                 returning: Mutex::new(false),
                 last_connected: Mutex::new(None),
                 installed: Mutex::default(),
+                arrivals: Mutex::default(),
             }
         }
     }
@@ -1406,8 +1426,18 @@ pub(crate) mod testing {
         pub fn routed(&self) -> Vec<String> {
             lock(&self.routed).clone()
         }
-        /// Replace the connected inventory this port reports.
+        /// Replace the connected inventory this port reports. Each listed browser that was
+        /// reported as an installed browser counts as one arrival of that installed browser.
         pub fn connect(&self, browsers: Vec<BrowserSummary>) {
+            {
+                let installed = lock(&self.installed);
+                let mut arrivals = lock(&self.arrivals);
+                for browser in &browsers {
+                    if let Some(installed) = installed.get(&browser.id) {
+                        *arrivals.entry(installed.clone()).or_default() += 1;
+                    }
+                }
+            }
             *lock(&self.connected) = browsers;
         }
         /// Report evidence that a browser is about to connect, as a relay does after a service
@@ -1534,6 +1564,10 @@ pub(crate) mod testing {
 
         fn installed_browser_of(&self, browser: &str) -> Option<String> {
             lock(&self.installed).get(browser).cloned()
+        }
+
+        fn arrivals_of(&self, installed: &str) -> u64 {
+            lock(&self.arrivals).get(installed).copied().unwrap_or(0)
         }
 
         fn publish_control_state(&self, state: RuntimeControlState) -> Result<(), BrowserError> {

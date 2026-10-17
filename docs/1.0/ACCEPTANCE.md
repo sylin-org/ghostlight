@@ -89,9 +89,12 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
     reconnecting while it installs its page runtime takes the call. Under `on_demand`, when this
     service saw the bound browser connect as one installed browser, the wait ends once no browser
     is evidently returning, and that browser, never another, is started again; the call goes
-    through when the same browser identity connects, another profile connecting instead is
+    through when the same browser identity connects within the call's deadline, even after
+    another profile connected first; another profile alone at the deadline is
     `browser_wrong_profile`, and nothing connecting is `browser_handshake_timeout` (ADR-0196
-    Decision 12 amendment, 2026-10-17). Otherwise, and always under `manual`, a bound session
+    Decision 12 amendment, 2026-10-17). A start that has not connected is never repeated within
+    30 seconds: a session with no browser, a bound session and a retry asking meanwhile all wait
+    for that one start. Otherwise, and always under `manual`, a bound session
     never reaches browser startup. If the browser does not return, the refusal says it is not
     answering, not connected, or not connected while a different browser is
     (`browser_wrong_profile`). A session

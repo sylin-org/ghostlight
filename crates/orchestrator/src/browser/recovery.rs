@@ -15,7 +15,11 @@
 //! Decision 12 amendment, 2026-10-17).
 //!
 //! Where the selected platform and policy permit it, a flight performs one ordinary-profile
-//! launch and waits within the invocation deadline for an inbound adapter.
+//! launch and waits within the invocation deadline for an inbound adapter. Every flight shares
+//! one launch guard per installed browser: while a start Ghostlight made is younger than
+//! [`LAUNCH_HANDSHAKE_WINDOW`] and no connection of that browser has arrived, no flight starts
+//! it again, so two sessions asking at once, or a retry after a slow start, never open a second
+//! window.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -32,6 +36,12 @@ use crate::governance::manifest::BrowserStartup;
 use crate::governance::GovernanceFacade;
 use crate::install::browser_package::BrowserPackage;
 use crate::install::native_host::{NativeHostRegistry, NativeHostState};
+use crate::language::MAX_TIMEOUT_MS;
+
+/// How long a browser start Ghostlight made holds the launch guard while no connection of that
+/// browser has arrived: the longest wait any call can give a handshake. A request inside it waits
+/// for that start instead of starting the browser again.
+const LAUNCH_HANDSHAKE_WINDOW: Duration = Duration::from_millis(MAX_TIMEOUT_MS);
 
 /// One browser installation that can inform a recovery decision.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -424,6 +434,19 @@ struct Flights {
     scopes: HashMap<FlightScope, Arc<RecoveryFlight>>,
 }
 
+/// One browser start Ghostlight made, as the launch guard holds it.
+#[derive(Clone, Copy, Debug)]
+struct PendingLaunch {
+    /// When the start was made, by the recovery clock.
+    at: Instant,
+    /// The port's count of arrivals of that installed browser when the start was made; a higher
+    /// count means a connection of it has arrived since.
+    arrivals: u64,
+}
+
+/// The source of the current time for the launch guard.
+type RecoveryClock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
 /// Cloneable, service-scoped single-flight recovery decision service.
 #[derive(Clone)]
 pub struct BrowserRecovery {
@@ -432,6 +455,11 @@ pub struct BrowserRecovery {
     browser: Arc<dyn BrowserPort>,
     mechanism: Arc<dyn RecoveryMechanism>,
     flights: Arc<Mutex<Flights>>,
+    /// The launch guard: the latest start of each installed browser, by native-host id, shared
+    /// by every flight scope.
+    launches: Arc<Mutex<HashMap<String, PendingLaunch>>>,
+    /// The clock that times the launch guard.
+    clock: RecoveryClock,
 }
 
 impl BrowserRecovery {
@@ -442,8 +470,10 @@ impl BrowserRecovery {
             governance,
             inventory: Arc::new(SystemBrowserInventory),
             browser,
-            mechanism: Arc::new(SystemRecoveryMechanism),
+            mechanism: discovered_mechanism(),
             flights: Arc::new(Mutex::new(Flights::default())),
+            launches: Arc::new(Mutex::new(HashMap::new())),
+            clock: Arc::new(Instant::now),
         }
     }
 
@@ -482,9 +512,9 @@ impl BrowserRecovery {
     ///
     /// Only that browser is ever started. The answer is `Ready` once a connection of it arrives,
     /// or at once when one is already connected, since launching a running browser again would
-    /// only open a window in the profile it already runs; `Manual` when the posture is `manual` or
-    /// the browser is not one Ghostlight can start; and the ordinary failures, `HandshakeTimeout`
-    /// among them, otherwise.
+    /// only open a window in the profile it already runs; that connection may be another
+    /// profile. It is `Manual` when the posture is `manual` or the browser is not one Ghostlight
+    /// can start, and the ordinary failures, `HandshakeTimeout` among them, otherwise.
     pub fn request_browser(
         &self,
         installed: &str,
@@ -617,12 +647,7 @@ impl BrowserRecovery {
             }
             (FlightScope::Unbound, FlightPhase::Inspecting) => {
                 Ok(self.inventory.inspect().map_or_else(
-                    |_| {
-                        FlightPhase::Complete(RecoveryDecision::Failed {
-                            reason: RecoveryFailure::NativeHostUnavailable,
-                            details: Vec::new(),
-                        })
-                    },
+                    |()| unreadable_inventory(),
                     |candidates| {
                         let remembered = self.browser.last_connected_browser();
                         phase_from_plan(decide(
@@ -680,10 +705,17 @@ impl BrowserRecovery {
                 }
             }
             (_, FlightPhase::Launching { browser }) => {
+                if !self.claim_launch(&browser.id) {
+                    return Ok(FlightPhase::Launched { browser });
+                }
                 match self.mechanism.launch(&browser, deadline, cancelled) {
                     Ok(()) => Ok(FlightPhase::Launched { browser }),
-                    Err(MechanismError::Wait(error)) => Err(error),
+                    Err(MechanismError::Wait(error)) => {
+                        self.release_launch(&browser.id);
+                        Err(error)
+                    }
                     Err(MechanismError::Failed((reason, detail))) => {
+                        self.release_launch(&browser.id);
                         Ok(FlightPhase::Complete(RecoveryDecision::Failed {
                             reason,
                             details: vec![detail],
@@ -731,13 +763,37 @@ impl BrowserRecovery {
             return FlightPhase::Complete(RecoveryDecision::Ready { browser: running });
         }
         self.inventory.inspect().map_or_else(
-            |()| {
-                FlightPhase::Complete(RecoveryDecision::Manual {
-                    browsers: Vec::new(),
-                })
-            },
+            |()| unreadable_inventory(),
             |candidates| phase_from_plan(decide_browser(&candidates, installed)),
         )
+    }
+
+    /// Take the launch guard of the installed browser `installed` for a start, or learn that the
+    /// flight must not start it: a connection of it is present, or a start Ghostlight made less
+    /// than [`LAUNCH_HANDSHAKE_WINDOW`] ago has not connected yet. Either way the flight then
+    /// waits for that browser exactly as if it had started it. A start that connected, or whose
+    /// window has passed, no longer holds the guard.
+    fn claim_launch(&self, installed: &str) -> bool {
+        if self.connected_as(installed).is_some() {
+            return false;
+        }
+        let arrivals = self.browser.arrivals_of(installed);
+        let now = (self.clock)();
+        let mut launches = lock(&self.launches);
+        let pending = launches.get(installed).is_some_and(|launch| {
+            launch.arrivals == arrivals
+                && now.saturating_duration_since(launch.at) < LAUNCH_HANDSHAKE_WINDOW
+        });
+        if pending {
+            return false;
+        }
+        launches.insert(installed.into(), PendingLaunch { at: now, arrivals });
+        true
+    }
+
+    /// Free the launch guard of `installed` after a start that began no process.
+    fn release_launch(&self, installed: &str) {
+        lock(&self.launches).remove(installed);
     }
 
     /// A connected browser identity that reported the installed browser `installed`.
@@ -896,6 +952,24 @@ fn start_plan(mode: BrowserStartup, browser: RecoveryCandidate) -> RecoveryPlan 
             launch: true,
         },
     }
+}
+
+/// The answer when the installed browsers cannot be read: the native host is not usable.
+fn unreadable_inventory() -> FlightPhase {
+    FlightPhase::Complete(RecoveryDecision::Failed {
+        reason: RecoveryFailure::NativeHostUnavailable,
+        details: Vec::new(),
+    })
+}
+
+/// The launcher a discovered recovery service holds. A test build holds one that starts no
+/// process, so no test can open a browser on the machine that runs it.
+fn discovered_mechanism() -> Arc<dyn RecoveryMechanism> {
+    #[cfg(not(test))]
+    let mechanism = Arc::new(SystemRecoveryMechanism);
+    #[cfg(test)]
+    let mechanism = Arc::new(TestLaunch(Box::new(|| {})));
+    mechanism
 }
 
 fn phase_from_plan(plan: RecoveryPlan) -> FlightPhase {
@@ -1076,6 +1150,8 @@ mod tests {
                 None,
             ),
             flights: Arc::new(Mutex::new(Flights::default())),
+            launches: Arc::new(Mutex::new(HashMap::new())),
+            clock: Arc::new(Instant::now),
         }
     }
 
@@ -1938,6 +2014,207 @@ mod tests {
             }
         );
         assert_eq!(inventory.inspections.load(Ordering::SeqCst), 0);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
+    }
+
+    /// Time `recovery`'s launch guard by a clock the test moves by hand.
+    fn hand_clock(recovery: &mut BrowserRecovery) -> Arc<Mutex<Instant>> {
+        let now = Arc::new(Mutex::new(Instant::now()));
+        let read = Arc::clone(&now);
+        recovery.clock = Arc::new(move || *lock(&read));
+        now
+    }
+
+    /// Wait until the flight for `scope` waits for a started browser to connect.
+    fn wait_for_launched(recovery: &BrowserRecovery, scope: &FlightScope) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let launched = lock(&recovery.flights)
+                .scopes
+                .get(scope)
+                .is_some_and(|flight| {
+                    matches!(lock(&flight.state).phase, FlightPhase::Launched { .. })
+                });
+            if launched {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the {scope:?} flight never waited for a started browser"
+            );
+            thread::yield_now();
+        }
+    }
+
+    /// The answer to a Chrome start that never connects within the call.
+    fn chrome_timeout() -> RecoveryDecision {
+        RecoveryDecision::Failed {
+            reason: RecoveryFailure::HandshakeTimeout,
+            details: vec!["Google Chrome".into()],
+        }
+    }
+
+    #[test]
+    fn an_unbound_and_a_named_request_for_one_closed_browser_start_it_once() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_installed("browser_chrome", "chrome");
+        browser.remember_last_connected("chrome");
+        let mechanism = mechanism(Ok(()), None);
+        let (recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+
+        let unbound = {
+            let recovery = recovery.clone();
+            thread::spawn(move || {
+                recovery.request(
+                    Instant::now() + Duration::from_secs(2),
+                    &AtomicBool::new(false),
+                )
+            })
+        };
+        let named = {
+            let recovery = recovery.clone();
+            thread::spawn(move || request_chrome(&recovery, Duration::from_secs(2)))
+        };
+        wait_for_launched(&recovery, &FlightScope::Unbound);
+        wait_for_launched(&recovery, &FlightScope::Browser("chrome".into()));
+        browser.connect(vec![summary("browser_chrome", true)]);
+
+        let ready = RecoveryDecision::Ready {
+            browser: "browser_chrome".into(),
+        };
+        assert_eq!(unbound.join().unwrap(), Ok(ready.clone()));
+        assert_eq!(named.join().unwrap(), ready);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_retry_inside_the_guard_window_waits_for_the_first_start() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_installed("browser_chrome", "chrome");
+        let mechanism = mechanism(Ok(()), None);
+        let (mut recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+        let now = hand_clock(&mut recovery);
+
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_millis(50)),
+            chrome_timeout()
+        );
+        *lock(&now) += Duration::from_secs(5);
+        let retry = {
+            let recovery = recovery.clone();
+            thread::spawn(move || request_chrome(&recovery, Duration::from_secs(2)))
+        };
+        wait_for_launched(&recovery, &FlightScope::Browser("chrome".into()));
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+        browser.connect(vec![summary("browser_chrome", true)]);
+
+        assert_eq!(
+            retry.join().unwrap(),
+            RecoveryDecision::Ready {
+                browser: "browser_chrome".into(),
+            }
+        );
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_start_that_connected_frees_the_guard() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_installed("browser_chromium", "chrome");
+        let mechanism = mechanism(Ok(()), Some(Arc::clone(&browser)));
+        let (mut recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+        let _still = hand_clock(&mut recovery);
+        let ready = RecoveryDecision::Ready {
+            browser: "browser_chromium".into(),
+        };
+
+        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), ready);
+        browser.connect(Vec::new());
+        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), ready);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn after_the_guard_window_the_browser_is_started_again() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_installed("browser_chrome", "chrome");
+        let mechanism = mechanism(Ok(()), None);
+        let (mut recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+        let now = hand_clock(&mut recovery);
+
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_millis(50)),
+            chrome_timeout()
+        );
+        *lock(&now) += LAUNCH_HANDSHAKE_WINDOW;
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_millis(50)),
+            chrome_timeout()
+        );
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_start_that_began_no_process_frees_the_guard() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        let mechanism = mechanism(
+            Err((RecoveryFailure::LaunchFailed, "fake launch refused".into())),
+            None,
+        );
+        let (mut recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+        let _still = hand_clock(&mut recovery);
+        let refused = RecoveryDecision::Failed {
+            reason: RecoveryFailure::LaunchFailed,
+            details: vec!["fake launch refused".into()],
+        };
+
+        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), refused);
+        assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), refused);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn an_unreadable_inventory_answers_a_named_request_as_it_answers_an_unbound_one() {
+        struct Unreadable;
+        impl BrowserInventory for Unreadable {
+            fn inspect(&self) -> Result<Vec<RecoveryCandidate>, ()> {
+                Err(())
+            }
+        }
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        let mechanism = mechanism(Ok(()), None);
+        let (mut recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+        recovery.inventory = Arc::new(Unreadable);
+        let unreadable = RecoveryDecision::Failed {
+            reason: RecoveryFailure::NativeHostUnavailable,
+            details: Vec::new(),
+        };
+
+        assert_eq!(
+            recovery
+                .request(
+                    Instant::now() + Duration::from_secs(1),
+                    &AtomicBool::new(false),
+                )
+                .unwrap(),
+            unreadable
+        );
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_secs(1)),
+            unreadable
+        );
         assert_eq!(mechanism.launches.load(Ordering::SeqCst), 0);
     }
 
