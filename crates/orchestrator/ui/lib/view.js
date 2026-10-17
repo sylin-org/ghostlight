@@ -722,15 +722,22 @@
 
     const kindGlyph = (group) => (group.commandLine ? KIND_GLYPHS.commandLine : KIND_GLYPHS.agent);
 
-    /** The face an agent wears in the closed summary: its initials, or the prompt for the command line. */
-    function faceMarkup(group) {
-      const face = group.commandLine ? KIND_GLYPHS.commandLine : escapeHtml(initials(group.name));
-      return `<span class="glance-face${group.busy ? " busy" : ""}" title="${escapeHtml(group.name)}">${face}</span>`;
+    /**
+     * The face an agent wears in the closed summary: the tile the Integrations rail shows for it,
+     * its initials when the page knows no tile, or the prompt for the command line.
+     */
+    function faceMarkup(group, icons) {
+      const icon = group.commandLine ? null : icons.get(group.name);
+      const face = group.commandLine ? KIND_GLYPHS.commandLine
+        : icon ? `<img src="integrations/${escapeHtml(icon)}" alt="" width="20" height="20">`
+          : escapeHtml(initials(group.name));
+      const kind = `${group.busy ? " busy" : ""}${icon ? " tile" : ""}`;
+      return `<span class="glance-face${kind}" title="${escapeHtml(group.name)}">${face}</span>`;
     }
 
     /** The closed summary: who is connected, toward how many browsers, and the way to the details. */
-    function pillMarkup(groups, browsers) {
-      const faces = groups.slice(0, GLANCE_FACES).map(faceMarkup).join("");
+    function pillMarkup(groups, browsers, icons) {
+      const faces = groups.slice(0, GLANCE_FACES).map((group) => faceMarkup(group, icons)).join("");
       const hidden = groups.length - GLANCE_FACES;
       const rest = hidden > 0 ? `<span class="glance-face glance-rest">+${hidden}</span>` : "";
       const stack = groups.length ? `<span class="glance-faces" aria-hidden="true">${faces}${rest}</span>` : "";
@@ -804,13 +811,19 @@
         const open = groups.find((group) => group.name === glanceAgent);
         const body = shelvesMarkup(groups, facts.browsers, facts.no_browser) + (open ? cardMarkup(open) : "");
         const markup = `<details class="glance" data-page-details="${GLANCE_KEY}"${openPage.has(GLANCE_KEY) ? " open" : ""}>`
-          + pillMarkup(groups, facts.browsers) + body + "</details>";
+          + pillMarkup(groups, facts.browsers, facts.icons) + body + "</details>";
         replaceHistoryMarkup(el.connections, markup);
       });
     }
 
     function connections(snapshot) {
-      lastConnections = { sessions: snapshot.sessions, browsers: snapshot.browsers, no_browser: snapshot.no_browser };
+      // Each agent's tile, by its name, from the Integrations part. A snapshot without that part
+      // keeps the tiles already known.
+      const harnesses = snapshot.harnesses ?? [];
+      const icons = harnesses.length
+        ? new Map(harnesses.filter((harness) => harness.icon).map((harness) => [harness.name, harness.icon]))
+        : lastConnections?.icons ?? new Map();
+      lastConnections = { sessions: snapshot.sessions, browsers: snapshot.browsers, no_browser: snapshot.no_browser, icons };
       paintConnections(lastConnections);
     }
 

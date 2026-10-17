@@ -1251,6 +1251,25 @@ test("the glance is one closed summary: who is connected, toward how many browse
   assert.deepEqual(shown.failures, []);
 });
 
+test("an agent the Integrations page knows wears its own tile in the summary, not initials", () => {
+  const shown = drawing();
+  const answer = snapshotAnswer({ sessions: GLANCE_SESSIONS });
+  answer.parts.integrations.harnesses = [agent("claude-code", "Claude Code", "installed"), agent("codex", "Codex", "installed")];
+  const snapshot = Transport.flatten(answer);
+  shown.view.collections(snapshot, new Set());
+  const html = shown.el("connections").innerHTML;
+  const faces = drawn(html).wearing("glance-face");
+  assert.deepEqual(faces.map((face) => face.classes.has("tile")), [true, true, false],
+    "Codex and Claude Code wear tiles; the command line keeps its prompt");
+  assert.match(html, /<img src="integrations\/codex\.svg"/);
+  assert.match(html, /<img src="integrations\/claude-code\.svg"/);
+  assert.equal(faces.filter((face) => face.classes.has("busy")).length, 1, "the working agent still shows it");
+  // A later snapshot without the Integrations part keeps the tiles already known.
+  shown.view.collections(Transport.flatten(snapshotAnswer({ sessions: GLANCE_SESSIONS })), new Set());
+  assert.equal(drawn(shown.el("connections").innerHTML).wearing("tile").length, 2);
+  assert.deepEqual(shown.failures, []);
+});
+
 test("the summary counts in words, singular for one and plain for none", () => {
   assert.deepEqual([0, 1, 3].map(Words.agentsCount), ["No agents", "1 agent", "3 agents"]);
   assert.deepEqual([0, 1, 2].map(Words.browsersCount), ["no browser", "1 browser", "2 browsers"]);

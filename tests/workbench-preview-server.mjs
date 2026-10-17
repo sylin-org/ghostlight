@@ -373,9 +373,10 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     const spec = blocked
       ? { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
       : window.__GHOSTLIGHT_SCRIPT__[step++ % window.__GHOSTLIGHT_SCRIPT__.length];
+    const session = preview.sessions[counter % preview.sessions.length];
     const operation = {
       invocation: "invocation_preview_" + counter,
-      workspace: preview.sessions[counter % preview.sessions.length].id,
+      workspace: session.id,
       tool: spec.tool,
       activity: spec.activity,
       capability: spec.capability,
@@ -401,8 +402,16 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
         summary: blocked ? "Authority blocked the browser job." : spec.summary,
         duration_ms: spec.ms,
         observed: blocked ? {} : spec.observed,
-        // Alternate the intake so both read side by side in the queue.
-        channel: counter % 3 === 0 ? "cli" : "mcp"
+        // The record carries the intake and the name of the session that ran it, as the service's do.
+        channel: session.channel,
+        provenance: {
+          connection_id: "connection_" + session.id,
+          reported_application: session.channel === "cli" ? null : session.agent,
+          agent: session.agent,
+          channel: session.channel,
+          explanation: session.channel === "cli" ? "A ghostlight call session is a local program."
+            : '"' + session.agent + '" is what the agent calls itself; Ghostlight does not verify it.'
+        }
       };
       publish({ kind: "operation_settled", record });
       setTimeout(runOne, blocked ? 3000 : 700 + Math.random() * 1300);
