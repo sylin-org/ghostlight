@@ -27,8 +27,8 @@
 
   const TOAST_MS = 4200;
 
-  /** The disclosure key of the At a glance summary, which opens its shelves. */
-  const GLANCE_KEY = "glance:shelves";
+  /** The page disclosure key of the At a glance summary, which opens its shelves. */
+  const GLANCE_KEY = "glance";
 
   /** The id of the open agent's card, which its chip controls. */
   const GLANCE_CARD_ID = "glance-card";
@@ -185,14 +185,27 @@
 
     /* -------------------------------- monitor ----------------------------- */
 
-    // Expansion is disposable view state; new receipts never force a panel open.
+    // Expansion is disposable view state; new receipts never force a panel open. Feed
+    // disclosures belong to an activity entry and are forgotten with it; page disclosures, such
+    // as the At a glance summary, belong to no entry, so no feed change forgets them.
     const expandedHistory = new Set();
+    const openPage = new Set();
+
+    /** The open-state set a `<details>` is remembered in and its key there, or null when it is not remembered. */
+    function disclosure(details) {
+      const feedKey = details?.dataset?.historyDetails;
+      if (feedKey) return { remembered: expandedHistory, key: feedKey };
+      const pageKey = details?.dataset?.pageDetails;
+      if (pageKey) return { remembered: openPage, key: pageKey };
+      return null;
+    }
+
     document.addEventListener("click", (event) => {
       // Native toggle events are deferred. Remember the click before a receipt can repaint it.
       const details = event.target.closest?.("summary")?.parentElement;
-      const historyKey = details?.dataset?.historyDetails;
-      if (historyKey) {
-        if (details.open) expandedHistory.delete(historyKey); else expandedHistory.add(historyKey);
+      const clicked = disclosure(details);
+      if (clicked) {
+        if (details.open) clicked.remembered.delete(clicked.key); else clicked.remembered.add(clicked.key);
         details.dataset.historyOpening = String(!details.open);
       }
       const agent = event.target.closest?.("[data-glance-agent]");
@@ -214,10 +227,10 @@
     });
     document.addEventListener("toggle", (event) => {
       const details = event.target;
-      const key = details?.dataset?.historyDetails;
-      if (!key || details.isConnected === false) return;
-      const wasOpen = expandedHistory.has(key);
-      if (details.open) expandedHistory.add(key); else expandedHistory.delete(key);
+      const toggled = disclosure(details);
+      if (!toggled || details.isConnected === false) return;
+      const wasOpen = toggled.remembered.has(toggled.key);
+      if (details.open) toggled.remembered.add(toggled.key); else toggled.remembered.delete(toggled.key);
       if (details.open && (!wasOpen || details.dataset.historyOpening === "true") && details.classList.contains("composition-details")) {
         details.querySelector('[data-step-problem="true"]')?.scrollIntoView({ block: "nearest" });
       }
@@ -229,7 +242,7 @@
         [list.closest("details")?.dataset.historyDetails, list.scrollTop]));
       const active = document.activeElement;
       const focusKey = node.contains(active) && active?.tagName === "SUMMARY"
-        ? active.closest("details")?.dataset.historyDetails : null;
+        ? disclosure(active.closest("details"))?.key : null;
       const focusData = node.contains(active)
         ? FOCUS_KEYS.find((key) => active?.dataset?.[key] !== undefined) : undefined;
       const focusValue = focusData ? active.dataset[focusData] : undefined;
@@ -239,7 +252,7 @@
         if (scroll.has(key)) list.scrollTop = scroll.get(key);
       }
       if (focusKey) {
-        [...node.querySelectorAll("details")].find((details) => details.dataset.historyDetails === focusKey)
+        [...node.querySelectorAll("details")].find((details) => disclosure(details)?.key === focusKey)
           ?.querySelector("summary")?.focus({ preventScroll: true });
       }
       if (focusData) {
@@ -740,7 +753,7 @@
         const groups = agentGroups(facts.sessions);
         const open = groups.find((group) => group.name === glanceAgent);
         const body = shelvesMarkup(groups, facts.browsers, facts.no_browser) + (open ? cardMarkup(open) : "");
-        const markup = `<details class="glance" data-history-details="${GLANCE_KEY}"${expandedHistory.has(GLANCE_KEY) ? " open" : ""}>`
+        const markup = `<details class="glance" data-page-details="${GLANCE_KEY}"${openPage.has(GLANCE_KEY) ? " open" : ""}>`
           + pillMarkup(groups, facts.browsers) + body + "</details>";
         replaceHistoryMarkup(el.connections, markup);
       });

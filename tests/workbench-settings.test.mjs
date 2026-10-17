@@ -1268,6 +1268,19 @@ test("the summary stays open across a repaint once a person opened it", () => {
   assert.equal("open" in shown.read().wearing("glance")[0].attributes, true);
 });
 
+test("the opened summary stays open when the activity feed is rebuilt", () => {
+  const shown = glance();
+  const details = shown.read().wearing("glance")[0];
+  details.open = true;
+  details.isConnected = true;
+  shown.dispatch("toggle", { target: details });
+  shown.view.rebuildFeed([Entries.entryFromRecord(settledRead({ invocation: "newest" }), null)]);
+  shown.view.rebuildFeed([]);
+  shown.view.collections({ ...shown.snapshot, sessions: [GLANCE_SESSIONS[2]] }, new Set());
+  assert.equal("open" in shown.read().wearing("glance")[0].attributes, true,
+    "a queued call, Clear view or a reconnect rebuilds the feed, which owns no page disclosure");
+});
+
 test("the shelves name each agent once with its glyph, a count past one session, and a working agent lit", () => {
   const shown = glance();
   const bar = shown.read();

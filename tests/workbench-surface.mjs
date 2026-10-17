@@ -842,18 +842,22 @@ const glanceChecks = [];
   };
   let html = draw({ sessions, browsers });
   glanceChecks.push(["at a glance is one closed summary that counts agents and browsers",
-    html.startsWith('<details class="glance" data-history-details="glance:shelves">')
+    html.startsWith('<details class="glance" data-page-details="glance">')
       && html.includes(">3 agents<") && html.includes(">1 browser<") && html.includes(">Details<")
       && !html.includes("Connection details") && !html.includes("Intake"), html]);
   glanceChecks.push(["the shelves give each agent one chip with a count, and the working one wears the busy glyph",
     html.includes('data-glance-agent="Codex"') && html.includes('<span class="tally">5</span>')
       && /class="chip glance-chip busy"[^>]*data-glance-agent="Claude &lt;b&gt;Code&lt;\/b&gt;"/.test(html)
       && html.includes(">Google Chrome<small>2 tabs</small>") && !html.includes("<b>Code</b>"), html]);
-  documentHandlers.get("toggle").at(-1)({ target: { dataset: { historyDetails: "glance:shelves" }, open: true,
+  documentHandlers.get("toggle").at(-1)({ target: { dataset: { pageDetails: "glance" }, open: true,
     classList: { contains: () => false } } });
   html = draw({ sessions: sessions.slice(1), browsers });
   glanceChecks.push(["the opened summary stays open across a refresh",
-    html.startsWith('<details class="glance" data-history-details="glance:shelves" open>'), html.slice(0, 80)]);
+    html.startsWith('<details class="glance" data-page-details="glance" open>'), html.slice(0, 80)]);
+  glanceView.rebuildFeed([]);
+  html = draw({ sessions: sessions.slice(2), browsers });
+  glanceChecks.push(["the opened summary stays open when the activity feed is rebuilt",
+    html.startsWith('<details class="glance" data-page-details="glance" open>'), html.slice(0, 80)]);
   const press = (name) => documentHandlers.get("click").forEach((handler) => handler({ target: {
     closest: (selector) => (selector === "[data-glance-agent]" ? { dataset: { glanceAgent: name } } : null) } }));
   press("Codex");
