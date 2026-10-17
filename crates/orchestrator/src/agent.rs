@@ -34,6 +34,9 @@ const SRC_KEY: &str = "src";
 /// The key of a glyph symbol: the glyph's word.
 const GLYPH_KEY: &str = "glyph";
 
+/// The names of the catalog's reserved entries, which no client's claim may take.
+const RESERVED_NAMES: [&str; 2] = [COMMAND_LINE_AGENT, UNKNOWN_AGENT];
+
 /// One agent as the window names and shows it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Agent {
@@ -132,15 +135,19 @@ impl Agent {
     /// is known: the command line for a `ghostlight call` session; the roster's agent for a
     /// name it knows; an agent Ghostlight does not know under the name it reported
     /// ([`claimed_name`]), with the unknown glyph; and the unknown agent when no name was
-    /// reported or none was kept. Ghostlight never invents a name.
+    /// reported, none was kept, or the client claimed a reserved entry's name. Ghostlight never
+    /// invents a name.
     ///
     /// The name stays the client's own claim: it names the agent for a person and grants nothing.
+    /// An MCP client that calls itself "Command line" or "Unknown agent" is not the command line
+    /// and does not wear its glyph; its claim still shows in the connection's explanation.
     #[must_use]
     pub fn of(reported: Option<&str>, channel: IntakeChannel) -> Self {
         match channel {
             IntakeChannel::Cli => Self::command_line(),
             IntakeChannel::Mcp => match reported.and_then(claimed_name) {
                 None => Self::unknown(),
+                Some(name) if takes_a_reserved_name(name) => Self::unknown(),
                 Some(name) => crate::install::agent_called(name).unwrap_or_else(|| Self {
                     name: name.to_owned(),
                     ..Self::unknown()
@@ -158,6 +165,20 @@ impl Agent {
             Self::of(evidence.reported_application.as_deref(), evidence.channel)
         })
     }
+}
+
+/// Whether `name` is a reserved entry's name, ignoring case and space.
+fn takes_a_reserved_name(name: &str) -> bool {
+    let squeezed = |text: &str| -> String {
+        text.chars()
+            .filter(|character| !character.is_whitespace())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let name = squeezed(name);
+    RESERVED_NAMES
+        .iter()
+        .any(|reserved| squeezed(reserved) == name)
 }
 
 #[cfg(test)]
@@ -214,6 +235,43 @@ mod tests {
             assert_eq!(agent, Agent::unknown(), "{unnamed:?}");
             assert_eq!(agent.name, "Unknown agent");
         }
+    }
+
+    #[test]
+    fn a_client_that_claims_a_reserved_name_is_the_unknown_agent() {
+        use crate::provenance::ConnectionEvidence;
+
+        for claimed in [
+            "Command line",
+            "command line",
+            "  COMMAND   LINE ",
+            "CommandLine",
+            "Unknown agent",
+            "unknown agent",
+            " UnknownAgent ",
+        ] {
+            let agent = Agent::of(Some(claimed), IntakeChannel::Mcp);
+            assert_eq!(agent, Agent::unknown(), "{claimed:?}");
+            assert_ne!(
+                agent.symbol,
+                Symbol::Glyph(Glyph::CommandLine),
+                "{claimed:?}"
+            );
+            let evidence = ConnectionEvidence::new(claimed, IntakeChannel::Mcp).details();
+            assert_eq!(Agent::of_evidence(Some(&evidence)), Agent::unknown());
+            assert!(
+                evidence
+                    .explanation
+                    .contains(&format!("\"{}\"", claimed.trim())),
+                "the claim still shows in the trust note: {}",
+                evidence.explanation
+            );
+        }
+        assert_eq!(
+            Agent::of(Some("Command line"), IntakeChannel::Cli),
+            Agent::command_line(),
+            "only the command line's own channel names it"
+        );
     }
 
     #[test]
