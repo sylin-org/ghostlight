@@ -18,10 +18,10 @@
   /** The button that takes a draft of the rules to the Ghostlight application to be applied. */
   const APPLY_IN_WINDOW_LABEL = "Apply in the Ghostlight window";
 
-  /** Said after Copy setup puts a client's manual setup on the clipboard. */
+  /** Said after Copy setup puts an agent's entry on the clipboard. */
   const COPIED_SETUP = "Manual setup copied.";
 
-  /** Said after Copy MCP command puts a client's command on the clipboard. */
+  /** Said after Copy MCP command puts the command every agent runs on the clipboard. */
   const COPIED_COMMAND = "MCP command copied.";
 
   /** The band's word while the live stream is lost and being opened again. */
@@ -268,33 +268,209 @@
     install: "integrations"
   };
 
-  /**
-   * The integration roster's card categories, in presentation order.
-   *
-   * Product state and presentation order are separate facts: an available product is shown before
-   * one that needs attention, while attention still outranks availability when several concrete
-   * targets share one product card.
-   */
-  const INTEGRATION_CATEGORIES = Object.freeze([
-    Object.freeze({ id: "ready", label: "Ready" }),
-    Object.freeze({ id: "available", label: "Available" }),
-    Object.freeze({ id: "needs-attention", label: "Needs Attention" }),
-    Object.freeze({ id: "not-detected", label: "Not Detected" })
-  ]);
+  /* ----------------------------- Integrations ----------------------------- */
 
-  /** Map every closed harness state to the one category a product card may occupy. */
-  const INTEGRATION_STATE_CATEGORY = Object.freeze({
-    installed: "ready",
-    available: "available",
-    updatable: "needs-attention",
-    needs_attention: "needs-attention",
-    not_detected: "not-detected"
+  /** What each of the service's agent states reads as, on the rail and in the pane. */
+  const AGENT_STATE_WORDS = Object.freeze({
+    installed: "Connected",
+    not_detected: "Not on this computer",
+    available: "Found, not connected",
+    updatable: "Needs an update",
+    needs_attention: "Needs your attention"
   });
 
-  /** Resolve a plural product card from its strongest concrete target state. */
-  const INTEGRATION_CATEGORY_PRIORITY = Object.freeze([
-    "ready", "needs-attention", "available", "not-detected"
+  /**
+   * The rail's groups, in rail order, each with the states it holds. A group with no agent is not
+   * drawn, so Needs a look appears only when something does.
+   */
+  const AGENT_GROUPS = Object.freeze([
+    Object.freeze({ key: "look", title: "Needs a look", states: Object.freeze(["needs_attention", "updatable"]) }),
+    Object.freeze({ key: "connected", title: AGENT_STATE_WORDS.installed, states: Object.freeze(["installed"]) }),
+    Object.freeze({ key: "found", title: AGENT_STATE_WORDS.available, states: Object.freeze(["available"]) }),
+    Object.freeze({ key: "absent", title: AGENT_STATE_WORDS.not_detected, states: Object.freeze(["not_detected"]) })
   ]);
+
+  /** The key of the group that folds into one rail row. */
+  const ABSENT_GROUP = "absent";
+
+  /** The label on each button the pane offers, by the act it asks for. */
+  const AGENT_ACTS = Object.freeze({
+    install: "Install", prepare: "Prepare", connect: "Connect", update: "Update", fix: "Fix",
+    locate: "Locate", copy: "Copy setup", recheck: "Re-check"
+  });
+
+  /** The fixed words of the Integrations page. */
+  const AGENTS = Object.freeze({
+    copyOnly: "Copy setup only",
+    working: "Working...",
+    evidence: "What Ghostlight found",
+    settingsFile: "Settings file",
+    entry: "Ghostlight's entry",
+    factsNote: "Every agent finds Ghostlight through one entry like this in its own settings file, "
+      + "and starts Ghostlight by itself when it needs your browser.",
+    showSessions: "See them in At a glance",
+    fixSteps: "How to fix it",
+    copyStep: "Replace what Ghostlight found with the entry below",
+    recheckStep: "Check again",
+    noAgents: "No supported agent was found for this user.",
+    rechecked: "Looked for agents again."
+  });
+
+  /** A list of names in a sentence: "A", "A and B", "A, B and C". */
+  function namesList(names) {
+    if (names.length <= 1) return names.join("");
+    return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  }
+
+  /** How many things, with the plural for anything but one. */
+  const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+
+  /** What the rail says when a search finds nothing. */
+  const noAgentCalled = (query) => `No agent called "${query}".`;
+
+  /** The words beside the count on the row the agents not on this computer fold into. */
+  const moreAgents = (count) => (count === 1 ? "more agent Ghostlight can join" : "more agents Ghostlight can join");
+
+  /**
+   * The page's headline: how many of the agents found on this computer have Ghostlight, as a lead,
+   * the emphasised part and a trail.
+   */
+  function agentHeadline(agents) {
+    const here = agents.filter((agent) => agent.state !== "not_detected");
+    const on = agents.filter((agent) => agent.state === "installed");
+    if (!here.length) return { lead: "Add Ghostlight to ", accent: "your agent", trail: "." };
+    if (on.length === here.length) {
+      return on.length === 1
+        ? { lead: "Ghostlight is in ", accent: on[0].label, trail: "." }
+        : { lead: "Ghostlight is in ", accent: `all ${on.length}`, trail: " of your agents." };
+    }
+    if (!on.length) {
+      return here.length === 1
+        ? { lead: "Ghostlight is not in ", accent: here[0].label, trail: " yet." }
+        : { lead: "Ghostlight is in ", accent: "none", trail: ` of your ${here.length} agents yet.` };
+    }
+    return { lead: "Ghostlight is in ", accent: `${on.length} of your ${here.length}`, trail: " agents." };
+  }
+
+  /** A short list of agents by name, or how many when there are more than three. */
+  const fewOrCount = (names) => (names.length <= 3 ? namesList(names) : `${names.length} agents`);
+
+  /**
+   * What Set up everything will do, said before it is pressed: the agents it connects, the ones it
+   * updates, and the ones it leaves to the person.
+   */
+  function agentPlan({ connect, update, left }) {
+    const leftWords = left.length
+      ? ` ${fewOrCount(left)} ${left.length === 1 ? "is" : "are"} left for you.` : "";
+    if (!connect.length && !update.length) {
+      return left.length ? `Nothing Ghostlight can set up.${leftWords}` : "Nothing to set up.";
+    }
+    const parts = [];
+    if (connect.length) parts.push(`connect ${fewOrCount(connect)}`);
+    if (update.length) parts.push(`update ${fewOrCount(update)}`);
+    return `Will ${parts.join(" and ")}.${leftWords}`;
+  }
+
+  /** An agent's sessions and tabs on its rail line: "3 sessions, 1 tab". */
+  function agentUse({ sessions, tabs }) {
+    const said = [plural(sessions, "session", "sessions")];
+    if (tabs) said.push(plural(tabs, "tab", "tabs"));
+    return said.join(", ");
+  }
+
+  /** The pane's line for an agent in use now. */
+  function agentLive(name, { sessions, tabs }) {
+    const many = sessions === 1 ? `${name} session is` : `${name} sessions are`;
+    const open = tabs ? `, with ${plural(tabs, "browser tab", "browser tabs")} open` : "";
+    return `${sessions} ${many} connected right now${open}.`;
+  }
+
+  /**
+   * The one sentence the pane says about an agent, from its state and the file it reads. A blocked
+   * agent with no evidence says the service's own sentence, which names what Ghostlight saw.
+   */
+  function agentLead(agent, { prepare }) {
+    const { name, file } = agent;
+    switch (agent.state) {
+      case "installed":
+        return `Ghostlight's entry is in ${name}'s ${file}, so ${name} can use your browser.`;
+      case "not_detected":
+        return prepare
+          ? `${name} is not installed on this computer. You can install it, or prepare its settings first.`
+          : `${name} is not installed on this computer.`;
+      case "available":
+        return `${name} is installed on this computer but does not know about Ghostlight yet.`;
+      case "updatable":
+        return `${name} has Ghostlight's entry, but an older Ghostlight wrote it. Update brings it to the current one.`;
+      case "needs_attention":
+        return agent.evidence
+          ? `Something Ghostlight did not write sits where its entry belongs in ${name}'s ${file}, and Ghostlight left it as it is.`
+          : agent.detail;
+      default:
+        return agent.detail;
+    }
+  }
+
+  /** What one button of the pane does, written beside it. */
+  function agentWhy(act, agent) {
+    const { name, file } = agent;
+    switch (act) {
+      case "install": return `Opens the official ${name} download page in your browser. You install it from there.`;
+      case "prepare": return `Writes Ghostlight's entry into ${file} now, so ${name} finds Ghostlight the first time it starts.`;
+      case "connect": return `Adds Ghostlight's entry to ${file}. The rest of the file stays as it is. Restart ${name} afterwards.`;
+      case "update": return `Rewrites Ghostlight's own entry in ${file}. Nothing else in the file changes. Restart ${name} afterwards.`;
+      case "fix": return `Backs up ${file}, then puts Ghostlight's entry in place of what is there. Nothing else in the file changes. Asks first.`;
+      case "locate": return `Lets you choose ${name}'s settings file or program yourself, if Ghostlight looks in the wrong place.`;
+      case "recheck": return `Once the entry is right, ${name} moves to ${AGENT_STATE_WORDS.installed}.`;
+      case "copy":
+        if (agent.copy_only) return `Ghostlight never edits ${file}. Copying this entry and pasting it in yourself is the only way to connect ${name}.`;
+        if (agent.state === "installed") return `Copies this entry, to set ${name} up by hand on another computer.`;
+        if (agent.state === "needs_attention") return "Copies the entry that belongs there, to paste over what Ghostlight found.";
+        return `Copies this entry, to paste into ${file} yourself.`;
+      default: return "";
+    }
+  }
+
+  /** What the settings file is to this agent, under its label. */
+  function agentFileLabel(agent) {
+    if (agent.copy_only && agent.state !== "installed") return "Where to paste it";
+    return ({
+      installed: "Ghostlight's entry is in here", not_detected: `Where ${agent.name} will look`,
+      available: "Where Connect writes", updatable: "Where Update writes", needs_attention: "Where the problem is"
+    })[agent.state] ?? "";
+  }
+
+  /** What the entry shown is to this agent, under its label. */
+  function agentEntryLabel(agent, { prepare }) {
+    if (agent.copy_only) return "What to paste";
+    return ({
+      installed: "As Ghostlight added it", not_detected: prepare ? "What Prepare writes" : "What to paste",
+      available: "What Connect adds", updatable: "After the update", needs_attention: "What belongs there"
+    })[agent.state] ?? "";
+  }
+
+  /** The quiet line beside Remove, and its label. */
+  const removeNote = (file) => `Deletes only Ghostlight's entry from ${file}. Asks first.`;
+  const removeLabel = (name) => `Remove from ${name}`;
+
+  /** The question Remove asks, naming the sessions that use Ghostlight now. */
+  function confirmRemovalWords(name, file, sessions) {
+    const live = sessions
+      ? ` ${sessions} ${sessions === 1 ? `${name} session is` : `${name} sessions are`} using Ghostlight right now.` : "";
+    return {
+      title: `Remove Ghostlight from ${name}?`,
+      detail: `Ghostlight deletes only its own entry from ${file}; everything else in it stays.${live}`
+        + ` You can connect ${name} again from this page at any time.`,
+      action: "Remove"
+    };
+  }
+
+  /** The question Fix asks before it replaces what sits under Ghostlight's key. */
+  const confirmFixWords = (name, file) => ({
+    title: `Replace what sits in ${name}'s ${file}?`,
+    detail: "Only the entry under Ghostlight's key is replaced, and the file is backed up first.",
+    action: AGENT_ACTS.fix
+  });
 
   /* --------------------------------------------------------------------------
    * The medallion vocabulary, keyed by the orchestrator's fixed activity labels.
@@ -693,7 +869,9 @@
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, initials, sessionLine,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
-    INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
+    AGENT_STATE_WORDS, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
+    agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
+    removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     GLYPHS, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,

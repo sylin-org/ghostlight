@@ -24,31 +24,35 @@ const jsonSetup = (collection = "mcpServers") => JSON.stringify({
 }, null, 2);
 
 const previewHarness = ({
-  id, productId = id, name, target, icon = `${id}.svg`, state, configPath,
-  canDownload = true, manualSetup = jsonSetup(), detail, evidence
+  id, productId = id, name, label = name, target, icon = `${id}.svg`, state, configPath,
+  canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false
 }) => ({
   id,
   product_id: productId,
   name,
+  label,
   target,
   icon,
   state,
   detail: detail ?? harnessDetail[state],
   ...(evidence ? { evidence } : {}),
-  can_install: ["available", "updatable", "not_detected"].includes(state),
+  can_install: ["available", "updatable", "not_detected"].includes(state) && !copyOnly,
   can_uninstall: state === "installed",
   can_download: canDownload,
   can_locate: true,
+  copy_only: copyOnly,
   config_path: configPath,
   connector_command: connectorCommand,
   manual_setup: manualSetup
 });
 
-// This is the complete fixed registry, deliberately shuffled. The surface must form its four
-// semantic groups and alphabetize products without inheriting registry or fixture order.
+// This is the complete fixed registry, deliberately shuffled, with every state an agent can be in:
+// connected (Codex and Claude Code in use), found, found but copy-only (goose), needing an update
+// (Cursor), needing attention with and without evidence, and not on this computer (Continue is
+// copy-only). The rail must form its groups without inheriting registry or fixture order.
 const harnesses = [
   previewHarness({ id: "qwen-code", name: "Qwen Code", target: "CLI", state: "not_detected", configPath: "/home/test/.qwen/settings.json" }),
-  previewHarness({ id: "cline-vscode", productId: "cline", name: "Cline", target: "Visual Studio Code", icon: "cline.svg", state: "available", configPath: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-vscode", productId: "cline", name: "Cline", label: "Cline (Visual Studio Code)", target: "Visual Studio Code", icon: "cline.svg", state: "available", configPath: "/home/test/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
   previewHarness({
     id: "claude-desktop", name: "Claude Desktop", target: "User", state: "needs_attention",
     configPath: "/home/test/.config/Claude/claude_desktop_config.json", canDownload: false,
@@ -58,20 +62,20 @@ const harnesses = [
   previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", icon: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
   previewHarness({ id: "crush", name: "Crush", target: "User", state: "not_detected", configPath: "/home/test/.config/crush/crush.json", manualSetup: jsonSetup("mcp") }),
   previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorPath}"\nargs = ["mcp"]\n` }),
-  previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "updatable", configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorPath}"\n    args: ["mcp"]\n` }),
+  previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "not_detected", copyOnly: true, configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorPath}"\n    args: ["mcp"]\n` }),
   previewHarness({ id: "antigravity", name: "Antigravity", target: "CLI", state: "not_detected", configPath: "/home/test/.gemini/config/mcp_config.json" }),
   previewHarness({
-    id: "cline-cursor", productId: "cline", name: "Cline", target: "Cursor", icon: "cline.svg",
+    id: "cline-cursor", productId: "cline", name: "Cline", label: "Cline (Cursor)", target: "Cursor", icon: "cline.svg",
     state: "needs_attention",
     configPath: "/home/test/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
     evidence: `Found another program, \`npx\` with 2 arguments, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
-  previewHarness({ id: "cursor", name: "Cursor", target: "User", state: "available", configPath: "/home/test/.cursor/mcp.json" }),
+  previewHarness({ id: "cursor", name: "Cursor", target: "User", state: "updatable", configPath: "/home/test/.cursor/mcp.json" }),
   previewHarness({ id: "zcode", name: "ZCode", target: "User", state: "installed", configPath: "/home/test/.zcode/cli/config.json" }),
   previewHarness({ id: "zed", name: "Zed", target: "User", state: "installed", configPath: "/home/test/.config/zed/settings.json", manualSetup: jsonSetup("context_servers") }),
-  previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "not_detected", configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorPath}"\n    args: ["mcp"]\n    envs: {}\n    timeout: 300\n` }),
+  previewHarness({ id: "goose", name: "goose", target: "CLI and desktop", state: "available", copyOnly: true, configPath: "/home/test/.config/goose/config.yaml", manualSetup: `extensions:\n  ghostlight:\n    type: stdio\n    name: ghostlight\n    display_name: Ghostlight\n    enabled: true\n    cmd: "${connectorPath}"\n    args: ["mcp"]\n    envs: {}\n    timeout: 300\n` }),
   previewHarness({ id: "copilot-cli", name: "GitHub Copilot CLI", target: "CLI", state: "available", configPath: "/home/test/.copilot/mcp-config.json" }),
-  previewHarness({ id: "cline-cli", productId: "cline", name: "Cline", target: "CLI", icon: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "cline-cli", productId: "cline", name: "Cline", label: "Cline (CLI)", target: "CLI", icon: "cline.svg", state: "installed", configPath: "/home/test/.cline/data/settings/cline_mcp_settings.json" }),
   previewHarness({
     id: "junie", name: "Junie", target: "CLI and JetBrains", state: "needs_attention",
     configPath: "/home/test/.junie/mcp/mcp.json",
@@ -84,8 +88,8 @@ const harnesses = [
     configPath: "/home/test/.config/kilo/kilo.json", manualSetup: jsonSetup("mcp"),
     evidence: `Found another program, \`alien-cli\` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
-  previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "available", configPath: "/home/test/.claude.json" }),
-  previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", target: "Windsurf", icon: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
+  previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "installed", configPath: "/home/test/.claude.json" }),
+  previewHarness({ id: "cline-windsurf", productId: "cline", name: "Cline", label: "Cline (Windsurf)", target: "Windsurf", icon: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
   previewHarness({ id: "vscode", name: "Visual Studio Code", target: "User", state: "available", configPath: "/home/test/.config/Code/User/mcp.json", manualSetup: jsonSetup("servers") })
 ];
 
@@ -300,7 +304,16 @@ snapshot.history.forEach(retainConnection);
 // Chrome would start on request.
 const withoutBrowsers = (flat) => ({ ...flat, browsers: [], no_browser: "Starts Google Chrome on request" });
 
-const fixtureFor = (stage, noBrowsers) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify((noBrowsers ? withoutBrowsers : (flat) => flat)({ ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] }))};
+// `?agents=connected` shows Integrations when every agent found on this computer has Ghostlight.
+const allConnected = (flat) => ({
+  ...flat,
+  harnesses: flat.harnesses.map((harness) => (harness.state === "not_detected" ? harness : {
+    ...harness, state: "installed", detail: harnessDetail.installed, evidence: undefined,
+    can_install: false, can_uninstall: true
+  }))
+});
+
+const fixtureFor = (stage, noBrowsers, connected) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify((connected ? allConnected : (flat) => flat)((noBrowsers ? withoutBrowsers : (flat) => flat)({ ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] })))};
 window.__GHOSTLIGHT_SETUP_STATES__ = ${JSON.stringify(setupStates)};
 window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(stage)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
@@ -561,7 +574,8 @@ const server = createServer(async (request, response) => {
     }
     if (pathname === "/fixture.js") {
       response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
-      response.end(fixtureFor(stage, address.searchParams.get("browsers") === "none"));
+      response.end(fixtureFor(stage, address.searchParams.get("browsers") === "none",
+        address.searchParams.get("agents") === "connected"));
       return;
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);

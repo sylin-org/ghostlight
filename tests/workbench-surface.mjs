@@ -30,7 +30,6 @@ function dispatchDocument(kind, event) {
   for (const handler of documentHandlers.get(kind) ?? []) handler(event);
 }
 const elementHandlers = new Map();
-const failedSetupManual = { open: false };
 const node = (id) => ({
   id, textContent: "", innerHTML: "", className: "", hidden: true, disabled: false, scrollTop: 0,
   style: { setProperty() {} }, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
@@ -168,11 +167,16 @@ const snapshot = () => ({
     status: "succeeded", effect: "none", allowed: true, summary: "Read 5 words.", complete: true
   }] : [],
   harnesses: [{
-    id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "updatable",
+    id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User", icon: "codex.svg", state: "updatable",
     detail: "The connector path belongs to an older installation.",
     can_install: true, can_fix: false, can_uninstall: false, can_download: true, can_locate: true,
     config_path: "/home/test/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "[mcp_servers.ghostlight]"
+  }, {
+    id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI", icon: "qwen-code.svg",
+    state: "not_detected", detail: "Not detected.", can_install: true, can_fix: false, can_uninstall: false,
+    can_download: true, can_locate: true, copy_only: false, config_path: "/home/test/.qwen/settings.json",
+    connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup"
   }],
   diagnostics: [],
   // The aggregate answer is the orchestrator's, exactly like the policy sentence below. The
@@ -254,7 +258,7 @@ const sandbox = {
   document: {
     getElementById: (id) => nodes.get(id) ?? null,
     querySelectorAll: (sel) => (sel === "[id]" ? [...nodes.values()] : []),
-    querySelector: (sel) => sel === '[data-harness-manual="qwen-code"]' ? failedSetupManual : null,
+    querySelector: () => null,
     addEventListener: (kind, handler) => {
       listeners.push(`document:${kind}`);
       if (!documentHandlers.has(kind)) documentHandlers.set(kind, []);
@@ -335,6 +339,8 @@ try {
 }
 
 await new Promise((r) => setTimeout(r, 60));
+const bootRail = nodes.get("agents-list").innerHTML;
+const bootPane = nodes.get("agents-pane").innerHTML;
 const failedSetupButton = {
   disabled: false,
   dataset: {
@@ -348,6 +354,8 @@ dispatchDocument("click", {
   }
 });
 await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+const paneAfterFailure = nodes.get("agents-pane").innerHTML;
 // A second snapshot: whatever the first pass did with the broken panel, this is where a memo
 // would show itself by never trying again.
 const before = aboutAttempts;
@@ -437,7 +445,6 @@ dispatchDocument("click", {
 const connections = nodes.get("connections");
 // Read what the booted surface drew before anything below repaints the same nodes: the second
 // view instance shares this one stub document, so a later render would answer for the first.
-const integrationsHtml = nodes.get("integration-grid").innerHTML;
 const setupEverythingButton = nodes.get("setup-integrations");
 const setupEverythingWasActionable = !setupEverythingButton.disabled
   && setupEverythingButton.dataset.actionable === "true";
@@ -494,75 +501,104 @@ const compiled = (editable) => ({
 // exists so the destination can be drawn on demand without a real click.
 const view = sandbox.globalThis.GhostlightView.create({ onFailure: (what, error) => reported.push(`${what}: ${error?.message ?? error}`) });
 
+// The Integrations page drawn on demand, over every state an agent can be in. The ids differ from
+// the booted roster's, so the booted page's own listeners leave this one alone.
+const AGENT_COMMAND = "/opt/ghostlight/ghostlight mcp";
+const agentRow = (id, name, state, extra = {}) => ({
+  id, product_id: id, name, label: name, target: "User", icon: `${id}.svg`, state, detail: "Said by the service.",
+  can_install: ["available", "updatable", "not_detected"].includes(state) && !extra.copy_only,
+  can_fix: false, can_uninstall: state === "installed", can_download: true, can_locate: true, copy_only: false,
+  config_path: `/home/test/.${id}/settings.json`, connector_command: AGENT_COMMAND,
+  manual_setup: `{\n  "servers": {\n    "${id}": "ghostlight"\n  }\n}`, ...extra
+});
+const agentRoster = [
+  agentRow("zcode", "ZCode", "not_detected"),
+  agentRow("windsurf", "Windsurf", "installed"),
+  agentRow("goose", "goose", "available", { copy_only: true }),
+  agentRow("junie", "Junie", "needs_attention", {
+    can_install: false, can_fix: true,
+    evidence: "Found another program, `alien-agent` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `/opt/ghostlight/ghostlight` there and changed nothing."
+  }),
+  agentRow("antigravity", "Antigravity", "not_detected"),
+  agentRow("cursor", "Cursor", "updatable"),
+  agentRow("zed", "Zed", "installed"),
+  agentRow("kilo-code", "Kilo Code", "needs_attention", {
+    can_install: false, evidence: "Found an entry without a usable command where Ghostlight's entry belongs; Ghostlight maintains `/opt/ghostlight/ghostlight` there and changed nothing."
+  }),
+  agentRow("claude-code", "Claude Code", "available"),
+  agentRow("continue", "Continue", "not_detected", { copy_only: true }),
+  agentRow("crush", "Crush", "not_detected")
+];
 view.collections({
-  sessions: [], browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
+  sessions: [
+    { id: "w-zed-1", agent: "Zed", channel: "mcp", tab_count: 1, active_operations: 0 },
+    { id: "w-zed-2", agent: "Zed", channel: "mcp", tab_count: 2, active_operations: 1 },
+    { id: "w-cli", agent: "Command line", channel: "cli", tab_count: 1, active_operations: 0 }
+  ],
+  browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
   configuration: { managed_policy: { configured: false } },
-  // Deliberately shuffled across every raw target state. Product cards must classify their mixed
-  // targets first, then render the four semantic groups in product-owned order with names sorted
-  // inside each group. Neither registry order nor the order of targets in this fixture may leak.
-  harnesses: [
-    { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", target: "CLI",
-      icon: "qwen-code.svg", state: "not_detected", detail: "Not detected.", can_install: true,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/qwen.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup" },
-    { id: "windsurf", product_id: "windsurf", name: "Windsurf", target: "User",
-      icon: "windsurf.svg", state: "available", detail: "Detected.", can_install: true,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/windsurf.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "windsurf setup" },
-    { id: "cline-vscode", product_id: "cline", name: "Cline", target: "Visual Studio Code",
-      icon: "cline.svg", state: "available", detail: "Detected.", can_install: true,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-vscode.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "editor setup" },
-    { id: "zed", product_id: "zed", name: "Zed", target: "User", icon: "zed.svg",
-      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
-      can_download: true, can_locate: true, config_path: "/tmp/zed.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "zed setup" },
-    { id: "junie-cli", product_id: "junie", name: "Junie", target: "CLI", icon: "junie.svg",
-      state: "available", detail: "Detected.", can_install: true, can_uninstall: false,
-      can_download: true, can_locate: true, config_path: "/tmp/junie.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "junie setup" },
-    { id: "antigravity", product_id: "antigravity", name: "Antigravity", target: "CLI",
-      icon: "antigravity.svg", state: "not_detected", detail: "Not detected.", can_install: true,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/antigravity.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "antigravity setup" },
-    { id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg",
-      state: "updatable", detail: "Old owned connector.", can_install: true, can_uninstall: false,
-      can_download: true, can_locate: true, config_path: "/tmp/codex.toml",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "codex setup" },
-    { id: "cline-cli", product_id: "cline", name: "Cline", target: "CLI", icon: "cline.svg",
-      state: "installed", detail: "Current.", can_install: false, can_uninstall: true,
-      can_download: true, can_locate: true, config_path: "/tmp/cline-cli.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "cli setup" },
-    { id: "claude-code", product_id: "claude-code", name: "Claude Code", target: "User",
-      icon: "claude-code.svg", state: "available", detail: "Detected.", can_install: true,
-      can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/claude.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "claude setup" },
-    { id: "junie-jetbrains", product_id: "junie", name: "Junie", target: "JetBrains",
-      icon: "junie.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
-      can_fix: true, can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/junie.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "junie setup",
-      evidence: "Found another program, `alien-agent` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains `/opt/ghostlight/ghostlight` there and changed nothing." },
-    { id: "cline-cursor", product_id: "cline", name: "Cline", target: "Cursor",
-      icon: "cline.svg", state: "needs_attention", detail: "Foreign entry preserved.", can_install: false,
-      can_fix: false, can_uninstall: false, can_download: true, can_locate: true, config_path: "/tmp/cline-cursor.json",
-      connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "cursor setup" }
-  ]
+  harnesses: agentRoster
 }, new Set());
-const rosterHtml = nodes.get("integration-grid").innerHTML;
-const rosterCards = [...rosterHtml.matchAll(
-  /<article class="([^"]*\bintegration-card\b[^"]*)">([\s\S]*?)<\/article>/g
-)].map(([, classes, html]) => ({
-  classes,
-  html,
-  name: html.match(/<h3>([^<]+)<\/h3>/)?.[1] ?? ""
-}));
-const rosterCard = (name) => rosterCards.find((card) => card.name === name);
+const agentsShown = {
+  heading: nodes.get("integrations-heading").innerHTML,
+  caption: nodes.get("integrations-caption").textContent,
+  setupTitle: nodes.get("setup-integrations").title,
+  command: nodes.get("integrations-command").textContent,
+  copyCommand: { hidden: nodes.get("copy-command").hidden, harness: nodes.get("copy-command").dataset.harness },
+  rail: nodes.get("agents-list").innerHTML,
+  opening: nodes.get("agents-pane").innerHTML
+};
+const railHeads = (html) => [...html.matchAll(/<h2 class="agents-group-head"><span>([^<]+)<\/span><span class="agents-count">(\d+)<\/span>/g)]
+  .map(([, title, count]) => `${title} ${count}`);
+const railNames = (html) => [...html.matchAll(/data-agent="([^"]+)"/g)].map(([, id]) => id);
+const clickAgent = (selector, dataset) => dispatchDocument("click", {
+  target: { closest: (asked) => (asked === selector ? { dataset } : null) }
+});
+clickAgent("[data-agent-fold]", {});
+const railOpened = nodes.get("agents-list").innerHTML;
+clickAgent("[data-agent-fold]", {});
+elementHandlers.get("agents-find:input")({ target: { value: "zco" } });
+const railSearched = nodes.get("agents-list").innerHTML;
+elementHandlers.get("agents-find:input")({ target: { value: "nothing like it" } });
+const railNoMatch = nodes.get("agents-list").innerHTML;
+elementHandlers.get("agents-find:input")({ target: { value: "" } });
+const agentPanes = Object.fromEntries(["kilo-code", "cursor", "zed", "windsurf", "claude-code", "goose", "antigravity", "continue"]
+  .map((id) => {
+    clickAgent("[data-agent]", { agent: id });
+    return [id, nodes.get("agents-pane").innerHTML];
+  }));
+const railWithAbsentPicked = nodes.get("agents-list").innerHTML;
+const everyPane = Object.values(agentPanes).join("") + agentsShown.opening;
+
+// Remove asks first and names the sessions that use Ghostlight now; cancelling sends nothing.
+const managedBeforeRemove = managedHarnesses.length;
+dispatchDocument("click", {
+  target: {
+    closest: (selector) => selector === "[data-harness-operation]" ? {
+      disabled: false,
+      dataset: {
+        harness: "zed", harnessOperation: "manage", harnessAction: "uninstall", harnessName: "Zed",
+        harnessState: "installed", harnessFile: "settings.json", harnessSessions: "2"
+      }
+    } : null
+  }
+});
+await new Promise((r) => setTimeout(r, 0));
+const removalAsked = {
+  shown: !nodes.get("confirm-dialog").hidden,
+  title: nodes.get("confirm-title").textContent,
+  detail: nodes.get("confirm-detail").textContent,
+  action: confirmAccept.textContent
+};
+dispatchDocument("click", { target: { closest: (selector) => selector === "[data-confirm]" ? { dataset: { confirm: "cancel" } } : null } });
+await new Promise((r) => setTimeout(r, 0));
+const removalSentNothing = managedHarnesses.length === managedBeforeRemove;
 
 const fixButton = {
   disabled: false,
   dataset: {
-    harness: "cline-cli", harnessOperation: "manage", harnessAction: "fix",
-    harnessName: "Cline", harnessTarget: "CLI"
+    harness: "junie", harnessOperation: "manage", harnessAction: "fix",
+    harnessName: "Junie", harnessFile: "settings.json"
   }
 };
 dispatchDocument("click", {
@@ -572,14 +608,14 @@ dispatchDocument("click", {
 });
 await new Promise((r) => setTimeout(r, 0));
 const fixConfirmationShown = !nodes.get("confirm-dialog").hidden
-  && nodes.get("confirm-title").textContent.includes("Cline")
-  && nodes.get("confirm-title").textContent.includes("CLI")
+  && nodes.get("confirm-title").textContent.includes("Junie")
+  && nodes.get("confirm-title").textContent.includes("settings.json")
   && nodes.get("confirm-detail").textContent.includes("backed up")
   && confirmAccept.textContent === "Fix";
 dispatchDocument("click", { target: confirmAccept });
 await new Promise((r) => setTimeout(r, 0));
 const fixWasManaged = managedHarnesses.some((call) =>
-  call.id === "cline-cli" && call.action === "fix");
+  call.id === "junie" && call.action === "fix");
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
@@ -951,19 +987,19 @@ const contextFor = (kind) => {
 };
 
 const roster = () => [
-  { id: "codex", product_id: "codex", name: "Codex", target: "User", icon: "codex.svg", state: "updatable",
+  { id: "codex", product_id: "codex", name: "Codex", label: "Codex", target: "User", icon: "codex.svg", state: "updatable",
     detail: "Old owned connector.", can_install: true, can_fix: false, can_uninstall: false, can_download: true,
     can_locate: true, config_path: "~/.codex/config.toml", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "codex setup", download_url: "https://example.test/codex" },
-  { id: "zed", product_id: "zed", name: "Zed", target: "User", icon: "zed.svg", state: "installed",
+  { id: "zed", product_id: "zed", name: "Zed", label: "Zed", target: "User", icon: "zed.svg", state: "installed",
     detail: "Current.", can_install: false, can_fix: false, can_uninstall: true, can_download: true,
     can_locate: true, config_path: "~/.config/zed/settings.json", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "zed setup", download_url: "https://example.test/zed" },
-  { id: "junie", product_id: "junie", name: "Junie", target: "CLI", icon: "junie.svg", state: "needs_attention",
+  { id: "junie", product_id: "junie", name: "Junie", label: "Junie", target: "CLI", icon: "junie.svg", state: "needs_attention",
     detail: "Foreign entry preserved.", can_install: false, can_fix: true, can_uninstall: false, can_download: true,
     can_locate: true, config_path: "~/.junie/mcp.json", connector_command: "/opt/ghostlight/ghostlight mcp",
     manual_setup: "junie setup", download_url: "https://example.test/junie" },
-  { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", target: "CLI", icon: "qwen-code.svg",
+  { id: "qwen-code", product_id: "qwen-code", name: "Qwen Code", label: "Qwen Code", target: "CLI", icon: "qwen-code.svg",
     state: "not_detected", detail: "Not detected.", can_install: true, can_fix: false, can_uninstall: false,
     can_download: true, can_locate: true, config_path: "~/.qwen/settings.json",
     connector_command: "/opt/ghostlight/ghostlight mcp", manual_setup: "qwen setup",
@@ -1197,12 +1233,15 @@ const watchOpening = {
   recheck: watching.text("refresh-integrations").hidden,
   wheelHidden: watching.text("wheel").hidden,
   bandContinue: watching.text("band-continue").hidden,
-  roster: watching.text("integration-grid").innerHTML,
+  roster: watching.text("agents-list").innerHTML + watching.text("agents-pane").innerHTML,
+  copyCommandHidden: watching.text("copy-command").hidden,
   rosterLine: watching.text("integrations-continue").innerHTML,
   rosterLineHidden: watching.text("integrations-continue").hidden,
   status: watching.text("diagnostic-grid").innerHTML,
   apply: watching.text("apply-policy").textContent
 };
+watching.clickOn("[data-agent]", { dataset: { agent: "qwen-code" } });
+const watchQwenPane = watching.text("agents-pane").innerHTML;
 const watchGlance = { closed: watching.text("connections").innerHTML };
 watching.clickOn("[data-glance-agent]", { dataset: { glanceAgent: "Codex" } });
 watchGlance.card = watching.text("connections").innerHTML;
@@ -1287,10 +1326,14 @@ const controlOpening = {
   wheelHidden: controlling.text("wheel").hidden,
   bandContinue: controlling.text("band-continue").hidden,
   rosterLineHidden: controlling.text("integrations-continue").hidden,
-  roster: controlling.text("integration-grid").innerHTML,
+  roster: controlling.text("agents-list").innerHTML + controlling.text("agents-pane").innerHTML,
   status: controlling.text("diagnostic-grid").innerHTML,
   apply: controlling.text("apply-policy").textContent
 };
+const controlPanes = Object.fromEntries(["junie", "codex", "zed", "qwen-code"].map((id) => {
+  controlling.clickOn("[data-agent]", { dataset: { agent: id } });
+  return [id, controlling.text("agents-pane").innerHTML];
+}));
 controlling.clickOn("[data-harness-operation]", {
   dataset: { harness: "zed", harnessOperation: "copy", copyKind: "command", harnessName: "Zed" }
 });
@@ -1507,15 +1550,16 @@ const httpChecks = [
     watchOpening.setup === true && watchOpening.endSession === true && watchOpening.sendTest === true
       && watchOpening.sheetViewingToggle === true && watchOpening.sheetDiagnosticsToggle === true
       && watchOpening.sheetReveal === true
-      && !/>Set up<|>Update<|>Remove<|>Fix<|>Locate<|Turn on|Turn off|Open log folder/.test(watchOpening.roster + watchOpening.status)
+      && !/>Set up<|>Update<|>Connect<|>Prepare<|Remove from|>Fix<|>Locate<|Turn on|Turn off|Open log folder/
+        .test(watchOpening.roster + watchQwenPane + watchOpening.status)
       && watchOpening.recheck === false,
     JSON.stringify({ ...watchOpening, roster: undefined, status: undefined })],
-  ["a watching page keeps the state of every client as text and offers Copy and Install as plain controls",
-    watchOpening.roster.includes("Old owned connector.") && watchOpening.roster.includes(">Copy setup<")
-      && watchOpening.roster.includes(">Copy MCP command<")
-      && watchOpening.roster.includes('<a class="ghost-button" href="https://example.test/qwen"')
-      && !watchOpening.roster.includes('data-harness-operation="download"'),
-    watchOpening.roster],
+  ["a watching page keeps the state of every agent as text and offers Copy and Install as plain controls",
+    watchOpening.roster.includes("Needs an update") && watchOpening.roster.includes("Needs your attention")
+      && watchOpening.roster.includes(">Copy setup<") && watchOpening.copyCommandHidden === false
+      && watchQwenPane.includes('<a class="primary-button" href="https://example.test/qwen"')
+      && !watchQwenPane.includes('data-harness-operation="download"'),
+    watchOpening.roster + watchQwenPane],
   ["a watching page shows one Continue line for the roster, one for each section of Settings and none on Status",
     watchOpening.rosterLineHidden === false && watchOpening.rosterLine.includes(CONTINUE_SENTENCE)
       && watchOpening.rosterLine.includes("data-continue") && watchOpening.rosterLine.includes("Continue in the Ghostlight window")
@@ -1576,10 +1620,10 @@ const httpChecks = [
       && controlOpening.bandContinue === true && controlOpening.rosterLineHidden === true
       && controlOpening.apply === "Apply"
       && !(controlOpening.roster + controlOpening.status).includes("data-continue")
-      && controlOpening.roster.includes(">Update</button>") && controlOpening.roster.includes(">Remove</button>")
-      && controlOpening.roster.includes(">Fix</button>") && controlOpening.roster.includes(">Locate</button>")
-      && controlOpening.roster.includes('data-harness-operation="download"')
-      && controlOpening.roster.includes('data-harness-state="updatable"')
+      && controlPanes.codex.includes(">Update</button>") && controlPanes.codex.includes('data-harness-state="updatable"')
+      && controlPanes.zed.includes(">Remove from Zed</button>")
+      && controlPanes.junie.includes(">Fix</button>") && controlPanes.junie.includes(">Locate</button>")
+      && controlPanes["qwen-code"].includes('data-harness-operation="download"')
       && controlOpening.sheetPause === false
       && controlOpening.sheetViewingToggle === false && controlOpening.sheetDiagnosticsToggle === false
       && controlOpening.sheetReveal === false && controlOpening.sheetContinues.every((hidden) => hidden === true),
@@ -1761,70 +1805,95 @@ const checks = [
   ["snapshot still fetched", snapshots > 0],
   ["the pass continued past the broken panel", connections.innerHTML.length > 0,
     `connections: ${JSON.stringify(connections.innerHTML)}`],
-  ["an old owned harness path is offered as an update",
-    integrationsHtml.includes("Update")
-      && integrationsHtml.includes('data-harness-action="install"'),
-    `integrations: ${JSON.stringify(integrationsHtml)}`],
+  ["an old owned agent entry is offered as an update, in the pane the page opens on",
+    bootPane.includes(">Update</button>") && bootPane.includes('data-harness-action="install"')
+      && bootRail.includes('data-agent="codex"') && bootRail.includes("Needs an update"),
+    `pane: ${JSON.stringify(bootPane)}`],
   ["one setup-everything action reaches the aggregate orchestrator command",
     setupEverythingWasActionable && bulkSetups === 1
       && listeners.includes("setup-integrations:click"),
     `actionable=${setupEverythingWasActionable} calls=${bulkSetups}`],
-  ["integrations stay one flat roster with category order before alphabetic name order",
-    !rosterHtml.includes("integration-group")
-      && JSON.stringify(rosterCards.map((card) => card.name)) === JSON.stringify([
-        "Cline", "Zed", "Claude Code", "Windsurf",
-        "Codex", "Junie", "Antigravity", "Qwen Code"
-      ]),
-    `cards: ${JSON.stringify(rosterCards.map((card) => card.name))} roster: ${JSON.stringify(rosterHtml)}`],
-  ["mixed products use Ready before Needs Attention before Available",
-    rosterCard("Cline")?.classes.includes("integration-ready")
-      && rosterCard("Cline")?.html.includes("Visual Studio Code")
-      && rosterCard("Cline")?.html.includes("Foreign entry preserved.")
-      && rosterCard("Junie")?.classes.includes("integration-needs-attention")
-      && rosterCard("Junie")?.html.includes("Detected."),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["a blocked target shows the orchestrator's precomposed evidence and other targets show none",
-    rosterCard("Junie")?.html.includes('<p class="integration-evidence">')
-      && rosterCard("Junie")?.html.includes("`alien-agent`")
-      && rosterCard("Junie")?.html.includes("changed nothing.")
-      && !rosterCard("Cline")?.html.includes("integration-evidence"),
-    `junie: ${JSON.stringify(rosterCard("Junie")?.html)}`],
-  ["only a fixable foreign entry offers the explicit Fix action",
-    rosterCard("Junie")?.html.includes('data-harness-action="fix"')
-      && rosterCard("Junie")?.html.includes(">Fix</button>")
-      && !rosterCard("Cline")?.html.includes('data-harness-action="fix"'),
-    `junie: ${JSON.stringify(rosterCard("Junie")?.html)}`],
+  ["a failed automatic setup shows that agent, with the entry to paste by hand",
+    paneAfterFailure.includes('id="agents-pane-title">Qwen Code</h2>') && paneAfterFailure.includes("qwen setup"),
+    JSON.stringify(paneAfterFailure)],
+  ["the rail groups agents by state and folds the ones not on this computer into one closed row",
+    JSON.stringify(railHeads(agentsShown.rail)) === JSON.stringify(["Needs a look 3", "Connected 2", "Found, not connected 2"])
+      && JSON.stringify(railNames(agentsShown.rail).slice(0, 7))
+        === JSON.stringify(["junie", "kilo-code", "cursor", "zed", "windsurf", "claude-code", "goose"])
+      && agentsShown.rail.includes("<b>4</b> more agents Ghostlight can join")
+      && agentsShown.rail.includes('data-agent-fold aria-expanded="false"')
+      && agentsShown.rail.includes('id="agents-absent" hidden>'),
+    agentsShown.rail],
+  ["the fold opens in place, and picking an agent inside it keeps it open",
+    railOpened.includes('data-agent-fold aria-expanded="true"') && railOpened.includes('id="agents-absent">')
+      && railWithAbsentPicked.includes('data-agent-fold aria-expanded="true"'),
+    railOpened],
+  ["the rail's search reaches a folded agent and says so when nothing matches",
+    JSON.stringify(railHeads(railSearched)) === JSON.stringify(["Not on this computer 1"])
+      && JSON.stringify(railNames(railSearched)) === JSON.stringify(["zcode"])
+      && !railSearched.includes("data-agent-fold")
+      && railNoMatch.includes("No agent called &quot;nothing like it&quot;."),
+    railSearched + railNoMatch],
+  ["a rail entry carries a second line only for what is its own",
+    agentsShown.rail.includes('<span class="agent-entry-sub live">2 sessions, 3 tabs</span>')
+      && agentsShown.rail.includes('<span class="agent-entry-sub">Copy setup only</span>')
+      && agentsShown.rail.includes('<span class="agent-entry-sub action">Needs an update</span>')
+      && agentsShown.rail.includes('<span class="agent-entry-sub warn">Needs your attention</span>')
+      && agentsShown.rail.includes('<span class="agent-dot d-live" aria-hidden="true"></span>')
+      && agentsShown.rail.includes('<span class="sr-only">, Connected</span>'),
+    agentsShown.rail],
+  ["the page opens on the agent that needs attention, with its evidence and Fix",
+    agentsShown.opening.includes('id="agents-pane-title">Junie</h2>')
+      && agentsShown.rail.includes('data-agent="junie" aria-controls="agents-pane" aria-current="true"')
+      && agentsShown.opening.includes("What Ghostlight found") && agentsShown.opening.includes("`alien-agent`")
+      && agentsShown.opening.includes(">Fix</button>") && agentsShown.opening.includes("Backs up settings.json"),
+    agentsShown.opening],
+  ["an agent that needs attention and cannot be fixed gets numbered steps",
+    agentPanes["kilo-code"].includes('<ol class="agent-steps" aria-label="How to fix it">')
+      && agentPanes["kilo-code"].includes("Replace what Ghostlight found with the entry below")
+      && agentPanes["kilo-code"].includes("data-agents-recheck") && !agentPanes["kilo-code"].includes(">Fix</button>"),
+    agentPanes["kilo-code"]],
+  ["each state's pane says one sentence for its agent and the step it allows, with what it does",
+    agentPanes.cursor.includes(">Update</button>") && agentPanes.cursor.includes("an older Ghostlight wrote it")
+      && agentPanes["claude-code"].includes(">Connect</button>")
+      && agentPanes["claude-code"].includes("Claude Code is installed on this computer but does not know about Ghostlight yet.")
+      && agentPanes.windsurf.includes("Ghostlight&#039;s entry is in Windsurf&#039;s settings.json, so Windsurf can use your browser.")
+      && !agentPanes.windsurf.includes("agent-live")
+      && agentPanes.antigravity.includes(">Install</button>") && agentPanes.antigravity.includes(">Prepare</button>")
+      && agentPanes.antigravity.includes("You can install it, or prepare its settings first."),
+    JSON.stringify(agentPanes)],
+  ["an agent in use says its sessions and tabs, links to At a glance, and pulses on its wire",
+    agentPanes.zed.includes("2 Zed sessions are connected right now, with 3 browser tabs open.")
+      && agentPanes.zed.includes('data-view="monitor" data-show-agent="Zed"')
+      && agentPanes.zed.includes('class="agent-hero s-live"'),
+    agentPanes.zed],
+  ["a copy-only agent is connected by pasting, and is never offered Connect or Prepare",
+    agentPanes.goose.includes("Ghostlight never edits settings.json.")
+      && agentPanes.goose.includes('<button class="primary-button" type="button" data-harness-operation="copy"')
+      && !agentPanes.goose.includes(">Connect</button>")
+      && agentPanes.continue.includes(">Install</button>") && !agentPanes.continue.includes(">Prepare</button>"),
+    agentPanes.goose + agentPanes.continue],
+  ["Remove is a quiet link last in the pane, and it asks first naming the live sessions",
+    agentPanes.zed.includes('<button class="agent-remove" type="button" data-harness-operation="manage" data-harness-action="uninstall"')
+      && agentPanes.zed.includes('data-harness-sessions="2"') && agentPanes.zed.includes(">Remove from Zed</button>")
+      && agentPanes.zed.trimEnd().endsWith("Remove from Zed</button></div></div>")
+      && removalAsked.shown && removalAsked.title === "Remove Ghostlight from Zed?"
+      && removalAsked.detail.includes("2 Zed sessions are using Ghostlight right now.")
+      && removalAsked.detail.includes("settings.json") && removalAsked.action === "Remove" && removalSentNothing,
+    JSON.stringify(removalAsked)],
   ["Fix confirms the backup before dispatching the closed action",
     fixConfirmationShown && fixWasManaged,
     `shown=${fixConfirmationShown} calls=${JSON.stringify(managedHarnesses)}`],
-  ["every category keeps visible words and a distinct card tone",
-    rosterCard("Cline")?.classes.includes("integration-ready")
-      && rosterCard("Cline")?.html.includes('<span class="tile-state">Ready</span>')
-      && rosterCard("Claude Code")?.classes.includes("integration-available")
-      && rosterCard("Claude Code")?.html.includes('<span class="tile-state">Available</span>')
-      && rosterCard("Codex")?.classes.includes("integration-needs-attention")
-      && rosterCard("Codex")?.html.includes('<span class="tile-state">Needs Attention</span>')
-      && rosterCard("Antigravity")?.classes.includes("integration-not-detected")
-      && rosterCard("Antigravity")?.html.includes('<span class="tile-state">Not Detected</span>'),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["plural harness targets share one recognizable product card",
-    (rosterHtml.match(/class="tile integration-card/g) ?? []).length === 8
-      && rosterHtml.includes("Visual Studio Code")
-      && rosterHtml.includes('src="integrations/cline.svg"'),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["configured and detected targets offer the right durable actions",
-    rosterHtml.includes('<span class="tile-state">Ready</span>')
-      && rosterHtml.includes(">Remove</button>")
-      && rosterHtml.includes(">Set up</button>")
-      && rosterHtml.includes(">Copy MCP command</button>"),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["a missing product offers one install, locate, and manual route",
-    rosterHtml.includes('data-product="qwen-code"')
-      && rosterHtml.includes('data-harness="qwen-code" data-harness-name="Qwen Code">Locate</button>')
-      && rosterHtml.includes('data-copy-kind="command"')
-      && rosterHtml.includes('data-harness-manual="qwen-code"'),
-    `roster: ${JSON.stringify(rosterHtml)}`],
-  ["failed automatic setup opens the target's manual route", failedSetupManual.open],
+  ["the headline counts the agents with Ghostlight, and Set up everything says beforehand what it will do",
+    agentsShown.heading === "Ghostlight is in <em>2 of your 7</em> agents."
+      && agentsShown.caption === "Will connect Claude Code and update Cursor. goose, Junie and Kilo Code are left for you."
+      && agentsShown.setupTitle === agentsShown.caption,
+    JSON.stringify(agentsShown.heading + " | " + agentsShown.caption)],
+  ["the page offers one Copy MCP command, in its header, with the command shown",
+    agentsShown.command === AGENT_COMMAND && agentsShown.copyCommand.hidden === false
+      && agentsShown.copyCommand.harness === "zcode"
+      && !(everyPane + agentsShown.rail).includes("Copy MCP command"),
+    JSON.stringify(agentsShown.copyCommand)],
   ["the front door renders the orchestrator's readiness answer and never authors one",
     nodes.get("state-word").textContent === "Ready"
       && nodes.get("state-word").title === "Connected and idle. Agents can work when they ask."

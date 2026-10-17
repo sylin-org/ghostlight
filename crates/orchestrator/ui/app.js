@@ -29,7 +29,7 @@
 const {
   FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
   WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONNECTION_ID_COPIED, SETTINGS, DEFAULT_VIEW,
-  SETUP_ADDRESS, SETUP, parseAddress, addressOf, screenState, byteSize
+  SETUP_ADDRESS, SETUP, AGENTS, parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
 
 /** How long an act waits for the change it caused to reach this page, before it asks again. */
@@ -533,9 +533,10 @@ function harnessText(id, kind) {
 async function handleHarnessAction(button) {
   if (!transport.available || button.disabled) return;
   const { harness: id, harnessOperation: operation, harnessAction: action, harnessState: state,
-    harnessName: name, harnessTarget: target, product: productId, copyKind: copyKind } = button.dataset;
-  if (operation === "manage" && action === "uninstall" && !(await view.confirmRemoval(name))) return;
-  if (operation === "manage" && action === "fix" && !(await view.confirmFix(name, target))) return;
+    harnessName: name, harnessFile: file, harnessSessions: sessions, product: productId, copyKind: copyKind } = button.dataset;
+  if (operation === "manage" && action === "uninstall"
+    && !(await view.confirmRemoval(name, file, Number(sessions ?? 0)))) return;
+  if (operation === "manage" && action === "fix" && !(await view.confirmFix(name, file))) return;
   if (operation === "download") {
     try {
       await transport.openHarnessDownload(productId);
@@ -566,12 +567,27 @@ async function handleHarnessAction(button) {
       await settled(result);
     }
   } catch (error) {
-    // A client that changed since it was drawn is not a client that could not be set up.
-    if (operation === "manage" && error?.code !== globalThis.GhostlightTransport.STALE) view.openHarnessManual(id);
+    // An agent that changed since it was drawn is not an agent that could not be set up. One that
+    // could not is shown, with the entry to paste by hand.
+    if (operation === "manage" && error?.code !== globalThis.GhostlightTransport.STALE) view.showAgent(id);
     view.toast(String(error), true);
     await resync();
   } finally {
     store.endHarness(id);
+  }
+}
+
+/** Look for the agents again from a Re-check inside the Integrations pane. */
+async function recheckFrom(button) {
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    await rescan();
+    view.toast(AGENTS.rechecked);
+  } catch (error) {
+    view.toast(String(error), true);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -827,6 +843,8 @@ function wire() {
     if (wheel && !wheel.disabled) applyIntent(wheel.dataset.intent);
     const harness = event.target.closest("[data-harness-operation]");
     if (harness) handleHarnessAction(harness);
+    const recheck = event.target.closest("[data-agents-recheck]");
+    if (recheck) recheckFrom(recheck);
     const carryOn = event.target.closest("[data-continue]");
     if (carryOn) continueInWindow(carryOn.dataset.address || undefined);
     const destination = event.target.closest("[data-destination]");
@@ -904,7 +922,7 @@ function wire() {
   });
 
   el["refresh-integrations"].addEventListener("click", (event) =>
-    withButton(event, rescan, "MCP clients re-checked."));
+    withButton(event, rescan, AGENTS.rechecked));
 
   el["setup-integrations"].addEventListener("click", async (event) => {
     const button = event.currentTarget;

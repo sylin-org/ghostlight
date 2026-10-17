@@ -56,7 +56,9 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 
 ## RESUME HERE
 
-d02-activity-names has landed. Next: d04-integrations; d03-call-help runs in its own lane.
+d04-integrations has landed. Every window slice of this batch (d00, d01, d02, d04) has landed;
+d03-call-help runs in its own lane. Next: the coordinator deploys the batch and runs the owed live
+checks with the owner.
 
 ## Landed
 
@@ -65,6 +67,7 @@ d02-activity-names has landed. Next: d04-integrations; d03-call-help runs in its
 | d00-agent-names | The service names each session's agent as a person knows it. `install::agent_name` is one closed table beside the harness registry (`AGENT_NAMES`): each product name as the install summary says it, with its harness and product ids and the client names it is known to send (`codex-mcp-client`, `claude-ai`, `cursor-vscode`), matched ignoring case and surrounding space; a test keeps it in step with every registry row. `language::provenance::agent_name` adds the command line (`COMMAND_LINE_AGENT`, "Command line") and shows an unknown name as reported, trimmed. `SessionSummary.agent` and `ConnectionDetails.agent` carry it on sessions, operations and history items; `client_label` and `reported_application` keep the reported name for the trust note. Durable history names only the command line, from its channel. The setup view matches a session to an agent by that name, so a Codex session turns the Codex row Connected, and names the finishing agent by product name. The window's chips, activity client column, hero and search name the agent. | see `git log` |
 | d01-glance-summary | At a glance opens on one summary pill instead of a chip per client and browser plus Connection details. The pill shows a face per agent (initials, the prompt glyph for the command line, teal while working), "N agents", an arrow, a dot and "N browsers", and Details; it is a `<details>` disclosure kept open across repaints like the page's other disclosures, remembered as a page disclosure apart from the activity feed's, so a feed rebuild (a queued call, Clear view, a stream reconnect) never closes it. Details opens two shelves: agents (spark or prompt glyph, the d00 name, a count past one session, a working agent's glyph breathing in teal and still under reduced motion) and browsers (window glyph, name, tab count, adapter version on hover). With no browser the shelf shows the service's line in a dashed chip: "Starts <browser> on request" only when `BrowserRecovery::starts_on_request` says a request would start one (`on_demand` and the remembered or only installed browser with a usable registration), otherwise "No browser connected" (`language::workbench::no_browser`). An agent chip opens its card: one line per session in words (tabs and browser, working or idle, "from the command line" for the command line), at most 4 and "and N more", each with Copy id for its connection ids, and the trust note once. A live MCP connection's explanation now names the claim (`"codex-mcp-client" is what the agent calls itself; Ghostlight does not verify it.`, `language::provenance::claimed_name_explanation`). The service adds `tab_count` to each browser and `no_browser` to the connections part, which a watcher is sent too. The per-connection list, its CSS and the chip-dot rules nothing used are gone. | see `git log` |
 | d02-activity-names | Activity rows and the hero say what a person needs. `toolWords` in `ui/lib/words.js` is the one rule for a tool's displayed name: the shared `browser_` start left out and the rest in words ("navigate", "fill form", "press key", "policy explain"); the exact name is the row's and the hero title's hover and a fact in the detail card's meta line. The client column and the hero name the agent (d00), or "Unknown agent" with the workspace id only as a hover. The intake cell is empty for MCP and holds the prompt glyph for the command line, with "Command line" as its hover and screen-reader words; the hero no longer adds "via cli". A settled row names only the browser its record names and never borrows its session's. The record names the browser the call reached, not the session's pin: the one browser seam remembers the browser each invocation's commands were written to (`ApplicationExecutor::send`), and the receipt names only that browser. Whether a command was written comes from the port, not from its error: `BrowserDispatch.written` is set when the protocol-4 Link starts writing the command's first frame, so a read whose deadline runs out while the browser holds it, a cancel mid-read, or a page that changed under a read (all failures before any effect) still names the browser. A refusal before the call starts (invalid input, capacity, cancelled or past its deadline, an unknown workspace, an audit preflight refusal), a governance refusal before dispatch, `policy_explain`, and a call whose session's browser is gone record no browser; a flow step names the browser only when that step reached it. A session pinned to a browser that is gone carries none (`workbench/live.rs`). Both guessed "Chromium" before; `BrowserSummary::display_name` keeps the one family fallback for a connected browser that reports no name. docs/MEMORY.md's "Activity lists lead with tool identity" says the window drops the prefix. | see `git log` |
+| d04-integrations | The Integrations tab is the approved master and detail page (decision 5). One header row: the kicker, the computed headline (`agentHeadline` in `ui/lib/words.js`: "Ghostlight is in all 7 of your agents.", "2 of your 5", "none of your 3 agents yet", one agent by name, "Add Ghostlight to your agent."), and on the right Re-check, Set up everything with a caption that says beforehand what it will do (`agentPlan`: "Will connect Claude Code and update Cursor. Junie is left for you."), and one Copy MCP command with the command shown small. A rail grouped Needs a look, Connected, Found, not connected and Not on this computer, with a state dot per agent and a second line only for what is the agent's own (sessions and tabs, Needs an update, Needs your attention, Copy setup only); the agents not on this computer fold into one row ("12 more agents Ghostlight can join") that opens in place, scrolls into view, and that the rail's search reaches (`/` focuses the search). A pane for the picked agent: its icon joined to the mascot by a wire that shows the state, one sentence for it, the next step with each button's effect written beside it, the settings file with Locate, Ghostlight's entry shown whole (one block per line, the indent a class, no scroll of its own) with Copy setup, the service's evidence and numbered fix steps for an agent that needs attention and cannot be fixed, a live line with "See them in At a glance" (it opens that agent's card), and Remove last as a quiet link that asks first and names the live sessions. The page opens on the most relevant agent and keeps the pick by id. An agent in use pulses teal on its rail dot, still under reduced motion. Only the rail and the pane scroll. The service adds `HarnessSummary.copy_only` (Continue and goose). The card grid, its CSS, the category vocabulary and `openHarnessManual` are gone; a failed act shows that agent in the pane instead. ADR-0129 gets a marked amendment. | see `git log` |
 
 ## Owed live checks
 
@@ -97,6 +100,21 @@ owner before anything is pushed.
   sent.") shows no browser, and the agent's card line for that session names no browser either.
   With the browser connected, a `policy_explain` row and a row refused for invalid input show no
   browser, while a `browser_tabs` row of the same session names it.
+- d04-integrations: open Integrations in the window, at 1200 and at 800 px wide. The header reads
+  "Ghostlight is in all N of your agents." (or "N of your M agents.") with Re-check, Set up
+  everything and Copy MCP command in one row and the command shown small under them; with
+  something to set up the caption says what (for example "Will connect Cursor."), and with nothing
+  it says "Nothing to set up." and the button is off. The rail shows Needs a look only when
+  something does, then Connected and Found, and one row "N more agents Ghostlight can join" that
+  opens in place and scrolls into view; typing in the search (or pressing /) finds a folded agent.
+  The page opens on the agent that needs attention, else a found one, else the one with tabs.
+  Codex and Claude Code in use show "N sessions, M tabs" in teal with a breathing dot (still with
+  reduced motion on), and their pane says how many sessions are connected with "See them in At a
+  glance", which opens their card. Remove from Claude Code asks first and names the live sessions;
+  Cancel changes nothing. Continue and goose say "Copy setup only" and offer Copy setup, never
+  Connect. Only the rail and the pane scroll, and Ghostlight's entry is shown whole. A watching
+  browser tab shows the same page with Copy setup and Install as plain controls and the one
+  Continue line.
 
 ## Notes
 
@@ -144,3 +162,31 @@ owner before anything is pushed.
   quotes when asking; no workspace id is printed. (6) A composition step with no receipt names its
   tool in words too. (7) The preview server's history shows each case: a refusal before dispatch
   with no browser, a command-line row, and a restored row that reads "Unknown agent".
+- d04-integrations: differences from the spec and the mockup. (1) Live sessions per agent come
+  from the service's own naming: each session's `agent` is the roster's product name (d00), the
+  rule the setup view uses (`is_agent_of`), so the page counts the sessions whose agent is the
+  row's name and their tabs and decides nothing; no new fact was added for it. A Cline session
+  therefore counts on every Cline row, as d00 notes for the setup view. (2) Copy-only is a service
+  fact, `HarnessSummary.copy_only` (true for the manual dialects, Continue and goose), carried in
+  the integrations part; the page uses it for its words and for Set up everything's plan. (3) The
+  pane's sentence is the page's own words by state. For an agent that needs attention it is the
+  page's sentence when the service gives evidence (a foreign entry) and the service's `detail`
+  otherwise (a malformed or unreadable file), so the cause is never guessed. The service's other
+  details (the missing Ghostlight program, a located path that is gone, a retired connector) are
+  not shown in the pane; `ghostlight doctor` and `ghostlight setup` still print them. (4) Locate is
+  described as what it does here, choosing the agent's file or program, not the mockup's "Opens
+  File Explorer". For an agent that needs attention and can be fixed, the next step is Fix
+  (confirmed, backed up) instead of the numbered steps; the steps are Copy setup and Re-check, and
+  Locate stays on the settings file row. (5) The rail's group heads are plain headings: only the
+  fold opens and closes. The pick is not written to the address. The caption carries no "Checked
+  just now", because the page has no scan time from the service, and Set up everything adds no
+  dialog: the caption says beforehand what it will do and the result toast says what it did. The
+  mockup's scope line ("For your Windows user") is left out, since the target words are the
+  service's. (6) The window's minimum width is 720 px, so the mockup's stacked layout below 700 px
+  is not carried. (7) Remove's and Fix's questions moved into `ui/lib/words.js`; Fix's names the
+  agent and its file. (8) The preview server shows every state (Cursor needs an update, goose found
+  and copy-only, Continue not on this computer and copy-only, Claude Code connected and in use),
+  and `?agents=connected` shows the all-connected headline. (9) ADR-0129 Decision 1 (the card
+  roster) gets a marked amendment for the 2.0 window and its index row says so; ACCEPTANCE no
+  longer says Windsurf and Devin share a card; the installation guide says remove instead of
+  Disconnect.

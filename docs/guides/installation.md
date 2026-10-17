@@ -219,8 +219,8 @@ the Start-menu shortcut and the installed-apps entry among them while they are o
 `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal to finish them. After that,
 installs from inside the container only rewrite the manifest.
 
-Before removing Ghostlight, run `ghostlight uninstall` or use **MCP integrations** to Disconnect
-each registration it owns.
+Before removing Ghostlight, run `ghostlight uninstall` or use **MCP integrations** to remove Ghostlight
+from each agent it was added to.
 Then remove the matching browser extension and use the operating system's package uninstall. A
 release package must remove only its own native-messaging registration and files; clean-machine
 verification of that behavior is required before publication.

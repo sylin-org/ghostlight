@@ -1,6 +1,6 @@
 # ADR-0129: The integration roster returns to product cards
 
-- Status: Accepted
+- Status: Accepted; Decision 1 amended 2026-10-17 (see the amendment at the end)
 - Date: 2026-08-16
 - Supersedes: ADR-0130 and ADR-0128 in full. ADR-0125's card roster is restored and governs again.
 - Note: the switch roster was filed as ADR-0130 and renumbered to ADR-0130 on 2026-08-17 to clear a
@@ -64,3 +64,24 @@ accurate.
 
 The Rust projection returns to its previous shape. Re-landing the foreign-entry evidence is an
 independent change and does not require a particular layout.
+
+## Amendment (2026-10-17): the 2.0 window shows the roster as master and detail
+
+The owner reviewed the 2.0 window on 2026-10-17, saw six working directions for this destination,
+and chose master and detail with five grafts (the decision is recorded as decision 5 of
+[docs/tasks/break-2.0/design.md](../tasks/break-2.0/design.md)). Decision 1 of this record no
+longer governs the 2.0 window; Decisions 2 to 4 stand as history.
+
+- A rail lists every agent, grouped by state (Needs a look, Connected, Found, not connected, Not on
+  this computer), with a state dot per agent and a second line only for what is that agent's own.
+  The agents not on this computer fold into one row that opens in place and that search reaches.
+- The pane shows the one agent picked: one sentence for it, each button with its effect written
+  beside it, the settings file, Ghostlight's entry shown whole, the service's evidence and numbered
+  fix steps for an agent that needs attention, and Remove last as a quiet link that asks first and
+  names the live sessions. The page opens on the most relevant agent and keeps the pick by id, so
+  an agent that changes group when someone acts on it stays in the pane, which answers the moving
+  row named in Decision 3.
+- One header row holds the computed headline, Re-check, Set up everything with a caption that says
+  beforehand what it will do, and one Copy MCP command with the command shown.
+- The foreign-entry evidence named in Decision 4 is rendered verbatim (ADR-0135), and the roster
+  says which agents are copy-only (`copy_only`) so the page does not guess it.

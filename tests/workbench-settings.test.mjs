@@ -59,7 +59,7 @@ function part({ context = "control", watch = true, runtime = "active", layer = "
   };
 }
 
-const VOID = new Set(["meta", "link", "img", "input", "br", "hr", "source"]);
+const VOID = new Set(["meta", "link", "img", "input", "br", "hr", "source", "wbr"]);
 
 /** A fake element that knows its place in the tree, so `closest` answers like a browser's. */
 class Element {
@@ -1354,6 +1354,228 @@ test("each line of a card keeps its connection ids behind Copy id", () => {
   assert.deepEqual(copies.map((button) => button.dataset.copyConnection), ["connection_w3", "connection_w2"]);
   assert.ok(!shown.read().wearing("glance-line").some((line) => line.textContent.includes("connection_")),
     "no id is printed in the line");
+});
+
+/* ------------------------------- Integrations -------------------------------- */
+
+/** One agent of the roster, as the integrations part carries it. */
+function agent(id, name, state, extra = {}) {
+  return {
+    id, product_id: id, name, label: name, target: "User", icon: `${id}.svg`, state, detail: "Said by the service.",
+    can_install: ["available", "updatable", "not_detected"].includes(state) && !extra.copy_only,
+    can_fix: false, can_uninstall: state === "installed", can_download: true, can_locate: true, copy_only: false,
+    config_path: `/home/ann/.${id}/mcp.json`, connector_command: "/home/ann/.ghostlight/bin/ghostlight mcp",
+    manual_setup: '{\n  "mcpServers": {\n    "ghostlight": {\n      "command": "/home/ann/.ghostlight/bin/ghostlight"\n    }\n  }\n}',
+    ...extra
+  };
+}
+
+/** A view that has drawn the Integrations page of `harnesses` beside `sessions`, in `context`. */
+function agentsPage(harnesses, { sessions = [], context } = {}) {
+  const shown = drawing();
+  if (context) shown.view.context(context);
+  const answer = snapshotAnswer({ sessions });
+  answer.parts.integrations.harnesses = harnesses;
+  const snapshot = Transport.flatten(answer);
+  shown.view.collections(snapshot, new Set());
+  const rail = () => drawn(shown.el("agents-list").innerHTML);
+  const pane = () => drawn(shown.el("agents-pane").innerHTML);
+  const title = () => [...pane().root.descendants()].find((node) => node.id === "agents-pane-title")?.textContent;
+  const pick = (id) => shown.click(rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id));
+  return { ...shown, snapshot, rail, pane, title, pick };
+}
+
+const ROSTER = [
+  agent("zed", "Zed", "installed"),
+  agent("codex", "Codex", "installed"),
+  agent("cursor", "Cursor", "available"),
+  agent("junie", "Junie", "needs_attention", { can_install: false, evidence: "Found another program, `npx` with 2 arguments, where Ghostlight's entry belongs; Ghostlight maintains `/home/ann/.ghostlight/bin/ghostlight` there and changed nothing." }),
+  agent("crush", "Crush", "not_detected"),
+  agent("goose", "goose", "not_detected", { copy_only: true }),
+  agent("kiro", "Kiro", "updatable")
+];
+
+test("Integrations opens on what needs attention, then what was found, then an agent with tabs, then the first connected", () => {
+  const working = [glanceSession("w1", "Zed", { tabs: 2 })];
+  assert.equal(agentsPage(ROSTER, { sessions: working }).title(), "Junie");
+  const found = ROSTER.filter((row) => !["junie", "kiro"].includes(row.id));
+  assert.equal(agentsPage(found, { sessions: working }).title(), "Cursor");
+  const connected = found.filter((row) => row.id !== "cursor");
+  assert.equal(agentsPage(connected, { sessions: working }).title(), "Zed", "the agent with tabs");
+  assert.equal(agentsPage(connected).title(), "Codex", "the first connected, by name");
+  assert.equal(agentsPage(ROSTER.filter((row) => row.state === "not_detected")).title(), "Crush");
+});
+
+test("the pick is kept by id when the agent moves group, and the page draws nothing it was not given", () => {
+  const shown = agentsPage(ROSTER);
+  shown.pick("cursor");
+  assert.equal(shown.title(), "Cursor");
+  const connected = ROSTER.map((row) => (row.id === "cursor" ? { ...row, state: "installed", can_install: false, can_uninstall: true } : row));
+  shown.view.collections({ ...shown.snapshot, harnesses: connected }, new Set());
+  assert.equal(shown.title(), "Cursor");
+  assert.deepEqual(shown.failures, []);
+  const empty = agentsPage([]);
+  assert.equal(empty.rail().wearing("agents-empty")[0].textContent, Words.AGENTS.noAgents);
+  assert.equal(empty.el("agents-pane").innerHTML, "");
+  assert.equal(empty.el("copy-command").hidden, true, "no command to copy without an agent");
+});
+
+test("the agents not on this computer fold into one closed row that opens in place, and search reaches them", () => {
+  const shown = agentsPage(ROSTER);
+  const fold = () => shown.rail().wearing("agents-fold")[0];
+  assert.equal(fold().attributes["aria-expanded"], "false");
+  assert.equal(fold().textContent.replace(/\s+/g, " ").trim(), "2 more agents Ghostlight can joinNot on this computer");
+  assert.equal([...shown.rail().root.descendants()].find((node) => node.id === "agents-absent").hidden, true);
+  shown.click(fold());
+  assert.equal(fold().attributes["aria-expanded"], "true");
+  assert.equal([...shown.rail().root.descendants()].find((node) => node.id === "agents-absent").hidden, false);
+  shown.click(fold());
+  shown.el("agents-find").listeners.input[0]({ target: { value: "GOO" } });
+  assert.equal(shown.rail().wearing("agents-fold").length, 0, "a search shows the folded agents it reaches under their heading");
+  assert.deepEqual(shown.rail().wearing("agent-entry").map((entry) => entry.dataset.agent), ["goose"]);
+  assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.textContent), ["Not on this computer1"]);
+  shown.pick("goose");
+  shown.el("agents-find").listeners.input[0]({ target: { value: "" } });
+  assert.equal(fold().attributes["aria-expanded"], "true", "the folded agent the person picked stays in view");
+  shown.el("agents-find").listeners.input[0]({ target: { value: "nobody" } });
+  assert.equal(shown.rail().wearing("agents-empty")[0].textContent, Words.noAgentCalled("nobody").replaceAll('"', "&quot;"));
+});
+
+test("each state reads as its own words, and a group shows only when it holds an agent", () => {
+  const shown = agentsPage(ROSTER, { sessions: [glanceSession("w1", "Zed", { tabs: 2 }), glanceSession("w2", "Zed")] });
+  assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.children[0].textContent),
+    ["Needs a look", "Connected", "Found, not connected"]);
+  const sub = (id) => [...shown.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id).descendants()].find((node) => node.classes.has("agent-entry-sub"))?.textContent ?? null;
+  assert.equal(sub("zed"), "2 sessions, 2 tabs");
+  assert.equal(sub("codex"), null, "a plain connected agent has no second line");
+  assert.equal(sub("kiro"), "Needs an update");
+  assert.equal(sub("junie"), "Needs your attention");
+  assert.equal(sub("goose"), "Copy setup only");
+  const dot = (id) => shown.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id)
+    .children.find((node) => node.classes.has("agent-dot"));
+  assert.ok(dot("zed").classes.has("d-live"), "an agent in use wears the teal dot");
+  assert.ok(dot("codex").classes.has("d-installed"));
+  const agentsAgain = agentsPage(ROSTER.filter((row) => row.state === "installed"));
+  assert.deepEqual(agentsAgain.rail().wearing("agents-group-head").map((head) => head.children[0].textContent), ["Connected"]);
+});
+
+test("a pane for each state: its sentence, the step it allows with what it does, and the entry whole", () => {
+  const shown = agentsPage(ROSTER);
+  const acts = () => shown.pane().wearing("agent-act").map((row) => [row.children[0].textContent, row.children[1].textContent]);
+  shown.pick("kiro");
+  assert.deepEqual(acts(), [["Update", "Rewrites Ghostlight's own entry in mcp.json. Nothing else in the file changes. Restart Kiro afterwards."]]
+    .map(([label, why]) => [label, why.replaceAll("'", "&#039;")]));
+  shown.pick("crush");
+  assert.deepEqual(acts().map(([label]) => label), ["Install", "Prepare"]);
+  assert.match(shown.pane().wearing("agent-lead")[0].textContent, /^Crush is not installed on this computer\. You can install it, or prepare its settings first\.$/);
+  shown.pick("goose");
+  assert.deepEqual(acts().map(([label]) => label), ["Install", "Copy setup"], "copy-only is never offered Prepare");
+  assert.equal(shown.pane().wearing("agent-lead")[0].textContent, "goose is not installed on this computer.");
+  shown.pick("codex");
+  assert.deepEqual(acts(), [], "a connected agent has nothing to do next");
+  const lines = shown.pane().wearing("agent-doc")[0].children.map((line) => [...line.classes].join(" "));
+  assert.deepEqual(lines, ["ln i0", "ln i1", "ln i2", "ln i3", "ln i2", "ln i1", "ln i0"], "one block per line, its indent a class");
+  assert.equal(shown.pane().wearing("agent-remove")[0].textContent, "Remove from Codex");
+});
+
+test("an agent that needs attention shows the service's evidence and numbered steps when it cannot be fixed", () => {
+  const shown = agentsPage(ROSTER);
+  assert.equal(shown.title(), "Junie");
+  assert.equal(shown.pane().wearing("agent-evidence")[0].children[1].textContent.includes("`npx` with 2 arguments"), true);
+  const steps = shown.pane().wearing("agent-steps")[0].children;
+  assert.deepEqual(steps.map((step) => step.children[1].textContent), ["Copy setup", "Re-check"]);
+  const fixable = agentsPage(ROSTER.map((row) => (row.id === "junie" ? { ...row, can_fix: true } : row)));
+  assert.equal(fixable.pane().wearing("agent-steps").length, 0);
+  assert.deepEqual(fixable.pane().wearing("agent-act").map((row) => row.children[0].textContent), ["Fix"]);
+  const unreadable = agentsPage([agent("zed", "Zed", "needs_attention", { detail: "This configuration could not be read; it was left untouched." })]);
+  assert.equal(unreadable.pane().wearing("agent-lead")[0].textContent, "This configuration could not be read; it was left untouched.",
+    "without evidence the service's own sentence names what it saw");
+});
+
+test("Remove asks first, naming the sessions that use Ghostlight now", () => {
+  const shown = agentsPage(ROSTER, { sessions: [glanceSession("w1", "Codex"), glanceSession("w2", "Codex", { tabs: 1 })] });
+  shown.pick("codex");
+  const remove = shown.pane().wearing("agent-remove")[0];
+  assert.equal(remove.dataset.harnessSessions, "2");
+  assert.equal(remove.dataset.harnessAction, "uninstall");
+  const asked = Words.confirmRemovalWords("Codex", "config.toml", 2);
+  assert.equal(asked.title, "Remove Ghostlight from Codex?");
+  assert.match(asked.detail, / 2 Codex sessions are using Ghostlight right now\. /);
+  assert.ok(!Words.confirmRemovalWords("Codex", "config.toml", 0).detail.includes("session"));
+});
+
+test("the headline counts the agents with Ghostlight, and Set up everything says beforehand what it will do", () => {
+  const head = (rows) => {
+    const said = Words.agentHeadline(rows);
+    return `${said.lead}${said.accent}${said.trail}`;
+  };
+  const on = (count) => Array.from({ length: count }, (_, at) => agent(`a${at}`, `A${at}`, "installed"));
+  assert.equal(head(on(7)), "Ghostlight is in all 7 of your agents.");
+  assert.equal(head(on(1)), "Ghostlight is in A0.");
+  assert.equal(head([...on(2), agent("c", "Cursor", "available")]), "Ghostlight is in 2 of your 3 agents.");
+  assert.equal(head([agent("c", "Cursor", "available")]), "Ghostlight is not in Cursor yet.");
+  assert.equal(head([agent("c", "C", "available"), agent("d", "D", "available")]), "Ghostlight is in none of your 2 agents yet.");
+  assert.equal(head([agent("c", "C", "not_detected")]), "Add Ghostlight to your agent.");
+  const shown = agentsPage(ROSTER);
+  assert.equal(shown.el("integrations-heading").innerHTML, "Ghostlight is in <em>2 of your 5</em> agents.");
+  assert.equal(shown.el("integrations-caption").textContent, "Will connect Cursor and update Kiro. Junie is left for you.");
+  assert.equal(shown.el("setup-integrations").disabled, false);
+  assert.equal(Words.agentPlan({ connect: [], update: [], left: [] }), "Nothing to set up.");
+  assert.equal(Words.agentPlan({ connect: ["A", "B", "C", "D"], update: [], left: ["goose"] }),
+    "Will connect 4 agents. goose is left for you.");
+  const done = agentsPage(on(2));
+  assert.equal(done.el("setup-integrations").disabled, true);
+  assert.equal(done.el("integrations-caption").textContent, "Nothing to set up.");
+});
+
+test("the page offers one Copy MCP command, in its header, with the command shown small", () => {
+  const shown = agentsPage(ROSTER);
+  assert.equal(shown.el("copy-command").hidden, false);
+  assert.equal(shown.el("copy-command").dataset.harnessOperation, "copy");
+  assert.equal(shown.el("copy-command").dataset.copyKind, Transport.COPY_KIND.command);
+  assert.equal(shown.el("copy-command").dataset.harness, "zed");
+  assert.equal(shown.el("integrations-command").textContent, "/home/ann/.ghostlight/bin/ghostlight mcp");
+  for (const row of ROSTER) {
+    shown.pick(row.id);
+    assert.ok(!shown.el("agents-pane").innerHTML.includes("Copy MCP command"), row.id);
+  }
+  assert.ok(!shown.el("agents-list").innerHTML.includes("Copy MCP command"));
+});
+
+test("a watching screen sees every agent's state and copies, and is told once where changes are made", () => {
+  const watcher = {
+    context: "watch", opener: "anchor", word: "Watching", sentence: WATCHER, product: { version: "2.0.0" },
+    acts: Object.fromEntries(Object.values(Transport.ACT).map((act) => [act,
+      [Transport.ACT.rescan, Transport.ACT.hold].includes(act) ? { available: true, why_not: null } : { available: false, why_not: WHY }]))
+  };
+  const rows = ROSTER.map((row) => ({ ...row, download_url: `https://example.test/${row.id}` }));
+  const shown = agentsPage(rows, { context: watcher });
+  assert.equal(shown.el("integrations-continue").hidden, false);
+  assert.ok(shown.el("integrations-continue").innerHTML.includes(WHY));
+  for (const row of rows) {
+    shown.pick(row.id);
+    const html = shown.el("agents-pane").innerHTML;
+    assert.ok(!/data-harness-operation="(manage|locate|download)"/.test(html), `${row.id}: ${html}`);
+    assert.ok(html.includes(">Copy setup</button>"), row.id);
+  }
+  shown.pick("crush");
+  assert.ok(shown.el("agents-pane").innerHTML.includes('href="https://example.test/crush"'), "Install is the product's own link");
+});
+
+test("only the rail and the pane scroll, the entry has no scroll of its own, and agents in use pulse unless motion is reduced", () => {
+  const top = (selector) => naming(selector).filter((rule) => rule.media === null);
+  assert.equal(top(".agents-list")[0].declarations["overflow-y"], "auto");
+  assert.equal(top(".agents-pane")[0].declarations["overflow-y"], "auto");
+  const doc = top(".agent-doc")[0].declarations;
+  assert.equal(doc.overflow, undefined);
+  assert.equal(doc["max-height"], undefined);
+  assert.equal(doc["white-space"], "pre-wrap");
+  assert.match(top(".agent-dot.d-live")[0].declarations.animation, /^glyph-breathe /);
+  assert.match(top(".agent-dot.d-live::after")[0].declarations.animation, /^halo-breathe /);
+  const still = naming("*").filter((rule) => rule.media === "(prefers-reduced-motion: reduce)");
+  assert.ok(still.some((rule) => /^none/.test(rule.declarations.animation)));
+  assert.ok(naming(".agent-entry[aria-current=\"true\"]").some((rule) => /forced-colors/.test(rule.media ?? "")),
+    "the picked agent takes the system highlight under forced colours");
 });
 
 test("a settled action says the service's sentence, the readiness note beside it, and the host once", () => {

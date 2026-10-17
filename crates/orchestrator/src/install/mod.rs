@@ -378,6 +378,9 @@ pub struct HarnessSummary {
     pub can_download: bool,
     /// Whether the native Locate action is available.
     pub can_locate: bool,
+    /// Whether Ghostlight never edits this target's file, so copying its setup and pasting it in
+    /// is the only way to connect it.
+    pub copy_only: bool,
     /// Whether this process runs inside an app container that keeps this target's configuration
     /// private: what it reads here is that app's view, and a change would reach only that app.
     pub private_view: bool,
@@ -1175,6 +1178,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         can_uninstall: state == HarnessState::Installed,
         can_download: definition.download_url.is_some(),
         can_locate: true,
+        copy_only: manual,
         private_view: context.private_to(definition).is_some(),
         config_path: definition.path.to_string_lossy().into_owned(),
         connector_command: mcp_command_line(&context.edge),
@@ -2522,6 +2526,12 @@ mod tests {
                 summary.id
             );
             assert_eq!(summary.connector_command, format!("{edge} mcp"));
+            assert_eq!(
+                summary.copy_only,
+                matches!(summary.id.as_str(), "goose" | "continue"),
+                "only the clients whose files Ghostlight never edits are copy-only: {}",
+                summary.id
+            );
             assert!(
                 summary.manual_setup.contains(&edge) || summary.manual_setup.contains(escaped_edge),
                 "manual setup for {} omitted the edge",
@@ -2928,6 +2938,10 @@ mod tests {
                 .expect("the client stays in the closed roster");
             assert_eq!(summary.state, HarnessState::Available, "{id}");
             assert!(!summary.can_install && !summary.can_fix && !summary.can_uninstall);
+            assert!(
+                summary.copy_only,
+                "{id} is connected only by pasting its setup"
+            );
             assert!(summary.detail.contains("Copy setup"), "{}", summary.detail);
             assert!(summary
                 .manual_setup
@@ -2963,6 +2977,7 @@ mod tests {
                 .unwrap();
             assert_eq!(summary.state, HarnessState::NotDetected, "{id}");
             assert!(!summary.can_install);
+            assert!(summary.copy_only, "{id}");
         }
         fs::remove_dir_all(directory).unwrap();
     }

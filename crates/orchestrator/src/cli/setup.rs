@@ -1118,6 +1118,7 @@ mod tests {
             can_uninstall: false,
             can_download: false,
             can_locate: false,
+            copy_only: false,
             private_view: false,
             config_path: String::new(),
             connector_command: "/home/ghostlight mcp".into(),

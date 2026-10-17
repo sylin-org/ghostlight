@@ -15,7 +15,9 @@
     VIEWS, SETTINGS_SECTIONS, DEFAULT_SECTION, addressOf, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
-    INTEGRATION_CATEGORIES, INTEGRATION_STATE_CATEGORY, INTEGRATION_CATEGORY_PRIORITY,
+    AGENT_STATE_WORDS, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
+    agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
+    removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
@@ -40,7 +42,10 @@
    * The data keys a repaint gives focus back by: the element that held focus is found again by
    * the same key and value.
    */
-  const FOCUS_KEYS = Object.freeze(["actionDetails", "glanceAgent", "copyConnection"]);
+  const FOCUS_KEYS = Object.freeze(["actionDetails", "glanceAgent", "copyConnection", "agent", "agentFold"]);
+
+  /** The mascot the Integrations pane joins each agent to, served beside the page. */
+  const MASCOT = "extension/ghostlight-mascot.png";
 
   /** The panels that hold data, each with the line that says why it holds none and its section. */
   const DATA_PANELS = Object.freeze([
@@ -236,6 +241,23 @@
       if (agent) {
         const name = agent.dataset.glanceAgent;
         glanceAgent = glanceAgent === name ? null : name;
+        if (lastConnections) paintConnections(lastConnections);
+        return;
+      }
+      const agentEntry = event.target.closest?.("[data-agent]");
+      if (agentEntry) {
+        showAgent(agentEntry.dataset.agent);
+        return;
+      }
+      if (event.target.closest?.("[data-agent-fold]")) {
+        toggleFold();
+        return;
+      }
+      // "See them in At a glance" opens the summary on that agent's card as it goes there.
+      const shown = event.target.closest?.("[data-show-agent]");
+      if (shown) {
+        glanceAgent = shown.dataset.showAgent;
+        openPage.add(GLANCE_KEY);
         if (lastConnections) paintConnections(lastConnections);
         return;
       }
@@ -820,116 +842,378 @@
         .join("");
     }
 
-    function integrations(snapshot, pending) {
+    /*
+     * Integrations: every agent Ghostlight knows, on a rail grouped by state, and the one the
+     * person picked shown in full beside it.
+     *
+     * Every fact comes from the service's roster: the state, what each act may do, the settings
+     * file, the entry and the evidence. An agent's sessions are the sessions the service names by
+     * that agent's name, the rule the setup view uses, so the page counts them and decides nothing.
+     * The pick is kept by id across repaints, so an agent that moves group when someone acts on it
+     * stays in the pane.
+     */
+    let agentPick = null;
+    let foldOpen = false;
+    let agentQuery = "";
+    let lastAgents = null;
+    let paneShows = null;
+
+    /** The file an agent reads, from its settings path. */
+    const fileOf = (path) => String(path ?? "").split(/[\\/]/).filter(Boolean).at(-1) ?? "";
+
+    /** The live sessions of `harness`'s agent and the tabs they hold. */
+    function useOf(harness, sessions) {
+      const own = sessions.filter((session) => session.agent === harness.name);
+      return { sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0) };
+    }
+
+    const inUse = (agent) => agent.state === "installed" && agent.use.sessions > 0;
+    const toneOf = (agent) => (inUse(agent) ? "live" : agent.state);
+    const byLabel = (left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+
+    /** The rail's groups that hold an agent, each sorted the way a person scans it. */
+    function railGroups(agents) {
+      return AGENT_GROUPS.map((group) => {
+        const members = agents.filter((agent) => group.states.includes(agent.state));
+        if (group.key === "look") {
+          members.sort((left, right) => group.states.indexOf(left.state) - group.states.indexOf(right.state) || byLabel(left, right));
+        } else if (group.key === "connected") {
+          members.sort((left, right) => right.use.tabs - left.use.tabs || right.use.sessions - left.use.sessions || byLabel(left, right));
+        } else {
+          members.sort(byLabel);
+        }
+        return { ...group, agents: members };
+      }).filter((group) => group.agents.length);
+    }
+
+    /** The agent the page opens on: one that needs a look, then one found, then one with tabs, then the first connected. */
+    function mostRelevant(groups) {
+      const members = (key) => groups.find((group) => group.key === key)?.agents ?? [];
+      const connected = members("connected");
+      return (members("look")[0] ?? members("found")[0] ?? connected.find((agent) => agent.use.tabs > 0)
+        ?? connected[0] ?? members(ABSENT_GROUP)[0])?.id ?? null;
+    }
+
+    /** What this screen may do for `agent`, from the roster's flags and what the screen was told. */
+    function actsOf(agent) {
+      const manage = can(ACT.harnessAct);
+      const absent = agent.state === "not_detected";
+      return {
+        install: absent && agent.can_download && (!opensLinks() || Boolean(agent.download_url)),
+        prepare: manage && absent && agent.can_install,
+        connect: manage && agent.state === "available" && agent.can_install,
+        update: manage && agent.state === "updatable" && agent.can_install,
+        fix: manage && agent.state === "needs_attention" && agent.can_fix,
+        remove: manage && agent.state === "installed" && agent.can_uninstall,
+        locate: can(ACT.locate) && agent.can_locate,
+        recheck: can(ACT.rescan) && agent.state === "needs_attention",
+        copy: true
+      };
+    }
+
+    /** The action each act asks of the service's client roster. */
+    const MANAGE_ACTION = Object.freeze({ prepare: "install", connect: "install", update: "install", fix: "fix" });
+
+    /** One button of the pane, wired to the act it names. */
+    function actButton(act, agent, primary) {
+      const kind = primary ? "primary-button" : "ghost-button";
+      const label = escapeHtml(AGENT_ACTS[act]);
+      const who = ` data-harness="${escapeHtml(agent.id)}" data-harness-name="${escapeHtml(agent.name)}"`;
+      if (MANAGE_ACTION[act]) {
+        const waiting = lastAgents.pending.has(agent.id);
+        return `<button class="${kind}" type="button" data-harness-operation="manage"`
+          + ` data-harness-action="${MANAGE_ACTION[act]}"${who} data-harness-state="${escapeHtml(agent.state)}"`
+          + ` data-harness-file="${escapeHtml(agent.file)}"${waiting ? " disabled" : ""}>`
+          + `${waiting ? escapeHtml(AGENTS.working) : label}</button>`;
+      }
+      if (act === "install") {
+        // A tab follows the product's own link; the window asks the service to open it.
+        return opensLinks()
+          ? `<a class="${kind}" href="${escapeHtml(agent.download_url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+          : `<button class="${kind}" type="button" data-harness-operation="download"`
+            + ` data-product="${escapeHtml(agent.product_id)}"${who}>${label}</button>`;
+      }
+      if (act === "locate") return `<button class="${kind}" type="button" data-harness-operation="locate"${who}>${label}</button>`;
+      if (act === "copy") {
+        return `<button class="${kind}" type="button" data-harness-operation="copy" data-copy-kind="${COPY_KIND.setup}"${who}>${label}</button>`;
+      }
+      return `<button class="${kind}" type="button" data-agents-recheck>${label}</button>`;
+    }
+
+    /** The second line of a rail entry, only when the agent has something of its own to say. */
+    function subOf(agent) {
+      if (inUse(agent)) return { tone: "live", text: agentUse(agent.use) };
+      if (agent.state === "needs_attention") return { tone: "warn", text: AGENT_STATE_WORDS.needs_attention };
+      if (agent.state === "updatable") return { tone: "action", text: AGENT_STATE_WORDS.updatable };
+      if (agent.copy_only && agent.state !== "installed") return { tone: "", text: AGENTS.copyOnly };
+      return null;
+    }
+
+    function entryMarkup(agent) {
+      const sub = subOf(agent);
+      const second = sub
+        ? `<span class="agent-entry-sub${sub.tone ? ` ${sub.tone}` : ""}">${escapeHtml(sub.text)}</span>`
+        : `<span class="sr-only">, ${escapeHtml(AGENT_STATE_WORDS[agent.state] ?? "")}</span>`;
+      return `<button class="agent-entry e-${escapeHtml(agent.state)}" type="button" data-agent="${escapeHtml(agent.id)}"`
+        + ` aria-controls="agents-pane" aria-current="${agent.id === agentPick}">`
+        + `<span class="agent-dot d-${escapeHtml(toneOf(agent))}" aria-hidden="true"></span>`
+        + `<img src="integrations/${escapeHtml(agent.icon ?? "generic.svg")}" alt="" width="22" height="22">`
+        + `<span class="agent-entry-text"><span class="agent-entry-name">${escapeHtml(agent.label)}</span>${second}</span></button>`;
+    }
+
+    const CHEVRON = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>';
+
+    /** The one row every agent not on this computer folds into, which opens in place. */
+    function foldMarkup(group) {
+      const count = group.agents.length;
+      return `<div class="agents-group g-${ABSENT_GROUP}">`
+        + `<button class="agents-fold" type="button" data-agent-fold aria-expanded="${foldOpen}" aria-controls="agents-absent">`
+        + `<span class="agent-dot d-not_detected" aria-hidden="true"></span>`
+        + `<span class="agent-entry-text"><span class="agent-entry-name"><b>${count}</b> ${escapeHtml(moreAgents(count))}</span>`
+        + `<span class="agent-entry-sub">${escapeHtml(group.title)}</span></span>${CHEVRON}</button>`
+        + `<div class="agents-fold-list" id="agents-absent"${foldOpen ? "" : " hidden"}>${group.agents.map(entryMarkup).join("")}</div></div>`;
+    }
+
+    function railMarkup(groups) {
+      const query = agentQuery.trim().toLowerCase();
+      const html = groups.map((group) => {
+        const shown = query
+          ? group.agents.filter((agent) => `${agent.label} ${agent.name}`.toLowerCase().includes(query)) : group.agents;
+        if (!shown.length) return "";
+        // While a search runs, the folded agents it reaches show under their own heading.
+        if (group.key === ABSENT_GROUP && !query) return foldMarkup(group);
+        return `<div class="agents-group g-${group.key}"><h2 class="agents-group-head"><span>${escapeHtml(group.title)}</span>`
+          + `<span class="agents-count">${shown.length}</span></h2>${shown.map(entryMarkup).join("")}</div>`;
+      }).join("");
+      return html || `<p class="agents-empty">${escapeHtml(noAgentCalled(agentQuery.trim()))}</p>`;
+    }
+
+    /** The agent and the mascot, joined by a wire that shows the state. */
+    function agentHeroMarkup(agent) {
+      const tone = toneOf(agent);
+      return `<header class="agent-hero s-${escapeHtml(tone)}">`
+        + '<div class="agent-link" aria-hidden="true">'
+        + `<img class="agent-icon" src="integrations/${escapeHtml(agent.icon ?? "generic.svg")}" alt="" width="46" height="46">`
+        + '<span class="agent-wire"><i></i><i></i><i></i><b></b></span>'
+        + `<img class="agent-ghost" src="${MASCOT}" alt="" width="50" height="50"></div>`
+        + `<div class="agent-hero-text"><h2 id="agents-pane-title">${escapeHtml(agent.label)}</h2>`
+        + `<div class="agent-state-line"><span class="agent-dot d-${escapeHtml(tone)}" aria-hidden="true"></span>`
+        + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(AGENT_STATE_WORDS[agent.state] ?? "")}</span></div></div></header>`;
+    }
+
+    const actRow = (act, agent, primary) => `<div class="agent-act">${actButton(act, agent, primary)}`
+      + `<span class="agent-why">${escapeHtml(agentWhy(act, agent))}</span></div>`;
+
+    /** The next step: each button the agent's state allows, with what it does beside it. */
+    function nextMarkup(agent, acts, used) {
+      if (agent.state === "needs_attention" && !acts.fix) {
+        const steps = [];
+        if (acts.copy) steps.push(["copy", AGENTS.copyStep, true]);
+        if (acts.recheck) steps.push(["recheck", AGENTS.recheckStep, false]);
+        for (const [act] of steps) used.add(act);
+        return `<ol class="agent-steps" aria-label="${escapeHtml(AGENTS.fixSteps)}">`
+          + steps.map(([act, what, primary]) => `<li><span class="agent-step-what">${escapeHtml(what)}`
+            + `<small>${escapeHtml(agentWhy(act, agent))}</small></span>${actButton(act, agent, primary)}</li>`).join("")
+          + "</ol>";
+      }
+      const order = ["install", "connect", "update", "prepare", "fix"];
+      if (agent.copy_only && agent.state !== "installed") order.push("copy");
+      const rows = order.filter((act) => acts[act]).map((act, index) => {
+        used.add(act);
+        return actRow(act, agent, index === 0);
+      }).join("");
+      return rows ? `<div class="agent-next">${rows}</div>` : "";
+    }
+
+    /** A path that breaks after its separators, so it wraps between folders. */
+    const breakable = (text) => escapeHtml(text).replace(/([\\/]+)/g, "$1<wbr>");
+
+    /** The entry, whole, one block per line, each line's indent held by a class. */
+    function docMarkup(doc) {
+      return String(doc ?? "").split("\n").map((line) => {
+        const level = Math.min(6, Math.floor(/^ */.exec(line)[0].length / 2));
+        return `<span class="ln i${level}">${line ? breakable(line) : "<br>"}</span>`;
+      }).join("");
+    }
+
+    function factsMarkup(agent, acts, used, prepare) {
+      const locate = acts.locate && !used.has("locate");
+      const copy = acts.copy && !used.has("copy");
+      return '<div class="agent-facts">'
+        + `<p class="agent-facts-note">${escapeHtml(AGENTS.factsNote)}</p>`
+        + `<div class="agent-fact"><span class="agent-fact-label">${escapeHtml(AGENTS.settingsFile)}<small>${escapeHtml(agentFileLabel(agent))}</small></span>`
+        + `<div><div class="agent-path">${breakable(agent.config_path ?? "")}</div>`
+        + (locate ? `<div class="agent-why">${escapeHtml(agentWhy("locate", agent))}</div>` : "") + "</div>"
+        + (locate ? actButton("locate", agent, false) : "<span></span>") + "</div>"
+        + `<div class="agent-fact"><span class="agent-fact-label">${escapeHtml(AGENTS.entry)}<small>${escapeHtml(agentEntryLabel(agent, { prepare }))}</small></span>`
+        + `<div><pre class="agent-doc">${docMarkup(agent.manual_setup)}</pre>`
+        + (copy ? `<div class="agent-why">${escapeHtml(agentWhy("copy", agent))}</div>` : "") + "</div>"
+        + (copy ? actButton("copy", agent, false) : "<span></span>") + "</div>"
+        + "</div>";
+    }
+
+    function paneMarkup(agent, arriving) {
+      const acts = actsOf(agent);
+      const used = new Set();
+      let html = agentHeroMarkup(agent);
+      html += `<p class="agent-lead">${escapeHtml(agentLead(agent, { prepare: acts.prepare }))}</p>`;
+      // ADR-0135: the orchestrator precomposed this proof for a blocked agent; it is rendered
+      // verbatim and the page adds no words of its own to it.
+      if (agent.evidence) {
+        html += `<div class="agent-evidence"><span class="kicker">${escapeHtml(AGENTS.evidence)}</span>`
+          + `<p>${escapeHtml(agent.evidence)}</p></div>`;
+      }
+      if (inUse(agent)) {
+        html += `<div class="agent-live"><span class="agent-dot d-live" aria-hidden="true"></span>`
+          + `<span>${escapeHtml(agentLive(agent.name, agent.use))}</span>`
+          + `<button class="link-button" type="button" data-view="monitor" data-show-agent="${escapeHtml(agent.name)}">`
+          + `${escapeHtml(AGENTS.showSessions)}</button></div>`;
+      }
+      html += nextMarkup(agent, acts, used);
+      html += factsMarkup(agent, acts, used, acts.prepare);
+      if (acts.remove) {
+        html += `<div class="agent-quiet"><p>${escapeHtml(removeNote(agent.file))}</p>`
+          + `<button class="agent-remove" type="button" data-harness-operation="manage" data-harness-action="uninstall"`
+          + ` data-harness="${escapeHtml(agent.id)}" data-harness-name="${escapeHtml(agent.name)}"`
+          + ` data-harness-state="${escapeHtml(agent.state)}" data-harness-file="${escapeHtml(agent.file)}"`
+          + ` data-harness-sessions="${agent.use.sessions}"${lastAgents.pending.has(agent.id) ? " disabled" : ""}>`
+          + `${escapeHtml(removeLabel(agent.name))}</button></div>`;
+      }
+      // Only a newly picked agent arrives; a repaint of the same one stays still.
+      return `<div class="agent-pane-in${arriving ? " arriving" : ""}">${html}</div>`;
+    }
+
+    /** The headline, what Set up everything will do, and the one command every agent runs. */
+    function agentsHeading(agents) {
+      const headline = agentHeadline(agents);
+      el["integrations-heading"].innerHTML = `${escapeHtml(headline.lead)}<em>${escapeHtml(headline.accent)}</em>`
+        + escapeHtml(headline.trail);
+      const changeable = (agent) => agent.state === "available" || agent.state === "updatable";
+      const plan = {
+        connect: agents.filter((agent) => agent.can_install && agent.state === "available").map((agent) => agent.label),
+        update: agents.filter((agent) => agent.can_install && agent.state === "updatable").map((agent) => agent.label),
+        left: agents.filter((agent) => agent.state === "needs_attention" || (changeable(agent) && agent.copy_only))
+          .map((agent) => agent.label)
+      };
+      const actionable = plan.connect.length + plan.update.length > 0;
       const setup = el["setup-integrations"];
-      const actionable = snapshot.harnesses.some((harness) => harness.can_install
-        && (harness.state === "available" || harness.state === "updatable"));
       setup.disabled = !actionable;
       setup.dataset.actionable = String(actionable);
-      // One line for the whole roster, naming the first change this screen cannot make.
+      const said = agentPlan(plan);
+      setup.title = said;
+      el["integrations-caption"].textContent = said;
+      el["integrations-caption"].hidden = !can(ACT.setupAll) || !agents.length;
+      const command = agents[0]?.connector_command ?? "";
+      el["integrations-command"].textContent = command;
+      el["integrations-command"].title = command;
+      el["integrations-command"].hidden = !command;
+      el["copy-command"].hidden = !command;
+      el["copy-command"].dataset.harness = agents[0]?.id ?? "";
+      el["copy-command"].dataset.harnessName = agents[0]?.name ?? "";
+    }
+
+    function drawAgents() {
+      const { harnesses, sessions } = lastAgents;
+      const agents = harnesses.map((harness) => ({
+        ...harness, file: fileOf(harness.config_path), use: useOf(harness, sessions)
+      }));
+      agentsHeading(agents);
+      // One line for the whole page, naming the first change this screen cannot make.
       const withheld = [ACT.harnessAct, ACT.locate, ACT.setupAll].find((act) => !can(act));
       el["integrations-continue"].hidden = !withheld;
       el["integrations-continue"].innerHTML = withheld ? continueMarkup(whyNot(withheld), addressOf("integrations")) : "";
-      if (!snapshot.harnesses.length) {
-        el["integration-grid"].innerHTML =
-          '<div class="empty">No supported MCP client was found for this user.</div>';
+      if (!agents.length) {
+        el["agents-list"].innerHTML = `<p class="agents-empty">${escapeHtml(AGENTS.noAgents)}</p>`;
+        el["agents-pane"].innerHTML = "";
         return;
       }
-
-      const products = new Map();
-      for (const harness of snapshot.harnesses) {
-        const id = harness.product_id ?? harness.id;
-        if (!products.has(id)) products.set(id, []);
-        products.get(id).push(harness);
+      const groups = railGroups(agents);
+      if (!agents.some((agent) => agent.id === agentPick)) {
+        agentPick = mostRelevant(groups);
+        if (agents.find((agent) => agent.id === agentPick)?.state === "not_detected") foldOpen = true;
       }
-      const categoryById = new Map(INTEGRATION_CATEGORIES.map((category) => [category.id, category]));
-      const categoryOrder = new Map(INTEGRATION_CATEGORIES.map((category, index) => [category.id, index]));
-      const actionButton = (harness, action, label, kind = "ghost-button") => {
-        const waiting = pending.has(harness.id);
-        return `<button class="${kind}" type="button" data-harness-operation="manage"`
-          + ` data-harness-action="${action}" data-harness="${escapeHtml(harness.id)}"`
-          + ` data-harness-state="${escapeHtml(harness.state)}"`
-          + ` data-harness-name="${escapeHtml(harness.name)}"`
-          + ` data-harness-target="${escapeHtml(harness.target)}"${waiting ? " disabled" : ""}>`
-          + `${waiting ? "Working..." : label}</button>`;
-      };
-      const utilityButton = (harness, operation, label, extra = "") =>
-        `<button class="link-button" type="button" data-harness-operation="${operation}"`
-        + ` data-harness="${escapeHtml(harness.id)}" data-harness-name="${escapeHtml(harness.name)}"`
-        + `${extra}>${label}</button>`;
-
-      const cards = [...products.entries()].map(([productId, targets]) => {
-        const sortedTargets = [...targets].sort((left, right) =>
-          left.target.localeCompare(right.target) || left.id.localeCompare(right.id));
-        const visible = sortedTargets.some((target) => target.state !== "not_detected")
-          ? sortedTargets.filter((target) => target.state !== "not_detected") : [sortedTargets[0]];
-        const targetCategories = new Set(visible.map((target) => INTEGRATION_STATE_CATEGORY[target.state]));
-        const categoryId = INTEGRATION_CATEGORY_PRIORITY.find((id) => targetCategories.has(id))
-          ?? "needs-attention";
-        const category = categoryById.get(categoryId);
-        const product = visible[0];
-        const icon = escapeHtml(product.icon ?? "generic.svg");
-        const rows = visible.map((harness) => {
-          const installed = harness.state === "installed";
-          const available = harness.state === "available";
-          const updatable = harness.state === "updatable";
-          const needsAttention = harness.state === "needs_attention";
-          let primary = "";
-          if (!can(ACT.harnessAct)) {
-            primary = "";
-          } else if (installed && harness.can_uninstall) {
-            primary = actionButton(harness, "uninstall", "Remove", "danger-button");
-          } else if ((available || updatable) && harness.can_install) {
-            primary = actionButton(harness, "install", updatable ? "Update" : "Set up");
-          } else if (needsAttention && harness.can_fix) {
-            primary = actionButton(harness, "fix", "Fix");
-          }
-          const locate = can(ACT.locate) && harness.can_locate && harness.state !== "not_detected"
-            ? utilityButton(harness, "locate", "Locate") : "";
-          const setup = utilityButton(harness, "copy", "Copy setup", ` data-copy-kind="${COPY_KIND.setup}"`);
-          return `<div class="integration-target">`
-            + `<div class="integration-target-head"><strong>${escapeHtml(harness.target)}</strong>`
-            + `<span>${escapeHtml(words(harness.state))}</span></div>`
-            + `<p>${escapeHtml(harness.detail)}</p>`
-            // ADR-0135: the orchestrator precomposed this proof for a blocked target; it is
-            // rendered verbatim and the surface adds no words of its own.
-            + (harness.state === "needs_attention" && harness.evidence
-              ? `<p class="integration-evidence">${escapeHtml(harness.evidence)}</p>` : "")
-            + `<details class="manual-setup" data-harness-manual="${escapeHtml(harness.id)}"><summary>Manual setup</summary>`
-            + `<code>${escapeHtml(harness.config_path)}</code><pre>${escapeHtml(harness.manual_setup)}</pre></details>`
-            + `<div class="tile-actions">${primary}${locate}${setup}</div></div>`;
-        }).join("");
-        const missing = visible.length === 1 && visible[0].state === "not_detected";
-        const first = visible[0];
-        const downloadable = targets.find((target) => target.can_download);
-        // A tab follows the product's own link; the window asks the service to open it.
-        const install = !(missing && downloadable) ? ""
-          : !opensLinks()
-            ? `<button class="ghost-button" type="button" data-harness-operation="download"`
-              + ` data-product="${escapeHtml(productId)}" data-harness="${escapeHtml(first.id)}"`
-              + ` data-harness-name="${escapeHtml(first.name)}">Install</button>`
-            : downloadable.download_url
-              ? `<a class="ghost-button" href="${escapeHtml(downloadable.download_url)}"`
-                + ` target="_blank" rel="noopener noreferrer">Install</a>` : "";
-        const locate = missing && can(ACT.locate) ? utilityButton(first, "locate", "Locate") : "";
-        const command = utilityButton(first, "copy", "Copy MCP command", ` data-copy-kind="${COPY_KIND.command}"`);
-        const html = `<article class="tile integration-card integration-${category.id}">`
-          + `<div class="tile-top"><span class="integration-identity"><img src="integrations/${icon}" alt=""`
-          + ` width="28" height="28"><h3>${escapeHtml(product.name)}</h3></span>`
-          + `<span class="tile-state">${escapeHtml(category.label)}</span></div>`
-          + `<div class="integration-targets">${rows}</div>`
-          + `<div class="tile-actions integration-product-actions">${install}${locate}${command}</div>`
-          + `</article>`;
-        return { categoryId, name: product.name, productId, html };
-      });
-
-      el["integration-grid"].innerHTML = cards
-        .sort((left, right) => (categoryOrder.get(left.categoryId) - categoryOrder.get(right.categoryId))
-          || left.name.localeCompare(right.name)
-          || left.productId.localeCompare(right.productId))
-        .map((card) => card.html)
-        .join("");
+      replaceHistoryMarkup(el["agents-list"], railMarkup(groups));
+      const picked = agents.find((agent) => agent.id === agentPick);
+      const arriving = paneShows !== agentPick;
+      el["agents-pane"].innerHTML = picked ? paneMarkup(picked, arriving) : "";
+      if (arriving) el["agents-pane"].scrollTop = 0;
+      paneShows = agentPick;
     }
+
+    /** Paint the page when its facts or the person's place on it changed. */
+    function paintAgents() {
+      if (!lastAgents) return;
+      ifChanged("integrations", [lastAgents.facts, agentPick, foldOpen, agentQuery], drawAgents);
+    }
+
+    function integrations(snapshot, pending) {
+      const harnesses = snapshot.harnesses;
+      const sessions = snapshot.sessions ?? [];
+      const uses = harnesses.map((harness) => useOf(harness, sessions));
+      lastAgents = { harnesses, sessions, pending, facts: [harnesses, uses, [...pending], access?.acts] };
+      paintAgents();
+    }
+
+    /** Show `id` in the pane, and open the fold when it sits there and no search is running. */
+    function showAgent(id) {
+      if (!lastAgents?.harnesses.some((harness) => harness.id === id)) return;
+      agentPick = id;
+      const picked = lastAgents.harnesses.find((harness) => harness.id === id);
+      if (picked.state === "not_detected" && !agentQuery.trim()) foldOpen = true;
+      paintAgents();
+    }
+
+    /** The rail entries a person can reach now, in rail order. */
+    const reachableEntries = () => [...el["agents-list"].querySelectorAll(".agent-entry")]
+      .filter((entry) => entry.offsetParent !== null);
+
+    function findAgent(text) {
+      agentQuery = text;
+      if (!text.trim()) {
+        const picked = lastAgents?.harnesses.find((harness) => harness.id === agentPick);
+        if (picked?.state === "not_detected") foldOpen = true;
+      }
+      paintAgents();
+    }
+
+    function toggleFold() {
+      foldOpen = !foldOpen;
+      paintAgents();
+      // Bring the opened list into view, so the press visibly lands when the rail is nearly full.
+      if (foldOpen) el["agents-list"].querySelector("#agents-absent")?.scrollIntoView?.({ block: "nearest" });
+    }
+
+    el["agents-find"]?.addEventListener("input", (event) => findAgent(event.target.value));
+    el["agents-find"]?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.target.value = "";
+        findAgent("");
+        return;
+      }
+      if (event.key !== "ArrowDown" && event.key !== "Enter") return;
+      const first = reachableEntries()[0];
+      if (!first) return;
+      event.preventDefault();
+      if (event.key === "ArrowDown") first.focus();
+      showAgent(first.dataset.agent);
+    });
+    el["agents-list"]?.addEventListener("keydown", (event) => {
+      const entries = reachableEntries();
+      const at = entries.indexOf(document.activeElement);
+      if (at < 0) return;
+      const to = { ArrowDown: entries[Math.min(at + 1, entries.length - 1)], ArrowUp: entries[Math.max(at - 1, 0)],
+        Home: entries[0], End: entries.at(-1) }[event.key];
+      if (!to) return;
+      event.preventDefault();
+      to.focus();
+      showAgent(to.dataset.agent);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "/" || current !== "integrations" || !el["confirm-dialog"].hidden || !el.palette.hidden) return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "")) return;
+      event.preventDefault();
+      el["agents-find"].focus();
+    });
 
     function status(snapshot) {
       // The service's own sentence about what is connected, read from the controls part it keeps.
@@ -1701,11 +1985,6 @@
       toastTimer = setTimeout(() => { el.toast.hidden = true; }, TOAST_MS);
     }
 
-    function openHarnessManual(id) {
-      const manual = document.querySelector(`[data-harness-manual="${globalThis.CSS?.escape?.(id) ?? id}"]`);
-      if (manual) manual.open = true;
-    }
-
     function openPalette() {
       el.palette.hidden = false;
       el["palette-query"].value = "";
@@ -1749,17 +2028,17 @@
       });
     }
 
-    const confirmRemoval = (name) => confirmHarnessChange(
-      `Remove Ghostlight from ${name}?`,
-      "Only the entry Ghostlight owns will be removed.",
-      "Remove"
-    );
+    /** Ask before removing Ghostlight from an agent, naming the sessions that use it now. */
+    function confirmRemoval(name, file, sessions) {
+      const asked = confirmRemovalWords(name, file, sessions);
+      return confirmHarnessChange(asked.title, asked.detail, asked.action);
+    }
 
-    const confirmFix = (name, target) => confirmHarnessChange(
-      `Replace the incorrect Ghostlight entry for ${name} (${target})?`,
-      "Only the entry under Ghostlight's key will be replaced. The configuration is backed up first.",
-      "Fix"
-    );
+    /** Ask before Fix replaces what sits under Ghostlight's key in an agent's file. */
+    function confirmFix(name, file) {
+      const asked = confirmFixWords(name, file);
+      return confirmHarnessChange(asked.title, asked.detail, asked.action);
+    }
 
     const answerConfirmation = (confirmed) => {
       if (!confirmation) return false;
@@ -1818,7 +2097,7 @@
       hero, row, drop, promote, rebuildFeed, queueCount,
       context, closed, chip, reconnecting, leaving,
       band, collections, navigate, writeAddress, showing: () => current, showingSection: () => currentSection, toast,
-      openHarnessManual,
+      showAgent,
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
       discardDraft, renderRules, previewResult, previewCleared, editorStatus,

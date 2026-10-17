@@ -500,8 +500,8 @@ workbench shows waiting becoming running once.
    independent targets from being attempted, and foreign or malformed entries remain untouched by
    every automatic path. A parseable foreign entry offers one confirmed per-target Fix that
    replaces only Ghostlight's key after creating a byte-exact backup and re-checking eligibility.
-   Windsurf and Devin share one product card but retain their own executable evidence and config
-   path, so neither generation can make Ghostlight write the other generation's file.
+   Windsurf and Devin are separate agents in the window and keep their own executable evidence and
+   config path, so neither generation can make Ghostlight write the other generation's file.
 9. JSONC and Codex TOML comments, trailing commas, formatting, and unrelated values survive
    install, uninstall, and Fix. Malformed and unreadable configurations are left untouched with an
    actionable result. Foreign `ghostlight` entries remain untouched unless the person confirms the

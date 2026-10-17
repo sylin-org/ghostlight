@@ -661,6 +661,7 @@ pub(super) mod test_support {
             can_uninstall: false,
             can_download: false,
             can_locate: true,
+            copy_only: false,
             private_view: false,
             config_path: String::new(),
             connector_command: "ghostlight mcp".into(),
