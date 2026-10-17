@@ -1588,18 +1588,18 @@ test("a session that arrives after the first paint reaches the rail, the pane an
   assert.deepEqual(shown.failures, []);
 });
 
-test("only the rows the service says are in use pulse, so one session never lights every host of its agent", () => {
+test("only the rows the service says are in use pulse, and the page never puts a session on a host itself", () => {
   const cline = (id, label, state) => ({ ...agent(id, "Cline", state), label, agent: namedAgent("Cline") });
   const rows = [cline("cline-cli", "Cline (CLI)", "installed"), cline("cline-vscode", "Cline (Visual Studio Code)", "available"),
-    cline("cline-cursor", "Cline (Cursor)", "installed")];
+    cline("cline-cursor", "Cline (Cursor)", "updatable")];
   const shown = agentsPage(rows, { sessions: [glanceSession("w1", "Cline", { tabs: 1 })], inUse: ["cline-cli"] });
   const dot = (id) => shown.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id)
     .children.find((node) => node.classes.has("agent-dot"));
   assert.ok(dot("cline-cli").classes.has("d-live"));
-  assert.ok(dot("cline-cursor").classes.has("d-installed"), "a session the service did not put on this host leaves it still");
-  assert.ok(dot("cline-vscode").classes.has("d-available"));
+  assert.ok(dot("cline-cursor").classes.has("d-updatable"), "the page draws only the rows the service names in use");
+  assert.ok(dot("cline-vscode").classes.has("d-available"), "a host without the entry stays found");
   assert.deepEqual(shown.rail().wearing("agents-group-head").map((head) => head.children[0].textContent),
-    ["Connected", "Found, not connected"]);
+    ["Needs a look", "Connected", "Found, not connected"]);
 });
 
 test("a copy-only agent found here claims nothing about a file Ghostlight never reads", () => {
