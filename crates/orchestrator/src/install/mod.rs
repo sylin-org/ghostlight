@@ -286,6 +286,7 @@ fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessConte
         path_entries: Vec::new(),
         locations: state.join(HARNESS_LOCATIONS_FILE),
         windows: false,
+        linux: cfg!(target_os = "linux"),
         private_view: None,
     }
 }
@@ -469,7 +470,11 @@ struct HarnessContext {
     edge: PathBuf,
     path_entries: Vec<PathBuf>,
     locations: PathBuf,
+    /// Whether the computer runs Windows: paths compare ignoring case and programs end in `.exe`.
     windows: bool,
+    /// Whether the computer runs Linux, where Codex's entry forwards the desktop session
+    /// ([`CODEX_DESKTOP_ENVIRONMENT`]).
+    linux: bool,
     /// Set when this process runs inside an app container: configuration below its `AppData`
     /// roots is that app's private view, which no other app reads.
     private_view: Option<PrivateView>,
@@ -554,6 +559,7 @@ impl HarnessContext {
             path_entries,
             locations,
             windows,
+            linux: cfg!(target_os = "linux"),
             private_view,
         }
     }
@@ -1344,7 +1350,7 @@ fn registration_state(
     }
     let source = fs::read_to_string(&definition.path).map_err(HarnessError::Read)?;
     match definition.dialect {
-        ConfigDialect::CodexToml => inspect_toml(&source, &context.edge, context.windows),
+        ConfigDialect::CodexToml => inspect_toml(&source, context),
         ConfigDialect::Manual(_) => Ok(RegistrationState::Missing),
         ConfigDialect::Json(dialect) => {
             inspect_json(&source, dialect, &context.edge, context.windows)
@@ -1376,11 +1382,7 @@ fn inspect_json(
     )
 }
 
-fn inspect_toml(
-    source: &str,
-    edge: &Path,
-    windows: bool,
-) -> Result<RegistrationState, HarnessError> {
+fn inspect_toml(source: &str, context: &HarnessContext) -> Result<RegistrationState, HarnessError> {
     let document = parse_toml(source)?;
     let Some(entry) = document
         .get("mcp_servers")
@@ -1394,7 +1396,8 @@ fn inspect_toml(
         .and_then(Item::as_str)
         .unwrap_or_default();
     let args = toml_entry_args(entry);
-    let state = command_registration_state(command, args.as_deref(), edge, windows);
+    let state =
+        command_registration_state(command, args.as_deref(), &context.edge, context.windows);
     if !matches!(
         state,
         RegistrationState::Current | RegistrationState::Updatable | RegistrationState::Retired
@@ -1403,18 +1406,21 @@ fn inspect_toml(
     }
     // Every entry this install owns is validated, so inspection refuses the same malformed
     // members an edit of that entry refuses.
-    let missing = missing_codex_desktop_environment(entry, windows)?;
+    let missing = missing_codex_desktop_environment(entry, context.linux)?;
     if state == RegistrationState::Current && !missing.is_empty() {
         return Ok(RegistrationState::Updatable);
     }
     Ok(state)
 }
 
+/// The desktop session variables a Codex entry on a Linux computer (`linux`) does not yet hand
+/// to its stdio child; none on any other computer. Refuses an entry whose forwarding list is not
+/// one Codex accepts.
 fn missing_codex_desktop_environment(
     entry: &Item,
-    windows: bool,
+    linux: bool,
 ) -> Result<Vec<&'static str>, HarnessError> {
-    if windows || !cfg!(target_os = "linux") {
+    if !linux {
         return Ok(Vec::new());
     }
     let forwarded = entry
@@ -1470,8 +1476,8 @@ fn missing_codex_desktop_environment(
         .collect())
 }
 
-fn forward_codex_desktop_environment(entry: &mut Item, windows: bool) -> Result<(), HarnessError> {
-    let missing = missing_codex_desktop_environment(entry, windows)?;
+fn forward_codex_desktop_environment(entry: &mut Item, linux: bool) -> Result<(), HarnessError> {
+    let missing = missing_codex_desktop_environment(entry, linux)?;
     if !missing.is_empty() {
         if entry.get("env_vars").is_none() {
             entry["env_vars"] = value(Array::new());
@@ -1495,13 +1501,13 @@ fn apply_install(
         return Err(HarnessError::EdgeMissing);
     }
     let changed = match definition.dialect {
-        ConfigDialect::CodexToml => edit_toml(&definition.path, &context.edge, true)?,
+        ConfigDialect::CodexToml => edit_toml(context, &definition.path, true)?,
         ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => edit_json(&definition.path, &context.edge, dialect, true)?,
+        ConfigDialect::Json(dialect) => edit_json(context, &definition.path, dialect, true)?,
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
             let dialect = opencode_dialect(context, &source)?;
-            edit_json(&definition.path, &context.edge, dialect, true)?
+            edit_json(context, &definition.path, dialect, true)?
         }
     };
     let summary = inspect(context, definition);
@@ -1528,13 +1534,13 @@ fn apply_uninstall(
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
     let changed = match definition.dialect {
-        ConfigDialect::CodexToml => edit_toml(&definition.path, &context.edge, false)?,
+        ConfigDialect::CodexToml => edit_toml(context, &definition.path, false)?,
         ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => edit_json(&definition.path, &context.edge, dialect, false)?,
+        ConfigDialect::Json(dialect) => edit_json(context, &definition.path, dialect, false)?,
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
             let dialect = opencode_dialect(context, &source)?;
-            edit_json(&definition.path, &context.edge, dialect, false)?
+            edit_json(context, &definition.path, dialect, false)?
         }
     };
     let summary = inspect(context, definition);
@@ -1564,13 +1570,13 @@ fn apply_fix(
         return Err(HarnessError::EdgeMissing);
     }
     let changed = match definition.dialect {
-        ConfigDialect::CodexToml => fix_toml(&definition.path, &context.edge)?,
+        ConfigDialect::CodexToml => fix_toml(context, &definition.path)?,
         ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => fix_json(&definition.path, &context.edge, dialect)?,
+        ConfigDialect::Json(dialect) => fix_json(context, &definition.path, dialect)?,
         ConfigDialect::OpenCode => {
             let source = read_or_empty(&definition.path)?;
             let dialect = opencode_dialect(context, &source)?;
-            fix_json(&definition.path, &context.edge, dialect)?
+            fix_json(context, &definition.path, dialect)?
         }
     };
     let summary = inspect(context, definition);
@@ -1614,14 +1620,14 @@ impl RegistrationEdit {
 }
 
 fn edit_json(
+    context: &HarnessContext,
     path: &Path,
-    edge: &Path,
     dialect: JsonDialect,
     install: bool,
 ) -> Result<bool, HarnessError> {
     edit_json_with(
+        context,
         path,
-        edge,
         dialect,
         if install {
             RegistrationEdit::Install
@@ -1631,21 +1637,28 @@ fn edit_json(
     )
 }
 
-fn fix_json(path: &Path, edge: &Path, dialect: JsonDialect) -> Result<bool, HarnessError> {
-    edit_json_with(path, edge, dialect, RegistrationEdit::Fix)
+fn fix_json(
+    context: &HarnessContext,
+    path: &Path,
+    dialect: JsonDialect,
+) -> Result<bool, HarnessError> {
+    edit_json_with(context, path, dialect, RegistrationEdit::Fix)
 }
 
+/// Make the edit `intent` to Ghostlight's entry in the JSON file at `path`, written in `dialect`,
+/// for the edge and the computer `context` describes. Whether the file changed.
 fn edit_json_with(
+    context: &HarnessContext,
     path: &Path,
-    edge: &Path,
     dialect: JsonDialect,
     intent: RegistrationEdit,
 ) -> Result<bool, HarnessError> {
+    let edge = context.edge.as_path();
     let source = read_or_empty(path)?;
     let parsed = parse_jsonc(&source)?;
     let current = json_entry(&parsed, dialect);
     if let Some(entry) = current {
-        let foreign = !json_entry_owned(entry, dialect, edge, cfg!(target_os = "windows"));
+        let foreign = !json_entry_owned(entry, dialect, edge, context.windows);
         if foreign && !intent.replaces_foreign() {
             return Err(HarnessError::ForeignEntry);
         }
@@ -1681,10 +1694,10 @@ fn edit_json_with(
     Ok(true)
 }
 
-fn edit_toml(path: &Path, edge: &Path, install: bool) -> Result<bool, HarnessError> {
+fn edit_toml(context: &HarnessContext, path: &Path, install: bool) -> Result<bool, HarnessError> {
     edit_toml_with(
+        context,
         path,
-        edge,
         if install {
             RegistrationEdit::Install
         } else {
@@ -1693,15 +1706,18 @@ fn edit_toml(path: &Path, edge: &Path, install: bool) -> Result<bool, HarnessErr
     )
 }
 
-fn fix_toml(path: &Path, edge: &Path) -> Result<bool, HarnessError> {
-    edit_toml_with(path, edge, RegistrationEdit::Fix)
+fn fix_toml(context: &HarnessContext, path: &Path) -> Result<bool, HarnessError> {
+    edit_toml_with(context, path, RegistrationEdit::Fix)
 }
 
+/// Make the edit `intent` to Ghostlight's entry in the Codex TOML file at `path`, for the edge and
+/// the computer `context` describes. Whether the file changed.
 fn edit_toml_with(
+    context: &HarnessContext,
     path: &Path,
-    edge: &Path,
     intent: RegistrationEdit,
 ) -> Result<bool, HarnessError> {
+    let edge = context.edge.as_path();
     let source = read_or_empty(path)?;
     let mut document = parse_toml(&source)?;
     let existing = document
@@ -1714,7 +1730,7 @@ fn edit_toml_with(
             .and_then(Item::as_str)
             .unwrap_or_default();
         let args = toml_entry_args(entry);
-        let foreign = !command_owned(command, args.as_deref(), edge, cfg!(target_os = "windows"));
+        let foreign = !command_owned(command, args.as_deref(), edge, context.windows);
         if foreign && !intent.replaces_foreign() {
             return Err(HarnessError::ForeignEntry);
         }
@@ -1724,7 +1740,7 @@ fn edit_toml_with(
         if intent == RegistrationEdit::Install
             && command == edge.to_string_lossy()
             && args.as_deref() == Some(&MCP_ARGUMENTS[..])
-            && missing_codex_desktop_environment(entry, cfg!(windows))?.is_empty()
+            && missing_codex_desktop_environment(entry, context.linux)?.is_empty()
         {
             return Ok(false);
         }
@@ -1743,7 +1759,7 @@ fn edit_toml_with(
     if intent.installs() {
         updated["command"] = value(edge.to_string_lossy().into_owned());
         updated["args"] = value(mcp_arguments_array());
-        forward_codex_desktop_environment(&mut updated, cfg!(windows))?;
+        forward_codex_desktop_environment(&mut updated, context.linux)?;
         if !document.contains_key("mcp_servers") {
             document["mcp_servers"] = Item::Table(Table::new());
         }
@@ -1937,7 +1953,7 @@ fn manual_setup(
             let mut entry = Item::Table(Table::new());
             entry["command"] = value(context.edge.to_string_lossy().into_owned());
             entry["args"] = value(mcp_arguments_array());
-            forward_codex_desktop_environment(&mut entry, context.windows)?;
+            forward_codex_desktop_environment(&mut entry, context.linux)?;
             let mut document = DocumentMut::new();
             document["mcp_servers"] = Item::Table(Table::new());
             document["mcp_servers"][SERVER_NAME] = entry;
@@ -2409,6 +2425,7 @@ mod tests {
             path_entries: Vec::new(),
             locations: directory.join("config/ghostlight/harness-locations.json"),
             windows: false,
+            linux: cfg!(target_os = "linux"),
             private_view: None,
         }
     }
@@ -2519,6 +2536,7 @@ mod tests {
             path_entries: vec![binary_directory],
             locations: directory.join("locations.json"),
             windows: false,
+            linux: cfg!(target_os = "linux"),
             private_view: None,
         });
 
@@ -2788,18 +2806,18 @@ mod tests {
 
         let directory = temporary("json-mode");
         let path = directory.join("config.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
         fs::write(&path, "{\"theme\":\"dark\"}\n").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
-        assert!(edit_json(&path, &edge, JsonDialect::Copilot, true).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::Copilot, true).unwrap());
         let installed = fs::read(&path).unwrap();
-        assert!(!edit_json(&path, &edge, JsonDialect::Copilot, true).unwrap());
+        assert!(!edit_json(&context, &path, JsonDialect::Copilot, true).unwrap());
         assert_eq!(fs::read(&path).unwrap(), installed);
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o640
         );
-        assert!(edit_json(&path, &edge, JsonDialect::Copilot, false).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::Copilot, false).unwrap());
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o640
@@ -3205,14 +3223,15 @@ mod tests {
     fn json_install_is_idempotent_and_preserves_siblings() {
         let directory = temporary("json");
         let path = directory.join("mcp.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         fs::write(
             &path,
             r#"{"other":7,"mcpServers":{"sibling":{"command":"sibling"}}}"#,
         )
         .unwrap();
-        assert!(edit_json(&path, &edge, JsonDialect::McpServers, true).unwrap());
-        assert!(!edit_json(&path, &edge, JsonDialect::McpServers, true).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::McpServers, true).unwrap());
+        assert!(!edit_json(&context, &path, JsonDialect::McpServers, true).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(value["other"], 7);
         assert_eq!(value["mcpServers"]["sibling"]["command"], "sibling");
@@ -3226,7 +3245,7 @@ mod tests {
             .unwrap(),
             RegistrationState::Current
         );
-        assert!(edit_json(&path, &edge, JsonDialect::McpServers, false).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::McpServers, false).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(value["mcpServers"].get("ghostlight").is_none());
         fs::remove_dir_all(directory).unwrap();
@@ -3236,10 +3255,11 @@ mod tests {
     fn jsonc_install_and_uninstall_preserve_comments_and_trailing_commas() {
         let directory = temporary("jsonc");
         let path = directory.join("settings.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         let source = "{\n  // keep this thought\n  \"context_servers\": {},\n}\n";
         fs::write(&path, source).unwrap();
-        assert!(edit_json(&path, &edge, JsonDialect::ContextServers, true).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::ContextServers, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         assert!(installed.contains("// keep this thought"));
         assert!(installed.contains("\"ghostlight\""));
@@ -3264,7 +3284,7 @@ mod tests {
         assert!(entry["command"].is_string());
         assert!(entry["args"].is_array());
         assert!(entry["env"].is_object());
-        assert!(edit_json(&path, &edge, JsonDialect::ContextServers, false).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::ContextServers, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("// keep this thought"));
         assert!(!removed.contains("\"ghostlight\""));
@@ -3276,11 +3296,12 @@ mod tests {
     fn zcode_nested_install_and_uninstall_preserve_sibling_servers() {
         let directory = temporary("zcode");
         let path = directory.join("config.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         let source = "{\n  \"mcp\": {\n    \"servers\": {\n      \"other\": {\"command\": \"keep\"}\n    }\n  }\n}\n";
         fs::write(&path, source).unwrap();
-        assert!(edit_json(&path, &edge, JsonDialect::ZCode, true).unwrap());
-        assert!(!edit_json(&path, &edge, JsonDialect::ZCode, true).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::ZCode, true).unwrap());
+        assert!(!edit_json(&context, &path, JsonDialect::ZCode, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         assert!(installed.contains("\"other\""));
         assert_eq!(
@@ -3297,7 +3318,7 @@ mod tests {
         assert!(entry["command"].is_string());
         assert!(entry["args"].is_array());
         assert!(entry["env"].is_object());
-        assert!(edit_json(&path, &edge, JsonDialect::ZCode, false).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::ZCode, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("\"other\""));
         assert!(!removed.contains("\"ghostlight\""));
@@ -3336,7 +3357,8 @@ mod tests {
         // confirmed Fix may.
         let directory = temporary("zcode-foreign-orchestrator");
         let path = directory.join("config.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         let orchestrator = directory
             .join(executable_name("ghostlight-service", cfg!(windows)))
             .to_string_lossy()
@@ -3347,7 +3369,7 @@ mod tests {
         fs::write(&path, &source).unwrap();
         for install in [true, false] {
             assert!(matches!(
-                edit_json(&path, &edge, JsonDialect::ZCode, install),
+                edit_json(&context, &path, JsonDialect::ZCode, install),
                 Err(HarnessError::ForeignEntry)
             ));
         }
@@ -3364,12 +3386,12 @@ mod tests {
     fn foreign_entries_are_never_overwritten_or_removed() {
         let directory = temporary("foreign");
         let path = directory.join("mcp.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
         let source = r#"{"mcpServers":{"ghostlight":{"command":"some-other-tool"}}}"#;
         fs::write(&path, source).unwrap();
         for install in [true, false] {
             assert!(matches!(
-                edit_json(&path, &edge, JsonDialect::McpServers, install),
+                edit_json(&context, &path, JsonDialect::McpServers, install),
                 Err(HarnessError::ForeignEntry)
             ));
         }
@@ -3443,17 +3465,17 @@ mod tests {
     #[test]
     fn explicit_fix_is_lossless_for_the_toml_dialect() {
         let directory = temporary("fix-foreign-toml");
-        let edge = edge(&directory);
+        let context = context(&directory);
 
         let toml = directory.join("config.toml");
         let toml_source = "title = \"keep\"\n\n[mcp_servers.sibling]\ncommand = \"keep-me\"\n\n[mcp_servers.ghostlight]\ncommand = \"alien\"\nargs = [\"serve\"]\n";
         fs::write(&toml, toml_source).unwrap();
-        assert!(fix_toml(&toml, &edge).unwrap());
+        assert!(fix_toml(&context, &toml).unwrap());
         let fixed_toml = fs::read_to_string(&toml).unwrap();
         assert!(fixed_toml.contains("title = \"keep\""));
         assert!(fixed_toml.contains("[mcp_servers.sibling]"));
         assert_eq!(
-            inspect_toml(&fixed_toml, &edge, cfg!(windows)).unwrap(),
+            inspect_toml(&fixed_toml, &context).unwrap(),
             RegistrationState::Current
         );
         assert_eq!(
@@ -3720,7 +3742,7 @@ mod tests {
     #[test]
     fn every_blocked_dialect_names_the_found_program() {
         let directory = temporary("dialect-evidence");
-        let expected_edge = edge(&directory);
+        let context = context(&directory);
 
         let toml = directory.join("codex.toml");
         std::fs::write(
@@ -3730,7 +3752,7 @@ mod tests {
         .unwrap();
         let toml_source = fs::read_to_string(&toml).unwrap();
         assert!(matches!(
-            inspect_toml(&toml_source, &expected_edge, false),
+            inspect_toml(&toml_source, &context),
             Ok(RegistrationState::Foreign(Some(ForeignCommand { program, arguments: 1 })))
                 if program == "alien-tool"
         ));
@@ -3863,17 +3885,17 @@ mod tests {
     fn codex_toml_edit_preserves_unrelated_comments() {
         let directory = temporary("toml");
         let path = directory.join("config.toml");
-        let edge = edge(&directory);
+        let context = context(&directory);
         fs::write(&path, "# keep me\nmodel = \"gpt-test\"\n").unwrap();
-        assert!(edit_toml(&path, &edge, true).unwrap());
-        assert!(!edit_toml(&path, &edge, true).unwrap());
+        assert!(edit_toml(&context, &path, true).unwrap());
+        assert!(!edit_toml(&context, &path, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         assert!(installed.contains("# keep me"));
         assert_eq!(
-            inspect_toml(&installed, &edge, cfg!(windows)).unwrap(),
+            inspect_toml(&installed, &context).unwrap(),
             RegistrationState::Current
         );
-        assert!(edit_toml(&path, &edge, false).unwrap());
+        assert!(edit_toml(&context, &path, false).unwrap());
         let removed = fs::read_to_string(&path).unwrap();
         assert!(removed.contains("# keep me"));
         assert!(!removed.contains("mcp_servers"));
@@ -3885,7 +3907,8 @@ mod tests {
     fn codex_owned_registration_gains_desktop_forwarding_without_losing_custom_fields() {
         let directory = temporary("codex-desktop");
         let path = directory.join("config.toml");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         // The current registration lacking the Linux desktop forwarding: updatable for that
         // alone, so the edit adds the forwarding and keeps every custom field.
         let source = format!(
@@ -3895,10 +3918,10 @@ mod tests {
         );
         fs::write(&path, &source).unwrap();
         assert_eq!(
-            inspect_toml(&source, &edge, false).unwrap(),
+            inspect_toml(&source, &context).unwrap(),
             RegistrationState::Updatable
         );
-        assert!(edit_toml(&path, &edge, true).unwrap());
+        assert!(edit_toml(&context, &path, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
         let entry = &document["mcp_servers"]["ghostlight"];
@@ -3922,10 +3945,12 @@ mod tests {
             Some("other-server")
         );
         assert!(installed.contains("# keep me"));
-        assert!(super::missing_codex_desktop_environment(entry, false)
-            .unwrap()
-            .is_empty());
-        assert!(!edit_toml(&path, &edge, true).unwrap());
+        assert!(
+            super::missing_codex_desktop_environment(entry, context.linux)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!edit_toml(&context, &path, true).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), installed);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -3935,18 +3960,27 @@ mod tests {
     fn codex_malformed_environment_is_preserved_and_windows_needs_no_desktop_forwarding() {
         let directory = temporary("codex-malformed-env");
         let path = directory.join("config.toml");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         let source = format!(
             "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenv_vars = \"not-an-array\"\n",
             edge.to_string_lossy(),
             super::MCP_ARGUMENTS
         );
         fs::write(&path, &source).unwrap();
-        assert!(inspect_toml(&source, &edge, false).is_err());
-        assert!(edit_toml(&path, &edge, true).is_err());
+        assert!(inspect_toml(&source, &context).is_err());
+        assert!(edit_toml(&context, &path, true).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
         assert_eq!(
-            inspect_toml(&source, &edge, true).unwrap(),
+            inspect_toml(
+                &source,
+                &HarnessContext {
+                    windows: true,
+                    linux: false,
+                    ..context
+                }
+            )
+            .unwrap(),
             RegistrationState::Current
         );
         fs::remove_dir_all(directory).unwrap();
@@ -3957,7 +3991,8 @@ mod tests {
     fn codex_malformed_environment_members_are_preserved_before_migration() {
         let directory = temporary("codex-malformed-env-members");
         let path = directory.join("config.toml");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         // The edge command with its current arguments is the current registration. The retired
         // connector command is a retired one. Both are owned, so both refuse malformed members.
         let arguments = format!("{:?}", super::MCP_ARGUMENTS);
@@ -3986,10 +4021,10 @@ mod tests {
                 ] {
                     fs::write(&path, &source).unwrap();
                     assert!(
-                        inspect_toml(&source, &edge, false).is_err(),
+                        inspect_toml(&source, &context).is_err(),
                         "inspection accepted {source}"
                     );
-                    assert!(edit_toml(&path, &edge, true).is_err());
+                    assert!(edit_toml(&context, &path, true).is_err());
                     assert_eq!(fs::read_to_string(&path).unwrap(), source);
                 }
             }
@@ -4002,13 +4037,14 @@ mod tests {
     fn codex_inline_owned_registration_keeps_custom_fields() {
         let directory = temporary("codex-inline-env");
         let path = directory.join("config.toml");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         // The edge command with no arguments is an updatable registration on purpose.
         fs::write(&path, format!(
             "[mcp_servers]\nghostlight = {{ command = {:?}, args = [], startup_timeout_sec = 45 }}\n",
             edge.to_string_lossy()
         )).unwrap();
-        assert!(edit_toml(&path, &edge, true).unwrap());
+        assert!(edit_toml(&context, &path, true).unwrap());
         let installed = fs::read_to_string(&path).unwrap();
         let document = installed.parse::<toml_edit::DocumentMut>().unwrap();
         assert_eq!(
@@ -4016,7 +4052,7 @@ mod tests {
             Some(45)
         );
         assert_eq!(
-            inspect_toml(&installed, &edge, false).unwrap(),
+            inspect_toml(&installed, &context).unwrap(),
             RegistrationState::Current
         );
         fs::remove_dir_all(directory).unwrap();
@@ -4031,7 +4067,7 @@ mod tests {
             .find(|row| row.id == "codex")
             .unwrap();
         let manual = super::manual_setup(&context, &definition).unwrap();
-        assert!(edit_toml(&definition.path, &context.edge, true).unwrap());
+        assert!(edit_toml(&context, &definition.path, true).unwrap());
         assert_eq!(manual, fs::read_to_string(&definition.path).unwrap());
         fs::remove_dir_all(directory).unwrap();
     }
@@ -4040,10 +4076,11 @@ mod tests {
     fn opencode_v1_uses_the_local_command_array_contract() {
         let directory = temporary("opencode-v1");
         let path = directory.join("opencode.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
+        let edge = context.edge.clone();
         fs::write(&path, r#"{"theme":"ghost","mcp":{}}"#).unwrap();
 
-        assert!(edit_json(&path, &edge, JsonDialect::OpenCodeV1, true).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::OpenCodeV1, true).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(value["theme"], "ghost");
         assert_eq!(value["mcp"]["ghostlight"]["type"], "local");
@@ -4070,22 +4107,22 @@ mod tests {
     fn opencode_v2_preserves_the_nested_servers_contract() {
         let directory = temporary("opencode-v2");
         let path = directory.join("opencode.json");
-        let edge = edge(&directory);
+        let context = context(&directory);
         fs::write(
             &path,
             r#"{"mcp":{"servers":{"sibling":{"type":"remote"}}}}"#,
         )
         .unwrap();
 
-        assert!(edit_json(&path, &edge, JsonDialect::OpenCodeV2, true).unwrap());
-        assert!(!edit_json(&path, &edge, JsonDialect::OpenCodeV2, true).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::OpenCodeV2, true).unwrap());
+        assert!(!edit_json(&context, &path, JsonDialect::OpenCodeV2, true).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");
         assert_eq!(value["mcp"]["servers"]["ghostlight"]["type"], "local");
         assert!(value["mcp"]["servers"]["ghostlight"]
             .get("enabled")
             .is_none());
-        assert!(edit_json(&path, &edge, JsonDialect::OpenCodeV2, false).unwrap());
+        assert!(edit_json(&context, &path, JsonDialect::OpenCodeV2, false).unwrap());
         let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert!(value["mcp"]["servers"].get("ghostlight").is_none());
         assert_eq!(value["mcp"]["servers"]["sibling"]["type"], "remote");
