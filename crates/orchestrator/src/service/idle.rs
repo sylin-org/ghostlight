@@ -62,6 +62,9 @@ pub struct Streams {
     state: Mutex<State>,
     clock: Arc<dyn Clock>,
     limit: Duration,
+    /// How many times the rule was asked, so a test can wait for the watch to look.
+    #[cfg(test)]
+    looks: std::sync::atomic::AtomicUsize,
 }
 
 impl Streams {
@@ -79,6 +82,8 @@ impl Streams {
             }),
             clock,
             limit,
+            #[cfg(test)]
+            looks: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -126,6 +131,8 @@ impl Streams {
     /// leaving, so the service looks again a whole limit later. A [`Verdict::Leave`] is final and
     /// closes the count to new streams.
     pub fn verdict(&self, holds_work: impl FnOnce() -> bool) -> Verdict {
+        #[cfg(test)]
+        self.looks.fetch_add(1, Ordering::SeqCst);
         let mut state = lock(&self.state);
         if state.leaving {
             return Verdict::Leave;
@@ -144,6 +151,19 @@ impl Streams {
         }
         state.leaving = true;
         Verdict::Leave
+    }
+
+    /// How many times the rule has been asked. A look is counted before it reads the count and
+    /// the clock, so a look counted after a test moved its clock sees the move.
+    #[cfg(test)]
+    pub(crate) fn looks(&self) -> usize {
+        self.looks.load(Ordering::SeqCst)
+    }
+
+    /// How many streams are open.
+    #[cfg(test)]
+    pub(crate) fn open(&self) -> usize {
+        lock(&self.state).open
     }
 
     /// How long the watch sleeps between looks: a tenth of the limit, within a second.
@@ -235,28 +255,14 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use std::sync::mpsc;
 
+    use super::super::lifetime::HandClock;
     use super::*;
-
-    /// A clock the test moves by hand.
-    struct FakeClock(Mutex<Instant>);
-
-    impl FakeClock {
-        fn advance(&self, by: Duration) {
-            *lock(&self.0) += by;
-        }
-    }
-
-    impl Clock for Arc<FakeClock> {
-        fn now(&self) -> Instant {
-            *lock(&self.0)
-        }
-    }
 
     const MINUTE: Duration = Duration::from_secs(60);
 
-    fn streams() -> (Arc<FakeClock>, Arc<Streams>) {
-        let clock = Arc::new(FakeClock(Mutex::new(Instant::now())));
-        let streams = Streams::new(Arc::new(Arc::clone(&clock)), IDLE_EXIT);
+    fn streams() -> (HandClock, Arc<Streams>) {
+        let clock = HandClock::default();
+        let streams = Streams::new(Arc::new(clock.clone()), IDLE_EXIT);
         (clock, streams)
     }
 
@@ -390,8 +396,7 @@ mod tests {
 
     #[test]
     fn the_watch_runs_leave_once_when_the_service_idles_out() {
-        let clock = Arc::new(FakeClock(Mutex::new(Instant::now())));
-        let streams = Streams::new(Arc::new(Arc::clone(&clock)), IDLE_EXIT);
+        let (clock, streams) = streams();
         let stop = Arc::new(AtomicBool::new(false));
         let (left, heard) = mpsc::channel();
         let watcher = watch(
@@ -411,8 +416,7 @@ mod tests {
 
     #[test]
     fn a_stopped_watch_never_leaves() {
-        let clock = Arc::new(FakeClock(Mutex::new(Instant::now())));
-        let streams = Streams::new(Arc::new(Arc::clone(&clock)), IDLE_EXIT);
+        let (clock, streams) = streams();
         let stop = Arc::new(AtomicBool::new(true));
         let (left, heard) = mpsc::channel();
         clock.advance(IDLE_EXIT);

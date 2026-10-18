@@ -104,7 +104,7 @@ const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
 use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
 use idle::Streams;
-use lifetime::{Drain, ReadyWatch, SystemClock, QUIT_GRACE, READY_LIMIT};
+use lifetime::{Clock, Drain, ReadyWatch, SystemClock, QUIT_GRACE, READY_LIMIT};
 use lock::ServiceLock;
 
 /// What the runtime-published diagnostics line says: where the relay and the workbench listen.
@@ -227,6 +227,7 @@ impl ServiceHost {
             StartTerms::asking_once(StartReason::Agent),
             || Ok(false),
             world,
+            Arc::new(SystemClock),
         )
     }
 
@@ -276,34 +277,48 @@ impl ServiceHost {
         terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
     ) -> Result<Self> {
-        Self::start_with_world(home, terms, elevated, presence::System::boxed)
+        Self::start_with_world(
+            home,
+            terms,
+            elevated,
+            presence::System::boxed,
+            Arc::new(SystemClock),
+        )
     }
 
     /// Like [`ServiceHost::start_with_token`], with the world presence acts on made by `world`
-    /// from the installation and the question "has a quit begun". A test passes a world that
-    /// starts no process.
+    /// from the installation and the question "has a quit begun", and the idle limit judged by
+    /// `idle_clock`. A test passes a world that starts no process and a clock it moves by hand.
     pub(crate) fn start_with_world(
         home: &Path,
         terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
         world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
+        idle_clock: Arc<dyn Clock>,
     ) -> Result<Self> {
         let diagnostics = DiagnosticsHub::birth(home);
-        Self::start_with_diagnostics(home, Arc::clone(&diagnostics), terms, elevated, world)
-            .inspect_err(|error| {
-                // Meeting the running service is how a racing start ends, not a failure, and a
-                // start Quit holds back is a decision, not a fault.
-                if error.is::<QuitLatched>() {
-                    diagnostics.sink().emit(
-                        ghostlight_bridge::diagnostics::event::PROCESS_EXITED,
-                        ghostlight_bridge::diagnostics::Level::Info,
-                        None,
-                        &format!("{}: {QUIT_HELD}", terms.reason.as_str()),
-                    );
-                } else if !error.is::<AuthorityAlreadyRunning>() {
-                    startup_failed(&diagnostics, error);
-                }
-            })
+        Self::start_with_diagnostics(
+            home,
+            Arc::clone(&diagnostics),
+            terms,
+            elevated,
+            world,
+            idle_clock,
+        )
+        .inspect_err(|error| {
+            // Meeting the running service is how a racing start ends, not a failure, and a
+            // start Quit holds back is a decision, not a fault.
+            if error.is::<QuitLatched>() {
+                diagnostics.sink().emit(
+                    ghostlight_bridge::diagnostics::event::PROCESS_EXITED,
+                    ghostlight_bridge::diagnostics::Level::Info,
+                    None,
+                    &format!("{}: {QUIT_HELD}", terms.reason.as_str()),
+                );
+            } else if !error.is::<AuthorityAlreadyRunning>() {
+                startup_failed(&diagnostics, error);
+            }
+        })
     }
 
     fn start_with_diagnostics(
@@ -312,6 +327,7 @@ impl ServiceHost {
         terms: StartTerms,
         elevated: impl FnOnce() -> io::Result<bool>,
         world: impl FnOnce(install::layout::Layout, presence::Ending) -> Box<dyn presence::Outside>,
+        idle_clock: Arc<dyn Clock>,
     ) -> Result<Self> {
         refuse_elevated_token(elevated)?;
         let layout = install::layout::Layout::new(home);
@@ -339,7 +355,7 @@ impl ServiceHost {
         let browser = Arc::new(RelayBrowserPort::new(service_epoch, page_assets()));
         browser.remember_browsers_in(layout.last_browser_record());
         let browser_port: Arc<dyn BrowserPort> = browser.clone();
-        let streams = Streams::new(Arc::new(SystemClock), terms.idle_exit);
+        let streams = Streams::new(idle_clock, terms.idle_exit);
         browser.set_lifecycle_observer(Arc::new(idle::CountBrowsers::new(
             Arc::clone(&streams),
             Arc::clone(&diagnostics) as Arc<dyn AdapterLifecycleObserver>,
@@ -2101,6 +2117,7 @@ mod tests {
     };
     use serde_json::{json, Value};
 
+    use super::lifetime::HandClock;
     use super::presence::testing::Fake;
     use super::test_home::TestHome;
     use crate::browser::adapter::BrowserCommand;
@@ -5223,17 +5240,15 @@ mod tests {
         drop(host);
     }
 
-    /// The idle limit of the tests that hold a service open or closed across several looks. It is
-    /// wide enough that a loaded machine does not let it pass before a test's first move.
+    /// The idle limit of the tests of the idle exit. It is judged on a clock the test moves, so
+    /// real time passing never reaches it, however loaded the machine; in real time it only sets
+    /// how often the watch looks, a tenth of it.
     const IDLE_LIMIT: Duration = Duration::from_secs(1);
 
-    /// How long a test watches a service that must not leave: past two idle limits.
-    const HOLD_WINDOW: Duration = Duration::from_millis(2200);
-
-    /// Terms of an agent start whose service idles out after `idle`.
-    fn idling(idle: Duration) -> StartTerms {
+    /// Terms of an agent start whose service idles out after [`IDLE_LIMIT`].
+    fn idling() -> StartTerms {
         StartTerms {
-            idle_exit: idle,
+            idle_exit: IDLE_LIMIT,
             ..agent()
         }
     }
@@ -5260,20 +5275,58 @@ mod tests {
         }
     }
 
-    /// A published host that idles out after `idle`, whose quit signal is a channel and whose
-    /// presence acts on `fake`.
-    fn idling_host(
-        name: &str,
-        idle: Duration,
-        fake: &Arc<Fake>,
-    ) -> (TestHome, ServiceHost, std::sync::mpsc::Receiver<()>) {
+    /// A published service that idles out after [`IDLE_LIMIT`] on `clock`, and the channel its
+    /// quit signal sends on. The host is dropped before its home.
+    struct Idling {
+        host: ServiceHost,
+        home: TestHome,
+        clock: HandClock,
+        quit_requested: std::sync::mpsc::Receiver<()>,
+    }
+
+    impl Idling {
+        /// Wait until the idle watch has looked twice from now, and assert that the service
+        /// asked for no exit, saying `why` it stays. A look is counted before it reads the clock,
+        /// so the first sees everything done before this call; the second comes only because the
+        /// first did not leave.
+        fn looked_and_stayed(&self, why: &str) {
+            let streams = &self.host.intake.streams;
+            let before = streams.looks();
+            let until = Instant::now() + PATIENCE;
+            while streams.looks() < before + 2 {
+                assert!(Instant::now() < until, "the watch stopped looking: {why}");
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(self.quit_requested.try_recv().is_err(), "{why}");
+        }
+
+        /// Move the idle clock well past the limit and show that the service stays.
+        fn stays_past_the_limit(&self, why: &str) {
+            self.clock.advance(IDLE_LIMIT * 3);
+            self.looked_and_stayed(why);
+        }
+
+        /// Wait until no stream is open, so the last close has armed the limit, then move the
+        /// idle clock past the limit and expect the quit within [`PATIENCE`].
+        fn leaves_past_the_limit(&self, why: &str) {
+            eventually(|| self.host.intake.streams.open() == 0);
+            self.clock.advance(IDLE_LIMIT * 2);
+            self.quit_requested.recv_timeout(PATIENCE).expect(why);
+        }
+    }
+
+    /// A published host whose idle limit runs on a clock the test moves, whose quit signal is a
+    /// channel and whose presence acts on `fake`.
+    fn idling_host(name: &str, fake: &Arc<Fake>) -> Idling {
         let home = TestHome::new(name);
+        let clock = HandClock::default();
         let fake = Arc::clone(fake);
         let host = ServiceHost::start_with_world(
             home.path(),
-            idling(idle),
+            idling(),
             || Ok(false),
             move |_, ending| Box::new(EndsWithQuit(fake.world(), ending)),
+            Arc::new(clock.clone()),
         )
         .unwrap();
         let (quit, quit_requested) = std::sync::mpsc::channel();
@@ -5281,16 +5334,19 @@ mod tests {
             let _ = quit.send(());
         }));
         host.publish_ready().unwrap();
-        (home, host, quit_requested)
+        Idling {
+            host,
+            home,
+            clock,
+            quit_requested,
+        }
     }
 
     #[test]
     fn a_service_with_no_stream_exits_and_a_browser_start_after_it_is_not_refused() {
-        let (home, host, quit_requested) =
-            idling_host("idle-exit", Duration::from_millis(300), &Arc::default());
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the idle service asks the process to exit");
+        let idling = idling_host("idle-exit", &Arc::default());
+        idling.leaves_past_the_limit("the idle service asks the process to exit");
+        let Idling { host, home, .. } = idling;
         assert!(
             !super::latch::is_set(&home.path().join("state").join("quit")),
             "an idle exit is not a person's Quit"
@@ -5311,65 +5367,41 @@ mod tests {
 
     #[test]
     fn an_open_stream_keeps_the_service_and_the_last_close_arms_the_limit_again() {
-        let (_home, host, quit_requested) = idling_host("idle-stream", IDLE_LIMIT, &Arc::default());
+        let idling = idling_host("idle-stream", &Arc::default());
         let socket = open_mcp(None);
-        assert!(
-            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
-            "an open stream holds the service past two limits"
-        );
+        idling.stays_past_the_limit("an open stream holds the service");
         drop(socket);
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the last close arms the limit and the service leaves");
-        drop(host);
+        idling.leaves_past_the_limit("the last close arms the limit and the service leaves");
     }
 
     #[test]
     fn a_control_call_restarts_the_span() {
-        let (_home, host, quit_requested) =
-            idling_host("idle-control", IDLE_LIMIT * 3 / 2, &Arc::default());
+        let idling = idling_host("idle-control", &Arc::default());
         for _ in 0..4 {
-            thread::sleep(IDLE_LIMIT / 2);
+            idling.clock.advance(IDLE_LIMIT * 9 / 10);
+            idling.looked_and_stayed("the last call came less than a limit ago");
             cli_client::status().expect("the service answers a status call");
+            eventually(|| idling.host.intake.streams.open() == 0);
         }
-        assert!(
-            quit_requested.try_recv().is_err(),
-            "each call came before the limit passed"
-        );
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the service leaves after the last call");
-        drop(host);
+        idling.leaves_past_the_limit("the service leaves a limit after the last call");
     }
 
     #[test]
     fn an_attached_shell_is_a_stream_and_keeps_the_service() {
-        let (_home, host, quit_requested) = idling_host("idle-shell", IDLE_LIMIT, &Arc::default());
+        let idling = idling_host("idle-shell", &Arc::default());
         let (shell, _handed) = open_desktop();
-        assert!(
-            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
-            "an attached shell holds the service past two limits"
-        );
+        idling.stays_past_the_limit("an attached shell holds the service");
         drop(shell);
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the service leaves once the shell has gone");
-        drop(host);
+        idling.leaves_past_the_limit("the service leaves once the shell has gone");
     }
 
     #[test]
     fn work_the_executor_still_holds_re_arms_the_limit() {
-        let (_home, host, quit_requested) = idling_host("idle-work", IDLE_LIMIT, &Arc::default());
-        let running = host.quit.drain.admit().unwrap();
-        assert!(
-            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
-            "held work keeps the service past two limits"
-        );
+        let idling = idling_host("idle-work", &Arc::default());
+        let running = idling.host.quit.drain.admit().unwrap();
+        idling.stays_past_the_limit("held work keeps the service");
         drop(running);
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the service leaves a limit after the work finished");
-        drop(host);
+        idling.leaves_past_the_limit("the service leaves a limit after the work finished");
     }
 
     #[test]
@@ -5377,11 +5409,8 @@ mod tests {
         use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
         use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
 
-        let (_home, host, quit_requested) =
-            idling_host("idle-browser", IDLE_LIMIT, &Arc::default());
-        // Hold the service while the stand-in browser connects: on a loaded machine that can take
-        // longer than the short idle limit, and a service already leaving rightly refuses it.
-        let connecting = host.quit.drain.admit().unwrap();
+        let idling = idling_host("idle-browser", &Arc::default());
+        let host = &idling.host;
         // Stand in for the browser edge: carry the extension's bytes over a browser stream.
         let (native, extension) = pair().unwrap();
         let carrier = thread::spawn(move || {
@@ -5411,19 +5440,14 @@ mod tests {
                 .iter()
                 .any(|browser| browser.id == "browser_idle")
         });
-        // From here only the browser holds the service.
-        drop(connecting);
-        assert!(
-            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
-            "an attached browser holds the service past two limits"
-        );
+        // The opening is counted out once the browser is attached: from here only the browser
+        // holds the service.
+        eventually(|| host.intake.streams.open() == 1);
+        idling.stays_past_the_limit("an attached browser holds the service");
         fake.close();
         drop(fake);
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the service leaves once the browser has gone");
+        idling.leaves_past_the_limit("the service leaves once the browser has gone");
         let _ = carrier.join();
-        drop(host);
     }
 
     #[test]
@@ -5464,14 +5488,9 @@ mod tests {
 
     #[test]
     fn a_start_that_arrives_while_the_service_is_leaving_on_idle_waits_for_it_and_serves() {
-        let (home, host, quit_requested) = idling_host(
-            "idle-exit-race",
-            Duration::from_millis(300),
-            &Arc::default(),
-        );
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the idle service asks the process to exit");
+        let idling = idling_host("idle-exit-race", &Arc::default());
+        idling.leaves_past_the_limit("the idle service asks the process to exit");
+        let Idling { host, home, .. } = idling;
         // The old service still holds the lock and the endpoint while it tears down.
         let directory = home.path().to_path_buf();
         let starter = thread::spawn(move || {
@@ -5493,27 +5512,30 @@ mod tests {
 
     #[test]
     fn the_end_of_the_session_leaves_once_and_the_idle_path_adds_nothing() {
-        let (_home, host, quit_requested) =
-            idling_host("idle-session-end", IDLE_LIMIT, &Arc::default());
-        host.quit_handle().session_end();
-        quit_requested
+        let idling = idling_host("idle-session-end", &Arc::default());
+        idling.host.quit_handle().session_end();
+        idling
+            .quit_requested
             .recv_timeout(PATIENCE)
             .expect("the session end asks the process to exit");
+        idling.clock.advance(IDLE_LIMIT * 3);
+        let streams = &idling.host.intake.streams;
+        let before = streams.looks();
+        eventually(|| streams.looks() > before);
+        // That look decided to leave and makes its request on the same thread at once; ten of
+        // the watch's real poll periods cover it.
         assert!(
-            quit_requested.recv_timeout(HOLD_WINDOW).is_err(),
+            idling.quit_requested.recv_timeout(IDLE_LIMIT).is_err(),
             "the idle limit passing during the exit makes no second request"
         );
-        drop(host);
     }
 
     #[test]
     fn presence_launches_no_shell_after_an_idle_stop() {
         let fake = Arc::new(Fake::default());
-        let (home, host, quit_requested) =
-            idling_host("idle-presence", Duration::from_millis(300), &fake);
-        quit_requested
-            .recv_timeout(PATIENCE)
-            .expect("the idle service asks the process to exit");
+        let idling = idling_host("idle-presence", &fake);
+        idling.leaves_past_the_limit("the idle service asks the process to exit");
+        let Idling { host, home, .. } = idling;
         fake.advance(Duration::from_secs(10));
         thread::sleep(Duration::from_millis(1200));
         assert!(
@@ -5523,11 +5545,10 @@ mod tests {
         drop(host);
         drop(home);
 
+        // The control's idle clock never moves, so it stays however long presence takes.
         let live = Arc::new(Fake::default());
-        let (_home, host, _quit_requested) =
-            idling_host("idle-presence-control", Duration::from_secs(600), &live);
+        let _idling = idling_host("idle-presence-control", &live);
         live.advance(Duration::from_secs(10));
         eventually(|| live.launches() == vec![true]);
-        drop(host);
     }
 }

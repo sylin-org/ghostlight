@@ -57,7 +57,7 @@ pub fn refused_by_quit_latch(reason: StartReason) -> bool {
     matches!(reason, StartReason::Browser | StartReason::Recover)
 }
 
-/// The source of the current time for the ready watch.
+/// The source of the current time for the ready watch and the idle watch.
 pub trait Clock: Send + Sync + 'static {
     /// The current instant.
     fn now(&self) -> Instant;
@@ -70,6 +70,34 @@ pub struct SystemClock;
 impl Clock for SystemClock {
     fn now(&self) -> Instant {
         Instant::now()
+    }
+}
+
+/// A clock a test moves by hand: real time passing never moves it. Clones share one reading.
+#[cfg(test)]
+#[derive(Clone)]
+pub struct HandClock(Arc<Mutex<Instant>>);
+
+#[cfg(test)]
+impl Default for HandClock {
+    /// A clock that reads the moment it was made until it is moved.
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(Instant::now())))
+    }
+}
+
+#[cfg(test)]
+impl HandClock {
+    /// Move the clock forward by `by`.
+    pub fn advance(&self, by: Duration) {
+        *lock(&self.0) += by;
+    }
+}
+
+#[cfg(test)]
+impl Clock for HandClock {
+    fn now(&self) -> Instant {
+        *lock(&self.0)
     }
 }
 
@@ -279,35 +307,16 @@ mod tests {
         assert!(fired.recv_timeout(Duration::from_millis(300)).is_err());
     }
 
-    /// A clock the test moves by hand.
-    struct FakeClock(Mutex<Instant>);
-
-    impl FakeClock {
-        fn advance(&self, by: Duration) {
-            *lock(&self.0) += by;
-        }
-    }
-
-    impl Clock for Arc<FakeClock> {
-        fn now(&self) -> Instant {
-            *lock(&self.0)
-        }
-    }
-
     #[test]
     fn a_service_that_is_not_ready_within_the_limit_of_taking_the_lock_stops() {
-        let taken = Instant::now();
-        let clock = Arc::new(FakeClock(Mutex::new(taken)));
+        let clock = HandClock::default();
+        let taken = clock.now();
         let watch = Arc::new(ReadyWatch::default());
         let (expired, fired) = mpsc::channel();
         watch
-            .arm_by(
-                Arc::new(Arc::clone(&clock)),
-                taken + READY_LIMIT,
-                move || {
-                    let _ = expired.send(());
-                },
-            )
+            .arm_by(Arc::new(clock.clone()), taken + READY_LIMIT, move || {
+                let _ = expired.send(());
+            })
             .unwrap();
 
         clock.advance(READY_LIMIT - Duration::from_secs(1));
@@ -324,18 +333,14 @@ mod tests {
 
     #[test]
     fn a_service_that_is_ready_inside_the_limit_is_left_alone() {
-        let taken = Instant::now();
-        let clock = Arc::new(FakeClock(Mutex::new(taken)));
+        let clock = HandClock::default();
+        let taken = clock.now();
         let watch = Arc::new(ReadyWatch::default());
         let (expired, fired) = mpsc::channel();
         watch
-            .arm_by(
-                Arc::new(Arc::clone(&clock)),
-                taken + READY_LIMIT,
-                move || {
-                    let _ = expired.send(());
-                },
-            )
+            .arm_by(Arc::new(clock.clone()), taken + READY_LIMIT, move || {
+                let _ = expired.send(());
+            })
             .unwrap();
         clock.advance(READY_LIMIT - Duration::from_secs(1));
         watch.settle();
