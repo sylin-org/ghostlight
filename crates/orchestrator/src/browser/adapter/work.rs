@@ -674,6 +674,15 @@ pub enum BrowserCommand {
         group_title: String,
         focus_window: bool,
     },
+    /// Put a tab the service chose to reuse back in the workspace's group and load a URL in it,
+    /// as a single physical browser effect. A tab the person kept after its session ended has left
+    /// its group, and this returns it there (ADR-0201). `focus_window` is as for `OpenTab`.
+    AdoptTab {
+        tab_id: u64,
+        url: String,
+        group_title: String,
+        focus_window: bool,
+    },
     /// Navigate a physical tab.
     Navigate { tab_id: u64, url: String },
     /// Move through browser history.

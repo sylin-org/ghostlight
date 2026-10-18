@@ -14,11 +14,13 @@
   // Tabs, windows and zoom: list_tabs, open_tab, navigate, focus_tab, close_tab, set_zoom and
   // resize_window. The service chooses which tab to touch and which tab to adopt; this module only
   // does what a request names. A tab opened or adopted for the service joins a tab group found by the
-  // service's opaque group key (a title match repairs the mapping after an extension reload), and
-  // every handler is a `{ validate, run, addresses, tabOf }` entry for the primitive dispatcher.
+  // service's opaque group key (a title match repairs the mapping after an extension reload), a tab
+  // the person keeps after its session ends leaves that group, and every handler is a
+  // `{ validate, run, addresses, tabOf }` entry for the primitive dispatcher.
 
   const GROUPS_KEY = "ghostlight.groups";
   const GROUP_COLOR = "blue";
+  const NO_GROUP = -1;
   const GROUP_KEY_CHARS = 200;
   const GROUP_TITLE_CHARS = 120;
   const MESSAGE_CHARS = 500;
@@ -239,11 +241,33 @@
       });
     }
 
+    function inOwnGroup(tab) {
+      return Array.from(groups.values()).some((entry) => entry.groupId === tab.groupId);
+    }
+
+    // A tab the person put in a group of their own stays where they put it; any other tab joins the
+    // key's group.
     async function adoptGroupedTab(tabId, args) {
       return serialized(async () => {
         await loadGroups();
         const group = await canonicalGroup(args.group_key, args.group_title);
+        const tab = await chromeApi.tabs.get(tabId);
+        if (Number.isInteger(tab.groupId) && tab.groupId !== NO_GROUP && tab.groupId !== group?.id && !inOwnGroup(tab)) return tab;
         return placeInGroup(tabId, args.group_key, args.group_title, group);
+      });
+    }
+
+    // Takes a kept tab out of the adapter's group; a tab the person put in a group of their own stays.
+    // Chromium deletes a group emptied this way but saves a group that is still open when its window
+    // closes or the browser exits, and no extension API can find, reopen or delete a saved group. So
+    // a group with no live session's tab is gone before Chromium can save it, and the next session's
+    // group is the only one with its title. Adopting the tab again puts it back.
+    async function leaveOwnGroup(tabId) {
+      return serialized(async () => {
+        try {
+          await loadGroups();
+          if (inOwnGroup(await chromeApi.tabs.get(tabId))) await chromeApi.tabs.ungroup(tabId);
+        } catch (_error) { /* a tab that cannot leave keeps its group; the close answers as it would */ }
       });
     }
 
@@ -316,8 +340,9 @@
         requireDuration(args.ready_timeout_ms, "ready_timeout_ms");
       },
       /**
-       * Resolves `TabOpened`. Adopts the named tab (moving it into the group) or creates a tab in the
-       * group's window, then marks the tab controlled and waits for it to be ready.
+       * Resolves `TabOpened`. Adopts the named tab (moving it into the group, unless the person put it
+       * in a group of their own) or creates a tab in the group's window, then marks the tab
+       * controlled and waits for it to be ready.
        */
       async run(args, fx, correlation) {
         let tab;
@@ -414,11 +439,15 @@
       },
       /**
        * Resolves `TabClosed`. The person's preserve-tabs choice vetoes the close with
-       * `local_interlock`; a released close that is vetoed still ends Ghostlight's control of the tab.
+       * `local_interlock`; a released close that is vetoed still ends Ghostlight's control of the tab
+       * and takes it out of Ghostlight's group.
        */
       async run(args, fx) {
         if (await preserveTabsEnabled()) {
-          if (args.released === true) await controlled.release(args.tab_id);
+          if (args.released === true) {
+            await controlled.release(args.tab_id);
+            await leaveOwnGroup(args.tab_id);
+          }
           throw sessions.failure(FAILURE.LOCAL_INTERLOCK, INTERLOCK_MESSAGE);
         }
         await requireTab(args.tab_id);

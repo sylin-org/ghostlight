@@ -330,6 +330,7 @@ fn command_tab(command: &BrowserCommand) -> Option<u64> {
         BrowserCommand::InDocuments { primitive, .. } => command_tab(primitive),
         BrowserCommand::DescribeDocuments { tab_id, .. }
         | BrowserCommand::FocusTab { tab_id }
+        | BrowserCommand::AdoptTab { tab_id, .. }
         | BrowserCommand::Navigate { tab_id, .. }
         | BrowserCommand::TraverseHistory { tab_id, .. }
         | BrowserCommand::Reload { tab_id, .. }

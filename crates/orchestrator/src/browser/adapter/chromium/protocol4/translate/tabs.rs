@@ -77,6 +77,32 @@ pub fn open_tab(
     })
 }
 
+/// Put an existing tab in the workspace's tab group and load one URL in it.
+///
+/// # Errors
+///
+/// Returns the primitive's failure.
+pub fn adopt_tab(
+    l: &mut Link<'_>,
+    tab_id: u64,
+    url: String,
+    group_title: String,
+    focus_window: bool,
+) -> Result<BrowserOutcome, BrowserError> {
+    let adopted = l.send(wire::OpenTab {
+        url: Some(url),
+        group_key: group_key(&group_title),
+        group_title,
+        adopt_tab_id: Some(tab_id),
+        focus_window,
+        ready_timeout_ms: ready_timeout_ms(l),
+    })?;
+    Ok(BrowserOutcome::TabOpened {
+        tab: adopted.tab.into(),
+        committed_urls: l.committed(),
+    })
+}
+
 /// Navigate a tab: to a URL, through history, or by reloading.
 ///
 /// # Errors

@@ -331,3 +331,14 @@ the extension in a profile and no browser connected, the Next line reads "Next: 
 where Ghostlight is already added." and the agents line keeps its restart note. The summary still
 never says "to finish", so a fresh install never reads as unfinished. A connected browser asks
 for the prompt as before.
+
+## Amendment (2026-10-18): the extension is unfrozen for one fix
+
+The owner unfroze the extension on 2026-10-18 for a proper fix of saved tab groups piling up
+("Unfreeze the extension. I want a proper fix."). The fix is
+[ADR-0201](0201-a-kept-tab-leaves-the-group.md), and it changes one packaged file, `lib/tabs.js`.
+The freeze golden, `tests/golden/extension-2.0.0.files.sha256`, is regenerated from the new zip in
+the same commit, and the freeze holds again from that commit. The version stays 2.0.0. The tree
+records no 2.0 store submission yet (`docs/STATUS.md`, Owed by the owner); if one was made, it is
+withdrawn and the new zip submitted instead. Decision 16's rule is unchanged: a packaged file
+changes only with a recorded owner decision.

@@ -171,6 +171,15 @@ function fakeBrowser({ tabs = [], groups = [], focusedWindows = [], readyAfter =
         pruneGroups();
         return id;
       },
+      async ungroup(tabIds) {
+        log("tabs.ungroup", tabIds);
+        for (const tabId of [tabIds].flat()) {
+          const tab = find(tabId);
+          if (!tab) throw missing(tabId);
+          tab.groupId = -1;
+        }
+        pruneGroups();
+      },
       async remove(id) {
         log("tabs.remove", id);
         const index = tabList.findIndex((tab) => tab.id === id);

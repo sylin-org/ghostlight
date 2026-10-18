@@ -14,6 +14,10 @@ is a candidate, so the tab already sits in the caller's client-scoped group (ADR
 person opened, which the rejected alternatives below call never-bound, is never one. The adapter
 is always sent `reuse:"never"`, so its own reuse ladder never runs.
 
+Amended by ADR-0201, 2026-10-18: a tab the person keeps after its session ends leaves the
+client-scoped group, so a reused tab no longer already sits in it. The service reuses it with an
+adopt (`open_tab` with `adopt_tab_id`, still never the adapter's own choice) that puts it back.
+
 ## Context
 
 Running the sample scripts repeatedly produced ever-accumulating tabs, and the browser showed

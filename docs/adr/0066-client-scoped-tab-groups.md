@@ -7,6 +7,13 @@ that the visible Chrome tab group is keyed on the per-process session GUID and i
 per live session. Builds on ADR-0061 (extension-owned browser identity) and ADR-0030 Decision 6
 (the SERVICE is the isolation boundary; the extension's group checks are defense-in-depth).
 
+## Amendment by ADR-0201 (2026-10-18)
+
+Chromium now saves every tab group, and a group still open when its window closes or the browser
+exits stays saved where no extension API can reach it. So D4's premise that a restart without
+restore orphans nothing no longer holds, and D6 gains one exception: a tab the person keeps after
+its session ends leaves the group, and reuse adopts it back. See ADR-0201.
+
 ## Amendment by ADR-0096 (2026-08-04)
 
 Decisions 1-4 retain their group-reuse and recovery intent but no longer key current frames on an

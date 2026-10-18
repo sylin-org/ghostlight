@@ -285,6 +285,24 @@ test("open_tab adopts the named tab: it moves into the group's window and is nav
   assert.deepEqual(chrome.named("windows.update").map((call) => call.args), [[OTHER_WINDOW, { focused: true }]]);
 });
 
+test("an adopted tab in a group of the person's stays in it and is navigated there", async () => {
+  const { tabs, chrome } = setup({
+    browser: {
+      tabs: [
+        tab({ id: 14, windowId: WINDOW, groupId: 7, url: "https://example.com/old" }),
+        tab({ id: 20, windowId: OTHER_WINDOW, groupId: 9, active: true })
+      ],
+      groups: [{ id: 7, windowId: WINDOW, title: "Reading" }, { id: 9, windowId: OTHER_WINDOW, title: TITLE }]
+    }
+  });
+  const result = await execute(tabs.openTab, { ...goldenArgs("open_tab.adopt"), focus_window: false });
+  assert.equal(result.ok.adopted, true);
+  const adopted = chrome.tabList.find((item) => item.id === 14);
+  assert.deepEqual([adopted.windowId, adopted.groupId, adopted.url], [WINDOW, 7, "https://example.com/inbox"]);
+  assert.equal(chrome.named("tabs.move").length, 0);
+  assert.equal(chrome.named("tabs.group").length, 0);
+});
+
 test("open_tab adopting without a url only activates the tab, and a missing tab is tab_missing with nothing dispatched", async () => {
   const { tabs, chrome } = setup({ browser: { tabs: [tab({ id: 14, active: false })] } });
   const { url: _url, ...withoutUrl } = goldenArgs("open_tab.adopt");
@@ -503,6 +521,47 @@ test("a vetoed released close still releases the tab from Ghostlight's control",
   assert.equal(result.dispatched, false);
   assert.deepEqual(hook.calls, [["release", 12]]);
   assert.equal(chrome.tabList.length, 1);
+});
+
+test("a tab kept after its session leaves Ghostlight's group, which goes with its last tab", async () => {
+  const { tabs, chrome } = setup({
+    browser: {
+      tabs: [tab({ id: 12, groupId: 9 }), tab({ id: 13, groupId: 9 })],
+      groups: [{ id: 9, windowId: WINDOW, title: TITLE }]
+    }
+  });
+  chrome.store.session.set(Tabs.GROUPS_KEY, [[KEY, { groupId: 9, title: TITLE }]]);
+  assert.equal((await execute(tabs.closeTab, { tab_id: 12, released: true })).failure, "local_interlock");
+  assert.deepEqual(chrome.tabList.map((item) => [item.id, item.groupId]), [[12, -1], [13, 9]]);
+  assert.equal((await execute(tabs.closeTab, { tab_id: 13, released: true })).failure, "local_interlock");
+  assert.deepEqual(chrome.tabList.map((item) => [item.id, item.groupId]), [[12, -1], [13, -1]]);
+  assert.deepEqual(chrome.groupList, []);
+});
+
+test("a kept tab in a group of the person's stays there, and a close that does not release keeps its group", async () => {
+  const { tabs, chrome } = setup({
+    browser: {
+      tabs: [tab({ id: 12, groupId: 7 }), tab({ id: 13, groupId: 9 })],
+      groups: [{ id: 7, windowId: WINDOW, title: "Reading" }, { id: 9, windowId: WINDOW, title: TITLE }]
+    }
+  });
+  chrome.store.session.set(Tabs.GROUPS_KEY, [[KEY, { groupId: 9, title: TITLE }]]);
+  await execute(tabs.closeTab, { tab_id: 12, released: true });
+  await execute(tabs.closeTab, { tab_id: 13 });
+  assert.deepEqual(chrome.tabList.map((item) => [item.id, item.groupId]), [[12, 7], [13, 9]]);
+  assert.equal(chrome.named("tabs.ungroup").length, 0);
+});
+
+test("a kept tab the next session adopts goes back into Ghostlight's group", async () => {
+  const { tabs, chrome } = setup({ browser: { tabs: [tab({ id: 1, active: true })] } });
+  const opened = await execute(tabs.openTab, goldenArgs("open_tab"));
+  const id = opened.ok.tab.tab_id;
+  await execute(tabs.closeTab, { tab_id: id, released: true });
+  assert.equal(chrome.tabList.find((item) => item.id === id).groupId, -1);
+  assert.deepEqual(chrome.groupList, []);
+  await execute(tabs.openTab, { ...goldenArgs("open_tab"), adopt_tab_id: id });
+  const group = chrome.tabList.find((item) => item.id === id).groupId;
+  assert.deepEqual(chrome.groupList.map((item) => [item.id, item.title]), [[group, TITLE]]);
 });
 
 test("close_tab on a missing tab is tab_missing with nothing dispatched", async () => {

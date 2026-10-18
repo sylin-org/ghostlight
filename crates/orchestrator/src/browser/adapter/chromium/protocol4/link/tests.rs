@@ -157,6 +157,22 @@ fn rows() -> Vec<Row> {
             },
         },
         Row {
+            command: BrowserCommand::AdoptTab {
+                tab_id: 12,
+                url: example.into(),
+                group_title: GROUP_TITLE.into(),
+                focus_window: false,
+            },
+            primitive: json!({"name": "open_tab", "args": {"url": example,
+                "group_key": "g_0308773300b3c6a8", "group_title": GROUP_TITLE,
+                "adopt_tab_id": 12, "focus_window": false, "ready_timeout_ms": 8000}}),
+            receipt: effect(json!({"tab": tab(example), "adopted": true}), &[example]),
+            outcome: BrowserOutcome::TabOpened {
+                tab: physical_tab(example),
+                committed_urls: vec![example.into()],
+            },
+        },
+        Row {
             command: BrowserCommand::Navigate {
                 tab_id: 12,
                 url: example.into(),

@@ -502,10 +502,12 @@ because a restarted browser hands out tab ids again. A close or commit that arri
 runs keeps the tab out. Default reuse (`reuse:"domain"`) adopts only from this pool (ADR-0196
 Decision 9). The executor claims the best same-host candidate released by a session of the same
 client, under the aggregate lock, exact URL first and then lowest id, checks it against the live tab
-list, adds it to the workspace, and sends `Navigate` with that exact tab id. The client label must
-match because reuse never regroups a tab and the group title is `Ghostlight - <client label>`: a tab
-another client released would stay under that client's group, so it is left in the pool and the open
-creates a fresh tab. The label only narrows reuse and never grants authority. The pool is in memory
+list, adds it to the workspace, and sends `AdoptTab` with that exact tab id and the client's group
+title. The kept tab left its group when its session ended (ADR-0201), so the adopt puts it back in
+`Ghostlight - <client label>` as it loads the page, unless the person put it in a group of their own.
+The client label must match, so a client reuses only the tabs its own sessions kept: a tab another
+client released is left in the pool and the open creates a fresh tab. The label only narrows reuse
+and never grants authority. The pool is in memory
 and does not survive a service restart. A person can still type into a preserved released tab
 without loading a page, and a later reuse would then replace that page.
 
@@ -1018,12 +1020,14 @@ newly opened tab is not adopted through its opener: that relationship cannot dis
 agent popup from a human opening a link. Explicit executor work establishes ownership. Moving a
 group or tab between windows does not change ownership or trigger automatic regrouping.
 
-The adapter never chooses a tab to reuse. The executor's `OpenTab` carries no reuse request and
-the adapter's open is never sent `adopt_tab_id`, so the adapter always creates. A reused tab
-arrives as an ordinary `Navigate` naming the exact tab the service chose. A reused tab
-is not regrouped, and it does not need to be: only a session of the client that released it can
-reuse it, so it already sits in that client's `Ghostlight - <client label>` group, or wherever the
-person moved it.
+The adapter never chooses a tab to reuse. The executor's `OpenTab` carries no reuse request, so a
+plain open always creates. A reused tab arrives as `AdoptTab`, the adapter's open with
+`adopt_tab_id` naming the exact tab the service chose. A tab the person keeps after its session ends
+leaves its Ghostlight group (ADR-0201): Chromium saves a group that is still open when its window
+closes or the browser exits, and no extension API can find, reopen or delete a saved group, so a
+group left open between sessions would come back as one more same-title group after every browser
+restart. The adopt puts the tab back in the group, moving it to the group's window when it is
+elsewhere, and leaves a tab the person put in a group of their own where it is.
 
 Document-commit events silently update cached destinations and invalidate agent references. They
 never authorize browsing, hold tabs, write action history, or produce presentation. Even a

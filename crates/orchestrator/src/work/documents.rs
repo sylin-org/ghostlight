@@ -153,6 +153,7 @@ impl RequestScope {
             | BrowserCommand::ScreenshotRegion { .. }
             | BrowserCommand::FocusTab { .. }
             | BrowserCommand::OpenTab { .. }
+            | BrowserCommand::AdoptTab { .. }
             | BrowserCommand::Navigate { .. }
             | BrowserCommand::NavigateDiscardingBeforeUnload { .. }
             | BrowserCommand::TraverseHistory { .. }

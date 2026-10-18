@@ -81,7 +81,7 @@ fn a_released_ghostlight_tab_is_reused_by_the_next_session_on_its_host() {
             tab(9, "https://example.com/the-persons-own"),
         ],
     }));
-    browser.push(Ok(BrowserOutcome::Navigated {
+    browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/b"),
         committed_urls: vec!["https://example.com/b".into()],
     }));
@@ -96,8 +96,12 @@ fn a_released_ghostlight_tab_is_reused_by_the_next_session_on_its_host() {
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert!(matches!(calls[0], BrowserCommand::ListTabs));
     assert!(
-        matches!(&calls[1], BrowserCommand::Navigate { tab_id: 7, url } if url == "https://example.com/b"),
-        "the service names the exact tab it chose: {calls:?}"
+        matches!(
+            &calls[1],
+            BrowserCommand::AdoptTab { tab_id: 7, url, group_title, focus_window: true }
+                if url == "https://example.com/b" && group_title == "Ghostlight - test"
+        ),
+        "the service names the exact tab it chose and puts it back in the group: {calls:?}"
     );
 
     // The tab now belongs to the new session, and nobody can reuse it a second time.
@@ -222,15 +226,15 @@ fn a_released_tab_the_person_took_back_or_closed_is_not_reused() {
 #[test]
 fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_it() {
     let (executor, browser, workspaces, _, _) = fixture();
-    // The sample scripts open example.com and exit. Preserve-tabs keeps their tab open, and it
-    // stays in the "Ghostlight - ghostlight call" group.
+    // The sample scripts open example.com and exit. Preserve-tabs keeps their tab open, out of
+    // the "Ghostlight - ghostlight call" group (ADR-0201).
     let scripts = workspaces.admit("ghostlight call".into(), IntakeChannel::Mcp);
     open_at(&executor, &browser, &scripts, 7, "https://example.com/a");
     let scripts_again = later_session_of(&workspaces, &scripts);
     assert_eq!(release_kept_open(&workspaces, &scripts), vec![7]);
 
-    // A Claude Code session opening the same host gets a fresh tab in its own group. Reusing
-    // tab 7 would leave a tab it controls under the group title of the scripts.
+    // A Claude Code session opening the same host gets a fresh tab in its own group: a client
+    // reuses only the tabs its own sessions kept.
     let agent = workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
     let before = browser.calls().len();
     browser.push(Ok(BrowserOutcome::TabOpened {
@@ -254,7 +258,7 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
         "{calls:?}"
     );
 
-    // The next run of the scripts still reuses their tab, which already sits in their group.
+    // The next run of the scripts still reuses their tab and puts it back in their group.
     let before = browser.calls().len();
     browser.push(Ok(BrowserOutcome::Tabs {
         tabs: vec![
@@ -262,7 +266,7 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
             tab(12, "https://example.com/b"),
         ],
     }));
-    browser.push(Ok(BrowserOutcome::Navigated {
+    browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/c"),
         committed_urls: vec!["https://example.com/c".into()],
     }));
@@ -275,7 +279,11 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert!(matches!(calls[0], BrowserCommand::ListTabs));
     assert!(
-        matches!(&calls[1], BrowserCommand::Navigate { tab_id: 7, url } if url == "https://example.com/c"),
+        matches!(
+            &calls[1],
+            BrowserCommand::AdoptTab { tab_id: 7, url, group_title, .. }
+                if url == "https://example.com/c" && group_title == "Ghostlight - ghostlight call"
+        ),
         "{calls:?}"
     );
 }

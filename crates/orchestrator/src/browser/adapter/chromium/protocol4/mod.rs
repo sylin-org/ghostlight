@@ -119,6 +119,12 @@ fn translate(
             group_title,
             focus_window,
         } => tabs::open_tab(l, url, group_title, focus_window),
+        BrowserCommand::AdoptTab {
+            tab_id,
+            url,
+            group_title,
+            focus_window,
+        } => tabs::adopt_tab(l, tab_id, url, group_title, focus_window),
         BrowserCommand::Navigate { tab_id, url } => {
             tabs::navigate(l, tab_id, wire::NavigationTarget::Url { url }, false)
         }

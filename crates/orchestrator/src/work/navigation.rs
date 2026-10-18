@@ -29,9 +29,9 @@ enum OpenedTabKind {
 
 /// The browser group every controlled tab of one client sits in: `Ghostlight - <client label>`.
 ///
-/// The title depends on the client label alone (ADR-0066). Default reuse relies on that: it hands
-/// a released tab only to a session of the client that released it, so the tab already sits in
-/// the caller's group and is never regrouped (ADR-0196 Decision 9).
+/// The title depends on the client label alone (ADR-0066), so every session of one client shares
+/// one group. A tab the person kept after its session ended has left that group (ADR-0201), and
+/// default reuse puts it back under this title.
 fn group_title(client_label: &str) -> String {
     format!("Ghostlight - {}", bounded(client_label, 80))
 }
@@ -230,11 +230,11 @@ impl ApplicationExecutor {
     /// The service makes the whole choice and sends the adapter an exact tab id (ADR-0196
     /// Decision 9). Candidates come only from the released pool, in the browser this session
     /// works in, on the requested host, so a tab the person opened is never one. They were also
-    /// released by a session with this session's `client_label`, so a reused tab already sits in
-    /// this client's group: `Navigate` does not move it, and another client's tab would stay
-    /// under that client's group title. A candidate is used only while the live browser still
-    /// shows it at its release address; one that closed or moved on is dropped and the next is
-    /// tried. Returns None when nothing fits, and the open then creates a fresh tab.
+    /// released by a session with this session's `client_label`, so a client reuses only its own
+    /// tabs. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts it
+    /// back in this client's group as it loads the page. A candidate is used only while the live
+    /// browser still shows it at its release address; one that closed or moved on is dropped and
+    /// the next is tried. Returns None when nothing fits, and the open then creates a fresh tab.
     fn reuse_released_tab(
         &self,
         context: &InvocationContext<'_>,
@@ -266,6 +266,7 @@ impl ApplicationExecutor {
                 .workspaces
                 .claim_released(&browser, client_label, url)?;
         };
+        let focus_window = holds_no_tab(lease);
         let controlled = match lease.add_tab(&released) {
             Ok(controlled) => controlled,
             // Another session already took this tab; nothing happened yet, so open a fresh one.
@@ -275,12 +276,14 @@ impl ApplicationExecutor {
         Some(
             match self.dispatch(
                 context,
-                BrowserCommand::Navigate {
+                BrowserCommand::AdoptTab {
                     tab_id: released.tab_id,
                     url: url.into(),
+                    group_title: group_title(client_label),
+                    focus_window,
                 },
             ) {
-                Ok(BrowserOutcome::Navigated {
+                Ok(BrowserOutcome::TabOpened {
                     tab,
                     committed_urls,
                 }) if tab.tab_id == released.tab_id => self.settle_opened_tab(
