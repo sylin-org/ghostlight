@@ -67,7 +67,7 @@ class Element {
     this.tag = tag;
     this.id = attributes.id ?? "";
     this.hidden = "hidden" in attributes;
-    this.disabled = false;
+    this.disabled = "disabled" in attributes;
     this.textContent = "";
     this.title = "";
     this.scrollTop = 0;
@@ -146,8 +146,9 @@ class Element {
     delete this.attributes[name];
   }
 
+  /** Take focus, as a browser does for a control that is not disabled. */
   focus() {
-    Element.focused = this;
+    if (!this.disabled) Element.focused = this;
   }
 
   matches(selector) {
@@ -2282,6 +2283,27 @@ test("a failure the service did not word is said in the window's words, as an al
   assert.equal(shown.el("alert").hidden, true);
 });
 
+test("a success after a failure takes the alert away, and the two notices never share a spot", () => {
+  const shown = drawing();
+  shown.view.toast(Words.NO_ANSWER, true);
+  assert.equal(shown.el("alert").hidden, false);
+  shown.view.toast(Words.AGENTS.rechecked);
+  assert.equal(shown.el("toast").hidden, false);
+  assert.equal(shown.el("alert").hidden, true, "the window no longer says something failed once it worked");
+  shown.view.toast(Words.NO_ANSWER, true);
+  assert.equal(shown.el("toast").hidden, false, "a failure while a success shows leaves both to read");
+
+  const column = shown.el("alert").parent;
+  assert.equal(column, shown.el("toast").parent, "the alert and the toast sit in one column");
+  assert.ok(column.classes.has("notices"));
+  const top = (selector) => naming(selector).filter((rule) => rule.media === null);
+  assert.equal(top(".notices")[0].declarations.position, "fixed");
+  assert.equal(top(".notices")[0].declarations["flex-direction"], "column");
+  for (const selector of [".toast", ".toast.error"]) {
+    for (const rule of top(selector)) assert.equal(rule.declarations.position, undefined, `${selector} is placed by its column`);
+  }
+});
+
 /* --------------------------------- dialog focus -------------------------------- */
 
 /** The view over the page, with the document's focus following the fake elements' own. */
@@ -2338,7 +2360,7 @@ test("ArrowDown and ArrowUp walk from the search box through the hits, and a foc
   assert.ok(naming(".hit:focus-visible").some((rule) => /^2px solid/.test(rule.declarations.outline ?? "")));
 });
 
-test("the confirmation takes focus on Cancel, and Escape or an answer gives it back, or to the page when its control is gone", async () => {
+test("the confirmation takes focus on Cancel, and Escape gives it back to the control that opened it", async () => {
   const shown = focusable();
   const cancel = new Element("button");
   const accept = new Element("button");
@@ -2352,12 +2374,83 @@ test("the confirmation takes focus on Cancel, and Escape or an answer gives it b
   assert.equal(await asked, false);
   assert.equal(shown.el("app-shell").inert, false);
   assert.equal(Element.focused, opener);
+});
 
-  const gone = new Element("button");
-  gone.focus();
-  const again = shown.view.confirmRemoval("Zed", "settings.json", 0);
-  gone.isConnected = false;
+/** Let `node` take markup as a browser does: parsed into children, the old ones leaving the page. */
+function live(node) {
+  let html = "";
+  Object.defineProperty(node, "innerHTML", {
+    configurable: true,
+    get: () => html,
+    set: (value) => {
+      for (const old of node.descendants()) old.isConnected = false;
+      html = value;
+      node.replaceChildren(...parse(value, { text: true }).children);
+    }
+  });
+  node.querySelectorAll = (selector) => [...node.descendants()].filter((found) => found.matches(selector));
+  node.querySelector = (selector) => node.querySelectorAll(selector)[0] ?? null;
+}
+
+/**
+ * The Integrations page of Zed, connected, and Codex, drawn into a rail and a pane that parse their
+ * markup, with the document's focus following the fake elements' own and the confirmation's buttons.
+ */
+function liveAgents() {
+  const shown = drawing();
+  Object.defineProperty(shown.document, "activeElement", { get: () => Element.focused ?? null, configurable: true });
+  const cancel = new Element("button");
+  shown.el("confirm-dialog").querySelector = (selector) => (selector === "[data-confirm=\"cancel\"]" ? cancel : new Element("button"));
+  live(shown.el("agents-list"));
+  live(shown.el("agents-pane"));
+  const roster = (zed) => {
+    const answer = snapshotAnswer();
+    answer.parts.integrations.harnesses = [agent("zed", "Zed", zed), agent("codex", "Codex", "available")];
+    return Transport.flatten(answer);
+  };
+  shown.view.collections(roster("installed"), new Set());
+  shown.view.showAgent("zed");
+  const control = (action) => [...shown.el("agents-pane").descendants()].find((node) => node.dataset.harnessAction === action);
+  const key = (name) => shown.dispatch("keydown", { key: name, preventDefault() {} });
+  return { ...shown, roster, control, key, cancel };
+}
+
+test("after a confirmed Remove the redrawn pane hands focus to the agent's rail entry, never to the page", async () => {
+  const shown = liveAgents();
+  const remove = shown.control("uninstall");
+  assert.ok(remove, "Zed, connected, offers Remove");
+  remove.focus();
+  const asked = shown.view.confirmRemoval("Zed", "settings.json", 0);
+  assert.equal(Element.focused, shown.cancel);
   shown.view.answerConfirmation(true);
-  assert.equal(await again, true);
-  assert.equal(Element.focused, shown.el("main-content"), "a control that left the page hands focus to the page");
+  assert.equal(await asked, true);
+  assert.equal(Element.focused, remove, "the answer gives focus back to Remove, which is still on the page");
+
+  // The app then marks the agent busy, which redraws the pane with Remove waiting, then settles it.
+  shown.view.collections(shown.roster("installed"), new Set(["zed"]));
+  assert.equal(remove.isConnected, false, "the redraw replaced the pressed Remove");
+  assert.equal(shown.control("uninstall").disabled, true);
+  const entry = () => Element.focused;
+  assert.notEqual(entry().isConnected, false, "focus is on an element the page still holds");
+  assert.equal(entry().dataset.agent, "zed", "focus waits on Zed's rail entry while Remove works");
+  assert.ok(shown.el("agents-list").contains(entry()));
+
+  shown.view.collections(shown.roster("available"), new Set());
+  assert.equal(shown.control("uninstall"), undefined, "Zed, removed, no longer offers Remove");
+  assert.equal(entry().dataset.agent, "zed", "the settled redraw keeps focus on Zed's entry");
+  assert.ok(shown.el("agents-list").contains(entry()));
+  assert.notEqual(entry(), shown.document.body);
+});
+
+test("a pane redrawn while the confirmation is open gives focus back to the redrawn control", async () => {
+  const shown = liveAgents();
+  shown.control("uninstall").focus();
+  const asked = shown.view.confirmRemoval("Zed", "settings.json", 0);
+  const session = glanceSession("w1", "Zed", { tabs: 1 });
+  shown.view.collections({ ...shown.roster("installed"), sessions: [session], harnesses_in_use: ["zed"] }, new Set());
+  const redrawn = shown.control("uninstall");
+  assert.equal(Element.focused, shown.cancel, "the dialog keeps focus while the pane behind it redraws");
+  shown.key("Escape");
+  assert.equal(await asked, false);
+  assert.equal(Element.focused, redrawn, "Cancel lands on the Remove the person sees, not the one the redraw replaced");
 });

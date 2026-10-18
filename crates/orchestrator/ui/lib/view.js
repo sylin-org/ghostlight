@@ -49,10 +49,19 @@
   const GLANCE_FACES = 4;
 
   /**
-   * The data keys a repaint gives focus back by: the element that held focus is found again by
-   * the same key and value.
+   * The data keys a repaint gives focus back by: the control that held focus is found again by the
+   * same keys with the same values, all of them together, so one agent's Remove is not its Copy.
    */
-  const FOCUS_KEYS = Object.freeze(["actionDetails", "glanceAgent", "copyConnection", "agent", "agentFold"]);
+  const FOCUS_KEYS = Object.freeze([
+    "actionDetails", "glanceAgent", "copyConnection", "agent", "agentFold",
+    "harness", "harnessOperation", "harnessAction", "copyKind", "agentsRecheck", "showAgent"
+  ]);
+
+  /** What a control is, by its focus keys, or null for one a repaint cannot find again. */
+  function controlIdentity(node) {
+    const named = FOCUS_KEYS.filter((key) => node?.dataset?.[key] !== undefined);
+    return named.length ? named.map((key) => `${key}=${node.dataset[key]}`).join("&") : null;
+  }
 
   /** The mascot the Integrations pane joins each agent to, served beside the page. */
   const MASCOT = "extension/ghostlight-mascot.png";
@@ -77,6 +86,8 @@
     const painted = Object.create(null);
     let toastTimer = null;
     let confirmation = null;
+    // The open dialog, with the control it gives focus back to; see holdFocus.
+    let modal = null;
 
     /*
      * What this screen was told it may do.
@@ -286,29 +297,40 @@
       delete details.dataset.historyOpening;
     }, true);
 
-    function replaceHistoryMarkup(node, markup) {
+    /**
+     * Replace a panel's markup and keep the person's place in it: the scroll of its step lists, the
+     * summary that held focus, and the control that held focus, found again by what it is. While a
+     * dialog is open, the control the dialog gives focus back to is found again instead. When that
+     * control is gone or is waiting on its own act, `fallback()` names where focus goes, so it
+     * never drops to the page's body.
+     */
+    function replaceHistoryMarkup(node, markup, fallback = () => null) {
       const scroll = new Map([...node.querySelectorAll(".history-steps")].map((list) =>
         [list.closest("details")?.dataset.historyDetails, list.scrollTop]));
-      const active = document.activeElement;
-      const focusKey = node.contains(active) && active?.tagName === "SUMMARY"
-        ? disclosure(active.closest("details"))?.key : null;
-      const focusData = node.contains(active)
-        ? FOCUS_KEYS.find((key) => active?.dataset?.[key] !== undefined) : undefined;
-      const focusValue = focusData ? active.dataset[focusData] : undefined;
+      const held = modal ? modal.opener : document.activeElement;
+      const inside = Boolean(held) && node.contains(held);
+      const focusKey = inside && held.tagName === "SUMMARY" ? disclosure(held.closest("details"))?.key : null;
+      const identity = inside ? controlIdentity(held) : null;
       node.innerHTML = markup;
       for (const list of node.querySelectorAll(".history-steps")) {
         const key = list.closest("details")?.dataset.historyDetails;
         if (scroll.has(key)) list.scrollTop = scroll.get(key);
       }
+      if (!inside) return;
+      let back = null;
       if (focusKey) {
-        [...node.querySelectorAll("details")].find((details) => disclosure(details)?.key === focusKey)
-          ?.querySelector("summary")?.focus({ preventScroll: true });
+        back = [...node.querySelectorAll("details")].find((details) => disclosure(details)?.key === focusKey)
+          ?.querySelector("summary") ?? null;
+      } else if (identity) {
+        const first = FOCUS_KEYS.find((key) => held.dataset[key] !== undefined);
+        const selector = `[data-${first.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}]`;
+        back = [...node.querySelectorAll(selector)]
+          .find((found) => controlIdentity(found) === identity && !found.disabled) ?? null;
       }
-      if (focusData) {
-        const selector = `[data-${focusData.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}]`;
-        [...node.querySelectorAll(selector)].find((found) => found.dataset[focusData] === focusValue)
-          ?.focus({ preventScroll: true });
-      }
+      back ??= fallback();
+      if (!back) return;
+      if (modal) modal.opener = back;
+      else back.focus({ preventScroll: true });
     }
 
     function historyDetails(key, title, body, className = "permission-details") {
@@ -1246,10 +1268,14 @@
         agentPick = mostRelevant(groups);
         if (agents.find((agent) => agent.id === agentPick)?.standing === "not_detected") foldOpen = true;
       }
-      replaceHistoryMarkup(el["agents-list"], railMarkup(groups));
+      replaceHistoryMarkup(el["agents-list"], railMarkup(groups), () => el["main-content"]);
       const picked = agents.find((agent) => agent.id === agentPick);
       const arriving = paneShows !== agentPick;
-      el["agents-pane"].innerHTML = picked ? paneMarkup(picked, arriving) : "";
+      // A control the pane redraws away, such as Remove once it is pressed, hands focus to the
+      // agent's entry in the rail, which every redraw keeps.
+      const entry = () => [...el["agents-list"].querySelectorAll("[data-agent]")]
+        .find((found) => found.dataset.agent === agentPick) ?? el["main-content"];
+      replaceHistoryMarkup(el["agents-pane"], picked ? paneMarkup(picked, arriving) : "", entry);
       if (arriving) el["agents-pane"].scrollTop = 0;
       paneShows = agentPick;
     }
@@ -2097,7 +2123,9 @@
 
     /**
      * Say what an act did. A sentence of success leaves on its own after TOAST_MS; a failure is
-     * an alert that stays until the person dismisses it or a later failure takes its place.
+     * an alert that stays until the person dismisses it, a later failure takes its place, or a
+     * later success says the window is working again. The two stack in one column and never
+     * cover each other.
      */
     function toast(message, error = false) {
       if (error) {
@@ -2105,6 +2133,7 @@
         el.alert.hidden = false;
         return;
       }
+      el.alert.hidden = true;
       clearTimeout(toastTimer);
       el.toast.textContent = message;
       el.toast.hidden = false;
@@ -2145,9 +2174,9 @@
      *
      * Opening one remembers the control that held focus, makes the window behind it inert and moves
      * focus in; Tab and Shift+Tab stay inside it; closing it gives the window back and returns
-     * focus to that control, or to the page when the control is gone.
+     * focus to that control. A repaint while it is open finds that control again (see
+     * replaceHistoryMarkup); the page takes focus only when nothing stands in for it.
      */
-    let modal = null;
 
     function holdFocus(box, first) {
       const opener = document.activeElement;
@@ -2179,7 +2208,8 @@
       modal = null;
       document.removeEventListener("keydown", keep);
       el["app-shell"].inert = false;
-      const back = opener && opener !== document.body && opener.isConnected !== false ? opener : el["main-content"];
+      const back = opener && opener !== document.body && opener.isConnected !== false && !opener.disabled
+        ? opener : el["main-content"];
       back.focus?.({ preventScroll: true });
     }
 
