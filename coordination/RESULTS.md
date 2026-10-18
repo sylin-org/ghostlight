@@ -1,30 +1,36 @@
 # Latest result
 
-## [0036] linux-1: L06 passes after three fixes for a service with no display
+## [0040] linux-1: L07 passes after five fixes; the model's answers about captures and recordings
 
-linux-claude, on test-01, on the real installation, every command in the environment an SSH login
-gets (no display variables). Details: [the ledger](../docs/tasks/linux-1/LEDGER.md), L06.
+linux-claude, on test-01, on the real installation with the system Chromium. Details:
+[the ledger](../docs/tasks/linux-1/LEDGER.md), L07.
 
-Passed as specified: `status` says `no_display` and no shell starts; the service leaves 600 s after
-the last command and `status` then says it is not running (m2-06); a call 0.27 s before that exit
-is answered by the running service and one 0.08 s after it by a new service in 1.58 s (m2-08);
-`kill -TERM` of the service ends both edges with their goodbyes in 22 ms and leaves nothing
-running (f07g).
+Passed: the popup in Ready, browsing, Paused, Session ended, Not connected, Recording and
+Release debugger states; the options page's connection card and switches; the setup page from
+waiting to connected; real agent work on every demo stage L07 names; `browser.startup` manual
+(names Chromium, starts nothing) and on_demand (starts the ordinary profile).
 
 Fixed, each deployed and checked:
 
-- cb37cdbf `fix(browser)`: a launch from a service with no display now leaves startup to the
-  person (ADR-0149 amendment "A service with no display"), so the model is told to ask the user to
-  open the browser instead of "could not start the selected browser". Chromium opened at the
-  desktop then reaches that service and the repeated call works.
-- c014f161 `fix(language)`: the step after a failed launch or a handshake timeout asks the model to
-  ask the user, instead of "Start the selected browser yourself" (ADR-0147 Decision 3).
-- 56c49dc4 `fix(desktop)`: `ghostlight open` at the desktop over an SSH-started service waited 15 s
-  and said "try again", every time. When the service answers `no_display`, `open` starts the shell
-  from the person's session, as the Applications entry does; over SSH it says why at once.
-  `presence::start_shell` and `presence::display_here` are now shared by presence and `open`.
+- efe54caf `fix(browser)`: a screenshot of a session tab its window does not show waited 8 s (or
+  30 s) for a frame Chromium never draws and told the model to raise the timeout. It is refused at
+  once as `tab_not_showing`, with the focus step. Adds `BrowserError::TabNotShowing` and
+  `Refusal::TabNotShowing`; captures first send `list_tabs` for that tab.
+- 5c4adb4d `fix(diagnostics)`: `diagnostics show` no longer runs the invocation id into the tool.
+- be54ad44 `fix(language)`: a stopped recording's status no longer says "Recording ... so far".
+- 6734f99b `fix(language)`: a recording save the page did not take (target not a file input) is
+  `recording_not_attached` and keeps the recording, instead of "could not be turned into a replay"
+  with advice to discard it. The adapter recognizes the extension's fixed reason
+  (`wire::PAGE_REFUSED_REPLAY`).
+- 7769fd97 `fix(browser)`: the browser the service starts on demand is reaped and has its own
+  process group (it was a `<defunct>` child of the service).
 
-Please pull before touching `browser/recovery.rs`, `language/outcome.rs` (the recovery steps),
-`cli/desktop.rs` or `service/presence.rs`. My claims on them end here.
+For the owner or the coordinator (not changed): on plain Chromium the extension reports no
+browser name, so the ADR-0149 last-browser record is never written for it; an upload calls a file
+input a "text field" because the page assets give it the textbox role.
 
-Next: L07, the extension and the browser.
+Please pull before touching `translate/capture.rs`, `translate/records.rs`, `work/recording.rs`,
+`browser/recovery.rs` or the recording and capture refusals in `language/outcome.rs`. My claims
+on them end here.
+
+Next: L08, setup on a fresh home.
