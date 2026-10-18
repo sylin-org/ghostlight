@@ -1,25 +1,38 @@
 # Latest result
 
-## [0031] Both sessions' work integrated; Windows CI repaired
+## [0032] linux-1: L05 passes after six fixes to the shell, the service and the window
 
-windows-claude rebased its commits onto linux-claude's [0030] fixes, ran the full gate on the
-combined tree (fmt, workspace clippy, cargo test --workspace, guards, workbench, extension and
-integrity checks, all green), deployed it in place on the owner's Windows machine and checked it
-live through the window's watch view.
+linux-claude, on test-01 (KDE Plasma 6.8, Wayland), on the real installation, under the owner's
+authority to fix what it finds. Details: [the ledger](../docs/tasks/linux-1/LEDGER.md), L05.
 
-On dev from windows-claude since [0026]:
+The window and the tray were driven as a person would (Applications entry, clicks through a
+virtual pointer, the tray menu over D-Bus, KWin's window list, screenshots). All L05 checks and
+the Linux items of m2-03 and m2-04 pass after these fixes, each deployed and checked:
 
-- t01: every test removes its temporary files, also when it fails or panics: a `Scratch` guard
-  per crate (`crate::scratch::Scratch` in the service). New tests should hold one.
-- t02: the service's idle-exit tests run on a clock the test moves (`lifetime::HandClock`), so a
-  loaded runner cannot make the service leave early (CI 39079174806).
-- t03: the icon endpoint serves each app icon as a finished tile on a dark or light ground the
-  service picks per icon, or as cached when the icon brings its own plate.
-- t04: a Microsoft Store app's own copy of an agent's settings is found on every look (Windows
-  only; ADR-0197 amendment "Packaged clients seen from outside"). Live: the owner's Store Claude
-  Desktop now reads "Found, not connected" with its packaged settings path.
-- a63364d3: the retired-pages tests in `install/user_assets.rs` gate their symlink step to Unix
-  and hold a scratch guard; this repairs Windows CI (39087428922).
+- da28f0f1 `fix(desktop)`: on Linux tao's `WaitUntil` is a plain wait, so a shell with only its
+  tray reconnected about 18 s after a lost service; presence launched a second shell and the
+  window then opened by itself. The shell keeps its own clock and reconnects in about 0.5 s.
+- 17ec7571 `fix(desktop)`: the shell's desktop opening says what it shows (`window` or `tray`
+  in the relay channel; the relay doc, the relay-protocol-4 table and a golden say so), and the
+  service believes it: status is true after a restart, and a tray newcomer that finds the place
+  taken shows no window. A shell that says nothing is treated as before.
+- 240fcdeb `fix(desktop)`: `ghostlight open` with no shell running gave a shell with no window
+  that ignored every later open (a window replaced at birth is never reported destroyed by
+  tao). The shell records its own window's end, and a person's start answers the service's
+  follow-up show.
+- f546c124 `fix(desktop)`: the tray hover reads Ghostlight, not `org.sylin.ghostlight`.
+- 0a09d95b `fix(workbench)`: the band says "1 session" and "1 browser".
+- 906bd254 `fix(status)`: did_not_stay names WebKitGTK as a check, not as the cause.
 
-For linux-claude: gate Unix-only calls in tests with `#[cfg(unix)]`; L09 should look at Linux
-icons on their new tiles.
+Tests: d86463ca aligns `tests/linux/installed/desktop-check.py` with the 2.0 shell on the real
+installation; it passes. docs/MEMORY.md has the tao lesson.
+
+Please pull before touching `crates/desktop` (app.rs, link.rs, window.rs), `service/presence.rs`,
+`service/mod.rs` (serve_desktop) or `intake/desktop.rs`.
+
+windows-claude's [0031] (integration of both sessions' work, the `Scratch` test guard, the
+hand-moved idle clock, icon tiles, Store-app settings copies, and the Windows CI repair of the
+retired-pages test) is in git history at 87903254. Its asks are taken: Unix-only test calls get
+`#[cfg(unix)]`, and L09 looks at the Linux icons on their new tiles.
+
+Next: L06, headless and SSH.
