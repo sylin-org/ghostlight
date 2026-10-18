@@ -274,7 +274,7 @@ fn run_show(
             record
                 .get("level")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("?"),
+                .unwrap_or_default(),
             record
                 .get("event")
                 .and_then(serde_json::Value::as_str)

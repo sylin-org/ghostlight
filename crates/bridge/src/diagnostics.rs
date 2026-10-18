@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use ghostlight_relay::log::{Component as EdgeLog, MAX_FILE_BYTES as EDGE_LOG_FULL_BYTES};
 use ghostlight_relay::private;
 use notify::Watcher as _;
 
@@ -535,10 +536,24 @@ impl fmt::Debug for Sink {
     }
 }
 
+/// The edge's logs. The edge writes one file per role, `<component>.jsonl`, and stops writing it
+/// once it reaches [`EDGE_LOG_FULL_BYTES`] (`ghostlight_relay::log`).
+const EDGE_LOGS: [EdgeLog; 2] = [EdgeLog::EdgeMcp, EdgeLog::EdgeBrowser];
+
+/// The name of the file the edge writes for `log`.
+fn edge_log_name(log: EdgeLog) -> String {
+    format!("{}.jsonl", log.as_str())
+}
+
 /// Pick the log file name for a new activation period, numbering past collisions so two
 /// periods in the same second never share a file.
 pub fn allocate_log_path(directory: &Path, component: Component, pid: u32, stamp: &str) -> PathBuf {
-    let base = format!("{}-{}-{}", stamp, component.as_str(), pid);
+    allocate_named_path(directory, component.as_str(), pid, stamp)
+}
+
+/// [`allocate_log_path`] for a component named by its text.
+fn allocate_named_path(directory: &Path, component: &str, pid: u32, stamp: &str) -> PathBuf {
+    let base = format!("{}-{}-{}", stamp, component, pid);
     let mut path = directory.join(format!("{}.jsonl", base));
     let mut sequence: u32 = 1;
     while path.exists() {
@@ -561,6 +576,7 @@ pub struct PruneReport {
 /// pruning oldest first. Only files matching the diagnostics naming are considered; the marker
 /// and anything else in the directory are never touched.
 pub fn prune_directory(directory: &Path) -> PruneReport {
+    rotate_full_edge_logs(directory, &utc_stamp(unix_ms()));
     let empty = PruneReport {
         deleted: 0,
         kept: 0,
@@ -616,10 +632,32 @@ pub fn prune_directory(directory: &Path) -> PruneReport {
     }
 }
 
+/// Give each edge log that reached the size at which the edge stops writing it a stamped name,
+/// so retention keeps or prunes it like any other log and the edge starts a new file. A rename
+/// that fails (the edge has the file open on Windows) is tried again at the next prune.
+fn rotate_full_edge_logs(directory: &Path, stamp: &str) {
+    for log in EDGE_LOGS {
+        let live = directory.join(edge_log_name(log));
+        if fs::metadata(&live).is_ok_and(|metadata| metadata.len() >= EDGE_LOG_FULL_BYTES) {
+            let _ = fs::rename(
+                &live,
+                allocate_named_path(directory, log.as_str(), 0, stamp),
+            );
+        }
+    }
+}
+
 /// Parse a diagnostics log file name into its component and stamp. Returns `None` for anything
 /// that is not a diagnostics log, which is how the marker and foreign files survive pruning,
-/// and how `diagnostics show` knows which files are its own.
+/// and how `diagnostics show` knows which files are its own. The file an edge is writing has no
+/// stamp; it sorts after every stamped file of its component, as the newest.
 pub fn parse_log_name(name: &str) -> Option<(String, String)> {
+    if let Some(log) = EDGE_LOGS
+        .into_iter()
+        .find(|log| edge_log_name(*log) == name)
+    {
+        return Some((log.as_str().to_owned(), String::new()));
+    }
     let base = name.strip_suffix(".jsonl")?;
     let mut parts = base.split('-').collect::<Vec<_>>();
     if parts.len() < 3 {
@@ -1030,6 +1068,50 @@ mod tests {
         assert!(remaining.contains(&"foreign.txt".to_string()));
         assert!(!remaining.contains(&"20260801T000000Z-orchestrator-1.jsonl".to_string()));
         assert!(!remaining.contains(&"20260801T000001Z-orchestrator-1.jsonl".to_string()));
+    }
+
+    #[test]
+    fn the_files_the_edge_writes_are_logs_of_their_component() {
+        assert_eq!(
+            parse_log_name("edge-mcp.jsonl"),
+            Some(("edge-mcp".to_owned(), String::new()))
+        );
+        assert_eq!(
+            parse_log_name("edge-browser.jsonl"),
+            Some(("edge-browser".to_owned(), String::new()))
+        );
+        assert!(parse_log_name("edge-other.jsonl").is_none());
+        assert!(parse_log_name("orchestrator.jsonl").is_none());
+    }
+
+    #[test]
+    fn a_full_edge_log_is_rotated_so_the_edge_can_write_again_and_a_partial_one_stays() {
+        let root = temp_root("edge-rotation");
+        let directory = root.join("diagnostics");
+        fs::create_dir_all(&directory).expect("dir");
+        let full = vec![b'm'; usize::try_from(EDGE_LOG_FULL_BYTES).unwrap()];
+        fs::write(directory.join("edge-mcp.jsonl"), &full).expect("full edge log");
+        fs::write(directory.join("edge-browser.jsonl"), b"{}\n").expect("partial edge log");
+        prune_directory(&directory);
+        let remaining: Vec<String> = fs::read_dir(&directory)
+            .expect("dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !remaining.contains(&"edge-mcp.jsonl".to_owned()),
+            "{remaining:?}"
+        );
+        let rotated = remaining
+            .iter()
+            .find(|name| name.ends_with("-edge-mcp-0.jsonl"))
+            .expect("the full log keeps a stamped name");
+        assert_eq!(
+            parse_log_name(rotated).map(|(component, _)| component),
+            Some("edge-mcp".to_owned())
+        );
+        assert_eq!(fs::read(directory.join(rotated)).unwrap(), full);
+        assert!(remaining.contains(&"edge-browser.jsonl".to_owned()));
     }
 
     #[test]
