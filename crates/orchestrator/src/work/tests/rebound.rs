@@ -296,6 +296,35 @@ fn saving_a_recording_to_a_target_after_a_followed_describe_reports_rebound() {
     assert!(audit.0.lock().unwrap().last().unwrap().observed.rebound);
 }
 
+#[test]
+fn a_save_the_page_did_not_take_keeps_the_recording_and_names_a_file_input() {
+    let (executor, browser, workspace, _audit, _, target) = found_target();
+    browser.push(Ok(BrowserOutcome::RecordingStopped {
+        summary: recording_summary(RecordingState::Frozen, "https://example.com/"),
+        changed: false,
+    }));
+    browser.push(Ok(described(false)));
+    browser.push(Ok(BrowserOutcome::RecordingExportFailed {
+        reason: "the page did not accept the replay".into(),
+        page_refused: true,
+    }));
+
+    let result = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"save","target":target}),
+        None,
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(result.status, Status::Failed, "{result:?}");
+    assert_eq!(
+        result.summary,
+        "The page did not take the replay at that target, so nothing was attached; the recording is kept."
+    );
+    assert!(result.next_steps[0].contains("file input"), "{result:?}");
+}
+
 /// A page-target save run twice: once when describing the target followed its handle and once
 /// when it did not. Returns the followed run, the plain run and the followed run's audit.
 fn after_saving_to_a_target() -> (

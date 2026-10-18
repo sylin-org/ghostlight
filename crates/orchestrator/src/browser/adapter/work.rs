@@ -1175,8 +1175,9 @@ pub enum BrowserOutcome {
         encoded: EncodedRecording,
         delivery: RecordingDelivery,
     },
-    /// The browser could not encode or deliver the recording.
-    RecordingExportFailed { reason: String },
+    /// The browser could not encode or deliver the recording. `page_refused` says the page did
+    /// not take the replay at the save's target; the recording is kept either way.
+    RecordingExportFailed { reason: String, page_refused: bool },
     /// Extension memory was decisively erased.
     RecordingDiscarded { released_bytes: usize },
     /// The workspace already holds a recording, so none was started.

@@ -1276,6 +1276,11 @@ pub struct DiagnosticsFacts {
     pub cleared_count: usize,
 }
 
+/// The reason a protocol-4 extension gives when the page did not take a replay at the save's
+/// target: the target is not a file input, or not one that takes it. The words are the
+/// extension's (`buffers.js`), fixed for protocol 4.
+pub const PAGE_REFUSED_REPLAY: &str = "the page did not accept the replay";
+
 /// Outcome of `recording`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
@@ -1310,7 +1315,7 @@ pub enum RecordingFacts {
     },
     /// The export could not complete.
     ExportFailed {
-        /// Bounded reason.
+        /// Bounded reason. [`PAGE_REFUSED_REPLAY`] says the page did not take the replay.
         reason: String,
     },
     /// The recording was erased.

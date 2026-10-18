@@ -1493,6 +1493,8 @@ pub enum Refusal {
     RecordingHeld,
     /// Retained recording frames could not produce a bounded GIF.
     RecordingExportFailed,
+    /// The page did not take a saved replay at the target the call named; the recording is kept.
+    RecordingNotAttached,
     /// The action was applied, but the condition the caller asked to check was not confirmed.
     ///
     /// The job did complete its effect. What it could not do is confirm the expected page state
@@ -1618,6 +1620,9 @@ impl Refusal {
             Self::RecordingUnavailable => "This session has no recording.",
             Self::RecordingHeld => "This session already has a recording.",
             Self::RecordingExportFailed => "The recording could not be turned into a replay.",
+            Self::RecordingNotAttached => {
+                "The page did not take the replay at that target, so nothing was attached; the recording is kept."
+            }
             Self::ActionUnconfirmed { action, cause } => {
                 return unconfirmed_summary(action, *cause);
             }
@@ -1768,6 +1773,7 @@ impl Refusal {
                 "Inspect recording status, then discard it or start a shorter recording."
                     .into(),
             ],
+            Self::RecordingNotAttached => vec!["Save again with target set to a file input that takes images (browser_inspect lists inputs of type file), or with download true.".into()],
             Self::EffectUnknown | Self::ConnectionLost | Self::CancelledAfterDispatch => vec![
                 "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly."
                     .into(),
@@ -3354,6 +3360,10 @@ Changes are \"unsaved\".".into()),
             (
                 Refusal::RecordingExportFailed,
                 "The recording could not be turned into a replay.",
+            ),
+            (
+                Refusal::RecordingNotAttached,
+                "The page did not take the replay at that target, so nothing was attached; the recording is kept.",
             ),
             (
                 Refusal::DeadlineExpired {

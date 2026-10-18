@@ -303,9 +303,10 @@ pub fn recorded(l: &Link<'_>, facts: wire::RecordingFacts) -> Result<BrowserOutc
                 delivery: delivery.try_into().map_err(unknown)?,
             }
         }
-        wire::RecordingFacts::ExportFailed { reason } => {
-            BrowserOutcome::RecordingExportFailed { reason }
-        }
+        wire::RecordingFacts::ExportFailed { reason } => BrowserOutcome::RecordingExportFailed {
+            page_refused: reason == wire::PAGE_REFUSED_REPLAY,
+            reason,
+        },
         wire::RecordingFacts::Discarded { released_bytes, .. } => {
             l.recordings().forget(l.workspace());
             BrowserOutcome::RecordingDiscarded { released_bytes }

@@ -121,6 +121,7 @@ pub enum AuditRefusal {
     RecordingUnavailable,
     RecordingHeld,
     RecordingExportFailed,
+    RecordingNotAttached,
     ActionUnconfirmed { cause: CheckFailure },
 }
 
@@ -219,6 +220,7 @@ impl Refusal {
             Self::RecordingUnavailable => AuditRefusal::RecordingUnavailable,
             Self::RecordingHeld => AuditRefusal::RecordingHeld,
             Self::RecordingExportFailed => AuditRefusal::RecordingExportFailed,
+            Self::RecordingNotAttached => AuditRefusal::RecordingNotAttached,
             Self::ActionUnconfirmed { cause, .. } => {
                 AuditRefusal::ActionUnconfirmed { cause: *cause }
             }

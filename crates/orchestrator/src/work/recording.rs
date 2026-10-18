@@ -255,9 +255,10 @@ impl ApplicationExecutor {
             }) if summary.state != RecordingState::Recording => {
                 self.recording_delivered(context, decision, &summary, encoded, delivery, rebound)
             }
-            Ok(BrowserOutcome::RecordingExportFailed { reason }) => {
-                self.recording_export_failure(context, &reason)
-            }
+            Ok(BrowserOutcome::RecordingExportFailed {
+                reason,
+                page_refused,
+            }) => self.recording_export_failure(context, &reason, page_refused),
             Ok(outcome @ BrowserOutcome::RecordingNotFound) => {
                 self.recording_selection_failure(context, outcome)
             }
@@ -543,12 +544,23 @@ impl ApplicationExecutor {
         self.failed(context, Decision::permitted(), None, refusal, facts)
     }
 
-    fn recording_export_failure(&self, context: &InvocationContext<'_>, reason: &str) -> Terminal {
+    /// A save that did not finish. A page that did not take the replay is a target to change, not
+    /// a recording to give up: the recording is kept for another save.
+    fn recording_export_failure(
+        &self,
+        context: &InvocationContext<'_>,
+        reason: &str,
+        page_refused: bool,
+    ) -> Terminal {
         self.failed(
             context,
             Decision::permitted(),
             None,
-            Refusal::RecordingExportFailed,
+            if page_refused {
+                Refusal::RecordingNotAttached
+            } else {
+                Refusal::RecordingExportFailed
+            },
             json!({"reason":bounded(reason, 160)}),
         )
     }

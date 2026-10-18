@@ -423,6 +423,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::RecordingUnavailable => "RecordingUnavailable",
         Refusal::RecordingHeld => "RecordingHeld",
         Refusal::RecordingExportFailed => "RecordingExportFailed",
+        Refusal::RecordingNotAttached => "RecordingNotAttached",
         Refusal::ActionUnconfirmed { .. } => "ActionUnconfirmed",
     }
 }
@@ -464,6 +465,7 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "RecordingUnavailable",
     "RecordingHeld",
     "RecordingExportFailed",
+    "RecordingNotAttached",
     "ActionUnconfirmed",
 ];
 
@@ -978,6 +980,7 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::RecordingUnavailable,
         Refusal::RecordingHeld,
         Refusal::RecordingExportFailed,
+        Refusal::RecordingNotAttached,
     ];
     samples.extend(rejected_fill_samples());
     samples.extend(reverted_fill_samples());

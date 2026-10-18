@@ -710,6 +710,36 @@ fn a_written_command_reached_the_browser_whatever_its_failure() {
 }
 
 #[test]
+fn a_save_the_page_did_not_take_is_told_apart_from_one_that_could_not_be_made() {
+    let next = Arc::new(Mutex::new(answer(json!({"result": "export_failed",
+        "reason": wire::PAGE_REFUSED_REPLAY}))));
+    let (port, _fake) = port(scripted(&next));
+    recordings(&port).learn(WORKSPACE, "recording_1");
+    let save = || BrowserCommand::ExportRecording {
+        destination: RecordingDestination::Download {
+            file_name: "flow.gif".into(),
+        },
+        max_output_bytes: 4096,
+    };
+
+    assert_eq!(
+        call(&port, save()),
+        Ok(BrowserOutcome::RecordingExportFailed {
+            reason: wire::PAGE_REFUSED_REPLAY.into(),
+            page_refused: true,
+        })
+    );
+    *next.lock().unwrap() = answer(json!({"result": "export_failed", "reason": "encoder failed"}));
+    assert_eq!(
+        call(&port, save()),
+        Ok(BrowserOutcome::RecordingExportFailed {
+            reason: "encoder failed".into(),
+            page_refused: false,
+        })
+    );
+}
+
+#[test]
 fn a_workspace_reaches_only_its_one_recording_without_naming_it() {
     let next = Arc::new(Mutex::new(answer(
         json!({"result": "status", "summary": summary()}),
