@@ -514,14 +514,14 @@ fn read_until_end(reader: &mut impl Read, mut on_frame: impl FnMut(DesktopFrame)
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::path::Path;
     use std::sync::mpsc;
 
     use ghostlight_relay::endpoint::Listener;
     use ghostlight_relay::protocol::{RefusalCode, Reply};
 
     use super::*;
+    use crate::scratch::Scratch;
     use crate::tray::TrayState;
 
     const URL: &str = "http://127.0.0.1:41234/";
@@ -924,27 +924,9 @@ mod tests {
         );
     }
 
-    static HOMES: AtomicUsize = AtomicUsize::new(0);
-
     /// A fresh home directory, removed on drop.
-    struct Home(PathBuf);
-
-    impl Home {
-        fn new() -> Self {
-            let directory = std::env::temp_dir().join(format!(
-                "ghostlight-desktop-link-{}-{}",
-                std::process::id(),
-                HOMES.fetch_add(1, Ordering::SeqCst)
-            ));
-            std::fs::create_dir_all(&directory).unwrap();
-            Self(directory)
-        }
-    }
-
-    impl Drop for Home {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
+    fn fresh_home() -> Scratch {
+        Scratch::named("link")
     }
 
     /// A service that accepts one shell, answers `reply` and writes `frames`. Joining it returns
@@ -980,9 +962,9 @@ mod tests {
 
     #[test]
     fn the_link_opens_as_the_desktop_shell_and_ends_once_at_the_goodbye() {
-        let home = Home::new();
+        let home = fresh_home();
         let service = fake_service(
-            &home.0,
+            home.path(),
             accepted(),
             vec![
                 workbench_frame(URL),
@@ -992,7 +974,7 @@ mod tests {
             ],
         );
         let (link, workbench) =
-            open_link(&home.0, View::Window).expect("the workbench is handed over");
+            open_link(home.path(), View::Window).expect("the workbench is handed over");
         assert_eq!(workbench.url, URL);
         assert_eq!(workbench.bearer, BEARER);
         assert_eq!(workbench.tray, tray());
@@ -1021,8 +1003,8 @@ mod tests {
 
     #[test]
     fn a_tray_click_reaches_the_service() {
-        let home = Home::new();
-        let listener = Listener::bind_first(&home.0).unwrap();
+        let home = fresh_home();
+        let listener = Listener::bind_first(home.path()).unwrap();
         let (clicked, rx) = mpsc::channel();
         let service = thread::spawn(move || {
             let mut shell = listener.accept().unwrap();
@@ -1032,7 +1014,7 @@ mod tests {
             let heard: DesktopFrame = frame::read_frame(&mut shell).unwrap().unwrap();
             clicked.send(heard).unwrap();
         });
-        let (link, _) = open_link(&home.0, View::Window).unwrap();
+        let (link, _) = open_link(home.path(), View::Window).unwrap();
         link.send_tray(TrayItemId::Resume).unwrap();
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -1045,8 +1027,8 @@ mod tests {
 
     #[test]
     fn an_act_result_reaches_the_service_and_a_request_reaches_the_shell() {
-        let home = Home::new();
-        let listener = Listener::bind_first(&home.0).unwrap();
+        let home = fresh_home();
+        let listener = Listener::bind_first(home.path()).unwrap();
         let (heard, rx) = mpsc::channel();
         let service = thread::spawn(move || {
             let mut shell = listener.accept().unwrap();
@@ -1066,7 +1048,7 @@ mod tests {
             let answer: DesktopFrame = frame::read_frame(&mut shell).unwrap().unwrap();
             heard.send(answer).unwrap();
         });
-        let (link, _) = open_link(&home.0, View::Window).unwrap();
+        let (link, _) = open_link(home.path(), View::Window).unwrap();
         let (asked, requests) = mpsc::channel();
         link.spawn_reader(move |request| asked.send(request).unwrap(), |_| {})
             .unwrap();
@@ -1087,9 +1069,9 @@ mod tests {
 
     #[test]
     fn the_stream_ending_ends_the_link() {
-        let home = Home::new();
-        let service = fake_service(&home.0, accepted(), vec![workbench_frame(URL)]);
-        let (link, _) = open_link(&home.0, View::Window).unwrap();
+        let home = fresh_home();
+        let service = fake_service(home.path(), accepted(), vec![workbench_frame(URL)]);
+        let (link, _) = open_link(home.path(), View::Window).unwrap();
         drop(service.join().unwrap());
         let (ended, rx) = mpsc::channel();
         link.spawn_reader(|_| {}, move |end| ended.send(end).unwrap())
@@ -1103,13 +1085,13 @@ mod tests {
 
     #[test]
     fn a_first_frame_with_another_address_is_a_contract_failure() {
-        let home = Home::new();
+        let home = fresh_home();
         let service = fake_service(
-            &home.0,
+            home.path(),
             accepted(),
             vec![workbench_frame("http://localhost:1/")],
         );
-        let failure = open_link(&home.0, View::Window)
+        let failure = open_link(home.path(), View::Window)
             .err()
             .expect("the address is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
@@ -1118,9 +1100,9 @@ mod tests {
 
     #[test]
     fn a_first_frame_of_already_open_is_the_already_open_failure() {
-        let home = Home::new();
-        let service = fake_service(&home.0, accepted(), vec![DesktopFrame::AlreadyOpen]);
-        let failure = open_link(&home.0, View::Window)
+        let home = fresh_home();
+        let service = fake_service(home.path(), accepted(), vec![DesktopFrame::AlreadyOpen]);
+        let failure = open_link(home.path(), View::Window)
             .err()
             .expect("the shell is turned away");
         assert!(matches!(failure, LinkError::AlreadyOpen), "{failure:?}");
@@ -1129,9 +1111,9 @@ mod tests {
 
     #[test]
     fn a_first_frame_that_is_not_the_workbench_is_a_contract_failure() {
-        let home = Home::new();
-        let service = fake_service(&home.0, accepted(), vec![DesktopFrame::Unknown]);
-        let failure = open_link(&home.0, View::Window)
+        let home = fresh_home();
+        let service = fake_service(home.path(), accepted(), vec![DesktopFrame::Unknown]);
+        let failure = open_link(home.path(), View::Window)
             .err()
             .expect("the frame is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
@@ -1140,9 +1122,9 @@ mod tests {
 
     #[test]
     fn a_bearer_of_the_wrong_shape_is_a_contract_failure() {
-        let home = Home::new();
+        let home = fresh_home();
         let service = fake_service(
-            &home.0,
+            home.path(),
             accepted(),
             vec![DesktopFrame::Workbench {
                 url: URL.to_owned(),
@@ -1150,7 +1132,7 @@ mod tests {
                 tray: tray(),
             }],
         );
-        let failure = open_link(&home.0, View::Window)
+        let failure = open_link(home.path(), View::Window)
             .err()
             .expect("the bearer is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
@@ -1160,13 +1142,13 @@ mod tests {
 
     #[test]
     fn a_refused_opening_carries_the_services_words() {
-        let home = Home::new();
+        let home = fresh_home();
         let service = fake_service(
-            &home.0,
+            home.path(),
             Reply::refused(RefusalCode::Capacity, "Another window is open.".to_owned()),
             Vec::new(),
         );
-        let failure = open_link(&home.0, View::Window)
+        let failure = open_link(home.path(), View::Window)
             .err()
             .expect("the opening is refused");
         match failure {
@@ -1181,8 +1163,8 @@ mod tests {
 
     #[test]
     fn no_service_is_a_connect_failure() {
-        let home = Home::new();
-        let failure = open_link(&home.0, View::Window)
+        let home = fresh_home();
+        let failure = open_link(home.path(), View::Window)
             .err()
             .expect("nothing listens");
         assert!(

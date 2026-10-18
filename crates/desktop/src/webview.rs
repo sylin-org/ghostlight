@@ -191,11 +191,10 @@ mod tests {
 
     #[test]
     fn preparing_the_profile_creates_the_folder_and_is_repeatable() {
-        let root = std::env::temp_dir().join(format!("ghostlight-profile-{}", std::process::id()));
+        let root = crate::scratch::Scratch::named("profile");
         let directory = profile_directory(&root);
         prepare_profile(&directory).expect("the folder is created");
         assert!(directory.is_dir());
         prepare_profile(&directory).expect("an existing folder is accepted");
-        std::fs::remove_dir_all(&root).expect("the test folder is removed");
     }
 }

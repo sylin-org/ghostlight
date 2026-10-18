@@ -27,18 +27,30 @@ const ENDS_WITHIN: Duration = Duration::from_secs(10);
 /// The environment variable that names the Ghostlight home.
 const HOME_VARIABLE: &str = "GHOSTLIGHT_TEST_HOME";
 
-/// An empty temporary Ghostlight home, removed on drop.
+/// The start of every temporary home's name, as the crate's unit tests name theirs.
+const SCRATCH_PREFIX: &str = "ghostlight-test-desktop-loads";
+
+/// An empty temporary Ghostlight home, removed with everything in it on drop, also when the test
+/// panics and unwinds.
 struct EmptyHome(PathBuf);
 
 impl EmptyHome {
+    /// A fresh directory whose name carries `name`. It is made with `create_dir`, so it is never
+    /// an earlier run's leftover.
     fn new(name: &str) -> Self {
-        let directory = std::env::temp_dir().join(format!(
-            "ghostlight-desktop-loads-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&directory);
-        std::fs::create_dir_all(&directory).expect("the empty home is made");
-        Self(directory)
+        let base = std::env::temp_dir();
+        let mut attempt = 0u32;
+        loop {
+            let directory = base.join(format!(
+                "{SCRATCH_PREFIX}-{name}-{}-{attempt}",
+                std::process::id()
+            ));
+            match std::fs::create_dir(&directory) {
+                Ok(()) => return Self(directory),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => attempt += 1,
+                Err(error) => panic!("cannot create {}: {error}", directory.display()),
+            }
+        }
     }
 }
 

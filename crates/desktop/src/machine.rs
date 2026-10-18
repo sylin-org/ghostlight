@@ -1118,7 +1118,8 @@ mod tests {
 
     #[test]
     fn the_image_of_a_file_reads_its_metadata_and_a_missing_file_has_none() {
-        let path = std::env::temp_dir().join(format!("ghostlight-image-{}", std::process::id()));
+        let scratch = crate::scratch::Scratch::named("image");
+        let path = scratch.join("image");
         std::fs::write(&path, b"abc").unwrap();
         let image = Image::of(&path).expect("the file has metadata");
         assert_eq!(image.length, 3);
