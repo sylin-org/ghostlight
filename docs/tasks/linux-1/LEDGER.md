@@ -9,9 +9,9 @@ L01 to L04 passed (L03 with a scope change: the owner directed on 2026-10-17 tha
 uses the real installation and the real system browser, never a sandbox). The owner then let this
 session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed and proven on the
 real install (see L04). L05 passed after six fixes in the shell, the service and the window, and
-L06 after three (see each). The development build at 56c49dc4 is installed in the real
-`~/.ghostlight`, the system Chromium's ordinary profile is connected, and diagnostics are on.
-Next: L07, the extension and the browser.
+L06 after three and L07 after five (see each). The development build at 7769fd97 is installed in
+the real `~/.ghostlight`, the system Chromium's ordinary profile is connected, `browser.startup`
+is on_demand as before, and diagnostics are on. Next: L08, setup on a fresh home.
 
 ## Tasks
 
@@ -336,7 +336,7 @@ Defects found and fixed (each deployed and checked on the real install):
    did): one active window in 54 ms, and a second `open` reuses it. Over SSH, `open` says why at
    once (7 ms).
 
-### L07 The extension and the browser (todo)
+### L07 The extension and the browser (pass, after fixes)
 
 Load `extension/` unpacked in Chrome or Chromium. The popup and the options page in each state
 (j06, j07 in journey.md); `chrome-extension://<id>/setup.html`. Then real agent work through
@@ -344,6 +344,59 @@ Ghostlight on https://sylin.org/ghostlight/demo/ stages (navigate, find, fill a 
 composed iframe stage, a screenshot handed back to the studio page). With the browser closed and
 `browser.startup` at its Linux default (manual), an agent request names the browser and starts
 nothing; with on_demand set, it starts the browser that last connected.
+
+Result, 2026-10-17, on the real installation with the system Chromium's ordinary profile; the
+extension is loaded from `extension/` by the machine's `ghostlight-browser` launcher
+(`--load-extension`). The agent was a long-lived MCP session on `ghostlight mcp`; the popup, the
+options page, the setup page and the window were driven through the real pointer and read from
+screenshots.
+
+- Popup (j06): Ready ("No agent is browsing."), "linux-1 agent is browsing." while a tab-bound
+  call runs (with the page's working indicator), Paused (accent Resume, a pause badge), Session
+  ended (Start a new session; a call meanwhile gets the fixed directive), Not connected ("Open
+  Ghostlight on this computer. It is in your applications."), Recording ("Recording in 1 tab.",
+  a REC badge) and Release debugger session, which detaches and leaves. Not covered: Update
+  needed (needs an older service), the key cap (this Chromium has no shortcut set), Edge.
+- Options (j07): the Not connected card with no setup button; every switch saves and survives a
+  reload; captions dim while effects are off. Not covered: 390 px, reduced motion, the
+  diagnostics download, the setup-button state (needs the host absent).
+- Setup page: "Open Ghostlight on this computer" and "Waiting for this computer" while the
+  service is down; on its own, once Ghostlight starts, "Your browser and this computer are
+  connected. One step left: your agent."; Open Ghostlight brings the window forward.
+- Demo work: the desk (find, click, the bell's prompt answered), the form filled and submitted on
+  a tab not in front ("Form received."), the embedded partner form across its frame ("Application
+  received", "Composed frame verified"), the Capture Studio (a screenshot handed back, "developed
+  locally"), and a recording saved into the page.
+- `browser.startup`, set through the Policy tab: manual answers in 9 ms that the user should open
+  a Chromium window and starts nothing; on_demand starts `/usr/lib/chromium/chromium` with no
+  arguments. On this machine that browser has no extension (only the launcher loads it), so the
+  call ends with the handshake timeout; a store or "Load unpacked" install would connect.
+
+Defects found and fixed (each deployed and checked on the real install):
+
+1. efe54caf: a screenshot of a session tab that is not the one its window shows (a second tab,
+   or two sessions in one Ghostlight window) waited for a frame Chromium never draws, failed at
+   its deadline (8 s, or 30 s), and told the model to use a longer timeout. It is now refused at
+   once (`tab_not_showing`) with the focus step: 9 ms, then 242 ms after focus.
+2. 5c4adb4d: `diagnostics show` printed the invocation id and the tool as one word.
+3. be54ad44: browser_record status said "Recording ... so far" for a stopped recording.
+4. 6734f99b: a save whose target is not a file input said the recording could not be made and
+   advised discarding it, though the GIF was fine. It now says the page did not take it and the
+   recording is kept (`recording_not_attached`), with a file input or a download as the step.
+5. 7769fd97: the browser the service started on demand was never reaped (a `<defunct>` chromium
+   under the service until it exited) and shared the service's process group.
+
+Seen and left, for the owner or the coordinator:
+
+- The extension names no browser on plain Chromium (it treats the Chromium brand as generic), so
+  no last-browser record is written for it (ADR-0149 amendment: a name that maps to none writes
+  nothing). With Chrome remembered and the person since moved to Chromium, on_demand would start
+  Chrome. Linux defaults to manual, which starts nothing.
+- An upload's sentence calls a file input a "text field": the page assets give `input type=file`
+  the textbox role, which inspect also shows. Changing the role changes what inspect tells the
+  model, so it is a deliberate choice.
+- During a flow, the popup says no agent is browsing between steps that touch no tab, since its
+  activity follows the notices of tab-bound work.
 
 ### L08 Setup on a fresh home (todo)
 
