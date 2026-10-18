@@ -524,8 +524,13 @@ pub enum Outcome {
     },
     /// A memory-only recording began.
     RecordingStarted { host: Option<String> },
-    /// Memory-only recording state was read.
-    RecordingObserved { frames: usize, duration_ms: u64 },
+    /// Memory-only recording state was read. `active` is whether capture is still running; a
+    /// recording that stopped keeps its frames for a save.
+    RecordingObserved {
+        frames: usize,
+        duration_ms: u64,
+        active: bool,
+    },
     /// An active memory-only recording stopped.
     RecordingStopped { duration_ms: u64 },
     /// Recording ended when its admitted document scope could no longer be verified.
@@ -876,8 +881,18 @@ impl Outcome {
             Self::RecordingObserved {
                 frames,
                 duration_ms,
+                active: true,
             } => format!(
                 "Recording for {}, {} so far.",
+                spanned(*duration_ms),
+                counted(*frames, "frame", "frames")
+            ),
+            Self::RecordingObserved {
+                frames,
+                duration_ms,
+                active: false,
+            } => format!(
+                "A stopped recording of {} with {} is ready to save.",
                 spanned(*duration_ms),
                 counted(*frames, "frame", "frames")
             ),
@@ -2717,8 +2732,17 @@ Changes are \"unsaved\".".into()),
                 Outcome::RecordingObserved {
                     frames: 3,
                     duration_ms: 1200,
+                    active: true,
                 },
                 "Recording for 1 second, 3 frames so far.",
+            ),
+            (
+                Outcome::RecordingObserved {
+                    frames: 35,
+                    duration_ms: 20_598,
+                    active: false,
+                },
+                "A stopped recording of 21 seconds with 35 frames is ready to save.",
             ),
             (
                 Outcome::RecordingStopped {

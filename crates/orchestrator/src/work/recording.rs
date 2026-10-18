@@ -521,6 +521,7 @@ impl ApplicationExecutor {
                 Outcome::RecordingObserved {
                     frames: summary.frame_count,
                     duration_ms: summary.duration_ms,
+                    active: summary.state == RecordingState::Recording,
                 }
             },
             recording_facts(summary),

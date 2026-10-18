@@ -865,6 +865,12 @@ fn outcome_samples() -> Vec<Outcome> {
         Outcome::RecordingObserved {
             frames: 10,
             duration_ms: 2_000,
+            active: true,
+        },
+        Outcome::RecordingObserved {
+            frames: 10,
+            duration_ms: 2_000,
+            active: false,
         },
         Outcome::RecordingStopped { duration_ms: 2_000 },
         Outcome::RecordingBoundary { duration_ms: 2_000 },
