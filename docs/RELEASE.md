@@ -260,7 +260,8 @@ The cutover, in one sitting, in this order:
    command, Add in the window, the store's 2.0 extension, the first prompt, and Ready.
 7. Commit the public state on `dev` from what step 6 and the channels show:
    `docs/public-status.json`, `server.json`, `compatibility.json`, the README's "Where it stands
-   today" block and its release details, `llms-install.md`, the installation guide, the trust
+   today" block and its release details, `llms-install.md`, the installation guide (both keep
+   their WinGet caveat, since the WinGet manifest is submitted only in step 9), the trust
    pages' "currently serve" lines (`supply-chain.md`, `faq.md`), and the date `v2.0.0` became the
    latest release in place of `Unreleased` in the CHANGELOG `[2.0.0]` heading (the tag keeps
    `Unreleased`). `scripts/check-public-surfaces.ps1 -Online` must pass. Then fast-forward `main`
@@ -271,8 +272,11 @@ The cutover, in one sitting, in this order:
 9. Submit the WinGet manifests once the `v2.0.0` archive is observable:
    `scripts/prepare-winget-manifest.ps1 -CandidateDirectory dist/release-candidate -ValidateWinGet`,
    then a pull request to `microsoft/winget-pkgs`. Until it merges, `winget install
-   Sylin.Ghostlight` installs 1.x, which the 2.0 extension refuses; the release notes say so, and
-   the step 7 commit keeps the README's WinGet line only if it has merged.
+   Sylin.Ghostlight` installs 1.x, which the 2.0 extension refuses; the release notes, the README
+   and the installation guide say so.
+10. Once the `microsoft/winget-pkgs` pull request merges, commit on `dev` the README and
+    installation guide lines that say WinGet carries 2.0, in place of the caveat, and fast-forward
+    `main` to that commit.
 
 The MCP Registry and WinGet follow their observable inputs and never hold the steps before them.
 

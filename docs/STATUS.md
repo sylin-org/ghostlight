@@ -100,7 +100,8 @@ the 2.0 privacy text on the public page, the staged store submission and its app
 sitting: `v2.0.0` as latest, `main` fast-forwarded, the npm launcher published, the frozen install
 strings proved, the staged extension published, a clean-profile run of the public path on Windows
 and Linux, the public-state commit with a second fast-forward of `main` and a website rebuild, the
-MCP Registry record and the WinGet manifests. Not before approval.
+MCP Registry record and the WinGet manifests, and once winget-pkgs merges them, the README and
+installation guide lines that say WinGet carries 2.0. Not before approval.
 
 ## CI
 
@@ -155,5 +156,7 @@ The cutover, in one sitting (`docs/RELEASE.md`, The 2.0 cutover):
 - Coordinator drafts, owner pushes: the public-state commit, the second fast-forward of `main`
   and the website rebuild.
 - Owner: the MCP Registry record and the WinGet manifests.
+- Coordinator drafts, owner pushes: once winget-pkgs merges the 2.0.0 manifest, the README and
+  installation guide lines that say WinGet carries 2.0, and a fast-forward of `main`.
 
 Tags, publication and store actions are the owner's call.

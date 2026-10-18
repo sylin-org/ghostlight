@@ -236,7 +236,9 @@ On Windows, WinGet is another way to install: `winget install Sylin.Ghostlight`,
 `ghostlight install` once. The self-contained Claude Desktop MCPB is a third. Every route puts the
 three executables in `~/.ghostlight/bin`: WinGet only delivers them, and `ghostlight install`
 copies them there. After `winget upgrade`, the next `ghostlight install` carries the newer version
-there. An older copy never replaces a newer one.
+there. An older copy never replaces a newer one. WinGet carries 2.0 once its 2.0.0 manifest is
+accepted into winget-pkgs; until then `winget install Sylin.Ghostlight` installs a 1.x release, so
+use the one-line installer.
 
 <details>
 <summary><strong>Current release and compatibility</strong></summary>
