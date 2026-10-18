@@ -702,7 +702,13 @@ workbench shows waiting becoming running once.
 ## Connection reporting (ADR-0161)
 
 - Two different connections sharing one workspace, and the actual MCP edge, each receive their
-  own service-issued connection identity and channel. No executable or signature is observed.
+  own service-issued connection identity and channel.
+- Each `mcp` and `cli` connection carries the source the service observed when it opened
+  (ADR-0161, amendment of 2026-10-18). The service reads it from the ancestors of the peer process,
+  never from anything the client sends. It is a catalog agent id when an ancestor's executable lies
+  in that agent's installed app, else the file name of the nearest ancestor that is not a wrapper.
+  It is never a path and never authority. A failed process read leaves it unknown and does not fail
+  the connection. Records without a source still read.
 - Active, queued, composed, preparation-failed, cancelled, capacity-refused, and invalid work keep
   their original connection evidence. A later connection or released workspace cannot rewrite it.
 - Each reconnect gets new evidence. Session details retain plural active connections and remove
@@ -710,11 +716,12 @@ workbench shows waiting becoming running once.
 - Raw reported application names remain in bounded live human details only. Serialized audit and
   enabled service and edge diagnostics exclude unique claim sentinels. Durable history retains
   bounded evidence after restart; history written before connection identities existed says so.
-- Human details show the reported application, the connection and its channel, with one sentence
-  that says what the connection does and does not establish. Details are quiet by default, escape
-  claims, preserve expansion/focus on refresh, and fit a narrow workbench.
+- Human details show the reported application, the connection, its channel and its source when
+  known, with one sentence that says what the connection does and does not establish. Details are
+  quiet by default, escape claims, preserve expansion/focus on refresh, and fit a narrow workbench.
 
-This foundation adds no executable observation, signature/hash verifier or identity admission.
+The source is display and history evidence only. No signature or hash verifier and no identity
+admission is added.
 
 ## Consolidated tool surface (ADR-0162)
 
