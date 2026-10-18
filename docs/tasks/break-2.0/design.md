@@ -122,11 +122,12 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 
 ## RESUME HERE
 
-Every slice through t06, t01 and t02 included, is on `dev` and pushed. What remains: the owner's
-live looks (the e02, e03, f01 and t03 owed checks, and the Windows-only t04 and t05 checks; t06's
-was paid on 2026-10-18), and the browser lane's `history-browser` journey
-in CI (d08 note 1). The owed Linux checks of c00, c12, e01 and e02's Linux build were paid by
-linux-1 L02 at 17a0c060.
+Every slice through t06, t01 and t02 included, is on `dev` and pushed. On 2026-10-18 the owner's
+look at the deployed window paid the window checks (d00 to d07, c01, e02, e03, f01, t03), the
+Store Claude Desktop check (t04, Connect pressed), and live dry runs paid t05 and c11; CI paid d08.
+Still open: c02 (the setup view with setup incomplete), c03 (acts from a terminal inside the Codex
+app), e01's removal-and-Re-check step, and c12's look at the rendered table on GitHub. Next: the
+product owner's pass before the release candidate.
 
 ## Landed
 
@@ -170,6 +171,7 @@ owner before anything is pushed.
   still show the reported name ("Reported application: codex-mcp-client"). With setup incomplete,
   a Codex session turns the setup view's Codex row Connected. A restored history row of an MCP
   agent still shows its short workspace id until d02 says "Unknown agent".
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - d01-glance-summary: in the window, At a glance shows one pill ("3 agents", "N browsers",
   Details). Details opens the agent and browser shelves; a working agent's glyph breathes teal
   (still with reduced motion on); each browser chip shows its tab count. Pressing an agent opens
@@ -179,6 +181,7 @@ owner before anything is pushed.
   `browser.startup` set to `manual` it says "No browser connected". A watching browser tab shows
   the same pill, shelves and card. The open pill and card survive a new session arriving, a call
   queued behind a running one, Clear view and a stream reconnect.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 
 - d02-activity-names: in the window's Activity list, rows read "navigate", "fill form", "press
   key" with the icon first, and hovering a tool shows its exact name (`browser_fill_form`), which
@@ -190,6 +193,7 @@ owner before anything is pushed.
   sent.") shows no browser, and the agent's card line for that session names no browser either.
   With the browser connected, a `policy_explain` row and a row refused for invalid input show no
   browser, while a `browser_tabs` row of the same session names it.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - d04-integrations: open Integrations in the window, at 1200 and at 800 px wide. The header reads
   "Ghostlight is in all N of your agents." (or "N of your M agents.") with Re-check, Set up
   everything and Copy MCP command in one row and the command shown small under them; with
@@ -209,10 +213,13 @@ owner before anything is pushed.
   question name it without a reload. Only the rail and the pane scroll, and Ghostlight's entry is shown whole. A watching
   browser tab shows the same page with Copy setup and Install as plain controls and the one
   Continue line.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - d05-design-tidy: the window's search finds the page as "Integrations". A session whose client
   sent no name shows one "Unknown agent" chip on the At a glance shelf, never a blank one.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - d08-catalog-finish: CI's browser lane passes `history-browser` (`tests/workbench-history-browser.mjs`),
   which was ported here and not run (note 1).
+  Paid by CI: the browser lane passed `history-browser` in runs 39089218896, 39090209135 and 39137323190.
 - d07-agent-catalog: with Codex, Claude Code and a `ghostlight call` connected, each agent wears the
   same tile in the summary pill, on its shelf chip, in its card's head and on the Integrations rail
   and pane (Codex's CX, Claude Code's CC, never initials or the spark); a working agent's face has
@@ -221,6 +228,7 @@ owner before anything is pushed.
   shows the unknown glyph (a circled question mark) beside "Unknown agent", and a restored MCP row in
   Activity reads "Unknown agent" with the workspace id on hover. A watching browser tab shows the
   same faces.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - c00-writer-golden: CI's Linux test job passes `install::writer_golden` against the files recorded
   on Windows (`writes/` and `native/linux.txt`), and compiles the Linux-only Codex tests this slice
   edited (note 4). Nothing changes for
@@ -231,6 +239,7 @@ owner before anything is pushed.
   Install on Cline (Visual Studio Code) opens the Visual Studio Marketplace page of the Cline
   extension, on Cline (Cursor) and Cline (Windsurf) the Cline installing page, and on Cline (CLI)
   the Cline CLI page. A watching browser tab's Install link goes to the same pages.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - c02-setup-view-rules: with setup incomplete and a browser connected, the setup view's agent step:
   goose or Continue, when found, reads "Found, set up by hand" with Copy setup, and the copy pastes
   the same entry as Integrations; an agent with an older entry reads "Needs an update" with Update;
@@ -255,6 +264,7 @@ owner before anything is pushed.
   the ids. On Linux with the completions installed, `ghostlight install --client <Tab>`
   offers the ids in bash, zsh and fish (only the bash file was syntax-checked here; this machine
   has no zsh or fish), and `man ghostlight` shows the two id lines.
+  Paid on Windows on 2026-10-18: `--help` lists the client ids, `--client cline` refuses on this machine (no Cline host) naming the four host ids and `--all-clients`, `--client CODEX` matches Codex, and `--client nope` refuses naming the ids. The Linux completions and man page are paid by linux-1 L04.
 - e01-icon-cache: on a Linux desktop with Zed or Visual Studio Code installed from a package, the
   Snap or the Flatpak, the deployed window shows that app's own icon for the agent in the summary
   pill, on its shelf chip, in its card's head and on the Integrations rail and pane, and a watching
@@ -264,6 +274,7 @@ owner before anything is pushed.
   Linux test job runs the icon tests (they ran here on Windows only, with Linux sources looked at
   through a test computer). The icon tests are paid by linux-1 L02 at 17a0c060: all 16
   `install::icons::` tests passed on Linux. The desktop look remains.
+  The Linux desktop look is paid by linux-1 L09 on test-01 (Zed's own icon in the pill, shelf chip, card, rail and pane, and doctor). The removal-and-Re-check step was not run.
 - e02-icon-windows: on the owner's Windows machine, after the deploy, the window shows the apps'
   own icons in the summary pill, the shelf chips, the card heads and the Integrations rail and
   pane: Codex and Claude Desktop their Store logos, Claude Code the Claude Desktop logo (its
@@ -277,6 +288,7 @@ owner before anything is pushed.
   job builds the service and win-peer (only win-peer could be checked for Linux here; the service's
   Linux check needs a Linux C compiler for `ring`, which this host lacks). The Linux build is paid
   by linux-1 L02 at 17a0c060: the workspace built and its tests passed on Linux.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - e03-icon-polish: in the deployed window on the owner's machine, each found icon (Codex, Claude
   Desktop, Claude Code, Visual Studio Code, Antigravity) sits whole on its light tile in the summary
   face, the shelf chip, the card head, the rail and the pane, the same size and outline as the
@@ -287,6 +299,7 @@ owner before anything is pushed.
   names the rest as showing monograms; `ghostlight doctor --json` has `agent_icons` with the same
   facts and no paths. The first look after the deploy rewrites the manifests e02 wrote without the
   new fields (they are not offered until then, so the monograms may show for up to one look).
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - f01-icon-endpoint: in the deployed window on the owner's machine, every agent shows the endpoint's
   image in the summary face, the shelf chip, the card head, the Integrations rail and the pane: the
   apps' own icons where e02 found them (Codex, Claude Desktop, Claude Code, Visual Studio Code,
@@ -295,6 +308,7 @@ owner before anything is pushed.
   corners of a chip or the rail). No image is empty and no "An agent's icon could not be loaded"
   notice appears, also after Re-check and after turning "Others can watch" off and on. `http://127.0.0.1:<port>/agent-icons/zed` in a watching browser
   tab shows Zed's monogram (or its icon), and `/integrations/zed.svg` is not found.
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - t03-icon-tile: in the deployed window on the owner's machine, Codex, Claude Code, Claude Desktop,
   Visual Studio Code and Antigravity each show their app icon on a ground that suits it (a white or
   light icon on the dark gray, a dark or colored one on the warm off-white) or on its own plate, in
@@ -303,6 +317,7 @@ owner before anything is pushed.
   dark window. Monograms look as before. An image still loading shows the quiet dark placeholder.
   CI's `cargo deny check licenses bans sources` and `cargo audit` pass with the orchestrator's new
   `png` edge (neither tool is installed here; the crate was already locked for the desktop crate).
+  Paid on 2026-10-18 by the owner's look at the deployed window.
 - t04-packaged-client-config (Windows only; not part of any Linux check): deploy the batch on the
   owner's machine, which has the Microsoft Store Claude Desktop. Integrations shows Claude Desktop
   found, not connected, with the settings file
@@ -312,12 +327,14 @@ owner before anything is pushed.
   The owner chooses whether to press Set up; if so, only that file changes (its other entries stay)
   and, after a Claude Desktop restart, Ghostlight's tools appear in Claude Desktop. Nothing is
   written to `%APPDATA%\Claude`.
+  Paid on 2026-10-18: the owner's window showed Claude Desktop found with its packaged settings path, the owner pressed Connect, and the packaged `claude_desktop_config.json` now holds Ghostlight's entry.
 - t05-integration-fixes (Windows only): on the owner's machine, with the Store Claude Desktop,
   `ghostlight uninstall --dry-run --client claude-desktop` says what `ghostlight uninstall` would
   change: "Would remove Ghostlight from Claude Desktop." when only the Store copy holds the entry,
   a line naming `%APPDATA%\Claude\claude_desktop_config.json` when an earlier install's entry is
   still there, and "Claude Desktop has no Ghostlight entry; nothing would change." when no copy
   holds one. A dry run changes no file.
+  Paid on 2026-10-18 for the case on the owner's machine: with only the Store copy holding the entry, `ghostlight uninstall --dry-run --client claude-desktop` said "Would remove Ghostlight from Claude Desktop." The other two cases are pinned by the `client_step` tests.
 - t06-windows-1x-leftovers (Windows only): on the owner's machine the next regular install, from a
   terminal outside Claude's container, removes `C:\Users\Leo\AppData\Local\org.sylin.ghostlight`
   (only `EBWebView`, 38.8 MB) and the empty `C:\Users\Leo\AppData\Local\Ghostlight`, and says
