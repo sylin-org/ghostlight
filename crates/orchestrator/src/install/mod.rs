@@ -3000,6 +3000,7 @@ mod tests {
             windows: false,
             linux: cfg!(target_os = "linux"),
             private_view: None,
+            local_app_data: None,
         });
 
         let zed = registry
