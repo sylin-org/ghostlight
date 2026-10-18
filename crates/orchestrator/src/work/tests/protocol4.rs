@@ -364,7 +364,7 @@ fn an_upload_that_failed_after_the_files_were_attached_has_an_unknown_effect() {
     );
     assert_eq!(
         result.summary,
-        "Sent, but the browser never confirmed what happened."
+        "The browser never confirmed what the sent command did."
     );
     assert_eq!(result.effect, Effect::Unknown, "{}", result.summary);
     assert!(!result.repeat_safe, "{}", result.summary);

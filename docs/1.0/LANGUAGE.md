@@ -758,23 +758,24 @@ complete request before an effect. Text conditions match page text, not field va
 
 When the check does not confirm the expectation, the action still happened. The result keeps
 `effect: applied`, `repeat_safe: false`, and the action's own facts, and adds a `reason`. The
-summary is the action's sentence followed by why the check fell short:
+summary says first why the check fell short, then gives the action's sentence, so a summary cut
+short still says the check failed:
 
-| Check | Status | `reason` | Summary after the action's sentence |
+| Check | Status | `reason` | Summary before the action's sentence |
 | --- | --- | --- | --- |
-| Ran, condition false | `failed` | `expectation_unmet` | `The expected condition did not hold afterward.` |
+| Ran, condition false | `failed` | `expectation_unmet` | `The expected condition did not hold after the action.` |
 | Caller cancelled | `cancelled` | `cancelled` | `The expected condition was not checked because the call was cancelled.` |
 | Out of time | `failed` | `deadline` | `The expected condition was not checked because the call ran out of time.` |
 | Browser disconnected | `failed` | `browser_disconnected` | `The expected condition was not checked because the browser disconnected.` |
 | No browser reachable | `failed` | `browser_unavailable` | `The expected condition was not checked because Ghostlight could not reach the browser.` |
 | Page access unverified | `failed` | `document_unavailable` | `The expected condition was not checked because access to the page could not be verified.` |
 | Browser could not check | `failed` | `browser_refused` | `The expected condition was not checked because the browser could not run the check.` |
-| Policy refused the check | `blocked` | the policy reason | `The expected condition was not checked.` and the policy sentence |
+| Policy refused the check | `blocked` | the policy reason | `The expected condition was not checked.` then the policy sentence |
 
 The next step is `Check the page with browser_read or browser_inspect before repeating; the action
 already happened.` A policy refusal points to `policy_explain` instead. A
 history-storage refusal and an unreadable policy give no step. Pause and Stop put their fixed
-directive first, then the action's sentence and `The expected condition was not checked.`, with no
+directive first, then `The expected condition was not checked.` and the action's sentence, with no
 next step. History records `action_unconfirmed` with the same cause, and a flow treats the step by
 that cause: a Pause, Stop, cancellation, or deadline during the check stops the flow as it would
 for any step.

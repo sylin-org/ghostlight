@@ -956,7 +956,7 @@ fn a_launched_browser_without_the_extension_names_the_store_while_setup_is_incom
     let refused = launch_without_extension(false, false);
     assert!(refused
         .summary
-        .starts_with("The browser started, but its Ghostlight adapter did not connect"));
+        .starts_with("The Ghostlight adapter did not connect in time"));
     assert_eq!(refused.next_steps.len(), 1, "{:?}", refused.next_steps);
     assert!(
         refused.next_steps[0].contains(crate::language::setup::STORE_LISTING_URL),

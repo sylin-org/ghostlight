@@ -24,7 +24,7 @@ the push.
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
 | e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit) | todo |
-| o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | todo |
+| o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | landed (this commit) |
 | k1 brand-reference-for-2-0 | docs | j-37 | landed (this commit) |
 
 Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's light-mode look.
@@ -52,6 +52,17 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   dark-taskbar art; the left column of each half is on a light ground (#f3f3f3), the right on a
   dark one (#202020). The 24 pixel frames are the 32 pixel art scaled down, as Windows does at
   150%.
+- o1 (n-d-07): an unconfirmed check now leads with why it fell short and gives the action's own
+  sentence after it: "The expected condition did not hold after the action. Clicked the "Submit"
+  button on example.com." The item's wording ("did not hold after clicking ...") would need a
+  second, gerund form of every action sentence; leading with the failure and keeping the one
+  action sentence says the same in fewer moving parts. Pause and Stop keep their directive first.
+- o1, same rule elsewhere in outcome.rs: the "Sent, but ..." sentences now lead with what went
+  wrong ("The agent cancelled before the browser confirmed what the sent command did."), as do the
+  adapter handshake timeout and the blocked landing whose tab state is unknown. Partial counts
+  ("Completed 2 of 5 steps. Step 3 failed.", "Set 2 of 3 fields; ...") stay: their opening
+  already says the work was incomplete. docs/1.0/LANGUAGE.md states the new order. The result
+  goldens hold none of these sentences, so regenerating them changed nothing.
 - u0 (j-38): the preview's head comment lists every query parameter. One part of the original
   j-38 was already true on the tree: Policy reads the policy the page script was handed, so
   nothing threw. The diagnostics folder path was left as it is: the agreed change does not name

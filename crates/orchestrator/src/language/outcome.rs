@@ -1326,42 +1326,43 @@ const CHECK_BEFORE_REPEATING: &str =
 /// Sentence for an applied action whose check never ran.
 const CHECK_NOT_RUN: &str = "The expected condition was not checked";
 
-/// Render an applied action followed by the reason its requested check did not confirm it.
+/// Render why an applied action's requested check did not confirm it, then the action itself.
 ///
-/// The action sentence always stays, because the action really happened. Pause and Stop keep
-/// their fixed directives first (ADR-0126); the effect facts follow them.
+/// The failure leads, so a sentence cut short anywhere still says the check fell short. The
+/// action sentence always follows, because the action really happened. Pause and Stop keep
+/// their fixed directives first (ADR-0126).
 fn unconfirmed_summary(action: &Outcome, cause: CheckFailure) -> String {
     let done = action.summary();
     match cause {
         CheckFailure::Unmet => {
-            format!("{done} The expected condition did not hold afterward.")
+            format!("The expected condition did not hold after the action. {done}")
         }
         CheckFailure::Blocked(BlockedReason::Hold) => {
-            format!("{HUMAN_PAUSE_DIRECTIVE} {done} {CHECK_NOT_RUN}.")
+            format!("{HUMAN_PAUSE_DIRECTIVE} {CHECK_NOT_RUN}. {done}")
         }
         CheckFailure::Blocked(BlockedReason::SessionEnded) => {
-            format!("{HUMAN_STOP_DIRECTIVE} {done} {CHECK_NOT_RUN}.")
+            format!("{HUMAN_STOP_DIRECTIVE} {CHECK_NOT_RUN}. {done}")
         }
         CheckFailure::Blocked(reason) => {
-            format!("{done} {CHECK_NOT_RUN}. {}", blocked(reason, &None, &None))
+            format!("{CHECK_NOT_RUN}. {} {done}", blocked(reason, &None, &None))
         }
         CheckFailure::Cancelled => {
-            format!("{done} {CHECK_NOT_RUN} because the call was cancelled.")
+            format!("{CHECK_NOT_RUN} because the call was cancelled. {done}")
         }
         CheckFailure::DeadlineExpired => {
-            format!("{done} {CHECK_NOT_RUN} because the call ran out of time.")
+            format!("{CHECK_NOT_RUN} because the call ran out of time. {done}")
         }
         CheckFailure::Disconnected => {
-            format!("{done} {CHECK_NOT_RUN} because the browser disconnected.")
+            format!("{CHECK_NOT_RUN} because the browser disconnected. {done}")
         }
         CheckFailure::BrowserUnavailable => {
-            format!("{done} {CHECK_NOT_RUN} because Ghostlight could not reach the browser.")
+            format!("{CHECK_NOT_RUN} because Ghostlight could not reach the browser. {done}")
         }
         CheckFailure::DocumentUnavailable => {
-            format!("{done} {CHECK_NOT_RUN} because access to the page could not be verified.")
+            format!("{CHECK_NOT_RUN} because access to the page could not be verified. {done}")
         }
         CheckFailure::BrowserRefused => {
-            format!("{done} {CHECK_NOT_RUN} because the browser could not run the check.")
+            format!("{CHECK_NOT_RUN} because the browser could not run the check. {done}")
         }
     }
 }
@@ -1619,7 +1620,7 @@ impl Refusal {
                 if *before_dispatch {
                     "The job ran out of time before anything changed in the browser."
                 } else {
-                    "Sent, but the job ran out of time before the browser confirmed."
+                    "The job ran out of time before the browser confirmed what the sent command did."
                 }
             }
             Self::CancelledBeforeDispatch { by } => match by {
@@ -1680,22 +1681,22 @@ impl Refusal {
                     "Another Ghostlight installation owns the browser registration."
                 }
                 BrowserRecoveryReason::HandshakeTimeout => {
-                    "The browser started, but its Ghostlight adapter did not connect in time."
+                    "The Ghostlight adapter did not connect in time after the browser started."
                 }
             },
             Self::ConnectionLost => "Connection lost before the browser confirmed completion.",
-            Self::EffectUnknown | Self::CancelledAfterDispatch { by: None } => "Sent, but the browser never confirmed what happened.",
+            Self::EffectUnknown | Self::CancelledAfterDispatch { by: None } => "The browser never confirmed what the sent command did.",
             Self::CancelledAfterDispatch { by: Some(CancelCause::Client) } => {
-                "Sent, but the agent cancelled before the browser confirmed what happened."
+                "The agent cancelled before the browser confirmed what the sent command did."
             }
             Self::CancelledAfterDispatch { by: Some(CancelCause::SessionEnded) } => {
-                "Sent, but the agent's session ended before the browser confirmed what happened."
+                "The agent's session ended before the browser confirmed what the sent command did."
             }
             Self::CancelledAfterDispatch { by: Some(CancelCause::Quit) } => {
-                "Sent, but Ghostlight quit before the browser confirmed what happened."
+                "Ghostlight quit before the browser confirmed what the sent command did."
             }
             Self::LandingDeniedUnknown => {
-                "Blocked the landing, but the new tab's final state is unknown."
+                "The new tab's final state is unknown after its landing was blocked."
             }
             Self::WorkspaceUnusable { reason } => return reason.summary(),
             Self::FilesUnreadable => "The selected local files could not be prepared safely.",
@@ -3246,52 +3247,52 @@ Changes are \"unsaved\".".into()),
         let cases = [
             (
                 CheckFailure::Unmet,
-                "Clicked the \"Save\" button on example.com. The expected condition did not hold afterward.",
+                "The expected condition did not hold after the action. Clicked the \"Save\" button on example.com.",
                 vec![check],
             ),
             (
                 CheckFailure::Cancelled,
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the call was cancelled.",
+                "The expected condition was not checked because the call was cancelled. Clicked the \"Save\" button on example.com.",
                 vec![check],
             ),
             (
                 CheckFailure::Disconnected,
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the browser disconnected.",
+                "The expected condition was not checked because the browser disconnected. Clicked the \"Save\" button on example.com.",
                 vec![check],
             ),
             (
                 CheckFailure::BrowserUnavailable,
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked because Ghostlight could not reach the browser.",
+                "The expected condition was not checked because Ghostlight could not reach the browser. Clicked the \"Save\" button on example.com.",
                 vec![check],
             ),
             (
                 CheckFailure::DeadlineExpired,
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the call ran out of time.",
+                "The expected condition was not checked because the call ran out of time. Clicked the \"Save\" button on example.com.",
                 vec![check],
             ),
             (
                 CheckFailure::DocumentUnavailable,
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked because access to the page could not be verified.",
+                "The expected condition was not checked because access to the page could not be verified. Clicked the \"Save\" button on example.com.",
                 vec![check],
             ),
             (
                 CheckFailure::BrowserRefused,
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked because the browser could not run the check.",
+                "The expected condition was not checked because the browser could not run the check. Clicked the \"Save\" button on example.com.",
                 vec![check],
             ),
             (
                 CheckFailure::Blocked(BlockedReason::Hold),
-                "The user paused Ghostlight. Wait for further instructions. Clicked the \"Save\" button on example.com. The expected condition was not checked.",
+                "The user paused Ghostlight. Wait for further instructions. The expected condition was not checked. Clicked the \"Save\" button on example.com.",
                 vec![],
             ),
             (
                 CheckFailure::Blocked(BlockedReason::SessionEnded),
-                "The user asked to interrupt the process. Wait for further instructions. Clicked the \"Save\" button on example.com. The expected condition was not checked.",
+                "The user asked to interrupt the process. Wait for further instructions. The expected condition was not checked. Clicked the \"Save\" button on example.com.",
                 vec![],
             ),
             (
                 CheckFailure::Blocked(BlockedReason::Host),
-                "Clicked the \"Save\" button on example.com. The expected condition was not checked. Blocked: that host is not allowed.",
+                "The expected condition was not checked. Blocked: that host is not allowed. Clicked the \"Save\" button on example.com.",
                 vec!["Call policy_explain to see what this session may do."],
             ),
         ];
@@ -3454,33 +3455,33 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::CancelledAfterDispatch { by: None },
-                "Sent, but the browser never confirmed what happened.",
+                "The browser never confirmed what the sent command did.",
             ),
             (
                 Refusal::CancelledAfterDispatch {
                     by: Some(CancelCause::Client),
                 },
-                "Sent, but the agent cancelled before the browser confirmed what happened.",
+                "The agent cancelled before the browser confirmed what the sent command did.",
             ),
             (
                 Refusal::CancelledAfterDispatch {
                     by: Some(CancelCause::SessionEnded),
                 },
-                "Sent, but the agent's session ended before the browser confirmed what happened.",
+                "The agent's session ended before the browser confirmed what the sent command did.",
             ),
             (
                 Refusal::CancelledAfterDispatch {
                     by: Some(CancelCause::Quit),
                 },
-                "Sent, but Ghostlight quit before the browser confirmed what happened.",
+                "Ghostlight quit before the browser confirmed what the sent command did.",
             ),
             (
                 Refusal::EffectUnknown,
-                "Sent, but the browser never confirmed what happened.",
+                "The browser never confirmed what the sent command did.",
             ),
             (
                 Refusal::LandingDeniedUnknown,
-                "Blocked the landing, but the new tab's final state is unknown.",
+                "The new tab's final state is unknown after its landing was blocked.",
             ),
             (
                 Refusal::WorkspaceUnusable {
@@ -3548,7 +3549,7 @@ Changes are \"unsaved\".".into()),
                     before_dispatch: false,
                     timeout_adjustable: true,
                 },
-                "Sent, but the job ran out of time before the browser confirmed.",
+                "The job ran out of time before the browser confirmed what the sent command did.",
             ),
         ];
         for (refusal, expected) in summaries {

@@ -564,7 +564,7 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
     assert_eq!(
         result.summary,
         format!(
-            "{} Typed 4 characters into the \"Message\" text field on example.com. The expected condition was not checked.",
+            "{} The expected condition was not checked. Typed 4 characters into the \"Message\" text field on example.com.",
             crate::language::outcome::HUMAN_PAUSE_DIRECTIVE
         ),
         "the pause directive comes first and the applied action follows it"

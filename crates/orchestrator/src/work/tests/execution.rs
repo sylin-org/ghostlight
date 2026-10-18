@@ -3862,7 +3862,7 @@ fn unconfirmed_expectations_keep_the_applied_action_in_every_account() {
             }),
             Status::Failed,
             "expectation_unmet",
-            format!("{TYPED} The expected condition did not hold afterward."),
+            format!("The expected condition did not hold after the action. {TYPED}"),
             json!({"reason":"action_unconfirmed","cause":"unmet"}),
         ),
         (
@@ -3870,7 +3870,7 @@ fn unconfirmed_expectations_keep_the_applied_action_in_every_account() {
             Status::Cancelled,
             "cancelled",
             format!(
-                "{TYPED} The expected condition was not checked because the call was cancelled."
+                "The expected condition was not checked because the call was cancelled. {TYPED}"
             ),
             json!({"reason":"action_unconfirmed","cause":"cancelled"}),
         ),
@@ -3879,7 +3879,7 @@ fn unconfirmed_expectations_keep_the_applied_action_in_every_account() {
             Status::Failed,
             "browser_disconnected",
             format!(
-                "{TYPED} The expected condition was not checked because the browser disconnected."
+                "The expected condition was not checked because the browser disconnected. {TYPED}"
             ),
             json!({"reason":"action_unconfirmed","cause":"disconnected"}),
         ),
@@ -3890,7 +3890,7 @@ fn unconfirmed_expectations_keep_the_applied_action_in_every_account() {
             Status::Failed,
             "browser_unavailable",
             format!(
-                "{TYPED} The expected condition was not checked because Ghostlight could not reach the browser."
+                "The expected condition was not checked because Ghostlight could not reach the browser. {TYPED}"
             ),
             json!({"reason":"action_unconfirmed","cause":"browser_unavailable"}),
         ),
