@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Bash completion for ghostlight.
 #
-# The command list below is checked against the command line's own list, and the client list
-# against the agent catalog, by tests in the orchestrator. Adding a subcommand or an agent
-# without adding it here fails those tests.
+# The command and policy command lists below are checked against the command line's own lists,
+# and the client list against the agent catalog, by tests in the orchestrator. Adding a
+# subcommand, a policy command or an agent without adding it here fails those tests.
 
 _ghostlight() {
     local commands="open install uninstall doctor status call diagnostics policy"
+    local policy_commands="validate migrate explain simulate keygen pubkey sign publish"
     local clients="codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf"
     local current previous
     current="${COMP_WORDS[COMP_CWORD]}"
@@ -35,7 +36,7 @@ _ghostlight() {
             ;;
         policy)
             if [ "${COMP_CWORD}" -eq 2 ]; then
-                COMPREPLY=($(compgen -W "validate explain simulate keygen pubkey sign publish" -- "${current}"))
+                COMPREPLY=($(compgen -W "${policy_commands}" -- "${current}"))
             else
                 COMPREPLY=($(compgen -f -- "${current}"))
             fi

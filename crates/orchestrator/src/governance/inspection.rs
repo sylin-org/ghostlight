@@ -11,6 +11,14 @@ use anyhow::{anyhow, Context, Result};
 use super::{managed, manifest, migrate, CapabilitySet, GovernanceFacade};
 use crate::language::{capability_map, migration};
 
+/// Every `ghostlight policy` subcommand, in help order.
+///
+/// This is the list the shell completions offer after `policy`; a test holds them to it, and
+/// another holds [`parse`] to accepting each one.
+pub const SUBCOMMANDS: &[&str] = &[
+    "validate", "migrate", "explain", "simulate", "keygen", "pubkey", "sign", "publish",
+];
+
 /// One local policy inspection command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -237,8 +245,45 @@ fn short_hash(hash: &str) -> &str {
 mod tests {
     use std::fs;
 
-    use super::{parse, run, Command};
+    use super::{parse, run, Command, SUBCOMMANDS};
     use crate::scratch::Scratch;
+
+    /// Each listed subcommand is one the parser accepts, and the list names every one it accepts.
+    #[test]
+    fn every_listed_subcommand_parses() {
+        let samples: &[&[&str]] = &[
+            &["validate", "policy.json"],
+            &["migrate", "policy.json"],
+            &["explain", "policy.json"],
+            &["simulate", "policy.json", "audit.jsonl"],
+            &["keygen", "keys"],
+            &["pubkey", "ed25519.seed"],
+            &[
+                "sign",
+                "policy.json",
+                "--ed25519-seed",
+                "s",
+                "--sequence",
+                "1",
+            ],
+            &[
+                "publish",
+                "policy.json",
+                "--ed25519-seed",
+                "s",
+                "--source",
+                "policy.json",
+            ],
+        ];
+        let named: Vec<&str> = samples.iter().map(|sample| sample[0]).collect();
+        assert_eq!(named, SUBCOMMANDS);
+        for sample in samples {
+            let arguments: Vec<String> = sample.iter().map(|word| (*word).to_owned()).collect();
+            if let Err(error) = parse(&arguments) {
+                panic!("policy {} does not parse: {error}", sample[0]);
+            }
+        }
+    }
 
     #[test]
     fn commands_are_small_and_unambiguous() {

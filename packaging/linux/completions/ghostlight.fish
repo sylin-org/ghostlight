@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # Fish completion for ghostlight.
 #
-# The command list below is checked against the command line's own list, and the client list
-# against the agent catalog, by tests in the orchestrator. Adding a subcommand or an agent
-# without adding it here fails those tests.
+# The command and policy command lists below are checked against the command line's own lists,
+# and the client list against the agent catalog, by tests in the orchestrator. Adding a
+# subcommand, a policy command or an agent without adding it here fails those tests.
 
 set -l ghostlight_commands open install uninstall doctor status call diagnostics policy
+set -l ghostlight_policy_commands validate migrate explain simulate keygen pubkey sign publish
 set -l ghostlight_clients codex claude-code claude-desktop cursor vscode windsurf devin zed zcode opencode crush copilot-cli cline kiro qwen-code junie kilo-code goose continue antigravity cline-cli cline-vscode cline-cursor cline-windsurf
 
 complete -c ghostlight -f
@@ -35,4 +36,4 @@ complete -c ghostlight -n "__fish_seen_subcommand_from call" -l stdin -d "Run a 
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l output -d "Write bounded content to a file" -r -F
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l catalog -d "List the available browser tools"
 complete -c ghostlight -n "__fish_seen_subcommand_from call" -l help -s h -d "Show the usage of call"
-complete -c ghostlight -n "__fish_seen_subcommand_from policy" -x -a "validate explain simulate keygen pubkey sign publish"
+complete -c ghostlight -n "__fish_seen_subcommand_from policy" -x -a "$ghostlight_policy_commands"

@@ -528,6 +528,32 @@ mod tests {
         }
     }
 
+    /// The shell completions offer exactly the policy subcommands the policy command has.
+    #[test]
+    fn completion_policy_subcommands_match_the_parser() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packaging/linux/completions")
+            .canonicalize()
+            .expect("completion directory exists");
+        let expected = crate::governance::inspection::SUBCOMMANDS.join(" ");
+        for (file, prefix, suffix) in [
+            ("ghostlight.bash", "local policy_commands=\"", "\""),
+            ("_ghostlight", "local -a ghostlight_policy_commands=(", ")"),
+            (
+                "ghostlight.fish",
+                "set -l ghostlight_policy_commands ",
+                "\n",
+            ),
+        ] {
+            let source = std::fs::read_to_string(root.join(file)).expect("completion is readable");
+            assert_eq!(
+                declared(file, &source, prefix, suffix),
+                expected,
+                "{file} offers different policy commands than the policy command has"
+            );
+        }
+    }
+
     /// The text between the first `prefix` in `source` and the next `suffix`, trimmed.
     fn declared<'a>(file: &str, source: &'a str, prefix: &str, suffix: &str) -> &'a str {
         let start = source
@@ -599,14 +625,37 @@ mod tests {
         assert!(help.is_ascii());
     }
 
-    /// Every offered subcommand is documented in help, so the two surfaces cannot drift.
+    /// Every offered subcommand and policy subcommand is documented in help and in the manual
+    /// page, so the surfaces cannot drift.
     #[test]
-    fn help_documents_every_subcommand() {
+    fn help_and_the_manual_document_every_subcommand() {
         let help = help_text();
+        let page = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packaging/linux/man/ghostlight.1"),
+        )
+        .expect("the manual page is readable");
         for subcommand in SUBCOMMANDS {
             assert!(
                 help.contains(&format!("ghostlight {subcommand}")),
                 "help does not document {subcommand}"
+            );
+            if *subcommand != "policy" {
+                assert!(
+                    page.lines().any(|line| line.starts_with(".B")
+                        && line.split_whitespace().nth(1) == Some(subcommand)),
+                    "the manual page does not document {subcommand}"
+                );
+            }
+        }
+        for subcommand in crate::governance::inspection::SUBCOMMANDS {
+            assert!(
+                help.contains(&format!("ghostlight policy {subcommand}")),
+                "help does not document policy {subcommand}"
+            );
+            assert!(
+                page.contains(&format!("policy {subcommand}")),
+                "the manual page does not document policy {subcommand}"
             );
         }
     }
