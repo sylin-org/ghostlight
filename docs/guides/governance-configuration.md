@@ -56,9 +56,8 @@ the first grant admitting the complete capability set wins.
 Every denial is enforced. Observe mode was removed in 2.0; `ghostlight policy simulate` replays a
 candidate against recorded audit instead, and lists what it would have refused.
 
-Schema 4 is schema 3 without `mode`, the channel switches (`channels.mcp.enabled`,
-`channels.cli.enabled`), `policy.user.enabled`, and the frame options (`content.frames.handling`,
-`content.frames.notice`). Pages with embedded documents behave one way: Ghostlight reads the
+Schema 4 is schema 3 without `mode`, `policy.user.enabled`, and the frame options
+(`content.frames.handling`, `content.frames.notice`). Pages with embedded documents behave one way: Ghostlight reads the
 documents policy permits, leaves the others out, and reports what it left out. A file in the retired
 schema 3 fails with `unsupported policy schema 3; run ghostlight policy migrate <file>`, and the
 next section moves it.
@@ -73,12 +72,25 @@ remain separate.
 
 | Key | Value | Effect |
 | --- | --- | --- |
+| `channels.mcp.enabled` | boolean | `false` refuses every request from MCP agents; on when unset. |
+| `channels.cli.enabled` | boolean | `false` refuses every request from the command line (`ghostlight call` and programs that speak its relay contract); on when unset. |
 | `browser.tabs.allow_close` | boolean | `false` removes model-driven close. |
 | `browser.screenshots.enabled` | boolean | `false` refuses every screenshot; enabled by default. |
 | `privacy.preserve_target_names` | boolean | `false` keeps page-authored target names out of results and audit. |
 | `audit.availability` | `keep_working` or `require_audit` | Defaults to continuing with visible history degradation. Require audit stops subsequent browser work during a known saving failure. Either layer can require it. |
 | `browser.startup` | `on_demand` or `manual` | Controls whether admitted work may request one bounded browser-startup attempt. Windows defaults to `on_demand`; Linux defaults to `manual`. |
 | `content.security.sacred_domains` | hostname array | Adds never-touch destinations. |
+
+A channel switch set to `false` refuses every request on that channel before any browser work, and
+the refusal says which switch is off and whose policy turned it off. The connection still opens,
+so the agent hears why. Either layer can turn a channel off; a user layer cannot turn back on a
+channel the organization turned off. The window's Policy page shows both switches, with the layer
+that set them, and lets your own layer turn them off.
+
+A channel switch is a guardrail for well-behaved agents, not a barrier. The channel is declared
+by Ghostlight's own programs when they connect: `ghostlight mcp` declares `mcp` and
+`ghostlight call` declares `cli`. Any program running as the same user could connect and declare
+the other, so a switch does not stop hostile software on the same account.
 
 `browser.startup` is an operational control, not a security boundary. `on_demand` permits one
 bounded recovery attempt when admitted work finds no connected browser; `manual` returns a
@@ -92,14 +104,13 @@ ghostlight policy migrate policy.json
 ```
 
 The command rewrites a schema-3 file as schema 4 only where the meaning stays the same. It drops
-`mode` when it is `enforce`, a channel switch set to `true`, `policy.user.enabled` (a user layer can
-only tighten, so dropping it never widens anything), and a frame option at its default
-(`permitted_content` and `when_affected`). It copies the original to `policy.json.schema3.bak`,
+`mode` when it is `enforce`, `policy.user.enabled` (a user layer can only tighten, so dropping it
+never widens anything), and a frame option at its default (`permitted_content` and
+`when_affected`). The channel switches carry over as they are. It copies the original to `policy.json.schema3.bak`,
 writes the result in one step, and prints each part it removed.
 
 It refuses anything else, because moving it would change what the policy does: `mode: "observe"`,
-a channel set to `false`, a frame option set to anything but its default, and any content schema 4
-would also refuse. The refusal prints one sentence per part and leaves the file untouched. Edit the
+a frame option set to anything but its default, and any content schema 4 would also refuse. The refusal prints one sentence per part and leaves the file untouched. Edit the
 file to say what you mean in schema 4, then run the command again.
 
 Ghostlight moves the user policy it owns the same way when it loads it, and keeps the same backup.

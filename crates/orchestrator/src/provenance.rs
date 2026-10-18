@@ -7,8 +7,9 @@
 //! session, `initialize`, the service reads the ancestors of the connection's peer process from
 //! the operating system and keeps the first that lies in a catalog agent's installed app
 //! ([`crate::install::apps`]), else the first that is not a wrapper. No field a client writes takes
-//! part. Like the channel, it is provenance for display and history and never an input to
-//! governance.
+//! part. It is provenance for display and history and never an input to governance. The channel
+//! is too, except that a policy's channel switch admits or refuses a request by it (ADR-0202
+//! Decision 22a).
 //!
 //! When the name a connection's client claims is a catalog agent's, the attribution also keeps that
 //! agent's catalog id as [`Attribution::claimed_agent`], so history names the agent after a restart

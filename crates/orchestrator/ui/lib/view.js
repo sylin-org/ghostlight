@@ -14,7 +14,7 @@
   const {
     VIEWS, SETTINGS_SECTIONS, DEFAULT_SECTION, addressOf, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, capabilityWord, capabilityLabel, capabilitiesSaid, stepsUsed,
-    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
+    CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords, settingLimits,
     OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES, SETTINGS,
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
@@ -1514,6 +1514,7 @@
               + ` <span class="owner">${escapeHtml(setting.owner)}</span></li>`;
           }).join("")
           + `</ul>`
+          + limitNotes(settings.filter((setting) => setting.value === "false").map((setting) => setting.key))
         : "";
 
       el["policy-documents"].innerHTML = layers.map((layer) => {
@@ -1610,9 +1611,15 @@
       el["setting-groups"].innerHTML = SETTING_GROUPS.map((group) =>
         `<div class="setting-group"><h3>${escapeHtml(group.title)}</h3>`
         + group.items.map(settingRow).join("")
+        + limitNotes(group.items.map((item) => item.key))
         + `</div>`).join("");
       el["sacred-hosts"].value = draft.settings.sacred;
       refreshSacred();
+    }
+
+    /** What the settings with these keys cannot promise, each limit said once. */
+    function limitNotes(keys) {
+      return settingLimits(keys).map((limit) => `<p class="setting-limit">${escapeHtml(limit)}</p>`).join("");
     }
 
     function settingRow(item) {

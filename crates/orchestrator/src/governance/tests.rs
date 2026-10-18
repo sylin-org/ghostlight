@@ -58,6 +58,68 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
     .is_err());
 }
 
+#[test]
+fn a_switch_left_unset_is_on() {
+    let open = GovernanceFacade::new(None, None).snapshot();
+    let unset = temporary("channel-unset");
+    fs::write(&unset, policy("quiet", all_open_grant(), "[]")).unwrap();
+    let authored = GovernanceFacade::new(Some(unset.to_path_buf()), None).snapshot();
+    let on = temporary("channel-on");
+    fs::write(
+        &on,
+        policy(
+            "on",
+            all_open_grant(),
+            &format!(r#"[{{"key":"{CLI_CHANNEL_ENABLED_KEY}","value":true,"level":"mandatory"}}]"#),
+        ),
+    )
+    .unwrap();
+    let switched_on = GovernanceFacade::new(Some(on.to_path_buf()), None).snapshot();
+    for snapshot in [open, authored, switched_on] {
+        for channel in [IntakeChannel::Mcp, IntakeChannel::Cli] {
+            assert_eq!(snapshot.channel_refusal(channel), None, "{channel:?}");
+        }
+    }
+}
+
+#[test]
+fn a_channel_switch_refuses_only_its_channel_and_names_its_layer() {
+    let local = temporary("channel-local");
+    let managed = temporary("channel-managed");
+    for (local_value, managed_value, author, tier) in [
+        (true, false, PolicyAuthor::Organization, "managed"),
+        (false, true, PolicyAuthor::User, "user"),
+    ] {
+        for (path, value) in [(&local, local_value), (&managed, managed_value)] {
+            fs::write(
+                path,
+                policy(
+                    "channels",
+                    all_open_grant(),
+                    &format!(
+                        r#"[{{"key":"{MCP_CHANNEL_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
+                    ),
+                ),
+            )
+            .unwrap();
+        }
+        let snapshot =
+            GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()))
+                .snapshot();
+        let (decision, refused_by) = snapshot
+            .channel_refusal(IntakeChannel::Mcp)
+            .expect("the switch is off");
+        assert!(!decision.allowed);
+        assert_eq!(decision.reason, ReasonCode::ChannelDenied);
+        assert_eq!(decision.policy_rule(), Some("channel"));
+        assert!(decision.denial_id().is_some());
+        assert_eq!(refused_by, author);
+        assert_eq!(snapshot.attribution(decision), Some((tier, None)));
+        assert_eq!(snapshot.channel_refusal(IntakeChannel::Cli), None);
+        assert!(snapshot.authorize_capability(Capability::Read).allowed);
+    }
+}
+
 /// The workspace forbids raw memory access everywhere except the two audited crates (ADR-0105
 /// amendment 2026-08-24, ADR-0199 Decision 3). Every workspace member but `crates/win-peer`
 /// (which allows it) and `crates/relay` (which denies it, so only the `os` module's expectation

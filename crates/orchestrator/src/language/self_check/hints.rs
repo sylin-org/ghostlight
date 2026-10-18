@@ -26,6 +26,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
+use crate::intake::session::IntakeChannel;
 use crate::language::area::{LeftOut, LeftOutKey};
 use crate::language::catalog;
 use crate::language::composition::{
@@ -35,8 +36,8 @@ use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-    CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Outcome, Refusal, SavedTo, StaleHelp,
-    TargetNoun, TargetRole, WorkspaceReason,
+    CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Outcome, PolicyAuthor, Refusal,
+    SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
 };
 use crate::language::page_refusal::{PageGesture, PageRefusal};
 use crate::workspace::StaleReason;
@@ -394,6 +395,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::CancelledBeforeStart => "CancelledBeforeStart",
         Refusal::DeadlineBeforeStart => "DeadlineBeforeStart",
         Refusal::AuthorityBlocked { .. } => "AuthorityBlocked",
+        Refusal::ChannelOff { .. } => "ChannelOff",
         Refusal::LocalInterlock => "LocalInterlock",
         Refusal::CredentialAuthorization { .. } => "CredentialAuthorization",
         Refusal::IncompatibleReceipt => "IncompatibleReceipt",
@@ -437,6 +439,7 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "CancelledBeforeStart",
     "DeadlineBeforeStart",
     "AuthorityBlocked",
+    "ChannelOff",
     "LocalInterlock",
     "CredentialAuthorization",
     "IncompatibleReceipt",
@@ -943,6 +946,14 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::InvalidRequest,
         Refusal::CancelledBeforeStart,
         Refusal::DeadlineBeforeStart,
+        Refusal::ChannelOff {
+            channel: IntakeChannel::Mcp,
+            author: PolicyAuthor::Organization,
+        },
+        Refusal::ChannelOff {
+            channel: IntakeChannel::Cli,
+            author: PolicyAuthor::User,
+        },
         Refusal::LocalInterlock,
         Refusal::CredentialAuthorization {
             control: ControlRef::new(

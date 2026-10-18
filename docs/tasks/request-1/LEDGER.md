@@ -26,7 +26,7 @@ the architecture sweep.
 | S8 flow-step-own-facts | request | todo |
 | S9 cancel-cause | request | todo |
 | S10 watcher-words | window | landed (this commit) |
-| S11 channel-switches | governance | todo |
+| S11 channel-switches | governance | landed (this commit) |
 
 ## Notes
 
@@ -132,3 +132,27 @@ the architecture sweep.
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed
   for a watching page, and the fake service in `tests/workbench-surface.mjs` speaks the new words.
+- S11: every request on a channel that is off is refused, `policy_explain` included, so the
+  refusal keeps no next step: the caller can neither turn the switch on nor ask about it on that
+  connection. The refusal is its own `Refusal::ChannelOff { channel, author }` rather than a
+  `BlockedReason`, because its words need the channel and whose layer turned it off:
+  "Blocked: the user's Ghostlight policy turns off work from MCP agents." (or "the
+  organization's", and "from the command line."), where the ADR's example said "Ghostlight's
+  policy". The decision is `channel_denied` with policy rule `channel`, a denial id and the
+  deciding tier; the audit's `refusal_facts` is `{"reason":"channel_off","channel":"mcp"}`. The
+  result's facts carry no channel (Decision 20). `AuthoritySnapshot::channel_refusal` returns the
+  decision with its `PolicyAuthor`, so the words never guess the layer, and it leaves validity to
+  the boundaries that already refuse invalid authority, so an unreadable policy still answers
+  `policy_explain`. The executor checks after a capacity refusal and before the run, through
+  the frame's findings and the one completion path; the snapshot is taken after the lease as
+  before, so a refused call can still wait for its own workspace's lease. `ghostlight policy
+  simulate` replays a record's channel too, so a candidate that turns MCP off would deny its MCP
+  lines. The Policy page gains a "Who may work" group: an organization's `false` disables the
+  switch and names itself, the user layer authors only `false`, and the honest limit is said under
+  the group and once under Restrictions in force. The refusal golden is a new file,
+  `tests/golden/model/channel_refusal.json`; `refusal.json` is unchanged. Tests:
+  `a_switch_left_unset_is_on` and `a_channel_switch_refuses_only_its_channel_and_names_its_layer`
+  (`governance::tests`), `the_schema_3_switches_migrate` (`governance::migrate::tests`), and the
+  two executor tests and the golden test in `work::tests::channels`. The stale "never an input to an authority decision" comments on
+  `IntakeChannel`, `provenance` and `AuditRecord.channel` now name the switch, and LANGUAGE's
+  policy-denial list loses "client kind", a refusal that no longer exists.

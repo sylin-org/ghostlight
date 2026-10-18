@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
-use super::{managed, manifest, migrate, CapabilitySet, GovernanceFacade};
+use super::{managed, manifest, migrate, GovernanceFacade};
 use crate::language::{capability_map, migration};
 
 /// Every `ghostlight policy` subcommand, in help order.
@@ -199,7 +199,7 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
         };
         records += 1;
         let requirements = record.capabilities;
-        let decision = decide_record(&snapshot, requirements, record.observed.host.as_deref());
+        let decision = decide_record(&snapshot, &record);
         if !decision.allowed {
             denied += 1;
             let host = record.observed.host.as_deref().unwrap_or("no host");
@@ -226,12 +226,20 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
     Ok(())
 }
 
+/// Decide one recorded request as the candidate would have: by its channel first, as the executor
+/// does, then by its capabilities and host.
 fn decide_record(
     snapshot: &super::AuthoritySnapshot,
-    requirements: CapabilitySet,
-    host: Option<&str>,
+    record: &crate::audit::AuditRecord,
 ) -> super::Decision {
-    host.map_or_else(
+    if let Some((decision, _)) = record
+        .channel
+        .and_then(|channel| snapshot.channel_refusal(channel))
+    {
+        return decision;
+    }
+    let requirements = record.capabilities;
+    record.observed.host.as_deref().map_or_else(
         || snapshot.authorize_requirements(requirements),
         |host| snapshot.authorize_landing(requirements, &format!("https://{host}")),
     )
@@ -339,6 +347,42 @@ mod tests {
         let simulation = String::from_utf8(simulation).unwrap();
         assert!(simulation.contains("Would deny line 1: browser_click [action]"));
         assert!(simulation.contains("1 would be denied"));
+    }
+
+    #[test]
+    fn simulate_refuses_the_recorded_requests_of_a_channel_the_candidate_turns_off() {
+        let policy = Scratch::file("policy.json");
+        let audit = Scratch::file("audit.jsonl");
+        fs::write(
+            &policy,
+            r#"{"schema":4,"name":"no agents","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"}]}"#,
+        )
+        .unwrap();
+        let line = |channel: &str| {
+            format!(
+                r#"{{"timestamp_ms":1,"invocation":"i","workspace":"w","tool":"browser_click","capabilities":["action"],"authority":"a","allowed":true,"reason":"permitted","status":"succeeded","effect":"applied","observed":{{"host":"example.com"}},"channel":"{channel}"}}"#
+            )
+        };
+        let lines = [line("mcp"), line("cli")].join("\n");
+        fs::write(&audit, lines).unwrap();
+
+        let mut simulation = Vec::new();
+        run(
+            &Command::Simulate {
+                policy: policy.to_path_buf(),
+                audit: audit.to_path_buf(),
+            },
+            &mut simulation,
+        )
+        .unwrap();
+        let simulation = String::from_utf8(simulation).unwrap();
+        assert!(
+            simulation
+                .contains("Would deny line 1: browser_click [action] on example.com -- channel"),
+            "{simulation}"
+        );
+        assert!(!simulation.contains("Would deny line 2"), "{simulation}");
+        assert!(simulation.contains("1 would be denied"), "{simulation}");
     }
 
     #[test]

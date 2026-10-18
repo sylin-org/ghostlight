@@ -10,8 +10,6 @@ use serde_json::Value;
 pub enum Retired {
     /// A `mode` on the policy or on one of its grants.
     Mode,
-    /// A channel switch in `config`, with the key it used.
-    Channel(&'static str),
     /// The switch that stopped a person authoring their own policy.
     UserPolicySwitch,
     /// A frame option in `config`, with the key it used and the value schema 4 fixes it at.
@@ -24,16 +22,14 @@ impl Retired {
     pub const fn config_key(self) -> Option<&'static str> {
         match self {
             Self::Mode => None,
-            Self::Channel(key) | Self::Frame(key, _) => Some(key),
+            Self::Frame(key, _) => Some(key),
             Self::UserPolicySwitch => Some("policy.user.enabled"),
         }
     }
 }
 
 /// Every retired `config` key, in the order the migration checks them.
-pub const RETIRED_SETTINGS: [Retired; 5] = [
-    Retired::Channel("channels.mcp.enabled"),
-    Retired::Channel("channels.cli.enabled"),
+pub const RETIRED_SETTINGS: [Retired; 3] = [
     Retired::UserPolicySwitch,
     Retired::Frame("content.frames.handling", "permitted_content"),
     Retired::Frame("content.frames.notice", "when_affected"),
@@ -44,9 +40,6 @@ pub const RETIRED_SETTINGS: [Retired; 5] = [
 pub fn removed(retired: Retired, path: &str) -> String {
     match retired {
         Retired::Mode => format!("Removed {path}: enforce is the only behavior in schema 4."),
-        Retired::Channel(key) => {
-            format!("Removed {key}: schema 4 has no channel switch, and true admitted the channel.")
-        }
         Retired::UserPolicySwitch => "Removed policy.user.enabled: schema 4 has no switch for the user layer, and that layer can only tighten policy.".into(),
         Retired::Frame(key, fixed) => {
             format!("Removed {key}: schema 4 fixes it at {fixed}, the value this policy had.")
@@ -62,9 +55,6 @@ pub fn refused(retired: Retired, path: &str, value: &Value) -> String {
             "{path} is {value}: schema 4 has no observe mode, so work this policy only reports would now be refused."
         ),
         Retired::Mode => format!("{path} is {value}: schema 3 accepted only enforce or observe."),
-        Retired::Channel(key) => format!(
-            "{key} is {value}: schema 4 has no channel switch, so that channel would now be admitted."
-        ),
         Retired::UserPolicySwitch => format!(
             "policy.user.enabled is {value}: schema 4 has no switch for the user layer."
         ),
@@ -155,8 +145,6 @@ mod tests {
         assert_eq!(
             keys,
             [
-                "channels.mcp.enabled",
-                "channels.cli.enabled",
                 "policy.user.enabled",
                 "content.frames.handling",
                 "content.frames.notice"

@@ -501,6 +501,7 @@ const compiled = (editable) => ({
       rules: [{ id: "support", description: "Ordinary support work", allow: ["support.example.test"], deny: [], allowed: ["read"], note: null }],
       settings: [
         { key: "privacy.preserve_target_names", value: "false", level: "mandatory" },
+        { key: "channels.cli.enabled", value: "false", level: "mandatory" },
         { key: "browser.startup", value: '"on_demand"', level: "mandatory" }
       ],
       path: null, document: '{"schema": 4}' },
@@ -737,6 +738,9 @@ view.setSacred("vault.example.test, *.finance.example.test");
 const authoredAfterEdit = JSON.parse(view.draftDocument()).config;
 view.setPermission("browser.tabs.allow_close", true);
 const authoredAfterClearing = JSON.parse(view.draftDocument()).config;
+view.setPermission("channels.mcp.enabled", false);
+const authoredChannelOff = JSON.parse(view.draftDocument()).config;
+const channelSwitchesOff = nodes.get("setting-groups").innerHTML;
 
 // Opening and closing one organization rule: the detail belongs to the row, not to the page.
 view.toggleRule("org:Example Org:support");
@@ -2115,6 +2119,24 @@ const checks = [
   ["a restriction in force reads as a sentence, not a key",
     settingsShown.includes("Closing a tab stays something only you do."),
     `settings: ${JSON.stringify(settingsShown)}`],
+  ["both channel switches render, on unless a layer turned them off, with the layer that did",
+    permissionsOnLoad.includes("Who may work")
+      && /data-restriction="channels\.mcp\.enabled"\s+checked/.test(permissionsOnLoad)
+      && /data-restriction="channels\.cli\.enabled"[^>]*disabled/.test(permissionsOnLoad)
+      && settingsShown.includes("Work from the command line is refused.")
+      && /Work from the command line is refused\. <span class="owner">Example Org<\/span>/.test(settingsShown),
+    `permissions: ${JSON.stringify(permissionsOnLoad)}, settings: ${JSON.stringify(settingsShown)}`],
+  ["a channel switch states its honest limit wherever it is shown",
+    permissionsOnLoad.includes("any program running as you could say otherwise")
+      && settingsShown.includes("any program running as you could say otherwise")
+      && settingsShown.split("any program running as you").length === 2,
+    `permissions: ${JSON.stringify(permissionsOnLoad)}, settings: ${JSON.stringify(settingsShown)}`],
+  ["the user layer turns a channel off by authoring its tightening value",
+    authoredChannelOff.some((entry) =>
+      entry.key === "channels.mcp.enabled" && entry.value === false && entry.level === "mandatory")
+      && !/data-restriction="channels\.mcp\.enabled"\s+checked/.test(channelSwitchesOff)
+      && channelSwitchesOff.includes("Work from MCP agents is refused."),
+    `authored: ${JSON.stringify(authoredChannelOff)}`],
   ["the editor appears only when authoring is permitted",
     editorShown && editorHiddenWhenRefused],
   ["Re-check re-enables its button after currentTarget has expired, and never throws",

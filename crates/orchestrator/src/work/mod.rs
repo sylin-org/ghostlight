@@ -388,6 +388,8 @@ impl ApplicationExecutor {
                 observed: Observed::default(),
                 audit: refusal.audit(),
             }
+        } else if let Some(terminal) = self.channel_preflight(&context) {
+            terminal
         } else if (!requires_lease || lease.is_some())
             && !cancellation.is_cancelled()
             && Instant::now() < deadline
@@ -1113,6 +1115,35 @@ impl ApplicationExecutor {
         context
             .snapshot
             .authorize_audit(!self.audit.health().unavailable())
+    }
+
+    /// Refuse a request whose channel a policy turned off, before any browser work and for every
+    /// operation, `policy_explain` included (ADR-0202 Decision 22a).
+    fn channel_preflight(&self, context: &InvocationContext<'_>) -> Option<Terminal> {
+        let channel = context.provenance.attribution().channel;
+        let (decision, author) = context.snapshot.channel_refusal(channel)?;
+        context.findings.permit(context.snapshot.decision_evidence(
+            CapabilitySet::EMPTY,
+            None,
+            decision,
+        ));
+        let refusal = Refusal::ChannelOff { channel, author };
+        Some(Terminal {
+            result: InvocationResult::new(
+                context.invocation,
+                Status::Blocked,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                &refusal.summary(),
+                with_denial_facts(decision, json!({"reason": decision.reason.as_str()})),
+                refusal.next_steps(),
+            ),
+            decision,
+            physical_id: None,
+            observed: refusal.observed(),
+            audit: refusal.audit(),
+        })
     }
 
     fn audit_preflight(&self, context: &InvocationContext<'_>) -> Option<Terminal> {
@@ -2616,7 +2647,9 @@ const fn blocked_reason(reason: ReasonCode) -> BlockedReason {
         ReasonCode::RuntimeHold => BlockedReason::Hold,
         ReasonCode::SessionEnded => BlockedReason::SessionEnded,
         ReasonCode::AuditUnavailable => BlockedReason::AuditUnavailable,
-        ReasonCode::Permitted | ReasonCode::InvalidRequest => BlockedReason::Unspecified,
+        ReasonCode::Permitted | ReasonCode::InvalidRequest | ReasonCode::ChannelDenied => {
+            BlockedReason::Unspecified
+        }
     }
 }
 
@@ -2997,6 +3030,7 @@ mod tests {
     mod audit_health;
     mod availability;
     mod catalog_authority;
+    mod channels;
     mod configured_authority;
     mod control;
     mod controls;

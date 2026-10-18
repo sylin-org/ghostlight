@@ -48,6 +48,12 @@ destinations follow those policies, with one exception: agents can never open or
 Ghostlight's own workbench address. Non-HTTP(S) schemes and configured sacred domains remain
 hard ceilings.
 
+A policy can turn off work from MCP agents or from the command line, and every request on a
+channel that is off is refused before any browser work. The channel is declared by Ghostlight's
+own programs when they connect, and any program running as the same user could declare another,
+so a channel switch is a guardrail for well-behaved agents, not a barrier against hostile software
+on the same account.
+
 Every policy denial receives deterministic attribution to authority, tier, grant, and
 rule. Repeated refusals do not pause a session; later permitted work remains available. Human
 Pause/Stop remain authoritative. Controls are rechecked at browser

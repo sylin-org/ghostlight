@@ -540,6 +540,8 @@ fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<()
         }
         "browser.tabs.allow_close"
         | super::SCREENSHOTS_ENABLED_KEY
+        | super::MCP_CHANNEL_ENABLED_KEY
+        | super::CLI_CHANNEL_ENABLED_KEY
         | "privacy.preserve_target_names" => {
             if !entry.value.is_boolean() {
                 return field(source, &path, "must be a boolean");
@@ -802,15 +804,13 @@ mod tests {
     }
 
     #[test]
-    fn the_settings_and_modes_schema_three_had_are_not_part_of_schema_four() {
+    fn the_settings_and_modes_schema_four_retired_are_not_part_of_it() {
         let config = |key: &str, value: &str| {
             format!(
                 r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{key}","value":{value},"level":"mandatory"}}]}}"#
             )
         };
         for (key, value) in [
-            ("channels.mcp.enabled", "true"),
-            ("channels.cli.enabled", "false"),
             ("policy.user.enabled", "false"),
             ("content.frames.handling", r#""permitted_content""#),
             ("content.frames.notice", r#""when_affected""#),
@@ -831,6 +831,26 @@ mod tests {
                 parse(text, "retired").unwrap_err(),
                 ManifestError::Shape { .. }
             ));
+        }
+    }
+
+    #[test]
+    fn the_channel_switches_are_booleans() {
+        for key in [
+            crate::governance::MCP_CHANNEL_ENABLED_KEY,
+            crate::governance::CLI_CHANNEL_ENABLED_KEY,
+        ] {
+            let document = |value: &str| {
+                format!(
+                    r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{key}","value":{value},"level":"mandatory"}}]}}"#
+                )
+            };
+            for value in [false, true] {
+                let policy = parse(&document(&value.to_string()), "switch").expect("a boolean");
+                assert_eq!(policy.boolean_setting(key), Some(value));
+            }
+            let error = parse(&document(r#""off""#), "switch").unwrap_err();
+            assert!(error.to_string().contains("must be a boolean"), "{error}");
         }
     }
 

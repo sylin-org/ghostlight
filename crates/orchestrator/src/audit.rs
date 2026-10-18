@@ -113,7 +113,8 @@ pub struct AuditRecord {
     /// What the action did, merged from browser-seam landing facts and outcome measurements.
     #[serde(default)]
     pub observed: Observed,
-    /// Which intake the work arrived on. Attribution only, never authority (ADR-0105).
+    /// Which intake the work arrived on. Attribution, and the one fact a policy's channel switch
+    /// decides by (ADR-0202 Decision 22a).
     ///
     /// Absent when the workspace was already gone by the time the record was written.
     #[serde(default)]

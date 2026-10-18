@@ -1,0 +1,21 @@
+{
+  "content": [
+    {
+      "text": "Blocked: the user's Ghostlight policy turns off work from MCP agents.",
+      "type": "text"
+    }
+  ],
+  "isError": true,
+  "structuredContent": {
+    "effect": "none",
+    "facts": {
+      "denial_id": "D-9840b389",
+      "policy_rule": "channel",
+      "reason": "channel_denied"
+    },
+    "invocation": "<volatile>",
+    "repeat_safe": true,
+    "status": "blocked",
+    "summary": "Blocked: the user's Ghostlight policy turns off work from MCP agents."
+  }
+}

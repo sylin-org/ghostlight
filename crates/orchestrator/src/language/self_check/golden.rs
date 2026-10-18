@@ -1,8 +1,8 @@
 //! Golden files: compare, or rewrite on request.
 //!
 //! The catalog golden pins `tools/list`; the result goldens pin what a model receives from
-//! `tools/call` for one success, one refusal, one find of repeated controls and one refusal of
-//! each kind of stale handle. Volatile values (handles, times) are replaced
+//! `tools/call` for one success, one refusal, one find of repeated controls, one refusal of each
+//! kind of stale handle and one call on a channel a policy turned off. Volatile values (handles, times) are replaced
 //! by a placeholder so the files stay stable between runs. The audit line goldens reuse the same
 //! comparison with their own update variable.
 
@@ -23,6 +23,10 @@ pub(crate) const REPEATED_FIND_GOLDEN: &str = "tests/golden/model/find_repeated.
 
 /// The complete `tools/call` result of one refused call, relative to the repository root.
 pub(crate) const REFUSAL_GOLDEN: &str = "tests/golden/model/refusal.json";
+
+/// The complete `tools/call` result of a call on a channel a policy turned off, relative to the
+/// repository root.
+pub(crate) const CHANNEL_REFUSAL_GOLDEN: &str = "tests/golden/model/channel_refusal.json";
 
 /// The complete `tools/call` results of a click on a stale handle, one per word a stale handle can
 /// give, relative to the repository root.

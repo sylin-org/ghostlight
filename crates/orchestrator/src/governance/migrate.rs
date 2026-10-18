@@ -1,10 +1,10 @@
 //! Carry a schema-3 policy document to schema 4 where its meaning is kept.
 //!
-//! Schema 4 is schema 3 without observe mode, the channel switches, the user-policy switch and the
-//! frame options. A document moves only when every part schema 4 drops says what schema 4 does
-//! anyway: `enforce`, a channel set to `true`, the user switch (the user layer only tightens), and
-//! a frame option at its default. Anything else would change what the policy does, so the
-//! document stays as it is and each such part gets one sentence.
+//! Schema 4 is schema 3 without observe mode, the user-policy switch and the frame options. Its
+//! channel switches carry over as they are (ADR-0202 Decision 22a). A document moves only when
+//! every part schema 4 drops says what schema 4 does anyway: `enforce`, the user switch (the user
+//! layer only tightens), and a frame option at its default. Anything else would change what the
+//! policy does, so the document stays as it is and each such part gets one sentence.
 
 use std::fs;
 use std::io;
@@ -202,7 +202,6 @@ impl Plan {
         };
         let value = entry.get("value").unwrap_or(&Value::Null);
         let keeps_meaning = match retired {
-            Retired::Channel(_) => value == &Value::Bool(true),
             Retired::UserPolicySwitch => true,
             Retired::Frame(_, fixed) => value.as_str() == Some(fixed),
             Retired::Mode => false,
@@ -254,7 +253,7 @@ mod tests {
                 {{"key":"browser.startup","value":"manual","level":"mandatory"}}]}}"#
         );
         let migration = moved(&text);
-        assert_eq!(migration.removed.len(), 6);
+        assert_eq!(migration.removed.len(), 4);
         let carried = manifest::parse(&migration.document, "moved").unwrap();
         assert_eq!(carried.schema, 4);
         assert_eq!(carried.name, "mine");
@@ -264,14 +263,37 @@ mod tests {
             carried.browser_startup(),
             Some(manifest::BrowserStartup::Manual)
         );
-        assert_eq!(carried.config.len(), 1);
+        assert_eq!(carried.config.len(), 3);
         assert!(migration.document.ends_with("}\n"));
+    }
+
+    #[test]
+    fn the_schema_3_switches_migrate() {
+        let migration = moved(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[],"config":[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"},{"key":"channels.cli.enabled","value":true,"level":"recommended"}]}"#,
+        );
+        assert!(migration.removed.is_empty(), "{:?}", migration.removed);
+        let carried = manifest::parse(&migration.document, "moved").unwrap();
+        assert_eq!(
+            carried.boolean_setting(crate::governance::MCP_CHANNEL_ENABLED_KEY),
+            Some(false)
+        );
+        assert_eq!(
+            carried.boolean_setting(crate::governance::CLI_CHANNEL_ENABLED_KEY),
+            Some(true)
+        );
+        assert_eq!(carried.config[1].level, manifest::SettingLevel::Recommended);
+        let off = refused(
+            r#"{"schema":3,"name":"mine","version":"1","grants":[],"config":[{"key":"channels.mcp.enabled","value":"no","level":"mandatory"}]}"#,
+        );
+        assert_eq!(off.len(), 1);
+        assert!(off[0].contains("must be a boolean"), "{off:?}");
     }
 
     #[test]
     fn a_grant_that_enforces_and_an_emptied_config_leave_a_plain_document() {
         let migration = moved(
-            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"g","mode":"enforce","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"channels.cli.enabled","value":true,"level":"mandatory"}]}"#,
+            r#"{"schema":3,"name":"mine","version":"1","grants":[{"id":"g","mode":"enforce","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"policy.user.enabled","value":true,"level":"mandatory"}]}"#,
         );
         assert!(!migration.document.contains("config"));
         assert!(!migration.document.contains("mode"));
@@ -305,14 +327,6 @@ mod tests {
                 "grants[0].mode",
             ),
             (
-                r#""grants":[],"config":[{"key":"channels.cli.enabled","value":false,"level":"mandatory"}]"#,
-                "channels.cli.enabled is false",
-            ),
-            (
-                r#""grants":[],"config":[{"key":"channels.mcp.enabled","value":"no","level":"mandatory"}]"#,
-                "channels.mcp.enabled",
-            ),
-            (
                 r#""grants":[],"config":[{"key":"content.frames.handling","value":"complete_page","level":"mandatory"}]"#,
                 "content.frames.handling",
             ),
@@ -328,7 +342,7 @@ mod tests {
             assert!(reasons[0].contains(expected), "{body}: {reasons:?}");
         }
         let both = refused(
-            r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[],"config":[{"key":"channels.cli.enabled","value":false,"level":"mandatory"}]}"#,
+            r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[],"config":[{"key":"content.frames.notice","value":"on_demand","level":"mandatory"}]}"#,
         );
         assert_eq!(both.len(), 2);
     }

@@ -8,6 +8,7 @@ use super::outcome::{
     Refusal, WorkspaceReason,
 };
 use super::page_refusal::PageRefusal;
+use crate::intake::session::IntakeChannel;
 
 /// The explicitly permitted language projection of one terminal result.
 ///
@@ -91,6 +92,7 @@ pub enum AuditRefusal {
     DeadlineBeforeStart,
     Capacity,
     AuthorityBlocked { cause: BlockedReason },
+    ChannelOff { channel: IntakeChannel },
     LocalInterlock,
     CredentialHandoff,
     CredentialAuthorization,
@@ -182,6 +184,7 @@ impl Refusal {
             Self::AuthorityBlocked { reason, .. } => {
                 AuditRefusal::AuthorityBlocked { cause: *reason }
             }
+            Self::ChannelOff { channel, .. } => AuditRefusal::ChannelOff { channel: *channel },
             Self::LocalInterlock => AuditRefusal::LocalInterlock,
             Self::CredentialAuthorization { .. } => AuditRefusal::CredentialAuthorization,
             Self::IncompatibleReceipt => AuditRefusal::IncompatibleReceipt,

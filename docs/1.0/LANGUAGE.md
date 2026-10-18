@@ -286,9 +286,15 @@ Refusals say what is true, and their next steps suggest only what the caller can
   `browser_read` or `browser_screenshot` before repeating.
   The `timeout_ms` of a decoded operation is the one record of its call time, and the deadline
   itself is derived from it.
-- A policy denial (host, protected host, capability, tab close, screenshot, client kind, or an
-  unspecified policy reason) points to `policy_explain`. Pause, Stop, a required-history outage,
-  and an unreadable policy keep no next step.
+- A policy denial (host, protected host, capability, tab close, screenshot, or an unspecified
+  policy reason) points to `policy_explain`. Pause, Stop, a required-history outage, and an
+  unreadable policy keep no next step.
+- A request on a channel a policy turned off is refused before any browser work, `policy_explain`
+  included, with `blocked`, `reason: channel_denied`, no effect and `repeat_safe: true`. The
+  summary names the switch and whose policy turned it off: `Blocked: the user's Ghostlight policy
+  turns off work from MCP agents.`, or `the organization's`, and `from the command line.` for
+  `ghostlight call`. It keeps no next step, because the caller cannot turn the switch back on.
+  The connection stays open, so every call on it hears the same refusal (ADR-0202 Decision 22a).
 - A refusal of Ghostlight's own control page names the origin as the caller wrote it (scheme,
   host and port, never a path) and says other ports on this computer are not affected. It keeps
   no next step, because no policy lifts it. History records the reason and the host, never the

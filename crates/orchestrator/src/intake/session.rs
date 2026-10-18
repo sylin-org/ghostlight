@@ -73,8 +73,8 @@ pub enum ServiceContent {
 /// Which intake a session arrived on.
 ///
 /// Closed on purpose: an intake is a fact about the shape of the caller, not an open label. It is
-/// recorded for attribution and presentation and is never an input to an authority decision
-/// (ADR-0105 Decision 2).
+/// recorded for attribution and presentation, and it decides one thing: a policy's channel switch
+/// admits or refuses a request by the channel its connection declared (ADR-0202 Decision 22a).
 #[derive(
     Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]

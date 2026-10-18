@@ -7,6 +7,7 @@ use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
 use super::page_refusal::{self, PageGesture, PageRefusal};
 use super::{adapter, setup, MAX_INSPECT_ITEMS};
+use crate::intake::session::IntakeChannel;
 use crate::workspace::{StaleReason, WorkspaceError};
 
 /// The most characters a result's summary keeps. Longer summaries are cut at this bound, so a
@@ -283,6 +284,15 @@ pub enum BlockedReason {
     SessionEnded,
     /// Authority refused for a reason with no more specific wording.
     Unspecified,
+}
+
+/// Whose policy layer refused a request, in the words its refusal names it by.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PolicyAuthor {
+    /// The organization managing this computer.
+    Organization,
+    /// The person using this computer.
+    User,
 }
 
 /// Where a saved replay ended up.
@@ -1413,6 +1423,14 @@ pub enum Refusal {
         host: Option<String>,
         origin: Option<String>,
     },
+    /// A policy's switch turned off the channel the request arrived on, so nothing ran
+    /// (ADR-0202 Decision 22a). The connection stays open, so the caller hears why.
+    ChannelOff {
+        /// The channel the request's connection declared.
+        channel: IntakeChannel,
+        /// Whose layer turned it off.
+        author: PolicyAuthor,
+    },
     /// The browser-local physical safety setting refused the action.
     LocalInterlock,
     /// Credential input requires the caller to acknowledge the user's explicit instruction. It
@@ -1543,6 +1561,7 @@ impl Refusal {
                 host,
                 origin,
             } => return blocked(*reason, host, origin),
+            Self::ChannelOff { channel, author } => return channel_off(*channel, *author),
             Self::LocalInterlock => {
                 "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings."
             }
@@ -2149,6 +2168,22 @@ fn blocked(reason: BlockedReason, host: &Option<String>, origin: &Option<String>
     }
 }
 
+/// Say which channel switch is off and whose policy turned it off.
+///
+/// No next step goes with it: the caller cannot turn the switch back on, and nothing it calls on
+/// this connection will run until a person does.
+fn channel_off(channel: IntakeChannel, author: PolicyAuthor) -> String {
+    let whose = match author {
+        PolicyAuthor::Organization => "the organization's",
+        PolicyAuthor::User => "the user's",
+    };
+    let from = match channel {
+        IntakeChannel::Mcp => "MCP agents",
+        IntakeChannel::Cli => "the command line",
+    };
+    format!("Blocked: {whose} Ghostlight policy turns off work from {from}.")
+}
+
 /// Say what the page did, not which condition constant was evaluated.
 ///
 /// "Wait condition text_present was satisfied after 1687 ms" describes the mechanism doing the
@@ -2359,10 +2394,11 @@ mod tests {
 
     use super::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-        CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Observed, Outcome, Refusal,
-        SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE,
-        HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
+        CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Observed, Outcome, PolicyAuthor,
+        Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
+        HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
+    use crate::intake::session::IntakeChannel;
     use crate::language::area::{LeftOut, LeftOutKey};
     use crate::language::field_problem::ControlRef;
     use crate::workspace::{StaleReason, WorkspaceError};
@@ -3497,6 +3533,42 @@ Changes are \"unsaved\".".into()),
         );
         assert_eq!(refusal.observed().host.as_deref(), Some("localhost"));
         assert!(Refusal::InvalidRequest.observed().host.is_none());
+    }
+
+    #[test]
+    fn a_channel_refusal_names_the_switch_and_whose_policy_turned_it_off() {
+        for (channel, author, expected) in [
+            (
+                IntakeChannel::Mcp,
+                PolicyAuthor::User,
+                "Blocked: the user's Ghostlight policy turns off work from MCP agents.",
+            ),
+            (
+                IntakeChannel::Mcp,
+                PolicyAuthor::Organization,
+                "Blocked: the organization's Ghostlight policy turns off work from MCP agents.",
+            ),
+            (
+                IntakeChannel::Cli,
+                PolicyAuthor::User,
+                "Blocked: the user's Ghostlight policy turns off work from the command line.",
+            ),
+            (
+                IntakeChannel::Cli,
+                PolicyAuthor::Organization,
+                "Blocked: the organization's Ghostlight policy turns off work from the command line.",
+            ),
+        ] {
+            let refusal = Refusal::ChannelOff { channel, author };
+            assert_eq!(refusal.summary(), expected);
+            assert!(refusal.next_steps().is_empty());
+            let audit = refusal.audit();
+            assert_eq!(audit.summary(), expected);
+            assert_eq!(
+                serde_json::to_value(audit.refusal()).unwrap(),
+                serde_json::json!({"reason": "channel_off", "channel": channel.as_str()})
+            );
+        }
     }
 
     /// A primitive adapter refusal speaks the browser's own reason and never masquerades as a

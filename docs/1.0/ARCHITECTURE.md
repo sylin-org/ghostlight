@@ -382,7 +382,8 @@ agent's catalog id as a labelled claim, never the client's words. One function i
 `language::provenance` names the agent and composes the explanation, live and from history alike:
 the claim names the agent, else the source's catalog agent, else Unknown agent, and "X, in Y." is
 said only when the catalog knows X runs inside Y (ADR-0202 Decisions 14 and 14a). Provenance
-grants no authority. Audit lines with
+grants no authority. Its channel decides one thing: a policy's channel switch refuses every request
+on a channel it turns off (ADR-0202 Decision 22a). Audit lines with
 extra attribution fields still read; the extra fields are ignored.
 
 Every peer reaches the service through one endpoint (relay protocol 4, ADR-0199 Decision 5; the
@@ -576,8 +577,15 @@ the extension; ADR-0109 places the GIF encode and its delivery there too.
 ### Governance
 
 Owns authority loading, immutable snapshots, capabilities, scheme boundaries,
-policy-protected hosts, admission, landing decisions, runtime controls, holds, and content-minimized
-audit intent. Operation handlers see only the governance facade.
+policy-protected hosts, the channel switches, admission, landing decisions, runtime controls, holds,
+and content-minimized audit intent. Operation handlers see only the governance facade.
+
+The channel switches, `channels.mcp.enabled` and `channels.cli.enabled`, are on when unset. The
+executor asks the snapshot about the request's channel, read from its connection's evidence, before
+any browser work, and a channel that any layer turned off refuses the request through the one
+completion path. The connection stays open, so the agent hears why. The channel is declared by
+Ghostlight's own peer, and any program running as the same user could declare another, so a switch
+is a guardrail for well-behaved agents, not a barrier against hostile software on the same account.
 
 One refresher publishes the authority. The service starts a single thread that, once a second,
 checks each policy file and the managed bootstrap by existence, modified time and size, reads only

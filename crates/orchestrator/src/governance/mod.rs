@@ -26,6 +26,8 @@ use std::sync::{Arc, Mutex};
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use crate::browser::BrowserPort;
 use crate::install::record::atomic_replace;
+use crate::intake::session::IntakeChannel;
+use crate::language::outcome::PolicyAuthor;
 use file_state::FileState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -38,6 +40,21 @@ const RUNTIME_END: u8 = 2;
 
 /// Binary permission for complete screenshots, including visible embedded documents.
 pub const SCREENSHOTS_ENABLED_KEY: &str = "browser.screenshots.enabled";
+
+/// The switch for work from MCP agents: `false` refuses every request on the `mcp` channel.
+pub const MCP_CHANNEL_ENABLED_KEY: &str = "channels.mcp.enabled";
+
+/// The switch for work from the command line: `false` refuses every request on the `cli` channel.
+pub const CLI_CHANNEL_ENABLED_KEY: &str = "channels.cli.enabled";
+
+/// The policy key that switches `channel` on or off (ADR-0202 Decision 22a). Unset means on.
+#[must_use]
+pub const fn channel_enabled_key(channel: IntakeChannel) -> &'static str {
+    match channel {
+        IntakeChannel::Mcp => MCP_CHANNEL_ENABLED_KEY,
+        IntakeChannel::Cli => CLI_CHANNEL_ENABLED_KEY,
+    }
+}
 
 /// One independent governed browser capability fact.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -208,6 +225,8 @@ pub enum ReasonCode {
     TabCloseDenied,
     /// Screenshot capture was disabled by an authority layer.
     ScreenshotDenied,
+    /// An authority layer turned off the channel the request arrived on.
+    ChannelDenied,
     /// Host was not granted by every authority layer.
     HostDenied,
     /// Host or scheme is independently protected.
@@ -237,6 +256,7 @@ impl ReasonCode {
             Self::CapabilityDenied => "capability_denied",
             Self::TabCloseDenied => "tab_close_denied",
             Self::ScreenshotDenied => "screenshot_denied",
+            Self::ChannelDenied => "channel_denied",
             Self::HostDenied => "host_denied",
             Self::ProtectedHost => "protected_host",
             Self::OwnWorkbench => "own_workbench",
@@ -264,6 +284,8 @@ pub enum PolicyRule {
     TabClose,
     /// A binary setting prevents screenshots.
     Screenshot,
+    /// A channel switch refuses the request's channel.
+    Channel,
 }
 
 impl PolicyRule {
@@ -276,6 +298,7 @@ impl PolicyRule {
             Self::Capability => "capability",
             Self::TabClose => "tab_close",
             Self::Screenshot => "screenshot",
+            Self::Channel => "channel",
             Self::AuditAvailability => "audit_availability",
         }
     }
@@ -470,6 +493,37 @@ impl AuthoritySnapshot {
             }
         }
         Decision::allow()
+    }
+
+    /// The refusal of a request on `channel` when a layer turns that channel's switch off: the
+    /// policy decision, and whose layer turned it off (ADR-0202 Decision 22a). `None` admits it.
+    ///
+    /// The channel is declared by Ghostlight's own peer, and any program running as the same user
+    /// could declare another, so this is a guardrail for well-behaved agents, not a barrier
+    /// against hostile software on the same account. Validity is not decided here: every
+    /// boundary the request goes on to cross refuses invalid authority itself.
+    #[must_use]
+    pub fn channel_refusal(&self, channel: IntakeChannel) -> Option<(Decision, PolicyAuthor)> {
+        let key = channel_enabled_key(channel);
+        let (index, layer) = self
+            .layers
+            .iter()
+            .enumerate()
+            .find(|(_, layer)| layer.manifest.boolean_setting(key) == Some(false))?;
+        let decision = Decision::policy(
+            ReasonCode::ChannelDenied,
+            PolicyAttribution {
+                layer: u16::try_from(index).expect("policy layer count is bounded"),
+                grant: None,
+                rule: PolicyRule::Channel,
+                denial: denial_bytes(&layer.manifest.hash, "", PolicyRule::Channel),
+            },
+        );
+        let author = match layer.tier {
+            AuthorityTier::Managed => PolicyAuthor::Organization,
+            AuthorityTier::User => PolicyAuthor::User,
+        };
+        Some((decision, author))
     }
 
     /// Opaque version recorded in audit.

@@ -199,11 +199,16 @@ workbench shows waiting becoming running once.
    one parent composition record plus safe incremental child receipts. Grouped history and policy
    previews use the child evidence without double-counting the aggregate (ADR-0156).
 4. Strict schema-4 grants use exact, suffix, universal, tie-deny, ordered-first-admission, per-grant
-   deny, and layer-intersection rules from ADR-0121. Schema 4 has no observe mode, channel
-   switches, user-policy switch or frame options. A schema-3 file fails closed with the migrate
-   sentence, `ghostlight policy migrate <file>` moves a file only where its meaning is kept and
-   keeps a `.schema3.bak` copy, Ghostlight's own user file moves at load by the same rule, and
-   administrator files are never rewritten.
+   deny, and layer-intersection rules from ADR-0121. Schema 4 has no observe mode, user-policy
+   switch or frame options. A schema-3 file fails closed with the migrate sentence,
+   `ghostlight policy migrate <file>` moves a file only where its meaning is kept, carries its
+   channel switches and keeps a `.schema3.bak` copy, Ghostlight's own user file moves at load by
+   the same rule, and administrator files are never rewritten. `channels.mcp.enabled` or
+   `channels.cli.enabled` set to `false` in either layer refuses every request on that channel
+   before any browser work, through the one completion path, and an unset switch is on. The
+   refusal says which switch is off and whose policy turned it off. The channel is declared by
+   Ghostlight's own peer, so a switch is a guardrail for well-behaved agents, not a barrier
+   against other software running as the same user (ADR-0202 Decision 22a).
 5. Tool calls cannot author host or capability policy. Obsolete request fields fail before effects.
    Started work keeps one immutable configured authority snapshot even if configuration changes.
 6. A configured invalid cold source fails closed. An invalid replacement retains last valid for

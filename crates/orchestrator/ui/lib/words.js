@@ -709,6 +709,13 @@
   };
 
   /**
+   * What a channel switch can and cannot promise, said wherever the switches are (ADR-0202
+   * Decision 22a). The channel is what Ghostlight's own program declared when the agent connected,
+   * and any program running as the same user could declare another.
+   */
+  const CHANNEL_LIMIT = "Ghostlight's own programs say how an agent connected, and any program running as you could say otherwise. These switches keep well-behaved agents in line; they do not stop hostile software on this account.";
+
+  /**
    * The settings a policy may author, grouped and worded the way a person actually thinks about
    * them -- not the way the schema stores them.
    *
@@ -725,6 +732,25 @@
    * are the seams that translate those controls back into the closed schema.
    */
   const SETTING_GROUPS = [
+    {
+      title: "Who may work",
+      items: [
+        {
+          key: "channels.mcp.enabled",
+          name: "MCP agents",
+          on: "Agents connected through MCP may work in the browser.",
+          off: "Work from MCP agents is refused.",
+          limit: CHANNEL_LIMIT
+        },
+        {
+          key: "channels.cli.enabled",
+          name: "Command line",
+          on: "Scripts and programs that use ghostlight call may work in the browser.",
+          off: "Work from the command line is refused.",
+          limit: CHANNEL_LIMIT
+        }
+      ]
+    },
     { title: "History", items: [{
       key: "audit.availability", name: "When history cannot be saved", kind: "choice",
       authority: "audit", field: "mode", source: "source", default: "keep_working",
@@ -811,6 +837,12 @@
 
   /** Every setting item, in one flat list, for lookups that do not care about grouping. */
   const SETTING_ITEMS = SETTING_GROUPS.flatMap((group) => group.items);
+
+  /** The limits the settings with these keys carry, each said once. */
+  function settingLimits(keys) {
+    const limits = keys.map((key) => SETTING_ITEMS.find((item) => item.key === key)?.limit).filter(Boolean);
+    return [...new Set(limits)];
+  }
 
   /** How a view that may not name the never-touch sites says how many there are. */
   function neverTouchedCount(count) {
@@ -1061,7 +1093,7 @@
     GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilitiesOf, capabilityWord, capabilityClass, capabilityLabel, capabilitiesSaid, stepsUsed,
     CAPABILITY_ORDER, CAPABILITY_WORDS,
-    CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
+    CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords, settingLimits,
     OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES,
     validHostPattern, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId });

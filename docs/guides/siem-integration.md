@@ -95,7 +95,7 @@ when the service writes a different shape.
 | `permissions` | Bounded actual evaluation checks and a `truncated` flag; includes allowed work as well as refusals. Each child record holds only its own checks, and a flow's own record holds its admission check. |
 | `coverage` | Optional document coverage of a read: `targeted`, the inspected, excluded, page excluded and unavailable document counts, and `limited_by_size`. |
 | `unconfirmed_history_steps` | Optional count of child receipts whose storage was not confirmed; absent when zero. |
-| `channel` | `mcp` or `cli`; attribution, not authority. |
+| `channel` | `mcp` or `cli`, as Ghostlight's own peer declared it. Attribution, and what a policy's channel switch decides by; never proof of who called. |
 | `provenance` | Opaque `connection_id`, `observed_at_ms` (when the service accepted the connection) and `channel` of the connection that sent the work, its optional `claimed_agent` and its optional `source`. `claimed_agent` is the catalog id of the agent the connection's client claimed to be, kept only when that claim names an agent in Ghostlight's catalog; it is the client's claim, never verified, and the client's own words are never written. `source` is the app Ghostlight saw start that connection, read from the operating system and never from the client. `source.agent` is the catalog id of the agent whose installed app it is, when one is; `source.image` is that app's executable file name, or the nearest program that is not a shell or interpreter, never a path. Attribution, not authority. |
 | `browser` | Browser family or product name that performed the work. |
 
@@ -119,6 +119,11 @@ control names it listed reach the client only and are never audited. The shape i
 audit v2 contract, which freezes at 2.0: a word is not renamed or removed, and a collector
 ignores a word it does not know. A line from an earlier build carries the bare string
 `"stale_target"` as its `cause`; a reader keeps such a line and omits its `refusal_facts`.
+
+A request refused because a policy turned off its channel has `reason` `channel_denied`,
+`policy_rule` `channel`, the deciding `policy_tier`, and `refusal_facts`
+`{"reason":"channel_off","channel":"<channel>"}`, where `<channel>` is `mcp` or `cli`. Nothing
+reached the browser. The same audit v2 rules apply to these words.
 
 A refusal because the page would not act on a control has the shape
 `{"reason":"page_refused","cause":"<word>"}`, and `<word>` is one of four: `not_visible`,
