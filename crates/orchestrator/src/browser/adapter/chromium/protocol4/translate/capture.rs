@@ -5,12 +5,16 @@
 //! decides the clip: the visible viewport, the whole page, one located target placed in the top
 //! viewport, or a region of the page the model chose on an earlier screenshot. Waiting for the
 //! page to settle first is best effort and never fails a capture.
+//!
+//! Chromium draws only the tab each window shows, so a capture of any other tab would wait for a
+//! frame that never comes until the call's deadline. Every capture first asks whether its tab is
+//! showing and refuses at once when it is not.
 
 use super::super::geometry;
 use super::super::link::Link;
 use super::super::locator::Locator;
 use super::super::scope::PlannedCall;
-use super::super::wire::{CallMode, Capture, CaptureClip};
+use super::super::wire::{CallMode, Capture, CaptureClip, ListTabs};
 use super::super::world::{self, OwnerBox, Prepared};
 use super::observe::condition;
 use super::{frame_tree, value};
@@ -48,6 +52,18 @@ fn settle_first(l: &mut Link<'_>, tab_id: u64) {
     );
 }
 
+/// Refuse a capture of `tab_id` when its window shows another tab. A tab the listing does not
+/// name is left to the capture's own failure.
+fn require_showing(l: &mut Link<'_>, tab_id: u64) -> Result<(), BrowserError> {
+    let listed = l.send(ListTabs {
+        tab_ids: Some(vec![tab_id]),
+    })?;
+    match listed.tabs.iter().find(|tab| tab.tab_id == tab_id) {
+        Some(tab) if !tab.active => Err(BrowserError::TabNotShowing),
+        _ => Ok(()),
+    }
+}
+
 /// Capture the visible viewport, the whole page, or one located target.
 ///
 /// A target is measured in its own document and placed in the top viewport by the position of
@@ -55,8 +71,8 @@ fn settle_first(l: &mut Link<'_>, tab_id: u64) {
 ///
 /// # Errors
 ///
-/// Returns the plain failure of a target that cannot be measured, and the failure of the
-/// capture.
+/// Returns [`BrowserError::TabNotShowing`] for a tab its window does not show, the plain failure
+/// of a target that cannot be measured, and the failure of the capture.
 pub fn screenshot(
     l: &mut Link<'_>,
     tab_id: u64,
@@ -64,6 +80,7 @@ pub fn screenshot(
     full_page: bool,
     visual_settle: Option<bool>,
 ) -> Result<BrowserOutcome, BrowserError> {
+    require_showing(l, tab_id)?;
     let settling = visual_settle != Some(false);
     let (clip, scope) = match locator {
         Some(locator) => {
@@ -128,8 +145,8 @@ pub fn screenshot(
 ///
 /// # Errors
 ///
-/// Returns the plain failure of a region that cannot be captured or of a view that moved, and
-/// the failure of the capture.
+/// Returns [`BrowserError::TabNotShowing`] for a tab its window does not show, the plain failure
+/// of a region that cannot be captured or of a view that moved, and the failure of the capture.
 pub fn screenshot_region(
     l: &mut Link<'_>,
     tab_id: u64,
@@ -138,6 +155,7 @@ pub fn screenshot_region(
     visual_settle: Option<bool>,
 ) -> Result<BrowserOutcome, BrowserError> {
     let clip = geometry::region_clip(region)?;
+    require_showing(l, tab_id)?;
     if visual_settle != Some(false) {
         settle_first(l, tab_id);
     }

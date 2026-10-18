@@ -734,8 +734,8 @@ fn a_viewport_capture_is_one_primitive_after_a_best_effort_settle() {
     assert_eq!(viewport, expected_view());
     assert_eq!(
         primitives_seen(&fake),
-        ["call", "capture"],
-        "a settle, then the capture; the service sends no hide or restore calls"
+        ["list_tabs", "call", "capture"],
+        "the tab is showing, a settle, then the capture; the service sends no hide or restore calls"
     );
     let calls = calls_seen(&fake);
     assert_eq!(calls[0].calls[0].message["condition"], "visual_settle");
@@ -770,7 +770,7 @@ fn a_capture_goes_on_when_the_settle_fails_and_skips_it_when_asked() {
     call(&port, shot(false, Some(false))).unwrap();
     assert_eq!(
         primitives_seen(&fake),
-        ["call", "capture", "capture"],
+        ["list_tabs", "call", "capture", "list_tabs", "capture"],
         "visual_settle false sends no settle"
     );
     assert_eq!(captures_seen(&fake)[0].clip, CaptureClip::FullPage);
@@ -847,7 +847,40 @@ fn a_region_capture_magnifies_the_page_rectangle_of_the_view_it_was_chosen_on() 
         }
     );
     assert_eq!(captures[0].budget, geometry::region_budget());
-    assert_eq!(primitives_seen(&fake), ["capture"]);
+    assert_eq!(primitives_seen(&fake), ["list_tabs", "capture"]);
+}
+
+#[test]
+fn a_tab_its_window_does_not_show_is_refused_before_any_capture() {
+    let (port, fake) = port_with(Box::new(|correlation, primitive| {
+        Reply::Now(match primitive {
+            wire::Primitive::ListTabs(_) => FakeExtension::ok(
+                correlation,
+                json!({"tabs": [{"tab_id": 12, "title": "Top", "url": TOP, "active": false,
+                                 "readiness": "complete"}]}),
+            ),
+            _ => FakeExtension::ok(correlation, captured(view())),
+        })
+    }));
+    let viewport = BrowserCommand::Screenshot {
+        tab_id: 12,
+        locator: None,
+        full_page: false,
+        visual_settle: None,
+    };
+    let region = BrowserCommand::ScreenshotRegion {
+        tab_id: 12,
+        region: region(),
+        expected_viewport: expected_view(),
+        visual_settle: None,
+    };
+    assert_eq!(call(&port, viewport), Err(BrowserError::TabNotShowing));
+    assert_eq!(call(&port, region), Err(BrowserError::TabNotShowing));
+    assert_eq!(
+        primitives_seen(&fake),
+        ["list_tabs", "list_tabs"],
+        "no settle and no capture waits for a frame the browser will not draw"
+    );
 }
 
 #[test]

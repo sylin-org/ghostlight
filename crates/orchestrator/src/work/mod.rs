@@ -1884,6 +1884,15 @@ impl ApplicationExecutor {
                 json!({"reason":"dialog_open"}),
             );
         }
+        if error == BrowserError::TabNotShowing {
+            return self.failed(
+                context,
+                decision,
+                physical_id,
+                Refusal::TabNotShowing,
+                json!({"reason": browser_reason(&error)}),
+            );
+        }
         if error == BrowserError::DocumentUnavailable {
             return self.failed(
                 context,
@@ -2618,7 +2627,9 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
             (governed_check(*reason), Decision::refused(*reason))
         }
         BrowserError::DocumentUnavailable => (CheckFailure::DocumentUnavailable, admitted),
-        BrowserError::DialogOpen => (CheckFailure::BrowserRefused, admitted),
+        BrowserError::DialogOpen | BrowserError::TabNotShowing => {
+            (CheckFailure::BrowserRefused, admitted)
+        }
         BrowserError::CancelledBeforeDispatch | BrowserError::CancelledAfterDispatch => {
             (CheckFailure::Cancelled, admitted)
         }
@@ -2950,6 +2961,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::Primitive(_) => "browser_primitive_failed",
         BrowserError::FieldsRejected { .. } => "field_value_rejected",
         BrowserError::DialogOpen => "dialog_open",
+        BrowserError::TabNotShowing => "tab_not_showing",
         BrowserError::StaleView => "stale_view",
         BrowserError::LocalInterlock(_) => "browser_local_interlock",
         BrowserError::Protocol(_)

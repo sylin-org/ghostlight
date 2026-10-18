@@ -1466,6 +1466,8 @@ pub enum Refusal {
     FilesUnreadable,
     /// A screenshot exceeded the result bound.
     CaptureTooLarge,
+    /// A capture of a tab its window is not showing: the browser does not draw it.
+    TabNotShowing,
     /// No JavaScript dialog was visible.
     NoDialogVisible,
     /// A JavaScript dialog blocks the page, so the browser could not take the work.
@@ -1593,6 +1595,9 @@ impl Refusal {
             Self::WorkspaceUnusable { reason } => return reason.summary(),
             Self::FilesUnreadable => "The selected local files could not be prepared safely.",
             Self::CaptureTooLarge => "The screenshot was too large to return.",
+            Self::TabNotShowing => {
+                "Nothing was captured: another tab is showing in this tab's window, and the browser draws only the tab it shows."
+            }
             Self::NoDialogVisible => "No JavaScript dialog is currently visible.",
             Self::DialogOpen => "A JavaScript dialog is open on this page, so nothing was sent.",
             Self::RecordingUnavailable => "This session has no recording.",
@@ -1728,6 +1733,10 @@ impl Refusal {
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
             Self::FilesUnreadable => vec![
                 "Confirm each path is an existing file within Ghostlight's upload limits.".into(),
+            ],
+            Self::TabNotShowing => vec![
+                "Call browser_tabs with action focus for this tab, then repeat the screenshot; browser_read and browser_inspect read the page without it."
+                    .into(),
             ],
             Self::CaptureTooLarge => vec![
                 "Capture the viewport or a smaller region instead of the full page.".into(),
@@ -3299,6 +3308,10 @@ Changes are \"unsaved\".".into()),
                 "The screenshot was too large to return.",
             ),
             (
+                Refusal::TabNotShowing,
+                "Nothing was captured: another tab is showing in this tab's window, and the browser draws only the tab it shows.",
+            ),
+            (
                 Refusal::NoDialogVisible,
                 "No JavaScript dialog is currently visible.",
             ),
@@ -3359,6 +3372,10 @@ Changes are \"unsaved\".".into()),
         assert_eq!(
             Refusal::CaptureTooLarge.next_steps(),
             vec!["Capture the viewport or a smaller region instead of the full page."]
+        );
+        assert_eq!(
+            Refusal::TabNotShowing.next_steps(),
+            vec!["Call browser_tabs with action focus for this tab, then repeat the screenshot; browser_read and browser_inspect read the page without it."]
         );
         assert_eq!(
             Refusal::LocalInterlock.next_steps(),

@@ -1285,6 +1285,10 @@ pub enum BrowserError {
     /// A JavaScript dialog blocks the page, so the renderer cannot take the work.
     #[error("a JavaScript dialog blocks the page")]
     DialogOpen,
+    /// The tab is not the one its window shows. Chromium draws only that one, so a capture of
+    /// this tab would wait for a frame that never comes. Nothing was captured.
+    #[error("the tab is not showing in its window")]
+    TabNotShowing,
     /// The page's view moved on from the screenshot the point was chosen on, and nothing was sent.
     #[error("the view moved since the screenshot was taken")]
     StaleView,
