@@ -601,9 +601,11 @@ gave the icon and the kind of place it was read from.
 Every catalog agent has one image address, `agent-icons/<agent id>`, and the service decides what
 it serves there (`crate::agent::image`), in the owner's order: the app's own icon from the cache,
 then a curated vendor mark (none is packaged yet), then the agent's packaged monogram tile. An
-app's icon is served as a finished tile: the service decodes the cached copy, and when the icon's
-outer ring is not opaque it sets the icon at its own size in the middle of a square of a dark gray
-or a warm off-white, whichever more of the icon's ink reads on, and encodes it as an opaque PNG.
+app's icon is served as a finished tile: the service decodes the cached copy, and when the icon is
+not its own plate it sets the icon at its own size in the middle of a square of a dark gray or a
+warm off-white, whichever more of the icon's ink reads on, and encodes it as an opaque PNG. An
+icon is its own plate when its drawn area spans at least three quarters of it both ways and is
+opaque along the middle of each edge, as an app icon's plate set inside a transparent margin is.
 An icon with its own opaque plate, or one it cannot decode, is served as cached. Each tile is made
 once per cached copy and kept in memory, but the copy is read and checked against its hash each
 time the symbol or the route asks, so a copy that is gone or changed gives the monogram. The monogram

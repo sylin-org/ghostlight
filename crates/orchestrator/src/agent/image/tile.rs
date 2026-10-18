@@ -5,8 +5,13 @@
 //! The icon is decoded (a PNG, or the largest image of a Windows icon file: an embedded PNG or a
 //! 32-bit bitmap) and set in one of three ways, the closed [`Ground`]:
 //!
-//! - An icon whose outer ring (a band [`RING_SHARE`] of its side wide) is at least
-//!   [`PLATE_OPACITY`] opaque is its own plate and is served exactly as cached.
+//! - An icon that is its own plate is served exactly as cached. It is judged at the edges of its
+//!   drawn area, the box around its pixels at least [`DRAWN_ALPHA`] opaque, because most app
+//!   icons set their plate inside a transparent margin: the area must span at least
+//!   [`PLATE_SPAN`] of the icon's side both ways, and the middle half of each of its edges, in a
+//!   band [`RING_SHARE`] of its side deep, must be at least [`PLATE_OPACITY`] opaque. Rounded
+//!   corners do not count against a plate, a faint drop shadow does not move its edges, and a
+//!   small solid mark is a glyph, not a plate.
 //! - Otherwise each pixel's color is compared with the dark and the light ground by its WCAG
 //!   contrast, and the ground under which more of the icon's ink, weighted by opacity, reaches
 //!   [`READABLE_CONTRAST`] is chosen. A tie goes to the light ground.
@@ -30,12 +35,25 @@ const LIGHT_GROUND: [u8; 3] = [0xe7, 0xe5, 0xe4];
 /// The largest side, in pixels, of an icon the service sets on a tile.
 const MAX_SIDE: u32 = 512;
 
-/// The width of the outer ring that says whether an icon has its own plate, as a share of its
-/// longer side (at least one pixel).
+/// The depth of the band along each edge of an icon's drawn area that says whether it is its own
+/// plate, as a share of the area's longer side (at least one pixel).
 const RING_SHARE: f64 = 0.04;
 
-/// How opaque the outer ring must be, on average, for the icon to be its own plate.
+/// How opaque the middle of the drawn area's edges must be, on average, for the icon to be its
+/// own plate.
 const PLATE_OPACITY: f64 = 0.9;
+
+/// The opacity at which a pixel counts as drawn when the service finds an icon's edges: at least
+/// half, so a faint drop shadow is not taken for the plate's edge.
+const DRAWN_ALPHA: u8 = 0x80;
+
+/// How much of the icon's side, both ways, a plate's drawn area spans at least. App icons set
+/// their plate on about four fifths of the canvas.
+const PLATE_SPAN: f64 = 0.75;
+
+/// The share of each edge of the drawn area, around its middle, that is measured: the middle
+/// half, clear of rounded corners.
+const EDGE_MIDDLE_SHARE: f64 = 0.5;
 
 /// The WCAG contrast at which a pixel of the icon reads on a ground: the level for graphics.
 const READABLE_CONTRAST: f64 = 3.0;
@@ -284,10 +302,10 @@ fn i32_at(bytes: &[u8], at: usize) -> Option<i32> {
     Some(i32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
 }
 
-/// How the service sets `pixels`: on its own plate when its outer ring is opaque, else on the
-/// ground under which more of its ink reads.
+/// How the service sets `pixels`: on its own plate when the edges of its drawn area are opaque,
+/// else on the ground under which more of its ink reads.
 fn ground_for(pixels: &Pixels) -> Ground {
-    if ring_opacity(pixels) >= PLATE_OPACITY {
+    if plate_opacity(pixels) >= PLATE_OPACITY {
         return Ground::Plate;
     }
     let dark = luminance(DARK_GROUND);
@@ -313,24 +331,59 @@ fn ground_for(pixels: &Pixels) -> Ground {
     }
 }
 
-/// The average opacity, from 0 to 1, of the band [`RING_SHARE`] of the side wide around the edge.
-fn ring_opacity(pixels: &Pixels) -> f64 {
-    let band = share_of(pixels.side(), RING_SHARE);
-    let in_ring = |x: u32, y: u32| {
-        x < band
-            || y < band
-            || x >= pixels.width.saturating_sub(band)
-            || y >= pixels.height.saturating_sub(band)
+/// The average opacity, from 0 to 1, of the middle half of each edge of the icon's drawn area, in
+/// a band [`RING_SHARE`] of the area's longer side deep; zero when nothing is drawn or the area
+/// spans less than [`PLATE_SPAN`] of the icon either way.
+fn plate_opacity(pixels: &Pixels) -> f64 {
+    let Some((left, top, right, bottom)) = drawn_area(pixels) else {
+        return 0.0;
+    };
+    let (width, height) = (right - left, bottom - top);
+    let spans = |drawn: u32, side: u32| f64::from(drawn) >= f64::from(side) * PLATE_SPAN;
+    if !spans(width, pixels.width) || !spans(height, pixels.height) {
+        return 0.0;
+    }
+    let band = share_of(width.max(height), RING_SHARE);
+    // Each edge loses the same share at both ends; a side of a few pixels keeps all of it.
+    let inset = |length: u32| (f64::from(length) * (1.0 - EDGE_MIDDLE_SHARE) / 2.0) as u32;
+    let (middle_left, middle_right) = (left + inset(width), right - inset(width));
+    let (middle_top, middle_bottom) = (top + inset(height), bottom - inset(height));
+    let on_edge = |x: u32, y: u32| {
+        let across = (middle_left..middle_right).contains(&x);
+        let down = (middle_top..middle_bottom).contains(&y);
+        (across && (y < top + band || y >= bottom.saturating_sub(band)))
+            || (down && (x < left + band || x >= right.saturating_sub(band)))
     };
     let (mut total, mut count) = (0_u64, 0_u64);
-    for y in 0..pixels.height {
-        for x in (0..pixels.width).filter(|&x| in_ring(x, y)) {
+    for y in top..bottom {
+        for x in (left..right).filter(|&x| on_edge(x, y)) {
             total += u64::from(pixels.alpha(x, y));
             count += 1;
         }
     }
-    // A ring always holds at least the image's first pixel.
+    if count == 0 {
+        return 0.0;
+    }
     total as f64 / (count as f64 * f64::from(u8::MAX))
+}
+
+/// The box around the pixels at least [`DRAWN_ALPHA`] opaque, as left, top, right and bottom,
+/// the right and bottom one past the last drawn pixel; none when no pixel is drawn.
+fn drawn_area(pixels: &Pixels) -> Option<(u32, u32, u32, u32)> {
+    let mut area: Option<(u32, u32, u32, u32)> = None;
+    for y in 0..pixels.height {
+        for x in 0..pixels.width {
+            if pixels.alpha(x, y) < DRAWN_ALPHA {
+                continue;
+            }
+            area = Some(
+                area.map_or((x, y, x + 1, y + 1), |(left, top, right, bottom)| {
+                    (left.min(x), top.min(y), right.max(x + 1), bottom.max(y + 1))
+                }),
+            );
+        }
+    }
+    area
 }
 
 /// The WCAG relative luminance of an sRGB color.
@@ -513,6 +566,37 @@ pub(super) mod tests {
             ground_for(&disc),
             Ground::Light,
             "a disc leaves its corners open"
+        );
+    }
+
+    #[test]
+    fn a_plate_set_in_a_transparent_margin_with_a_faint_shadow_is_its_own_plate() {
+        // A 64 px icon, as most app icons are drawn: a rounded plate inset by 6 px, and a faint
+        // shadow under it.
+        let inset = glyph(64, [0x1d, 0x1d, 0x22, 0xff], |x, y| {
+            let inside = |v: u32| (6..58).contains(&v);
+            let corner = |v: u32| (v - 6).min(57 - v);
+            inside(x) && inside(y) && corner(x) + corner(y) >= 8
+        });
+        let mut rgba = inset.rgba.clone();
+        for y in 58..61 {
+            for x in 10..54 {
+                rgba[index(x, y, 64) * 4 + 3] = 0x28;
+            }
+        }
+        let shadowed = Pixels::new(64, 64, rgba).unwrap();
+        assert_eq!(ground_for(&inset), Ground::Plate);
+        assert_eq!(ground_for(&shadowed), Ground::Plate);
+        assert_eq!(tile(IconKind::Png, &png_of(64, &shadowed.rgba)), None);
+
+        let inset_disc = glyph(64, [0x1d, 0x4e, 0xd8, 0xff], |x, y| {
+            let (dx, dy) = (f64::from(x) - 31.5, f64::from(y) - 31.5);
+            (dx * dx + dy * dy).sqrt() <= 26.0
+        });
+        assert_eq!(
+            ground_for(&inset_disc),
+            Ground::Light,
+            "an inset disc is no plate"
         );
     }
 
