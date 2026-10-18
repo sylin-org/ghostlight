@@ -388,3 +388,24 @@ After `quit`, `uninstall` and `session_end` the listings are answered too, so Qu
 The agent sees its answer instead of an error for the requests it cannot get wrong, and an honest
 "may have taken effect" for the ones it can. The rules are in `crates/edge/src/forward.rs` and
 `hold.rs`; relay protocol 4 is unpublished, so the edge source lock does not apply yet.
+
+## Amendment 2026-10-18: the folders 1.x left
+
+Decision 16 has the 2.0 migration clean the leftovers of the retired channels. Two folders of 1.x
+itself stayed on upgraded machines, and nothing in 2.0 reads either: the policy folder the
+migration empties, and the 1.x window's web view data. The 2.0 policy lives under the home, and
+the 2.0 window keeps its own web view data there.
+
+- On Linux (linux-1, L10), every install, migrating or not, removes `XDG_STATE_HOME/ghostlight`
+  when it is empty and `XDG_DATA_HOME/org.sylin.ghostlight` when it holds nothing but WebKitGTK's
+  web view data.
+- 2026-10-18, Windows: the same rule removes `%LOCALAPPDATA%\Ghostlight` when it is empty and
+  `%LOCALAPPDATA%\org.sylin.ghostlight` when it holds nothing but WebView2's `EBWebView` folder.
+  On the owner's machine the window folder held only `EBWebView` (38.8 MB) and the policy folder
+  was empty. Inside an app container the install leaves both for the next install outside it,
+  because its removals below `%LOCALAPPDATA%` would reach only the container's private view.
+  The managed bootstrap under `%PROGRAMDATA%\Ghostlight` is never touched.
+
+A folder that holds anything else is left, a removal that fails is left for the next install, and
+the install never fails on a leftover. The install names each folder it removed. The rule is
+`migration::retire_leftovers` in `crates/orchestrator/src/install/migration.rs`.

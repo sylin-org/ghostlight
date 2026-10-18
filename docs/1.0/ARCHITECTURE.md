@@ -98,10 +98,13 @@ connector images sat beside it; the installer stops those exact images and delet
 files. It also stops what runs from each 1.x `bin/v<version>` directory, moves the audit log the
 directory holds into `state` under a name that says which version it came from, and removes the
 directory (`install/version_directories.rs`); a log that cannot be moved keeps its directory.
-On Linux every install, migrating or not, also removes the folders 1.x left that nothing reads:
-its policy folder under `XDG_STATE_HOME` once it is empty, and the 1.x window's web view data
-under `XDG_DATA_HOME/org.sylin.ghostlight` when it holds nothing but web view data; a folder that
-holds anything else is left.
+Every install, migrating or not, also removes the folders 1.x left that nothing reads: its policy
+folder (`XDG_STATE_HOME/ghostlight` on Linux, `%LOCALAPPDATA%\Ghostlight` on Windows) once it is
+empty, and the 1.x window's web view data (`XDG_DATA_HOME/org.sylin.ghostlight` on Linux,
+`%LOCALAPPDATA%\org.sylin.ghostlight` on Windows, where WebView2 keeps it in `EBWebView`) when it
+holds nothing but web view data; a folder that holds anything else is left. An install inside a
+Windows app container leaves both for the next install outside it, because its removals below
+`%LOCALAPPDATA%` would reach only the container's private view.
 A release also refuses to install over the development channel and names the restore
 commands of the release carriers (npm and the get scripts), after it has checked that the payload
 is not `bin` itself. `--development` places the same files in `bin` the same way, but swaps the service

@@ -32,9 +32,11 @@
 //!    when its content is still the route's own, and every step is reported; the install never
 //!    fails on a leftover.
 //! 7. [`retire_leftovers`] removes, on every install and not only a migrating one, the folders
-//!    1.x left that nothing reads any more (Linux): its policy folder once the policy has moved
-//!    out and it is empty, and the 1.x window's web view data when it holds nothing else. A
-//!    folder that holds anything else is left.
+//!    1.x left that nothing reads any more: its policy folder once the policy has moved out and
+//!    it is empty, and the 1.x window's web view data when it holds nothing else. A folder that
+//!    holds anything else is left. Inside a Windows app container both folders sit in the
+//!    redirected `%LOCALAPPDATA%`, where a removal would not reach them, so they are left for the
+//!    next install outside it.
 //!
 //! The plan is data: `deployment install --plan` prints it. Stopping the old programs is the
 //! installer's step, not this module's: it must happen after the registrations name the new
@@ -58,6 +60,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
+use super::container::Residence;
 use super::entry;
 use super::layout::{retired_connector_names, Layout, INSTALL_RECORD_NAME};
 use super::native_host::{self, NativeHostRegistry};
@@ -114,13 +117,18 @@ const LEGACY_LINUX_POLICY_DIRECTORY_NAME: &str = "ghostlight";
 /// Directory below the Linux cache root that held state beside a `/usr/bin` install.
 const LEGACY_CACHE_DIRECTORY_NAME: &str = "ghostlight";
 
-/// Directory below the Linux data root where the 1.x window kept its web view data: the app id.
-/// The 2.0 window keeps its own under the home.
-const LEGACY_LINUX_WINDOW_DATA_NAME: &str = "org.sylin.ghostlight";
+/// Directory below the local data root (`XDG_DATA_HOME` on Linux, `%LOCALAPPDATA%` on Windows)
+/// where the 1.x window kept its web view data: the app id, the same on both systems. The 2.0
+/// window keeps its own under the home.
+const LEGACY_WINDOW_DATA_NAME: &str = "org.sylin.ghostlight";
 
 /// What a web view keeps in its data directory. A 1.x window data directory that holds anything
 /// else is not only the window's, and is left.
+///
+/// WebView2 on Windows keeps everything in one `EBWebView` folder inside the data directory it is
+/// given, and the 1.x window put nothing beside it. The other names are WebKitGTK's on Linux.
 const WEB_VIEW_DATA_ENTRIES: &[&str] = &[
+    "EBWebView",
     "CacheStorage",
     "WebKitCache",
     "hsts-storage.sqlite",
@@ -355,6 +363,9 @@ pub struct LegacyRoots {
     pub xdg_data_home: Option<PathBuf>,
     /// `XDG_CONFIG_HOME` (Linux).
     pub xdg_config_home: Option<PathBuf>,
+    /// Whether this process runs inside a Windows app container, where writes and removals below
+    /// `%LOCALAPPDATA%` and `%APPDATA%` reach only that app's private view.
+    pub in_container: bool,
 }
 
 impl LegacyRoots {
@@ -383,6 +394,7 @@ impl LegacyRoots {
             xdg_state_home: absolute("XDG_STATE_HOME"),
             xdg_data_home: absolute("XDG_DATA_HOME"),
             xdg_config_home: absolute("XDG_CONFIG_HOME"),
+            in_container: windows && Residence::detect().container().is_some(),
         })
     }
 
@@ -398,6 +410,7 @@ impl LegacyRoots {
             xdg_state_home: None,
             xdg_data_home: None,
             xdg_config_home: None,
+            in_container: false,
         }
     }
 
@@ -412,10 +425,15 @@ impl LegacyRoots {
         }
     }
 
+    /// The real `%LOCALAPPDATA%` (Windows).
+    fn local_app_data(&self) -> PathBuf {
+        self.real_root(self.local_app_data.as_deref(), &["AppData", "Local"])
+    }
+
     /// Where the default 1.x policy directory was.
     fn policy_directory(&self) -> PathBuf {
         if self.windows {
-            self.real_root(self.local_app_data.as_deref(), &["AppData", "Local"])
+            self.local_app_data()
                 .join(LEGACY_WINDOWS_POLICY_DIRECTORY_NAME)
         } else {
             self.real_root(self.xdg_state_home.as_deref(), &[".local", "state"])
@@ -423,16 +441,21 @@ impl LegacyRoots {
         }
     }
 
-    /// The folders 1.x left that nothing reads any more, whether or not they exist (Linux): its
-    /// policy folder and its window's web view data.
+    /// The folders 1.x left that nothing reads any more, whether or not they exist: its policy
+    /// folder and its window's web view data. None inside a Windows app container, whose
+    /// removals below `%LOCALAPPDATA%` would not reach the real folders.
     fn leftover_directories(&self) -> Vec<PathBuf> {
-        if self.windows {
-            return Vec::new();
-        }
+        let data_root = if self.windows {
+            if self.in_container {
+                return Vec::new();
+            }
+            self.local_app_data()
+        } else {
+            self.real_root(self.xdg_data_home.as_deref(), &[".local", "share"])
+        };
         vec![
             self.policy_directory(),
-            self.real_root(self.xdg_data_home.as_deref(), &[".local", "share"])
-                .join(LEGACY_LINUX_WINDOW_DATA_NAME),
+            data_root.join(LEGACY_WINDOW_DATA_NAME),
         ]
     }
 
@@ -997,7 +1020,7 @@ fn retire_leftover(directory: &Path) -> bool {
     }
     let window_data = directory
         .file_name()
-        .is_some_and(|name| name == LEGACY_LINUX_WINDOW_DATA_NAME)
+        .is_some_and(|name| name == LEGACY_WINDOW_DATA_NAME)
         && names.iter().all(|name| {
             name.to_str()
                 .is_some_and(|name| WEB_VIEW_DATA_ENTRIES.contains(&name))
@@ -1690,6 +1713,7 @@ mod tests {
                 xdg_state_home: None,
                 xdg_data_home: None,
                 xdg_config_home: None,
+                in_container: false,
             };
             Self {
                 scratch,
@@ -2650,6 +2674,52 @@ mod tests {
             windows.plan().leftovers.is_empty(),
             "the Linux folders only"
         );
+    }
+
+    #[test]
+    fn what_1x_left_in_local_app_data_is_removed_on_windows_and_anything_else_is_left() {
+        let fixture = Fixture::new(true);
+        let policy = fixture.path("user/AppData/Local/Ghostlight");
+        let window = fixture.path("user/AppData/Local/org.sylin.ghostlight");
+        let managed = fixture.path("ProgramData/Ghostlight");
+        fs::create_dir_all(&policy).unwrap();
+        fs::create_dir_all(&managed).unwrap();
+        fixture.write(&window.join("EBWebView/Default/Preferences"), "{}");
+        fixture.write(&window.join("EBWebView/Local State"), "{}");
+        let plan = fixture.plan();
+        assert!(
+            plan.is_empty(),
+            "leftovers need no migration and no restart"
+        );
+        assert_eq!(plan.leftovers, [policy.clone(), window.clone()]);
+        assert_eq!(retire_leftovers(&plan), [policy.clone(), window.clone()]);
+        assert!(!policy.exists() && !window.exists());
+        assert!(managed.is_dir(), "the managed bootstrap is never named");
+        assert!(
+            fixture.plan().leftovers.is_empty(),
+            "a second install finds nothing"
+        );
+
+        // A policy folder that still holds a file, and web view data beside something else, stay.
+        fixture.write(&policy.join("notes.txt"), "mine");
+        fs::create_dir_all(window.join("EBWebView")).unwrap();
+        fixture.write(&window.join("unrelated.txt"), "mine");
+        assert!(retire_leftovers(&fixture.plan()).is_empty());
+        assert!(policy.join("notes.txt").is_file() && window.join("unrelated.txt").is_file());
+    }
+
+    #[test]
+    fn inside_an_app_container_the_1x_folders_are_left_for_the_next_install_outside() {
+        let mut fixture = Fixture::new(true);
+        fixture.roots.in_container = true;
+        let policy = fixture.path("user/AppData/Local/Ghostlight");
+        let window = fixture.path("user/AppData/Local/org.sylin.ghostlight/EBWebView");
+        fs::create_dir_all(&policy).unwrap();
+        fs::create_dir_all(&window).unwrap();
+        let plan = fixture.plan();
+        assert!(plan.leftovers.is_empty());
+        assert!(retire_leftovers(&plan).is_empty());
+        assert!(policy.is_dir() && window.is_dir());
     }
 
     #[test]
