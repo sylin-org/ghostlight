@@ -247,10 +247,16 @@ pub fn apply_renderer_policy() {
 }
 
 /// Sets the program name to [`APPLICATION_ID`], so the Wayland app id and the X11 class match
-/// the installed `org.sylin.ghostlight.desktop` entry. A no-op on Windows.
+/// the installed `org.sylin.ghostlight.desktop` entry, and the application name to
+/// [`WINDOW_TITLE`]. The tray icon's title is the application name, and a Linux desktop shows it
+/// on hover; without one it fell back to the program name and read `org.sylin.ghostlight`. A
+/// no-op on Windows.
 pub fn prepare_identity() {
     #[cfg(target_os = "linux")]
-    gtk::glib::set_prgname(Some(APPLICATION_ID));
+    {
+        gtk::glib::set_prgname(Some(APPLICATION_ID));
+        gtk::glib::set_application_name(WINDOW_TITLE);
+    }
 }
 
 /// Initializes the display toolkit. An error means the session has no display and the caller
