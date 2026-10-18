@@ -9,9 +9,11 @@ L01 to L04 passed (L03 with a scope change: the owner directed on 2026-10-17 tha
 uses the real installation and the real system browser, never a sandbox). The owner then let this
 session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed and proven on the
 real install (see L04). L05 passed after six fixes in the shell, the service and the window, and
-L06 after three and L07 after five (see each). The development build at 7769fd97 is installed in
-the real `~/.ghostlight`, the system Chromium's ordinary profile is connected, `browser.startup`
-is on_demand as before, and diagnostics are on. Next: L08, setup on a fresh home.
+L06 after three, L07 after five and L09 after one (see each). The development build at 5107be98
+is installed in the real `~/.ghostlight`, the system Chromium's ordinary profile is connected,
+`browser.startup` is on_demand as before, and diagnostics are on. Next: L08 and L10 together,
+since the only fresh home that is neither a sandbox nor another user is the real one after an
+uninstall.
 
 ## Tasks
 
@@ -405,11 +407,28 @@ summary (version line, location, agents line, one Next line) and opens the windo
 step (j15); the setup view's browser step reads the real profile with and without the extension
 (j10, j12); Add and Open start the named browser (j13).
 
-### L09 Agent icons (todo)
+### L09 Agent icons (pass, after a fix)
 
 With an agent app installed from a package (Zed or Visual Studio Code), the agent shows the app's
 own icon in the pill, the shelves, the card and the Integrations rail and pane; Integrations says
 where it came from; `ghostlight doctor` reports it (e01 to e03 and f01 in design.md).
+
+Result, 2026-10-17, with Zed 1.24.3 from the Arch package (`/usr/bin/zeditor`, its desktop entry
+`dev.zed.Zed.desktop`, icon `hicolor/512x512/apps/zed.png`). The cache holds `zed.png` and
+`zed.json` (`found_in` desktop_entry), closed to other users (0700, 0600). `doctor` says "Agent
+icon: Zed -- from the installed Zed app (desktop entry)" and lists the agents that keep their
+monograms. Integrations says "Icon from the installed Zed app." With Zed started and connected,
+its icon shows in the pill, the shelf chip, the card head, and the rail and pane; the watching
+view's symbol is the same address. Cursor shows its app icon too. Not covered: removing the
+package and pressing Re-check (needs root).
+
+Defect found and fixed (deployed and checked):
+
+1. 5107be98: Zed showed its dark rounded plate inside an off-white square, a box in a box. Its
+   icon, like most Linux and macOS app icons, sets the plate in a transparent margin, so the
+   outer-ring test read 0.00 and put it on a ground (Cursor escaped only because its 1024 px
+   icon is over the tiling limit). The plate is now judged at the edges of the drawn area; Zed
+   is served as cached. ARCHITECTURE says the new rule.
 
 ### L10 Clean install for the release bar (todo)
 
