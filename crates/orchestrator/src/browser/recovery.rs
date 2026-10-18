@@ -2602,7 +2602,11 @@ mod tests {
 
     #[test]
     fn no_browser_is_launched_while_the_session_is_ending() {
-        let browser = candidate("Chromium", BrowserPackage::Native, NativeHostState::Current);
+        let browser = candidate_without_executable(
+            "Chromium",
+            BrowserPackage::Native,
+            NativeHostState::Current,
+        );
         let deadline = Instant::now() + Duration::from_secs(5);
         let cancelled = AtomicBool::new(false);
 
@@ -2614,8 +2618,9 @@ mod tests {
             MechanismError::Wait(RecoveryWaitError::Cancelled)
         ));
 
-        // The browser's executable does not exist, so a launch that is attempted fails; that
-        // failure is how the test tells an attempt from a refusal.
+        // The browser has no executable, so a launch that is attempted fails before it looks for
+        // a display or starts anything, on any host; that failure is how the test tells an
+        // attempt from a refusal.
         let attempted = SystemRecoveryMechanism
             .launch_unless_ending(false, &browser, deadline, &cancelled)
             .unwrap_err();
