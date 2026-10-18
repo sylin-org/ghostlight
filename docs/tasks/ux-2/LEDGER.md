@@ -65,6 +65,10 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   dark-taskbar art; the left column of each half is on a light ground (#f3f3f3), the right on a
   dark one (#202020). The 24 pixel frames are the 32 pixel art scaled down, as Windows does at
   150%.
+- n1, contracts: docs/1.0/ARCHITECTURE.md (the tray paragraph) and ACCEPTANCE.md item 12 now
+  say the light Windows taskbar shows the shipped tray glyph under the dot, and that the ready
+  icon is that art's own bytes. Both had said the light taskbar inked the original icon and that
+  no other artwork shipped.
 - o1 (n-d-07): an unconfirmed check now leads with why it fell short and gives the action's own
   sentence after it: "The expected condition did not hold after the action. Clicked the "Submit"
   button on example.com." The item's wording ("did not hold after clicking ...") would need a

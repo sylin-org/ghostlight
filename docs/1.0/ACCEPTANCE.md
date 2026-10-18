@@ -525,8 +525,9 @@ workbench shows waiting becoming running once.
    the UI event loop.
 12. The desktop executable, tray, and workbench use the original Ghostlight icon bytes,
     established palette and spring curve, and a static readable reduced-motion treatment. The
-    tray's state dot is drawn at run time over the original icon bytes, in the band's colours;
-    the ready icon is the original bytes.
+    tray's state dot is drawn at run time in the band's colours, over the original icon bytes on
+    a dark taskbar and over the shipped monochrome tray glyph on a light Windows taskbar; the
+    ready icon is that art's own bytes.
 13. A broken window never stops agent work. A shell that cannot start, a window that cannot be
     built, a missing display, web view runtime or tray, and a shell that vanishes leave the service
     serving; `status` and `doctor` say why there is no window, and presence relaunches a vanished

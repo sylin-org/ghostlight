@@ -235,10 +235,11 @@ looks ready), a tooltip (the band's word for the state, then the sentence that c
 connections, and "No browser connected" when none is) and four entries: Open and Quit
 always, Pause while work is active, Resume while it is paused or ended. The first workbench frame
 carries it and a `tray_model` frame follows each change. The shell draws the state as a small dot
-over the original icon bytes at run time. On Windows it draws the 16 pixel icon at the 16 pixel
-small-icon size and the 32 pixel icon above it; a Linux StatusNotifier host picks its own size, so
-it gets the 32 pixel icon. On a light Windows taskbar it inks the pale ghost in the window's
-night colour and rings the dot in the taskbar's ground; no other artwork is shipped.
+at run time. On a dark taskbar the dot goes over the original icon bytes. On a light Windows
+taskbar it goes over the tray glyph in `crates/desktop/assets`, a monochrome ghost in the window's
+night colour with its eyes cut out. The ring around the dot is drawn in the taskbar's ground. On
+Windows the shell draws the 16 pixel art at the 16 pixel small-icon size and the 32 pixel art
+above it; a Linux StatusNotifier host picks its own size, so it gets the 32 pixel art.
 
 The tray and the service do not depend on a permanent window. Closing the window destroys only the
 disposable workbench view in the shell, which stays with its icon; the shell tells the service
