@@ -199,7 +199,7 @@ const WINDOW_NO_TRAY: &str = "No Ghostlight window: this desktop shows no tray i
 #[cfg(windows)]
 const WINDOW_DID_NOT_STAY: &str = "No Ghostlight window: the window program ended again and again, so Ghostlight stopped starting it. Run ghostlight open to try again.";
 #[cfg(not(windows))]
-const WINDOW_DID_NOT_STAY: &str = "No Ghostlight window: the window program ended again and again, so Ghostlight stopped starting it. The usual cause on Linux is a missing WebKitGTK 4.1 (libwebkit2gtk-4.1). Run ghostlight open to try again.";
+const WINDOW_DID_NOT_STAY: &str = "No Ghostlight window: the window program ended again and again, so Ghostlight stopped starting it. Run ghostlight open to try again; if it ends again, check that WebKitGTK 4.1 (libwebkit2gtk-4.1) is installed.";
 
 /// Why the diagnostics folder cannot be shown: diagnostics are off.
 pub const DIAGNOSTICS_OFF: &str = "Diagnostics are off; turn them on first.";
