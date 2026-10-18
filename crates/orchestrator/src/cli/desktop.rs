@@ -379,19 +379,21 @@ mod tests {
         let record = Layout::new(&path).start_failure();
         fs::create_dir_all(record.parent().unwrap()).unwrap();
         fs::write(&record, "an earlier reason\n").unwrap();
+        // The service answers once its listener runs, which can be before `serve_in` removes the
+        // record, so the record is looked at only after `serve_in` returns: it removes the record
+        // before it waits for the quit.
         let probe = path.clone();
         let quitter = thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(20);
             while Instant::now() < deadline {
                 if crate::cli::client::status_at(&probe).is_ok() {
-                    let gone = !Layout::new(&probe).start_failure().exists();
                     let _ = crate::cli::client::control_at(
                         &probe,
                         ghostlight_relay::protocol::Control::Quit {
                             reason: ghostlight_relay::protocol::QuitReason::Replace,
                         },
                     );
-                    return gone;
+                    return true;
                 }
                 thread::sleep(Duration::from_millis(50));
             }
@@ -404,9 +406,10 @@ mod tests {
             |home, _| ServiceHost::start(home),
         )
         .unwrap();
+        assert!(quitter.join().unwrap(), "the service answered");
         assert!(
-            quitter.join().unwrap(),
-            "the record was gone once the service answered"
+            !record.exists(),
+            "a service that published removed the earlier start's reason"
         );
     }
 
