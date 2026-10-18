@@ -673,15 +673,10 @@ impl Projection {
         to_value(status)
     }
 
-    /// The connections part, as this audience sees it. Which tabs are leased or held is a detail
-    /// of the window's own controls, so nobody is shown it here.
+    /// The connections part, as this audience sees it. Every audience sees all of it.
     #[must_use]
     pub fn connections(&self, connections: &ConnectionsPart) -> Value {
-        let mut value = to_value(connections);
-        each(&mut value, "sessions", |session| {
-            remove(session, &["leased", "held_tab_count"]);
-        });
-        value
+        to_value(connections)
     }
 
     /// The Controls part, as this audience sees it: the acts it may do, and who it is.

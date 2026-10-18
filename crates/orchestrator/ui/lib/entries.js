@@ -18,7 +18,6 @@
       provenance: operation.provenance ?? null,
       agent: operation.agent ?? null,
       channel: operation.provenance?.channel ?? null,
-      browser: operation.browser ?? null,
       startedAt: operation.started_at_ms ?? Date.now(),
       phase: operation.phase,
       settled: false

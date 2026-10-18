@@ -301,15 +301,10 @@ impl Live {
                         .filter(|operation| operation.workspace == workspace.id)
                         .count(),
                     id: workspace.id,
-                    agent: crate::agent::Agent::of(
-                        Some(&workspace.client_label),
-                        workspace.channel,
-                    ),
+                    agent: workspace.opener.agent,
                     connections: workspace.connections,
-                    channel: workspace.channel,
-                    leased: workspace.leased,
+                    channel: workspace.opener.channel,
                     tab_count: workspace.tab_count,
-                    held_tab_count: workspace.held_tab_count,
                     browser,
                 }
             })
@@ -489,7 +484,7 @@ impl Live {
         count_connections(
             summaries.iter().map(|workspace| {
                 (
-                    crate::agent::Agent::of(Some(&workspace.client_label), workspace.channel).id,
+                    workspace.opener.agent.id.clone(),
                     workspace.connections.as_slice(),
                 )
             }),

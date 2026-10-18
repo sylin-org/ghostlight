@@ -19,7 +19,7 @@ the architecture sweep.
 | S1 source-after-the-opening | connection | landed (this commit) |
 | S2 one-channel-word | connection | landed (this commit) |
 | S3 one-agent-function (with Decision 14a) | connection | landed (this commit) |
-| S4 workspace-opener | connection | todo |
+| S4 workspace-opener | connection | landed (this commit) |
 | S5 one-request-id | request | landed (0f1b1a78 and this commit) |
 | S6 request-owns-itself | request | landed (this commit) |
 | S7 findings-per-frame | request | todo |
@@ -72,6 +72,15 @@ the architecture sweep.
   does not know, since a catalog claim now names its agent in history. `ui/lib/view.js`'s comment
   is true as written and is unchanged, so no page file changed. `SessionSummary.agent` and
   `connection_counts` still derive from the workspace's label until S4.
+- S4: `WorkspaceStore::client_label` is `opener_claim`, and the pool's `PooledTab.client_label`
+  and `claim_released`'s parameter are named for the opener's claim too, so the tab-group title
+  and released-tab reuse read as the rule; their behavior is unchanged. `WorkspaceSummary` also
+  lost `leased` and `held_tab_count`: once `SessionSummary` dropped them nothing read them. The one
+  test that read `held_tab_count` already proves the tab is not held, since its `select_tab`
+  refuses a held tab. `SessionSummary.channel` stays and is the opener's channel. The preview
+  server's fixture sessions lost the two retired keys. The two session-card tests are in
+  `workbench::tests` and the rename test is in `workspace::tests`, where the group title's claim is
+  read; `work/tests/tabs.rs` changes only the method's name.
 - S5: `InvocationId` is `pub`, not `pub(crate)`, because `ServiceRequest`, `ServiceResponse` and
   `InvocationResult` are public. The id is typed through `PreparedInvocation.id`,
   `InvocationContext.invocation` and `InvocationResult.invocation`, which serializes as its text,

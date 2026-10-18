@@ -1767,18 +1767,16 @@ pub struct OverviewSummary {
 pub struct SessionSummary {
     /// Opaque workspace identity.
     pub id: String,
-    /// The session's agent ([`crate::agent::Agent::of`]), wherever the window names the session.
+    /// The agent of the connection that opened the session, wherever the window names the
+    /// session. A later connection renames nothing.
     pub agent: crate::agent::Agent,
     /// Each current connection has its own observations and reported application.
     pub connections: Vec<crate::provenance::ConnectionDetails>,
-    /// Which intake admitted this session, so live work can be attributed before it settles.
+    /// The intake of the connection that opened the session, so live work can be attributed
+    /// before it settles.
     pub channel: IntakeChannel,
-    /// Whether one invocation currently owns the workspace.
-    pub leased: bool,
     /// Controlled tab count.
     pub tab_count: usize,
-    /// Runtime-held tab count.
-    pub held_tab_count: usize,
     /// Current operation count.
     pub active_operations: usize,
     /// Persistent browser family or product name this session's workspace is pinned to.

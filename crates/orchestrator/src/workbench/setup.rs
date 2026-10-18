@@ -679,9 +679,7 @@ pub(super) mod test_support {
             agent: crate::agent::Agent::of(Some(reported), IntakeChannel::Mcp),
             connections: Vec::new(),
             channel: IntakeChannel::Mcp,
-            leased: false,
             tab_count: 0,
-            held_tab_count: 0,
             active_operations: 0,
             browser: None,
         }

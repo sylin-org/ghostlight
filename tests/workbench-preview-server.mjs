@@ -238,11 +238,11 @@ const snapshot = {
   service: { version: "1.0.0", started_at_ms: Date.now() - 540000, runtime_state: "active" },
   overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
-    { id: "workspace_codex", agent: agentNamed("Codex"), channel: "mcp", leased: true, tab_count: 3, held_tab_count: 0, active_operations: 1, browser: "Chrome" },
+    { id: "workspace_codex", agent: agentNamed("Codex"), channel: "mcp", tab_count: 3, active_operations: 1, browser: "Chrome" },
     // Codex starts a session per request, so its card holds more lines than it shows.
-    ...[2, 3, 4, 5, 6].map((at) => ({ id: `workspace_codex_${at}`, agent: agentNamed("Codex"), channel: "mcp", leased: false, tab_count: 0, held_tab_count: 0, active_operations: 0 })),
-    { id: "workspace_claude", agent: agentNamed("Claude Code"), channel: "mcp", leased: true, tab_count: 1, held_tab_count: 0, active_operations: 1, browser: "Edge" },
-    { id: "workspace_script", agent: agentNamed("Command line"), channel: "cli", leased: false, tab_count: 1, held_tab_count: 0, active_operations: 0, browser: "Chrome" }
+    ...[2, 3, 4, 5, 6].map((at) => ({ id: `workspace_codex_${at}`, agent: agentNamed("Codex"), channel: "mcp", tab_count: 0, active_operations: 0 })),
+    { id: "workspace_claude", agent: agentNamed("Claude Code"), channel: "mcp", tab_count: 1, active_operations: 1, browser: "Edge" },
+    { id: "workspace_script", agent: agentNamed("Command line"), channel: "cli", tab_count: 1, active_operations: 0, browser: "Chrome" }
   ],
   operations: [
     { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },

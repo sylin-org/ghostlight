@@ -2231,7 +2231,6 @@ mod tests {
                 .unwrap();
             assert_eq!(current.url, url);
             assert!(current.generation > selected.generation);
-            assert_eq!(workspaces.summaries()[0].held_tab_count, 0);
             assert!(view.snapshot().history.is_empty());
             assert!(view.snapshot().operations.is_empty());
             assert!(browser.calls().is_empty());
@@ -3584,7 +3583,10 @@ mod tests {
         assert_eq!(served.browser.calls(), vec![BrowserCommand::ListTabs]);
         let summaries = served.intake.workspaces.summaries();
         assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].client_label, "returning client");
+        assert_eq!(
+            summaries[0].opener.reported_application.as_deref(),
+            Some("returning client")
+        );
 
         // A resumed session is initialized already: a tools call is served without initialize.
         send_line(

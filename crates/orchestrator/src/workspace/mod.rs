@@ -9,7 +9,7 @@ use crate::browser::adapter::{
     ViewportGeometry,
 };
 
-use crate::intake::session::{IntakeChannel, SessionMarker};
+use crate::intake::session::SessionMarker;
 use crate::language::outcome::{DialogKind, TargetRole};
 use crate::provenance::{ConnectionDetails, ConnectionEvidence};
 use thiserror::Error;
@@ -66,18 +66,13 @@ fn short_handle(prefix: &str, taken: impl Fn(&str) -> bool) -> String {
 pub struct WorkspaceSummary {
     /// Opaque workspace identity.
     pub id: String,
-    /// Presentation-only client label, claimed by the edge.
-    pub client_label: String,
+    /// The connection that opened this workspace, which names it for as long as it lives, whether
+    /// or not that connection is still current. Attribution only, never authority.
+    pub opener: ConnectionDetails,
     /// Current connections, each with its own immutable observed and claimed evidence.
     pub connections: Vec<ConnectionDetails>,
-    /// Which intake admitted this workspace. Attribution only (ADR-0105).
-    pub channel: IntakeChannel,
-    /// Whether one invocation currently owns the workspace lease.
-    pub leased: bool,
     /// Number of controlled tabs.
     pub tab_count: usize,
-    /// Number of controlled tabs held by runtime governance.
-    pub held_tab_count: usize,
 }
 
 /// Opaque admitted MCP workspace handle.
@@ -518,8 +513,13 @@ struct TabState {
 
 #[derive(Debug)]
 struct WorkspaceState {
-    client_label: String,
-    channel: IntakeChannel,
+    /// The connection that opened this workspace.
+    ///
+    /// It names the workspace for its whole life: its session card, its tab group and the released
+    /// tabs it may reuse. A command-line workspace outlives its connections (ADR-0106), so it cannot
+    /// be named from the current ones, and a group is named for the client that opened it
+    /// (ADR-0066). A later connection joins `connections` and renames nothing.
+    opener: Arc<ConnectionEvidence>,
     connections: HashMap<String, Arc<ConnectionEvidence>>,
     /// What owns this workspace, when it outlives the connection that opened it (ADR-0106).
     session: Option<SessionMarker>,
@@ -559,13 +559,13 @@ struct AggregateState {
 struct PooledTab {
     /// The governed URL the tab held when its workspace released it.
     url: String,
-    /// The client label of the workspace that released the tab.
+    /// The name the opener of the workspace that released the tab claimed.
     ///
-    /// Every controlled tab sits in the browser group named for its workspace's client label, and
+    /// Every controlled tab sits in the browser group named for its workspace opener's claim, and
     /// a reused tab is navigated where it is, never regrouped. So only a session of the same
     /// client may claim it; any other session would control a tab shown under another client's
     /// group (ADR-0066).
-    client_label: String,
+    opener_claim: String,
     /// Whether the release close answered that the browser keeps the tab open.
     ///
     /// Until it does, the browser may still bind the tab to the dead workspace, and that pending
@@ -594,7 +594,7 @@ impl AggregateState {
                     tab.physical_id,
                     PooledTab {
                         url: tab.url.clone(),
-                        client_label: workspace.client_label.clone(),
+                        opener_claim: workspace.opener.reported_application().into(),
                         kept_open: false,
                     },
                 )
@@ -673,7 +673,7 @@ impl WorkspaceStore {
             .iter()
             .map(|(id, workspace)| WorkspaceSummary {
                 id: id.as_str().into(),
-                client_label: workspace.client_label.clone(),
+                opener: workspace.opener.details(),
                 connections: {
                     let mut details: Vec<_> = workspace
                         .connections
@@ -683,10 +683,7 @@ impl WorkspaceStore {
                     details.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
                     details
                 },
-                channel: workspace.channel,
-                leased: workspace.leased,
                 tab_count: workspace.tabs.len(),
-                held_tab_count: workspace.tabs.values().filter(|tab| tab.held).count(),
             })
             .collect();
         summaries.sort_by(|left, right| left.id.cmp(&right.id));
@@ -694,7 +691,8 @@ impl WorkspaceStore {
     }
 
     /// Attach one actual connection, resuming only workspace continuity when an owner is supplied.
-    /// The connection's evidence stays independent of every other connection in that workspace.
+    /// The connection's evidence stays independent of every other connection in that workspace,
+    /// and only a connection that opens a new workspace becomes its opener.
     pub fn connect(
         &self,
         connection: Arc<ConnectionEvidence>,
@@ -723,8 +721,7 @@ impl WorkspaceStore {
         aggregate.workspaces.insert(
             id.clone(),
             WorkspaceState {
-                client_label: connection.reported_application().into(),
-                channel: connection.attribution().channel,
+                opener: Arc::clone(&connection),
                 connections: HashMap::from([(connection_id, connection)]),
                 session,
                 browser: None,
@@ -758,7 +755,11 @@ impl WorkspaceStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn admit(&self, label: String, channel: IntakeChannel) -> WorkspaceId {
+    pub(crate) fn admit(
+        &self,
+        label: String,
+        channel: crate::intake::session::IntakeChannel,
+    ) -> WorkspaceId {
         self.connect(Arc::new(ConnectionEvidence::claimed(&label, channel)), None)
     }
 
@@ -766,7 +767,7 @@ impl WorkspaceStore {
     pub(crate) fn resume_or_admit(
         &self,
         label: String,
-        channel: IntakeChannel,
+        channel: crate::intake::session::IntakeChannel,
         marker: SessionMarker,
     ) -> WorkspaceId {
         self.connect(
@@ -860,11 +861,11 @@ impl WorkspaceStore {
         }
     }
 
-    /// Take the released tab an open of `url` in `browser` by a session of `client_label` should
-    /// reuse, if there is one.
+    /// Take the released tab an open of `url` in `browser` by a session whose opener claimed
+    /// `opener_claim` should reuse, if there is one.
     ///
-    /// Candidates are tabs Ghostlight opened, a released workspace of the same client label left
-    /// behind, and the browser kept open when that workspace's cleanup asked to close them, in
+    /// Candidates are tabs Ghostlight opened, a released workspace whose opener made the same
+    /// claim left behind, and the browser kept open when that workspace's cleanup asked to close them, in
     /// this browser, on the same host and port. The label must match because a reused tab stays in
     /// the group it already sits in, and that group is named for the client that released it. An
     /// exact URL wins, then the lowest tab id. The claim removes the tab from the pool under the
@@ -874,7 +875,7 @@ impl WorkspaceStore {
     pub fn claim_released(
         &self,
         browser: &str,
-        client_label: &str,
+        opener_claim: &str,
         url: &str,
     ) -> Option<ReleasedTab> {
         let site = reusable_site(url)?;
@@ -885,7 +886,7 @@ impl WorkspaceStore {
             .iter()
             .filter(|(_, released)| {
                 released.kept_open
-                    && released.client_label == client_label
+                    && released.opener_claim == opener_claim
                     && reusable_site(&released.url).as_ref() == Some(&site)
             })
             .min_by_key(|(physical_id, released)| (released.url != url, **physical_id))
@@ -978,21 +979,13 @@ impl WorkspaceStore {
         Ok(tabs)
     }
 
-    /// Return presentation-only client label without using it for routing or authority.
-    pub fn client_label(&self, workspace: &WorkspaceId) -> Result<String, WorkspaceError> {
+    /// The name the client that opened a workspace claimed, which titles its tab group and picks
+    /// the released tabs it may reuse. Presentation only, never routing or authority.
+    pub fn opener_claim(&self, workspace: &WorkspaceId) -> Result<String, WorkspaceError> {
         self.lock()
             .workspaces
             .get(workspace)
-            .map(|state| state.client_label.clone())
-            .ok_or(WorkspaceError::UnknownWorkspace)
-    }
-
-    /// The intake that admitted a workspace, for attribution at completion.
-    pub fn channel(&self, workspace: &WorkspaceId) -> Result<IntakeChannel, WorkspaceError> {
-        self.lock()
-            .workspaces
-            .get(workspace)
-            .map(|state| state.channel)
+            .map(|state| state.opener.reported_application().to_owned())
             .ok_or(WorkspaceError::UnknownWorkspace)
     }
 
@@ -1089,7 +1082,7 @@ impl WorkspaceStore {
         mapped
     }
 
-    /// Name the other workspace that holds a handle, by its client label only.
+    /// Name the other workspace that holds a handle, by its opener's claimed name only.
     ///
     /// A workspace id is an internal key. No tool takes one, so naming it would only tell the
     /// caller where another session lives (ADR-0196 Decision 8). An owner without a label is
@@ -1104,7 +1097,7 @@ impl WorkspaceStore {
             .workspaces
             .iter()
             .find(|(id, workspace)| *id != current && holds(workspace))
-            .map(|(_, workspace)| workspace.client_label.clone())
+            .map(|(_, workspace)| workspace.opener.reported_application().to_owned())
             .filter(|label| !label.is_empty())
     }
 
@@ -2159,6 +2152,41 @@ mod tests {
             first.details().reported_application.as_deref(),
             Some("first")
         );
+    }
+
+    #[test]
+    fn a_later_connection_neither_renames_the_session_nor_its_tab_group() {
+        use crate::provenance::ConnectionEvidence;
+        use std::sync::Arc;
+        let store = WorkspaceStore::default();
+        let opener = Arc::new(ConnectionEvidence::claimed(
+            "claude-code",
+            IntakeChannel::Mcp,
+        ));
+        let later = Arc::new(ConnectionEvidence::claimed(
+            "codex-mcp-client",
+            IntakeChannel::Mcp,
+        ));
+        let owner = SessionMarker::Declared {
+            key: "shared".into(),
+        };
+        let workspace = store.connect(opener.clone(), Some(owner.clone()));
+        assert_eq!(store.connect(later.clone(), Some(owner)), workspace);
+        let summary = &store.summaries()[0];
+        assert_eq!(summary.opener, opener.details());
+        assert_eq!(summary.opener.agent.name, "Claude Code");
+        assert_eq!(summary.connections.len(), 2);
+        assert_eq!(store.opener_claim(&workspace).unwrap(), "claude-code");
+
+        // The opener names the workspace after it leaves, as long as the workspace lives.
+        store.disconnect(
+            &workspace,
+            opener.attribution().connection_id.as_deref().unwrap(),
+        );
+        let summary = &store.summaries()[0];
+        assert_eq!(summary.connections, vec![later.details()]);
+        assert_eq!(summary.opener, opener.details());
+        assert_eq!(store.opener_claim(&workspace).unwrap(), "claude-code");
     }
 
     #[test]

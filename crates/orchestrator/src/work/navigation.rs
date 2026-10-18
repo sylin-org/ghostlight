@@ -27,13 +27,14 @@ enum OpenedTabKind {
     Recovered,
 }
 
-/// The browser group every controlled tab of one client sits in: `Ghostlight - <client label>`.
+/// The browser group every controlled tab of one client sits in: `Ghostlight - <opener claim>`,
+/// the name the client that opened the workspace claimed.
 ///
-/// The title depends on the client label alone (ADR-0066), so every session of one client shares
-/// one group. A tab the person kept after its session ended has left that group (ADR-0201), and
+/// The title depends on that claim alone (ADR-0066), so every session of one client shares one
+/// group, and a later connection to the same workspace renames nothing. A tab the person kept after its session ended has left that group (ADR-0201), and
 /// default reuse puts it back under this title.
-fn group_title(client_label: &str) -> String {
-    format!("Ghostlight - {}", bounded(client_label, 80))
+fn group_title(opener_claim: &str) -> String {
+    format!("Ghostlight - {}", bounded(opener_claim, 80))
 }
 
 impl ApplicationExecutor {
@@ -178,13 +179,13 @@ impl ApplicationExecutor {
                 Some(url),
             );
         }
-        let client_label = match self.workspaces.client_label(context.workspace) {
+        let opener_claim = match self.workspaces.opener_claim(context.workspace) {
             Ok(label) => label,
             Err(error) => return self.workspace_failure(context, error),
         };
         if reuse == ReusePolicy::Domain {
             if let Some(terminal) =
-                self.reuse_released_tab(context, lease, decision, &client_label, url)
+                self.reuse_released_tab(context, lease, decision, &opener_claim, url)
             {
                 return terminal;
             }
@@ -195,7 +196,7 @@ impl ApplicationExecutor {
             // adapter always creates.
             BrowserCommand::OpenTab {
                 url: url.into(),
-                group_title: group_title(&client_label),
+                group_title: group_title(&opener_claim),
                 focus_window: holds_no_tab(lease),
             },
         ) {
@@ -227,8 +228,8 @@ impl ApplicationExecutor {
     /// The service makes the whole choice and sends the adapter an exact tab id (ADR-0196
     /// Decision 9). Candidates come only from the released pool, in the browser this session
     /// works in, on the requested host, so a tab the person opened is never one. They were also
-    /// released by a session with this session's `client_label`, so a client reuses only its own
-    /// tabs. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts it
+    /// released by a session whose opener claimed this session's `opener_claim`, so a client
+    /// reuses only its own tabs. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts it
     /// back in this client's group as it loads the page. A candidate is used only while the live
     /// browser still shows it at its release address; one that closed or moved on is dropped and
     /// the next is tried. Returns None when nothing fits, and the open then creates a fresh tab.
@@ -237,7 +238,7 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         decision: Decision,
-        client_label: &str,
+        opener_claim: &str,
         url: &str,
     ) -> Option<Terminal> {
         let browser = match self.admitted_browser(context) {
@@ -246,7 +247,7 @@ impl ApplicationExecutor {
         };
         let mut candidate = self
             .workspaces
-            .claim_released(&browser, client_label, url)?;
+            .claim_released(&browser, opener_claim, url)?;
         let live = match self.dispatch(context, BrowserCommand::ListTabs) {
             Ok(BrowserOutcome::Tabs { tabs }) => tabs,
             Ok(_) => return Some(self.protocol_failure(context, decision, None)),
@@ -261,7 +262,7 @@ impl ApplicationExecutor {
             }
             candidate = self
                 .workspaces
-                .claim_released(&browser, client_label, url)?;
+                .claim_released(&browser, opener_claim, url)?;
         };
         let focus_window = holds_no_tab(lease);
         let controlled = match lease.add_tab(&released) {
@@ -276,7 +277,7 @@ impl ApplicationExecutor {
                 BrowserCommand::AdoptTab {
                     tab_id: released.tab_id,
                     url: url.into(),
-                    group_title: group_title(client_label),
+                    group_title: group_title(opener_claim),
                     focus_window,
                 },
             ) {
@@ -401,7 +402,7 @@ impl ApplicationExecutor {
             // through the governed open path under the same handle, and say so plainly.
             Err(WorkspaceError::StaleTab) if requested_tab.is_some() => {
                 let handle = requested_tab.expect("guarded above");
-                let client_label = match self.workspaces.client_label(context.workspace) {
+                let opener_claim = match self.workspaces.opener_claim(context.workspace) {
                     Ok(label) => label,
                     Err(error) => return self.workspace_failure(context, error),
                 };
@@ -421,7 +422,7 @@ impl ApplicationExecutor {
                     context,
                     BrowserCommand::OpenTab {
                         url: url.into(),
-                        group_title: group_title(&client_label),
+                        group_title: group_title(&opener_claim),
                         focus_window: holds_no_tab(lease),
                     },
                 ) {

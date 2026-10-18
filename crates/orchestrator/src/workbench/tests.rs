@@ -1561,6 +1561,85 @@ fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::
     agent
 }
 
+/// A facade over `workspaces`, with nothing else to show.
+fn facade_with(
+    workspaces: &crate::workspace::WorkspaceStore,
+) -> (WorkbenchFacade, WorkbenchProjection) {
+    let projection = WorkbenchProjection::default();
+    let facade = WorkbenchFacade::new(
+        projection.clone(),
+        workspaces.clone(),
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(false, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    (facade, projection)
+}
+
+#[test]
+fn a_session_card_names_the_agent_its_operations_name() {
+    use crate::intake::session::IntakeChannel;
+    use crate::provenance::{Attribution, ConnectionEvidence, Source};
+
+    // No name was claimed, so only the source names the agent: the card must not fall back to
+    // the unknown agent while the session's running work names Claude Desktop.
+    let evidence = Arc::new(ConnectionEvidence::new(
+        Attribution {
+            source: Some(Source {
+                agent: Some("claude-desktop".into()),
+                image: "claude.exe".into(),
+            }),
+            ..Attribution::accepted(IntakeChannel::Mcp)
+        },
+        crate::intake::mcp::DEFAULT_CLIENT_LABEL,
+    ));
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    let workspace = workspaces.connect(Arc::clone(&evidence), None);
+    let (facade, projection) = facade_with(&workspaces);
+    projection.react(&DomainEvent::WorkStarted {
+        provenance: evidence.details(),
+        invocation: "invocation_running".into(),
+        workspace: workspace.as_str().into(),
+        tool: "browser_read".into(),
+        activity: PresentationActivity::Read,
+        capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
+    });
+    let shown = facade.snapshot();
+    assert_eq!(shown.sessions[0].agent.name, "Claude Desktop");
+    assert_eq!(shown.sessions[0].agent, shown.operations[0].agent);
+    assert_eq!(facade.connection_counts().agents, 1);
+}
+
+#[test]
+fn a_command_line_session_keeps_its_name_while_no_call_is_connected() {
+    use crate::intake::session::{IntakeChannel, SessionMarker};
+    use crate::provenance::ConnectionEvidence;
+
+    let call = Arc::new(ConnectionEvidence::claimed(
+        "ghostlight call",
+        IntakeChannel::Cli,
+    ));
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    let workspace = workspaces.connect(
+        Arc::clone(&call),
+        Some(SessionMarker::Declared {
+            key: "script".into(),
+        }),
+    );
+    workspaces.disconnect(
+        &workspace,
+        call.attribution().connection_id.as_deref().unwrap(),
+    );
+    let (facade, _) = facade_with(&workspaces);
+    let shown = facade.snapshot();
+    assert!(shown.sessions[0].connections.is_empty());
+    assert_eq!(shown.sessions[0].agent, crate::agent::Agent::command_line());
+    assert_eq!(shown.sessions[0].channel, IntakeChannel::Cli);
+    let counts = facade.connection_counts();
+    assert_eq!((counts.agents, counts.command_line), (1, 0));
+}
+
 #[test]
 fn the_search_names_the_integrations_page_as_its_tab_does() {
     let facade = facade_over(

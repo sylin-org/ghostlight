@@ -519,30 +519,37 @@ A connection binds to one workspace when it is admitted and keeps it until it cl
 moves a session into another workspace, and a handle from another session is refused before any
 browser work (ADR-0196 Decision 8).
 
+A workspace is named for the connection that opened it (ADR-0202 Decision 15). It keeps that
+connection's evidence as its opener for its whole life, and the session card, the connection
+counts, Integrations in use, the tab-group title and released-tab reuse all read the opener. A
+command-line workspace outlives its connections (ADR-0106), so it cannot be named from the current
+ones, and a group is named for the client that opened it (ADR-0066). A later connection to the
+same workspace is listed beside the others and renames nothing.
+
 Physical tab ids are unique inside one browser only. Ownership checks compare a tab id within the
 browser its workspace works in, so Chrome's tab 5 and Edge's tab 5 never refuse each other.
 
 When a workspace is released, the tabs it still holds enter a released-tab pool keyed by browser,
-with the governed URL each held at release and the releasing workspace's client label. A held tab,
-or one that never landed, does not enter. Release cleanup then asks the browser to close each tab. A
-tab becomes reusable only when the person's preserve-tabs setting refuses that close: the extension
-has then already dropped the dead workspace's binding and debugger hold, and the tab stays open.
-Until the close answers, no session can claim the tab, so a cleanup close never acts on a tab
-another session took (ADR-0196 Decision 8). A close that worked, failed, or did not answer in time
-removes the tab, so with preserve-tabs off nothing is reused. A tab also leaves the pool when it
-closes, when any page commits in it, when a workspace takes it, and when its browser disconnects,
+with the governed URL each held at release and the name the releasing workspace's opener claimed. A
+held tab, or one that never landed, does not enter. Release cleanup then asks the browser to close
+each tab. A tab becomes reusable only when the person's preserve-tabs setting refuses that close:
+the extension has then already dropped the dead workspace's binding and debugger hold, and the tab
+stays open. Until the close answers, no session can claim the tab, so a cleanup close never acts on
+a tab another session took (ADR-0196 Decision 8). A close that worked, failed, or did not answer in
+time removes the tab, so with preserve-tabs off nothing is reused. A tab also leaves the pool when
+it closes, when any page commits in it, when a workspace takes it, and when its browser disconnects,
 because a restarted browser hands out tab ids again. A close or commit that arrives while cleanup
 runs keeps the tab out. Default reuse (`reuse:"domain"`) adopts only from this pool (ADR-0196
 Decision 9). The executor claims the best same-host candidate released by a session of the same
 client, under the aggregate lock, exact URL first and then lowest id, checks it against the live tab
 list, adds it to the workspace, and sends `AdoptTab` with that exact tab id and the client's group
 title. The kept tab left its group when its session ended (ADR-0201), so the adopt puts it back in
-`Ghostlight - <client label>` as it loads the page, unless the person put it in a group of their own.
-The client label must match, so a client reuses only the tabs its own sessions kept: a tab another
+`Ghostlight - <opener claim>` as it loads the page, unless the person put it in a group of their
+own. The claim must match, so a client reuses only the tabs its own sessions kept: a tab another
 client released is left in the pool and the open creates a fresh tab. The label only narrows reuse
-and never grants authority. The pool is in memory
-and does not survive a service restart. A person can still type into a preserved released tab
-without loading a page, and a later reuse would then replace that page.
+and never grants authority. The pool is in memory and does not survive a service restart. A person
+can still type into a preserved released tab without loading a page, and a later reuse would then
+replace that page.
 
 A same-document change keeps the document generation. When an action receipt reports an address
 in the same origin and no committed document, the workspace updates the tab's URL and title and
@@ -1045,17 +1052,18 @@ owner decision to withdraw the store submission and resubmit.
 
 Workspace tab grouping is browser mechanism. `OpenTab` carries the governed URL, the owning
 workspace already present on every browser request, and the presentation-only exact title
-`Ghostlight - <client label>`. The adapter resolves placement before opening: it reuses one
-browser-wide exact-title group wherever that group currently resides, otherwise reuses a window
-containing another Ghostlight group, otherwise creates a dedicated normal window containing the
-requested URL. Destination resolution is serialized so concurrent opens cannot create duplicate
-groups. The first tab for a workspace brings the Ghostlight window into view; later tabs do not
-repeatedly steal window focus. The adapter colors the group blue, records the opaque workspace
-association, and opens without an externally visible blank-tab step. Group ids are restart-local
-hints and exact-title discovery repairs stale hints. The label never routes or grants authority. A
-newly opened tab is not adopted through its opener: that relationship cannot distinguish an
-agent popup from a human opening a link. Explicit executor work establishes ownership. Moving a
-group or tab between windows does not change ownership or trigger automatic regrouping.
+`Ghostlight - <opener claim>`, the name the client that opened the workspace claimed. The adapter
+resolves placement before opening: it reuses one browser-wide exact-title group wherever that group
+currently resides, otherwise reuses a window containing another Ghostlight group, otherwise creates
+a dedicated normal window containing the requested URL. Destination resolution is serialized so
+concurrent opens cannot create duplicate groups. The first tab for a workspace brings the Ghostlight
+window into view; later tabs do not repeatedly steal window focus. The adapter colors the group
+blue, records the opaque workspace association, and opens without an externally visible blank-tab
+step. Group ids are restart-local hints and exact-title discovery repairs stale hints. The label
+never routes or grants authority. A newly opened tab is not adopted through its opener: that
+relationship cannot distinguish an agent popup from a human opening a link. Explicit executor work
+establishes ownership. Moving a group or tab between windows does not change ownership or trigger
+automatic regrouping.
 
 The adapter never chooses a tab to reuse. The executor's `OpenTab` carries no reuse request, so a
 plain open always creates. A reused tab arrives as `AdoptTab`, the adapter's open with

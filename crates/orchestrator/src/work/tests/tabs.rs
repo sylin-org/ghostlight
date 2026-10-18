@@ -47,7 +47,7 @@ fn later_session_of(
     workspaces: &crate::workspace::WorkspaceStore,
     earlier: &crate::workspace::WorkspaceId,
 ) -> crate::workspace::WorkspaceId {
-    let client = workspaces.client_label(earlier).unwrap();
+    let client = workspaces.opener_claim(earlier).unwrap();
     workspaces.admit(client, IntakeChannel::Mcp)
 }
 
@@ -113,7 +113,7 @@ fn a_released_ghostlight_tab_is_reused_by_the_next_session_on_its_host() {
         &CancellationToken::default(),
     );
     assert_eq!(listed.facts["tabs"][0]["tab"], reused.facts["tab"]);
-    let client = workspaces.client_label(&next).unwrap();
+    let client = workspaces.opener_claim(&next).unwrap();
     assert_eq!(
         workspaces.claim_released(FAKE_BROWSER, &client, "https://example.com/b"),
         None
@@ -213,7 +213,7 @@ fn a_released_tab_the_person_took_back_or_closed_is_not_reused() {
         .iter()
         .any(|call| matches!(call, BrowserCommand::Navigate { .. })));
     // Candidates that failed the live check are gone, so the next open does not ask again.
-    let client = workspaces.client_label(&next).unwrap();
+    let client = workspaces.opener_claim(&next).unwrap();
     assert_eq!(
         workspaces.claim_released(FAKE_BROWSER, &client, "https://example.com/b"),
         None
