@@ -767,12 +767,14 @@ fn show_window() -> bool {
 }
 
 /// The facts the install summary is worded from, put together from what the run collected and
-/// what the computer shows now.
+/// what the computer shows now. `scan_browsers` reads the browsers and their profiles. It runs
+/// only while setup is incomplete: a complete setup's summary names no browser step, and
+/// docs/trust/data-flows.md says the profiles are read only then.
 fn install_facts(
     collected: &Collected,
     version: String,
     environment: Environment,
-    browsers: Vec<BrowserFact>,
+    scan_browsers: impl FnOnce() -> Vec<BrowserFact>,
     setup_complete: bool,
     window_shown: bool,
 ) -> InstallFacts {
@@ -782,7 +784,11 @@ fn install_facts(
         path_written: collected.path_written,
         agents: collected.agents.clone(),
         mcp_command: collected.mcp_command.clone(),
-        browsers,
+        browsers: if setup_complete {
+            Vec::new()
+        } else {
+            scan_browsers()
+        },
         complete: setup_complete,
         window_shown,
     }
@@ -817,7 +823,7 @@ fn finish_setup(
         collected,
         installed_version(&layout),
         environment::current(),
-        crate::workbench::setup::browsers_on_this_computer().facts,
+        || crate::workbench::setup::browsers_on_this_computer().facts,
         setup_complete,
         window_shown,
     );
@@ -1793,7 +1799,7 @@ mod tests {
             collected,
             "2.0.0".into(),
             Environment::Windows,
-            browsers,
+            || browsers,
             setup_complete,
             window_shown,
         ))
@@ -1883,6 +1889,31 @@ mod tests {
         let lines = lines_of(&unchanged, vec![native_chrome()], true, false);
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[2].starts_with("Agents: Claude Code"));
+    }
+
+    #[test]
+    fn a_complete_setup_reads_no_browser_profile() {
+        use super::install_facts;
+        use crate::language::environment::Environment;
+
+        let facts = install_facts(
+            &two_agents_changed(),
+            "2.0.0".into(),
+            Environment::Windows,
+            || panic!("a complete setup scanned the browser profiles"),
+            true,
+            false,
+        );
+        assert!(facts.browsers.is_empty());
+        let facts = install_facts(
+            &two_agents_changed(),
+            "2.0.0".into(),
+            Environment::Windows,
+            || vec![native_chrome()],
+            false,
+            false,
+        );
+        assert_eq!(facts.browsers, vec![native_chrome()]);
     }
 
     #[test]
