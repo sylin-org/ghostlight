@@ -1,14 +1,17 @@
-//! Linux detached process creation with no inherited descriptors, and the user identities the
-//! relay endpoint compares.
+//! Linux detached process creation with no inherited descriptors, the credentials the relay
+//! endpoint compares, and the process facts an ancestor walk reads from `/proc`.
 
 use std::ffi::{c_int, c_long, c_ulong, c_void, OsStr};
+use std::fs;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
+
+use super::ancestry::ProcessFacts;
 
 /// The `close_range` system call number, the same on every architecture Ghostlight supports.
 const SYS_CLOSE_RANGE: c_long = 436;
@@ -40,6 +43,24 @@ const SOL_SOCKET: c_int = 1;
 
 /// Socket option: the credentials of the peer of a connected Unix socket.
 const SO_PEERCRED: c_int = 17;
+
+/// The directory the kernel describes every process in.
+const PROC_DIRECTORY: &str = "/proc";
+
+/// The file below a process's directory that holds its status line.
+const STAT_FILE: &str = "stat";
+
+/// The link below a process's directory that names its executable.
+const EXE_LINK: &str = "exe";
+
+/// The parent id's place among the status fields after the command name (field 4 of `stat`).
+const PARENT_FIELD: usize = 1;
+
+/// The start time's place among the status fields after the command name (field 22 of `stat`).
+const START_TIME_FIELD: usize = 19;
+
+/// What the kernel appends to the executable link of a program whose file was removed.
+const DELETED_SUFFIX: &str = " (deleted)";
 
 /// The C `struct ucred`.
 #[repr(C)]
@@ -77,9 +98,19 @@ pub fn current_uid() -> u32 {
     unsafe { getuid() }
 }
 
-/// The user id of the process on the other end of the connected Unix socket `stream`, as the
-/// kernel recorded it when the connection was made.
-pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+/// Who is on the other end of a connected Unix socket, as the kernel recorded it when the
+/// connection was made.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PeerCredentials {
+    /// The peer's user id.
+    pub user_id: u32,
+    /// The peer's process id, or none when the peer lives in another process id namespace (a
+    /// sandbox), where the kernel reports zero.
+    pub process_id: Option<u32>,
+}
+
+/// The credentials of the process on the other end of the connected Unix socket `stream`.
+pub fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
     let mut credentials = Credentials {
         process_id: 0,
         user_id: 0,
@@ -100,7 +131,48 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     if read != 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(credentials.user_id)
+    Ok(PeerCredentials {
+        user_id: credentials.user_id,
+        process_id: u32::try_from(credentials.process_id)
+            .ok()
+            .filter(|id| *id != 0),
+    })
+}
+
+/// A reader of one process's facts for [`super::ancestry`], from `/proc/<id>/stat` (the parent id
+/// and start time) and the `/proc/<id>/exe` link (the executable).
+pub(super) fn process_facts_reader() -> impl Fn(u32) -> Option<ProcessFacts> {
+    process_facts
+}
+
+/// The facts `/proc` holds about `process_id`, or none when it has exited or cannot be read.
+fn process_facts(process_id: u32) -> Option<ProcessFacts> {
+    let directory = Path::new(PROC_DIRECTORY).join(process_id.to_string());
+    let stat = fs::read_to_string(directory.join(STAT_FILE)).ok()?;
+    // The command name, in parentheses, may itself hold spaces and parentheses: the fields
+    // that follow start after the last closing one.
+    let fields: Vec<&str> = stat
+        .get(stat.rfind(')')? + 1..)?
+        .split_whitespace()
+        .collect();
+    let parent = fields
+        .get(PARENT_FIELD)?
+        .parse::<u32>()
+        .ok()
+        .filter(|id| *id != 0);
+    let started = fields.get(START_TIME_FIELD)?.parse::<u64>().ok()?;
+    let image = fs::read_link(directory.join(EXE_LINK)).ok().map(|image| {
+        let kept = image
+            .to_string_lossy()
+            .strip_suffix(DELETED_SUFFIX)
+            .map(PathBuf::from);
+        kept.unwrap_or(image)
+    });
+    Some(ProcessFacts {
+        parent,
+        started,
+        image,
+    })
 }
 
 /// Start `executable` with `arguments` in its own process group, with `directory` as its working

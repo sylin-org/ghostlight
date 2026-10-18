@@ -72,7 +72,7 @@ use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_
 use crate::language::outcome::DialogKind;
 use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
-use crate::provenance::ConnectionEvidence;
+use crate::provenance::{ConnectionEvidence, Source};
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
@@ -1214,6 +1214,8 @@ fn serve_control(connection: Connection, operation: Option<Control>, intake: &In
 /// Serve one MCP client session on an accepted `mcp` stream.
 ///
 /// The opening names the channel and, for the command line, the process that owns the session.
+/// The app that started the session is read once from the stream's peer process
+/// ([`Source::observe`]), before anything the client sends.
 /// A resume token continues an earlier session: its revision, client and owned tabs come back,
 /// and tabs the browser no longer has stay stale. Tabs of a browser that has not returned yet
 /// stay in the token and are bound when it does.
@@ -1240,6 +1242,7 @@ fn serve_mcp(
     };
     let channel = requested.channel.as_deref().unwrap_or(MCP_CHANNEL);
     let intake_channel = crate::intake::intake_channel(channel);
+    let source = Source::observe(connection.peer_process_id());
     let resumed = requested
         .resume
         .as_deref()
@@ -1258,6 +1261,7 @@ fn serve_mcp(
     let opening = Opening {
         channel: intake_channel,
         marker,
+        source,
     };
 
     let (wire, mut live) = match resumed {
@@ -1326,6 +1330,8 @@ fn serve_mcp(
 struct Opening {
     channel: IntakeChannel,
     marker: Option<SessionMarker>,
+    /// The app Ghostlight saw start the stream, which every connection the session opens keeps.
+    source: Option<Source>,
 }
 
 /// One session's engine and the stream its lines go out on.
@@ -1504,10 +1510,10 @@ impl LiveSession {
         // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
         reap_finished_sessions(&intake.workspaces, intake.browser_port.as_ref());
         // Evidence belongs to this connection. Workspace continuity never replaces it.
-        let connection = Arc::new(ConnectionEvidence::new(
-            &wire.client_label(),
-            opening.channel,
-        ));
+        let connection = Arc::new(
+            ConnectionEvidence::new(&wire.client_label(), opening.channel)
+                .started_by(opening.source.clone()),
+        );
         let workspace = intake
             .workspaces
             .connect(connection.clone(), opening.marker.clone());
@@ -2109,6 +2115,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crate::intake::session::IntakeChannel;
+    use crate::provenance::{ConnectionEvidence, Source};
     use ghostlight_relay::endpoint::{pair, Connection, Endpoint, Listener};
     use ghostlight_relay::frame;
     use ghostlight_relay::protocol::{
@@ -2965,6 +2972,47 @@ mod tests {
 
         drop(socket);
         eventually(|| served.intake.workspaces.summaries().is_empty());
+    }
+
+    #[test]
+    fn a_real_relay_connection_carries_the_app_that_started_its_peer_and_a_pair_carries_none() {
+        let home = TestHome::new("mcp-source");
+        let served = serve_fake(&home);
+        let observed = Source::observe(Some(std::process::id()));
+        assert!(
+            observed.is_some(),
+            "the test runner was started by a program that is not a wrapper"
+        );
+        let expected = ConnectionEvidence::new("relay test", IntakeChannel::Mcp)
+            .started_by(observed)
+            .details()
+            .explanation;
+
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
+        eventually(|| served.intake.workspaces.summaries().len() == 1);
+        let summary = &served.intake.workspaces.summaries()[0];
+        assert_eq!(summary.connections[0].explanation, expected);
+
+        let mut paired = served.over_a_pair();
+        paired.set_read_timeout(Some(PATIENCE)).unwrap();
+        let reply = protocol::open(&paired, &mcp_opening(None), Instant::now() + PATIENCE).unwrap();
+        assert!(reply.accepted, "{reply:?}");
+        initialize(&mut paired);
+        eventually(|| served.intake.workspaces.summaries().len() == 2);
+        let explanations: Vec<String> = served
+            .intake
+            .workspaces
+            .summaries()
+            .iter()
+            .map(|summary| summary.connections[0].explanation.clone())
+            .collect();
+        assert!(
+            explanations.contains(&crate::language::provenance::claimed_name_explanation(
+                "relay test"
+            )),
+            "a stream with no peer process keeps the caveat: {explanations:?}"
+        );
     }
 
     #[test]

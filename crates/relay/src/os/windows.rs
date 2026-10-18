@@ -1,11 +1,15 @@
-//! Windows detached process creation with no inherited handles, and process identity.
+//! Windows detached process creation with no inherited handles, process identity, and the
+//! process facts an ancestor walk reads.
 
-use std::ffi::{c_void, OsStr};
+use std::collections::HashMap;
+use std::ffi::{c_void, OsStr, OsString};
 use std::io;
 use std::mem;
-use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
+
+use super::ancestry::ProcessFacts;
 
 type Handle = *mut c_void;
 
@@ -30,6 +34,12 @@ const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x0000_1000;
 const SYNCHRONIZE: u32 = 0x0010_0000;
 const WAIT_TIMEOUT: u32 = 0x0000_0102;
 const MAX_PATH: usize = 260;
+
+/// The longest executable path read, in UTF-16 units: the longest path Windows allows.
+const MAX_IMAGE_UNITS: u32 = 32 * 1024;
+
+/// `QueryFullProcessImageNameW` flag: the path in Win32 form, not the native device form.
+const WIN32_PATH_FORMAT: u32 = 0;
 
 const SPACE: u16 = b' ' as u16;
 const TAB: u16 = b'\t' as u16;
@@ -119,6 +129,12 @@ extern "system" {
         exit: *mut FileTime,
         kernel: *mut FileTime,
         user: *mut FileTime,
+    ) -> i32;
+    fn QueryFullProcessImageNameW(
+        process: Handle,
+        flags: u32,
+        name: *mut u16,
+        size: *mut u32,
     ) -> i32;
     fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
     fn CloseHandle(handle: Handle) -> i32;
@@ -280,9 +296,13 @@ impl Drop for OwnedHandle {
     }
 }
 
-/// The parent process id of `process_id`, from one process snapshot.
-fn parent_id(process_id: u32) -> Option<u32> {
-    let snapshot = OwnedHandle::snapshot()?;
+/// Every process's parent id, by process id, from one process snapshot. Empty when no snapshot
+/// can be taken.
+fn parent_ids() -> HashMap<u32, u32> {
+    let mut parents = HashMap::new();
+    let Some(snapshot) = OwnedHandle::snapshot() else {
+        return parents;
+    };
     let mut entry = ProcessEntry32W {
         size: mem::size_of::<ProcessEntry32W>() as u32,
         usage: 0,
@@ -298,13 +318,70 @@ fn parent_id(process_id: u32) -> Option<u32> {
     // SAFETY: entry has the required size and remains writable for the complete snapshot walk.
     let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) } != 0;
     while found {
-        if entry.process_id == process_id {
-            return Some(entry.parent_process_id);
-        }
+        parents.insert(entry.process_id, entry.parent_process_id);
         // SAFETY: snapshot and entry remain valid for the next row.
         found = unsafe { Process32NextW(snapshot.0, &mut entry) } != 0;
     }
-    None
+    parents
+}
+
+/// The parent process id of `process_id`, from one process snapshot.
+fn parent_id(process_id: u32) -> Option<u32> {
+    parent_ids().get(&process_id).copied()
+}
+
+/// A reader of one process's facts for [`super::ancestry`]: the parent ids come from one snapshot
+/// taken now, and each process is opened for query only when it is read.
+pub(super) fn process_facts_reader() -> impl Fn(u32) -> Option<ProcessFacts> {
+    let parents = parent_ids();
+    move |process_id| process_facts(process_id, parents.get(&process_id).copied())
+}
+
+/// The creation time and executable path of `process_id`, whose parent the snapshot named as
+/// `parent`; none when the process cannot be opened for query.
+fn process_facts(process_id: u32, parent: Option<u32>) -> Option<ProcessFacts> {
+    if process_id == 0 {
+        return None;
+    }
+    let process = OwnedHandle::process(process_id, PROCESS_QUERY_LIMITED_INFORMATION)?;
+    Some(ProcessFacts {
+        parent: parent.filter(|id| *id != 0),
+        started: creation_time(&process)?,
+        image: image_path(&process),
+    })
+}
+
+/// The creation time of the open `process`, as the raw FILETIME value.
+fn creation_time(process: &OwnedHandle) -> Option<u64> {
+    let mut creation = FileTime { low: 0, high: 0 };
+    let mut exit = FileTime { low: 0, high: 0 };
+    let mut kernel = FileTime { low: 0, high: 0 };
+    let mut user = FileTime { low: 0, high: 0 };
+    // SAFETY: all output structures outlive the call and process is a valid query handle.
+    let ok =
+        unsafe { GetProcessTimes(process.0, &mut creation, &mut exit, &mut kernel, &mut user) };
+    (ok != 0).then_some((u64::from(creation.high) << 32) | u64::from(creation.low))
+}
+
+/// The full Win32 path of the open `process`'s executable.
+fn image_path(process: &OwnedHandle) -> Option<PathBuf> {
+    let mut buffer = vec![0_u16; MAX_IMAGE_UNITS as usize];
+    let mut length = MAX_IMAGE_UNITS;
+    // SAFETY: buffer holds `length` writable units for the call, and process is a valid query
+    // handle. On success the call writes the path's length, without the terminator, to length.
+    let ok = unsafe {
+        QueryFullProcessImageNameW(
+            process.0,
+            WIN32_PATH_FORMAT,
+            buffer.as_mut_ptr(),
+            &mut length,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    buffer.truncate(length as usize);
+    Some(PathBuf::from(OsString::from_wide(&buffer)))
 }
 
 /// Capture the current process's parent with its creation time bound to its process id.
@@ -321,16 +398,9 @@ pub fn process_identity(process_id: u32) -> Option<ProcessIdentity> {
         return None;
     }
     let process = OwnedHandle::process(process_id, PROCESS_QUERY_LIMITED_INFORMATION)?;
-    let mut creation = FileTime { low: 0, high: 0 };
-    let mut exit = FileTime { low: 0, high: 0 };
-    let mut kernel = FileTime { low: 0, high: 0 };
-    let mut user = FileTime { low: 0, high: 0 };
-    // SAFETY: all output structures outlive the call and process is a valid query handle.
-    let ok =
-        unsafe { GetProcessTimes(process.0, &mut creation, &mut exit, &mut kernel, &mut user) };
-    (ok != 0).then_some(ProcessIdentity {
+    Some(ProcessIdentity {
         process_id,
-        created: (u64::from(creation.high) << 32) | u64::from(creation.low),
+        created: creation_time(&process)?,
     })
 }
 

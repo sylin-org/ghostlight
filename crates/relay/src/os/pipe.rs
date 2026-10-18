@@ -569,7 +569,7 @@ impl PipeListener {
         })
     }
 
-    /// Wait for the next client that passes the check, and return its end.
+    /// Wait for the next client that passes the check, and return its end with its process id.
     ///
     /// The pipe name is never left without an instance: when this returns an error, an instance
     /// is still waiting. A client that connects and closes before it is accepted is skipped. A
@@ -577,7 +577,7 @@ impl PipeListener {
     /// least medium. Any other client is disconnected before a byte is exchanged and the wait
     /// goes on. After [`PipeListener::shutdown`] this returns
     /// [`io::ErrorKind::ConnectionAborted`].
-    pub fn accept(&self) -> io::Result<PipeStream> {
+    pub fn accept(&self) -> io::Result<(PipeStream, u32)> {
         let mut waiting = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             let pipe = match waiting.take() {
@@ -604,8 +604,8 @@ impl PipeListener {
                     return Err(failure);
                 }
             }
-            if self.client_is_admitted(&pipe) {
-                return Ok(PipeStream::new(pipe));
+            if let Some(process_id) = self.admitted_client(&pipe) {
+                return Ok((PipeStream::new(pipe), process_id));
             }
             disconnect(&pipe);
         }
@@ -617,24 +617,23 @@ impl PipeListener {
         self.stop.set();
     }
 
-    /// Whether the process on the other end of `pipe` is the same user at medium integrity or
-    /// above.
-    fn client_is_admitted(&self, pipe: &Owned) -> bool {
+    /// The process id on the other end of `pipe` when that process is the same user at medium
+    /// integrity or above; none otherwise.
+    fn admitted_client(&self, pipe: &Owned) -> Option<u32> {
         let mut process_id = 0;
         // SAFETY: pipe is a valid connected server handle and process_id is writable.
         if unsafe { GetNamedPipeClientProcessId(pipe.0, &mut process_id) } == 0 {
-            return false;
+            return None;
         }
-        let Ok(token) = Token::of_process(process_id) else {
-            return false;
-        };
+        let token = Token::of_process(process_id).ok()?;
         let same_user = token
             .user()
             .is_ok_and(|client| client.same_user(&self.user));
-        same_user
+        let admitted = same_user
             && token
                 .integrity_rid()
-                .is_ok_and(|rid| rid >= SECURITY_MANDATORY_MEDIUM_RID)
+                .is_ok_and(|rid| rid >= SECURITY_MANDATORY_MEDIUM_RID);
+        admitted.then_some(process_id)
     }
 }
 

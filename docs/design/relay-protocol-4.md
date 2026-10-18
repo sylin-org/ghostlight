@@ -47,6 +47,9 @@ Each side checks the other before any payload byte moves.
 - The service admits a peer that runs as the same user. On Windows it must also run at medium
   integrity or higher, which keeps sandboxed and AppContainer processes out. On Linux the check is
   the peer's user id from the socket. A peer that fails is disconnected without a reply.
+- The peer's process id, which the same check reads, stays with the service's end of the stream.
+  The service reads the peer's ancestors from it to say what app started the connection (ADR-0161,
+  amendment of 2026-10-18). Nothing on the wire carries it, and it grants nothing.
 - The client requires a server that runs as the same user. On Windows it reads the pipe server's
   token; on Linux it requires `run` to belong to the user with no group or other permission. An
   account that took the name first receives nothing.

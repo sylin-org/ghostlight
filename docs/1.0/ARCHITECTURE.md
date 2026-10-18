@@ -369,9 +369,13 @@ its own evidence across queue waits, workspace sharing, composed children, prepa
 and refusal. The workspace lists active connections independently; closing one removes only its
 live details. Receipt storage receives a bounded attribution projection with no reported application
 text, while the bounded live human projection receives that claim separately. Restored history
-never borrows a current session's identity. The service does not identify the program on the other
-end of a connection, and provenance grants no authority. Audit lines with extra attribution
-fields still read; the extra fields are ignored.
+never borrows a current session's identity. When a connection opens, the service reads the
+ancestors of its peer process from the operating system and keeps the app it saw start the
+connection: the first ancestor that lies in a catalog agent's installed app, else the first that is
+not a shell, interpreter or other wrapper, as an agent id and an executable file name (ADR-0161,
+amendment of 2026-10-18). Nothing a client sends takes part. The window sets the client's claim
+beside that source, receipts keep the source, and provenance grants no authority. Audit lines with
+extra attribution fields still read; the extra fields are ignored.
 
 Every peer reaches the service through one endpoint (relay protocol 4, ADR-0199 Decision 5; the
 contract is [relay-protocol-4](../design/relay-protocol-4.md)): a named pipe on Windows and a Unix

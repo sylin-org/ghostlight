@@ -348,3 +348,93 @@ mod console_interrupts {
         forward_console_interrupts().expect("second registration");
     }
 }
+
+mod ancestry {
+    //! The ancestor walk over synthetic process trees, and over this test's real ancestors.
+
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use crate::os::ancestor_images;
+    use crate::os::ancestry::{walk, ProcessFacts};
+
+    /// A synthetic process table: each id with its parent, its start time and its image.
+    fn table(rows: &[(u32, Option<u32>, u64, Option<&str>)]) -> HashMap<u32, ProcessFacts> {
+        rows.iter()
+            .map(|(id, parent, started, image)| {
+                (
+                    *id,
+                    ProcessFacts {
+                        parent: *parent,
+                        started: *started,
+                        image: image.map(PathBuf::from),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn walked(rows: &[(u32, Option<u32>, u64, Option<&str>)], limit: usize) -> Vec<String> {
+        let table = table(rows);
+        walk(10, limit, |id| table.get(&id).cloned())
+            .into_iter()
+            .map(|image| image.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn the_walk_reads_each_parent_nearest_first_and_stops_at_the_top() {
+        let rows = [
+            (10, Some(20), 5, Some("edge")),
+            (20, Some(30), 4, Some("shell")),
+            (30, None, 1, Some("app")),
+        ];
+        assert_eq!(walked(&rows, 16), ["shell", "app"]);
+    }
+
+    #[test]
+    fn the_walk_stops_at_its_limit() {
+        let rows = [
+            (10, Some(20), 5, Some("edge")),
+            (20, Some(30), 4, Some("one")),
+            (30, Some(40), 3, Some("two")),
+            (40, None, 2, Some("three")),
+        ];
+        assert_eq!(walked(&rows, 2), ["one", "two"]);
+    }
+
+    #[test]
+    fn a_parent_that_is_gone_or_unreadable_ends_the_walk() {
+        let gone = [(10, Some(20), 5, Some("edge"))];
+        assert!(walked(&gone, 16).is_empty());
+        let unreadable = [
+            (10, Some(20), 5, Some("edge")),
+            (20, Some(30), 4, Some("shell")),
+            (30, Some(40), 3, None),
+            (40, None, 2, Some("app")),
+        ];
+        assert_eq!(walked(&unreadable, 16), ["shell"]);
+        assert!(walked(&[], 16).is_empty(), "the process itself is unknown");
+    }
+
+    #[test]
+    fn a_parent_started_after_its_child_is_a_reused_id_and_ends_the_walk() {
+        let rows = [
+            (10, Some(20), 5, Some("edge")),
+            (20, Some(30), 4, Some("shell")),
+            (30, Some(10), 9, Some("later process")),
+        ];
+        assert_eq!(walked(&rows, 16), ["shell"]);
+    }
+
+    #[test]
+    fn this_test_process_has_real_ancestors_with_absolute_paths() {
+        let images = ancestor_images(std::process::id(), 16);
+        assert!(!images.is_empty(), "the test runner has a parent");
+        assert!(images.len() <= 16);
+        for image in images {
+            assert!(image.is_absolute(), "{}", image.display());
+        }
+        assert!(ancestor_images(std::process::id(), 0).is_empty());
+    }
+}

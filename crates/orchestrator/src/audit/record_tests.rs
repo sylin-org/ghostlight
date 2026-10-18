@@ -112,6 +112,29 @@ fn new_audit_records_serialize_the_complete_set_without_a_highest_capability() {
 }
 
 #[test]
+fn a_record_carries_its_connection_s_source_and_a_line_without_one_still_reads() {
+    let record = navigate_succeeded();
+    let line = serde_json::to_value(&record).unwrap();
+    assert_eq!(
+        line["provenance"]["source"],
+        serde_json::json!({ "agent": "claude-desktop", "image": "claude.exe" }),
+        "the source's agent id and file name, and no path"
+    );
+    let mut without = line;
+    without["provenance"]
+        .as_object_mut()
+        .unwrap()
+        .remove("source");
+    let read = read(&without);
+    assert_eq!(read.provenance.as_ref().unwrap().source, None);
+    assert_eq!(
+        read.provenance.as_ref().unwrap().connection_id.as_deref(),
+        Some(GOLDEN_CONNECTION)
+    );
+    assert_eq!(serde_json::to_value(&read).unwrap(), without);
+}
+
+#[test]
 fn audit_reads_lines_written_with_peer_observation_without_reemitting_it() {
     use crate::intake::session::IntakeChannel;
 
@@ -289,12 +312,17 @@ fn wire(value: impl serde::Serialize) -> String {
         .expect("a status or effect is a plain string")
 }
 
-/// The connection evidence a record carries, as the service attaches it.
+/// The connection evidence a record carries, as the service attaches it: an MCP connection that
+/// Claude Desktop's installed app started.
 fn golden_connection() -> crate::provenance::ConnectionEvidence {
     crate::provenance::ConnectionEvidence::new(
         "golden client",
         crate::intake::session::IntakeChannel::Mcp,
     )
+    .started_by(Some(crate::provenance::Source {
+        agent: Some("claude-desktop".into()),
+        image: "claude.exe".into(),
+    }))
 }
 
 /// An all-open snapshot, the decision for `url` and the evidence it left.

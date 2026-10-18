@@ -1,16 +1,34 @@
-//! Connection evidence: a service-issued identity and channel, with transient claims kept apart
-//! from durable attribution.
+//! Connection evidence: a service-issued identity and channel, the app Ghostlight saw start the
+//! connection, and transient claims kept apart from durable attribution (ADR-0161).
+//!
+//! The [`Source`] of a connection is observed, never claimed: the service reads the ancestors of
+//! the connection's peer process from the operating system once, when the connection opens, and
+//! keeps the first that lies in a catalog agent's installed app ([`crate::install::apps`]), else
+//! the first that is not a wrapper. No field a client writes takes part. Like the channel, it is
+//! provenance for display and history and never an input to governance.
 
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::install::apps::{is_wrapper, AppLocations, PATH_SEPARATORS};
+use crate::install::icons::IconPlaces;
 use crate::intake::session::IntakeChannel;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 pub use crate::language::provenance::ConnectionDetails;
 
 const REPORTED_APPLICATION_MAX_CHARS: usize = 100;
 const CONNECTION_ID_PREFIX: &str = "connection_";
+
+/// The most ancestors of a connection's peer read for its source.
+const ANCESTOR_LIMIT: usize = 16;
+
+/// The longest executable file name a source keeps, in characters.
+const IMAGE_MAX_CHARS: usize = 120;
+
+/// The longest catalog agent id a source keeps, in characters.
+const AGENT_ID_MAX_CHARS: usize = 64;
 
 /// Evidence captured once for one accepted connection. Caller claims remain memory-only.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,10 +49,76 @@ pub struct Attribution {
     pub observed_at_ms: Option<u64>,
     /// Declared intake, never authority.
     pub channel: IntakeChannel,
+    /// The app Ghostlight saw start the connection; absent when it could not be read and on
+    /// records written before sources were kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+}
+
+/// The app Ghostlight saw start a connection, from the operating system's facts about the
+/// connection's peer process.
+///
+/// It is decided once, when the connection opens, and every request on the connection inherits
+/// it. It holds a file name and never a path, which would carry the person's name. Reading bounds
+/// both fields again, so an edited record cannot widen them.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Source {
+    /// The catalog id of the agent whose installed app started the connection, when one did.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_agent_id"
+    )]
+    pub agent: Option<String>,
+    /// The executable file name of that app, or of the nearest ancestor that is not a wrapper
+    /// when no agent's app started it.
+    #[serde(deserialize_with = "deserialize_image")]
+    pub image: String,
+}
+
+impl Source {
+    /// The source of a connection whose peer is the process `process_id`: its ancestors are read
+    /// (at most [`ANCESTOR_LIMIT`]), and the first that lies in a catalog agent's installed app
+    /// wins, else the first that is not a wrapper. None when no process id is known or no ancestor
+    /// but wrappers can be read; a failed read never fails the connection.
+    #[must_use]
+    pub fn observe(process_id: Option<u32>) -> Option<Self> {
+        let ancestors = ghostlight_relay::os::ancestor_images(process_id?, ANCESTOR_LIMIT);
+        if ancestors.iter().all(|image| is_wrapper(image)) {
+            return None;
+        }
+        let apps = AppLocations::discover(&IconPlaces::system());
+        Self::among(&ancestors, |image| apps.agent_of(image))
+    }
+
+    /// The source among `ancestors`, nearest first, with `agent_of` saying whose installed app a
+    /// program is: the first ancestor that is an agent's app, else the first that is not a
+    /// wrapper.
+    fn among(
+        ancestors: &[PathBuf],
+        agent_of: impl Fn(&Path) -> Option<&'static str>,
+    ) -> Option<Self> {
+        let mut nearest = None;
+        for image in ancestors.iter().filter(|image| !is_wrapper(image)) {
+            if let Some(agent) = agent_of(image) {
+                return Self::of(image, Some(agent));
+            }
+            nearest.get_or_insert(image);
+        }
+        Self::of(nearest?, None)
+    }
+
+    /// The source whose executable is at `image`, the installed app of `agent` when one is named.
+    fn of(image: &Path, agent: Option<&str>) -> Option<Self> {
+        Some(Self {
+            agent: agent.and_then(bounded_agent_id),
+            image: bounded_file_name(&image.to_string_lossy())?,
+        })
+    }
 }
 
 impl ConnectionEvidence {
-    /// Capture a new connection with a fresh identity and time.
+    /// Capture a new connection with a fresh identity and time, and no source.
     #[must_use]
     pub fn new(label: &str, channel: IntakeChannel) -> Self {
         Self {
@@ -50,8 +134,16 @@ impl ConnectionEvidence {
                         .unwrap_or(u64::MAX),
                 ),
                 channel,
+                source: None,
             },
         }
+    }
+
+    /// This evidence with the app Ghostlight saw start the connection.
+    #[must_use]
+    pub fn started_by(mut self, source: Option<Source>) -> Self {
+        self.attribution.source = source;
+        self
     }
 
     /// Borrow the durable evidence for this connection; it contains no caller-supplied label.
@@ -66,17 +158,14 @@ impl ConnectionEvidence {
         &self.reported_application
     }
 
-    /// Present the live connection with its separately identified, bounded application claim.
+    /// Present the live connection with its separately identified, bounded application claim,
+    /// beside the source Ghostlight saw.
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
-        let mut details = self.attribution.details();
-        if let Some(claim) = crate::language::provenance::claimed_name(&self.reported_application) {
-            if details.channel == IntakeChannel::Mcp {
-                details.explanation = crate::language::provenance::claimed_name_explanation(claim);
-            }
-            details.reported_application = Some(claim.to_owned());
-        }
-        details
+        crate::language::provenance::live_details(
+            &self.attribution,
+            crate::language::provenance::claimed_name(&self.reported_application),
+        )
     }
 }
 
@@ -88,6 +177,7 @@ impl Attribution {
             connection_id: None,
             observed_at_ms: None,
             channel,
+            source: None,
         }
     }
 
@@ -96,6 +186,42 @@ impl Attribution {
     pub fn details(&self) -> ConnectionDetails {
         crate::language::provenance::details(self)
     }
+}
+
+/// What follows the last path separator of `value`, bounded and stripped of control and
+/// direction text; none when nothing is left.
+fn bounded_file_name(value: &str) -> Option<String> {
+    let name = value.rsplit(PATH_SEPARATORS).next().unwrap_or_default();
+    let name = bounded_label(name, IMAGE_MAX_CHARS);
+    (!name.is_empty()).then_some(name)
+}
+
+/// `value` as a catalog agent id: lowercase ASCII letters, digits and dashes, bounded; none for
+/// anything else.
+fn bounded_agent_id(value: &str) -> Option<String> {
+    let valid = !value.is_empty()
+        && value.len() <= AGENT_ID_MAX_CHARS
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        });
+    valid.then(|| value.to_owned())
+}
+
+fn deserialize_agent_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .as_deref()
+        .and_then(bounded_agent_id))
+}
+
+fn deserialize_image<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    bounded_file_name(&String::deserialize(deserializer)?)
+        .ok_or_else(|| serde::de::Error::custom("an empty executable name"))
 }
 
 fn bounded_label(value: &str, limit: usize) -> String {
@@ -250,6 +376,126 @@ mod tests {
         let rewritten = serde_json::to_value(&restored).unwrap();
         assert!(rewritten.get("peer").is_none());
         assert!(rewritten.get("signature").is_none());
+    }
+
+    /// A chain of ancestors, nearest first.
+    fn chain(images: &[&str]) -> Vec<PathBuf> {
+        images.iter().map(PathBuf::from).collect()
+    }
+
+    /// Claude Desktop's program as the Store installs it.
+    const STORE_CLAUDE: &str =
+        "C:/Program Files/WindowsApps/Claude_1.0.0.0_x64__pzs8sxrjxfjjc/app/claude.exe";
+
+    /// Whose app a program is, by where it lies: Claude Desktop's Store package only.
+    fn store_claude(image: &Path) -> Option<&'static str> {
+        image
+            .starts_with("C:/Program Files/WindowsApps/Claude_1.0.0.0_x64__pzs8sxrjxfjjc")
+            .then_some("claude-desktop")
+    }
+
+    #[test]
+    fn a_source_is_the_nearest_agent_app_past_wrappers_and_other_programs() {
+        let source = Source::among(
+            &chain(&[
+                "C:/Users/ann/.ghostlight/bin/ghostlight.exe",
+                "C:/Windows/System32/cmd.exe",
+                "C:/Windows/System32/timeout.exe",
+                "C:/Users/ann/AppData/Roaming/npm/node_modules/x/bin/agent.exe",
+                STORE_CLAUDE,
+                "C:/Windows/explorer.exe",
+            ]),
+            store_claude,
+        )
+        .unwrap();
+        assert_eq!(
+            source,
+            Source {
+                agent: Some("claude-desktop".into()),
+                image: "claude.exe".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn with_no_agent_app_the_source_is_the_nearest_program_that_is_not_a_wrapper() {
+        let source = Source::among(
+            &chain(&[
+                "/usr/bin/node",
+                "/usr/bin/bash",
+                "/usr/libexec/gnome-terminal-server",
+                "/usr/lib/systemd/systemd",
+            ]),
+            store_claude,
+        )
+        .unwrap();
+        assert_eq!(
+            source,
+            Source {
+                agent: None,
+                image: "gnome-terminal-server".into(),
+            }
+        );
+        let same_name_elsewhere =
+            Source::among(&chain(&["C:/Users/ann/Downloads/claude.exe"]), store_claude).unwrap();
+        assert_eq!(
+            same_name_elsewhere.agent, None,
+            "an app is recognized by where it is installed, not by its file name"
+        );
+        assert_eq!(same_name_elsewhere.image, "claude.exe");
+    }
+
+    #[test]
+    fn only_wrappers_or_nothing_leave_the_source_unknown() {
+        assert_eq!(Source::among(&[], store_claude), None);
+        assert_eq!(
+            Source::among(
+                &chain(&["C:/Windows/System32/cmd.exe", "/usr/bin/python3.12"]),
+                store_claude
+            ),
+            None
+        );
+        assert_eq!(Source::observe(None), None);
+    }
+
+    #[test]
+    fn a_source_is_kept_on_the_record_as_a_file_name_and_a_record_without_one_still_reads() {
+        let evidence =
+            ConnectionEvidence::new("claude-code", IntakeChannel::Mcp).started_by(Some(Source {
+                agent: Some("claude-desktop".into()),
+                image: "claude.exe".into(),
+            }));
+        let encoded = serde_json::to_value(evidence.attribution()).unwrap();
+        assert_eq!(
+            encoded["source"],
+            serde_json::json!({ "agent": "claude-desktop", "image": "claude.exe" })
+        );
+        let restored: Attribution = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(&restored, evidence.attribution());
+
+        let mut without = encoded.clone();
+        without.as_object_mut().unwrap().remove("source");
+        let restored: Attribution = serde_json::from_value(without).unwrap();
+        assert_eq!(restored.source, None);
+        assert!(serde_json::to_value(&restored)
+            .unwrap()
+            .get("source")
+            .is_none());
+
+        let mut edited = encoded;
+        edited["source"] = serde_json::json!({
+            "agent": "Not An Id!",
+            "image": "C:\\Users\\ann\\AppData\\Local\\agent.exe",
+        });
+        let restored: Attribution = serde_json::from_value(edited).unwrap();
+        assert_eq!(
+            restored.source,
+            Some(Source {
+                agent: None,
+                image: "agent.exe".into(),
+            }),
+            "a path is cut to its file name and an id that is not one is dropped"
+        );
     }
 
     #[test]

@@ -38,6 +38,7 @@ use ghostlight_bridge::diagnostics::{event, Level, Sink};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::apps::is_wrapper;
 use super::packaged::{is_family_of, PACKAGES_DIRECTORY};
 use super::record::atomic_replace;
 use super::{lock, HOME_VARIABLE, USER_PROFILE_VARIABLE};
@@ -181,19 +182,6 @@ const UNPLATED_FORM: &str = "unplated";
 /// The smallest logo, in pixels, that stays sharp at the window's largest symbol on a dense
 /// screen. The smallest logo at least this size is taken, else the largest one.
 const PREFERRED_LOGO_PIXELS: u32 = 96;
-
-/// Programs a launcher starts to run a script, never the agent's own program: an npm shim names
-/// Node, and such a launcher names no program of the agent.
-const INTERPRETERS: [&str; 8] = [
-    "node.exe",
-    "bun.exe",
-    "deno.exe",
-    "cmd.exe",
-    "powershell.exe",
-    "pwsh.exe",
-    "wscript.exe",
-    "cscript.exe",
-];
 
 /// A folder Windows names for the person, below which a program may be installed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -390,11 +378,53 @@ impl IconPlaces {
         }
     }
 
+    /// Look Store packages up with `folders` instead of asking Windows, for tests that name their
+    /// own install folders.
+    #[cfg(test)]
+    pub(crate) fn set_package_folders(&mut self, folders: PackageFolders) {
+        self.packages = Some(folders);
+    }
+
     fn folder(&self, folder: KnownFolder) -> Option<&Path> {
         match folder {
             KnownFolder::LocalAppData => self.local_app_data.as_deref(),
             KnownFolder::ProgramFiles => self.program_files.as_deref(),
         }
+    }
+
+    /// Whether the computer runs Windows.
+    pub(super) fn is_windows(&self) -> bool {
+        self.windows
+    }
+
+    /// The directories commands are found in, in order.
+    pub(super) fn path_entries(&self) -> &[PathBuf] {
+        &self.path_entries
+    }
+
+    /// The install folders of the Store app with package name `name`: those of each of its
+    /// families installed for the person. Empty where packages are not looked at.
+    pub(super) fn package_install_folders(&self, name: &str) -> Vec<PathBuf> {
+        let (Some(local_app_data), Some(install_folders)) =
+            (self.local_app_data.as_deref(), self.packages)
+        else {
+            return Vec::new();
+        };
+        package_families(local_app_data, name)
+            .iter()
+            .flat_map(|family| install_folders(family))
+            .collect()
+    }
+
+    /// The desktop entry file `id` names, from the first data directory that holds it.
+    pub(super) fn desktop_entry(&self, id: &str) -> Option<PathBuf> {
+        self.data_dirs
+            .iter()
+            .map(|dir| {
+                dir.join(APPLICATIONS_DIRECTORY)
+                    .join(format!("{id}{DESKTOP_SUFFIX}"))
+            })
+            .find(|path| path.is_file())
     }
 }
 
@@ -901,15 +931,10 @@ impl IconCache {
     /// The logos of the Store app with package name `name`: one per install folder of each of its
     /// families installed for the person.
     fn package_logos(&self, agent_id: &str, name: &str) -> Vec<PathBuf> {
-        let places = &self.inner.places;
-        let (Some(local_app_data), Some(install_folders)) =
-            (places.local_app_data.as_deref(), places.packages)
-        else {
-            return Vec::new();
-        };
-        package_families(local_app_data, name)
-            .iter()
-            .flat_map(|family| install_folders(family))
+        self.inner
+            .places
+            .package_install_folders(name)
+            .into_iter()
             .filter_map(|install| match package_logo(&install) {
                 Ok(logo) => logo,
                 Err(error) => {
@@ -924,14 +949,7 @@ impl IconCache {
     /// entry.
     fn desktop_icon(&self, agent_id: &str, id: &str) -> Option<PathBuf> {
         let places = &self.inner.places;
-        let entry = places
-            .data_dirs
-            .iter()
-            .map(|dir| {
-                dir.join(APPLICATIONS_DIRECTORY)
-                    .join(format!("{id}{DESKTOP_SUFFIX}"))
-            })
-            .find(|path| path.is_file())?;
+        let entry = places.desktop_entry(id)?;
         let text = match read_text(&entry) {
             Ok(text) => text?,
             Err(error) => {
@@ -1067,7 +1085,7 @@ fn read_bounded(path: &Path, limit: u64) -> io::Result<Option<Vec<u8>>> {
 }
 
 /// The text of a desktop entry or launcher script, or none when it is larger than one should be.
-fn read_text(path: &Path) -> io::Result<Option<String>> {
+pub(super) fn read_text(path: &Path) -> io::Result<Option<String>> {
     Ok(read_bounded(path, MAX_TEXT_BYTES)?
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
 }
@@ -1075,6 +1093,12 @@ fn read_text(path: &Path) -> io::Result<Option<String>> {
 /// The value of the `Icon` key in the `[Desktop Entry]` group of a desktop entry, when it has one.
 /// Localized variants (`Icon[de]`) are not read.
 fn desktop_icon_name(text: &str) -> Option<&str> {
+    desktop_entry_value(text, ICON_KEY)
+}
+
+/// The value of `key` in the `[Desktop Entry]` group of a desktop entry, when it has a value that
+/// is not empty. Localized variants (`Key[de]`) are not read.
+pub(super) fn desktop_entry_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     let mut in_entry = false;
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
@@ -1084,8 +1108,8 @@ fn desktop_icon_name(text: &str) -> Option<&str> {
         if !in_entry {
             continue;
         }
-        if let Some((key, value)) = line.split_once('=') {
-            if key.trim() == ICON_KEY {
+        if let Some((name, value)) = line.split_once('=') {
+            if name.trim() == key {
                 let value = value.trim();
                 return (!value.is_empty()).then_some(value);
             }
@@ -1133,7 +1157,7 @@ fn theme_icon(name: &str, data_dirs: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// The Windows program `place` names on the computer `places` describes, when it exists.
-fn program(places: &IconPlaces, place: ProgramPlace) -> Option<PathBuf> {
+pub(super) fn program(places: &IconPlaces, place: ProgramPlace) -> Option<PathBuf> {
     match place {
         ProgramPlace::Below(folder, relative) => {
             let path = relative
@@ -1164,8 +1188,9 @@ fn command_program(directory: &Path, name: &str) -> Option<PathBuf> {
         .find_map(|launcher| launched_program(&launcher))
 }
 
-/// The first program a launcher script names that exists and is not an interpreter, with the
-/// script's own directory marks (`%~dp0`, `$basedir`) read as the script's directory.
+/// The first program a launcher script names that exists and is not a wrapper such as the
+/// interpreter an npm shim starts ([`is_wrapper`]), with the script's own directory marks
+/// (`%~dp0`, `$basedir`) read as the script's directory.
 fn launched_program(launcher: &Path) -> Option<PathBuf> {
     let text = read_text(launcher).ok()??;
     let directory = launcher.parent()?;
@@ -1174,7 +1199,7 @@ fn launched_program(launcher: &Path) -> Option<PathBuf> {
     })
     .filter(|token| token.to_ascii_lowercase().ends_with(EXE_SUFFIX))
     .filter_map(|token| launcher_path(directory, token))
-    .filter(|path| !is_interpreter(path))
+    .filter(|path| !is_wrapper(path))
     .find(|path| path.is_file())
 }
 
@@ -1418,12 +1443,6 @@ fn logo_variant(file: &str, stem: &str, base: u32) -> Option<LogoVariant> {
         }
     }
     Some(variant)
-}
-
-fn is_interpreter(path: &Path) -> bool {
-    path.file_name()
-        .map(|name| name.to_string_lossy().to_ascii_lowercase())
-        .is_some_and(|name| INTERPRETERS.contains(&name.as_str()))
 }
 
 #[cfg(test)]

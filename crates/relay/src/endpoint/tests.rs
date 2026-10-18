@@ -404,3 +404,22 @@ mod linux {
         assert!(matches!(home.connect(), Err(ConnectError::ForeignServer)));
     }
 }
+
+#[test]
+fn an_accepted_connection_knows_its_peer_process_and_the_connecting_end_does_not() {
+    let home = TempHome::new();
+    let listener = Listener::bind_first(home.path()).unwrap();
+    let client = home.connect().unwrap();
+    let server_end = listener.accept().unwrap();
+    assert_eq!(server_end.peer_process_id(), Some(std::process::id()));
+    assert_eq!(
+        server_end.try_clone().unwrap().peer_process_id(),
+        Some(std::process::id())
+    );
+    assert_eq!(client.peer_process_id(), None);
+    let (first, second) = pair().unwrap();
+    assert_eq!(
+        (first.peer_process_id(), second.peer_process_id()),
+        (None, None)
+    );
+}

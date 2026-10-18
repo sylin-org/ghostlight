@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use super::{run_directory, socket_path, ConnectError};
-use crate::os::{current_uid, peer_uid};
+use crate::os::{current_uid, peer_credentials};
 use crate::private;
 
 /// Mode of the run directory: the owner only.
@@ -33,8 +33,9 @@ pub(super) struct Listener {
 }
 
 impl Listener {
-    /// Accept the next peer owned by this user. A peer of another user is dropped unread.
-    pub(super) fn accept(&self) -> io::Result<Stream> {
+    /// Accept the next peer owned by this user, with its process id when the kernel names one. A
+    /// peer of another user is dropped unread.
+    pub(super) fn accept(&self) -> io::Result<(Stream, Option<u32>)> {
         loop {
             if self.stopping.load(Ordering::SeqCst) {
                 return Err(io::ErrorKind::ConnectionAborted.into());
@@ -43,8 +44,11 @@ impl Listener {
             if self.stopping.load(Ordering::SeqCst) {
                 return Err(io::ErrorKind::ConnectionAborted.into());
             }
-            if peer_uid(&stream).is_ok_and(|uid| uid == current_uid()) {
-                return Ok(Stream(stream));
+            match peer_credentials(&stream) {
+                Ok(peer) if peer.user_id == current_uid() => {
+                    return Ok((Stream(stream), peer.process_id));
+                }
+                _ => {}
             }
         }
     }
@@ -54,6 +58,12 @@ impl Listener {
         self.stopping.store(true, Ordering::SeqCst);
         let _ = UnixStream::connect(&self.path);
     }
+}
+
+/// Accept the next peer of `listener` owned by this user, with its process id when the kernel
+/// names one.
+pub(super) fn accept(listener: &Listener) -> io::Result<(Stream, Option<u32>)> {
+    listener.accept()
 }
 
 /// Create the run directory and bind the socket.

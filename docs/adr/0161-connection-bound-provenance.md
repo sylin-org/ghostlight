@@ -138,3 +138,87 @@ The per-action Connection details in the activity detail card stand as written. 
 explanation now names the reported claim. The rest of the section is unchanged: the
 orchestrator authors the explanation, the UI escapes claims and renders evidence, and no trusted
 badge or admission consequence follows from unchecked evidence.
+
+## Amendment (2026-10-18): every connection knows the app that started it
+
+ADR-0197 Decision 22 removed the observed peer identity: the 1.x observer read the directly
+connected executable, which on an ordinary MCP connection was Ghostlight's own connector and said
+nothing about the agent. The window then said of every agent that its name "is what the agent
+calls itself; Ghostlight does not verify it." On the owner's machine the three `ghostlight.exe
+mcp` edges were children of `claude.exe`, Claude Desktop from the Microsoft Store, whose Code tab
+runs Claude Code sessions, and their clients claimed "claude-code". The owner, 2026-10-18: "an
+MCP connector that's invoked by claude-code.exe has a clear hint." This amendment brings the
+observation back in a form that names the app above the connector, and supersedes Decision 22's
+removal of observed peer identity.
+
+### Observed, never claimed
+
+- The source is decided by the service from operating-system facts about the connection's peer,
+  never from a field a client writes. A `_source` in the JSON-RPC body would be forgeable by any
+  client, so the MCP intake still reads only `name` and `arguments`.
+- The relay's session listener already read the peer's process id to admit it
+  (`GetNamedPipeClientProcessId` on Windows, `SO_PEERCRED` on Linux). The accepted connection now
+  keeps it (`Connection::peer_process_id`). No byte on the wire changes, and every process-tree
+  read stays in the relay's audited `os` module (`os::ancestor_images`): one process snapshot and
+  query-only opens on Windows, `/proc` on Linux. That is the separation-of-concerns case for
+  touching the relay seam: the fact is physically the listener's, and only the platform layer can
+  read it.
+- The walk reads at most 16 ancestors and ends at a parent that has exited, cannot be read, or
+  started after its child (a reused id). A failed read leaves the source unknown and never fails
+  the connection.
+
+### Adaptive, not a table
+
+- An ancestor is a known agent's app when its executable lies where that agent's app is installed
+  on this computer, found on every look with the lookups the icon resolver already uses
+  (`install::apps`): a Store app is the install folders Windows names for its package family, a
+  program below a known folder is that program's folder, and a command on `PATH` or the program a
+  Linux desktop entry starts is that one file. So a Store Claude Desktop is recognized by where it
+  is installed, not by a list of executable names.
+- The walk skips wrappers: shells, consoles, script interpreters, package runners, process
+  wrappers such as `timeout`, and Ghostlight's own executables, named in one place
+  (`install::apps::is_wrapper`). The icon resolver skips the same list in a launcher script.
+- The source is the first ancestor that is a known agent's app, else the first that is not a
+  wrapper, by its executable file name.
+
+### One value on the connection
+
+- `Source { agent, image }` is decided once when an `mcp` stream opens, before anything the
+  client sends, and every connection evidence of that stream inherits it. `agent` is the catalog
+  id when an agent's app started it; `image` is the executable's file name, never a path, since
+  paths carry the person's name. The source's channel is the connection's existing intake channel
+  (`mcp` or `cli`), so the source does not repeat it. Browser, control and desktop streams carry
+  no work to attribute and decide no source.
+- It is provenance for display and history, never authority: governance decides by domain and
+  capability, not by who claims or launched, and nothing in governance or admission reads it.
+- Subagents of one client session share one edge process, so they share one source. The
+  never-guess rule for tabs (ADR-0198, amendment of 2026-10-18) is unchanged: a source does not
+  tell callers on one connection apart.
+
+### Up to the surface
+
+The connection's agent keeps its claimed identity, and the source corroborates it. The words are
+composed in `language::provenance` and reach the window's agent card, the activity detail card and
+history receipts through the connection explanation:
+
+- The source is the claimed agent's own app: the caveat goes, and the sentence says where it was
+  seen, "Started by Claude Desktop."
+- The claimed agent runs inside another agent's app: both, "Claude Code, in Claude Desktop."
+- The claim and the source do not line up (a name the catalog does not know, or a source that is
+  no agent's app): both, without judging either, `"claude-code" is what the agent calls itself.
+  Started by WindowsTerminal.exe.`
+- No source: the caveat stays as it was.
+- A command-line session says where it came from: "A ghostlight call from WindowsTerminal.exe.
+  Ghostlight does not verify the scripts and instructions it runs."
+- History keeps no claim, so a recorded MCP action with a source says "Started by ..." and one
+  without keeps the earlier explanation.
+
+The watcher audience sees the same connection explanation it already saw; no part gains a key.
+
+### Audit and history
+
+The durable attribution carries `source` (`agent` and `image`) beside `connection_id`,
+`observed_at_ms` and `channel`, content-free and path-free. Reading bounds both again: a path is
+cut to its file name and a value that is not a catalog id is dropped. Records without a source,
+and records from before, read unchanged. The SIEM guide documents the field, and the audit
+goldens show it.

@@ -13,7 +13,8 @@
 //!
 //! [`Connection`] is the same type for both ends and offers what `TcpStream` offered the code it
 //! replaces: reading and writing, [`Connection::try_clone`], read and write timeouts shared by
-//! clones, and [`Connection::shutdown`] to end a stream from any thread. The platform-specific
+//! clones, and [`Connection::shutdown`] to end a stream from any thread. An accepted connection
+//! also keeps the process id the peer check read ([`Connection::peer_process_id`]). The platform-specific
 //! parts live in [`crate::os`] (Windows pipes, user ids) and the private `windows` and `linux`
 //! files here.
 
@@ -166,13 +167,16 @@ impl Listener {
         })
     }
 
-    /// Wait for the next peer that passes the same-user check and return its end.
+    /// Wait for the next peer that passes the same-user check and return its end, which knows
+    /// the peer's process id ([`Connection::peer_process_id`]).
     ///
     /// A peer that fails the check is dropped before any byte moves and the wait goes on. After
     /// [`Listener::shutdown`] this fails with [`io::ErrorKind::ConnectionAborted`].
     pub fn accept(&self) -> io::Result<Connection> {
+        let (inner, peer_process_id) = platform::accept(&self.inner)?;
         Ok(Connection {
-            inner: self.inner.accept()?,
+            inner,
+            peer_process_id,
         })
     }
 
@@ -191,13 +195,23 @@ impl Listener {
 pub fn connect(home: &Path, deadline: Instant) -> Result<Connection, ConnectError> {
     Ok(Connection {
         inner: platform::connect(home, deadline)?,
+        peer_process_id: None,
     })
 }
 
 /// Two connected ends, for tests. No peer is checked.
 pub fn pair() -> io::Result<(Connection, Connection)> {
     let (first, second) = platform::pair()?;
-    Ok((Connection { inner: first }, Connection { inner: second }))
+    Ok((
+        Connection {
+            inner: first,
+            peer_process_id: None,
+        },
+        Connection {
+            inner: second,
+            peer_process_id: None,
+        },
+    ))
 }
 
 /// One end of a relay connection, the same type on the service and on the edge.
@@ -209,6 +223,9 @@ pub fn pair() -> io::Result<(Connection, Connection)> {
 #[derive(Debug)]
 pub struct Connection {
     inner: platform::Stream,
+    /// The peer's process id, as the operating system reported it when the listener admitted
+    /// the peer.
+    peer_process_id: Option<u32>,
 }
 
 impl Connection {
@@ -216,7 +233,17 @@ impl Connection {
     pub fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
             inner: self.inner.try_clone()?,
+            peer_process_id: self.peer_process_id,
         })
+    }
+
+    /// The process id of the peer [`Listener::accept`] admitted, as the operating system reported
+    /// it then: a fact about who connected, read by the service for display and history and never
+    /// for authority. None on the connecting end, on a [`pair`], and on Linux for a peer in
+    /// another process id namespace.
+    #[must_use]
+    pub fn peer_process_id(&self) -> Option<u32> {
+        self.peer_process_id
     }
 
     /// Limit how long a read waits, or `None` to wait without limit. Zero is refused.

@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 mod agent_list;
+pub mod apps;
 pub mod browser_package;
 pub mod browser_profiles;
 pub mod command_path;
@@ -1593,6 +1594,29 @@ pub fn icon_catalog() -> Vec<AgentIconSources> {
                 name: row.name,
                 sources: row.icons.to_vec(),
                 family: row.icon_family,
+            });
+        }
+    }
+    catalog
+}
+
+/// Where each catalog agent's app may be installed, one entry per agent in roster order: its
+/// hosts' icon sources and the commands they are started by, in roster order ([`apps`]).
+#[must_use]
+pub fn app_catalog() -> Vec<apps::AgentAppSources> {
+    let mut catalog: Vec<apps::AgentAppSources> = Vec::new();
+    for row in ROSTER {
+        if let Some(agent) = catalog
+            .iter_mut()
+            .find(|agent| agent.agent_id == row.agent_id)
+        {
+            agent.sources.extend_from_slice(row.icons);
+            agent.commands.extend_from_slice(row.executables);
+        } else {
+            catalog.push(apps::AgentAppSources {
+                agent_id: row.agent_id,
+                sources: row.icons.to_vec(),
+                commands: row.executables.to_vec(),
             });
         }
     }

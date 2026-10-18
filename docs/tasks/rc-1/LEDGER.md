@@ -24,6 +24,7 @@ gate, the in-place deploy and the owner-held items below.
 | c4-rows-and-widths | window | landed (`fix(workbench): the activity list keeps its meaning at every width, and the window fits a laptop half`): a row names one capability, the most consequential, and a flow takes its steps' (no more LOCAL); the band's facts give way below 1000px and the tabs take their own line below 900px; every destination holds at 720 and 600 CSS px; Settings > This screen offers Text size Standard / Large. The window minimum is 720 (lane native, `crates/desktop/src/window.rs` `WINDOW_MIN_SIZE`, already 720 x 620) |
 | d1-native-frame-fits-the-person | native | landed (`feat(tray): the tooltip names the state and says when no browser is connected`, `feat(desktop): the frame and the tray fit a light-mode laptop`): the title bar is dark in light mode; a new window opens no taller than the primary monitor less 96 px (624 high on 1280x720), centered above the taskbar; the minimum width is 720; the Windows tray draws the 16 px ghost at 16 px and the 32 px one at 24 and 32, and Linux always draws the 32 px one for its host to size, inks it on a light taskbar (re-read every 2 s) and rings a 3 px dot in the taskbar's ground; the executable carries 16/32/48/128; the tooltip leads with the band's word and says "No browser connected" (ADR-0199 amendment of 2026-10-18). Owed: the light-mode 150% check under Before v2.0.0 |
 | f1-extension-popup-and-kit | extension | landed (`fix(extension): the popup tells Paused apart and reaches the window`) |
+| b3-every-connection-knows-its-source | provenance | landed (`feat(provenance): every connection knows the app that started it`): the service reads the app that started each MCP connection from the peer process's ancestors, recognizes an agent's app by where it is installed, and sets the client's claim beside it in the window, history and audit, never as authority (ADR-0161, amendment of 2026-10-18) |
 | e1-the-rc-commit-tells-the-truth | docs | todo |
 
 ## Held for the owner
@@ -165,3 +166,21 @@ gate, the in-place deploy and the owner-held items below.
   nothing runs past the shell and no page scrolls sideways. The stylesheet tests read container
   rules and check the row at 1040, 821, 820, 720 and 600, the band at 1001, 1000, 901 and 900, and
   the activity's room at 600.
+- b3 (owner, 2026-10-18: "an MCP connector that's invoked by claude-code.exe has a clear hint"):
+  the relay's listener keeps the peer process id its same-user check reads
+  (`Connection::peer_process_id`), and `os::ancestor_images` walks at most 16 ancestors (a process
+  snapshot and query-only opens on Windows, `/proc` on Linux), ending at an exited, unreadable or
+  reused parent. `install::apps` finds each catalog agent's app where it is installed on every look
+  (a Store package's install folders, a program's folder, a command or desktop-entry program file)
+  and names the wrappers in one place (shells, consoles, interpreters, runners, `timeout`,
+  Ghostlight's own executables), which the icon resolver now shares. `provenance::Source`
+  (`agent`, `image` file name) is decided once when an `mcp` stream opens and joins the durable
+  attribution, so audit lines carry `provenance.source` (goldens regenerated, SIEM guide updated)
+  and lines without it read as before. `language::provenance` composes the words: "Started by
+  Claude Desktop." when the source is the claimed agent's app, "Claude Code, in Claude Desktop."
+  inside another agent's app, both without judging when they do not line up, the old caveat with
+  no source, and "A ghostlight call from WindowsTerminal.exe." for the command line. No window
+  part gains a key. Checked live on this machine: a cargo test process sees its real ancestors;
+  the Git `timeout.exe` wrapper an agent's shell uses ends the readable chain, which is why the
+  MCP edge, a direct child of its client, is the case that matters. Not checked: the edges under
+  the owner's Store Claude Desktop, which needs the deployed build.

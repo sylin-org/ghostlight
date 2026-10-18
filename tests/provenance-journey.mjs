@@ -1,6 +1,7 @@
 // Connection attribution through the real service on relay protocol 4, in a test home. Browser
-// receipts are synthetic. Each receipt names the connection that started it and its channel, and
-// nothing a client claims about itself reaches a durable record.
+// receipts are synthetic. Each receipt names the connection that started it, its channel and,
+// when the service could read it, the app it saw start the connection as a file name, never a
+// path. Nothing a client claims about itself reaches a durable record.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ const CANARIES = ["PRIVATE_C1_CLAIM_A", "PRIVATE_C1_CLAIM_B", "PRIVATE_C1_CLAIM_
 const [CLAIM_A, CLAIM_B, CLAIM_C, SESSION_KEY, PATH_CLAIM, MCP_CLAIM] = CANARIES;
 const MARKER = { kind: "declared", key: SESSION_KEY };
 const EVIDENCE_KEYS = ["channel", "connection_id", "observed_at_ms"];
+const SOURCE_KEYS = ["agent", "image"];
 
 const home = createHome({
   label: "provenance",
@@ -40,7 +42,12 @@ function checkEvidence(evidence, channel) {
   assert.match(evidence.connection_id, /^connection_/);
   assert.ok(Number.isSafeInteger(evidence.observed_at_ms) && evidence.observed_at_ms > 0);
   assert.equal(evidence.channel, channel);
-  assert.deepEqual(Object.keys(evidence).sort(), EVIDENCE_KEYS);
+  const { source, ...rest } = evidence;
+  assert.deepEqual(Object.keys(rest).sort(), EVIDENCE_KEYS);
+  if (source !== undefined) {
+    assert.ok(Object.keys(source).every((key) => SOURCE_KEYS.includes(key)), "a source holds an agent and an image");
+    assert.match(source.image, /^[^/\\]+$/, "a source keeps a file name, never a path");
+  }
 }
 
 function checkGroup(result, evidence, expectedCount) {

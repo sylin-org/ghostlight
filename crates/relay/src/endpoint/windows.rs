@@ -20,6 +20,12 @@ pub(super) fn bind_first(home: &Path) -> io::Result<Listener> {
     Listener::bind_first(&current_pipe_name(home)?)
 }
 
+/// Accept the next admitted client of `listener`, with its process id.
+pub(super) fn accept(listener: &Listener) -> io::Result<(Stream, Option<u32>)> {
+    let (stream, process_id) = listener.accept()?;
+    Ok((stream, Some(process_id)))
+}
+
 /// Connect to the pipe of `home`.
 pub(super) fn connect(home: &Path, deadline: Instant) -> Result<Stream, ConnectError> {
     os::connect_pipe(&current_pipe_name(home)?, deadline).map_err(|failure| match failure {

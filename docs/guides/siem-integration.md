@@ -54,7 +54,11 @@ its bounded History view from the same file.
   "provenance": {
     "connection_id": "connection_00000000000000000000000000000001",
     "observed_at_ms": 1790000000000,
-    "channel": "mcp"
+    "channel": "mcp",
+    "source": {
+      "agent": "claude-desktop",
+      "image": "claude.exe"
+    }
   },
   "browser": "Chromium"
 }
@@ -88,7 +92,7 @@ when the service writes a different shape.
 | `coverage` | Optional document coverage of a read: `targeted`, the inspected, excluded, page excluded and unavailable document counts, and `limited_by_size`. |
 | `unconfirmed_history_steps` | Optional count of child receipts whose storage was not confirmed; absent when zero. |
 | `channel` | `mcp` or `cli`; attribution, not authority. |
-| `provenance` | Opaque `connection_id`, `observed_at_ms` and `channel` of the connection that sent the work. |
+| `provenance` | Opaque `connection_id`, `observed_at_ms` and `channel` of the connection that sent the work, and its optional `source`: the app Ghostlight saw start that connection, read from the operating system and never from the client. `source.agent` is the catalog id of the agent whose installed app it is, when one is; `source.image` is that app's executable file name, or the nearest program that is not a shell or interpreter, never a path. Attribution, not authority. |
 | `browser` | Browser family or product name that performed the work. |
 
 Readers ignore any field they do not know and never write it back, so a collector, `ghostlight
