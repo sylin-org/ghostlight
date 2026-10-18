@@ -112,6 +112,11 @@ audit v2 contract, which freezes at 2.0: a word is not renamed or removed, and a
 ignores a word it does not know. A line from an earlier build carries the bare string
 `"stale_target"` as its `cause`; a reader keeps such a line and omits its `refusal_facts`.
 
+A refusal because the page would not act on a control has the shape
+`{"reason":"page_refused","cause":"<word>"}`, and `<word>` is one of four: `not_visible`,
+`disabled`, `read_only` and `not_editable`. Nothing happened in the page. The page's own message
+is never kept. The same audit v2 rules apply to these words.
+
 H4 adds incremental child records, grouped under one history entry in the workbench. Count actual
 operations using child records where `step.preparation_failed` is false, plus ordinary records
 without `step` or `composition`. Exclude aggregate wrappers and preparation facts from operation

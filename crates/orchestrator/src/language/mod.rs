@@ -17,6 +17,7 @@ pub mod history;
 pub mod intake;
 pub mod migration;
 pub mod outcome;
+pub mod page_refusal;
 pub mod provenance;
 pub mod readiness;
 #[cfg(test)]

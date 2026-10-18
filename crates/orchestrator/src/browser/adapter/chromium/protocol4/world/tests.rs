@@ -430,6 +430,24 @@ fn only_cancelled_not_retained_and_page_exception_can_follow_an_effect() {
 }
 
 #[test]
+fn only_the_codes_that_refuse_a_control_are_page_refusals() {
+    for refusal in PageRefusal::ALL {
+        let code: AssetErrorCode = serde_json::from_value(json!(refusal.as_str())).unwrap();
+        assert_eq!(code.page_refusal(), Some(refusal));
+        assert!(code.is_pre_effect(), "{}", refusal.as_str());
+    }
+    for name in [
+        "stale_locator",
+        "not_fillable",
+        "no_focused_control",
+        "page_exception",
+    ] {
+        let code: AssetErrorCode = serde_json::from_value(json!(name)).unwrap();
+        assert_eq!(code.page_refusal(), None, "{name}");
+    }
+}
+
+#[test]
 fn an_unknown_code_is_a_page_exception() {
     let code: AssetErrorCode = serde_json::from_value(json!("quota_exceeded")).unwrap();
     assert_eq!(code, AssetErrorCode::PageException);

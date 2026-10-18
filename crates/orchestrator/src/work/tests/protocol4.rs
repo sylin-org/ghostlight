@@ -263,22 +263,77 @@ fn navigating_a_tab_the_browser_no_longer_has_is_a_plain_failure() {
 }
 
 #[test]
-fn a_click_whose_target_cannot_be_prepared_is_a_plain_failure() {
-    let (executor, _fake, workspace) = opened(page_fault("activate", refused("not_visible")));
+fn a_click_the_page_refuses_says_why_that_nothing_was_clicked_and_what_works() {
+    for (code, summary, tool) in [
+        (
+            "not_visible",
+            "That target is not visible on the page. Nothing was clicked.",
+            "browser_find",
+        ),
+        (
+            "disabled",
+            "That target is disabled. Nothing was clicked.",
+            "browser_inspect",
+        ),
+    ] {
+        let (executor, _fake, workspace) = opened(page_fault("activate", refused(code)));
+        let target = control(&executor, &workspace);
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_click",
+            json!({"target": target}),
+        );
+        assert_plain(&result, Status::Failed, summary, code);
+        assert!(result.facts.get("detail").is_none(), "{code}");
+        assert_eq!(result.next_steps.len(), 1, "{code}");
+        assert!(result.next_steps[0].contains(tool), "{code}");
+    }
+}
+
+#[test]
+fn typing_into_a_field_the_page_refuses_says_nothing_was_typed() {
+    for (code, summary) in [
+        ("read_only", "That field is read-only. Nothing was typed."),
+        (
+            "not_editable",
+            "That target does not take typed text. Nothing was typed.",
+        ),
+    ] {
+        let (executor, _fake, workspace) = opened(page_fault("type_text", refused(code)));
+        let target = control(&executor, &workspace);
+        let result = execute(
+            &executor,
+            &workspace,
+            "browser_type_text",
+            json!({"target": target, "text": "Ada"}),
+        );
+        assert_plain(&result, Status::Failed, summary, code);
+        assert!(
+            result.next_steps[0].contains("browser_find with scope control"),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn a_flow_step_the_page_refuses_names_that_steps_own_gesture() {
+    let (executor, _fake, workspace) = opened(page_fault("activate", refused("disabled")));
     let target = control(&executor, &workspace);
     let result = execute(
         &executor,
         &workspace,
-        "browser_click",
-        json!({"target": target}),
+        "browser_flow",
+        json!({"steps": [{"tool": "browser_click", "arguments": {"target": target}}]}),
     );
-    assert_plain(
-        &result,
-        Status::Failed,
-        "The browser refused this job: not_visible.",
-        "browser_primitive_failed",
+    assert_eq!(result.status, Status::Failed, "{}", result.summary);
+    assert_eq!(result.effect, Effect::None);
+    let step = &result.facts["steps"][0]["result"];
+    assert_eq!(
+        step["summary"],
+        "That target is disabled. Nothing was clicked."
     );
-    assert_eq!(result.facts["detail"], "not_visible");
+    assert_eq!(step["facts"]["reason"], "disabled");
 }
 
 #[test]

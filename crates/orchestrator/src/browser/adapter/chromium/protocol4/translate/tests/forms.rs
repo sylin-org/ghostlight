@@ -12,6 +12,7 @@ use crate::browser::BrowserDispatch;
 use crate::governance::ReasonCode;
 use crate::language::field_echo::ChoiceMatch;
 use crate::language::field_problem::FieldProblemKind;
+use crate::language::page_refusal::PageRefusal;
 
 /// A value the page sets itself; every other value is typed by the browser.
 const LOCAL_VALUE: &str = "on";
@@ -233,7 +234,7 @@ fn every_document_prepares_before_any_field_is_edited() {
         ),
     )
     .unwrap_err();
-    assert_eq!(error, BrowserError::Primitive("read_only".into()));
+    assert_eq!(error, BrowserError::PageRefused(PageRefusal::ReadOnly));
     assert_eq!(primitives_order(&fake), ["call"], "no field was edited");
 }
 
@@ -331,7 +332,7 @@ fn a_text_field_is_one_input_behind_its_focus() {
 }
 
 #[test]
-fn a_refused_focus_is_a_plain_failure_with_no_key_sent() {
+fn a_refused_focus_is_a_page_refusal_with_no_key_sent() {
     let (port, _fake) = rig(|world| match world.message["kind"].as_str() {
         Some("focus_text_field") => refused("not_editable"),
         _ => answer(world),
@@ -344,7 +345,7 @@ fn a_refused_focus_is_a_plain_failure_with_no_key_sent() {
         ),
     )
     .unwrap_err();
-    assert_eq!(error, BrowserError::Primitive("not_editable".into()));
+    assert_eq!(error, BrowserError::PageRefused(PageRefusal::NotEditable));
 }
 
 #[test]

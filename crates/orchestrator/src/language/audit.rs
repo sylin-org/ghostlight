@@ -7,6 +7,7 @@ use super::outcome::{
     counted, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome,
     Refusal, WorkspaceReason,
 };
+use super::page_refusal::PageRefusal;
 
 /// The explicitly permitted language projection of one terminal result.
 ///
@@ -97,6 +98,7 @@ pub enum AuditRefusal {
     BrowserAdapterOutdated,
     DeadlineExpired { before_dispatch: bool },
     BrowserPrimitiveFailed,
+    PageRefused { cause: PageRefusal },
     FieldValuesRejected,
     FieldsReverted,
     DocumentUnavailable,
@@ -190,6 +192,7 @@ impl Refusal {
                 before_dispatch: *before_dispatch,
             },
             Self::BrowserPrimitive { .. } => AuditRefusal::BrowserPrimitiveFailed,
+            Self::PageRefused { refusal, .. } => AuditRefusal::PageRefused { cause: *refusal },
             Self::FieldValuesRejected { .. } => AuditRefusal::FieldValuesRejected,
             Self::FieldsReverted { .. } => AuditRefusal::FieldsReverted,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
@@ -349,6 +352,23 @@ mod tests {
             serde_json::to_value(refusal.audit().refusal()).unwrap(),
             serde_json::json!({"reason":"browser_primitive_failed"})
         );
+    }
+
+    #[test]
+    fn a_page_refusal_audits_its_word_and_the_sentence_that_quotes_no_page() {
+        use crate::language::page_refusal::{PageGesture, PageRefusal};
+        for refusal in PageRefusal::ALL {
+            let refused = Refusal::PageRefused {
+                refusal,
+                gesture: PageGesture::Click,
+            };
+            let audit = refused.audit();
+            assert_eq!(audit.summary(), refused.summary());
+            assert_eq!(
+                serde_json::to_value(audit.refusal()).unwrap(),
+                serde_json::json!({"reason":"page_refused","cause":refusal.as_str()})
+            );
+        }
     }
 
     #[test]

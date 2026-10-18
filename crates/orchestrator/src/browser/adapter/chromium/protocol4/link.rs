@@ -760,6 +760,9 @@ impl<'a> Link<'a> {
             BrowserError::Primitive(message)
             | BrowserError::LocalInterlock(message)
             | BrowserError::Protocol(message) => BrowserError::EffectUnknown(message),
+            BrowserError::PageRefused(refusal) => {
+                BrowserError::EffectUnknown(refusal.as_str().into())
+            }
             other => BrowserError::EffectUnknown(other.to_string()),
         }
     }

@@ -38,6 +38,7 @@ use crate::language::outcome::{
     CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Outcome, Refusal, SavedTo, StaleHelp,
     TargetNoun, TargetRole, WorkspaceReason,
 };
+use crate::language::page_refusal::{PageGesture, PageRefusal};
 use crate::workspace::StaleReason;
 
 /// Words a hint may put between `with` and the field it names.
@@ -399,6 +400,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::BrowserAdapterOutdated => "BrowserAdapterOutdated",
         Refusal::DeadlineExpired { .. } => "DeadlineExpired",
         Refusal::BrowserPrimitive { .. } => "BrowserPrimitive",
+        Refusal::PageRefused { .. } => "PageRefused",
         Refusal::FieldValuesRejected { .. } => "FieldValuesRejected",
         Refusal::FieldsReverted { .. } => "FieldsReverted",
         Refusal::DocumentUnavailable => "DocumentUnavailable",
@@ -441,6 +443,7 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "BrowserAdapterOutdated",
     "DeadlineExpired",
     "BrowserPrimitive",
+    "PageRefused",
     "FieldValuesRejected",
     "FieldsReverted",
     "DocumentUnavailable",
@@ -982,6 +985,12 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::RecordingExportFailed,
         Refusal::RecordingNotAttached,
     ];
+    for refusal in PageRefusal::ALL {
+        samples.push(Refusal::PageRefused {
+            refusal,
+            gesture: PageGesture::Click,
+        });
+    }
     samples.extend(rejected_fill_samples());
     samples.extend(reverted_fill_samples());
     for before_dispatch in [false, true] {

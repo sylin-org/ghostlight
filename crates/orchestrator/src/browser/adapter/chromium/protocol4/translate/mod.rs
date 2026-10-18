@@ -164,8 +164,9 @@ pub fn frame_tree(l: &mut Link<'_>, tab_id: u64) -> Result<FrameTree, BrowserErr
 /// # Errors
 ///
 /// Returns the asset's own failure as a plain failure, as [`BrowserError::FieldsRejected`]
-/// when it named the fields a fill could not take, or as [`BrowserError::StaleLocator`] for a
-/// locator that names no control. Returns [`BrowserError::DocumentUnavailable`] when the
+/// when it named the fields a fill could not take, as [`BrowserError::StaleLocator`] for a
+/// locator that names no control, or as [`BrowserError::PageRefused`] for a control the page
+/// refused to act on. Returns [`BrowserError::DocumentUnavailable`] when the
 /// document was gone or replaced, [`BrowserError::DialogOpen`] when a JavaScript dialog blocks
 /// the page, and [`BrowserError::Protocol`] for a value that does not have the kind's shape.
 pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError> {
@@ -180,11 +181,14 @@ pub fn value<T: DeserializeOwned>(answer: &CallAnswer) -> Result<T, BrowserError
                 Some(AssetDetail::Fields(detail)) => BrowserError::FieldsRejected {
                     problems: detail.problems,
                 },
-                None => BrowserError::Primitive(if error.message.is_empty() {
-                    wire_name(&error.code)
-                } else {
-                    error.message
-                }),
+                None => match error.code.page_refusal() {
+                    Some(refusal) => BrowserError::PageRefused(refusal),
+                    None => BrowserError::Primitive(if error.message.is_empty() {
+                        wire_name(&error.code)
+                    } else {
+                        error.message
+                    }),
+                },
             }),
             None => Err(BrowserError::Protocol(CALL_UNKNOWN.into())),
         },

@@ -1264,6 +1264,10 @@ pub enum BrowserError {
     /// Adapter decisively rejected a primitive without an effect.
     #[error("browser primitive failed: {0}")]
     Primitive(String),
+    /// The page refused the call's control before acting on it: it is hidden, disabled,
+    /// read-only or takes no text. Raised before any effect.
+    #[error("the page refused the target: {}", .0.as_str())]
+    PageRefused(crate::language::page_refusal::PageRefusal),
     /// The page holds no control for a locator, and says why. Raised before any effect.
     #[error("stale browser locator: {}", reason.word())]
     StaleLocator {

@@ -310,6 +310,7 @@ mod tests {
     use crate::language::outcome::{Refusal, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
 
     use crate::intake::session::IntakeChannel;
+    use crate::language::page_refusal::PageGesture;
     use crate::workspace::WorkspaceStore;
 
     fn child(status: Status, effect: Effect, refusal: Option<Refusal>) -> Terminal {
@@ -482,6 +483,7 @@ mod tests {
                 requested_tab: None,
                 requested_target: None,
                 repeat_tool: None,
+                gesture: PageGesture::Other,
                 snapshot: &snapshot,
                 deadline: Instant::now(),
                 deadline_adjustable: false,
@@ -554,6 +556,7 @@ mod tests {
             requested_tab: None,
             requested_target: None,
             repeat_tool: None,
+            gesture: PageGesture::Other,
             snapshot: &snapshot,
             deadline: Instant::now(),
             deadline_adjustable: false,

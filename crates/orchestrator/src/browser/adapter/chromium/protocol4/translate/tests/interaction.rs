@@ -10,6 +10,7 @@ use super::*;
 use crate::browser::adapter::{
     CaptureScope, PhysicalFile, PhysicalRectangle, ScriptForm, ViewportGeometry,
 };
+use crate::language::page_refusal::PageRefusal;
 
 const NESTED: &str = "C:c1:locator_a1_1";
 const TOP_LOCATOR: &str = "T:t1:locator_a1_2";
@@ -309,17 +310,17 @@ fn a_dialog_during_a_click_is_success() {
 }
 
 #[test]
-fn a_preparation_failure_is_a_plain_failure_and_sends_no_input() {
-    for code in ["stale_locator", "not_visible"] {
+fn a_preparation_failure_is_its_own_refusal_and_sends_no_input() {
+    for code in ["stale_locator", "not_visible", "disabled"] {
         let (port, fake) = rig(
             Box::new(move |call| call.calls.iter().map(|_| refused(code)).collect()),
             finished,
         );
         let error = call(&port, scoped(all_open(), activate(NESTED))).unwrap_err();
-        let expected = if code == "stale_locator" {
-            BrowserError::stale(StaleReason::Unknown)
-        } else {
-            BrowserError::Primitive(code.into())
+        let expected = match code {
+            "stale_locator" => BrowserError::stale(StaleReason::Unknown),
+            "not_visible" => BrowserError::PageRefused(PageRefusal::NotVisible),
+            _ => BrowserError::PageRefused(PageRefusal::Disabled),
         };
         assert_eq!(error, expected, "{code}");
         assert!(inputs_seen(&fake).is_empty());

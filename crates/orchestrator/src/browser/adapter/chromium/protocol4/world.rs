@@ -22,6 +22,7 @@ use crate::browser::adapter::{
 };
 use crate::language::area::LeftOut;
 use crate::language::field_problem::FieldProblems;
+use crate::language::page_refusal::PageRefusal;
 use crate::workspace::StaleReason;
 use EffectClass::{Effect, Prepare, Read};
 use ScopeClass::{Content, Metadata};
@@ -662,6 +663,19 @@ pub enum AssetErrorCode {
 }
 
 impl AssetErrorCode {
+    /// The page refusal this code reports, when it refuses the call's control for a reason the
+    /// service names in its own words.
+    #[must_use]
+    pub const fn page_refusal(self) -> Option<PageRefusal> {
+        match self {
+            Self::NotVisible => Some(PageRefusal::NotVisible),
+            Self::Disabled => Some(PageRefusal::Disabled),
+            Self::ReadOnly => Some(PageRefusal::ReadOnly),
+            Self::NotEditable => Some(PageRefusal::NotEditable),
+            _ => None,
+        }
+    }
+
     /// Whether a failure with this code proves the call changed nothing. An effect kind raises
     /// these only before its first mutation. `cancelled`, `not_retained` and `page_exception` can
     /// follow a mutation.

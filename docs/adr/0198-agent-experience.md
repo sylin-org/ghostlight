@@ -470,3 +470,60 @@ same bound ADR-0161 puts on provenance.
 Tests: `omission_selects_only_a_sole_tab`, `a_call_without_a_tab_uses_the_sessions_only_tab`,
 `a_call_without_a_tab_among_several_is_refused_with_the_tabs_and_does_nothing` and
 `a_flow_that_opens_a_tab_acts_in_it_without_naming_it`.
+
+## Amendment 2026-10-18: a control the page refuses says what to do
+
+### Evidence
+
+In the product-owner pass before the release candidate (finding agentx-3), clicks on hidden menu
+items, disabled buttons and read-only fields all came back as "The browser refused this job:
+target is not visible for activate (zero-size)." The words were the page asset's own: `activate`
+and `box` are message kinds, `zero-size` is one branch of a style test. The next step said to read
+the browser's reason and adjust the call. The agent could not tell whether anything was clicked or
+typed, so it hesitated or retried blindly. These are the most common dead ends on real pages.
+
+The page already sends a closed code with each refusal (`not_visible`, `disabled`, `read_only`,
+`not_editable`). The service read the code, then dropped it and kept the message.
+
+### Decision
+
+This brings Decision 29's refusal fold forward for these four codes.
+
+- The browser layer decodes the four codes as a page refusal, a closed vocabulary in
+  `language/page_refusal.rs`. The page's message never reaches the model or the audit. The other
+  page codes keep their present path: their messages are already plain, or they are contract
+  failures.
+- The summary says what was refused, then that nothing happened, in the call's own gesture.
+  Every one of these codes comes before the page's first change, so the second sentence is
+  always true. A flow step says its own gesture.
+
+| `reason` | Summary (a click) | Next step |
+| --- | --- | --- |
+| `not_visible` | `That target is not visible on the page. Nothing was clicked.` | `browser_find` or `browser_inspect` for a visible control; a closed menu or section opens with a click |
+| `disabled` | `That target is disabled. Nothing was clicked.` | do what the page still needs (`browser_inspect` shows each control's state), then repeat |
+| `read_only` | `That field is read-only. Nothing was typed.` | `browser_find` with scope control for a field that takes input |
+| `not_editable` | `That target does not take typed text. Nothing was typed.` | `browser_find` with scope control for the text field itself |
+
+- The gesture sentence is one of: Nothing was clicked, typed, dragged, scrolled or captured; No
+  field was filled; No key was pressed; No file was attached; The pointer was not moved; and,
+  for any other call, Nothing was done on the page.
+- Status `failed`, effect `none`, `repeat_safe: true`, as before. The `reason` fact is the page's
+  code; the old `browser_primitive_failed` reason and its `detail` no longer apply to these codes.
+  The audit keeps `{"reason":"page_refused","cause":"<code>"}` and the sentence, which quotes no
+  page text.
+- Two steps differ from the finding's wording, because the step must be a call that works.
+  `browser_scroll` is not offered for a hidden control: scrolling to it runs the same visibility
+  check and is refused the same way, and an off-screen control is not refused at all. No step
+  says `browser_wait` for a disabled control: no wait condition watches enablement.
+- A read-only refusal does not name a particular other field. Picking one would be a guess
+  among the page's fields, and Rule 5 and Decision 28 keep Ghostlight from naming a control it
+  cannot prove is the one meant. The step finds the fields that take input in one call.
+- Rule 6 holds: the page assets and the extension report exactly what they did before. No tool
+  was added.
+
+Tests: `a_click_the_page_refuses_says_why_that_nothing_was_clicked_and_what_works`,
+`typing_into_a_field_the_page_refuses_says_nothing_was_typed`,
+`a_flow_step_the_page_refuses_names_that_steps_own_gesture`,
+`only_the_codes_that_refuse_a_control_are_page_refusals` and
+`a_page_refusal_audits_its_word_and_the_sentence_that_quotes_no_page`. The hint guard checks every
+step against the catalog.

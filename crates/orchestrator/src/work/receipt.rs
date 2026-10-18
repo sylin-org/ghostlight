@@ -147,6 +147,7 @@ impl ApplicationExecutor {
             settlement_pending: &settlement_pending,
             settlement_requested,
             requirements: language::capability_map::requirements(operation),
+            gesture: PageGesture::of(operation),
             ..*context
         };
         self.emit(DomainEvent::WorkPhaseStarted {

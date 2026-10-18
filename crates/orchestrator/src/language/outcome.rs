@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::area::{LeftOut, LeftOutKey};
 use super::field_echo::{self, HeldField};
 use super::field_problem::{self, ControlRef, RejectedField};
+use super::page_refusal::{self, PageGesture, PageRefusal};
 use super::{adapter, setup, MAX_INSPECT_ITEMS};
 use crate::workspace::{StaleReason, WorkspaceError};
 
@@ -1432,6 +1433,13 @@ pub enum Refusal {
     },
     /// The browser answered the job with its own bounded refusal.
     BrowserPrimitive { detail: String },
+    /// The page refused the call's control before acting on it, so nothing happened.
+    PageRefused {
+        /// Why the page refused the control.
+        refusal: PageRefusal,
+        /// What the call would have done to it.
+        gesture: PageGesture,
+    },
     /// A form fill was applied, but the page changed some fields back before the values settled.
     FieldsReverted {
         /// How many of the call's fields held their values.
@@ -1547,6 +1555,9 @@ impl Refusal {
             }
             Self::BrowserPrimitive { detail } => {
                 return format!("The browser refused this job: {detail}.");
+            }
+            Self::PageRefused { refusal, gesture } => {
+                return page_refusal::summary(*refusal, *gesture);
             }
             Self::FieldValuesRejected { fields, total } => {
                 return field_problem::rejected_summary(fields, *total, SUMMARY_MAX_CHARS);
@@ -1702,6 +1713,7 @@ impl Refusal {
                 "Read the browser's stated reason, adjust the call or the page, then repeat."
                     .into(),
             ],
+            Self::PageRefused { refusal, .. } => page_refusal::next_steps(*refusal),
             Self::FieldValuesRejected { fields, .. } => field_problem::rejected_next_steps(fields),
             Self::FieldsReverted { reverted, .. } => field_problem::rejected_next_steps(reverted),
             Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],

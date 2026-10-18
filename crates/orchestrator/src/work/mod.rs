@@ -54,6 +54,7 @@ use crate::language::{
         WorkspaceReason, CANDIDATE_TABS_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT,
         STALE_FACT,
     },
+    page_refusal::{PageGesture, PageRefusal},
     Operation, Record, TakeScreenshot,
 };
 use crate::presentation::PresentationReactor;
@@ -396,6 +397,7 @@ impl ApplicationExecutor {
             requested_tab: operation_tab(operation),
             requested_target: operation_target(operation),
             repeat_tool: repeatable_tool(operation),
+            gesture: PageGesture::of(operation),
             snapshot: &snapshot,
             deadline,
             deadline_adjustable: prepared.deadline_adjustable,
@@ -1841,6 +1843,39 @@ impl ApplicationExecutor {
         self.workspace_failure(context, WorkspaceError::StaleTarget { reason })
     }
 
+    /// The page refused the call's control before acting on it. Nothing happened, so the call
+    /// is safe to repeat, and the refusal names its gesture and one step that would work.
+    fn page_refused(
+        &self,
+        context: &InvocationContext<'_>,
+        decision: Decision,
+        physical_id: Option<u64>,
+        refusal: PageRefusal,
+    ) -> Terminal {
+        let facts = json!({"reason": refusal.as_str()});
+        let refusal = Refusal::PageRefused {
+            refusal,
+            gesture: context.gesture,
+        };
+        let summary = refusal.summary();
+        Terminal {
+            result: InvocationResult::new(
+                context.invocation,
+                Status::Failed,
+                Effect::None,
+                Readiness::NotApplicable,
+                true,
+                &summary,
+                facts,
+                refusal.next_steps(),
+            ),
+            decision,
+            physical_id,
+            observed: Observed::default(),
+            audit: refusal.audit(),
+        }
+    }
+
     fn protocol_failure(
         &self,
         context: &InvocationContext<'_>,
@@ -1938,6 +1973,9 @@ impl ApplicationExecutor {
         // can choose between rather than picking one on the caller's behalf.
         if let BrowserError::StaleLocator { reason, lookup } = &error {
             return self.stale_locator_failure(context, *reason, lookup.as_ref());
+        }
+        if let BrowserError::PageRefused(refusal) = error {
+            return self.page_refused(context, decision, physical_id, refusal);
         }
         if let Some((refusal, facts)) = routing_refusal(&error, || self.extension_advice()) {
             let summary = refusal.summary();
@@ -2225,6 +2263,9 @@ struct InvocationContext<'a> {
     /// The catalog tool of this call when it takes `requested_target` as its one target and can
     /// be repeated with another handle in its place.
     repeat_tool: Option<&'static str>,
+    /// What this call does to a control, which a page refusal says did not happen. A flow child
+    /// carries its own.
+    gesture: PageGesture,
     snapshot: &'a AuthoritySnapshot,
     deadline: Instant,
     /// Whether the top-level call that set `deadline` could be repeated with a longer
@@ -2663,6 +2704,7 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         | BrowserError::RecoveryManual { .. }
         | BrowserError::RecoveryFailed { .. } => (CheckFailure::BrowserUnavailable, admitted),
         BrowserError::Primitive(_)
+        | BrowserError::PageRefused(_)
         | BrowserError::StaleLocator { .. }
         | BrowserError::FieldsRejected { .. }
         | BrowserError::FieldsReverted { .. }
@@ -2974,6 +3016,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::CancelledBeforeDispatch => "cancelled",
         BrowserError::DeadlineBeforeDispatch => "deadline",
         BrowserError::Primitive(_) => "browser_primitive_failed",
+        BrowserError::PageRefused(refusal) => refusal.as_str(),
         BrowserError::FieldsRejected { .. } => "field_value_rejected",
         BrowserError::DialogOpen => "dialog_open",
         BrowserError::TabNotShowing => "tab_not_showing",

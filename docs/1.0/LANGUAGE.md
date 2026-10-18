@@ -114,6 +114,20 @@ keep the stale word only: never a replacement, a handle, a row or a candidate. A
 control the page no longer holds in its registry is `unknown`. A control the page still holds under
 a handle but which now sits in a different row, because its list recycled the node, is also
 `removed`.
+
+A control the page refuses before acting on it refuses with `reason` set to the page's code, no
+effect and `repeat_safe: true`. The summary says what was refused, then that nothing happened in
+the call's own gesture (`Nothing was clicked.`, `Nothing was typed.`, `No field was filled.` and
+so on); a flow step says its own. It never quotes the page's message. The audit keeps
+`{"reason":"page_refused","cause":"<code>"}` (ADR-0198, amendment of 2026-10-18):
+
+| `reason` | Summary (a click or typing) | Next step |
+| --- | --- | --- |
+| `not_visible` | `That target is not visible on the page. Nothing was clicked.` | `browser_find` or `browser_inspect` for a visible control |
+| `disabled` | `That target is disabled. Nothing was clicked.` | `browser_inspect`, then repeat once the page enables it |
+| `read_only` | `That field is read-only. Nothing was typed.` | `browser_find` with scope control |
+| `not_editable` | `That target does not take typed text. Nothing was typed.` | `browser_find` with scope control |
+
 A same-document change is not a committed navigation. When an action moves the address within the
 same origin and no document commits, as an anchor link or a `history.pushState` route does, the
 generation and target handles stay valid. The tab's governed URL follows the page, landing

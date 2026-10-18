@@ -6,17 +6,17 @@ use super::*;
 /// detail, instead of falling through to the browser-stopped rendering.
 #[test]
 fn primitive_adapter_errors_route_to_an_honest_refusal_with_detail() {
-    let (refusal, facts) = routing_refusal(
-        &BrowserError::Primitive("target is not visible for focus".into()),
-        || ExtensionAdvice::Plain,
-    )
-    .expect("primitive errors route to a refusal");
+    let (refusal, facts) =
+        routing_refusal(&BrowserError::Primitive("no such frame".into()), || {
+            ExtensionAdvice::Plain
+        })
+        .expect("primitive errors route to a refusal");
     let crate::language::outcome::Refusal::BrowserPrimitive { detail } = refusal else {
         panic!("primitive errors must route to BrowserPrimitive");
     };
-    assert_eq!(detail, "target is not visible for focus");
+    assert_eq!(detail, "no such frame");
     assert_eq!(facts["reason"], "browser_primitive_failed");
-    assert_eq!(facts["detail"], "target is not visible for focus");
+    assert_eq!(facts["detail"], "no such frame");
 }
 
 /// Only a true pre-dispatch disconnection may claim disconnection in the reason vocabulary,
