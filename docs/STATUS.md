@@ -59,8 +59,10 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   Claude Code session on the owner's CachyOS machine worked the owed Linux checks L01 to L10 on
   the real installation and, by the owner's leave, fixed what it found (each fix is in the
   ledger, the record). On 2026-10-18 its open questions were settled by the user-delight test and
-  old leftovers removed (ledger, "Follow-up"). Owed: the release candidate's pinned install, and
-  the owner's decision on saved tab groups piling up (an extension-only fix).
+  old leftovers removed (ledger, "Follow-up"). Owed: the release candidate's pinned install.
+  On 2026-10-18 the owner unfroze the extension for a proper fix of saved tab groups piling up
+  (ADR-0137 reuse misses a group Chromium saved when it closed). Not started; the fix, its
+  ADR-0200 Decision 16 amendment and the regenerated freeze golden land together.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
