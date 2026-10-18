@@ -9,11 +9,11 @@ L01 to L04 passed (L03 with a scope change: the owner directed on 2026-10-17 tha
 uses the real installation and the real system browser, never a sandbox). The owner then let this
 session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed and proven on the
 real install (see L04). L05 passed after six fixes in the shell, the service and the window, and
-L06 after three, L07 after five and L09 after one (see each). The development build at 5107be98
-is installed in the real `~/.ghostlight`, the system Chromium's ordinary profile is connected,
-`browser.startup` is on_demand as before, and diagnostics are on. Next: L08 and L10 together,
-since the only fresh home that is neither a sandbox nor another user is the real one after an
-uninstall.
+L06 after three, L07 after five, L08, L09 and L10 after one each (see each). The batch is done.
+The development build at 1024a994 runs in a fresh `~/.ghostlight` with the owner's policy copied
+back (browser.startup on_demand), the system Chromium's ordinary profile is connected, and
+diagnostics are on; the home from before L10 is kept at `~/.ghostlight.l10-before`. Owed for
+later: the release candidate's pinned install (L10), and the items marked "seen and left".
 
 ## Tasks
 
@@ -400,12 +400,41 @@ Seen and left, for the owner or the coordinator:
 - During a flow, the popup says no agent is browsing between steps that touch no tab, since its
   activity follows the notices of tab-bound work.
 
-### L08 Setup on a fresh home (todo)
+### L08 Setup on a fresh home (pass, after a fix)
 
 In a fresh test user or a fresh `GHOSTLIGHT_HOME`, `ghostlight install` in a terminal prints the
 summary (version line, location, agents line, one Next line) and opens the window at the browser
 step (j15); the setup view's browser step reads the real profile with and without the extension
 (j10, j12); Add and Open start the named browser (j13).
+
+Result, 2026-10-18, run with L10. A fresh test user needs root, and a second `GHOSTLIGHT_HOME`
+would rewrite the real browser and agent registrations, so the fresh home is the real one: after
+L10's uninstall, `~/.ghostlight` was moved aside to `~/.ghostlight.l10-before`, and the first run
+was the get script's two steps from the development build (`ghostlight-service deployment install
+--development`, then `~/.ghostlight/bin/ghostlight install`), with Chromium closed.
+
+- The install printed the summary and nothing else on the happy path: "Ghostlight 2.0.0 is
+  installed.", "Ghostlight is in your system tray and your Applications menu.", the Agents line
+  (17 agents) and one Next line, beside the one line that needs a person (Cline (CLI) holds a
+  foreign entry). It opened the window at the browser step.
+- The browser step read the real profile: "Chromium -- Added in your Work profile. Open Chromium
+  to finish." Open Chromium started `/usr/lib/chromium/chromium --profile-directory=Default`.
+  Once the browser connected the window moved to "Ask your agent." with the prompt and every
+  agent; once an agent rang the desk bell it read "Your agent just used your browser. You're
+  set." A second install printed no Next line and left the window alone. Not covered: a profile
+  without the extension, and Add (both need a profile the machine does not have).
+
+Defect found and fixed (deployed and checked):
+
+1. 1024a994: at the agent step, with 17 agents, the window opened on an empty left half: the kit
+   centers the mascot and the steps on a row taller than the window. The window's stylesheet now
+   keeps them centered on the window; a short step looks as before.
+
+Seen and left, for the owner: the terminal's Next line and the window disagree when the extension
+is in a profile but no browser is connected. The window shows the browser step ("Open Chromium to
+finish"); the terminal counts the extension as the browser step done and says "Next: restart
+<17 agents>, then ask one: ...". On Linux, whose default is manual, the agent's first call is then
+refused with the ask-the-user answer. `language/setup.rs` says the two cannot disagree.
 
 ### L09 Agent icons (pass, after a fix)
 
@@ -430,11 +459,36 @@ Defect found and fixed (deployed and checked):
    icon is over the tiling limit). The plate is now judged at the edges of the drawn area; Zed
    is served as cached. ARCHITECTURE says the new rule.
 
-### L10 Clean install for the release bar (todo)
+### L10 Clean install for the release bar (pass, after a fix)
 
 After L01 to L09, uninstall (`ghostlight uninstall`), confirm nothing of Ghostlight is left in the
 home, the agents' files or the browser registrations, and install again from scratch. Record what
 a first-time person sees. The release candidate's pinned install (`get.sh` with
 `GHOSTLIGHT_VERSION`) is a later task, once the owner publishes `v2.0.0-rc.1`.
+
+Result, 2026-10-18, on the real installation (the home was copied to a private scratch folder
+first). The uninstall removed the four browser manifests, the command link, the Applications
+entry and its icon, the man page, the three shell completions and Ghostlight's entry in all 17
+agents; the agents' files hold no Ghostlight entry after it. What remains is by decision: the home
+(ADR-0199 Decision 20), the `*.ghostlight-backup` copies Ghostlight made of agents' files before
+editing them (ADR-0154), and a foreign Cline (CLI) entry it never owned. The first install from
+scratch and what it showed are under L08.
+
+Defect found and fixed (deployed and checked):
+
+1. e964e858: the uninstall left the service, the tray shell and the browser relay running; nothing
+   ever sent the `uninstall` goodbye ADR-0199 defines. A whole uninstall now asks the service to
+   quit with it and says "The running Ghostlight was stopped.": the service quit with
+   reason=uninstall, the relay exited with service_uninstalled and the shell ended, in 59 ms.
+
+Seen and left, for the owner: earlier generations left folders that nothing removes:
+`~/.local/share/ghostlight` (0.x, July), `~/.local/share/org.sylin.ghostlight` (the 1.x window's
+WebKit data, last written 2026-09-09) and `~/.local/state/ghostlight` (the 1.x policy folder the
+2.0 migration emptied on 2026-10-17 and left). The migration could remove the last two.
+
+Machine state after the batch: the fresh home runs the development build at 1024a994 with the
+owner's policy copied back from the old home (browser.startup on_demand, their rules) and
+diagnostics on; the old home, with its audit history, stays at `~/.ghostlight.l10-before` for the
+owner to keep or delete.
 
 ## Notes
