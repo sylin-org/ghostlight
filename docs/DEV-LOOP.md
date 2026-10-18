@@ -39,9 +39,11 @@ build into `~/.ghostlight/bin` the way a release install does:
 - The service image is replaced every time. A development install never stops at "same version"
   and never refuses an older or a newer one.
 - The edge is replaced when `bin/install.json` is absent, records no edge, records another relay
-  revision than the build speaks, or when the edge in `bin` is missing or is not the one the record
-  names. Otherwise the edge stays and keeps running. The same holds for the shell when the build
-  has one: it is replaced when its file differs.
+  revision than the build speaks, when the edge in `bin` is missing or is not the one the record
+  names, or when the build's edge differs from the installed one (ADR-0197, amendment of
+  2026-10-18). Cargo relinks the edge only when its code or dependencies change, so an unchanged
+  edge stays and keeps running. The deploy says in one line when it replaces the edge and why.
+  The shell is replaced the same way when the build has one: when its file differs.
 - Once the new service publishes, `bin/install.json` is written with `"channel": "development"`.
 
 Nothing is written into `dev` and no marker is written. `ghostlight doctor` and
@@ -97,8 +99,9 @@ build's directory.
 `--restore` takes the same optional payload directory as a release install. It installs that
 package into `bin` whatever version or channel is recorded (the one allowed move down), replaces
 the edge by the usual rule, restarts the service and records `"channel": "release"`. `-Plan` and
-`--plan` print one JSON document: the migration plan, the swaps, the registrations to rewrite, the
-processes to stop and the files to delete. Nothing changes.
+`--plan` print one JSON document: the migration plan, the swaps, why the edge is among them when
+it is, the registrations to rewrite, the processes to stop and the files to delete. Nothing
+changes.
 
 Packages, npm and the get scripts run the same command without `--development`. A release
 refuses an older payload, refuses a development installation, and does nothing for the same
@@ -110,22 +113,28 @@ publishes, so a service that does not start is installed again on the next launc
 | Changed area | Rebuild | Refresh |
 | --- | --- | --- |
 | Orchestrator domain, workbench, or bundled UI | `cargo build -p ghostlight-service` | Run the dev loop: it replaces the service in `bin` every time; no relay or extension change |
-| Edge as the MCP relay | `cargo build -p ghostlight` | Reach `bin` (a relay revision change or a forced replacement, see below), then reconnect the MCP server in the harness |
-| Edge as the browser relay | `cargo build -p ghostlight` | Reach `bin` (a relay revision change or a forced replacement, see below), then reload the extension so Chromium respawns the native host |
+| Edge as the MCP relay | `cargo build -p ghostlight` | Run the dev loop: it replaces the edge in `bin` when the build changed it, then reconnect the MCP server in the harness |
+| Edge as the browser relay | `cargo build -p ghostlight` | Run the dev loop: it replaces the edge in `bin` when the build changed it, then reload the extension so Chromium respawns the native host |
 | Chromium extension mechanism or presentation | none for JavaScript | Reload the unpacked extension explicitly in `chrome://extensions` |
 | Shared bridge contract | `cargo build --workspace` | Restart only consumers affected by that versioned boundary |
 
 Do not restart a shore merely because an orchestrator feature changed. That is the fringe-stability
 contract, not an optimization.
 
-Rebuilding does not deploy the edge by itself. A development deploy replaces the service in `bin`
-every time, and the edge only when the relay revision differs from the one `bin/install.json`
-records, there is no record, or the edge in `bin` is missing or is not the one the record names
-(ADR-0197 Decision 14). Under one relay revision, an edge source change reaches an installed home
-only through a revision change or a forced replacement. To force one, remove
-`~/.ghostlight/bin/install.json` and run `pwsh scripts/dev-loop.ps1 -Plan` first; the plan must
-list the edge among the swaps before you run the loop for real. The record is rewritten once the
-new service publishes. Until the edge is replaced, the old one keeps running the old code.
+Rebuilding does not deploy the edge by itself; the dev loop does. A development deploy replaces
+the service in `bin` every time, and the edge whenever the build's edge differs byte for byte from
+the one `bin/install.json` records (ADR-0197, amendment of 2026-10-18). Cargo relinks the edge
+only when its code or dependencies change, so a deploy that touched nothing in the edge leaves it
+running. `pwsh scripts/dev-loop.ps1 -Plan` shows the edge among the swaps, with an
+`edge_replaced` line saying why, before you run the loop for real. The record is rewritten once
+the new service publishes.
+
+A release install keeps the rule of ADR-0197 Decision 14: under one relay revision an intact
+edge stays, whatever its bytes. On a release-channel home, an edge source change under one relay
+revision arrives only through a revision change or a forced replacement. To force one, remove
+`~/.ghostlight/bin/install.json` and run the install with `--plan` first; the plan must list the
+edge among the swaps before you run it for real. Until the edge is replaced, the old one keeps
+running the old code.
 
 An extension reload invalidates content-script receivers in already-open pages. The current
 adapter does not bootstrap them back into those documents. Refresh a disposable verification tab

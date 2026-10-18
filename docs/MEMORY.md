@@ -530,7 +530,8 @@ Every one of these cost something to learn.
   it costs a killed native host, an extension reload and a browser reconnect for nothing. The
   installer replaces connectors only when the relay revision changes (ADR-0197 Decision 14); a
   connector source change under one revision reaches an installed home only by a revision bump or
-  the forced replacement in DEV-LOOP.md.
+  the forced replacement in DEV-LOOP.md. On the development channel the edge follows its build
+  (owner, 2026-10-18), since cargo relinks it only when it changed.
 - **A delegated batch spec must say what a change makes redundant**, not only what it adds, or the
   executor is correct and the surface is repetitive.
 - **No bureaucratic rules: every check and fence must serve the person.** Ask first whether a

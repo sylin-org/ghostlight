@@ -15,10 +15,11 @@
 //!    is not the one recorded. The payload is checked first, so a release install run from `bin`
 //!    itself reports that, not a restore command that would fail the same way.
 //!    `--development` places the same files the same way, but always swaps the service, whatever
-//!    version is installed, and records the development channel. `--restore` does the same for
-//!    this executable's own package and records the release channel: the one way back from a
-//!    development installation, and the one allowed move down. The Ghostlight shell goes beside
-//!    the service image when the payload has one and `bin` holds another;
+//!    version is installed, also replaces an edge whose bytes the build changed (see
+//!    [`EdgeReplacement::Rebuilt`]), and records the development channel. `--restore` does the
+//!    same for this executable's own package and records the release channel: the one way back
+//!    from a development installation, and the one allowed move down. The Ghostlight shell goes
+//!    beside the service image when the payload has one and `bin` holds another;
 //! 3. reconciles every registration to name `bin`, as soon as `bin` holds the executables and
 //!    before anything old is stopped, so a browser or client that relaunches its host the moment
 //!    the old one stops starts the new one;
@@ -555,6 +556,33 @@ pub struct Swap {
     pub source: PathBuf,
 }
 
+/// Why an install replaces the edge in `bin`. The plan prints it as the sentence a person reads.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EdgeReplacement {
+    /// `bin` still holds the layout of an earlier development build, where the service image had
+    /// the edge's name.
+    PreEdgeLayout,
+    /// There is no installation record, or it names no edge.
+    Unrecorded,
+    /// The payload's edge speaks another relay revision than the recorded one (ADR-0197
+    /// Decision 14).
+    RelayRevision,
+    /// The edge in `bin` is missing.
+    Missing,
+    /// The edge in `bin` is not the one the record names.
+    Altered,
+    /// A development install whose payload edge differs byte for byte from the installed one.
+    /// Cargo relinks the edge only when its code or dependencies change, so a development edge
+    /// follows its build and an unchanged one stays (ADR-0197, amendment of 2026-10-18).
+    Rebuilt,
+}
+
+impl Serialize for EdgeReplacement {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&words::edge_replaced(*self))
+    }
+}
+
 /// Everything one install will do, in order. `--plan` prints it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct InstallPlan {
@@ -569,6 +597,9 @@ pub struct InstallPlan {
     /// Executables placed by rename-swap: the service image, the shell beside it when the payload
     /// has one and `bin` holds another, and the edge where it changes.
     pub swaps: Vec<Swap>,
+    /// Why the edge is among the swaps; absent, and not printed, when it stays.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_replaced: Option<EdgeReplacement>,
     /// Whether the running service is replaced by a new `serve`.
     pub restart: bool,
     /// The record written once the new service answers.
@@ -803,6 +834,7 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
         migration,
         unchanged: false,
         swaps: Vec::new(),
+        edge_replaced: None,
         restart: true,
         record: None,
         processes_to_stop: Vec::new(),
@@ -810,10 +842,15 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
         version_audit_archives,
         registrations_to_rewrite: Vec::new(),
     };
-    let edge_changes = edge_changes(context, installed.as_ref())?;
+    validate_payload(&context.payload, &layout.bin())?;
+    let channel = if mode == Mode::Development {
+        Channel::Development
+    } else {
+        Channel::Release
+    };
+    let edge = edge_replacement(context, installed.as_ref(), channel)?;
     match mode {
         Mode::Release => {
-            validate_payload(&context.payload, &layout.bin())?;
             if installed
                 .as_ref()
                 .is_some_and(|record| record.channel == Channel::Development)
@@ -828,7 +865,7 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                     return Err(PayloadRefused::new(installed, &payload_record).into());
                 }
                 Standing::Same
-                    if !edge_changes
+                    if edge.is_none()
                         && plan.migration.is_empty()
                         && retired.is_empty()
                         && version_directories.is_empty() =>
@@ -837,32 +874,14 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
                     plan.restart = false;
                     return Ok(plan);
                 }
-                Standing::Same if !edge_changes => {}
+                Standing::Same if edge.is_none() => {}
                 Standing::Absent | Standing::Older | Standing::Damaged | Standing::Same => {
-                    place_in_bin(
-                        context,
-                        &mut plan,
-                        installed.as_ref(),
-                        edge_changes,
-                        Channel::Release,
-                    )?;
+                    place_in_bin(context, &mut plan, installed.as_ref(), edge, channel)?;
                 }
             }
         }
         Mode::Development | Mode::Restore => {
-            validate_payload(&context.payload, &layout.bin())?;
-            let channel = if mode == Mode::Development {
-                Channel::Development
-            } else {
-                Channel::Release
-            };
-            place_in_bin(
-                context,
-                &mut plan,
-                installed.as_ref(),
-                edge_changes,
-                channel,
-            )?;
+            place_in_bin(context, &mut plan, installed.as_ref(), edge, channel)?;
         }
     }
     plan.processes_to_stop = plan.migration.images_to_stop.clone();
@@ -1071,40 +1090,60 @@ fn shell_changes(context: &Context<'_>) -> bool {
         )
 }
 
-/// Whether the install replaces the edge in `bin`: there is no record, the edge speaks another
-/// relay revision, `bin` still holds the pre-edge layout, or the edge there is missing or is not
-/// the one the record says was installed.
-fn edge_changes(context: &Context<'_>, installed: Option<&InstallRecord>) -> io::Result<bool> {
-    let relay_changes =
-        installed.map(|record| &record.relay_revision) != Some(&context.build.relay_revision);
-    if relay_changes || migration::pre_edge_layout(&context.layout) {
-        return Ok(true);
+/// Why an install recording `channel` replaces the edge in `bin`, or `None` when the edge
+/// stays: `bin` still holds the pre-edge layout, nothing records the installed edge, the edge
+/// speaks another relay revision, the edge there is missing or is not the one the record says
+/// was installed, or, on the development channel only, the payload's edge is another build than
+/// the installed one. A release keeps an intact edge of its relay revision whatever its bytes.
+fn edge_replacement(
+    context: &Context<'_>,
+    installed: Option<&InstallRecord>,
+    channel: Channel,
+) -> io::Result<Option<EdgeReplacement>> {
+    if migration::pre_edge_layout(&context.layout) {
+        return Ok(Some(EdgeReplacement::PreEdgeLayout));
     }
-    let Some(recorded) = installed.and_then(|record| record.edge_sha256.as_deref()) else {
-        return Ok(true);
+    let Some(installed) = installed else {
+        return Ok(Some(EdgeReplacement::Unrecorded));
+    };
+    if installed.relay_revision != context.build.relay_revision {
+        return Ok(Some(EdgeReplacement::RelayRevision));
+    }
+    let Some(recorded) = installed.edge_sha256.as_deref() else {
+        return Ok(Some(EdgeReplacement::Unrecorded));
     };
     match record::sha256_file(&context.layout.edge()) {
-        Ok(sha) => Ok(sha != recorded),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
-        Err(error) => Err(error),
+        Ok(sha) if sha != recorded => return Ok(Some(EdgeReplacement::Altered)),
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(Some(EdgeReplacement::Missing));
+        }
+        Err(error) => return Err(error),
     }
+    if channel == Channel::Development
+        && record::sha256_file(&context.payload.join(EDGE_EXECUTABLE_NAME))? != recorded
+    {
+        return Ok(Some(EdgeReplacement::Rebuilt));
+    }
+    Ok(None)
 }
 
 /// Add the swaps that place the payload in `bin` to `plan`, and set the record `bin` holds once
 /// they are done: the service always, the shell when the payload has one `bin` does not, and the
-/// edge when `edge_changes` (the edge it leaves is the payload's, or the installed one).
+/// edge when `edge` gives a reason (the edge it leaves is the payload's, or the installed one).
 fn place_in_bin(
     context: &Context<'_>,
     plan: &mut InstallPlan,
     installed: Option<&InstallRecord>,
-    edge_changes: bool,
+    edge: Option<EdgeReplacement>,
     channel: Channel,
 ) -> anyhow::Result<()> {
     plan.swaps.push(service_swap(context));
     if shell_changes(context) {
         plan.swaps.push(desktop_swap(context));
     }
-    let edge_sha256 = if edge_changes {
+    plan.edge_replaced = edge;
+    let edge_sha256 = if edge.is_some() {
         plan.swaps.push(edge_swap(context));
         Some(record::sha256_file(
             &context.payload.join(EDGE_EXECUTABLE_NAME),
@@ -1841,15 +1880,8 @@ mod tests {
         let outcome = fixture
             .run(Mode::Release, "2.2.0", &FakeControl::new())
             .unwrap();
-        assert_eq!(
-            outcome
-                .plan
-                .swaps
-                .iter()
-                .map(|placed| placed.name.as_str())
-                .collect::<Vec<_>>(),
-            [SERVICE_EXECUTABLE_NAME]
-        );
+        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+        assert_eq!(outcome.plan.edge_replaced, None);
         assert_eq!(
             fixture.read(fixture.layout.service_executable()),
             "next service"
@@ -1873,7 +1905,7 @@ mod tests {
             relay_revision: "5".to_owned(),
             ..fixture.build("2.2.0")
         };
-        install(
+        let outcome = install(
             &fixture.context(build, &control),
             &Request {
                 payload: None,
@@ -1882,6 +1914,10 @@ mod tests {
             },
         )
         .unwrap();
+        assert_eq!(
+            outcome.plan.edge_replaced,
+            Some(EdgeReplacement::RelayRevision)
+        );
         assert_eq!(fixture.read(fixture.layout.edge()), "next edge");
         let record = fixture.record().unwrap();
         assert_eq!(record.relay_revision, "5");
@@ -1985,7 +2021,7 @@ mod tests {
     }
 
     #[test]
-    fn a_development_install_swaps_the_service_into_bin_and_keeps_an_intact_edge() {
+    fn a_development_install_swaps_the_service_into_bin_and_keeps_an_unchanged_edge() {
         let fixture = Fixture::new();
         fixture
             .run(Mode::Release, VERSION, &FakeControl::new())
@@ -1993,11 +2029,13 @@ mod tests {
         let recorded = fixture.record().unwrap();
         assert_eq!(recorded.channel, Channel::Release);
         Fixture::write_payload(&fixture.payload, "development service");
-        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
         let control = FakeControl::new();
         let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
         assert_eq!(outcome.service_started, Some(true));
         assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+        assert_eq!(outcome.plan.edge_replaced, None);
+        let printed = serde_json::to_value(&outcome.plan).unwrap();
+        assert!(printed.get("edge_replaced").is_none(), "{printed}");
         assert_eq!(
             fixture.read(fixture.layout.service_executable()),
             "development service"
@@ -2016,6 +2054,98 @@ mod tests {
     }
 
     #[test]
+    fn a_development_install_replaces_an_edge_its_build_changed_and_only_then() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        let first = fixture.record().unwrap().edge_sha256;
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+        let control = FakeControl::new();
+        let outcome = fixture.run(Mode::Development, VERSION, &control).unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(
+            placed_names(&outcome.plan),
+            [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
+        );
+        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Rebuilt));
+        let printed = serde_json::to_value(&outcome.plan).unwrap();
+        assert_eq!(
+            printed["edge_replaced"],
+            words::edge_replaced(EdgeReplacement::Rebuilt)
+        );
+        // The same swap and restart a relay revision change gets, and nothing more.
+        assert_eq!(control.calls(), [Call::Quit, Call::Start, Call::Wait]);
+        assert_eq!(fixture.read(fixture.layout.edge()), "rebuilt edge");
+        let record = fixture.record().unwrap();
+        assert_eq!(record.channel, Channel::Development);
+        assert_eq!(
+            record.edge_sha256,
+            Some(record::sha256_file(&fixture.layout.edge()).unwrap())
+        );
+        assert_ne!(record.edge_sha256, first);
+
+        // A deploy right after it, whose build did not change the edge, replaces no edge.
+        Fixture::write_payload(&fixture.payload, "next service");
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+        assert_eq!(outcome.plan.edge_replaced, None);
+        assert_eq!(fixture.record().unwrap().edge_sha256, record.edge_sha256);
+    }
+
+    #[test]
+    fn a_restore_keeps_an_intact_edge_of_its_relay_revision_whatever_its_bytes() {
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        let recorded = fixture.record().unwrap().edge_sha256;
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "release edge").unwrap();
+        let outcome = fixture
+            .run(Mode::Restore, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
+        assert_eq!(outcome.plan.edge_replaced, None);
+        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
+        assert_eq!(fixture.record().unwrap().edge_sha256, recorded);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_running_edge_a_development_build_changed_is_moved_aside_without_failing_the_deploy() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        /// The sharing Windows gives a running image: it may be read and renamed, not written.
+        const RUNNING_IMAGE_SHARING: u32 = 0x1 | 0x4;
+
+        let fixture = Fixture::new();
+        fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        let running = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(RUNNING_IMAGE_SHARING)
+            .open(fixture.layout.edge())
+            .unwrap();
+        fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "rebuilt edge").unwrap();
+        let outcome = fixture
+            .run(Mode::Development, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(outcome.service_started, Some(true));
+        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Rebuilt));
+        assert_eq!(fixture.read(fixture.layout.edge()), "rebuilt edge");
+        let moved_aside = fixture
+            .layout
+            .bin()
+            .join(format!("{EDGE_EXECUTABLE_NAME}.old-1"));
+        assert_eq!(fixture.read(moved_aside), edge_text(RELAY));
+        drop(running);
+    }
+
+    #[test]
     fn a_development_install_with_no_record_also_swaps_the_edge() {
         let fixture = Fixture::new();
         let outcome = fixture
@@ -2025,6 +2155,10 @@ mod tests {
         assert_eq!(
             placed_names(&outcome.plan),
             [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
+        );
+        assert_eq!(
+            outcome.plan.edge_replaced,
+            Some(EdgeReplacement::Unrecorded)
         );
         assert!(outcome
             .plan
@@ -2057,6 +2191,7 @@ mod tests {
             placed_names(&outcome.plan),
             [SERVICE_EXECUTABLE_NAME, EDGE_EXECUTABLE_NAME]
         );
+        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Altered));
         assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
         assert_eq!(fixture.record().unwrap().edge_sha256, recorded);
 
@@ -2065,6 +2200,7 @@ mod tests {
             .run(Mode::Development, VERSION, &FakeControl::new())
             .unwrap();
         assert!(placed_names(&outcome.plan).contains(&EDGE_EXECUTABLE_NAME));
+        assert_eq!(outcome.plan.edge_replaced, Some(EdgeReplacement::Missing));
         assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
     }
 

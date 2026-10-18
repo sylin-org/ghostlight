@@ -409,3 +409,25 @@ the 2.0 window keeps its own web view data there.
 A folder that holds anything else is left, a removal that fails is left for the next install, and
 the install never fails on a leftover. The install names each folder it removed. The rule is
 `migration::retire_leftovers` in `crates/orchestrator/src/install/migration.rs`.
+
+## Amendment 2026-10-18: the development edge follows its build
+
+Decision 14 replaces a connector only when its relay revision changes. On the owner's machine
+that left the installed edge at the 2026-10-15 build while every later deploy replaced the service
+and the shell. The owner directed on 2026-10-18: "the edge should be replaced very frequently, so
+I can always see what's being worked on."
+
+- On the development channel, a deploy also replaces the edge when the payload's edge differs
+  byte for byte from the installed one. The installer compares the SHA-256 of the payload's edge
+  with the one `bin/install.json` records, and records the new one once the service answers.
+- Cargo relinks the edge only when its code or dependencies change. A deploy that changed nothing
+  in the edge plans no edge swap, so an unchanged edge still costs no killed native host, no
+  extension reload and no reconnect.
+- A replaced edge goes in by the same rename-swap a relay revision change uses. A running edge
+  keeps running from its moved-aside name until it exits, and the deploy does not fail on it.
+- The plan and the deploy report say in one line when the edge is replaced and why. When the edge
+  stays, they say nothing about it.
+- Releases and restores keep Decision 14 unchanged: an intact edge of the same relay revision
+  stays, whatever its bytes. The relay protocol does not change.
+
+The rule is `edge_replacement` in `crates/orchestrator/src/install/deployment.rs`.

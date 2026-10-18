@@ -6,7 +6,7 @@
 //! every refusal a person can meet lives here, so the report says only what was observed and the
 //! way back from a development build is named the same way wherever it is needed.
 
-use crate::install::deployment::RESTORE_OPTION;
+use crate::install::deployment::{EdgeReplacement, RESTORE_OPTION};
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
 use crate::install::{Attention, HarnessState, ALL_CLIENTS_OPTION};
 
@@ -175,6 +175,22 @@ pub fn already_installed(version: &str, bin: &str) -> String {
 #[must_use]
 pub fn installed_file(name: &str, directory: &str) -> String {
     format!("Installed {name} in {directory}.")
+}
+
+/// The install replaces the edge in `bin`, and why.
+#[must_use]
+pub fn edge_replaced(reason: EdgeReplacement) -> String {
+    let because = match reason {
+        EdgeReplacement::PreEdgeLayout => {
+            "bin still holds the layout of an earlier development build"
+        }
+        EdgeReplacement::Unrecorded => "nothing records which edge is installed",
+        EdgeReplacement::RelayRevision => "this build speaks another relay revision",
+        EdgeReplacement::Missing => "the edge in bin is missing",
+        EdgeReplacement::Altered => "the edge in bin is not the one the record names",
+        EdgeReplacement::Rebuilt => "this development build changed it",
+    };
+    format!("The edge is replaced because {because}.")
 }
 
 /// A service that was observed answering is the one in `service`.

@@ -90,6 +90,10 @@ fn report(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
             &placed.directory.display().to_string(),
         )));
     }
+    lines.extend(
+        plan.edge_replaced
+            .map(|reason| Line::output(words::edge_replaced(reason))),
+    );
     lines.extend(service_line(outcome, layout));
     lines.extend(deletion_lines(outcome, layout));
     lines.extend(outcome.strays_left.iter().map(|stray| {
@@ -225,6 +229,7 @@ mod tests {
                 name: "ghostlight-service".to_owned(),
                 source: PathBuf::from("payload"),
             }],
+            edge_replaced: None,
             restart: true,
             record: None,
             processes_to_stop: Vec::new(),
@@ -438,5 +443,41 @@ mod tests {
         let layout = Layout::new("home");
         let lines = report_of(Mode::Release, &layout, Vec::new(), Some(true), Vec::new());
         assert!(lines.iter().all(|line| !line.text.contains("serves")));
+    }
+
+    #[test]
+    fn a_replaced_edge_is_said_once_with_its_reason_and_a_kept_one_not_at_all() {
+        use crate::install::deployment::EdgeReplacement;
+
+        let layout = Layout::new("home");
+        let outcome = |edge_replaced: Option<EdgeReplacement>| Outcome {
+            plan: InstallPlan {
+                edge_replaced,
+                ..plan(Mode::Development, &layout, Vec::new())
+            },
+            service_started: Some(true),
+            start_failure: None,
+            registrations: None,
+            flatpak: Vec::new(),
+            left_behind: Vec::new(),
+            archived_version_audits: Vec::new(),
+            strays_left: Vec::new(),
+            retired_leftovers: Vec::new(),
+        };
+        let replaced = report(&outcome(Some(EdgeReplacement::Rebuilt)), &layout);
+        let sentence = "The edge is replaced because this development build changed it.";
+        let said: Vec<&Line> = replaced
+            .iter()
+            .filter(|line| line.text.contains("edge"))
+            .collect();
+        assert_eq!(said.len(), 1, "{replaced:?}");
+        assert_eq!(said[0].text, sentence);
+        assert_eq!(said[0].stream, Stream::Output);
+
+        let kept = report(&outcome(None), &layout);
+        assert!(
+            kept.iter().all(|line| !line.text.contains("edge")),
+            "{kept:?}"
+        );
     }
 }

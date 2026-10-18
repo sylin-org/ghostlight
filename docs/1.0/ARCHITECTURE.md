@@ -92,9 +92,10 @@ still running keeps reading its policy from them, and a service or client starte
 steps must find the copies), then compares `bin/install.json` with the
 payload: an older payload is refused, the same intact version with an intact edge is left alone, the service image is
 rename-swapped (`install/swap.rs`), and the edge is replaced only when the relay revision
-changes, the edge in `bin` is missing or is not the one the record names, or `bin` still holds
-the layout of an earlier development build, where the service image had the edge's name and two
-connector images sat beside it; the installer stops those exact images and deletes the connector
+changes, the edge in `bin` is missing or is not the one the record names, a development install
+carries an edge that differs from the installed one (the development edge follows its build), or
+`bin` still holds the layout of an earlier development build, where the service image had the
+edge's name and two connector images sat beside it; the installer stops those exact images and deletes the connector
 files. It also stops what runs from each 1.x `bin/v<version>` directory, moves the audit log the
 directory holds into `state` under a name that says which version it came from, and removes the
 directory (`install/version_directories.rs`); a log that cannot be moved keeps its directory.
