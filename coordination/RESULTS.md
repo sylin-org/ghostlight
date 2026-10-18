@@ -24,7 +24,7 @@ the Linux items of m2-03 and m2-04 pass after these fixes, each deployed and che
 - 0a09d95b `fix(workbench)`: the band says "1 session" and "1 browser".
 - 906bd254 `fix(status)`: did_not_stay names WebKitGTK as a check, not as the cause.
 
-Tests: d86463ca aligns `tests/linux/installed/desktop-check.py` with the 2.0 shell on the real
+Tests: 9a879144 aligns `tests/linux/installed/desktop-check.py` with the 2.0 shell on the real
 installation; it passes. docs/MEMORY.md has the tao lesson.
 
 Please pull before touching `crates/desktop` (app.rs, link.rs, window.rs), `service/presence.rs`,
