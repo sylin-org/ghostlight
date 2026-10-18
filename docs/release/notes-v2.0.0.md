@@ -93,9 +93,15 @@ and 1.x installs move once.
   without changing what the policy does. Ghostlight moves its own user policy the same way.
   Policy files an administrator owns are never rewritten; they fail closed in schema 3 until their
   owner moves them.
-- Observe mode, the channel enable switches, the user-policy enable switch and the frame options
-  are removed. The managed policy keeps its HTTPS fetch, signatures and rollback protection; the
-  fetch runs on the refresher thread, never on the path of a call.
+- A policy can turn a channel off. `channels.mcp.enabled` and `channels.cli.enabled` set to
+  `false` refuse every request from MCP agents or from the command line before any browser work,
+  and the refusal says which switch is off and where. Unset means on. `policy migrate` carries
+  both keys, and the window's Policy page shows them with the layer that set them. The channel is
+  declared by Ghostlight's own peer, so a switch is a guardrail for well-behaved agents, not a
+  barrier against software running as the same user.
+- Observe mode, the user-policy enable switch and the frame options are removed. The managed
+  policy keeps its HTTPS fetch, signatures and rollback protection; the fetch runs on the
+  refresher thread, never on the path of a call.
 - The 1.x audit logs are moved aside under `state` and are not displayed. They keep the records
   they had and gain no new ones.
 

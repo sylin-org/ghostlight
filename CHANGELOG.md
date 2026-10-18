@@ -49,6 +49,12 @@ layout once, when you run the install again. The full release notes are in
 - `ghostlight policy migrate <file>` moves a schema-3 policy file to schema 4 only where the meaning
   stays the same. It keeps a `<file>.schema3.bak` copy and refuses anything it cannot move without
   changing what the policy does (ADR-0197 Decision 19).
+- A policy can turn a channel off. `channels.mcp.enabled` and `channels.cli.enabled` set to `false`
+  refuse every request from MCP agents or from the command line before any browser work, and the
+  refusal says which switch is off and where. Unset means on. `policy migrate` carries both keys, and
+  the window's Policy page shows them with the layer that set them. The channel is declared by
+  Ghostlight's own peer, so a switch is a guardrail for well-behaved agents, not a barrier against
+  software running as the same user (ADR-0202 Decision 22a).
 - Handles follow their control. A handle survives a re-render that the page proves is the same
   control, and the action reports `rebound: true`. A stale handle says why: `removed`, `navigated`,
   `tab_closed` or `unknown`. When a role and name repeat, `browser_find` and `browser_inspect` items
@@ -178,8 +184,7 @@ layout once, when you run the install again. The full release notes are in
   says what it did (ADR-0197 Decision 22).
 - MCPB as a channel after this release. The Claude Desktop bundle in this release is the last one,
   and it carries 2.0.0.
-- Observe mode, the channel enable switches, the user-policy enable switch and the frame options
-  (ADR-0197 Decision 19).
+- Observe mode, the user-policy enable switch and the frame options (ADR-0197 Decision 19).
 - The `layout_stable` wait condition. A call that names it is refused with a pointer to
   `visual_settle` (ADR-0197 Decision 21).
 - The popup's diagnostics toggle, the form-reset trace and the YAML editor for goose and Continue,
