@@ -16,7 +16,7 @@
     DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
-    agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
+    agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
@@ -1069,10 +1069,12 @@
     function factsMarkup(agent, acts, used, prepare) {
       const locate = acts.locate && !used.has("locate");
       const copy = acts.copy && !used.has("copy");
+      const copies = agentCopyNote(agent);
       return '<div class="agent-facts">'
         + `<p class="agent-facts-note">${escapeHtml(AGENTS.factsNote)}</p>`
         + `<div class="agent-fact"><span class="agent-fact-label">${escapeHtml(AGENTS.settingsFile)}<small>${escapeHtml(agentFileLabel(agent))}</small></span>`
         + `<div><div class="agent-path">${breakable(agent.config_path ?? "")}</div>`
+        + (copies ? `<div class="agent-why agent-copies">${breakable(copies)}</div>` : "")
         + (locate ? `<div class="agent-why">${escapeHtml(agentWhy("locate", agent))}</div>` : "") + "</div>"
         + (locate ? actButton("locate", agent, false) : "<span></span>") + "</div>"
         + `<div class="agent-fact"><span class="agent-fact-label">${escapeHtml(AGENTS.entry)}<small>${escapeHtml(agentEntryLabel(agent, { prepare }))}</small></span>`

@@ -38,7 +38,7 @@ use ghostlight_bridge::diagnostics::{event, Level, Sink};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::container::{PACKAGE_FIELD_SEPARATOR, PRIVATE_DATA_PARENT};
+use super::packaged::{is_family_of, PACKAGES_DIRECTORY};
 use super::record::atomic_replace;
 use super::{lock, HOME_VARIABLE, USER_PROFILE_VARIABLE};
 
@@ -1209,7 +1209,7 @@ fn launcher_path(directory: &Path, token: &str) -> Option<PathBuf> {
 /// below `%LOCALAPPDATA%\Packages` named `<name>_<publisher id>`, ignoring the name's case, in
 /// name order.
 fn package_families(local_app_data: &Path, name: &str) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(local_app_data.join(PRIVATE_DATA_PARENT)) else {
+    let Ok(entries) = fs::read_dir(local_app_data.join(PACKAGES_DIRECTORY)) else {
         return Vec::new();
     };
     let mut families: Vec<String> = entries
@@ -1217,15 +1217,7 @@ fn package_families(local_app_data: &Path, name: &str) -> Vec<String> {
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|family| {
-            family
-                .rsplit_once(PACKAGE_FIELD_SEPARATOR)
-                .is_some_and(|(own, publisher)| {
-                    own.eq_ignore_ascii_case(name)
-                        && !publisher.is_empty()
-                        && publisher.chars().all(|unit| unit.is_ascii_alphanumeric())
-                })
-        })
+        .filter(|family| is_family_of(family, name))
         .collect();
     families.sort();
     families

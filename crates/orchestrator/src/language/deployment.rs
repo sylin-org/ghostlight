@@ -268,6 +268,25 @@ pub fn client_kept_private(app: &str) -> String {
     )
 }
 
+/// What `doctor` says of where a client's settings are when that is not simply the plain path:
+/// `path`, where Ghostlight's entry goes, is the Microsoft Store edition's own copy when
+/// `packaged`, and `other` is another copy of the same settings that exists. None for settings
+/// found only at their plain path.
+#[must_use]
+pub fn client_settings_line(path: &str, packaged: bool, other: Option<&str>) -> Option<String> {
+    let place = if packaged {
+        format!("{path}, the Microsoft Store edition's own copy")
+    } else {
+        path.to_owned()
+    };
+    match other {
+        Some(other) => Some(format!(
+            "Ghostlight's entry goes in {place}; another copy of these settings is at {other}."
+        )),
+        None => packaged.then(|| format!("Settings: {place}.")),
+    }
+}
+
 /// What a run inside the app container named `app` says of `client`, whose configuration that
 /// container keeps private: the entry an install would write, or a removal would remove, is left
 /// as it is, and the same command run from a regular terminal changes it.
@@ -386,6 +405,30 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn a_clients_settings_are_named_only_when_they_are_a_store_copy_or_have_another_copy() {
+        let store = r"C:\Users\Pat\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json";
+        let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json";
+        assert_eq!(client_settings_line(plain, false, None), None);
+        assert_eq!(
+            client_settings_line(store, true, None).unwrap(),
+            format!("Settings: {store}, the Microsoft Store edition's own copy.")
+        );
+        assert_eq!(
+            client_settings_line(store, true, Some(plain)).unwrap(),
+            format!(
+                "Ghostlight's entry goes in {store}, the Microsoft Store edition's own copy; \
+                 another copy of these settings is at {plain}."
+            )
+        );
+        assert_eq!(
+            client_settings_line(plain, false, Some(store)).unwrap(),
+            format!(
+                "Ghostlight's entry goes in {plain}; another copy of these settings is at {store}."
+            )
+        );
+    }
 
     #[test]
     fn the_way_back_names_each_release_carrier_with_its_own_switch() {

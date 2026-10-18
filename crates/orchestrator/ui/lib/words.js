@@ -471,6 +471,17 @@
     })[agent.state] ?? "";
   }
 
+  /**
+   * What the pane says under the settings file when it is not simply the agent's usual one: the
+   * Microsoft Store edition's own copy, and another copy of the same settings that exists beside
+   * it. Empty for settings found only where the agent usually keeps them.
+   */
+  function agentCopyNote(agent) {
+    const store = agent.packaged ? `${agent.name} from the Microsoft Store keeps its settings in this file, in its own folder.` : "";
+    const other = agent.other_copy ? `Ghostlight's entry goes in this file. Another copy of these settings is at ${agent.other_copy}.` : "";
+    return [store, other].filter(Boolean).join(" ");
+  }
+
   /** What the entry shown is to this agent, under its label. */
   function agentEntryLabel(agent, { prepare }) {
     if (agent.copy_only) return "What to paste";
@@ -943,7 +954,7 @@
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
-    agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
+    agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,

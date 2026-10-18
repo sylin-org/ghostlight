@@ -741,8 +741,10 @@ impl Projection {
 
     fn project_harness(&self, harness: &mut Value) {
         remove(harness, &["private_view"]);
-        if let Some(path) = harness.get_mut("config_path") {
-            self.rewrite_path(path);
+        for key in ["config_path", "other_copy"] {
+            if let Some(path) = harness.get_mut(key) {
+                self.rewrite_path(path);
+            }
         }
     }
 

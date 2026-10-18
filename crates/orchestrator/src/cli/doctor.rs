@@ -189,6 +189,13 @@ pub fn run_doctor(fix: bool, json: bool) -> anyhow::Result<()> {
         if let Some(evidence) = &harness.evidence {
             println!("  {evidence}");
         }
+        if let Some(settings) = deployment_words::client_settings_line(
+            &harness.config_path,
+            harness.packaged,
+            harness.other_copy.as_deref(),
+        ) {
+            println!("  {settings}");
+        }
     }
     for line in agent_icon::doctor_lines(&observation.icons) {
         println!("{line}");

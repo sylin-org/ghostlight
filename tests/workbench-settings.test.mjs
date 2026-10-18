@@ -1620,6 +1620,27 @@ test("only the rows the service says are in use pulse, and the page never puts a
     ["Needs a look", "Connected", "Found, not connected"]);
 });
 
+test("the pane names a Store edition's own settings file and another copy beside it", () => {
+  const store = "~\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\claude_desktop_config.json";
+  const plain = "~\\AppData\\Roaming\\Claude\\claude_desktop_config.json";
+  const desktop = agent("claude-desktop", "Claude Desktop", "available", { config_path: store, packaged: true });
+  const shown = agentsPage([desktop, agent("zed", "Zed", "installed")]);
+  shown.pick("claude-desktop");
+  const text = (node) => node.textContent.replace(/<wbr>/g, "").replace(/&#039;/g, "'");
+  assert.equal(text(shown.pane().wearing("agent-path")[0]), store);
+  assert.equal(text(shown.pane().wearing("agent-copies")[0]),
+    "Claude Desktop from the Microsoft Store keeps its settings in this file, in its own folder.");
+  assert.match(shown.pane().wearing("agent-lead")[0].textContent, /^Claude Desktop is installed on this computer/);
+
+  const beside = agentsPage([{ ...desktop, other_copy: plain }]);
+  assert.equal(text(beside.pane().wearing("agent-copies")[0]),
+    "Claude Desktop from the Microsoft Store keeps its settings in this file, in its own folder. "
+    + `Ghostlight's entry goes in this file. Another copy of these settings is at ${plain}.`);
+
+  const plainOnly = agentsPage([agent("zed", "Zed", "installed")]);
+  assert.equal(plainOnly.pane().wearing("agent-copies").length, 0, "a plain settings file gets no note");
+});
+
 test("a copy-only agent found here claims nothing about a file Ghostlight never reads", () => {
   const goose = agent("goose", "goose", "available", { copy_only: true, config_path: "/home/ann/.config/goose/config.yaml" });
   const rows = [agent("zed", "Zed", "installed"), goose];

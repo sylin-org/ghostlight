@@ -562,7 +562,16 @@ last snapshot outlives that connection.
 
 Harness registration is an orchestrator-owned local-human capability. Each supported harness has
 one explicit config resolver and schema. The resolver applies Windows or Linux environment
-precedence before its documented fallback, including `CODEX_HOME` for Codex. Check is read-only.
+precedence before its documented fallback, including `CODEX_HOME` for Codex. On Windows a
+configuration below `%APPDATA%` or `%LOCALAPPDATA%` is also looked for, on every look, in each
+installed Store package's private copy of that root, `%LOCALAPPDATA%\Packages\<family>\LocalCache\Roaming`
+or `...\Local` (`install/packaged.rs`): `Packages` is listed once and only the client's own settings
+folder is tested in each package, so a Store edition is found even before it writes its file. A
+private copy beats the plain path; among several, the package the Store icon lookup names for the
+agent's app wins, else the copy written last. Inspection names the chosen file, says when it is a
+Store copy and names another copy that exists; Install and Fix write only the chosen file, and
+Uninstall removes Ghostlight's own entry from every copy that holds one (ADR-0197 amendment of
+2026-10-17). Check is read-only.
 Install and uninstall are serialized, merge only the `ghostlight` entry, keep unrelated siblings,
 preserve JSONC and TOML comments, create a backup, and refuse malformed, unreadable, or
 foreign-owned configuration rather than guessing. A separate confirmed Fix action may replace one

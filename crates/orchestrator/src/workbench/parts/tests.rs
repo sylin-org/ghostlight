@@ -250,6 +250,8 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
             copy_only: false,
             private_view: true,
             config_path: "/home/ann/.cursor/mcp.json".into(),
+            packaged: true,
+            other_copy: Some("/home/ann/.cursor/old/mcp.json".into()),
             connector_command: "/home/ann/.ghostlight/bin/ghostlight mcp".into(),
             manual_setup: "{\"mcpServers\":{}}".into(),
         }],
@@ -544,6 +546,8 @@ const INTEGRATION_KEYS: &[&str] = &[
     "harnesses[].label",
     "harnesses[].manual_setup",
     "harnesses[].name",
+    "harnesses[].other_copy",
+    "harnesses[].packaged",
     "harnesses[].product_id",
     "harnesses[].state",
     "harnesses[].target",
@@ -890,6 +894,7 @@ fn paths_are_home_relative_in_every_part_and_the_policy_for_both_audiences() {
     let home = path.parent().unwrap().to_owned();
     let inside = |name: &str| home.join(name).to_string_lossy().into_owned();
     snapshot.harnesses[0].config_path = inside("cursor.json");
+    snapshot.harnesses[0].other_copy = Some(inside("old-cursor.json"));
     snapshot.controls = ControlsPart::of(&ControlsFacts {
         runtime_state: RuntimeControlState::Active,
         runtime_note: None,
@@ -910,6 +915,10 @@ fn paths_are_home_relative_in_every_part_and_the_policy_for_both_audiences() {
         assert_eq!(
             integrations["harnesses"][0]["config_path"],
             format!("~{sep}cursor.json")
+        );
+        assert_eq!(
+            integrations["harnesses"][0]["other_copy"],
+            format!("~{sep}old-cursor.json")
         );
         let controls = projection.part(Part::Controls, &snapshot, setup_view);
         assert_eq!(controls["diagnostics"]["folder"], format!("~{sep}logs"));

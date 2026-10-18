@@ -25,6 +25,7 @@ use std::sync::OnceLock;
 use serde::Serialize;
 
 use super::layout::Layout;
+use super::packaged::{private_root, DataRoot};
 
 /// How many ancestors the detection walks before it stops.
 pub const MAX_ANCESTOR_DEPTH: usize = 16;
@@ -39,13 +40,6 @@ const PROGRAM_FILES_DIRECTORY: &str = "Program Files";
 /// architecture, resource id and publisher id. A package family name, `Claude_id`, is the first
 /// and the last.
 pub(super) const PACKAGE_FIELD_SEPARATOR: char = '_';
-
-/// Where an app's private copy of `%LOCALAPPDATA%` lives, below `%LOCALAPPDATA%`: one folder per
-/// package family installed for the person, named by the family name.
-pub(super) const PRIVATE_DATA_PARENT: &str = "Packages";
-
-/// The directories between the package family directory and the private `%LOCALAPPDATA%`.
-const PRIVATE_DATA_CHILD: [&str; 2] = ["LocalCache", "Local"];
 
 /// The prefix of the probe file the detection writes below `%LOCALAPPDATA%`.
 const PROBE_PREFIX: &str = "ghostlight-residence-probe-";
@@ -190,11 +184,7 @@ impl Probe {
     /// Whether the probe is also in the private copy of `%LOCALAPPDATA%` of package family
     /// `family`, which is where a redirected write goes.
     fn landed_privately(&self, family: &str) -> bool {
-        self.local_data
-            .join(PRIVATE_DATA_PARENT)
-            .join(family)
-            .join(PRIVATE_DATA_CHILD[0])
-            .join(PRIVATE_DATA_CHILD[1])
+        private_root(&self.local_data, family, DataRoot::Local)
             .join(&self.name)
             .is_file()
     }

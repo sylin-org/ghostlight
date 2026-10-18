@@ -128,6 +128,13 @@ The catalog holds 20 agents on 23 hosts.
 Where XDG_CONFIG_HOME is not set it is `~/.config`, and where APPDATA is not set it is `%USERPROFILE%\AppData\Roaming`.
 <!-- END agent list -->
 
+On Windows an agent installed from the Microsoft Store, such as Claude Desktop, keeps its settings
+in its own folder instead of the `%APPDATA%` path the table names: for Claude Desktop,
+`%LOCALAPPDATA%\Packages\Claude_<publisher id>\LocalCache\Roaming\Claude\claude_desktop_config.json`.
+Ghostlight looks there every time it checks, sets that file up, and says so on the **Integrations**
+page and in `ghostlight doctor`. A plain `%APPDATA%` file left from an earlier install is not edited;
+`ghostlight uninstall` removes Ghostlight's own entry from both.
+
 ## Workbench installation behavior
 
 **Check** is read-only. **Install** and **Uninstall** are explicit, serialized operations. They:

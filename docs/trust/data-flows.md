@@ -101,7 +101,8 @@ either case.
   The sidecar includes verification, sequence, freshness, source class, timing, organization, and
   contacts, but no source address, bearer token, verification key, or policy rules.
 - Browser adapter settings and MCP-client registrations remain in their platform-native local
-  stores.
+  stores. On Windows that includes a Microsoft Store app's own copy of its settings below
+  `%LOCALAPPDATA%\Packages`, which Ghostlight lists and reads on this computer only.
 - On Linux, the audit log, policy, state, run and diagnostics files that Ghostlight creates
   under `~/.ghostlight` are readable only by the user, and the directories it creates there are
   closed to other users. That includes `bin/install.json`, `install.lock`, `state/quit`,

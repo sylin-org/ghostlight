@@ -1218,6 +1218,8 @@ mod tests {
             copy_only: false,
             private_view: false,
             config_path: String::new(),
+            packaged: false,
+            other_copy: None,
             connector_command: "/home/ghostlight mcp".into(),
             manual_setup: String::new(),
         }

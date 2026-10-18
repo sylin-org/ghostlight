@@ -2,7 +2,10 @@
 //! and every sentence it says about it, pinned in `tests/golden/agents/writes/`.
 //!
 //! Each host of the roster is set up from fixed seed files on three computers: Windows, Linux,
-//! and Windows seen from inside another app's container. For each seed the golden records what
+//! and Windows seen from inside another app's container. On Windows the Store app's host is also
+//! set up with the Store edition installed, its settings in the package's private copy below
+//! `AppData/Local/Packages`, alone and beside a plain copy an earlier install left. For each seed
+//! the golden records what
 //! inspection says, what the Check, Install, Fix and Uninstall acts say, and every file each act
 //! wrote or removed, each act starting from a fresh copy of the seed. A setup of everything is
 //! recorded once per computer. The files change only on purpose: run this test with
@@ -61,6 +64,29 @@ const OLD_PERSON: &str = "Old Home";
 /// The app container the third computer runs Ghostlight from.
 const CONTAINER_APP: &str = "OpenAI.Codex";
 
+/// The host whose Store edition the Windows computer also has installed.
+const STORE_HOST: &str = "claude-desktop";
+
+/// The package family of [`STORE_HOST`]'s Store edition.
+const STORE_FAMILY: &str = "Claude_pzs8sxrjxfjjc";
+
+/// [`STORE_HOST`]'s settings file below the roaming application data, written out.
+const STORE_HOST_FILE: [&str; 2] = ["Claude", "claude_desktop_config.json"];
+
+/// The roaming application data below the person's home, where the plain file lives.
+const PLAIN_ROAMING: [&str; 2] = ["AppData", "Roaming"];
+
+/// The Store edition's own copy of the roaming application data below the person's home, where
+/// the packaged file lives.
+const STORE_ROAMING: [&str; 6] = [
+    "AppData",
+    "Local",
+    "Packages",
+    STORE_FAMILY,
+    "LocalCache",
+    "Roaming",
+];
+
 /// The argument a seed's entry gives the edge, written out as a person's file holds it.
 const EDGE_ARGUMENT: &str = "mcp";
 
@@ -106,15 +132,19 @@ impl Computer {
         !matches!(self, Self::Linux)
     }
 
-    /// The seeds recorded on this computer for a host whose file has `shape`.
-    fn seeds(self, shape: Shape) -> Vec<Seed> {
-        let all = shape.seeds();
+    /// The seeds recorded on this computer for the host `row`.
+    fn seeds(self, row: &AgentRow) -> Vec<Seed> {
+        let mut all = Shape::of(row).seeds();
         match self {
             Self::InsideAnotherApp => all
                 .into_iter()
                 .filter(|seed| matches!(seed, Seed::Absent | Seed::Other | Seed::Current))
                 .collect(),
-            _ => all,
+            Self::Windows if row.id == STORE_HOST => {
+                all.extend([Seed::Packaged, Seed::PackagedBesidePlain]);
+                all
+            }
+            Self::Windows | Self::Linux => all,
         }
     }
 }
@@ -185,6 +215,11 @@ enum Seed {
     CurrentNested,
     /// Codex's current entry with the Linux desktop session forwarded.
     CurrentForwarded,
+    /// The Store edition installed: the other seed in the package's private copy, no plain file.
+    Packaged,
+    /// The Store edition installed: the other seed in the package's private copy, and the current
+    /// entry in a plain file an earlier install left.
+    PackagedBesidePlain,
 }
 
 impl Seed {
@@ -203,6 +238,11 @@ impl Seed {
             Self::OtherNested => "other nested: another server under mcp.servers",
             Self::CurrentNested => "current nested: the current entry under mcp.servers",
             Self::CurrentForwarded => "current forwarded: the current entry forwarding the desktop",
+            Self::Packaged => "packaged: the Store edition's own copy holds the other seed",
+            Self::PackagedBesidePlain => {
+                "packaged beside plain: the Store edition's own copy holds the other seed, and a \
+                 plain file an earlier install left holds the current entry"
+            }
         }
     }
 }
@@ -302,11 +342,18 @@ impl Run {
             ),
         };
         let roots = harness_roots(&home, None, app_data, None, windows);
+        let local_app_data = windows
+            .then(|| PathBuf::from(spelled(&root, separator, &[PERSON, "AppData", "Local"])));
         let private_view = (computer == Computer::InsideAnotherApp).then(|| PrivateView {
             container: AppContainer {
                 app: CONTAINER_APP.into(),
             },
-            roots: vec![roots.roaming.clone(), home.join("AppData/Local")],
+            roots: vec![
+                roots.roaming.clone(),
+                local_app_data
+                    .clone()
+                    .expect("the container runs on Windows"),
+            ],
         });
         let context = HarnessContext {
             home,
@@ -323,6 +370,7 @@ impl Run {
             )),
             windows,
             linux: computer == Computer::Linux,
+            local_app_data,
             private_view,
         };
         Self {
@@ -392,25 +440,52 @@ impl Run {
         files
     }
 
+    /// The plain configuration file of the host `row` on this run's computer, where it is
+    /// written when no Store package holds a copy.
+    fn plain(&self, row: &AgentRow) -> PathBuf {
+        definition(&self.context, row.id)
+            .expect("every roster row has a definition")
+            .default_path
+    }
+
+    /// [`STORE_HOST`]'s settings file below `roaming`, below the person's home.
+    fn store_host_file(&self, roaming: &[&str]) -> PathBuf {
+        let mut parts = vec![PERSON];
+        parts.extend_from_slice(roaming);
+        parts.extend(STORE_HOST_FILE);
+        PathBuf::from(self.below(&parts))
+    }
+
+    /// The file a seed writes besides its own, with its bytes: the plain file an earlier install
+    /// left beside the Store edition's copy.
+    fn beside(&self, row: &AgentRow, seed: Seed) -> Option<(PathBuf, String)> {
+        (seed == Seed::PackagedBesidePlain).then(|| {
+            let bytes = seed_bytes(self, Shape::of(row), Seed::Current)
+                .expect("the current seed is a file");
+            (self.store_host_file(&PLAIN_ROAMING), bytes)
+        })
+    }
+
     /// Write `seed` for the host `row` and point Ghostlight at it when the seed is located. The
     /// seed's path and bytes, and the registry over the run.
     fn seeded(&self, row: &AgentRow, seed: Seed) -> (PathBuf, Option<String>, HarnessRegistry) {
-        let default = definition(&self.context, row.id)
-            .expect("every roster row has a definition")
-            .default_path;
-        let path = if seed == Seed::Located {
-            let name = default
-                .file_name()
-                .expect("a configuration has a file name");
-            PathBuf::from(self.below(&["located", &name.to_string_lossy()]))
-        } else {
-            default
+        let default = self.plain(row);
+        let path = match seed {
+            Seed::Located => {
+                let name = default
+                    .file_name()
+                    .expect("a configuration has a file name");
+                PathBuf::from(self.below(&["located", &name.to_string_lossy()]))
+            }
+            Seed::Packaged | Seed::PackagedBesidePlain => self.store_host_file(&STORE_ROAMING),
+            _ => default,
         };
         let bytes = seed_bytes(self, Shape::of(row), seed);
-        if let Some(bytes) = &bytes {
-            fs::create_dir_all(path.parent().expect("a configuration has a directory"))
+        let written = bytes.clone().map(|bytes| (path.clone(), bytes));
+        for (file, text) in written.into_iter().chain(self.beside(row, seed)) {
+            fs::create_dir_all(file.parent().expect("a configuration has a directory"))
                 .expect("the seed's directory is writable");
-            fs::write(&path, bytes).expect("the seed is writable");
+            fs::write(&file, text).expect("the seed is writable");
         }
         (
             path,
@@ -429,7 +504,9 @@ fn seed_bytes(run: &Run, shape: Shape, seed: Seed) -> Option<String> {
     match seed {
         Seed::Absent => return None,
         Seed::Empty => return Some(String::new()),
-        Seed::Located => return seed_bytes(run, shape, Seed::Other),
+        Seed::Located | Seed::Packaged | Seed::PackagedBesidePlain => {
+            return seed_bytes(run, shape, Seed::Other)
+        }
         _ => {}
     }
     Some(match shape {
@@ -683,6 +760,8 @@ fn write_summary(
         copy_only,
         private_view,
         config_path,
+        packaged,
+        other_copy,
         connector_command,
         manual_setup,
     } = summary;
@@ -714,6 +793,13 @@ fn write_summary(
     let _ = writeln!(out, "copy only: {}", yes(*copy_only));
     let _ = writeln!(out, "private view: {}", yes(*private_view));
     let _ = writeln!(out, "config path: {}", run.shown(Path::new(config_path)));
+    // Said only where it holds, so a host found at its plain path reads as it always did.
+    if *packaged {
+        out.push_str("packaged: yes, the Store edition's own copy\n");
+    }
+    if let Some(other) = other_copy {
+        let _ = writeln!(out, "other copy: {}", run.shown(Path::new(other)));
+    }
     let _ = writeln!(out, "connector command: {}", run.masked(connector_command));
     write_text(out, run, "manual setup", manual_setup);
 }
@@ -812,6 +898,10 @@ fn write_seed(out: &mut String, row: &AgentRow, computer: Computer, seed: Seed) 
             let _ = writeln!(out, "seed {}: no file", run.shown(&path));
         }
     }
+    if let Some((beside, bytes)) = run.beside(row, seed) {
+        let _ = writeln!(out, "seed {}:", run.shown(&beside));
+        write_block(out, &run, bytes.as_bytes());
+    }
     if seed == Seed::Located {
         out.push_str("-- locate\n");
         let before = run.files();
@@ -871,7 +961,7 @@ fn host_golden(row: &AgentRow) -> String {
         let _ = writeln!(out, "\n## {}", computer.heading());
         write_identity(&mut out, &summary_of(&registry, row.id));
         drop(run);
-        for seed in computer.seeds(Shape::of(row)) {
+        for seed in computer.seeds(row) {
             write_seed(&mut out, row, computer, seed);
         }
     }

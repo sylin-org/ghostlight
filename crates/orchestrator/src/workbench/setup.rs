@@ -663,6 +663,8 @@ pub(super) mod test_support {
             copy_only: false,
             private_view: false,
             config_path: String::new(),
+            packaged: false,
+            other_copy: None,
             connector_command: "ghostlight mcp".into(),
             manual_setup: String::new(),
         }

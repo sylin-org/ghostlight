@@ -14,6 +14,7 @@ pub mod last_browser;
 pub mod layout;
 pub mod migration;
 pub mod native_host;
+mod packaged;
 pub mod reconcile;
 pub mod record;
 pub mod setup_state;
@@ -50,6 +51,7 @@ use crate::language::deployment as words;
 use container::{AppContainer, Residence};
 use icons::{AgentIconSources, IconSource, KnownFolder, ProgramPlace};
 use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
+use packaged::{DataRoots, Packages, SettingsCopy};
 
 const SERVER_NAME: &str = "ghostlight";
 /// The arguments that make the edge the MCP relay, in every client's entry.
@@ -66,6 +68,8 @@ const USER_PROFILE_VARIABLE: &str = "USERPROFILE";
 const HOME_VARIABLE: &str = "HOME";
 /// The Windows variable that names the roaming application data directory.
 const APP_DATA_VARIABLE: &str = "APPDATA";
+/// The Windows variable that names the local application data directory.
+const LOCAL_APP_DATA_VARIABLE: &str = "LOCALAPPDATA";
 /// The Linux variable that names the configuration directory (XDG base directories).
 const XDG_CONFIG_HOME_VARIABLE: &str = "XDG_CONFIG_HOME";
 /// The variable that names Codex's own directory, which holds its `config.toml`.
@@ -311,6 +315,7 @@ fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessConte
         locations: state.join(HARNESS_LOCATIONS_FILE),
         windows: false,
         linux: cfg!(target_os = "linux"),
+        local_app_data: None,
         private_view: None,
     }
 }
@@ -425,6 +430,14 @@ pub struct HarnessSummary {
     pub private_view: bool,
     /// Exact configuration destination currently resolved for this target.
     pub config_path: String,
+    /// Whether `config_path` is a Microsoft Store app's private copy of the agent's settings,
+    /// found below `%LOCALAPPDATA%\Packages`, which is the copy that app reads.
+    pub packaged: bool,
+    /// Another copy of the agent's settings file that exists besides `config_path`, such as a
+    /// plain `%APPDATA%` file an earlier install left, or another package's copy. Ghostlight's
+    /// entry goes in `config_path`; Uninstall also removes Ghostlight's own entry from this copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other_copy: Option<String>,
     /// Exact installed command line available for manual setup.
     pub connector_command: String,
     /// Smallest complete manual configuration document for this target.
@@ -593,6 +606,9 @@ struct HarnessContext {
     /// Whether the computer runs Linux, where Codex's entry forwards the desktop session
     /// ([`CODEX_DESKTOP_ENVIRONMENT`]).
     linux: bool,
+    /// The person's `%LOCALAPPDATA%` on Windows, below which each Store app keeps its private
+    /// copy of the data roots ([`packaged`]); none elsewhere, where no copy is looked for.
+    local_app_data: Option<PathBuf>,
     /// Set when this process runs inside an app container: configuration below its `AppData`
     /// roots is that app's private view, which no other app reads.
     private_view: Option<PrivateView>,
@@ -654,20 +670,18 @@ impl HarnessContext {
             .map(|layout| layout.state())
             .unwrap_or_default()
             .join(HARNESS_LOCATIONS_FILE);
-        let private_view = if windows {
+        let local_app_data = windows.then(|| {
+            env::var_os(LOCAL_APP_DATA_VARIABLE)
+                .map_or_else(|| home.join("AppData/Local"), PathBuf::from)
+        });
+        let private_view = local_app_data.as_ref().and_then(|local| {
             Residence::detect()
                 .container()
                 .map(|container| PrivateView {
                     container: container.clone(),
-                    roots: vec![
-                        roots.roaming.clone(),
-                        env::var_os("LOCALAPPDATA")
-                            .map_or_else(|| home.join("AppData/Local"), PathBuf::from),
-                    ],
+                    roots: vec![roots.roaming.clone(), local.clone()],
                 })
-        } else {
-            None
-        };
+        });
         Self {
             home,
             config: roots.config,
@@ -679,7 +693,20 @@ impl HarnessContext {
             locations,
             windows,
             linux: cfg!(target_os = "linux"),
+            local_app_data,
             private_view,
+        }
+    }
+
+    /// The Store packages of this look that keep a private copy of a data root: one listing on
+    /// Windows, none elsewhere.
+    fn packages(&self) -> Packages {
+        match &self.local_app_data {
+            Some(local) if self.windows => Packages::listed(DataRoots {
+                roaming: self.roaming.clone(),
+                local: local.clone(),
+            }),
+            _ => Packages::none(),
         }
     }
 }
@@ -752,9 +779,30 @@ struct HarnessDefinition {
     /// The package name of the packaged app that reads this configuration, when the client is
     /// one. Inside that app's own container the private view is the one the client reads.
     own_package: Option<&'static str>,
+    /// Every place this look found the agent's settings may be, the one it reads first leading
+    /// ([`Packages::copies`]): the Store packages' private copies, then the plain path.
+    copies: Vec<SettingsCopy>,
 }
 
 impl HarnessDefinition {
+    /// Whether `path` is a Store package's private copy of the agent's settings.
+    fn packaged(&self) -> bool {
+        let path = comparable(&self.path);
+        self.copies
+            .iter()
+            .any(|copy| copy.packaged && comparable(&copy.file) == path)
+    }
+
+    /// The configuration files of the agent's other copies of its settings that exist: what
+    /// `path` is not, but an earlier install or another package may still hold.
+    fn other_copies(&self) -> impl Iterator<Item = &Path> {
+        let path = comparable(&self.path);
+        self.copies
+            .iter()
+            .filter(move |copy| comparable(&copy.file) != path && copy.file.is_file())
+            .map(|copy| copy.file.as_path())
+    }
+
     fn accepts_config_path(&self, path: &Path) -> bool {
         let Some(name) = path.file_name().and_then(OsStr::to_str) else {
             return false;
@@ -1365,21 +1413,38 @@ impl AgentRow {
         Agent::listed(self.agent_id, self.name, self.monogram)
     }
 
-    /// The configuration file on the computer `context` describes, before any location the
-    /// person chose: the first of the candidates that exists, else `path`.
-    fn file_on(&self, context: &HarnessContext) -> PathBuf {
-        let default = (self.path)(context);
-        self.candidates
+    /// The names of the Store packages of this host's own app, as its icon sources name them.
+    fn store_packages(&self) -> Vec<&'static str> {
+        self.icons
             .iter()
-            .map(|name| default.with_file_name(name))
-            .find(|candidate| candidate.exists())
-            .unwrap_or(default)
+            .filter_map(|source| match source {
+                IconSource::WindowsPackage(name) => Some(*name),
+                IconSource::WindowsExe(_) | IconSource::LinuxDesktop(_) => None,
+            })
+            .collect()
     }
 
-    /// The row as it stands on the computer `context` describes, before any location the person
-    /// chose.
-    fn on(&self, context: &HarnessContext) -> HarnessDefinition {
-        let path = self.file_on(context);
+    /// Every place the agent's settings may be on the computer `context` describes, among the
+    /// Store `packages` of this look, the one it reads first leading; in each, the configuration
+    /// file is the first of the candidates beside the file `path` names that exists, else that
+    /// file.
+    fn copies_on(&self, context: &HarnessContext, packages: &Packages) -> Vec<SettingsCopy> {
+        packages.copies(&(self.path)(context), &self.store_packages(), |file| {
+            self.candidates
+                .iter()
+                .map(|candidate| file.with_file_name(candidate))
+                .find(|candidate| candidate.exists())
+                .unwrap_or_else(|| file.to_path_buf())
+        })
+    }
+
+    /// The row as it stands on the computer `context` describes, among the Store `packages` of
+    /// this look, before any location the person chose.
+    fn on(&self, context: &HarnessContext, packages: &Packages) -> HarnessDefinition {
+        let copies = self.copies_on(context, packages);
+        let path = copies
+            .first()
+            .map_or_else(|| (self.path)(context), |copy| copy.file.clone());
         HarnessDefinition {
             id: self.id,
             agent_id: self.agent_id,
@@ -1397,12 +1462,18 @@ impl AgentRow {
             executables: self.executables,
             dialect: self.dialect,
             own_package: self.own_package,
+            copies,
         }
     }
 }
 
+/// Every roster row as this look finds it: the Store packages are listed once for all of them.
 fn definitions(context: &HarnessContext) -> Vec<HarnessDefinition> {
-    let mut rows: Vec<HarnessDefinition> = ROSTER.iter().map(|row| row.on(context)).collect();
+    let packages = context.packages();
+    let mut rows: Vec<HarnessDefinition> = ROSTER
+        .iter()
+        .map(|row| row.on(context, &packages))
+        .collect();
     let overrides = read_location_overrides(context).unwrap_or_default();
     for definition in &mut rows {
         if let Some(located) = overrides.get(definition.id) {
@@ -1586,6 +1657,11 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         copy_only: manual,
         private_view: !changeable,
         config_path: definition.path.to_string_lossy().into_owned(),
+        packaged: definition.packaged(),
+        other_copy: definition
+            .other_copies()
+            .next()
+            .map(|path| path.to_string_lossy().into_owned()),
         connector_command: mcp_command_line(&context.edge),
         manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
             format!(
@@ -1665,10 +1741,20 @@ fn registration_state(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<RegistrationState, HarnessError> {
-    if !definition.path.exists() || matches!(definition.dialect, ConfigDialect::Manual(_)) {
+    registration_state_at(context, definition, &definition.path)
+}
+
+/// The state of Ghostlight's entry in the file at `path`, read as the configuration of
+/// `definition`.
+fn registration_state_at(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+    path: &Path,
+) -> Result<RegistrationState, HarnessError> {
+    if !path.exists() || matches!(definition.dialect, ConfigDialect::Manual(_)) {
         return Ok(RegistrationState::Missing);
     }
-    let source = fs::read_to_string(&definition.path).map_err(HarnessError::Read)?;
+    let source = fs::read_to_string(path).map_err(HarnessError::Read)?;
     match definition.dialect {
         ConfigDialect::CodexToml => inspect_toml(&source, context),
         ConfigDialect::Manual(_) => Ok(RegistrationState::Missing),
@@ -1848,21 +1934,25 @@ fn apply_install(
     })
 }
 
+/// Remove Ghostlight's entry from its configuration and also from every other copy of the
+/// agent's settings that holds an entry Ghostlight owns, since an earlier install may have written
+/// either. A copy that holds no owned entry, or cannot be read, is left as it is.
 fn apply_uninstall(
     context: &HarnessContext,
     definition: &HarnessDefinition,
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
-    let changed = match definition.dialect {
-        ConfigDialect::CodexToml => edit_toml(context, &definition.path, false)?,
-        ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
-        ConfigDialect::Json(dialect) => edit_json(context, &definition.path, dialect, false)?,
-        ConfigDialect::OpenCode => {
-            let source = read_or_empty(&definition.path)?;
-            let dialect = opencode_dialect(context, &source)?;
-            edit_json(context, &definition.path, dialect, false)?
+    let mut changed = uninstall_at(context, definition, &definition.path)?;
+    for other in definition.other_copies() {
+        if matches!(
+            registration_state_at(context, definition, other),
+            Ok(RegistrationState::Current
+                | RegistrationState::Updatable
+                | RegistrationState::Retired)
+        ) {
+            changed |= uninstall_at(context, definition, other)?;
         }
-    };
+    }
     let summary = inspect(context, definition);
     Ok(HarnessActionResult {
         changed,
@@ -1879,6 +1969,25 @@ fn apply_uninstall(
         },
         summary,
     })
+}
+
+/// Remove Ghostlight's own entry from the file at `path`, read as the configuration of
+/// `definition`. Whether the file changed.
+fn uninstall_at(
+    context: &HarnessContext,
+    definition: &HarnessDefinition,
+    path: &Path,
+) -> Result<bool, HarnessError> {
+    match definition.dialect {
+        ConfigDialect::CodexToml => edit_toml(context, path, false),
+        ConfigDialect::Manual(_) => Err(manual_refusal(definition)),
+        ConfigDialect::Json(dialect) => edit_json(context, path, dialect, false),
+        ConfigDialect::OpenCode => {
+            let source = read_or_empty(path)?;
+            let dialect = opencode_dialect(context, &source)?;
+            edit_json(context, path, dialect, false)
+        }
+    }
 }
 
 fn apply_fix(
@@ -2706,10 +2815,11 @@ mod tests {
         agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
         edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots, inspect,
         inspect_json, inspect_toml, json_entry_args, json_entry_command, jsonc_options,
-        manual_json_setup, mcp_command_line, replace_with_backup, resolve_through_symlink,
-        AppContainer, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
-        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, PrivateView,
-        RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER,
+        manual_json_setup, mcp_command_line, packaged, replace_with_backup,
+        resolve_through_symlink, AppContainer, ClientName, ForeignCommand, HarnessAction,
+        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
+        JsonDialect, Packages, PrivateView, RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME,
+        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -2739,6 +2849,7 @@ mod tests {
             locations: directory.join("config/ghostlight/harness-locations.json"),
             windows: false,
             linux: cfg!(target_os = "linux"),
+            local_app_data: None,
             private_view: None,
         }
     }
@@ -3190,13 +3301,16 @@ mod tests {
             let directory = temporary(&format!("candidates-{}", row.id));
             let context = context(&directory);
             let default = (row.path)(&context);
-            assert_eq!(row.file_on(&context), default, "{}", row.id);
+            let file_on = |context: &HarnessContext| {
+                row.copies_on(context, &Packages::none())[0].file.clone()
+            };
+            assert_eq!(file_on(&context), default, "{}", row.id);
             fs::create_dir_all(default.parent().unwrap()).unwrap();
             // Each candidate, written after every later one, wins over all of them.
             for (index, name) in row.candidates.iter().enumerate().rev() {
                 fs::write(default.with_file_name(name), "{}\n").unwrap();
                 assert_eq!(
-                    row.file_on(&context),
+                    file_on(&context),
                     default.with_file_name(row.candidates[index]),
                     "{}",
                     row.id
@@ -4612,6 +4726,253 @@ mod tests {
         );
         let value: Value = serde_json::from_str(&fs::read_to_string(&desktop).unwrap()).unwrap();
         assert!(value["mcpServers"].get("ghostlight").is_some());
+    }
+
+    /// The Store Claude Desktop's package family, as the owner's computer has it.
+    const STORE_FAMILY: &str = "Claude_pzs8sxrjxfjjc";
+
+    /// A person's own settings in Claude Desktop's file, which every act keeps byte for byte.
+    const PERSON_SETTINGS: &str =
+        "{\n  // Kept as written.\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"other\": {\"command\": \"other-server\"}\n  }\n}\n";
+
+    /// A Windows computer below `directory`: `%APPDATA%` is `config` and `%LOCALAPPDATA%` is
+    /// `local`, where Store packages keep their private copies.
+    fn windows_context(directory: &Path) -> HarnessContext {
+        let mut context = context(directory);
+        context.windows = true;
+        context.local_app_data = Some(directory.join("local"));
+        context
+    }
+
+    /// Claude Desktop's plain settings file on the computer `context` describes.
+    fn plain_desktop(context: &HarnessContext) -> PathBuf {
+        context.roaming.join("Claude/claude_desktop_config.json")
+    }
+
+    /// The Store edition's own Claude folder on the computer `context` describes, made.
+    fn store_folder(context: &HarnessContext) -> PathBuf {
+        let folder = packaged::private_root(
+            context.local_app_data.as_deref().unwrap(),
+            STORE_FAMILY,
+            packaged::DataRoot::Roaming,
+        )
+        .join("Claude");
+        fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    fn desktop_summary(registry: &HarnessRegistry) -> HarnessSummary {
+        registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "claude-desktop")
+            .unwrap()
+    }
+
+    fn has_entry(path: &Path) -> bool {
+        let text = fs::read_to_string(path).unwrap();
+        parse_to_serde_value(&text, &super::jsonc_options())
+            .unwrap()
+            .expect("the file holds a document")["mcpServers"]
+            .get(SERVER_NAME)
+            .is_some()
+    }
+
+    #[test]
+    fn a_fresh_store_install_is_found_by_its_own_folder_and_set_up_there() {
+        let directory = temporary("store-fresh");
+        let context = windows_context(&directory);
+        let plain = plain_desktop(&context);
+
+        // Without the Store edition nothing changes: Claude Desktop is not here and the plain
+        // file is where it would look.
+        let registry = HarnessRegistry::with_context(context.clone());
+        let absent = desktop_summary(&registry);
+        assert_eq!(absent.state, HarnessState::NotDetected);
+        assert_eq!(PathBuf::from(&absent.config_path), plain);
+        assert!(!absent.packaged && absent.other_copy.is_none());
+
+        // The Store edition's own folder holds its other files but no settings file yet.
+        let folder = store_folder(&context);
+        fs::write(folder.join("config.json"), "{}").unwrap();
+        registry.refresh().unwrap();
+        let found = desktop_summary(&registry);
+        let private = folder.join("claude_desktop_config.json");
+        assert_eq!(found.state, HarnessState::Available, "{}", found.detail);
+        assert_eq!(PathBuf::from(&found.config_path), private);
+        assert!(found.packaged);
+        assert!(found.other_copy.is_none());
+
+        let installed = registry
+            .apply("claude-desktop", HarnessAction::Install)
+            .unwrap();
+        assert!(installed.changed);
+        assert_eq!(installed.summary.state, HarnessState::Installed);
+        assert!(has_entry(&private));
+        assert!(!plain.exists(), "the plain path is not written");
+        assert!(!plain.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn the_store_copy_is_set_up_and_a_plain_copy_left_beside_it_is_not_touched() {
+        let directory = temporary("store-plain");
+        let context = windows_context(&directory);
+        let plain = plain_desktop(&context);
+        fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        let left = format!(
+            "{{\"mcpServers\":{{\"ghostlight\":{{\"command\":{},\"args\":[\"mcp\"]}}}}}}",
+            serde_json::to_string(&context.edge.to_string_lossy()).unwrap()
+        );
+        fs::write(&plain, &left).unwrap();
+        let private = store_folder(&context).join("claude_desktop_config.json");
+        fs::write(&private, PERSON_SETTINGS).unwrap();
+        let registry = HarnessRegistry::with_context(context.clone());
+
+        let summary = desktop_summary(&registry);
+        assert_eq!(PathBuf::from(&summary.config_path), private);
+        assert_eq!(
+            summary.state,
+            HarnessState::Available,
+            "the plain copy's entry is not the one the Store edition reads"
+        );
+        assert!(summary.packaged);
+        assert_eq!(
+            summary.other_copy.as_deref().map(PathBuf::from),
+            Some(plain.clone())
+        );
+
+        assert!(
+            registry
+                .apply("claude-desktop", HarnessAction::Install)
+                .unwrap()
+                .changed
+        );
+        assert!(has_entry(&private));
+        let written = fs::read_to_string(&private).unwrap();
+        assert!(written.starts_with("{\n  // Kept as written.\n  \"theme\": \"dark\",\n"));
+        assert!(written.contains("\"other\": {\"command\": \"other-server\"}"));
+        assert_eq!(
+            fs::read_to_string(&plain).unwrap(),
+            left,
+            "the plain copy is left as it is"
+        );
+    }
+
+    #[test]
+    fn uninstall_removes_ghostlights_entry_from_every_copy_that_holds_it() {
+        let directory = temporary("store-uninstall");
+        let context = windows_context(&directory);
+        let registry = HarnessRegistry::with_context(context.clone());
+        let plain = plain_desktop(&context);
+        fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        fs::write(&plain, PERSON_SETTINGS).unwrap();
+        // An earlier non-Store install set up the plain copy.
+        registry
+            .apply("claude-desktop", HarnessAction::Install)
+            .unwrap();
+        let private = store_folder(&context).join("claude_desktop_config.json");
+        fs::write(&private, PERSON_SETTINGS).unwrap();
+        registry
+            .apply("claude-desktop", HarnessAction::Install)
+            .unwrap();
+        assert!(has_entry(&plain) && has_entry(&private));
+        // A foreign entry in a third copy is never removed.
+        let foreign = packaged::private_root(
+            context.local_app_data.as_deref().unwrap(),
+            "Other.Claude_abc123",
+            packaged::DataRoot::Roaming,
+        )
+        .join("Claude/claude_desktop_config.json");
+        fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+        let foreign_text = r#"{"mcpServers":{"ghostlight":{"command":"node","args":["x.js"]}}}"#;
+        fs::write(&foreign, foreign_text).unwrap();
+
+        let removed = registry
+            .apply("claude-desktop", HarnessAction::Uninstall)
+            .unwrap();
+        assert!(removed.changed);
+        assert!(!has_entry(&plain) && !has_entry(&private));
+        for copy in [&plain, &private] {
+            let text = fs::read_to_string(copy).unwrap();
+            assert!(text.contains("// Kept as written."), "{text}");
+            assert!(
+                text.contains("\"other\": {\"command\": \"other-server\"}"),
+                "{text}"
+            );
+        }
+        assert_eq!(fs::read_to_string(&foreign).unwrap(), foreign_text);
+    }
+
+    #[test]
+    fn when_the_store_copy_goes_away_the_next_look_falls_back_to_the_plain_path() {
+        let directory = temporary("store-gone");
+        let context = windows_context(&directory);
+        let folder = store_folder(&context);
+        let registry = HarnessRegistry::with_context(context.clone());
+        assert!(desktop_summary(&registry).packaged);
+
+        fs::remove_dir_all(context.local_app_data.as_deref().unwrap().join("Packages")).unwrap();
+        assert!(!folder.exists());
+        registry.refresh().unwrap();
+        let summary = desktop_summary(&registry);
+        assert!(!summary.packaged);
+        assert_eq!(PathBuf::from(&summary.config_path), plain_desktop(&context));
+        assert_eq!(summary.state, HarnessState::NotDetected);
+    }
+
+    #[test]
+    fn inside_the_store_apps_own_container_its_copy_is_the_file_its_view_shows_and_is_written() {
+        let directory = temporary("store-own-container");
+        let mut context = windows_context(&directory);
+        let local = context.local_app_data.clone().unwrap();
+        context.private_view = Some(PrivateView {
+            container: AppContainer {
+                app: "Claude".into(),
+            },
+            roots: vec![context.roaming.clone(), local.clone()],
+        });
+        let private = store_folder(&context).join("claude_desktop_config.json");
+        fs::write(&private, PERSON_SETTINGS).unwrap();
+        let registry = HarnessRegistry::with_context(context.clone());
+
+        let summary = desktop_summary(&registry);
+        // Inside the container a write to the plain path lands in the package's private copy of
+        // `%APPDATA%`, the same mapping the container probe confirms for `%LOCALAPPDATA%`: the
+        // plain path the view shows and the copy found here are one file.
+        let rest = plain_desktop(&context)
+            .strip_prefix(&context.roaming)
+            .unwrap()
+            .to_path_buf();
+        let redirected =
+            packaged::private_root(&local, STORE_FAMILY, packaged::DataRoot::Roaming).join(rest);
+        assert_eq!(PathBuf::from(&summary.config_path), redirected);
+        assert_eq!(redirected, private);
+        assert!(!summary.private_view);
+        assert!(summary.can_install);
+        assert!(
+            registry
+                .apply("claude-desktop", HarnessAction::Install)
+                .unwrap()
+                .changed
+        );
+        assert!(has_entry(&private));
+        assert!(!plain_desktop(&context).exists());
+
+        // Inside another app's container the same copy is that app's private view, and is left.
+        context.private_view = Some(PrivateView {
+            container: AppContainer {
+                app: "OpenAI.Codex".into(),
+            },
+            roots: vec![context.roaming.clone(), local],
+        });
+        let other = HarnessRegistry::with_context(context);
+        let summary = desktop_summary(&other);
+        assert!(summary.private_view && !summary.can_uninstall);
+        assert!(matches!(
+            other.apply("claude-desktop", HarnessAction::Uninstall),
+            Err(HarnessError::PrivateView(_))
+        ));
+        assert!(has_entry(&private));
     }
 
     #[test]

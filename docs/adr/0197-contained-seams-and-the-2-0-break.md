@@ -294,6 +294,44 @@ differ, this section wins.
 - **Development.** An agent that runs inside Claude desktop or Codex runs the install once from a
   regular terminal; later development loops then work from inside the container.
 
+## Packaged clients seen from outside (2026-10-17)
+
+Live finding on the owner's Windows machine: Claude Desktop from the Microsoft Store (package
+family `Claude_pzs8sxrjxfjjc`) keeps its settings in
+`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`.
+The service runs outside any container, read only `%APPDATA%\Claude`, and said Claude Desktop was
+not installed, so no Store user could set it up from the window. The Windows app container
+amendment above decides what an install does from inside a container. This amendment decides how
+Ghostlight, outside, finds a packaged client's settings. The owner asked for a process that is
+"resilient and adaptive", so there is no table of package families.
+
+- **Discovery on every look.** For a client whose configuration sits below `%APPDATA%` or
+  `%LOCALAPPDATA%` (relative path `<rest>`), the candidates are the plain path and the same
+  relative path in each installed package's private copy of that root:
+  `%LOCALAPPDATA%\Packages\<family>\LocalCache\Roaming\<rest>`, or `LocalCache\Local` for a
+  `%LOCALAPPDATA%` path. The evidence is the client's own settings folder, not only its file, so a
+  fresh Store install that has not written the file yet is found and set up. A look lists
+  `Packages` once, keeps the packages that have such a private copy, and tests only the settings
+  folder the catalog names for each client. There is no recursive search and no registry read.
+  The next look finds a Store edition installed or removed since.
+- **Choosing a copy.** A private copy beats the plain one, because the packaged app reads its
+  private copy first. Among several private copies, the package the Store icon lookup names for
+  the agent's app wins, else the copy written most recently (its file, or its folder while it has
+  no file). When the chosen copy goes away, the next look falls back cleanly.
+- **What Ghostlight says.** The Integrations pane and `doctor` name the chosen file, say when it is
+  the Store edition's own copy, and, when another copy of the settings exists, say in one sentence
+  where Ghostlight's entry goes and where the other copy is. It is never a refusal.
+- **A plain copy left behind.** A plain `%APPDATA%` file from an earlier non-Store install is not
+  the one the Store edition reads. Inspection reports the private copy and Install, Fix and Check
+  do not edit the plain one. Uninstall removes Ghostlight's own entry from every copy that holds
+  one, since earlier installs may have written either; a foreign entry stays.
+- **Containers are unchanged.** Inside the client's own container, the plain path the private view
+  shows and the private copy are one file, and it is written normally. Inside any other container
+  the private copy lies below `%LOCALAPPDATA%` and is left with the one command that finishes it
+  from a regular terminal. Ghostlight still uses no WMI, Task Scheduler or other container escape.
+- **No change elsewhere.** A client found only at its plain path behaves as before, and Linux has no
+  packages to look at.
+
 ## Amendment 2026-10-14: connector source lock
 
 Connector and relay source is locked to the last published tag at the same relay revision. The

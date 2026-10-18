@@ -14,7 +14,7 @@ use toml_edit::{DocumentMut, Table};
 
 use super::{
     harness_roots, manual_json_setup, manual_setup, AgentRow, ConfigDialect, HarnessContext,
-    JsonDialect, APP_DATA_VARIABLE, CODEX_HOME_VARIABLE, CRUSH_CONFIG_VARIABLE, ROSTER,
+    JsonDialect, Packages, APP_DATA_VARIABLE, CODEX_HOME_VARIABLE, CRUSH_CONFIG_VARIABLE, ROSTER,
     SERVER_NAME, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
 };
 use crate::language::self_check::golden::{check_golden_with, repository_path};
@@ -120,6 +120,7 @@ impl Platform {
             locations: PathBuf::new(),
             windows,
             linux: !windows,
+            local_app_data: None,
             private_view: None,
         }
     }
@@ -225,8 +226,8 @@ fn json_path(value: &Value) -> Option<Vec<String>> {
 /// The path to Ghostlight's entry in the TOML document a person would paste for `row`.
 fn toml_key(row: &AgentRow) -> String {
     let context = Platform::Linux.context(false);
-    let document =
-        manual_setup(&context, &row.on(&context)).expect("a TOML dialect has a setup document");
+    let document = manual_setup(&context, &row.on(&context, &Packages::none()))
+        .expect("a TOML dialect has a setup document");
     let document: DocumentMut = document.parse().expect("the setup document is TOML");
     dotted(&toml_path(document.as_table()).expect("the setup document holds Ghostlight's entry"))
 }
