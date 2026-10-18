@@ -118,6 +118,9 @@ the owner wants, and what this project learned the hard way.
   continuing would misinterpret an action, lose data, or bypass authority; do not silently guess
   those semantics. Versioned history is one application, not the scope of this directive
   (ADR-0163). Prove recovery at real boundaries, preserve evidence, and never replay uncertain work.
+  Be adaptive as well: discover where things really are on every look (where an app keeps its
+  settings, a Store app's private copy of them) instead of trusting a fixed table of locations or
+  package names (owner, 2026-10-17: "our process must be resilient and adaptive").
 - **Preserve history.** Docs, ADRs, licenses, research, trust and legal material, task ledgers, and
   product identity survive internal rewrites. Reconcile active documents; never erase evidence.
 - **Clean-room is not a resource wipe.** Old implementation code is not authority for new
