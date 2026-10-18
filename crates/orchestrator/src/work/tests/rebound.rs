@@ -23,7 +23,6 @@ fn found_target() -> (
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -42,7 +41,6 @@ fn found_target() -> (
         &workspace,
         "browser_find",
         json!({"tab":tab_handle,"text":"More options"}),
-        None,
         &CancellationToken::default(),
     );
     let target = found.facts["matches"][0]["target"]
@@ -74,7 +72,6 @@ fn click_with(
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     (clicked, audit, target)
@@ -116,7 +113,6 @@ fn after_describing(
             &workspace,
             tool,
             arguments(&tab_handle, &target),
-            None,
             &CancellationToken::default(),
         );
         (result, audit)
@@ -273,7 +269,6 @@ fn a_fill_that_followed_a_handle_while_preparing_reports_rebound() {
         &workspace,
         "browser_fill_form",
         json!({"tab":tab_handle,"fields":[{"target":target,"value":"x"}]}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -313,7 +308,6 @@ fn a_save_the_page_did_not_take_keeps_the_recording_and_names_a_file_input() {
         &workspace,
         "browser_record",
         json!({"action":"save","target":target}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -355,7 +349,6 @@ fn after_saving_to_a_target() -> (
             &workspace,
             "browser_record",
             json!({"action":"save","target":target}),
-            None,
             &CancellationToken::default(),
         );
         (result, audit)

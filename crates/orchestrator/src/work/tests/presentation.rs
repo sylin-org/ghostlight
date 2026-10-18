@@ -27,7 +27,6 @@ fn credential_guidance_finishes_visuals_without_a_denial_notice() {
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/"}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(opened.status, Status::Succeeded);
@@ -53,7 +52,7 @@ fn credential_guidance_finishes_visuals_without_a_denial_notice() {
         } else {
             ("browser_type_text", input)
         };
-        let result = executor.execute(&workspace, tool, input, None, &CancellationToken::default());
+        let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
         assert_eq!(result.status, Status::Blocked);
         assert_eq!(result.effect, Effect::None);
         let signals = signals.0.lock().unwrap();
@@ -84,7 +83,6 @@ fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/","new_tab":true}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Succeeded);
@@ -114,7 +112,7 @@ fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
         } else {
             ("browser_read", json!({"tab":handles[0]}))
         };
-        let result = executor.execute(&workspace, tool, input, None, &CancellationToken::default());
+        let result = executor.execute(&workspace, tool, input, &CancellationToken::default());
         assert_eq!(result.status, Status::Succeeded, "{result:?}");
         assert_eq!(
             browser.calls()[before..]

@@ -1719,9 +1719,8 @@ impl Refusal {
             Self::FieldValuesRejected { fields, .. } => field_problem::rejected_next_steps(fields),
             Self::FieldsReverted { reverted, .. } => field_problem::rejected_next_steps(reverted),
             Self::DocumentUnavailable => vec!["Inspect the current page before trying again.".into()],
-            // Only advice the decoder will take: timeout_ms never grows past its maximum, and an
-            // edge-supplied deadline ignores it. After dispatch the first job is learning whether
-            // the action already happened.
+            // Only advice the decoder will take: timeout_ms never grows past its maximum. After
+            // dispatch the first job is learning whether the action already happened.
             Self::DeadlineExpired {
                 before_dispatch: false,
                 ..

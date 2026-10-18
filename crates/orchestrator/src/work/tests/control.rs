@@ -17,7 +17,6 @@ fn human_pause_and_stop_drain_work_without_repeated_guardrail_popups() {
                 &workspace,
                 "browser_navigate",
                 json!({"url":"https://example.com","new_tab":true}),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(result.effect, Effect::None);
@@ -60,7 +59,6 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
             &workspace,
             "policy_explain",
             json!({}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Succeeded, "{result:?}");
@@ -87,7 +85,6 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
             &workspace,
             "browser_tabs",
             json!({"action":"list"}),
-            None,
             &CancellationToken::default(),
         );
         assert_ne!(blocked.status, Status::Succeeded);
@@ -100,14 +97,13 @@ fn policy_explain_still_honors_cancellation_and_original_deadlines() {
     let (executor, browser, _, workspace, audit) = fixture();
     let cancellation = CancellationToken::default();
     cancellation.cancel();
-    let result = executor.execute(&workspace, "policy_explain", json!({}), None, &cancellation);
+    let result = executor.execute(&workspace, "policy_explain", json!({}), &cancellation);
     assert_eq!(result.status, Status::Cancelled);
     assert_eq!(result.facts["reason"], "cancelled");
     let mut expired = crate::work::PreparedInvocation::new(
         crate::work::InvocationId::mint(),
         "policy_explain",
         json!({}),
-        None,
         None,
     );
     expired.deadline = Instant::now() - Duration::from_millis(1);
@@ -154,13 +150,7 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
         {"id":"five","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}},
         {"id":"six","tool":"browser_navigate","arguments":{"url":"https://denied.example/"}}
     ]});
-    let result = executor.execute(
-        &one,
-        "browser_flow",
-        refused,
-        None,
-        &CancellationToken::default(),
-    );
+    let result = executor.execute(&one, "browser_flow", refused, &CancellationToken::default());
     assert_eq!(result.status, Status::Blocked);
     assert!(result.facts["steps"]
         .as_array()
@@ -173,7 +163,6 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
             &one,
             "browser_navigate",
             json!({"url":"https://denied.example/"}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(blocked.status, Status::Blocked);
@@ -196,7 +185,6 @@ fn repeated_policy_refusals_keep_permitted_work_available_in_the_same_session() 
             workspace,
             "browser_navigate",
             json!({"url":"https://example.com/"}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(allowed.status, Status::Succeeded, "{allowed:?}");
@@ -254,7 +242,6 @@ fn obsolete_arguments_are_rejected_before_any_policy_check() {
                 &workspace,
                 tool,
                 arguments.clone(),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(result.status, Status::Failed, "{tool}: {}", result.summary);
@@ -281,7 +268,6 @@ fn obsolete_arguments_are_rejected_before_any_policy_check() {
                     &workspace,
                     "browser_tabs",
                     json!({"action":"list"}),
-                    None,
                     &CancellationToken::default()
                 )
                 .status,
@@ -366,7 +352,6 @@ fn human_controls_after_preparation_prevent_the_effect_in_direct_and_composed_wo
                     &workspace,
                     "browser_navigate",
                     json!({"url":"https://example.com/","new_tab":true}),
-                    None,
                     &CancellationToken::default(),
                 );
                 executor.browser = Arc::new(ControlledBrowser {
@@ -399,13 +384,8 @@ fn human_controls_after_preparation_prevent_the_effect_in_direct_and_composed_wo
                 } else {
                     ("browser_type_text", arguments)
                 };
-                let result = executor.execute(
-                    &workspace,
-                    tool,
-                    arguments,
-                    None,
-                    &CancellationToken::default(),
-                );
+                let result =
+                    executor.execute(&workspace, tool, arguments, &CancellationToken::default());
                 assert_eq!(result.effect, Effect::None);
                 assert_eq!(result.status, Status::Blocked);
                 assert!(result
@@ -439,7 +419,6 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     // Unlike the preparation test, allow the input and change control only before observation.
@@ -502,7 +481,6 @@ fn pause_before_postcondition_preserves_the_confirmed_action_and_audit_effect() 
         &workspace,
         "browser_type_text",
         json!({"text":"sent","focused":true,"expect":{"condition":"text_present","value":"done"}}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked, "{}", result.summary);
@@ -535,7 +513,6 @@ fn control_after_dispatch_preserves_applied_and_uncertain_receipts() {
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/","new_tab":true}),
-            None,
             &CancellationToken::default(),
         );
         executor.browser = Arc::new(ControlledBrowser {
@@ -559,7 +536,6 @@ fn control_after_dispatch_preserves_applied_and_uncertain_receipts() {
             &workspace,
             "browser_execute",
             json!({"script":"window.syntheticEffect = 1"}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(
@@ -594,7 +570,6 @@ fn control_after_dispatch_preserves_applied_and_uncertain_receipts() {
             &workspace,
             "browser_read",
             json!({}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(
@@ -619,7 +594,6 @@ fn an_authorization_publishes_no_control_state_and_a_hold_publishes_exactly_one(
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com"}),
-            None,
             &CancellationToken::default(),
         );
     }

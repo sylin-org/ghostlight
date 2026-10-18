@@ -538,7 +538,6 @@ fn established(
         workspace,
         "browser_navigate",
         json!({"url":PAGE}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
@@ -550,7 +549,6 @@ fn established(
         workspace,
         "browser_inspect",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(inspected.status, Status::Succeeded);
@@ -641,7 +639,6 @@ fn every_catalog_variant_has_positive_and_missing_capability_executor_coverage()
                     &workspace,
                     if composed { "browser_flow" } else { case.tool },
                     arguments,
-                    None,
                     &CancellationToken::default(),
                 );
                 let label = format!(
@@ -750,7 +747,6 @@ fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child(
                 &workspace,
                 if composed { "browser_flow" } else { case.tool },
                 arguments,
-                None,
                 &CancellationToken::default(),
             );
             drop(policy);
@@ -842,7 +838,6 @@ fn observation_variants_reject_missing_configured_capabilities_before_browser_ef
                     &workspace,
                     if composed { "browser_flow" } else { case.tool },
                     invocation,
-                    None,
                     &CancellationToken::default(),
                 );
                 drop(policy);
@@ -931,7 +926,6 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                     "browser_record"
                 },
                 arguments,
-                None,
                 &CancellationToken::default(),
             );
             drop(policy);

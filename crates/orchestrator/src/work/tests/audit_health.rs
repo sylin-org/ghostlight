@@ -26,7 +26,6 @@ fn audit_failure_preserves_success_unknown_effects_and_default_continuation() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded);
@@ -42,7 +41,6 @@ fn audit_failure_preserves_success_unknown_effects_and_default_continuation() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.effect, Effect::Unknown);
@@ -78,7 +76,7 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
             {"id":"first","tool":"browser_navigate","arguments":{"url":"https://example.com","new_tab":true}},
             {"id":"second","tool":"browser_navigate","arguments":{"url":"https://example.com","new_tab":true}},
             {"id":"third","tool":"browser_navigate","arguments":{"url":"https://example.com","new_tab":true}}
-        ]}), None, &CancellationToken::default());
+        ]}), &CancellationToken::default());
     assert_eq!(result.status, Status::Blocked, "{result:?}");
     assert_eq!(result.effect, Effect::Partial);
     assert_eq!(result.facts["progress"]["counts"]["succeeded"], 1);
@@ -93,7 +91,6 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(later.status, Status::Blocked);
@@ -104,7 +101,6 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
         &workspace,
         "policy_explain",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(explain.status, Status::Succeeded);
@@ -120,7 +116,6 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
         &workspace,
         "policy_explain",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(explain.status, Status::Succeeded);

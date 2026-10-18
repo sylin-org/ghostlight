@@ -99,7 +99,7 @@ pub(crate) struct PreparedInvocation {
     started: Instant,
     deadline: Instant,
     /// Whether a longer `timeout_ms` would give this call more time: its value is below the
-    /// maximum, and no edge-supplied deadline overrides it.
+    /// maximum.
     deadline_adjustable: bool,
     decoded: Result<Operation, language::LanguageError>,
     stage: Mutex<InvocationStage>,
@@ -122,22 +122,15 @@ impl PreparedInvocation {
         id: InvocationId,
         tool: &str,
         input: Value,
-        caller_deadline_ms: Option<u64>,
         provenance: Option<Arc<ConnectionEvidence>>,
     ) -> Self {
         let started = Instant::now();
         let decoded = language::decode(tool, input);
-        let timeout = caller_deadline_ms
-            .unwrap_or_else(|| {
-                decoded
-                    .as_ref()
-                    .map_or(language::DEFAULT_TIMEOUT_MS, Operation::timeout_ms)
-            })
+        let timeout = decoded
+            .as_ref()
+            .map_or(language::DEFAULT_TIMEOUT_MS, Operation::timeout_ms)
             .clamp(language::MIN_TIMEOUT_MS, language::MAX_TIMEOUT_MS);
-        // An edge-supplied deadline overrides the input field, so only an input-set deadline
-        // below the maximum is one the caller can raise by changing the call.
-        let deadline_adjustable =
-            caller_deadline_ms.is_none() && decoded.as_ref().is_ok_and(Operation::timeout_can_grow);
+        let deadline_adjustable = decoded.as_ref().is_ok_and(Operation::timeout_can_grow);
         Self {
             id,
             tool: tool.into(),
@@ -278,14 +271,12 @@ impl ApplicationExecutor {
         workspace: &WorkspaceId,
         tool: &str,
         input: Value,
-        caller_deadline_ms: Option<u64>,
         cancellation: &CancellationToken,
     ) -> InvocationResult {
         let prepared = PreparedInvocation::new(
             InvocationId::mint(),
             tool,
             input,
-            caller_deadline_ms,
             self.workspaces.single_connection(workspace),
         );
         self.execute_prepared(workspace, &prepared, cancellation, false)

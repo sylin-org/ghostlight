@@ -55,7 +55,6 @@ fn click(
         workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     )
 }
@@ -155,13 +154,7 @@ fn every_single_target_tool_repeats_with_the_replacement() {
         arguments["tab"] = json!(tab_handle);
         arguments["target"] = json!(target);
 
-        let refused = executor.execute(
-            &workspace,
-            tool,
-            arguments,
-            None,
-            &CancellationToken::default(),
-        );
+        let refused = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
 
         let replacement = refused.facts["replacement"]
             .as_str()
@@ -321,7 +314,6 @@ fn a_fill_names_no_replacement_because_it_names_several_targets() {
         &workspace,
         "browser_fill_form",
         json!({"tab":tab_handle,"fields":[{"target":target,"value":"x"}]}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -350,7 +342,6 @@ fn a_drag_names_no_replacement_because_it_names_two_targets() {
         &workspace,
         "browser_drag",
         json!({"tab":tab_handle,"source_target":target,"destination_target":target}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -407,7 +398,6 @@ fn after_a_navigation_the_step_is_browser_inspect_with_candidates_as_handles() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/next","tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::targets(
@@ -478,7 +468,6 @@ fn workspace_without_target_names(
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -495,7 +484,6 @@ fn workspace_without_target_names(
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -590,7 +578,6 @@ fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"]
@@ -640,7 +627,6 @@ fn the_audit_and_the_history_hold_no_handle_context_or_candidate() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -657,7 +643,6 @@ fn the_audit_and_the_history_hold_no_handle_context_or_candidate() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]

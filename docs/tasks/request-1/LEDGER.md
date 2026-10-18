@@ -20,7 +20,7 @@ the architecture sweep.
 | S2 one-channel-word | connection | landed (this commit) |
 | S3 one-agent-function (with Decision 14a) | connection | landed (this commit) |
 | S4 workspace-opener | connection | todo |
-| S5 one-request-id | request | todo |
+| S5 one-request-id | request | landed (0f1b1a78 and this commit) |
 | S6 request-owns-itself | request | todo |
 | S7 findings-per-frame | request | todo |
 | S8 flow-step-own-facts | request | todo |
@@ -69,6 +69,23 @@ the architecture sweep.
   does not know, since a catalog claim now names its agent in history. `ui/lib/view.js`'s comment
   is true as written and is unchanged, so no page file changed. `SessionSummary.agent` and
   `connection_counts` still derive from the workspace's label until S4.
+- S5: `InvocationId` is `pub`, not `pub(crate)`, because `ServiceRequest`, `ServiceResponse` and
+  `InvocationResult` are public. The id is typed through `PreparedInvocation.id`,
+  `InvocationContext.invocation` and `InvocationResult.invocation`, which serializes as its text,
+  so the envelope and every golden are unchanged; events, audit and the window keep the text, and
+  the executor's tables still key by text until S7. The two commits are the id, then the caller
+  deadline: `ServiceRequest::Invoke.deadline_ms`, the branch, its assertion and the parameter of
+  `PreparedInvocation::new` and the test-only `execute` (325 call sites) go together, so no commit
+  holds an unused parameter. `a_cancel_reaches_the_invocation_the_client_named` is in
+  `service::admission::tests`: a session's forwarded call and cancel drive the session queue,
+  since the fake browser cannot hold a call open over a relay pair. There was no session
+  duplicate-id test to rekey, so `a_running_client_id_is_refused_and_is_free_again_once_answered`
+  is new; `string_and_numeric_ids_echo_with_their_type` no longer checks the prefix, which
+  `invocation_id::tests` does. `work/tests/provenance.rs` and `work/tests/control.rs` pass the id
+  to `PreparedInvocation::new`. The admission duplicate test builds a second job under the same
+  id until S6 deletes `Refused::Duplicate`. The ARCHITECTURE Work paragraph rode in with S3's
+  commit, since both lanes had the file open. LANGUAGE and a comment in `language::outcome` no
+  longer mention an edge deadline.
 - S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed

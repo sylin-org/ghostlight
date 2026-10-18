@@ -279,7 +279,7 @@ Refusals say what is true, and their next steps suggest only what the caller can
   does not say whether anything was sent. A receipt in the wrong shape arrives after the
   browser already received the request.
 - A deadline before dispatch suggests a longer `timeout_ms` only when the call's own value is
-  below the 30000 ms maximum and no edge deadline overrides it. Every tool takes the field, so
+  below the 30000 ms maximum. The deadline comes only from that field. Every tool takes it, so
   the suggestion always describes a call the decoder accepts. Calls already at the maximum (such
   as `browser_fill_form` with its default) are told to repeat the call and narrow a very large
   page first. A deadline after dispatch has an unknown effect, so it says to check the page with

@@ -51,7 +51,6 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
             &workspace,
             "browser_click",
             json!({"selector":{"name":"Save","exact":true},"visual_settle":enabled}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
@@ -95,7 +94,6 @@ fn open(executor: &ApplicationExecutor, browser: &FakeBrowser, workspace: &Works
                 workspace,
                 "browser_navigate",
                 json!({"url":"https://example.com/","new_tab":true}),
-                None,
                 &CancellationToken::default()
             )
             .status,
@@ -143,7 +141,6 @@ fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
                 &workspace,
                 "browser_screenshot",
                 arguments,
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
@@ -177,7 +174,6 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
         &workspace,
         "browser_inspect",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"].as_str().unwrap();
@@ -186,7 +182,6 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
         &workspace,
         "browser_screenshot",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     let view = image.facts["view"].as_str().unwrap();
@@ -207,7 +202,6 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
             &workspace,
             "browser_screenshot",
             arguments,
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Blocked, "{}", result.summary);
@@ -242,7 +236,6 @@ fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_det
         &workspace,
         "browser_read",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
@@ -300,7 +293,6 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
             &workspace,
             "browser_inspect",
             json!({}),
-            None,
             &CancellationToken::default(),
         );
         let target = observed.facts["items"][0]["target"].as_str().unwrap();
@@ -316,7 +308,6 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
             &workspace,
             "browser_click",
             json!({"target":target}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
@@ -350,7 +341,6 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
         &workspace,
         "browser_inspect",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     let target = observed.facts["items"][0]["target"].as_str().unwrap();
@@ -361,7 +351,6 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
         &workspace,
         "browser_fill_form",
         json!({"fields":[{"target":target,"value":"NOT_SENT"}]}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked, "{}", result.summary);
@@ -386,7 +375,6 @@ fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
         &workspace,
         "browser_wait",
         json!({"condition":"text_absent","value":"private"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(absent.status, Status::Failed, "{}", absent.summary);
@@ -395,7 +383,6 @@ fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
         &workspace,
         "browser_execute",
         json!({"script":"window.effect = 1"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(script.status, Status::Blocked);
@@ -413,7 +400,6 @@ fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
         &workspace,
         "browser_read",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(read.status, Status::Succeeded);
@@ -440,7 +426,6 @@ fn all_open_scripts_keep_their_browser_behavior_without_document_host_restrictio
         &workspace,
         "browser_execute",
         json!({"script":"1+1"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
@@ -452,7 +437,6 @@ fn all_open_scripts_keep_their_browser_behavior_without_document_host_restrictio
         &workspace,
         "browser_execute",
         json!({"script":"window.effect=1"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(unknown.status, Status::Unknown);
@@ -485,7 +469,6 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
             &workspace,
             "browser_record",
             arguments,
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Blocked, "{}", result.summary);
@@ -537,7 +520,6 @@ fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch(
             &workspace,
             "browser_execute",
             json!({"script":"1+1"}),
-            None,
             &CancellationToken::default(),
         );
         if supported {

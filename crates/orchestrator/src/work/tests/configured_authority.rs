@@ -59,7 +59,6 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                 &workspace,
                 "browser_navigate",
                 json!({"url":"https://example.com/"}),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(opened.status, Status::Succeeded);
@@ -89,7 +88,6 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                     &workspace,
                     "browser_inspect",
                     json!({}),
-                    None,
                     &CancellationToken::default(),
                 );
                 assert_eq!(inspected.status, Status::Succeeded);
@@ -132,7 +130,6 @@ fn selector_fills_find_ordinary_controls_without_weakening_credentials_or_submit
                     "browser_fill_form"
                 },
                 invocation,
-                None,
                 &CancellationToken::default(),
             );
             let label = format!("{case}, composed={composed}");
@@ -213,7 +210,6 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
                 &workspace,
                 "browser_navigate",
                 json!({"url":"https://example.com/"}),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(opened.status, Status::Succeeded);
@@ -257,7 +253,6 @@ fn selector_uploads_allow_explicit_files_despite_credential_like_metadata() {
                     "browser_upload"
                 },
                 invocation,
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(
@@ -317,7 +312,6 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                 &workspace,
                 "browser_navigate",
                 json!({"url":"https://example.com/"}),
-                None,
                 &CancellationToken::default(),
             );
             let handle = &opened.facts["tab"];
@@ -340,7 +334,6 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                     &workspace,
                     "browser_inspect",
                     json!({"tab":handle}),
-                    None,
                     &CancellationToken::default(),
                 );
                 input["target"] = inspected.facts["items"][0]["target"].clone();
@@ -373,7 +366,6 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                 &workspace,
                 "browser_type_text",
                 input,
-                None,
                 &CancellationToken::default(),
             );
             if request != "action" {
@@ -440,7 +432,6 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                 &workspace,
                 "browser_navigate",
                 json!({"url":"https://example.com/"}),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(opened.status, Status::Succeeded);
@@ -459,7 +450,6 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                     &workspace,
                     "browser_inspect",
                     json!({}),
-                    None,
                     &CancellationToken::default(),
                 );
                 assert_eq!(inspected.status, Status::Succeeded);
@@ -496,7 +486,6 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                     "browser_type_text"
                 },
                 invocation,
-                None,
                 &CancellationToken::default(),
             );
             let label = format!("{location}, composed={composed}");
@@ -561,7 +550,6 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                 &workspace,
                 "browser_press_key",
                 json!({"key":"Tab"}),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(
@@ -586,7 +574,6 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/"}),
-            None,
             &CancellationToken::default(),
         );
         let handle = &opened.facts["tab"];
@@ -603,7 +590,6 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
             &workspace,
             "browser_inspect",
             json!({"tab":handle}),
-            None,
             &CancellationToken::default(),
         );
         let target = &inspected.facts["items"][0]["target"];
@@ -629,7 +615,6 @@ fn an_unsent_form_needs_read_and_write_under_configured_policy() {
             &workspace,
             "browser_fill_form",
             json!({"tab":handle,"fields":[{"target":target,"value":"PRIVATE_DRAFT"}]}),
-            None,
             &CancellationToken::default(),
         );
         if permitted {
@@ -671,7 +656,6 @@ fn retired_host_input_is_rejected_before_any_browser_work() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://excluded.example/","restrict_hosts":["allowed.example"]}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Failed);

@@ -510,7 +510,6 @@ impl McpSession {
             id: invocation,
             tool: tool.into(),
             input,
-            deadline_ms: None,
         })
     }
 

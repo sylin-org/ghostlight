@@ -112,7 +112,6 @@ fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
@@ -135,7 +134,6 @@ fn a_contract_failure_after_dispatch_never_claims_nothing_was_sent() {
         &workspace,
         "browser_click",
         json!({"selector":{"name":"Save","exact":true},"visual_settle":false}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -173,7 +171,6 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -193,7 +190,6 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle,"scope":"controls","max_items":10}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -217,7 +213,6 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/next","tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -238,7 +233,6 @@ fn a_stale_target_refusal_offers_fresh_candidates_from_the_live_page() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target_handle}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -264,7 +258,6 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -286,7 +279,6 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
             &workspace,
             "browser_wait",
             json!({"tab":tab_handle,"condition":"selector_present","selector":{"name":"Ready","role":"button"}}),
-            None,
             &CancellationToken::default(),
         );
     assert_eq!(waited.status, Status::Succeeded);
@@ -301,7 +293,6 @@ fn waiting_on_a_semantic_selector_polls_the_live_page() {
             &workspace,
             "browser_wait",
             json!({"tab":tab_handle,"condition":"selector_present","selector":{"name":"Never","role":"button"},"timeout_ms":250}),
-            None,
             &CancellationToken::default(),
         );
     assert_eq!(missed.status, Status::Failed);
@@ -320,7 +311,6 @@ fn deadlines_speak_for_themselves_instead_of_claiming_disconnection() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(before.status, Status::Failed);
@@ -341,7 +331,6 @@ fn deadlines_speak_for_themselves_instead_of_claiming_disconnection() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(after.status, Status::Unknown);
@@ -372,7 +361,6 @@ fn every_tool_gets_deadline_advice_it_can_follow() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -381,7 +369,6 @@ fn every_tool_gets_deadline_advice_it_can_follow() {
         &workspace,
         "browser_read",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(read.status, Status::Failed);
@@ -397,7 +384,6 @@ fn every_tool_gets_deadline_advice_it_can_follow() {
         &workspace,
         "browser_read",
         json!({"timeout_ms":30_000}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -405,18 +391,6 @@ fn every_tool_gets_deadline_advice_it_can_follow() {
         vec!["Repeat the call; if the page is very large, narrow it first (a target, a smaller max_chars, or a smaller inspect scope)."]
     );
     assert!(crate::language::decode("browser_read", json!({"timeout_ms":30_001})).is_err());
-
-    // An edge-supplied deadline overrides timeout_ms, so it is not advice either.
-    browser.push(Err(BrowserError::DeadlineBeforeDispatch));
-    let edge = executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com/"}),
-        Some(5_000),
-        &CancellationToken::default(),
-    );
-    assert_eq!(edge.status, Status::Failed);
-    assert!(!edge.next_steps.join(" ").contains("timeout_ms"));
 }
 
 /// A call already at the longest `timeout_ms` is never told to raise it, because the decoder
@@ -434,7 +408,6 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -453,7 +426,6 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -467,7 +439,6 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
         &workspace,
         "browser_fill_form",
         json!({"tab":tab_handle,"fields":fields}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(default_fill.status, Status::Failed, "{default_fill:?}");
@@ -485,7 +456,6 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/","timeout_ms":30_000}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(longest_navigation.facts["phase"], "before_dispatch");
@@ -499,7 +469,6 @@ fn calls_at_the_longest_timeout_are_not_told_to_raise_it() {
         &workspace,
         "browser_fill_form",
         json!({"tab":tab_handle,"fields":fields,"timeout_ms":20_000}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(shorter_fill.facts["phase"], "before_dispatch");
@@ -520,7 +489,6 @@ fn cancellation_before_dispatch_says_cancelled_not_disconnected() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Cancelled);
@@ -549,7 +517,6 @@ fn an_empty_session_says_no_tab_yet_and_how_to_open_one() {
         &workspace,
         "browser_diagnose",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Failed);
@@ -578,7 +545,6 @@ fn navigating_to_a_dead_tab_recreates_it_under_the_same_handle() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/again","tab":"tab_deadbeefdeadbeefdeadbeefdeadbeef"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -604,7 +570,6 @@ fn closing_an_already_gone_tab_succeeds_without_touching_the_browser() {
         &workspace,
         "browser_tabs",
         json!({"action":"close","tab":"tab_gone"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -629,7 +594,6 @@ fn effect_unknown_receipts_render_as_unknown_with_the_browser_reason() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -657,7 +621,6 @@ fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::Text {
@@ -673,7 +636,7 @@ fn failed_flow_audit_excludes_prior_read_and_error_payloads() {
     let result = executor.execute(&workspace, "browser_flow", json!({"steps":[
             {"id":"PRIVATE_STEP_ID", "tool":"browser_read", "arguments":{}},
             {"id":"execute", "tool":"browser_execute", "arguments":{"script":"throw 'PRIVATE_SCRIPT_SENTINEL'"}}
-        ]}), None, &CancellationToken::default());
+        ]}), &CancellationToken::default());
     assert_ne!(result.status, Status::Succeeded);
     let client = serde_json::to_string(&result).unwrap();
     assert!(client.contains("PRIVATE_PAGE_SENTINEL"));
@@ -695,7 +658,6 @@ fn audit_excludes_primitive_exception_text_and_unknown_tool_names() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     assert!(serde_json::to_string(&result)
@@ -705,7 +667,6 @@ fn audit_excludes_primitive_exception_text_and_unknown_tool_names() {
         &workspace,
         "PRIVATE_TOOL_SENTINEL",
         json!({"PRIVATE_KEY":"PRIVATE_VALUE"}),
-        None,
         &CancellationToken::default(),
     );
     let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();
@@ -726,7 +687,6 @@ fn audit_excludes_script_results_and_invalid_input_context() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap();
@@ -741,7 +701,6 @@ fn audit_excludes_script_results_and_invalid_input_context() {
         &workspace,
         "browser_execute",
         json!({"script":"'PRIVATE_SCRIPT'"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{result:?}");
@@ -768,13 +727,7 @@ fn audit_excludes_script_results_and_invalid_input_context() {
             json!({"condition":"PRIVATE_CONDITION","value":"PRIVATE_WAIT_VALUE"}),
         ),
     ] {
-        let result = executor.execute(
-            &workspace,
-            tool,
-            arguments,
-            None,
-            &CancellationToken::default(),
-        );
+        let result = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
         assert_ne!(result.status, Status::Succeeded, "{result:?}");
     }
     let records = audit.0.lock().unwrap();
@@ -801,7 +754,6 @@ fn a_captured_image_states_its_decoded_size() {
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/"}),
-            None,
             &CancellationToken::default(),
         );
         let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -830,7 +782,6 @@ fn a_captured_image_states_its_decoded_size() {
             &workspace,
             "browser_screenshot",
             json!({"tab":tab_handle}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(shot.status, Status::Succeeded, "{shot:?}");
@@ -850,7 +801,6 @@ fn a_captured_image_states_its_decoded_size() {
                 "x": 10,
                 "y": 10
             }),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(dropped.status, Status::Succeeded, "{data}: {dropped:?}");
@@ -892,7 +842,6 @@ fn an_empty_object_result_says_what_else_reads_as_empty() {
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/"}),
-            None,
             &CancellationToken::default(),
         );
         browser.push(Ok(BrowserOutcome::ScriptEvaluated {
@@ -906,7 +855,6 @@ fn an_empty_object_result_says_what_else_reads_as_empty() {
             &workspace,
             "browser_execute",
             json!({"script":"PRIVATE_SCRIPT"}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Succeeded, "{result:?}");
@@ -945,7 +893,6 @@ fn audit_records_carry_refusal_facts_for_failures_and_omit_them_for_successes() 
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -957,7 +904,6 @@ fn audit_records_carry_refusal_facts_for_failures_and_omit_them_for_successes() 
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -1022,13 +968,7 @@ fn retired_tools_and_inputs_never_dispatch_or_change_human_controls() {
         cases.push(("browser_flow".to_string(), json!({"steps":[{"tool":"browser_tabs","arguments":{"action":"list"}},{"tool":"browser_execute","arguments":arguments}]})));
     }
     for (tool, input) in cases {
-        let result = executor.execute(
-            &workspace,
-            &tool,
-            input,
-            None,
-            &CancellationToken::default(),
-        );
+        let result = executor.execute(&workspace, &tool, input, &CancellationToken::default());
         assert_eq!(result.status, Status::Failed, "{tool}: {result:?}");
         assert_eq!(result.effect, Effect::None);
         assert!(
@@ -1075,7 +1015,6 @@ fn flow_stops_after_a_refused_child_without_reverting_prior_effects() {
                     {"id":"after","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
                 ]
             }),
-            None,
             &CancellationToken::default(),
         );
 
@@ -1122,7 +1061,6 @@ fn flow_error_policy_controls_runtime_argument_failures() {
                             {"id":"after","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
                         ]
                     }),
-                    None,
                     &CancellationToken::default(),
                 );
 
@@ -1174,7 +1112,7 @@ fn continue_reports_policy_denial_after_later_independent_success() {
                 {"id":"denied","tool":"browser_execute","arguments":{"script":"PRIVATE_SCRIPT"}},
                 {"id":"last","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
             ]
-        }), None, &CancellationToken::default());
+        }), &CancellationToken::default());
     assert_eq!(browser.calls().len(), 2);
     assert_eq!(result.status, Status::Blocked);
     assert_eq!(result.effect, Effect::Partial);
@@ -1207,7 +1145,6 @@ fn flow_result_budget_preserves_step_metadata_and_reference_values() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::ScriptEvaluated {
@@ -1227,7 +1164,7 @@ fn flow_result_budget_preserves_step_metadata_and_reference_values() {
     let result = executor.execute(&workspace, "browser_flow", json!({"steps":[
             {"id":"large","tool":"browser_execute","arguments":{"script":"({limit:500})"}},
             {"id":"read","tool":"browser_read","arguments":{"max_chars":{"flow_ref":{"step":"large","pointer":"/facts/value/limit"}}}}
-        ]}), None, &CancellationToken::default());
+        ]}), &CancellationToken::default());
     assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
     assert_eq!(result.facts["completed"], 2);
     for row in result.facts["steps"].as_array().unwrap() {
@@ -1257,7 +1194,6 @@ fn short_flow_uses_its_default_tab_with_multiple_controlled_pages() {
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/","new_tab":true}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(opened.status, Status::Succeeded);
@@ -1281,7 +1217,6 @@ fn short_flow_uses_its_default_tab_with_multiple_controlled_pages() {
             {"tool":"browser_read","arguments":{"tab":handles[1]}},
             {"tool":"browser_read"}
         ]}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{result:?}");
@@ -1310,7 +1245,6 @@ fn read_only_compositions_are_repeat_safe_only_when_fully_successful() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     for fail_last in [false, true] {
@@ -1334,7 +1268,6 @@ fn read_only_compositions_are_repeat_safe_only_when_fully_successful() {
                 {"id":"one","tool":"browser_read","arguments":{}},
                 {"id":"two","tool":"browser_read","arguments":{}}
             ]}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(
@@ -1390,7 +1323,7 @@ fn continue_honors_human_attention_and_invocation_limits() {
         let result = executor.execute(&workspace, "browser_flow", json!({"on_error":"continue","steps":[
                 {"id":"first","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}},
                 {"id":"later","tool":"browser_navigate","arguments":{"url":"https://example.com/","new_tab":true}}
-            ]}), None, &CancellationToken::default());
+            ]}), &CancellationToken::default());
         assert_eq!(browser.calls().len(), 1, "{cause}: {}", result.summary);
         assert_eq!(result.status, status);
         assert_eq!(result.effect, effect);
@@ -1410,7 +1343,6 @@ fn focused_typing_names_the_control_it_described_and_settles() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -1440,7 +1372,6 @@ fn focused_typing_names_the_control_it_described_and_settles() {
         &workspace,
         "browser_type_text",
         json!({"text":"Ember","focused":true,"clear_first":true}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -1473,7 +1404,6 @@ fn work_follows_the_attended_browser_and_then_stays_where_it_started() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
@@ -1496,7 +1426,6 @@ fn work_follows_the_attended_browser_and_then_stays_where_it_started() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/next"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(followed.status, Status::Succeeded);
@@ -1515,7 +1444,6 @@ fn an_ambiguous_bootstrap_names_the_choices_and_touches_no_browser() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -1592,7 +1520,6 @@ fn a_named_browser_opens_there_and_a_named_stranger_is_refused() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true,"browser":"browser_chrome"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
@@ -1604,7 +1531,6 @@ fn a_named_browser_opens_there_and_a_named_stranger_is_refused() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true,"browser":"browser_absent"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(refused.status, Status::Failed);
@@ -1633,7 +1559,6 @@ fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(woke.status, Status::Succeeded);
@@ -1659,7 +1584,6 @@ fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(absent.status, Status::Failed);
@@ -1682,7 +1606,6 @@ fn listing_tabs_reports_live_titles_and_drops_bindings_that_are_gone() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let handle = opened.facts["tab"].as_str().unwrap();
@@ -1702,7 +1625,6 @@ fn listing_tabs_reports_live_titles_and_drops_bindings_that_are_gone() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -1722,7 +1644,6 @@ fn listing_tabs_reports_live_titles_and_drops_bindings_that_are_gone() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(gone.status, Status::Succeeded);
@@ -1740,7 +1661,6 @@ fn direct_and_composed_reads_keep_equivalent_safe_receipts() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     for composed in [false, true] {
@@ -1759,13 +1679,7 @@ fn direct_and_composed_reads_keep_equivalent_safe_receipts() {
         } else {
             ("browser_read", json!({}))
         };
-        let result = executor.execute(
-            &workspace,
-            tool,
-            arguments,
-            None,
-            &CancellationToken::default(),
-        );
+        let result = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
         assert_eq!(result.status, Status::Succeeded);
         assert!(serde_json::to_string(&result)
             .unwrap()
@@ -1805,7 +1719,6 @@ fn child_receipts_share_authority_without_holding_the_session() {
             {"id":"PRIVATE_LABEL_ONE","tool":"browser_tabs","arguments":{"action":"list"}},
             {"id":"PRIVATE_LABEL_TWO","tool":"browser_tabs","arguments":{"action":"list"}}
         ]}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked);
@@ -1835,7 +1748,6 @@ fn child_receipts_share_authority_without_holding_the_session() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -1856,7 +1768,6 @@ fn repeated_policy_denials_remain_independent_requests() {
             &workspace,
             "browser_tabs",
             json!({"action":"list"}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(denied.status, Status::Blocked);
@@ -1870,7 +1781,6 @@ fn repeated_policy_denials_remain_independent_requests() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(allowed.status, Status::Succeeded);
@@ -1898,7 +1808,6 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -1913,7 +1822,6 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
                 &workspace,
                 "browser_record",
                 json!({"action":"start","tab":handle}),
-                None,
                 &CancellationToken::default(),
             )
             .status,
@@ -1927,7 +1835,6 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         &workspace,
         "browser_record",
         json!({"action":"status"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -1939,7 +1846,6 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         &workspace,
         "browser_record",
         json!({"action":"stop"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -1948,7 +1854,6 @@ fn record_actions_cross_only_the_extension_owned_request_receipt_seam() {
         &workspace,
         "browser_record",
         json!({"action":"discard"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -1982,7 +1887,6 @@ fn a_paused_runtime_refuses_recording_status_stop_and_discard() {
             &workspace,
             "browser_record",
             json!({"action":action}),
-            None,
             &CancellationToken::default(),
         );
         assert_ne!(
@@ -2025,7 +1929,6 @@ fn a_save_asks_the_browser_for_one_finished_replay() {
         &workspace,
         "browser_record",
         json!({"action":"save"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2077,7 +1980,6 @@ fn a_download_save_never_returns_the_replay_bytes() {
         &workspace,
         "browser_record",
         json!({"action":"save","download":true}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2118,7 +2020,6 @@ fn client_save_authorizes_source_before_recording_bytes_cross() {
         &workspace,
         "browser_record",
         json!({"action":"save"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2140,7 +2041,6 @@ fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -2160,7 +2060,6 @@ fn unsatisfied_wait_is_decisive_before_the_invocation_deadline() {
             "value":"never present",
             "timeout_ms":1_000
         }),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2191,7 +2090,6 @@ fn open_read_close_is_one_truthful_result_per_call() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
@@ -2207,7 +2105,6 @@ fn open_read_close_is_one_truthful_result_per_call() {
         &workspace,
         "browser_read",
         json!({"tab":handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(read.status, Status::Succeeded);
@@ -2216,7 +2113,6 @@ fn open_read_close_is_one_truthful_result_per_call() {
         &workspace,
         "browser_tabs",
         json!({"action":"close","tab":handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(closed.status, Status::Succeeded);
@@ -2291,7 +2187,6 @@ fn outcome_language_and_the_seam_observe_without_carrying_page_detail() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/patients/48219?ssn=1#note"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
@@ -2308,7 +2203,6 @@ fn outcome_language_and_the_seam_observe_without_carrying_page_detail() {
         &workspace,
         "browser_read",
         json!({"tab":handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(read.status, Status::Succeeded);
@@ -2345,7 +2239,6 @@ fn an_observation_never_outlives_the_invocation_it_describes() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     // A failure before any browser crossing must not leave a key behind either.
@@ -2353,7 +2246,6 @@ fn an_observation_never_outlives_the_invocation_it_describes() {
         &workspace,
         "browser_navigate",
         json!({"nonsense":true}),
-        None,
         &CancellationToken::default(),
     );
     assert!(
@@ -2373,7 +2265,6 @@ fn a_capture_reports_its_size_and_a_wait_reports_how_long_it_waited() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -2402,7 +2293,6 @@ fn a_capture_reports_its_size_and_a_wait_reports_how_long_it_waited() {
         &workspace,
         "browser_screenshot",
         json!({"tab":handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(captured.summary, "Captured the viewport at 1280x720.");
@@ -2417,7 +2307,6 @@ fn a_capture_reports_its_size_and_a_wait_reports_how_long_it_waited() {
         &workspace,
         "browser_wait",
         json!({"tab":handle,"condition":"load_ready","timeout_ms":5_000}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(waited.summary, "example.com finished loading in 2 seconds.");
@@ -2453,7 +2342,6 @@ fn tab_close_policy_blocks_before_browser_dispatch() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let handle = opened.facts["tab"].as_str().unwrap();
@@ -2461,7 +2349,6 @@ fn tab_close_policy_blocks_before_browser_dispatch() {
         &workspace,
         "browser_tabs",
         json!({"action":"close","tab":handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(closed.status, Status::Blocked);
@@ -2482,7 +2369,6 @@ fn refused_navigation_audits_only_the_attempted_host() {
         &workspace,
         "browser_navigate",
         json!({"url":"http://127.0.0.1/private/record-42?token=secret#detail"}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2516,7 +2402,6 @@ fn the_workbench_origin_is_refused_by_name_and_other_loopback_ports_are_not() {
             &workspace,
             "browser_navigate",
             json!({"url":url}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Blocked, "{url}");
@@ -2553,7 +2438,6 @@ fn the_workbench_origin_is_refused_by_name_and_other_loopback_ports_are_not() {
         &workspace,
         "browser_navigate",
         json!({"url":"http://127.0.0.1:41258/"}),
-        None,
         &CancellationToken::default(),
     );
     assert_ne!(other.facts["reason"], "own_workbench", "{other:?}");
@@ -2582,7 +2466,6 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
         &workspace,
         "browser_navigate",
         json!({"url":"https://approved.example","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded, "{opened:?}");
@@ -2598,7 +2481,6 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
         &workspace,
         "browser_read",
         json!({"tab": handle.as_str()}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2627,7 +2509,6 @@ fn physical_action_receipt_names_the_target_without_trusting_its_role() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -2647,7 +2528,6 @@ fn physical_action_receipt_names_the_target_without_trusting_its_role() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -2668,7 +2548,6 @@ fn physical_action_receipt_names_the_target_without_trusting_its_role() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2702,7 +2581,6 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -2721,7 +2599,6 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -2741,7 +2618,6 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -2761,7 +2637,6 @@ fn local_preserve_tabs_refusal_is_blocked_without_an_effect() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let handle = opened.facts["tab"].as_str().unwrap();
@@ -2772,7 +2647,6 @@ fn local_preserve_tabs_refusal_is_blocked_without_an_effect() {
         &workspace,
         "browser_tabs",
         json!({"action":"close","tab":handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(closed.status, Status::Blocked);
@@ -2790,7 +2664,6 @@ fn uncertain_effect_guides_recovery_without_replay() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Unknown);
@@ -2816,7 +2689,6 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -2835,7 +2707,6 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -2852,7 +2723,6 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(direct.status, Status::Succeeded);
@@ -2868,7 +2738,7 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
         elapsed_ms: 5,
         readiness: BrowserReadiness::Complete,
     }));
-    let sequence = executor.execute(&workspace, "browser_flow", json!({"tab":tab_handle,"steps":[{"tool":"browser_click","arguments":{"target":target}},{"tool":"browser_wait","arguments":{"condition":"load_ready","visual_settle":false}}]}), None, &CancellationToken::default());
+    let sequence = executor.execute(&workspace, "browser_flow", json!({"tab":tab_handle,"steps":[{"tool":"browser_click","arguments":{"target":target}},{"tool":"browser_wait","arguments":{"condition":"load_ready","visual_settle":false}}]}), &CancellationToken::default());
     assert_eq!(sequence.status, Status::Succeeded);
     let calls = browser.calls();
     assert_eq!(
@@ -2909,13 +2779,8 @@ fn direct_and_flow_actions_use_the_same_physical_executor_path() {
                     step.as_object_mut().unwrap().remove("id");
                 }
             }
-            let result = executor.execute(
-                &workspace,
-                tool,
-                arguments,
-                None,
-                &CancellationToken::default(),
-            );
+            let result =
+                executor.execute(&workspace, tool, arguments, &CancellationToken::default());
             assert_eq!(browser.calls().len() - before, 2, "{tool}");
             assert_eq!(
                 result.status,
@@ -2957,7 +2822,6 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -2974,7 +2838,6 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -2990,7 +2853,6 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         &workspace,
         "browser_fill_form",
         json!({"tab":tab_handle,"fields":[{"target":target,"value":"not-sent"}]}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked);
@@ -3015,7 +2877,6 @@ fn credential_target_returns_guidance_without_holding_the_session() {
         &workspace,
         "browser_read",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -3045,7 +2906,6 @@ fn denied_redirect_is_compensated_without_replay_risk() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked);
@@ -3081,7 +2941,6 @@ fn denied_redirect_remains_visibly_open_when_close_policy_refuses_compensation()
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked);
@@ -3114,7 +2973,6 @@ fn denied_redirect_remains_visibly_open_when_local_preservation_refuses_compensa
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Blocked);
@@ -3136,7 +2994,6 @@ fn stale_target_fails_before_browser_dispatch() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -3155,7 +3012,6 @@ fn stale_target_fails_before_browser_dispatch() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -3170,7 +3026,6 @@ fn stale_target_fails_before_browser_dispatch() {
         &workspace,
         "browser_navigate",
         json!({"tab":tab_handle,"url":"https://example.org"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(navigated.status, Status::Succeeded);
@@ -3191,7 +3046,6 @@ fn stale_target_fails_before_browser_dispatch() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(stale.status, Status::Failed);
@@ -3219,7 +3073,6 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -3249,7 +3102,6 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         &workspace,
         "browser_screenshot",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     assert!(screenshot.facts.get("data").is_none());
@@ -3268,7 +3120,6 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"view":view,"x":100,"y":50}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(clicked.status, Status::Succeeded);
@@ -3299,7 +3150,6 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         &workspace,
         "browser_screenshot",
         json!({"tab":tab_handle,"view":view,"x":100,"y":50,"width":200,"height":100}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -3337,7 +3187,6 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         &workspace,
         "browser_screenshot",
         json!({"view":first_region_view,"x":400,"y":200,"width":400,"height":200}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(second_region.status, Status::Succeeded);
@@ -3360,7 +3209,6 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         &workspace,
         "browser_navigate",
         json!({"tab":tab_handle,"url":"https://example.org"}),
-        None,
         &CancellationToken::default(),
     );
     let before = browser.calls().len();
@@ -3368,7 +3216,6 @@ fn screenshot_coordinates_and_regions_resolve_once_chain_and_expire() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"view":current_view,"x":1,"y":1}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(stale.facts["reason"], "stale_view");
@@ -3392,7 +3239,6 @@ fn cross_workspace_tab_discovery_names_owning_workspace_and_guidance() {
         &workspace_b,
         "browser_navigate",
         json!({"url": "https://example.com", "new_tab": true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
@@ -3403,7 +3249,6 @@ fn cross_workspace_tab_discovery_names_owning_workspace_and_guidance() {
         &workspace_a,
         "browser_read",
         json!({"tab": tab_b}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -3432,7 +3277,6 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
         &workspace_b,
         "browser_navigate",
         json!({"url": "https://example.com", "new_tab": true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded);
@@ -3445,7 +3289,6 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
         &workspace_a,
         "browser_read",
         json!({"tab": tab_b}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(refused.status, Status::Failed);
@@ -3470,13 +3313,7 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
             json!({"steps": [{"tool": "browser_workspace", "arguments": {"action": "switch", "workspace": workspace_b.as_str()}}]}),
         ),
     ] {
-        let result = executor.execute(
-            &workspace_a,
-            tool,
-            input,
-            None,
-            &CancellationToken::default(),
-        );
+        let result = executor.execute(&workspace_a, tool, input, &CancellationToken::default());
         assert_eq!(result.status, Status::Failed, "{tool}: {result:?}");
         assert_eq!(result.effect, Effect::None, "{tool}: {result:?}");
     }
@@ -3490,7 +3327,6 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
         &workspace_a,
         "browser_tabs",
         json!({"action": "list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(listed.status, Status::Succeeded);
@@ -3508,7 +3344,6 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
         &workspace_b,
         "browser_read",
         json!({"tab": tab_b}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(read.status, Status::Succeeded);
@@ -3533,7 +3368,6 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
             &workspace_b,
             "browser_navigate",
             json!({"url": "https://example.com", "new_tab": true}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(opened.status, Status::Succeeded);
@@ -3553,7 +3387,6 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
             &workspace_b,
             "browser_inspect",
             json!({"tab": tab_b, "scope": "controls", "max_items": 10}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(inspected.status, Status::Succeeded, "{inspected:?}");
@@ -3567,13 +3400,8 @@ fn a_refusal_never_names_an_unlabeled_session_by_its_workspace_id() {
             ("browser_read", json!({"tab": tab_b})),
             ("browser_click", json!({"target": target_b})),
         ] {
-            let refused = executor.execute(
-                &workspace_a,
-                tool,
-                input,
-                None,
-                &CancellationToken::default(),
-            );
+            let refused =
+                executor.execute(&workspace_a, tool, input, &CancellationToken::default());
             assert_eq!(refused.status, Status::Failed, "{tool}: {refused:?}");
             assert_eq!(refused.effect, Effect::None, "{tool}");
             assert_eq!(refused.facts["reason"], "ownership_mismatch", "{tool}");
@@ -3608,7 +3436,6 @@ fn wait_condition_visual_settle_observes_view_settlement() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -3627,7 +3454,6 @@ fn wait_condition_visual_settle_observes_view_settlement() {
             "condition": "visual_settle",
             "timeout_ms": 1_000
         }),
-        None,
         &CancellationToken::default(),
     );
 
@@ -3661,7 +3487,6 @@ fn wait_composite_visual_settle_chains_after_primary_condition() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -3690,7 +3515,6 @@ fn wait_composite_visual_settle_chains_after_primary_condition() {
             "visual_settle": true,
             "timeout_ms": 1_000
         }),
-        None,
         &CancellationToken::default(),
     );
 
@@ -3733,7 +3557,6 @@ fn cross_workspace_tab_discovery_stress_permutations() {
             &ws,
             "browser_navigate",
             json!({"url": format!("https://{}.internal/", name.to_lowercase()), "new_tab": true}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(opened.status, Status::Succeeded);
@@ -3758,7 +3581,6 @@ fn cross_workspace_tab_discovery_stress_permutations() {
                     caller_ws,
                     "browser_read",
                     json!({"tab": target_handle}),
-                    None,
                     &CancellationToken::default(),
                 );
                 assert_eq!(result.status, Status::Succeeded);
@@ -3768,7 +3590,6 @@ fn cross_workspace_tab_discovery_stress_permutations() {
                     caller_ws,
                     "browser_read",
                     json!({"tab": target_handle}),
-                    None,
                     &CancellationToken::default(),
                 );
                 let expected_owner = names[target_idx];
@@ -3800,7 +3621,6 @@ fn composite_wait_keeps_its_met_condition_when_optional_settlement_expires() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -3829,7 +3649,6 @@ fn composite_wait_keeps_its_met_condition_when_optional_settlement_expires() {
             "visual_settle": true,
             "timeout_ms": 100
         }),
-        None,
         &CancellationToken::default(),
     );
 
@@ -3853,7 +3672,6 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -3890,7 +3708,6 @@ fn composite_visual_settle_stress_semantic_selector_chain() {
             "visual_settle": true,
             "timeout_ms": 1_000
         }),
-        None,
         &CancellationToken::default(),
     );
 
@@ -3922,7 +3739,6 @@ fn document_inspection_returns_the_tree_it_describes() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     let page = json!({"kind":"container","label":"","children":[
@@ -3940,7 +3756,6 @@ fn document_inspection_returns_the_tree_it_describes() {
         &workspace,
         "browser_inspect",
         json!({"scope":"document"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(first.status, Status::Succeeded, "{}", first.summary);
@@ -3973,7 +3788,6 @@ fn document_inspection_returns_the_tree_it_describes() {
         &workspace,
         "browser_inspect",
         json!({"scope":"document"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(second.status, Status::Succeeded, "{}", second.summary);
@@ -4005,7 +3819,6 @@ fn document_inspection_returns_the_tree_it_describes() {
         &workspace,
         "browser_inspect",
         json!({"scope":"document","max_depth":2}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(third.status, Status::Succeeded, "{}", third.summary);
@@ -4029,7 +3842,6 @@ fn typed_with_expectation(
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
@@ -4055,7 +3867,6 @@ fn typed_with_expectation(
         &workspace,
         "browser_type_text",
         json!({"text":"sent","focused":true,"expect":{"condition":"text_present","value":"done"}}),
-        None,
         &CancellationToken::default(),
     );
     (result, audit)
@@ -4158,7 +3969,6 @@ pub(super) fn workspace_with_a_target() -> (
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -4177,7 +3987,6 @@ pub(super) fn workspace_with_a_target() -> (
         &workspace,
         "browser_find",
         json!({"tab":tab_handle,"text":"Delete"}),
-        None,
         &CancellationToken::default(),
     );
     let target = found.facts["matches"][0]["target"]
@@ -4207,7 +4016,6 @@ fn delete_click(
         workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     )
 }
@@ -4254,7 +4062,6 @@ fn a_moved_view_is_a_stale_view_with_a_screenshot_next_step() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(clicked.status, Status::Failed);
@@ -4280,7 +4087,6 @@ fn a_session_holds_one_recording_and_never_names_it() {
         &workspace,
         "browser_record",
         json!({"action":"start","tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(held.status, Status::Failed);
@@ -4296,7 +4102,6 @@ fn a_session_holds_one_recording_and_never_names_it() {
         &workspace,
         "browser_record",
         json!({"action":"status"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(missing.summary, "This session has no recording.");
@@ -4309,7 +4114,6 @@ fn a_session_holds_one_recording_and_never_names_it() {
         &workspace,
         "browser_record",
         json!({"action":"status"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(status.status, Status::Succeeded);
@@ -4319,7 +4123,6 @@ fn a_session_holds_one_recording_and_never_names_it() {
         &workspace,
         "browser_record",
         json!({"action":"stop","recording":"recording_one"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(named.status, Status::Failed);
@@ -4348,7 +4151,6 @@ fn a_session_starts_a_new_recording_after_saving_one() {
             &workspace,
             "browser_record",
             json!({"action":"start","tab":tab_handle}),
-            None,
             &CancellationToken::default(),
         )
     };
@@ -4375,7 +4177,6 @@ fn a_session_starts_a_new_recording_after_saving_one() {
         &workspace,
         "browser_record",
         json!({"action":"save","download":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(saved.status, Status::Succeeded);
@@ -4404,7 +4205,6 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         &workspace,
         "browser_dialog",
         json!({"action":"status","tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -4430,7 +4230,6 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         &workspace,
         "browser_dialog",
         json!({"action":"respond","text":"Ada","tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(dialog_open(), None);
@@ -4449,7 +4248,6 @@ fn dialog_calls_keep_the_record_of_the_tab_current() {
         &workspace,
         "browser_dialog",
         json!({"action":"status","tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(dialog_open(), None);
@@ -4494,7 +4292,6 @@ fn a_page_side_stale_handle_refuses_as_stale_target_with_its_word() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_stale_removed(&clicked, PICK_STEP);
@@ -4513,7 +4310,6 @@ fn a_tombstoned_handle_refuses_before_dispatch() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     let before = browser.calls().len();
@@ -4521,7 +4317,6 @@ fn a_tombstoned_handle_refuses_before_dispatch() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_stale_removed(&again, REMOVED_STEP);
@@ -4540,7 +4335,6 @@ fn a_typed_into_handle_the_page_removed_is_tombstoned() {
         &workspace,
         "browser_type_text",
         json!({"tab":tab_handle,"target":target,"text":"hello"}),
-        None,
         &CancellationToken::default(),
     );
     assert_stale_removed(&typed, REMOVED_STEP);
@@ -4549,7 +4343,6 @@ fn a_typed_into_handle_the_page_removed_is_tombstoned() {
         &workspace,
         "browser_type_text",
         json!({"tab":tab_handle,"target":target,"text":"hello"}),
-        None,
         &CancellationToken::default(),
     );
     assert_stale_removed(&again, REMOVED_STEP);
@@ -4570,7 +4363,6 @@ fn an_unknown_page_side_word_is_not_remembered() {
             &workspace,
             "browser_click",
             json!({"tab":tab_handle,"target":target}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(clicked.facts["reason"], "stale_target");
@@ -4598,14 +4390,12 @@ fn a_closed_tab_and_a_left_document_say_tab_closed_and_navigated() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/next","tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let navigated = executor.execute(
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(navigated.facts["stale"], "navigated");
@@ -4623,7 +4413,6 @@ fn a_closed_tab_and_a_left_document_say_tab_closed_and_navigated() {
         &workspace,
         "browser_click",
         json!({"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(closed.facts["reason"], "stale_target");
@@ -4649,7 +4438,6 @@ fn a_stale_refusal_audits_the_word_only() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com"}),
-        None,
         &CancellationToken::default(),
     );
     let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
@@ -4668,7 +4456,6 @@ fn a_stale_refusal_audits_the_word_only() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -4680,7 +4467,6 @@ fn a_stale_refusal_audits_the_word_only() {
         &workspace,
         "browser_click",
         json!({"tab":tab_handle,"target":target}),
-        None,
         &CancellationToken::default(),
     );
     let encoded = serde_json::to_string(&*audit.0.lock().unwrap()).unwrap();

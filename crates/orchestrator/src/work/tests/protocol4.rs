@@ -210,13 +210,7 @@ fn execute(
     tool: &str,
     arguments: Value,
 ) -> crate::work::result::InvocationResult {
-    executor.execute(
-        workspace,
-        tool,
-        arguments,
-        None,
-        &CancellationToken::default(),
-    )
+    executor.execute(workspace, tool, arguments, &CancellationToken::default())
 }
 
 /// The target handle of the page's one control, from an inspection.

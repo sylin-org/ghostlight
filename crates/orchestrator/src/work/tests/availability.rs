@@ -108,7 +108,6 @@ fn list_tabs(
         workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     )
 }
@@ -122,7 +121,6 @@ fn navigate(
         workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true}),
-        None,
         &CancellationToken::default(),
     )
 }
@@ -137,7 +135,6 @@ fn navigate_for(
         workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true,"timeout_ms":timeout_ms}),
-        None,
         &CancellationToken::default(),
     )
 }
@@ -617,7 +614,6 @@ fn a_call_that_reaches_the_session_browser_names_it_in_the_record() {
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
@@ -655,7 +651,6 @@ fn policy_explain_names_no_browser_in_the_record() {
         &workspace,
         "policy_explain",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(explained.status, Status::Succeeded, "{}", explained.summary);
@@ -673,7 +668,6 @@ fn invalid_input_names_no_browser_in_the_record() {
         &workspace,
         "browser_tabs",
         json!({"action":"juggle"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(refused.status, Status::Failed, "{}", refused.summary);
@@ -697,7 +691,6 @@ fn a_flow_names_the_browser_only_on_the_records_of_work_that_reached_it() {
             {"id":"tabs","tool":"browser_tabs","arguments":{"action":"list"}},
             {"id":"policy","tool":"policy_explain","arguments":{}}
         ]}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(flowed.status, Status::Succeeded, "{}", flowed.summary);
@@ -746,7 +739,6 @@ fn a_record_names_the_browser_a_command_was_written_to_whatever_the_failure() {
             &workspace,
             "browser_tabs",
             json!({"action":"list"}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(
@@ -779,7 +771,6 @@ fn a_pinned_browser_absent_while_another_is_connected_is_the_wrong_profile() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true,"timeout_ms":1000}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(refused.status, Status::Failed);
@@ -820,7 +811,6 @@ fn a_pinned_browser_absent_with_nothing_connected_is_not_connected_and_never_rec
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true,"timeout_ms":1000}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(refused.status, Status::Failed);
@@ -852,7 +842,6 @@ fn a_returning_browser_that_never_arrives_falls_back_to_recovery() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com","new_tab":true,"timeout_ms":1000}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(refused.status, Status::Failed);

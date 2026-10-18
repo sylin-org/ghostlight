@@ -25,7 +25,6 @@ fn successes_match_their_golden() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::Tabs {
@@ -36,7 +35,6 @@ fn successes_match_their_golden() {
         &workspace,
         "browser_tabs",
         arguments.clone(),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{result:?}");
@@ -61,7 +59,6 @@ fn successes_match_their_golden() {
         &workspace,
         "browser_click",
         arguments.clone(),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{result:?}");
@@ -87,7 +84,6 @@ fn a_find_of_repeated_controls_matches_its_golden() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     let menu = |locator: &str, context: &str, nth: Option<u32>| ObservedTarget {
@@ -112,7 +108,6 @@ fn a_find_of_repeated_controls_matches_its_golden() {
         &workspace,
         "browser_find",
         arguments.clone(),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{result:?}");
@@ -130,7 +125,6 @@ fn a_call_that_does_not_decode_matches_the_refusal_golden() {
         &workspace,
         "browser_tabs",
         arguments.clone(),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Failed, "{result:?}");
@@ -156,7 +150,6 @@ fn a_navigate_receipt_matches_the_audit_success_golden() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     let handle = opened.facts["tab"].as_str().expect("an opened tab handle");
@@ -168,7 +161,6 @@ fn a_navigate_receipt_matches_the_audit_success_golden() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/","tab":handle}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(navigated.status, Status::Succeeded, "{navigated:?}");
@@ -224,7 +216,6 @@ fn a_stale_handle_matches_its_golden_for_each_word() {
                     &workspace,
                     "browser_navigate",
                     json!({"url":"https://example.com/next","tab":tab_handle}),
-                    None,
                     &CancellationToken::default(),
                 );
             }
@@ -240,7 +231,6 @@ fn a_stale_handle_matches_its_golden_for_each_word() {
             &workspace,
             "browser_click",
             arguments.clone(),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.facts["stale"], reason.word(), "{result:?}");
@@ -263,7 +253,6 @@ fn a_stale_handle_matches_its_golden_for_each_word() {
             &workspace,
             "browser_click",
             arguments.clone(),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.facts["stale"], "removed", "{result:?}");

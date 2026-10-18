@@ -1641,12 +1641,7 @@ impl LiveSession {
                 let tools = self.advertised.advertise(&intake.governance.snapshot());
                 wire.render(ServiceResponse::Catalog { tools });
             }
-            ServiceRequest::Invoke {
-                id,
-                tool,
-                input,
-                deadline_ms,
-            } => {
+            ServiceRequest::Invoke { id, tool, input } => {
                 // Bound retained payloads as well as queue count. Decoding occurs once at intake.
                 let bytes = serde_json::to_vec(&input).map_or(0, |input| input.len())
                     + id.as_str().len()
@@ -1658,7 +1653,6 @@ impl LiveSession {
                         id,
                         &tool,
                         input,
-                        deadline_ms,
                         Some(self.connection.clone()),
                     )),
                     cancellation: CancellationToken::default(),
@@ -2290,7 +2284,6 @@ mod tests {
             &workspace,
             "browser_read",
             json!({"tab":selected.handle.as_str()}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Blocked);

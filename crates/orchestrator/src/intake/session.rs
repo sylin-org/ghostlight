@@ -175,8 +175,6 @@ pub enum ServiceRequest {
         tool: String,
         /// Opaque input the executor validates.
         input: Value,
-        /// Optional caller deadline relative to receipt.
-        deadline_ms: Option<u64>,
     },
     /// Cancel an active invocation.
     Cancel {

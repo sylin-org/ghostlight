@@ -26,7 +26,6 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 &workspace,
                 "browser_navigate",
                 json!({"url":"https://example.com/"}),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(opened.status, Status::Succeeded);
@@ -35,7 +34,6 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 &workspace,
                 "browser_inspect",
                 json!({}),
-                None,
                 &CancellationToken::default(),
             );
             let target = &inspected.facts["items"][0]["target"];
@@ -83,7 +81,6 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 } else {
                     args
                 },
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(
@@ -121,7 +118,6 @@ fn user_authorized_credentials_reach_fill_target_and_focused_typing_without_ente
                 &workspace,
                 "browser_type_text",
                 json!({"focused":true,"text":"NOT_AUTHORIZED"}),
-                None,
                 &CancellationToken::default(),
             );
             assert_eq!(later.status, Status::Blocked);
@@ -145,7 +141,6 @@ fn credential_guidance_obeys_flow_continue_without_pausing_later_work() {
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::TargetsDescribed {
@@ -167,7 +162,6 @@ fn credential_guidance_obeys_flow_continue_without_pausing_later_work() {
             {"tool":"browser_type_text","arguments":{"focused":true,"text":"not-sent"}},
             {"tool":"browser_read","arguments":{}}
         ]}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.facts["steps"][0]["result"]["status"], "blocked");
@@ -191,7 +185,6 @@ fn credential_acknowledgement_cannot_override_configured_policy_or_human_control
             &workspace,
             "browser_navigate",
             json!({"url":"https://example.com/"}),
-            None,
             &CancellationToken::default(),
         );
         match boundary {
@@ -212,7 +205,6 @@ fn credential_acknowledgement_cannot_override_configured_policy_or_human_control
             &workspace,
             "browser_type_text",
             json!({"focused":true,"text":"not-sent","user_authorized_credentials":true}),
-            None,
             &CancellationToken::default(),
         );
         assert_eq!(result.status, Status::Blocked, "{boundary}: {result:?}");
@@ -236,7 +228,6 @@ fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forwar
         &workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     browser.push(Ok(BrowserOutcome::targets(7, vec![credential()])));
@@ -244,7 +235,6 @@ fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forwar
         &workspace,
         "browser_inspect",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -261,7 +251,6 @@ fn an_unauthorized_credential_fill_names_the_field_its_handle_and_the_way_forwar
         &workspace,
         "browser_fill_form",
         json!({"fields":[{"target":target,"value":"PRIVATE_CREDENTIAL"}]}),
-        None,
         &CancellationToken::default(),
     );
 

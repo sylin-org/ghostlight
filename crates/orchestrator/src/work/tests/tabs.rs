@@ -22,7 +22,6 @@ fn open_at(
         workspace,
         "browser_navigate",
         json!({"url":url,"new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
@@ -61,7 +60,6 @@ fn navigate(
         workspace,
         "browser_navigate",
         json!({"url":url}),
-        None,
         &CancellationToken::default(),
     )
 }
@@ -112,7 +110,6 @@ fn a_released_ghostlight_tab_is_reused_by_the_next_session_on_its_host() {
         &next,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(listed.facts["tabs"][0]["tab"], reused.facts["tab"]);
@@ -303,7 +300,6 @@ fn chrome_and_edge_tabs_with_the_same_id_are_different_tabs() {
         &chrome,
         "browser_navigate",
         json!({"url":"https://example.com/","new_tab":true,"browser":"browser_chrome"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(in_chrome.status, Status::Succeeded, "{}", in_chrome.summary);
@@ -317,7 +313,6 @@ fn chrome_and_edge_tabs_with_the_same_id_are_different_tabs() {
         &edge,
         "browser_navigate",
         json!({"url":"https://example.org/","new_tab":true,"browser":"browser_edge"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -345,7 +340,6 @@ fn a_tab_refused_after_the_browser_opened_it_reports_the_effect() {
         &other,
         "browser_navigate",
         json!({"url":"https://example.com/","new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -376,7 +370,6 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle,"scope":"controls","max_items":10}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(inspected.status, Status::Succeeded, "{}", inspected.summary);
@@ -398,7 +391,6 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         &workspace,
         "browser_execute",
         json!({"script":"location.hash = 'settings'"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(anchored.status, Status::Succeeded, "{}", anchored.summary);
@@ -418,7 +410,6 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         &workspace,
         "browser_click",
         json!({"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(
@@ -439,7 +430,6 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         &workspace,
         "browser_click",
         json!({"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(again.status, Status::Succeeded, "{}", again.summary);
@@ -457,7 +447,6 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         &workspace,
         "browser_execute",
         json!({"script":"location.assign('https://example.org/')"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(moved.status, Status::Succeeded, "{}", moved.summary);
@@ -466,7 +455,6 @@ fn a_same_document_route_keeps_handles_and_a_new_origin_expires_them() {
         &workspace,
         "browser_click",
         json!({"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(stale.status, Status::Failed, "{}", stale.summary);
@@ -492,7 +480,6 @@ fn a_committed_document_in_the_same_origin_still_expires_handles() {
         &workspace,
         "browser_inspect",
         json!({"tab":tab_handle,"scope":"controls","max_items":10}),
-        None,
         &CancellationToken::default(),
     );
     let target = inspected.facts["items"][0]["target"]
@@ -510,7 +497,6 @@ fn a_committed_document_in_the_same_origin_still_expires_handles() {
         &workspace,
         "browser_click",
         json!({"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(followed.status, Status::Succeeded, "{}", followed.summary);
@@ -522,7 +508,6 @@ fn a_committed_document_in_the_same_origin_still_expires_handles() {
         &workspace,
         "browser_click",
         json!({"target":target}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(stale.facts["reason"], "stale_target");
@@ -547,7 +532,6 @@ fn open_titled(
         workspace,
         "browser_navigate",
         json!({"url":url,"new_tab":true}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
@@ -573,7 +557,6 @@ fn script_without_tab(
         workspace,
         "browser_execute",
         json!({"script":"1"}),
-        None,
         &CancellationToken::default(),
     )
 }
@@ -677,7 +660,6 @@ fn a_call_without_a_tab_among_several_is_refused_with_the_tabs_and_does_nothing(
         &workspace,
         "browser_tabs",
         json!({"action":"list"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(listed.status, Status::Succeeded, "a list needs no tab");
@@ -688,7 +670,6 @@ fn a_call_without_a_tab_among_several_is_refused_with_the_tabs_and_does_nothing(
         &workspace,
         "browser_execute",
         json!({"script":"1","tab":second}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(named.status, Status::Succeeded, "{}", named.summary);
@@ -732,7 +713,6 @@ fn a_flow_that_opens_a_tab_acts_in_it_without_naming_it() {
             {"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.net/","new_tab":true}},
             {"id":"run","tool":"browser_execute","arguments":{"script":"1"}}
         ]}),
-        None,
         &CancellationToken::default(),
     );
 

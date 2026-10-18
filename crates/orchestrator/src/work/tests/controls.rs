@@ -33,7 +33,6 @@ fn open_page(
         workspace,
         "browser_navigate",
         json!({"url":"https://example.com/"}),
-        None,
         &CancellationToken::default(),
     );
     assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
@@ -49,13 +48,7 @@ fn inspect_and_find_pass_a_selects_value_hint_and_options_through() {
         open_page(&executor, &browser, &workspace);
         browser.push(Ok(BrowserOutcome::targets(7, vec![role_select()])));
 
-        let result = executor.execute(
-            &workspace,
-            tool,
-            arguments,
-            None,
-            &CancellationToken::default(),
-        );
+        let result = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
 
         assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
         let item = &result.facts[key][0];
@@ -90,7 +83,6 @@ fn a_control_without_the_new_keys_reads_as_before() {
         &workspace,
         "browser_inspect",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -126,7 +118,6 @@ fn a_credential_class_item_shows_only_its_marker_even_if_the_adapter_sent_more()
         &workspace,
         "browser_inspect",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -186,7 +177,6 @@ fn a_cut_listing_reports_what_was_left_out_with_target_names_on_and_off() {
             &workspace,
             "browser_inspect",
             json!({}),
-            None,
             &CancellationToken::default(),
         );
 
@@ -221,7 +211,6 @@ fn a_whole_listing_carries_no_left_out_keys() {
         &workspace,
         "browser_inspect",
         json!({}),
-        None,
         &CancellationToken::default(),
     );
 
@@ -260,13 +249,7 @@ fn repeated_controls_show_their_row_in_the_result_and_never_in_audit_or_history(
             ],
         )));
 
-        let result = executor.execute(
-            &workspace,
-            tool,
-            arguments,
-            None,
-            &CancellationToken::default(),
-        );
+        let result = executor.execute(&workspace, tool, arguments, &CancellationToken::default());
 
         assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
         let places: Vec<_> = result.facts[key]

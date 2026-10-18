@@ -269,7 +269,6 @@ mod tests {
                     json!({"action":"list"})
                 },
                 None,
-                None,
             )),
         }
     }
