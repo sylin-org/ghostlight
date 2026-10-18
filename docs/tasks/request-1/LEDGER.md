@@ -21,7 +21,7 @@ the architecture sweep.
 | S3 one-agent-function (with Decision 14a) | connection | landed (this commit) |
 | S4 workspace-opener | connection | todo |
 | S5 one-request-id | request | landed (0f1b1a78 and this commit) |
-| S6 request-owns-itself | request | todo |
+| S6 request-owns-itself | request | landed (this commit) |
 | S7 findings-per-frame | request | todo |
 | S8 flow-step-own-facts | request | todo |
 | S9 cancel-cause | request | todo |
@@ -60,9 +60,12 @@ the architecture sweep.
   names it and the words are "Started by ...", as b3 said for history. A live claim the catalog
   does not know, or a reserved name, still names the agent (by that name, or Unknown agent); only
   no claim at all falls to the source. `claimed_agent` is set in `ConnectionEvidence::new`, from
-  the bounded claim, on MCP connections only. A restored row quotes the claimed agent's catalog
-  name where a live row quotes the client's words (`"Cline" is what the agent calls itself.` for
-  `"cline" ...`), since the words are never kept; the agent and every other sentence are the same.
+  the bounded claim, on MCP connections only. Only a live client's words are ever quoted: a
+  restored row keeps none, so where a live row says `"cline" is what the agent calls itself.
+  Started by Claude Desktop.` the restored row says `Started by Claude Desktop.`, and with no
+  source it keeps the MCP caveat. The agent and the Own and Inside sentences are the same.
+  `tests/workbench-preview-server.mjs` names its agents by the same rule and shows a restored row
+  named by its kept claim.
   `install::catalog_agent` (by catalog id) and `install::runs_inside` join `agent_called`;
   `source_name` now looks the source up by id. The audit golden's claim is `claude-code`, so the
   goldens show `claimed_agent`. `workbench::history`'s one-sentence test claims a name the catalog
@@ -86,6 +89,20 @@ the architecture sweep.
   id until S6 deletes `Refused::Duplicate`. The ARCHITECTURE Work paragraph rode in with S3's
   commit, since both lanes had the file open. LANGUAGE and a comment in `language::outcome` no
   longer mention an edge deadline.
+- S6: `InvocationContext.provenance` and `Completion.provenance` became required references too,
+  since every request now has its evidence; `AuditRecorder::record_with_provenance` and
+  `AuditRecord::with_provenance` keep their `Option` for records that are not requests, and the
+  completion passes `Some`. `OperationState` holds the required details, while
+  `OperationSummary.provenance` keeps its `Option` type, so the window's JSON and the parts tests
+  are unchanged (every live row now has one). The test-only `execute` gives the request the
+  caller's token, so its 325 call sites are unchanged. The queue's `jobs()` is `admitted()`, and
+  `SESSION_WORK` is `pub(super)` for the full-queue test. The duplicate admission test became
+  `a_queued_cancellation_bypasses_work_and_touches_no_later_request`. The full-queue and disconnect
+  tests are service tests over a relay pair: the test holds the lease of a declared session's
+  workspace, so calls wait in its queue. `a_waiting_call_keeps_its_start_time_when_it_runs` is in
+  `work::tests::control`. Two tests used `duplicate_request` as a sample service code and now use
+  `SHUTTING_DOWN_CODE`, the one code the service still sends. ARCHITECTURE's domain event list
+  now names `WorkWaiting` and `WorkPhaseStarted`; its `WorkProgressed` never existed.
 - S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed

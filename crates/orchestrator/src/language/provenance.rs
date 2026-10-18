@@ -73,15 +73,6 @@ pub fn claimed_agent(reported: &str, channel: IntakeChannel) -> Option<String> {
     }
 }
 
-/// What a connection's client claimed, as the naming reads it: the words to quote, and the agent
-/// they name.
-struct Claimed {
-    /// The words the client claimed live, or the claimed catalog agent's name for a record.
-    words: String,
-    /// The agent the claim names ([`Agent::of`]).
-    agent: Agent,
-}
-
 /// How a connection's agent stands to the app Ghostlight saw start the connection.
 enum Relation {
     /// No source was seen.
@@ -119,9 +110,9 @@ impl Relation {
 /// source is the agent's own app, the sentence says where it was seen. When the catalog knows the
 /// agent runs inside the source's app, it says both. When they stand apart (a name the catalog
 /// does not know, a source that is no agent's app, or an app the catalog does not know the agent
-/// runs inside), it says the claim and the source without judging either. With no source it keeps
-/// the caveat that the name is the client's own claim. The command line says where it was called
-/// from.
+/// runs inside), it says the source, and the words a live client claimed, without judging either.
+/// With no source it keeps the caveat that the name is the client's own claim. A record keeps no
+/// words, so its sentence never quotes any. The command line says where it was called from.
 #[must_use]
 pub fn details(attribution: &Attribution, reported: Option<&str>) -> ConnectionDetails {
     let reported = reported.and_then(claimed_name);
@@ -135,18 +126,13 @@ pub fn details(attribution: &Attribution, reported: Option<&str>) -> ConnectionD
             ),
         ),
         IntakeChannel::Mcp => {
-            let claimed = claimed(attribution, reported);
-            let agent = claimed.as_ref().map_or_else(
-                || {
-                    source
-                        .and_then(|source| source.agent.as_deref())
-                        .and_then(crate::install::catalog_agent)
-                        .unwrap_or_else(Agent::unknown)
-                },
-                |claimed| claimed.agent.clone(),
-            );
-            let words = claimed.as_ref().map(|claimed| claimed.words.as_str());
-            let explanation = explain(&agent, words, source);
+            let agent = claimed(attribution, reported).unwrap_or_else(|| {
+                source
+                    .and_then(|source| source.agent.as_deref())
+                    .and_then(crate::install::catalog_agent)
+                    .unwrap_or_else(Agent::unknown)
+            });
+            let explanation = explain(&agent, reported, source);
             (agent, explanation)
         }
     };
@@ -163,39 +149,34 @@ pub fn details(attribution: &Attribution, reported: Option<&str>) -> ConnectionD
     }
 }
 
-/// The claim of an MCP connection: the name its client `reported` live, else the catalog agent
-/// its `attribution` kept as claimed; none when neither names one.
-fn claimed(attribution: &Attribution, reported: Option<&str>) -> Option<Claimed> {
-    if let Some(reported) = reported {
-        return Some(Claimed {
-            words: reported.to_owned(),
-            agent: Agent::of(Some(reported), IntakeChannel::Mcp),
-        });
+/// The agent an MCP connection's claim names: the one the name its client `reported` live names
+/// ([`Agent::of`]), else the catalog agent its `attribution` kept as claimed; none when neither
+/// names one.
+fn claimed(attribution: &Attribution, reported: Option<&str>) -> Option<Agent> {
+    match reported {
+        Some(reported) => Some(Agent::of(Some(reported), IntakeChannel::Mcp)),
+        None => attribution
+            .claimed_agent
+            .as_deref()
+            .and_then(crate::install::catalog_agent),
     }
-    let agent = attribution
-        .claimed_agent
-        .as_deref()
-        .and_then(crate::install::catalog_agent)?;
-    Some(Claimed {
-        words: agent.name.clone(),
-        agent,
-    })
 }
 
-/// What an MCP connection establishes about `agent`, whose client claimed `words`, if anything,
-/// beside the `source` Ghostlight saw start it.
-fn explain(agent: &Agent, words: Option<&str>, source: Option<&Source>) -> String {
+/// What an MCP connection establishes about `agent` beside the `source` Ghostlight saw start it.
+/// Only `reported`, the words a live client sent, is ever quoted: a record keeps no words, so its
+/// sentence says only what the source and the caveat say.
+fn explain(agent: &Agent, reported: Option<&str>, source: Option<&Source>) -> String {
     match (Relation::of(agent, source), source) {
         (Relation::Own, Some(source)) => started_by(source),
         (Relation::Inside, Some(source)) => format!("{}, in {}.", agent.name, source_name(source)),
-        (Relation::Apart, Some(source)) => match words {
-            Some(words) => format!(
-                "\"{words}\" is what the agent calls itself. {}",
+        (Relation::Apart, Some(source)) => match reported {
+            Some(reported) => format!(
+                "\"{reported}\" is what the agent calls itself. {}",
                 started_by(source)
             ),
             None => started_by(source),
         },
-        _ => words.map_or_else(|| MCP_EXPLANATION.to_owned(), claimed_name_explanation),
+        _ => reported.map_or_else(|| MCP_EXPLANATION.to_owned(), claimed_name_explanation),
     }
 }
 
@@ -406,6 +387,56 @@ mod tests {
             source(Some("claude-desktop"), "claude.exe"),
         );
         assert_eq!(details(&cli, Some("codex")).agent, Agent::command_line());
+    }
+
+    /// Durable evidence of an MCP connection whose client claimed the catalog agent `claimed`,
+    /// beside the `source` that started it.
+    fn restored(claimed: &str, source: Option<Source>) -> Attribution {
+        Attribution {
+            claimed_agent: Some(claimed.to_owned()),
+            ..started(IntakeChannel::Mcp, source)
+        }
+    }
+
+    #[test]
+    fn a_restored_claim_names_its_agent_and_quotes_no_words_the_client_never_sent() {
+        let apart = details(
+            &restored("claude-code", source(Some("cursor"), "Cursor.exe")),
+            None,
+        );
+        assert_eq!(apart.agent.id, "claude-code");
+        assert_eq!(apart.explanation, "Started by Cursor.");
+        assert_eq!(apart.reported_application, None);
+        let by_program = details(
+            &restored("claude-code", source(None, "WindowsTerminal.exe")),
+            None,
+        );
+        assert_eq!(by_program.explanation, "Started by WindowsTerminal.exe.");
+        let unseen = details(&restored("claude-code", None), None);
+        assert_eq!(unseen.agent.id, "claude-code");
+        assert_eq!(unseen.explanation, MCP_EXPLANATION);
+        for said in [&apart, &by_program, &unseen] {
+            assert!(!said.explanation.contains('"'), "{}", said.explanation);
+        }
+    }
+
+    #[test]
+    fn a_restored_claim_reads_as_its_live_row_where_no_words_are_quoted() {
+        let desktop = source(Some("claude-desktop"), "claude.exe");
+        let inside = restored("claude-code", desktop.clone());
+        assert_eq!(
+            details(&inside, None).explanation,
+            details(&inside, Some("claude-code")).explanation
+        );
+        assert_eq!(
+            details(&inside, None).explanation,
+            "Claude Code, in Claude Desktop."
+        );
+        let own = restored("claude-desktop", desktop);
+        assert_eq!(
+            details(&own, None).explanation,
+            "Started by Claude Desktop."
+        );
     }
 
     #[test]
