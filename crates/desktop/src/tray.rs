@@ -5,15 +5,16 @@
 //! [`TrayEvent`]s. The shell owns no item of its own: which entries exist, what they say and
 //! whether they are enabled are all the service's decisions.
 //!
-//! The icon is the product icon, drawn at run time for the [`Taskbar`] it sits on. A ready service
-//! shows the plain ghost; each other state adds a small filled dot in the lower right in the colour
-//! the window's band uses for that state, ringed in the taskbar's ground ([`state_icon`]). On
-//! Windows the 16 pixel icon is drawn at the 16 pixel small-icon size and the 32 pixel icon at any
-//! larger one. A Linux StatusNotifier host draws the icon at its own size, so it gets the 32 pixel
-//! icon.
-//! On a light Windows taskbar the pale ghost would be a speck, so its body is inked in the window's
-//! night colour, and `watch_taskbar` notices when the taskbar turns light or dark. No other
-//! artwork is shipped.
+//! The icon is drawn at run time for the [`Taskbar`] it sits on. A ready service shows the plain
+//! ghost; each other state adds a small filled dot in the lower right in the colour the window's
+//! band uses for that state, ringed in the taskbar's ground ([`state_icon`]). On Windows the 16
+//! pixel art is drawn at the 16 pixel small-icon size and the 32 pixel art at any larger one. A
+//! Linux StatusNotifier host draws the icon at its own size, so it gets the 32 pixel art.
+//!
+//! A dark taskbar shows the product icon. On a light Windows taskbar the pale colour art would be
+//! a faceless speck, so the ghost is the tray glyph in `assets/`: one monochrome silhouette in the
+//! window's night colour with its eyes cut out, drawn by hand at 16 pixels and smooth at 32.
+//! `watch_taskbar` notices when the taskbar turns light or dark.
 //!
 //! Thread rule: the tray is created and updated on the event-loop thread, after the loop has
 //! started (on Linux `tao` has then initialized GTK). [`install_events`] may run on any thread
@@ -59,7 +60,7 @@ pub const PAUSED_COLOUR: [u8; 3] = [0xfb, 0xbf, 0x24];
 pub const ATTENTION_COLOUR: [u8; 3] = [0xf8, 0x71, 0x71];
 
 /// The window's night ground `--bg`: the ground of a dark taskbar, so the ring around the dot
-/// there, and the ink of the ghost on a light taskbar.
+/// there, and the colour of the tray glyph on a light taskbar.
 pub const NIGHT_COLOUR: [u8; 3] = [0x0f, 0x0e, 0x12];
 
 /// The ground of a light Windows taskbar, so the ring around the dot there.
@@ -86,10 +87,6 @@ const SMALL_ICON: u32 = 16;
 #[cfg(not(windows))]
 const HOST_ICON: u32 = 32;
 
-/// How light a pixel must be, on a scale of 0 to 255, to belong to the ghost's pale body. A
-/// darker pixel is a detail inside it, such as an eye.
-const BODY_LIGHTNESS: u32 = 128;
-
 /// The identity of the one tray icon.
 const TRAY_ID: &str = "ghostlight";
 
@@ -98,6 +95,12 @@ const ICON_PNG: &[u8] = include_bytes!("../../../extension/icons/icon32.png");
 
 /// The product icon at 16 pixels, drawn at the 16 pixel small-icon size.
 const ICON_16_PNG: &[u8] = include_bytes!("../../../extension/icons/icon16.png");
+
+/// The tray glyph at 32 pixels, the ghost on a light taskbar.
+const GLYPH_PNG: &[u8] = include_bytes!("../assets/tray-glyph-32.png");
+
+/// The tray glyph at 16 pixels, drawn at the 16 pixel small-icon size of a light taskbar.
+const GLYPH_16_PNG: &[u8] = include_bytes!("../assets/tray-glyph-16.png");
 
 /// Where Windows keeps whether the taskbar is light, below the current user.
 #[cfg(windows)]
@@ -296,13 +299,15 @@ impl Taskbar {
         }
     }
 
-    /// The product icon drawn at this taskbar's small-icon size: the 16 pixel icon at 16 pixels or
-    /// fewer, and the 32 pixel icon at any larger size, which Windows scales down to 24.
+    /// The art drawn on this taskbar: the tray glyph on a light taskbar and the product icon on a
+    /// dark one, at 16 pixels for a small-icon size of 16 or fewer and at 32 pixels for any larger
+    /// size, which Windows scales down to 24.
     fn source(self) -> &'static [u8] {
-        if self.small_icon <= SMALL_ICON {
-            ICON_16_PNG
-        } else {
-            ICON_PNG
+        match (self.light, self.small_icon <= SMALL_ICON) {
+            (true, true) => GLYPH_16_PNG,
+            (true, false) => GLYPH_PNG,
+            (false, true) => ICON_16_PNG,
+            (false, false) => ICON_PNG,
         }
     }
 }
@@ -354,37 +359,15 @@ pub fn icon_image() -> Result<(Vec<u8>, u32, u32), TrayError> {
     decode_rgba(ICON_PNG)
 }
 
-/// The icon for `state` on `taskbar`: the product icon at the taskbar's size, its body inked on a
-/// light taskbar, with a filled dot in the lower right for every state but ready. The ready icon
-/// on a dark taskbar is the product icon's own pixels.
+/// The icon for `state` on `taskbar`: the taskbar's art at its size, with a filled dot in the
+/// lower right for every state but ready. The ready icon is the art's own pixels: the product icon
+/// on a dark taskbar and the tray glyph on a light one.
 pub fn state_icon(state: TrayState, taskbar: Taskbar) -> Result<(Vec<u8>, u32, u32), TrayError> {
     let (mut rgba, width, height) = decode_rgba(taskbar.source())?;
-    if taskbar.light {
-        ink(&mut rgba, taskbar.ground());
-    }
     if let Some(colour) = state.dot() {
         draw_dot(&mut rgba, width, height, colour, taskbar.ground());
     }
     Ok((rgba, width, height))
-}
-
-/// Inks the ghost for a light taskbar: each pixel of its pale body takes [`NIGHT_COLOUR`], each
-/// darker detail inside it, such as an eye, takes `ground`, and every pixel keeps its opacity.
-fn ink(rgba: &mut [u8], ground: [u8; 3]) {
-    for pixel in rgba.chunks_exact_mut(4) {
-        if pixel[3] == 0 {
-            continue;
-        }
-        let lightness =
-            (2126 * u32::from(pixel[0]) + 7152 * u32::from(pixel[1]) + 722 * u32::from(pixel[2]))
-                / 10_000;
-        let colour = if lightness >= BODY_LIGHTNESS {
-            NIGHT_COLOUR
-        } else {
-            ground
-        };
-        pixel[..3].copy_from_slice(&colour);
-    }
 }
 
 /// Lay a ring in `ground` and a dot in `colour` over the lower right of `rgba`, with a soft edge
@@ -793,12 +776,14 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn the_16_pixel_icon_is_drawn_at_16_and_the_32_pixel_icon_at_24_and_32() {
-        for (scale, size) in [(1.0, 16), (1.25, 32), (1.5, 32), (2.0, 32)] {
-            let (rgba, width, height) =
-                state_icon(TrayState::Ready, Taskbar::new(false, scale)).unwrap();
-            assert_eq!((width, height), (size, size), "at {scale}");
-            assert_eq!(rgba.len(), (size * size * 4) as usize);
+    fn the_16_pixel_art_is_drawn_at_16_and_the_32_pixel_art_at_24_and_32() {
+        for light in [false, true] {
+            for (scale, size) in [(1.0, 16), (1.25, 32), (1.5, 32), (2.0, 32)] {
+                let (rgba, width, height) =
+                    state_icon(TrayState::Ready, Taskbar::new(light, scale)).unwrap();
+                assert_eq!((width, height), (size, size), "light {light} at {scale}");
+                assert_eq!(rgba.len(), (size * size * 4) as usize);
+            }
         }
     }
 
@@ -895,39 +880,95 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_light_taskbar_inks_the_body_and_keeps_every_opacity() {
-        for taskbar in [LIGHT_16, LIGHT_32] {
-            let plain = decode_rgba(taskbar.source()).unwrap().0;
-            let inked = state_icon(TrayState::Ready, taskbar).unwrap().0;
-            assert_eq!(inked.len(), plain.len());
-            let (mut body, mut details) = (0, 0);
-            for (before, after) in plain.chunks(4).zip(inked.chunks(4)) {
-                assert_eq!(before[3], after[3], "the opacity is kept");
-                if before[3] == 0 {
-                    assert_eq!(before, after, "a clear pixel stays clear");
-                } else if before[..3].iter().all(|channel| *channel >= 0xc0) {
-                    assert_eq!(after[..3], NIGHT_COLOUR, "a pale pixel takes the ink");
-                    body += 1;
-                } else if before[..3].iter().all(|channel| *channel < 0x40) {
-                    assert_eq!(after[..3], LIGHT_GROUND, "a dark detail takes the ground");
-                    details += 1;
+    /// How many separate pieces the visible pixels of a `size` pixel square RGBA image form, each
+    /// pixel joined to the eight around it.
+    fn pieces(rgba: &[u8], size: usize) -> usize {
+        let visible = |x: usize, y: usize| pixel_of(rgba, size, x, y)[3] != 0;
+        let mut seen = vec![false; size * size];
+        let mut count = 0;
+        for start in 0..size * size {
+            if seen[start] || !visible(start % size, start / size) {
+                continue;
+            }
+            count += 1;
+            seen[start] = true;
+            let mut open = vec![start];
+            while let Some(at) = open.pop() {
+                let (x, y) = (at % size, at / size);
+                for ny in y.saturating_sub(1)..=(y + 1).min(size - 1) {
+                    for nx in x.saturating_sub(1)..=(x + 1).min(size - 1) {
+                        let next = ny * size + nx;
+                        if !seen[next] && visible(nx, ny) {
+                            seen[next] = true;
+                            open.push(next);
+                        }
+                    }
                 }
             }
-            assert!(
-                body > 0 && details > 0,
-                "{taskbar:?}: {body} body, {details} details"
-            );
+        }
+        count
+    }
+
+    #[test]
+    fn a_light_taskbar_shows_the_glyph_in_one_ink_and_one_piece() {
+        for (taskbar, size) in [(LIGHT_16, 16), (LIGHT_32, 32)] {
+            let (glyph, width, height) = decode_rgba(taskbar.source()).unwrap();
+            assert_eq!((width, height), (size as u32, size as u32), "{taskbar:?}");
+            let ready = state_icon(TrayState::Ready, taskbar).unwrap().0;
+            assert_eq!(ready, glyph, "{taskbar:?}: ready is the glyph's own pixels");
+            let dark = Taskbar {
+                light: false,
+                ..taskbar
+            };
+            assert_ne!(glyph, decode_rgba(dark.source()).unwrap().0);
+            for pixel in glyph.chunks(4) {
+                if pixel[3] != 0 {
+                    assert_eq!(pixel[..3], NIGHT_COLOUR, "{taskbar:?}: one ink");
+                }
+            }
+            assert_eq!(pieces(&glyph, size), 1, "{taskbar:?}: no sparkle or speck");
         }
     }
 
     #[test]
-    fn a_dot_on_a_light_taskbar_lies_over_the_inked_ghost() {
-        let inked = state_icon(TrayState::Ready, LIGHT_32).unwrap().0;
-        for (state, colour) in DOT_STATES {
-            let icon = state_icon(state, LIGHT_32).unwrap().0;
-            assert_eq!(pixel(&icon, 24, 24), [colour[0], colour[1], colour[2], 255]);
-            assert_eq!(pixel(&icon, 12, 12), pixel(&inked, 12, 12), "{state:?}");
+    fn the_glyph_keeps_its_face_at_16_and_32_pixels() {
+        // Each eye is clear for two pixels down, with solid ink beside it and above it.
+        for (taskbar, size, eyes) in [
+            (LIGHT_16, 16, [(5, 6), (10, 6)]),
+            (LIGHT_32, 32, [(10, 13), (20, 13)]),
+        ] {
+            let glyph = state_icon(TrayState::Ready, taskbar).unwrap().0;
+            for (x, y) in eyes {
+                assert_eq!(pixel_of(&glyph, size, x, y)[3], 0, "{taskbar:?} eye");
+                assert_eq!(pixel_of(&glyph, size, x, y + 1)[3], 0, "{taskbar:?} eye");
+                for (beside_x, beside_y) in [(x - 2, y), (x + 3, y), (x, y - 3)] {
+                    assert_eq!(
+                        pixel_of(&glyph, size, beside_x, beside_y)[3],
+                        255,
+                        "{taskbar:?}: ink at ({beside_x}, {beside_y})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_dot_on_a_light_taskbar_lies_over_the_glyph() {
+        for (taskbar, size, centre) in [(LIGHT_32, 32, 24), (LIGHT_16, 16, 12)] {
+            let glyph = state_icon(TrayState::Ready, taskbar).unwrap().0;
+            for (state, colour) in DOT_STATES {
+                let icon = state_icon(state, taskbar).unwrap().0;
+                assert_eq!(
+                    pixel_of(&icon, size, centre, centre),
+                    [colour[0], colour[1], colour[2], 255],
+                    "{state:?} on {taskbar:?}"
+                );
+                assert_eq!(
+                    pixel_of(&icon, size, size / 4, size / 4),
+                    pixel_of(&glyph, size, size / 4, size / 4),
+                    "{state:?} on {taskbar:?}: the ghost is kept away from the dot"
+                );
+            }
         }
     }
 

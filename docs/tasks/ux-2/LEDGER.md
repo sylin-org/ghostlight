@@ -22,7 +22,7 @@ the push.
 | u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | todo |
 | u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | todo |
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
-| n1 light-taskbar-tray-glyph | native | j-11 | todo |
+| n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
 | e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit) | todo |
 | o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | todo |
 | k1 brand-reference-for-2-0 | docs | j-37 | landed (this commit) |
@@ -38,3 +38,17 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   chevron is described as u6 draws it, an SVG chevron. The dictionary page is labelled as the 1.x
   vocabulary rather than reskinned. The click section's emit site now points at
   work/pointer.rs, and docs/design/README.md names the dictionary as 1.x.
+- n1 (j-11): both light-taskbar frames, 16 and 32 pixels, are now the monochrome tray glyph
+  in crates/desktop/assets (tray-glyph-16.png drawn by hand, tray-glyph-32.png smooth): one
+  silhouette in the night colour with its eyes cut out and no sparkles. Since no light frame is
+  recoloured any more, ink() and BODY_LIGHTNESS are deleted rather than given the alpha-128
+  skip the item named; the grey specks go with them. The dark taskbar keeps the product icon.
+  The glyph is a plain ghost without the lantern, because the state dot sits where the lantern
+  would. The owner approves it, and it is checked in the light-mode session at 100% and 150%.
+- n1 previews, written by a throwaway program to the coordinator's scratchpad folder
+  ux2-tray-preview/: `<light|dark>-taskbar-<16|24|32>px-<ready|working|paused|attention>.png`
+  and the same names with `-8x` (48 files, nearest-neighbour 8x), plus sheet-1x.png and
+  sheet-8x.png. In the sheets the top half is the light-taskbar art and the bottom half the
+  dark-taskbar art; the left column of each half is on a light ground (#f3f3f3), the right on a
+  dark one (#202020). The 24 pixel frames are the 32 pixel art scaled down, as Windows does at
+  150%.
