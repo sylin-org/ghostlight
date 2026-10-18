@@ -709,7 +709,9 @@ enum ClientStep {
 
 /// Decide what a run does with `summary`. Inside `container`, a client whose configuration it
 /// keeps private is never changed: a real install leaves it to the closing lines, and a dry run or
-/// a removal says that its entry is left and which command run elsewhere changes it.
+/// a removal says that its entry is left and which command run elsewhere changes it. A dry run
+/// says what the real run would change, read from the same inspection the real run acts on: a
+/// removal names each other copy of the client's settings Uninstall would clean.
 fn client_step(
     summary: &HarnessSummary,
     install: bool,
@@ -729,11 +731,16 @@ fn client_step(
         }
     }
     if dry_run {
-        return ClientStep::Say(deployment_words::client_would(
-            &summary.label,
-            summary.state,
-            install,
-        ));
+        return ClientStep::Say(if install {
+            deployment_words::client_would_install(&summary.label, summary.state, summary.attention)
+        } else {
+            deployment_words::client_would_remove(
+                &summary.label,
+                summary.state,
+                summary.attention,
+                &summary.owned_copies,
+            )
+        });
     }
     ClientStep::Apply(if install {
         HarnessAction::Install
@@ -1209,6 +1216,7 @@ mod tests {
             state,
             detail: String::new(),
             evidence: None,
+            attention: None,
             can_install: true,
             can_fix: false,
             can_uninstall: false,
@@ -1220,6 +1228,7 @@ mod tests {
             config_path: String::new(),
             packaged: false,
             other_copy: None,
+            owned_copies: Vec::new(),
             connector_command: "/home/ghostlight mcp".into(),
             manual_setup: String::new(),
         }
@@ -1419,6 +1428,62 @@ mod tests {
         assert_eq!(
             client_step(&cursor, true, false, None),
             ClientStep::Apply(HarnessAction::Install)
+        );
+    }
+
+    #[test]
+    fn a_dry_run_removal_says_what_uninstall_would_change_in_every_copy() {
+        use crate::install::Attention;
+
+        let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json";
+        let said = |summary: &HarnessSummary| match client_step(summary, false, true, None) {
+            ClientStep::Say(line) => line,
+            other => panic!("a dry run changes nothing: {other:?}"),
+        };
+        let elsewhere = format!(
+            "Would remove Ghostlight from another copy of Claude Desktop's settings, at {plain}."
+        );
+
+        // The chosen file has no entry and another copy holds Ghostlight's own: Uninstall cleans
+        // that copy, so the dry run names it.
+        let available = HarnessSummary {
+            can_uninstall: true,
+            other_copy: Some(plain.into()),
+            owned_copies: vec![plain.into()],
+            ..harness("claude-desktop", "Claude Desktop", HarnessState::Available)
+        };
+        assert_eq!(said(&available), elsewhere);
+
+        // The chosen file holds an entry Ghostlight does not own, and another copy holds
+        // Ghostlight's: Uninstall leaves the chosen file and cleans the other copy.
+        let foreign = HarnessSummary {
+            state: HarnessState::NeedsAttention,
+            attention: Some(Attention::ForeignEntry),
+            ..available.clone()
+        };
+        assert_eq!(said(&foreign), elsewhere);
+
+        // No copy holds Ghostlight's entry: nothing would change, and a file that could not be
+        // parsed is said as that, not as a foreign entry.
+        let none = HarnessSummary {
+            other_copy: Some(plain.into()),
+            ..harness("claude-desktop", "Claude Desktop", HarnessState::Available)
+        };
+        assert_eq!(
+            said(&none),
+            "Claude Desktop has no Ghostlight entry; nothing would change."
+        );
+        let malformed = HarnessSummary {
+            attention: Some(Attention::Malformed),
+            ..harness(
+                "claude-desktop",
+                "Claude Desktop",
+                HarnessState::NeedsAttention,
+            )
+        };
+        assert_eq!(
+            said(&malformed),
+            "Would leave Claude Desktop as it is: its settings file could not be parsed."
         );
     }
 

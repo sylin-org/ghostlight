@@ -799,6 +799,7 @@ fn write_summary(
         state,
         detail,
         evidence,
+        attention,
         can_install,
         can_fix,
         can_uninstall,
@@ -810,6 +811,7 @@ fn write_summary(
         config_path,
         packaged,
         other_copy,
+        owned_copies,
         connector_command,
         manual_setup,
     } = summary;
@@ -818,6 +820,13 @@ fn write_summary(
     if let Some(evidence) = evidence {
         let _ = writeln!(out, "evidence: {}", run.masked(evidence));
     }
+    // The cause is said by `detail` above; what matters here is that it is known exactly when the
+    // host needs attention, since a dry run words its line from it.
+    assert_eq!(
+        attention.is_some(),
+        *state == HarnessState::NeedsAttention,
+        "{id}: the cause of attention is known exactly when the host needs it"
+    );
     let acts: Vec<&str> = [
         (*can_install, "install"),
         (*can_fix, "fix"),
@@ -847,6 +856,9 @@ fn write_summary(
     }
     if let Some(other) = other_copy {
         let _ = writeln!(out, "other copy: {}", run.shown(Path::new(other)));
+    }
+    for owned in owned_copies {
+        let _ = writeln!(out, "owned entry also in: {}", run.shown(Path::new(owned)));
     }
     let _ = writeln!(out, "connector command: {}", run.masked(connector_command));
     write_text(out, run, "manual setup", manual_setup);

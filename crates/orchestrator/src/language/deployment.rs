@@ -8,7 +8,7 @@
 
 use crate::install::deployment::RESTORE_OPTION;
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
-use crate::install::{HarnessState, ALL_CLIENTS_OPTION};
+use crate::install::{Attention, HarnessState, ALL_CLIENTS_OPTION};
 
 /// Where the get scripts are published.
 const GET_SCRIPT_ROOT: &str = "https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts";
@@ -214,28 +214,83 @@ pub fn browsers_registered(browsers: &[String]) -> String {
     format!("Browser connection registered for {}.", browsers.join(", "))
 }
 
-/// What a dry run would do for `client`, whose entry is in `state`: install it when `install`,
-/// otherwise remove it. It says what the real run would change, and that nothing would when
-/// nothing would.
+/// What a dry run of an install would do for `client`, whose entry is in `state`, needing
+/// `attention` for the cause inspection saw when it is in [`HarnessState::NeedsAttention`]. It
+/// says what the real run would change, and that nothing would when nothing would.
 #[must_use]
-pub fn client_would(client: &str, state: HarnessState, install: bool) -> String {
-    match (install, state) {
-        (true, HarnessState::NotDetected | HarnessState::Available) => {
+pub fn client_would_install(
+    client: &str,
+    state: HarnessState,
+    attention: Option<Attention>,
+) -> String {
+    match state {
+        HarnessState::NotDetected | HarnessState::Available => {
             format!("Would install Ghostlight for {client}.")
         }
-        (true, HarnessState::Updatable) => format!("Would update Ghostlight's entry for {client}."),
-        (true, HarnessState::Installed) => {
+        HarnessState::Updatable => format!("Would update Ghostlight's entry for {client}."),
+        HarnessState::Installed => {
             format!("{client} already has the current Ghostlight entry; nothing would change.")
         }
-        (_, HarnessState::NeedsAttention) => format!(
+        HarnessState::NeedsAttention => client_would_be_left(client, attention),
+    }
+}
+
+/// What a dry run of a removal would do for `client`, whose own settings are in `state`, needing
+/// `attention` for the cause inspection saw, and whose other settings copies at `owned_copies`
+/// hold an entry Ghostlight owns. It says what Uninstall changes: the entry in the client's own
+/// settings when it holds one, and each other copy by its path, so a change made in another copy
+/// is never said as nothing. Nothing would change only when no copy holds Ghostlight's entry.
+#[must_use]
+pub fn client_would_remove(
+    client: &str,
+    state: HarnessState,
+    attention: Option<Attention>,
+    owned_copies: &[String],
+) -> String {
+    let here = matches!(state, HarnessState::Installed | HarnessState::Updatable);
+    match (here, owned_copies.is_empty()) {
+        (true, true) => format!("Would remove Ghostlight from {client}."),
+        (true, false) => format!(
+            "Would remove Ghostlight from {client} and from {}.",
+            settings_copies("its", owned_copies)
+        ),
+        (false, false) => format!(
+            "Would remove Ghostlight from {}.",
+            settings_copies(&format!("{client}'s"), owned_copies)
+        ),
+        (false, true) if state == HarnessState::NeedsAttention => {
+            client_would_be_left(client, attention)
+        }
+        (false, true) => format!("{client} has no Ghostlight entry; nothing would change."),
+    }
+}
+
+/// The other copies of a client's settings at `copies`, whose owner is said as `owner` (`its`, or
+/// the client's name in the possessive).
+fn settings_copies(owner: &str, copies: &[String]) -> String {
+    match copies {
+        [copy] => format!("another copy of {owner} settings, at {copy}"),
+        _ => format!(
+            "other copies of {owner} settings, at {}",
+            copies.join(" and ")
+        ),
+    }
+}
+
+/// A dry run leaves `client` as it is because it needs attention, for the cause inspection saw.
+/// Without a known cause the line names none.
+fn client_would_be_left(client: &str, attention: Option<Attention>) -> String {
+    match attention {
+        Some(Attention::ForeignEntry) => format!(
             "Would leave {client} as it is: the entry under Ghostlight's name is not Ghostlight's."
         ),
-        (false, HarnessState::Installed | HarnessState::Updatable) => {
-            format!("Would remove Ghostlight from {client}.")
+        Some(Attention::Malformed) => {
+            format!("Would leave {client} as it is: its settings file could not be parsed.")
         }
-        (false, HarnessState::NotDetected | HarnessState::Available) => {
-            format!("{client} has no Ghostlight entry; nothing would change.")
+        Some(Attention::Unreadable) => {
+            format!("Would leave {client} as it is: its settings file could not be read.")
         }
+        None => format!("Would leave {client} as it is."),
     }
 }
 
@@ -478,40 +533,108 @@ mod tests {
     fn a_dry_run_says_what_each_state_would_become_in_plain_words() {
         use HarnessState::{Available, Installed, NeedsAttention, NotDetected, Updatable};
 
-        let would = |state, install| client_would("Cline (CLI)", state, install);
+        let install = |state| client_would_install("Cline (CLI)", state, None);
+        let remove = |state| client_would_remove("Cline (CLI)", state, None, &[]);
         assert_eq!(
-            would(Available, true),
+            install(Available),
             "Would install Ghostlight for Cline (CLI)."
         );
         assert_eq!(
-            would(NotDetected, true),
+            install(NotDetected),
             "Would install Ghostlight for Cline (CLI)."
         );
         assert_eq!(
-            would(Updatable, true),
+            install(Updatable),
             "Would update Ghostlight's entry for Cline (CLI)."
         );
-        assert!(would(Installed, true).ends_with("nothing would change."));
-        assert!(would(NeedsAttention, true).starts_with("Would leave Cline (CLI) as it is"));
+        assert!(install(Installed).ends_with("nothing would change."));
         assert_eq!(
-            would(Installed, false),
+            remove(Installed),
             "Would remove Ghostlight from Cline (CLI)."
         );
         assert_eq!(
-            would(Updatable, false),
+            remove(Updatable),
             "Would remove Ghostlight from Cline (CLI)."
         );
-        assert!(would(Available, false).ends_with("nothing would change."));
-        assert!(would(NeedsAttention, false).starts_with("Would leave Cline (CLI) as it is"));
+        assert!(remove(Available).ends_with("nothing would change."));
+        assert!(remove(NotDetected).ends_with("nothing would change."));
         for state in [Available, NotDetected, Updatable, Installed, NeedsAttention] {
-            for install in [true, false] {
-                let sentence = would(state, install);
+            for sentence in [install(state), remove(state)] {
                 assert!(
                     !sentence.contains(&format!("{state:?}")),
                     "no internal name: {sentence}"
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_client_left_as_it_is_is_said_with_the_cause_inspection_saw() {
+        let cases = [
+            (
+                Some(Attention::ForeignEntry),
+                "Would leave Kiro as it is: the entry under Ghostlight's name is not Ghostlight's.",
+            ),
+            (
+                Some(Attention::Malformed),
+                "Would leave Kiro as it is: its settings file could not be parsed.",
+            ),
+            (
+                Some(Attention::Unreadable),
+                "Would leave Kiro as it is: its settings file could not be read.",
+            ),
+            (None, "Would leave Kiro as it is."),
+        ];
+        for (attention, line) in cases {
+            assert_eq!(
+                client_would_install("Kiro", HarnessState::NeedsAttention, attention),
+                line
+            );
+            assert_eq!(
+                client_would_remove("Kiro", HarnessState::NeedsAttention, attention, &[]),
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn a_removal_names_each_other_copy_it_would_change() {
+        let plain = r"C:\Users\Pat\AppData\Roaming\Claude\claude_desktop_config.json".to_owned();
+        let codex = r"C:\Users\Pat\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Roaming\Claude\claude_desktop_config.json".to_owned();
+        let one = [plain.clone()];
+        let elsewhere = format!(
+            "Would remove Ghostlight from another copy of Claude Desktop's settings, at {plain}."
+        );
+        for (state, attention) in [
+            (HarnessState::Available, None),
+            (HarnessState::NotDetected, None),
+            (HarnessState::NeedsAttention, Some(Attention::ForeignEntry)),
+            (HarnessState::NeedsAttention, Some(Attention::Malformed)),
+        ] {
+            assert_eq!(
+                client_would_remove("Claude Desktop", state, attention, &one),
+                elsewhere
+            );
+        }
+        assert_eq!(
+            client_would_remove("Claude Desktop", HarnessState::Installed, None, &one),
+            format!(
+                "Would remove Ghostlight from Claude Desktop and from another copy of its \
+                 settings, at {plain}."
+            )
+        );
+        assert_eq!(
+            client_would_remove(
+                "Claude Desktop",
+                HarnessState::Available,
+                None,
+                &[plain.clone(), codex.clone()]
+            ),
+            format!(
+                "Would remove Ghostlight from other copies of Claude Desktop's settings, at \
+                 {plain} and {codex}."
+            )
+        );
     }
 
     #[test]
@@ -525,7 +648,8 @@ mod tests {
             payload_in_place("d"),
             payload_other_build("d"),
             service_did_not_start("bin", 30),
-            client_would("c", HarnessState::NeedsAttention, true),
+            client_would_install("c", HarnessState::NeedsAttention, None),
+            client_would_remove("c", HarnessState::Available, None, &["p".into()]),
             service_could_not_start("bin", "r"),
             service_stopped_because("bin", "r"),
             service_stopped("bin"),

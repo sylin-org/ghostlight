@@ -654,6 +654,7 @@ pub(super) mod test_support {
             state,
             detail: String::new(),
             evidence: None,
+            attention: None,
             can_install: false,
             can_fix: false,
             can_uninstall: false,
@@ -665,6 +666,7 @@ pub(super) mod test_support {
             config_path: String::new(),
             packaged: false,
             other_copy: None,
+            owned_copies: Vec::new(),
             connector_command: "ghostlight mcp".into(),
             manual_setup: String::new(),
         }

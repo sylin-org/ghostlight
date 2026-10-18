@@ -735,6 +735,7 @@ private view: no
 config path: <root>/Pat Doe/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude_desktop_config.json
 packaged: yes, the Store edition's own copy
 other copy: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
+owned entry also in: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
 connector command: "<edge>" mcp
 manual setup:
   | {
@@ -886,6 +887,7 @@ copy only: no
 private view: no
 config path: <root>/Pat Doe/AppData/Roaming/Claude/claude_desktop_config.json
 other copy: <root>/Pat Doe/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roaming/Claude/claude_desktop_config.json
+owned entry also in: <root>/Pat Doe/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Roaming/Claude/claude_desktop_config.json
 connector command: "<edge>" mcp
 manual setup:
   | {

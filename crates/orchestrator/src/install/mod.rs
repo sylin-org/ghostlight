@@ -378,6 +378,18 @@ impl HarnessState {
     }
 }
 
+/// What inspection saw that put a target in [`HarnessState::NeedsAttention`]. Each cause is
+/// said as itself, never as another (ADR-0135).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Attention {
+    /// An entry Ghostlight does not own sits under Ghostlight's name.
+    ForeignEntry,
+    /// The configuration file could not be parsed.
+    Malformed,
+    /// The configuration file could not be read.
+    Unreadable,
+}
+
 /// Immutable user-facing integration summary.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HarnessSummary {
@@ -407,6 +419,11 @@ pub struct HarnessSummary {
     /// words of its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// Why the target needs attention, present exactly when `state` is
+    /// [`HarnessState::NeedsAttention`]. `detail` says it to the window; a dry run words its line
+    /// from it.
+    #[serde(skip)]
+    pub attention: Option<Attention>,
     /// Whether an explicit install can be attempted.
     pub can_install: bool,
     /// Whether an explicit fix can replace a foreign entry under Ghostlight's key.
@@ -439,6 +456,11 @@ pub struct HarnessSummary {
     /// entry goes in `config_path`; Uninstall also removes Ghostlight's own entry from this copy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_copy: Option<String>,
+    /// Every copy of the agent's settings besides `config_path` that holds an entry Ghostlight
+    /// owns: the copies Uninstall removes Ghostlight's entry from, besides `config_path` when that
+    /// holds one too. A dry run names them, so it says what Uninstall changes.
+    #[serde(skip)]
+    pub owned_copies: Vec<String>,
     /// Exact installed command line available for manual setup.
     pub connector_command: String,
     /// Smallest complete manual configuration document for this target.
@@ -1655,9 +1677,13 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
     let changeable = private.is_none();
     let can_fix =
         changeable && edge_ready && matches!(registration, Ok(RegistrationState::Foreign(_)));
-    let left_elsewhere = definition
-        .other_copies()
-        .any(|path| holds_owned_entry(context, definition, path));
+    let owned_copies = owned_other_copies(context, definition);
+    let attention = match &registration {
+        Ok(RegistrationState::Foreign(_)) => Some(Attention::ForeignEntry),
+        Err(HarnessError::Malformed(_)) => Some(Attention::Malformed),
+        Err(_) => Some(Attention::Unreadable),
+        Ok(_) => None,
+    };
     HarnessSummary {
         id: definition.id.into(),
         product_id: definition.product_id.into(),
@@ -1668,9 +1694,10 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         state,
         detail,
         evidence,
+        attention,
         can_install: changeable && edge_ready && !manual && state.takes_install(),
         can_fix,
-        can_uninstall: changeable && (state == HarnessState::Installed || left_elsewhere),
+        can_uninstall: changeable && (state == HarnessState::Installed || !owned_copies.is_empty()),
         can_download: definition.download_url.is_some(),
         download_url: definition.download_url.map(str::to_owned),
         can_locate: true,
@@ -1682,6 +1709,10 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
             .other_copies()
             .next()
             .map(|path| path.to_string_lossy().into_owned()),
+        owned_copies: owned_copies
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
         connector_command: mcp_command_line(&context.edge),
         manual_setup: manual_setup(context, definition).unwrap_or_else(|_| {
             format!(
@@ -1964,10 +1995,7 @@ fn apply_uninstall(
     definition: &HarnessDefinition,
 ) -> Result<HarnessActionResult, HarnessError> {
     refuse_private(context, definition)?;
-    let others: Vec<&Path> = definition
-        .other_copies()
-        .filter(|path| holds_owned_entry(context, definition, path))
-        .collect();
+    let others = owned_other_copies(context, definition);
     let mut changed =
         if others.is_empty() || holds_owned_entry(context, definition, &definition.path) {
             uninstall_at(context, definition, &definition.path)?
@@ -1993,6 +2021,19 @@ fn apply_uninstall(
         },
         summary,
     })
+}
+
+/// The other copies of the agent's settings, besides the configuration itself, that hold an entry
+/// Ghostlight owns. Uninstall removes Ghostlight's entry from each, and inspection names them, so
+/// what a dry run says and what Uninstall does come from this one reading.
+fn owned_other_copies<'a>(
+    context: &HarnessContext,
+    definition: &'a HarnessDefinition,
+) -> Vec<&'a Path> {
+    definition
+        .other_copies()
+        .filter(|path| holds_owned_entry(context, definition, path))
+        .collect()
 }
 
 /// Whether the file at `path`, read as the configuration of `definition`, holds an entry
@@ -2853,10 +2894,10 @@ mod tests {
         edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots, inspect,
         inspect_json, inspect_toml, json_entry_args, json_entry_command, jsonc_options,
         manual_json_setup, mcp_command_line, packaged, replace_with_backup,
-        resolve_through_symlink, AppContainer, ClientName, ForeignCommand, HarnessAction,
-        HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary,
-        JsonDialect, Packages, PrivateView, RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME,
-        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
+        resolve_through_symlink, AppContainer, Attention, ClientName, ForeignCommand,
+        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
+        HarnessSummary, JsonDialect, Packages, PrivateView, RegistrationState, CLINE_SETTINGS,
+        EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -4934,6 +4975,12 @@ mod tests {
         fs::create_dir_all(foreign.parent().unwrap()).unwrap();
         let foreign_text = r#"{"mcpServers":{"ghostlight":{"command":"node","args":["x.js"]}}}"#;
         fs::write(&foreign, foreign_text).unwrap();
+        registry.refresh().unwrap();
+        assert_eq!(
+            desktop_summary(&registry).owned_copies,
+            [plain.to_string_lossy()],
+            "only the copy that holds Ghostlight's own entry is named"
+        );
 
         let removed = registry
             .apply("claude-desktop", HarnessAction::Uninstall)
@@ -5052,6 +5099,7 @@ mod tests {
             summary.can_uninstall,
             "the plain copy's entry can be removed"
         );
+        assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
         let selected = crate::cli::setup::select_harnesses(
             &registry.summaries(),
             &crate::cli::parse::SetupOptions::default(),
@@ -5069,6 +5117,48 @@ mod tests {
         assert!(!has_entry(&plain));
         assert_eq!(fs::read_to_string(&private).unwrap(), PERSON_SETTINGS);
         assert!(!removed.summary.can_uninstall);
+        assert!(removed.summary.owned_copies.is_empty());
+    }
+
+    #[test]
+    fn a_store_copy_that_needs_attention_names_its_cause_and_uninstall_still_cleans_the_plain_copy()
+    {
+        let directory = temporary("store-attention");
+        let context = windows_context(&directory);
+        let plain = plain_desktop(&context);
+        fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        fs::write(&plain, current_settings(&context)).unwrap();
+        let private = store_folder(&context).join("claude_desktop_config.json");
+        let broken = "{\"mcpServers\": {";
+        fs::write(&private, broken).unwrap();
+        let registry = HarnessRegistry::with_context(context.clone());
+
+        let summary = desktop_summary(&registry);
+        assert_eq!(PathBuf::from(&summary.config_path), private);
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        assert_eq!(summary.attention, Some(Attention::Malformed));
+        assert!(summary.can_uninstall);
+        assert_eq!(summary.owned_copies, [plain.to_string_lossy()]);
+
+        let removed = registry
+            .apply("claude-desktop", HarnessAction::Uninstall)
+            .unwrap();
+        assert!(removed.changed);
+        assert!(!has_entry(&plain));
+        assert_eq!(fs::read_to_string(&private).unwrap(), broken);
+        assert!(removed.summary.owned_copies.is_empty());
+        assert_eq!(removed.summary.attention, Some(Attention::Malformed));
+
+        fs::write(
+            &private,
+            r#"{"mcpServers":{"ghostlight":{"command":"node"}}}"#,
+        )
+        .unwrap();
+        registry.refresh().unwrap();
+        assert_eq!(
+            desktop_summary(&registry).attention,
+            Some(Attention::ForeignEntry)
+        );
     }
 
     #[test]
