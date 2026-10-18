@@ -41,6 +41,10 @@ never force.
   coordinator fixes it and pushes, and this session re-runs the check. The one exception is a
   Linux-only test or journey that is plainly wrong about Linux (for example a Windows path baked
   into a Linux test): fix it in its own commit, say so in the ledger, and tell the coordinator.
+  Amended by the owner on 2026-10-17: this session may also investigate the issues it finds and
+  land proper fixes, product code included, under AGENTS.md's rules (read the subsystem's ADRs
+  first, run the checks for what changed, one logical change per commit). It claims each
+  finding in the chat before it starts, so the coordinator does not fix the same one.
 - Never publish, tag, release, submit to a store, or post anywhere. Never phone home.
 - Never weaken a test to make it pass.
 - Never read or publish `local/`, `private/` or `saps/`.
