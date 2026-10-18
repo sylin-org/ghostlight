@@ -7,8 +7,10 @@
 //!
 //! The icon is the product icon, drawn at run time for the [`Taskbar`] it sits on. A ready service
 //! shows the plain ghost; each other state adds a small filled dot in the lower right in the colour
-//! the window's band uses for that state, ringed in the taskbar's ground ([`state_icon`]). The
-//! 16 pixel icon is drawn at the 16 pixel small-icon size and the 32 pixel icon at any larger one.
+//! the window's band uses for that state, ringed in the taskbar's ground ([`state_icon`]). On
+//! Windows the 16 pixel icon is drawn at the 16 pixel small-icon size and the 32 pixel icon at any
+//! larger one. A Linux StatusNotifier host draws the icon at its own size, so it gets the 32 pixel
+//! icon.
 //! On a light Windows taskbar the pale ghost would be a speck, so its body is inked in the window's
 //! night colour, and `watch_taskbar` notices when the taskbar turns light or dark. No other
 //! artwork is shipped.
@@ -78,6 +80,11 @@ const REFERENCE_SIZE: f32 = 32.0;
 
 /// The small-icon size of a taskbar at 100% scale, in pixels.
 const SMALL_ICON: u32 = 16;
+
+/// The size the icon is drawn for where the tray host picks its own size, as a Linux
+/// StatusNotifier host does (about 22 to 24 pixels on KDE Plasma), in pixels.
+#[cfg(not(windows))]
+const HOST_ICON: u32 = 32;
 
 /// How light a pixel must be, on a scale of 0 to 255, to belong to the ghost's pale body. A
 /// darker pixel is a detail inside it, such as an eye.
@@ -264,21 +271,20 @@ impl TrayModel {
 pub struct Taskbar {
     /// Whether the taskbar is light (on Windows, `SystemUsesLightTheme` is 1).
     pub light: bool,
-    /// The size of a small icon on it, in physical pixels.
+    /// The size the icon is drawn for on it, in physical pixels.
     pub small_icon: u32,
 }
 
 impl Taskbar {
-    /// The taskbar of a monitor at `scale_factor`, light when `light`. A scale that makes no
-    /// sense counts as 100%.
+    /// The taskbar of a monitor at `scale_factor`, light when `light`. On Windows the icon is
+    /// drawn for the small-icon size, 16 pixels at 100%, and a scale that makes no sense counts
+    /// as 100%. Elsewhere the host picks its own size, so the icon is drawn for 32 pixels
+    /// whatever the scale.
     pub fn new(light: bool, scale_factor: f64) -> Taskbar {
-        let scaled = (f64::from(SMALL_ICON) * scale_factor).round();
-        let small_icon = if (1.0..=f64::from(u16::MAX)).contains(&scaled) {
-            scaled as u32
-        } else {
-            SMALL_ICON
-        };
-        Taskbar { light, small_icon }
+        Taskbar {
+            light,
+            small_icon: small_icon_size(scale_factor),
+        }
     }
 
     /// The colour the taskbar is drawn in, so the ring that parts the dot from the ghost.
@@ -299,6 +305,24 @@ impl Taskbar {
             ICON_PNG
         }
     }
+}
+
+/// The Windows small-icon size at `scale_factor`: 16 pixels times the scale, or 16 for a scale
+/// that makes no sense.
+#[cfg(windows)]
+fn small_icon_size(scale_factor: f64) -> u32 {
+    let scaled = (f64::from(SMALL_ICON) * scale_factor).round();
+    if (1.0..=f64::from(u16::MAX)).contains(&scaled) {
+        scaled as u32
+    } else {
+        SMALL_ICON
+    }
+}
+
+/// The size a host that picks its own icon size is given, whatever `_scale_factor` is.
+#[cfg(not(windows))]
+fn small_icon_size(_scale_factor: f64) -> u32 {
+    HOST_ICON
 }
 
 impl Default for Taskbar {
@@ -741,6 +765,12 @@ mod tests {
         small_icon: 16,
     };
 
+    /// A dark taskbar at 100% scale, which draws the 16 pixel icon.
+    const DARK_16: Taskbar = Taskbar {
+        light: false,
+        small_icon: 16,
+    };
+
     /// The states that add a dot, with the dot's colour.
     const DOT_STATES: [(TrayState, [u8; 3]); 3] = [
         (TrayState::Working, WORKING_COLOUR),
@@ -748,6 +778,7 @@ mod tests {
         (TrayState::Attention, ATTENTION_COLOUR),
     ];
 
+    #[cfg(windows)]
     #[test]
     fn the_small_icon_size_follows_the_scale() {
         assert_eq!(Taskbar::new(false, 1.0).small_icon, 16);
@@ -760,6 +791,7 @@ mod tests {
         assert_eq!(Taskbar::default(), Taskbar::new(false, 1.0));
     }
 
+    #[cfg(windows)]
     #[test]
     fn the_16_pixel_icon_is_drawn_at_16_and_the_32_pixel_icon_at_24_and_32() {
         for (scale, size) in [(1.0, 16), (1.25, 32), (1.5, 32), (2.0, 32)] {
@@ -768,6 +800,19 @@ mod tests {
             assert_eq!((width, height), (size, size), "at {scale}");
             assert_eq!(rgba.len(), (size * size * 4) as usize);
         }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_host_that_picks_its_own_size_gets_the_32_pixel_icon_at_any_scale() {
+        for scale in [1.0, 1.25, 1.5, 2.0, 0.0, f64::NAN] {
+            let taskbar = Taskbar::new(false, scale);
+            assert_eq!(taskbar.small_icon, 32, "at {scale}");
+            let (rgba, width, height) = state_icon(TrayState::Ready, taskbar).unwrap();
+            assert_eq!((width, height), (32, 32), "at {scale}");
+            assert_eq!(rgba, icon_image().unwrap().0, "at {scale}");
+        }
+        assert_eq!(Taskbar::default(), Taskbar::new(false, 1.0));
     }
 
     #[test]
@@ -789,7 +834,7 @@ mod tests {
                 assert_ne!(icon, other, "four distinct images");
             }
         }
-        let small = state_icon(TrayState::Ready, Taskbar::default()).unwrap().0;
+        let small = state_icon(TrayState::Ready, DARK_16).unwrap().0;
         assert_eq!(small, decode_rgba(ICON_16_PNG).unwrap().0);
     }
 
@@ -818,7 +863,7 @@ mod tests {
     #[test]
     fn the_dot_is_six_pixels_across_on_the_16_pixel_icon() {
         for (state, colour) in DOT_STATES {
-            let icon = state_icon(state, Taskbar::default()).unwrap().0;
+            let icon = state_icon(state, DARK_16).unwrap().0;
             let full = [colour[0], colour[1], colour[2], 255];
             for (x, y) in [(12, 12), (10, 12), (13, 12), (12, 10), (12, 13)] {
                 assert_eq!(pixel_of(&icon, 16, x, y), full, "{state:?} at ({x}, {y})");

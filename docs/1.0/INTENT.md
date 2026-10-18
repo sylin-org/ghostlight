@@ -74,10 +74,10 @@ Internal browser commands are combined when a person experiences them as one job
 - Whatever started Ghostlight, the service brings up the shell whenever the desktop can show it,
   and the shell draws the tray. When an agent started Ghostlight, only the icon appears; a
   Start-menu launch, `ghostlight open`, a watcher's Continue and the tray's Open always show the
-  window. The icon shows the band's state and its tooltip counts the connections. Closing the
-  window leaves the icon, and the first time one notice says so. Windows restores its existing
-  view; Linux reconstructs its disposable view because Wayland cannot report or unset
-  minimization.
+  window. The icon shows the band's state, and its tooltip names that state, counts the
+  connections and says when no browser is connected. Closing the window leaves the icon, and the
+  first time one notice says so. Windows restores its existing view; Linux reconstructs its
+  disposable view because Wayland cannot report or unset minimization.
 - Install is one journey in three steps, This computer, Your browser and Your agent, and every
   surface that shows it shows the same three. An interactive install prints the version, where
   Ghostlight lives, which agents have it and one Next line, and opens the Ghostlight window on its

@@ -714,6 +714,17 @@ cleared, asserts both refuse with the administrator-rights sentence and leave no
 asserts that the variable set to `1` lets `serve` start. An unelevated run prints `SKIP not
 elevated` and passes.
 
+## Amendment (2026-10-18): the tray tooltip names the state
+
+Found in the rc-1 product and visual review (finding j-11) and settled in rc-1 slice
+d1-native-frame-fits-the-person. A tooltip that only counted connections could not tell a person
+that Ghostlight was paused or that no browser was connected.
+
+This supersedes the line of the Settings and the tray amendment that says the tooltip is the
+sentence that counts the service's connections. The tooltip is now the band's word for the
+readiness, then that service line, then "No browser connected" when something is connected but no
+browser is. The service composes it in its language module; the shell only draws it.
+
 ## Amendment (2026-10-18): no waiting period in the release bar
 
 The release bar above names "a week of daily use with no shutdown block and no second service".
