@@ -559,7 +559,7 @@ mod tests {
         assert_eq!(tray.state, TrayState::Ready);
         assert_eq!(
             tray.tooltip,
-            "Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+            "Ready -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
         );
         let ids: Vec<(&str, bool)> = tray
             .items

@@ -231,7 +231,8 @@ either, `open` says why at once.
 
 The service owns the tray model and the shell draws it. The model is a state (ready, working,
 paused or attention, from the same readiness the band shows; a service with no browser connected
-looks ready), a tooltip (the sentence that counts connections) and four entries: Open and Quit
+looks ready), a tooltip (the band's word for the state, then the sentence that counts
+connections, and "No browser connected" when none is) and four entries: Open and Quit
 always, Pause while work is active, Resume while it is paused or ended. The first workbench frame
 carries it and a `tray_model` frame follows each change. The shell draws the state as a small dot
 over the original icon bytes at run time; no other artwork is shipped.

@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::language::readiness::Readiness;
+
 /// The word for the context that carries the right key: the Ghostlight window.
 pub const WORD_CONTROL: &str = "Full control";
 
@@ -344,6 +346,19 @@ pub fn service_line(counts: Option<ConnectionCounts>) -> String {
         Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
     };
     format!("Ghostlight service is up; {connected} connected.")
+}
+
+/// What the tray icon says on hover: the band's word for `readiness`, then [`service_line`] for
+/// `counts`, then [`NO_BROWSER`] when something is connected but no browser is.
+#[must_use]
+pub fn tray_tooltip(readiness: Readiness, counts: ConnectionCounts) -> String {
+    let line = service_line(Some(counts));
+    let others = counts.mcp_clients + counts.command_line;
+    if counts.browsers == 0 && others > 0 {
+        format!("{} -- {line} {NO_BROWSER}.", readiness.word())
+    } else {
+        format!("{} -- {line}", readiness.word())
+    }
 }
 
 /// What `status` says about a service that answered but did not report its connections.
@@ -684,6 +699,31 @@ mod tests {
         assert_eq!(
             service_line(counts(0, 2, 0)),
             "Ghostlight service is up; 2 command-line sessions connected."
+        );
+    }
+
+    #[test]
+    fn the_tray_tooltip_names_the_state_in_the_bands_word() {
+        let both = counts(2, 0, 2).unwrap();
+        assert_eq!(
+            tray_tooltip(Readiness::Ready, both),
+            "Ready -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+        );
+        assert_eq!(
+            tray_tooltip(Readiness::Paused, both),
+            "Paused -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+        );
+    }
+
+    #[test]
+    fn the_tray_tooltip_says_when_no_browser_is_connected() {
+        assert_eq!(
+            tray_tooltip(Readiness::NotConnected, counts(1, 0, 0).unwrap()),
+            "Not connected -- Ghostlight service is up; 1 MCP client connected. No browser connected."
+        );
+        assert_eq!(
+            tray_tooltip(Readiness::Ready, counts(0, 0, 0).unwrap()),
+            "Ready -- Ghostlight service is up; nothing is connected yet."
         );
     }
 }

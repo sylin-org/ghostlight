@@ -1,7 +1,7 @@
 {
   "kind": "tray_model",
   "model": {
-    "tooltip": "Ghostlight service is up; 2 MCP clients and 2 browsers connected.",
+    "tooltip": "Paused -- Ghostlight service is up; 2 MCP clients and 2 browsers connected.",
     "items": [
       {
         "id": "open",

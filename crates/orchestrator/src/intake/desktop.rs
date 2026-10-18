@@ -36,7 +36,7 @@ use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::workbench::PageAddress;
 
 /// The longest tooltip the shell draws, in characters: the Windows limit. The tooltip is the
-/// service line that counts connections, which stays well inside it.
+/// band's word for the state and the service line that counts connections, which stay inside it.
 pub const MAX_TOOLTIP_LENGTH: usize = 127;
 
 /// One frame on a `desktop` stream, in either direction.
@@ -368,7 +368,8 @@ impl TrayState {
 /// The whole tray as the service describes it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TrayModel {
-    /// The hover text: the sentence that counts the service's connections.
+    /// The hover text: the band's word for the state and the sentence that counts the service's
+    /// connections.
     pub tooltip: String,
     /// The entries in order.
     pub items: Vec<TrayItem>,
@@ -389,7 +390,7 @@ impl TrayModel {
     ) -> Self {
         let active = runtime == RuntimeControlState::Active;
         Self {
-            tooltip: words::service_line(Some(counts)),
+            tooltip: words::tray_tooltip(readiness, counts),
             items: TrayItemId::ALL
                 .into_iter()
                 .map(|id| TrayItem {
@@ -621,7 +622,7 @@ mod tests {
         let tray = golden_tray();
         assert_eq!(
             tray.tooltip,
-            "Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+            "Ready -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
         );
         assert_eq!(tray.state, TrayState::Ready);
         assert_eq!(
@@ -670,21 +671,25 @@ mod tests {
     }
 
     #[test]
-    fn the_longest_service_line_fits_the_windows_tooltip() {
+    fn the_longest_tooltip_fits_the_windows_limit() {
         // The most the service admits at once: its session capacity of command-line or MCP
-        // sessions, and as many browsers.
-        let counts = ConnectionCounts {
-            mcp_clients: 999,
-            command_line: 999,
-            browsers: 999,
-        };
-        let tray = TrayModel::of(Readiness::Ready, RuntimeControlState::Active, counts);
-        assert!(
-            tray.tooltip.chars().count() <= MAX_TOOLTIP_LENGTH,
-            "{} characters: {}",
-            tray.tooltip.chars().count(),
-            tray.tooltip
-        );
+        // sessions, and as many browsers or none, in every state.
+        for browsers in [999, 0] {
+            let counts = ConnectionCounts {
+                mcp_clients: 999,
+                command_line: 999,
+                browsers,
+            };
+            for readiness in Readiness::ALL {
+                let tray = TrayModel::of(*readiness, RuntimeControlState::Active, counts);
+                assert!(
+                    tray.tooltip.chars().count() <= MAX_TOOLTIP_LENGTH,
+                    "{} characters: {}",
+                    tray.tooltip.chars().count(),
+                    tray.tooltip
+                );
+            }
+        }
     }
 
     #[test]

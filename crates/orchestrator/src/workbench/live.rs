@@ -444,8 +444,8 @@ impl Live {
         }
     }
 
-    /// The tray of one look: the icon state from the readiness, the tooltip from the connections
-    /// and the entries from the runtime state.
+    /// The tray of one look: the icon state from the readiness, the tooltip from the readiness and
+    /// the connections, and the entries from the runtime state.
     pub fn tray(&self, gathered: &Gathered) -> TrayModel {
         TrayModel::of(
             gathered.readiness.state,
