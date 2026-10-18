@@ -12,8 +12,8 @@ Maintained, and still describing the product as built.
 
 | Note | What it covers |
 | --- | --- |
-| [visual-language.md](visual-language.md) | The shared visual vocabulary across the in-page renderer and the desktop workbench. |
-| [visual-feedback.md](visual-feedback.md) | The feedback vocabulary: what each treatment means. Its rendered companion is [visual-feedback-dictionary.html](visual-feedback-dictionary.html). |
+| [visual-language.md](visual-language.md) | The shared visual vocabulary across the in-page renderer and the desktop workbench: what 2.0 draws, with the 1.x vocabulary as history. |
+| [visual-feedback.md](visual-feedback.md) | The feedback vocabulary: what each treatment means. Its rendered companion, [visual-feedback-dictionary.html](visual-feedback-dictionary.html), plays the 1.x vocabulary. |
 | [tool-visual-signatures.md](tool-visual-signatures.md) | Which visual signature each tool carries. |
 | [action-observations.md](action-observations.md) | Where per-action facts belong, and the two structural owners that keep the account complete. |
 | [adapter-protocol-4.md](adapter-protocol-4.md) | Adapter protocol 4, the implementation spec behind ADR-0197: frozen primitives, isolated-world assets, and the service-side Chromium translation. |

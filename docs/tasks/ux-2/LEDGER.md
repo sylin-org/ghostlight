@@ -25,8 +25,16 @@ the push.
 | n1 light-taskbar-tray-glyph | native | j-11 | todo |
 | e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit) | todo |
 | o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | todo |
-| k1 brand-reference-for-2-0 | docs | j-37 | todo |
+| k1 brand-reference-for-2-0 | docs | j-37 | landed (this commit) |
 
 Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's light-mode look.
 
 ## Notes
+
+- k1 (j-37): the 2.0 vocabulary table lists everything presentation.js draws today, not only the
+  four effects the item named. The renderer still draws the cursor, ripples, trail, field splash
+  and shimmer, scroll chevrons, read scan, navigate pill, screenshot and zoom frames, and five
+  medallion kinds, so a table of four would have under-described 2.0. The navigate pill's
+  chevron is described as u6 draws it, an SVG chevron. The dictionary page is labelled as the 1.x
+  vocabulary rather than reskinned. The click section's emit site now points at
+  work/pointer.rs, and docs/design/README.md names the dictionary as 1.x.
