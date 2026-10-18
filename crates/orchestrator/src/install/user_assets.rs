@@ -14,6 +14,10 @@
 //! Ownership follows the same rule the Applications entry uses. A symlink in a product-owned
 //! location is someone else's and is never touched. A regular file is replaced on install, and
 //! removed on uninstall only when its bytes are exactly what Ghostlight would have written.
+//!
+//! 1.x also installed manual pages for its two connectors, which 2.0 replaced with the edge
+//! ([`RETIRED_PAGES`]). Install and uninstall remove each one 1.x wrote, so `man` never describes a
+//! program that is gone, and inspection counts one that lingers as out of date.
 
 use std::env;
 use std::fs;
@@ -43,6 +47,60 @@ const ASSETS: &[(&str, &str)] = &[
         include_str!("../../../../packaging/linux/completions/ghostlight.fish"),
     ),
 ];
+
+/// The manual pages 1.x installed for its connectors, as `(path relative to the user data
+/// directory, the page's title)`. Their date and version changed with every 1.x release, so a
+/// page is known as 1.x's by its `.TH` line rather than by its bytes.
+const RETIRED_PAGES: &[(&str, &str)] = &[
+    (
+        "man/man1/ghostlight-mcp-connector.1",
+        "GHOSTLIGHT-MCP-CONNECTOR",
+    ),
+    (
+        "man/man1/ghostlight-browser-connector.1",
+        "GHOSTLIGHT-BROWSER-CONNECTOR",
+    ),
+];
+
+/// Whether `text` is the page 1.x wrote for `title`: its `.TH` line names `title` in section 1 of
+/// a Ghostlight 1.x manual.
+fn written_by_1x(text: &str, title: &str) -> bool {
+    text.lines()
+        .find(|line| line.starts_with(".TH "))
+        .is_some_and(|line| {
+            line.starts_with(&format!(".TH {title} 1 "))
+                && line.contains("\"Ghostlight 1.")
+                && line.ends_with("\"Ghostlight Manual\"")
+        })
+}
+
+/// The retired 1.x pages under `directory` that 1.x wrote and that are still there. A symlink is
+/// someone else's and is never one of them.
+fn lingering_pages(directory: &Path) -> Result<Vec<PathBuf>, UserAssetError> {
+    let mut lingering = Vec::new();
+    for (name, title) in RETIRED_PAGES {
+        let path = directory.join(name);
+        if is_symlink(&path)? {
+            continue;
+        }
+        if read_optional(&path)?.is_some_and(|text| written_by_1x(&text, title)) {
+            lingering.push(path);
+        }
+    }
+    Ok(lingering)
+}
+
+/// Remove the retired 1.x pages under `directory`. Returns whether one was removed.
+fn retire_pages(directory: &Path) -> Result<bool, UserAssetError> {
+    let lingering = lingering_pages(directory)?;
+    for path in &lingering {
+        fs::remove_file(path).map_err(|source| UserAssetError::Write {
+            path: path.clone(),
+            source,
+        })?;
+    }
+    Ok(!lingering.is_empty())
+}
 
 /// Current state of the per-user documentation and completion files.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -179,6 +237,9 @@ fn inspect(context: &UserAssetContext) -> Result<UserAssetReport, UserAssetError
             current = false;
         }
     }
+    if !lingering_pages(&directory)?.is_empty() {
+        current = false;
+    }
     let state = if current {
         UserAssetState::Current
     } else {
@@ -192,13 +253,14 @@ fn inspect(context: &UserAssetContext) -> Result<UserAssetReport, UserAssetError
 }
 
 fn apply_install(context: &UserAssetContext) -> Result<UserAssetActionResult, UserAssetError> {
+    let retired = context.applicable() && retire_pages(&context.data_home)?;
     let before = inspect(context)?;
     if matches!(
         before.state,
         UserAssetState::NotApplicable | UserAssetState::NeedsAttention | UserAssetState::Current
     ) {
         return Ok(UserAssetActionResult {
-            changed: false,
+            changed: retired,
             report: before,
         });
     }
@@ -227,7 +289,7 @@ fn apply_uninstall(context: &UserAssetContext) -> Result<UserAssetActionResult, 
         });
     }
     let directory = context.data_home.clone();
-    let mut changed = false;
+    let mut changed = retire_pages(&directory)?;
     for (name, contents) in ASSETS {
         let path = directory.join(name);
         if is_symlink(&path)? {
@@ -372,6 +434,62 @@ mod tests {
         assert_eq!(fs::read_to_string(&edited).unwrap(), "someone's own notes");
         assert!(!context.data_home.join(ASSETS[1].0).exists());
 
+        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
+    }
+
+    /// The `.TH` line a 1.x release wrote for `title`.
+    fn page_of_1x(title: &str, version: &str) -> String {
+        format!(
+            ".\\\" SPDX-License-Identifier: Apache-2.0 OR MIT\n.TH {title} 1 \"2026-09-08\" \"Ghostlight {version}\" \"Ghostlight Manual\"\n.SH NAME\n"
+        )
+    }
+
+    #[test]
+    fn the_connector_pages_1x_left_are_retired_and_anything_else_there_is_kept() {
+        let context = context("retired");
+        let man = context.data_home.join("man/man1");
+        fs::create_dir_all(&man).unwrap();
+        let mcp = man.join("ghostlight-mcp-connector.1");
+        let browser = man.join("ghostlight-browser-connector.1");
+        fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.5")).unwrap();
+        fs::write(
+            &browser,
+            page_of_1x("GHOSTLIGHT-BROWSER-CONNECTOR", "1.0.0"),
+        )
+        .unwrap();
+        apply_install(&context).unwrap();
+        assert!(
+            !mcp.exists() && !browser.exists(),
+            "1.x's pages are retired"
+        );
+        assert_eq!(inspect(&context).unwrap().state, UserAssetState::Current);
+
+        // A page that is current already still loses a lingering 1.x page, and says it changed.
+        fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.15")).unwrap();
+        assert_eq!(inspect(&context).unwrap().state, UserAssetState::Missing);
+        assert!(apply_install(&context).unwrap().changed);
+        assert!(!mcp.exists());
+
+        // Someone's own file under that name, and a symlink, are kept.
+        fs::write(&mcp, "someone's own notes").unwrap();
+        std::os::unix::fs::symlink(&mcp, &browser).unwrap();
+        apply_install(&context).unwrap();
+        apply_uninstall(&context).unwrap();
+        assert_eq!(fs::read_to_string(&mcp).unwrap(), "someone's own notes");
+        assert!(is_symlink(&browser).unwrap());
+
+        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_uninstall_retires_the_connector_pages_1x_left() {
+        let context = context("retired-uninstall");
+        let man = context.data_home.join("man/man1");
+        fs::create_dir_all(&man).unwrap();
+        let mcp = man.join("ghostlight-mcp-connector.1");
+        fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.14")).unwrap();
+        assert!(apply_uninstall(&context).unwrap().changed);
+        assert!(!mcp.exists());
         fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
