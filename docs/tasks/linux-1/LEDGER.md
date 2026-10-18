@@ -121,8 +121,10 @@ Owner direction, 2026-10-17, during this task: sandboxed versions are false inte
 always use the real system browser. The driver results above are therefore not acceptance
 evidence. Acceptance runs on the real installation (L04) with the system Chromium and its
 ordinary profile; `tests/linux/installed-journey.mjs`, which uses the real registered native
-host and the running browser, runs after L04. Retiring the sandboxed drivers waits for the
-owner's explicit word: this session's permission check refused the deletion.
+host and the running browser, runs after L04. The owner then authorized removing all
+bubblewrap content: the `tests/linux/acceptance` drivers (the guest build roots included),
+their runner and environment template, and `installed/worker.mjs`, which read a dedicated
+browser's DevTools port, are gone; `tests/linux/README.md` says what is left and why.
 
 For the coordinator, seen while diagnosing (no product change made):
 
