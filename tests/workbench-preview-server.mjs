@@ -11,7 +11,8 @@
 //                             the band says Working while anything is in flight.
 //   ?readiness=ready          Ready and idle: nothing runs and nothing starts.
 //   ?readiness=not_connected  No browser connected and none would start.
-//   ?readiness=paused         Paused, with the waiting work held.
+//   ?readiness=paused         Paused, with the waiting work held. Resume puts it back in flight,
+//                             settles it, and starts new work as on the working page.
 //   ?readiness=ended          Session ended.
 //   ?readiness=channel_off    MCP agents switched off in your rules and the command line on.
 //                             Policy shows the two channel switches with MCP off.
@@ -495,7 +496,8 @@ const heldWork = (operation) => ({ ...operation, phase: "held", activity: HELD_A
 
 /**
  * What each `?readiness=` value does to the page. The band's answer is not written here: the page
- * resolves it from the facts these leave, as the service does. Only `working` starts new work.
+ * resolves it from the facts these leave, as the service does. Only `working` starts new work on
+ * load; a Resume starts it on any page.
  */
 const READINESS_SCENES = {
   working: (flat) => flat,
@@ -542,7 +544,11 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
   const listeners = [];
   let counter = 0;
   let step = 0;
-  const ticks = ${!historyScenario && choice.scene === TICKING_SCENE};
+  // The still history scenario never starts work; otherwise the working page starts on load and
+  // any page starts on Resume.
+  const still = ${historyScenario};
+  const ticks = !still && ${choice.scene === TICKING_SCENE};
+  let looping = false;
 
   // Every fixture time moves forward to this page load, so work in flight began seconds ago.
   const shift = Date.now() - ${FIXTURE_EPOCH};
@@ -627,28 +633,8 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
   window.__GHOSTLIGHT_SETUP__ = setSetup;
   if (window.__GHOSTLIGHT_SETUP_START__ === "done") setTimeout(() => setSetup("done"), 3000);
 
-  const runOne = () => {
-    if (preview.service.runtime_state !== "active") return;
-    counter += 1;
-    const blocked = counter % 9 === 0;
-    const spec = blocked
-      ? { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
-      : window.__GHOSTLIGHT_SCRIPT__[step++ % window.__GHOSTLIGHT_SCRIPT__.length];
-    const session = preview.sessions[counter % preview.sessions.length];
-    const operation = {
-      invocation: "invocation_preview_" + counter,
-      workspace: session.id,
-      tool: spec.tool,
-      activity: spec.activity,
-      capability: spec.capability,
-      started_at_ms: Date.now(),
-      phase: "running",
-      agent: session.agent
-    };
-    preview.operations.push(operation);
-    publish({ kind: "operation_started", operation });
-    publishStatus();
-
+  // Settle an operation in flight after its spec's time, as the service would, then call next.
+  const settle = (operation, spec, session, blocked, next) => {
     setTimeout(() => {
       const index = preview.operations.indexOf(operation);
       if (index >= 0) preview.operations.splice(index, 1);
@@ -678,8 +664,49 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
       };
       publish({ kind: "operation_settled", record });
       publishStatus();
-      setTimeout(runOne, blocked ? 3000 : 700 + Math.random() * 1300);
+      next();
     }, spec.ms);
+  };
+
+  // The run loop: start one piece of work, settle it, and start the next while the runtime runs.
+  const runOne = () => {
+    if (preview.service.runtime_state !== "active") {
+      looping = false;
+      return;
+    }
+    looping = true;
+    counter += 1;
+    const blocked = counter % 9 === 0;
+    const spec = blocked
+      ? { tool: "browser_execute", activity: "Running JavaScript", capability: "execute", ms: 900, effect: "none" }
+      : window.__GHOSTLIGHT_SCRIPT__[step++ % window.__GHOSTLIGHT_SCRIPT__.length];
+    const session = preview.sessions[counter % preview.sessions.length];
+    const operation = {
+      invocation: "invocation_preview_" + counter,
+      workspace: session.id,
+      tool: spec.tool,
+      activity: spec.activity,
+      capability: spec.capability,
+      started_at_ms: Date.now(),
+      phase: "running",
+      agent: session.agent
+    };
+    preview.operations.push(operation);
+    publish({ kind: "operation_started", operation });
+    publishStatus();
+
+    settle(operation, spec, session, blocked, () => setTimeout(runOne, blocked ? 3000 : 700 + Math.random() * 1300));
+  };
+
+  // Resume puts held work back in flight: each held operation runs what it was doing and settles.
+  const releaseHeld = () => {
+    for (const operation of preview.operations.filter(each => each.phase === "held")) {
+      operation.phase = "running";
+      publish({ kind: "operation_changed", operation: { ...operation } });
+      const spec = window.__GHOSTLIGHT_SCRIPT__.find(each => each.tool === operation.tool);
+      const session = preview.sessions.find(each => each.id === operation.workspace);
+      settle(operation, spec, session, false, () => {});
+    }
   };
 
   // What the service answers for each command. The page asks over HTTP, as it does in the window.
@@ -733,7 +760,8 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
       publish({ kind: "runtime_changed", runtime_state: state });
       publishStatus();
       publishControls();
-      if (state === "active" && ticks) runOne();
+      if (state === "active") releaseHeld();
+      if (state === "active" && !still && !looping) runOne();
       // Mirrors crates/orchestrator/src/language/control.rs: the confirmation states the
       // authority's state only, never browser delivery.
       const confirmation = {
@@ -834,7 +862,10 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
     }
   };
 
-  if (ticks) setTimeout(runOne, 1200);
+  if (ticks) {
+    looping = true;
+    setTimeout(runOne, 1200);
+  }
   window.__GHOSTLIGHT_PUBLISH__ = publish;
 })();`;
 
