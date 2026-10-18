@@ -387,6 +387,16 @@ the owner wants, and what this project learned the hard way.
 
 ## Durable lessons
 
+- **A gate on one system never compiles the other system's gated code.** On 2026-10-17 the two
+  coordinated sessions broke each other's platform within an hour: a Linux-written test called
+  `std::os::unix::fs::symlink` without `#[cfg(unix)]` (Windows CI red), and a Windows-side field
+  added to a shared struct missed a `#[cfg(unix)]` test that builds it (Linux CI red). Gate every
+  Unix-only or Windows-only call; when a shared type changes, grep the other system's gated code
+  for its uses; and treat CI's other-system clippy as the first check of that code, pushing to
+  `dev` early rather than calling a one-system gate complete. Cross-compiling the service for the
+  other system needs that system's C toolchain (`ring`), which neither host has.
+- **Cite unpushed work by its subject, not its hash.** A rebase onto the other session's pushes
+  rewrites every local hash, and ledger lines that named them pointed at commits no branch holds.
 - **Agents share the owner's machine; their processes must end with their step.** On 2026-10-15 a coding agent ran `find / -maxdepth 6 -name <crate>` in Git Bash to locate a crate's source.
   Git Bash's root reaches every drive, its shell timed out, and the orphaned `find` burned 20
   CPU-minutes until another session noticed. Never search a drive or the filesystem root;
