@@ -609,6 +609,8 @@ pub struct Outcome {
     /// Programs of an older installation that would not stop. The next install, deploy or
     /// `doctor --fix` tries again; this one is not failed by them.
     pub strays_left: Vec<StrayProcess>,
+    /// The folders 1.x left that this install removed (`migration::retire_leftovers`).
+    pub retired_leftovers: Vec<PathBuf>,
 }
 
 /// A release package found an installation that a development build made. The refusal names the
@@ -767,6 +769,7 @@ pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outco
             left_behind: Vec::new(),
             archived_version_audits: Vec::new(),
             strays_left: Vec::new(),
+            retired_leftovers: Vec::new(),
         });
     }
     let _guard = hold_install_lock(&context.layout.install_lock())?;
@@ -901,6 +904,8 @@ pub fn plan(context: &Context<'_>, mode: Mode) -> anyhow::Result<InstallPlan> {
 pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outcome> {
     let layout = &context.layout;
     if plan.unchanged {
+        // The same version is in place, but what 1.x left still goes.
+        let retired_leftovers = migration::retire_leftovers(&plan.migration);
         return Ok(Outcome {
             plan,
             service_started: None,
@@ -910,6 +915,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             left_behind: Vec::new(),
             archived_version_audits: Vec::new(),
             strays_left: Vec::new(),
+            retired_leftovers,
         });
     }
     let migrating = !plan.migration.is_empty();
@@ -967,6 +973,8 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             record.write(&layout.install_record())?;
         }
     }
+    // After a migration's own steps, so a policy folder whose files it just retired is empty.
+    let retired_leftovers = migration::retire_leftovers(&plan.migration);
     Ok(Outcome {
         plan,
         service_started,
@@ -976,6 +984,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         left_behind,
         archived_version_audits,
         strays_left,
+        retired_leftovers,
     })
 }
 

@@ -104,6 +104,11 @@ fn report(outcome: &Outcome, layout: &Layout) -> Vec<Line> {
         lines.extend(registration_lines(registrations, layout));
     }
     lines.extend(outcome.flatpak.iter().map(flatpak_line));
+    lines.extend(
+        outcome.retired_leftovers.iter().map(|directory| {
+            Line::output(words::leftover_removed(&directory.display().to_string()))
+        }),
+    );
     lines
 }
 
@@ -246,6 +251,7 @@ mod tests {
                 left_behind,
                 archived_version_audits: Vec::new(),
                 strays_left: Vec::new(),
+                retired_leftovers: Vec::new(),
             },
             layout,
         )
@@ -364,6 +370,7 @@ mod tests {
                 to: archive.clone(),
             }],
             strays_left: Vec::new(),
+            retired_leftovers: Vec::new(),
         };
 
         let removed = report(&outcome(Vec::new()), &layout);
@@ -417,6 +424,7 @@ mod tests {
                 image: image.clone(),
                 kind: StrayKind::RetiredConnector,
             }],
+            retired_leftovers: Vec::new(),
         };
         let lines = report(&outcome, &layout);
         let sentence = format!("Could not stop {}. Close it yourself.", image.display());

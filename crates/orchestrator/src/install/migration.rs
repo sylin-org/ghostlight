@@ -31,6 +31,10 @@
 //!    permission grant the route added to the browser's override file. Each is touched only
 //!    when its content is still the route's own, and every step is reported; the install never
 //!    fails on a leftover.
+//! 7. [`retire_leftovers`] removes, on every install and not only a migrating one, the folders
+//!    1.x left that nothing reads any more (Linux): its policy folder once the policy has moved
+//!    out and it is empty, and the 1.x window's web view data when it holds nothing else. A
+//!    folder that holds anything else is left.
 //!
 //! The plan is data: `deployment install --plan` prints it. Stopping the old programs is the
 //! installer's step, not this module's: it must happen after the registrations name the new
@@ -109,6 +113,26 @@ const LEGACY_LINUX_POLICY_DIRECTORY_NAME: &str = "ghostlight";
 
 /// Directory below the Linux cache root that held state beside a `/usr/bin` install.
 const LEGACY_CACHE_DIRECTORY_NAME: &str = "ghostlight";
+
+/// Directory below the Linux data root where the 1.x window kept its web view data: the app id.
+/// The 2.0 window keeps its own under the home.
+const LEGACY_LINUX_WINDOW_DATA_NAME: &str = "org.sylin.ghostlight";
+
+/// What a web view keeps in its data directory. A 1.x window data directory that holds anything
+/// else is not only the window's, and is left.
+const WEB_VIEW_DATA_ENTRIES: &[&str] = &[
+    "CacheStorage",
+    "WebKitCache",
+    "hsts-storage.sqlite",
+    "mediakeys",
+    "storage",
+    "localstorage",
+    "databases",
+    "indexeddb",
+    "serviceworkers",
+    "cookies.sqlite",
+    "deviceidhashsalts",
+];
 
 /// Suffix of the name an original takes when it and its copy both changed.
 const SET_ASIDE_SUFFIX: &str = "pre-2.0";
@@ -327,6 +351,8 @@ pub struct LegacyRoots {
     pub app_data: Option<PathBuf>,
     /// `XDG_STATE_HOME` (Linux).
     pub xdg_state_home: Option<PathBuf>,
+    /// `XDG_DATA_HOME` (Linux).
+    pub xdg_data_home: Option<PathBuf>,
     /// `XDG_CONFIG_HOME` (Linux).
     pub xdg_config_home: Option<PathBuf>,
 }
@@ -355,6 +381,7 @@ impl LegacyRoots {
             local_app_data: absolute("LOCALAPPDATA"),
             app_data: absolute("APPDATA"),
             xdg_state_home: absolute("XDG_STATE_HOME"),
+            xdg_data_home: absolute("XDG_DATA_HOME"),
             xdg_config_home: absolute("XDG_CONFIG_HOME"),
         })
     }
@@ -369,6 +396,7 @@ impl LegacyRoots {
             local_app_data: None,
             app_data: None,
             xdg_state_home: None,
+            xdg_data_home: None,
             xdg_config_home: None,
         }
     }
@@ -393,6 +421,19 @@ impl LegacyRoots {
             self.real_root(self.xdg_state_home.as_deref(), &[".local", "state"])
                 .join(LEGACY_LINUX_POLICY_DIRECTORY_NAME)
         }
+    }
+
+    /// The folders 1.x left that nothing reads any more, whether or not they exist (Linux): its
+    /// policy folder and its window's web view data.
+    fn leftover_directories(&self) -> Vec<PathBuf> {
+        if self.windows {
+            return Vec::new();
+        }
+        vec![
+            self.policy_directory(),
+            self.real_root(self.xdg_data_home.as_deref(), &[".local", "share"])
+                .join(LEGACY_LINUX_WINDOW_DATA_NAME),
+        ]
     }
 
     /// Where the 1.x client location file was.
@@ -555,6 +596,9 @@ pub struct MigrationPlan {
     pub virtualized_sources: Vec<PathBuf>,
     /// What the 1.x Flatpak route left behind, when Ghostlight's own files are still there.
     pub flatpak: Option<FlatpakLeftovers>,
+    /// The folders 1.x left that exist now, for [`retire_leftovers`]. They need no migration and
+    /// no restart, so they do not make the plan non-empty.
+    pub leftovers: Vec<PathBuf>,
 }
 
 /// The places the 1.x Flatpak Chromium route wrote below the user's home.
@@ -794,6 +838,12 @@ pub fn plan(home: &Path, legacy: &Legacy) -> Result<MigrationPlan, MigrationErro
     plan.registrations_to_reclaim = legacy.registrations.clone();
     plan.flatpak =
         Some(FlatpakLeftovers::below(&legacy.roots.user_home)).filter(FlatpakLeftovers::present);
+    plan.leftovers = legacy
+        .roots
+        .leftover_directories()
+        .into_iter()
+        .filter(|directory| directory.is_dir())
+        .collect();
     Ok(plan)
 }
 
@@ -918,6 +968,41 @@ pub fn finish(plan: &MigrationPlan) -> Result<(), MigrationError> {
         }
     }
     Ok(())
+}
+
+/// Remove the folders of `plan` that 1.x left and nothing reads, and return the ones removed.
+///
+/// A folder is removed only when it is provably 1.x's own and spent: empty, or a 1.x window data
+/// folder that holds nothing but web view data. Anything else is left, and a removal that fails
+/// is left for the next install; the install never fails on a leftover.
+#[must_use]
+pub fn retire_leftovers(plan: &MigrationPlan) -> Vec<PathBuf> {
+    plan.leftovers
+        .iter()
+        .filter(|directory| retire_leftover(directory))
+        .cloned()
+        .collect()
+}
+
+fn retire_leftover(directory: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return false;
+    };
+    let names: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .collect();
+    if names.is_empty() {
+        return fs::remove_dir(directory).is_ok();
+    }
+    let window_data = directory
+        .file_name()
+        .is_some_and(|name| name == LEGACY_LINUX_WINDOW_DATA_NAME)
+        && names.iter().all(|name| {
+            name.to_str()
+                .is_some_and(|name| WEB_VIEW_DATA_ENTRIES.contains(&name))
+        });
+    window_data && fs::remove_dir_all(directory).is_ok()
 }
 
 /// Remove what the 1.x Flatpak route left in the user's home, and say what became of each file.
@@ -1603,6 +1688,7 @@ mod tests {
                 local_app_data: Some(user_home.join("AppData").join("Local")),
                 app_data: Some(user_home.join("AppData").join("Roaming")),
                 xdg_state_home: None,
+                xdg_data_home: None,
                 xdg_config_home: None,
             };
             Self {
@@ -2360,6 +2446,7 @@ mod tests {
                 "deletions",
                 "flatpak",
                 "images_to_stop",
+                "leftovers",
                 "moves",
                 "registrations_to_reclaim",
                 "setup_record",
@@ -2525,6 +2612,44 @@ mod tests {
             .iter()
             .map(|step| (step.part, step.result.clone()))
             .collect()
+    }
+
+    #[test]
+    fn what_1x_left_is_removed_on_any_install_and_anything_else_is_left() {
+        let fixture = Fixture::new(false);
+        let policy = fixture.path("user/.local/state/ghostlight");
+        let window = fixture.path("user/.local/share/org.sylin.ghostlight");
+        fs::create_dir_all(&policy).unwrap();
+        for entry in ["CacheStorage", "WebKitCache", "mediakeys", "storage"] {
+            fs::create_dir_all(window.join(entry)).unwrap();
+        }
+        fixture.write(&window.join("hsts-storage.sqlite"), "");
+        let plan = fixture.plan();
+        assert!(
+            plan.is_empty(),
+            "leftovers need no migration and no restart"
+        );
+        assert_eq!(plan.leftovers, [policy.clone(), window.clone()]);
+        assert_eq!(retire_leftovers(&plan), [policy.clone(), window.clone()]);
+        assert!(!policy.exists() && !window.exists());
+        assert!(
+            fixture.plan().leftovers.is_empty(),
+            "a second install finds nothing"
+        );
+
+        // A policy folder that still holds a file, and window data beside something else, stay.
+        fixture.write(&policy.join("notes.txt"), "mine");
+        fs::create_dir_all(window.join("CacheStorage")).unwrap();
+        fixture.write(&window.join("unrelated.txt"), "mine");
+        assert!(retire_leftovers(&fixture.plan()).is_empty());
+        assert!(policy.join("notes.txt").is_file() && window.join("unrelated.txt").is_file());
+
+        let windows = Fixture::new(true);
+        fs::create_dir_all(windows.path("user/.local/state/ghostlight")).unwrap();
+        assert!(
+            windows.plan().leftovers.is_empty(),
+            "the Linux folders only"
+        );
     }
 
     #[test]

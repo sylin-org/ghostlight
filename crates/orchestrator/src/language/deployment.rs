@@ -25,6 +25,12 @@ pub const INSTALL_LOCK_BUSY: &str = "Ghostlight installation is still changing; 
 /// The installer could not stop the programs of an older installation.
 pub const OLD_PROGRAMS_WOULD_NOT_STOP: &str = "Could not stop the old Ghostlight programs";
 
+/// What the install says for a folder Ghostlight 1.x left that it removed.
+#[must_use]
+pub fn leftover_removed(directory: &str) -> String {
+    format!("Removed a folder Ghostlight 1.x left: {directory}")
+}
+
 /// What a whole uninstall says after the Ghostlight that was running stopped.
 pub const RUNNING_STOPPED: &str = "The running Ghostlight was stopped.";
 
