@@ -1484,9 +1484,24 @@ fn the_page_files_are_never_rate_limited() {
 fn a_server_stops_when_it_is_dropped() {
     let fixture = Fixture::start();
     let port = fixture.port();
+    let bearer = fixture.bearer();
     fixture.server.stop();
     fixture.server.stop();
-    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_err());
+    // The freed port may already belong to a server another test started in parallel, so a
+    // connection alone proves nothing: this server is gone when nothing there answers its own
+    // bearer as the window. Every server mints its own bearer, so no other one would.
+    if let Ok(mut stream) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) {
+        let request = format!(
+            "GET /api/context HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {bearer}\r\nConnection: close\r\n\r\n"
+        );
+        let _ = stream.write_all(request.as_bytes());
+        let mut reply = String::new();
+        let _ = stream.read_to_string(&mut reply);
+        assert!(
+            !reply.contains(r#""context":"control""#),
+            "the stopped server still answers its own bearer: {reply}"
+        );
+    }
 }
 
 #[test]
