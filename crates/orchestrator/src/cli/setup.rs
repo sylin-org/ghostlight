@@ -14,6 +14,10 @@
 //! install there leaves those registrations unwritten, says which, and names the one command that
 //! finishes them from a regular terminal (see `crate::install::container`).
 
+use std::time::{Duration, Instant};
+
+use ghostlight_relay::protocol::{Control, QuitReason};
+
 use crate::cli::desktop::{self, Detached};
 use crate::cli::parse::{NativeHostCommand, SetupOptions};
 use crate::install::container::{self, AppContainer, Residence};
@@ -30,6 +34,7 @@ use crate::language::deployment as deployment_words;
 use crate::language::environment::{self, Environment};
 use crate::language::setup::{self as setup_words, BrowserFact, InstallAgent, InstallFacts};
 use crate::language::workbench as stray_words;
+use crate::service::lock::ServiceLock;
 
 /// Registrations an install left unwritten because the app container it ran in keeps them private.
 #[derive(Default)]
@@ -58,7 +63,51 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     if install && !options.dry_run {
         remove_version_directories(&Layout::current()?);
     }
+    if !install && stops_running(options) {
+        stop_running_for_uninstall(&Layout::current()?, options.dry_run);
+    }
     Ok(())
+}
+
+/// How long a whole uninstall waits for the running service to say goodbye and leave.
+const UNINSTALL_QUIT_WAIT: Duration = Duration::from_secs(10);
+
+/// How often that wait looks at the service lock.
+const UNINSTALL_QUIT_POLL: Duration = Duration::from_millis(50);
+
+/// Whether an uninstall removes Ghostlight as a whole, and so ends the Ghostlight that runs. One
+/// that names browsers or clients, or leaves every client alone, removes only part of it.
+fn stops_running(options: &SetupOptions) -> bool {
+    options.browser_ids.is_empty() && options.client_ids.is_empty() && !options.no_clients
+}
+
+/// End the running Ghostlight after a whole uninstall: the service sends the `uninstall` goodbye,
+/// on which the edges and the shell exit (ADR-0199 Decision 4). The answer to the quit only says
+/// the service heard; the free service lock says it has gone. Nothing runs, nothing is said.
+fn stop_running_for_uninstall(layout: &Layout, dry_run: bool) {
+    let lock = layout.service_lock();
+    if ServiceLock::is_free(&lock) {
+        return;
+    }
+    if dry_run {
+        println!("{}", deployment_words::RUNNING_WOULD_STOP);
+        return;
+    }
+    let _ = crate::cli::client::control_at(
+        layout.home(),
+        Control::Quit {
+            reason: QuitReason::Uninstall,
+        },
+    );
+    let deadline = Instant::now() + UNINSTALL_QUIT_WAIT;
+    while !ServiceLock::is_free(&lock) {
+        if Instant::now() >= deadline {
+            println!("{}", deployment_words::RUNNING_DID_NOT_STOP);
+            return;
+        }
+        std::thread::sleep(UNINSTALL_QUIT_POLL);
+    }
+    println!("{}", deployment_words::RUNNING_STOPPED);
 }
 
 /// The registration steps of [`run_setup`].
@@ -963,6 +1012,27 @@ mod tests {
             connector: PathBuf::from("/ghostlight"),
             browsers,
             private_view: None,
+        }
+    }
+
+    #[test]
+    fn only_a_whole_uninstall_ends_the_running_ghostlight() {
+        assert!(super::stops_running(&SetupOptions::default()));
+        for scoped in [
+            SetupOptions {
+                browser_ids: vec!["chromium".into()],
+                ..SetupOptions::default()
+            },
+            SetupOptions {
+                client_ids: vec!["zed".into()],
+                ..SetupOptions::default()
+            },
+            SetupOptions {
+                no_clients: true,
+                ..SetupOptions::default()
+            },
+        ] {
+            assert!(!super::stops_running(&scoped));
         }
     }
 

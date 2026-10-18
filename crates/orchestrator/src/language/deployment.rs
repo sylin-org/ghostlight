@@ -25,6 +25,16 @@ pub const INSTALL_LOCK_BUSY: &str = "Ghostlight installation is still changing; 
 /// The installer could not stop the programs of an older installation.
 pub const OLD_PROGRAMS_WOULD_NOT_STOP: &str = "Could not stop the old Ghostlight programs";
 
+/// What a whole uninstall says after the Ghostlight that was running stopped.
+pub const RUNNING_STOPPED: &str = "The running Ghostlight was stopped.";
+
+/// What a whole uninstall's dry run says while Ghostlight runs.
+pub const RUNNING_WOULD_STOP: &str = "Would stop the running Ghostlight.";
+
+/// What a whole uninstall says when the running Ghostlight did not stop in time.
+pub const RUNNING_DID_NOT_STOP: &str =
+    "The running Ghostlight did not stop in time; quit it from its icon, or sign out.";
+
 /// Which build an install put in `bin`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Placed {
