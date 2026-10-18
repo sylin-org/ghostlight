@@ -39,7 +39,13 @@ fi
 exit 1
 `
 };
-const sums = names.map(name => `${createHash("sha256").update(bodies[name]).digest("hex")}  ${name}-${target}`).join("\n") + "\n";
+// SHA256SUMS as a release carries it: sha256sum's layout with one LF per line, listing the other
+// system's images too. GitHub serves it as application/octet-stream; get.sh saves the bytes with
+// curl -o and reads the saved file, so the content type never matters.
+const sums = names.flatMap(name => [
+  `${createHash("sha256").update(bodies[name]).digest("hex")}  ${name}-${target}`,
+  `${"0".repeat(64)}  ${name}-x86_64-pc-windows-msvc.exe`
+]).join("\n") + "\n";
 writeFileSync(join(shims, "curl"), `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2), url = args.at(-1);

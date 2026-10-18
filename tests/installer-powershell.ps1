@@ -25,10 +25,13 @@ $env:GHOSTLIGHT_NO_REGISTER = '1'
 Remove-Item Env:GHOSTLIGHT_TEST_HOME -ErrorAction SilentlyContinue
 $global:fixtureNames = @('ghostlight', 'ghostlight-service', 'ghostlight-desktop')
 $global:fixtureBinaries = $Binaries
-$global:fixtureChecksums = @($global:fixtureNames | ForEach-Object {
+# SHA256SUMS as a release carries it: sha256sum's layout with one LF per line, listing the other
+# system's images too, and served as application/octet-stream, so a response's Content is bytes.
+$global:fixtureChecksums = [Text.Encoding]::ASCII.GetBytes((@($global:fixtureNames | ForEach-Object {
     $hash = (Get-FileHash -LiteralPath (Join-Path $global:fixtureBinaries "$_.exe") -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $_-x86_64-pc-windows-msvc.exe"
-}) -join "`n"
+    "$('0' * 64)  $_-x86_64-unknown-linux-gnu"
+}) -join "`n") + "`n")
 $global:fixtureCorrupt = $false
 $global:fixtureDownloads = [Collections.Generic.List[string]]::new()
 class FixtureHttpError : System.Exception { [object]$Response }
@@ -56,7 +59,11 @@ function Invoke-RestMethod {
 }
 function Invoke-WebRequest {
     param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
-    if ($Uri.EndsWith('/SHA256SUMS')) { return [pscustomobject]@{ Content = $global:fixtureChecksums } }
+    if ($Uri.EndsWith('/SHA256SUMS')) {
+        if (-not $OutFile) { return [pscustomobject]@{ Content = $global:fixtureChecksums } }
+        [IO.File]::WriteAllBytes($OutFile, $global:fixtureChecksums)
+        return
+    }
     $name = ($Uri.Split('/')[-1] -replace '-x86_64-pc-windows-msvc', '')
     $global:fixtureDownloads.Add($OutFile)
     if ($global:fixtureCorrupt -and $name -eq 'ghostlight-service.exe') {

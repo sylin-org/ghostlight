@@ -83,6 +83,14 @@ jobs:
       - name: Check shell script syntax
         if: runner.os != 'Windows'
         run: sh -n scripts/*.sh
+      - name: Check the PowerShell installer reads a real release's checksums
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($shell in @('pwsh', 'powershell')) {
+            & $shell -NoProfile -ExecutionPolicy Bypass -File tests/installer-checksums.ps1 -Tag v1.3.14
+            if ($LASTEXITCODE -ne 0) { throw "$shell could not read the release checksums." }
+          }
       - name: Check runtime JavaScript syntax
         shell: pwsh
         run: |

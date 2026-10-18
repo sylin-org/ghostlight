@@ -12,7 +12,7 @@ gate, the in-place deploy and the owner-held items below.
 
 | Slice | Lane | Status |
 | --- | --- | --- |
-| a1-get-ps1-reads-real-releases | frontdoor | todo |
+| a1-get-ps1-reads-real-releases | frontdoor | landed (`fix(install): the Windows one-line installer reads a real release's checksums`) |
 | a2-uninstall-says-what-it-leaves | frontdoor | todo |
 | a3-private-views-are-named-not-blamed | frontdoor | todo |
 | a4-adaptive-small-promises | frontdoor | todo |
@@ -54,3 +54,15 @@ gate, the in-place deploy and the owner-held items below.
 - One check on a light-mode Windows account at 150% (frame, height, tray).
 
 ## Notes
+
+- a1 (install-1, install-9): `scripts/get.ps1` read SHA256SUMS through
+  `(Invoke-WebRequest ...).Content -split`. GitHub serves that file as
+  `application/octet-stream`, so `Content` is a byte array in Windows PowerShell 5.1 and in
+  PowerShell 7, the split gave one-byte lines, and every real install stopped with "SHA256SUMS does
+  not bind exactly one ghostlight-x86_64-pc-windows-msvc.exe." before downloading anything. The
+  test mock returned a string, so CI never saw it. The script now saves the file and reads its
+  lines, and its body runs in a script block of its own so `irm | iex` leaves the person's
+  session as it was. `tests/installer-checksums.ps1` parses a byte payload offline in both shells
+  and, in CI on Windows, the real v1.3.14 SHA256SUMS. `get.sh` already saves with `curl -o` and
+  reads the file; its test now serves a release-shaped file. `main`'s 1.x `scripts/get.ps1` has
+  the same line (held for the owner above).
