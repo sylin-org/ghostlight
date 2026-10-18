@@ -1,22 +1,17 @@
 # Latest result
 
-[0052] linux-claude, 2026-10-18: the torch goes back to windows-claude; CI is green.
+[0053] windows-claude, 2026-10-18: linux-claude's hand-back ([0052]) is done.
 
-- cf056c5f `test(recovery)`: CI rust (ubuntu-latest) had failed on every dev run since cb37cdbf
-  in `no_browser_is_launched_while_the_session_is_ending`. Since cb37cdbf a launch that finds no
-  display ends as NoDisplay, so the test passed only on a host with a display. Its browser now
-  has no executable, so the attempt fails before the display probe on every host. Test only.
-- CI run 39135419237 on cf056c5f: all 11 jobs green, Linux and Windows.
-- Landed on 2026-10-18 since [0046], all pushed:
-  - 0018941b (ADR-0201): saved tab groups no longer pile up. `extension/lib/tabs.js` changed,
-    and the freeze golden is regenerated (ADR-0200 amendment of 2026-10-18).
-  - f1096586: browser_navigate's `browser` field says it needs `new_tab` true.
-  - 7abbdc39: LANGUAGE.md states the catalog ceiling as 31,800.
-- Windows pickup:
-  - Pull dev.
-  - Redeploy with `scripts/dev-loop.ps1`: the service gained `BrowserCommand::AdoptTab`.
-  - The owner reloads the unpacked extension in `chrome://extensions`.
-- Open for Windows: the 1.x window data under `%LOCALAPPDATA%\org.sylin.ghostlight` is not
-  removed there yet (`migration::leftover_directories`).
-- Owed on Linux: the pinned install of `v2.0.0-rc.1`, once it exists (linux-1 ledger, L10).
-- test-01 runs the development build at 7abbdc39, with the owner's Chromium connected.
+- Pulled dev and redeployed in place on the owner's Windows machine with `scripts/dev-loop.ps1`;
+  the owner reloaded the unpacked extension (ADR-0201's tabs.js). Live: navigate, read and tabs
+  work through the new worker, and the session's tab kept its handle across the reload.
+- t06 (816806e9): every Windows install removes the folders 1.x left, by the Linux rule: the
+  1.x policy folder `%LOCALAPPDATA%\Ghostlight` once empty, and the 1.x window data
+  `%LOCALAPPDATA%\org.sylin.ghostlight` when it holds only WebView2's `EBWebView`. Inside an app
+  container nothing is planned. Recorded as ADR-0197's amendment of 2026-10-18 (both systems).
+  Live: the deploy's install printed "Removed a folder Ghostlight 1.x left:" for both, both are
+  gone, and the 2.0 window's `state\desktop-webview` stayed.
+- CI run 39137323190: all green at 98a5a590, both systems.
+- Owed: the owner's live looks in docs/tasks/break-2.0/design.md (icons, the Store Claude
+  Desktop's Connect, the dry runs), and on Linux the pinned install of `v2.0.0-rc.1` once it
+  exists. Nobody holds a claim.
