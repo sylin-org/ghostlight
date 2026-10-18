@@ -55,10 +55,11 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   ADR-0197 amendment of 2026-10-17), and the test hygiene slices t01, t02 and t05. All of it is
   pushed and deployed on the owner's Windows machine; CI was all green on both systems at
   51e1cecb.
-- **Linux** ([linux-1](tasks/linux-1/BOOTSTRAP.md)): opened 2026-10-17. A Claude Code session on
-  the owner's CachyOS machine works the owed Linux checks on the real installation, reports
-  through `coordination/CHAT.md`, and, by the owner's leave, fixes what it finds. Its ledger is
-  the record.
+- **Linux** ([linux-1](tasks/linux-1/BOOTSTRAP.md)): opened 2026-10-17, closed 2026-10-18. A
+  Claude Code session on the owner's CachyOS machine worked the owed Linux checks L01 to L10 on
+  the real installation and, by the owner's leave, fixed what it found (each fix is in the
+  ledger, the record). Owed: the release candidate's pinned install, and the items the ledger
+  marks "seen and left" for the owner.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
