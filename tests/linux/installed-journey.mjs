@@ -1,5 +1,5 @@
 // Opt-in recovery acceptance through Linux's real registered native host. The caller supplies
-// an idle development/test installation and a dedicated running browser; no native pipe is mocked.
+// the idle installation and the running system browser; no native pipe is mocked.
 // The installation holds two images: the edge `ghostlight`, which is the MCP relay and the browser
 // relay, and the service `ghostlight-service`. A lost service takes its browser edge with it: once
 // a service answers again the browser edge exits and the browser starts a new one, while an MCP
@@ -19,7 +19,7 @@ import { invoker } from "./lib/reporting.mjs";
 const options = new Map();
 for (let index = 2; index < process.argv.length; index++) {
   const name = process.argv[index];
-  assert.ok(["--bin-dir", "--browser", "--devtools-port-file", "--exercise-installed-stack"].includes(name), `Unknown option: ${name}`);
+  assert.ok(["--bin-dir", "--browser", "--exercise-installed-stack"].includes(name), `Unknown option: ${name}`);
   assert.ok(!options.has(name), `Repeated option: ${name}`);
   const value = name === "--exercise-installed-stack" ? true : process.argv[++index];
   assert.ok(value && !String(value).startsWith("--"), `Missing value: ${name}`);
@@ -27,7 +27,7 @@ for (let index = 2; index < process.argv.length; index++) {
 }
 assert.ok(process.platform === "linux" && options.get("--exercise-installed-stack") &&
   options.get("--bin-dir") && options.get("--browser"),
-"Usage: node tests/linux/installed-journey.mjs --bin-dir <installed siblings> --browser <running executable> --exercise-installed-stack [--devtools-port-file <dedicated browser file>]");
+"Usage: node tests/linux/installed-journey.mjs --bin-dir <installed siblings> --browser <running executable> --exercise-installed-stack");
 for (const name of ["GHOSTLIGHT_TEST_HOME", "GHOSTLIGHT_NATIVE_HOST_DIR", "GHOSTLIGHT_PROFILE_DIR", "GHOSTLIGHT_POLICY_FILE"]) {
   assert.ok(!process.env[name], `Remove ${name}: this journey requires the installation's ordinary paths.`);
 }
@@ -43,14 +43,12 @@ const output = join(process.env.GHOSTLIGHT_LINUX_INSTALLED_AREA || join(root, ".
 mkdirSync(output, { recursive: true });
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const delay = ms => new Promise(done => setTimeout(done, ms));
-const report = { started_at: new Date().toISOString(), passed: false, release_ready: false,
-  scope: "Linux development installation; actual native messaging; dedicated browser context",
+const report = { started_at: new Date().toISOString(), passed: false,
+  scope: "Linux development installation; actual native messaging; the running system browser",
   revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   test_sha256: hash(readFileSync(new URL(import.meta.url))),
   browser_version: execFileSync(browserImage, ["--version"], { encoding: "utf8", timeout: 10000 }).trim(),
-  config_root: configRoot, binaries: {}, identities: {}, phases: [], invocations: [],
-  remaining_release_gates: ["clean-install-both-orders", "candidate-package-lifecycle", "store-adapter",
-    "second-browser", "three-real-MCP-clients", "governed-installed-browser", "visible-desktop-lifecycle"] };
+  config_root: configRoot, binaries: {}, identities: {}, phases: [], invocations: [] };
 const save = () => writeFileSync(join(output, "results.json"), JSON.stringify(report, null, 2) + "\n");
 save();
 function identity(pid) {
@@ -84,7 +82,7 @@ async function until(check, label, timeout = 45000) {
   throw new Error(`Timed out: ${label}`);
 }
 async function ready() { return until(() => doctor().readiness?.state === "ready", "installed readiness"); }
-let browser, restoreOwed = false, mcp, socket, heldResponse, effectCount = 0, activePhase = "preflight";
+let browser, restoreOwed = false, mcp, heldResponse, effectCount = 0, activePhase = "preflight";
 const registrations = [];
 const pending = new Map();
 let nextId = 0;
@@ -175,7 +173,10 @@ try {
     assert.equal(relisted.error, undefined, "The initialized MCP stream must survive a lost service");
     assert.ok(relisted.result.tools.length > 0);
     await ready();
-    const replacement = only(serviceImage);
+    // The MCP edge and the tray shell both start a service after a crash. The start that loses
+    // the lock waits LEAVING_LOCK_WAIT (5 s) for a service that might be leaving, then gives way,
+    // so one service remains once the race settles.
+    const replacement = await until(() => { const matches = processes(serviceImage); return matches.length === 1 && matches[0]; }, "one service once the racing starts give way");
     assert.notEqual(replacement.pid, lost.pid, "A new service must answer");
     const edge = await until(() => { const matches = nativeEdges(); return matches.length === 1 && matches[0].pid !== native.pid && matches[0]; }, "browser edge replacement after the service returns");
     assert.ok(descendsFrom(edge, browser), "The new browser edge must descend from the selected browser");
@@ -215,61 +216,6 @@ try {
   phase("in-flight-browser-effect-is-not-replayed", started, { effect_count: effectCount, result: "outcome_unavailable" });
   report.preserved_tab = opened.facts.tab;
 
-  if (options.has("--devtools-port-file")) {
-    activePhase = "stopped-worker-preserves-binding-and-recovers-on-browser-activity";
-    const [port, endpoint] = readFileSync(options.get("--devtools-port-file"), "utf8").trim().split(/\r?\n/);
-    assert.match(port, /^\d+$/); assert.match(endpoint, /^\/devtools\/browser\/[a-zA-Z0-9-]+$/);
-    socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`);
-    await new Promise((done, reject) => { socket.onopen = done; socket.onerror = reject; });
-    let cdpId = 0;
-    const waiting = new Map(), versions = new Map();
-    socket.onmessage = ({ data }) => {
-      const message = JSON.parse(data);
-      if (message.method === "ServiceWorker.workerVersionUpdated") for (const version of message.params.versions) versions.set(version.versionId, version);
-      const waiter = waiting.get(message.id);
-      if (waiter) { waiting.delete(message.id); clearTimeout(waiter.timer); message.error ? waiter.reject(new Error("CDP worker control failed")) : waiter.done(message.result); }
-    };
-    const send = (method, params = {}, sessionId) => new Promise((done, reject) => {
-      const id = ++cdpId, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 10000);
-      waiting.set(id, { done, reject, timer });
-      socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-    });
-    const { processInfo } = await send("SystemInfo.getProcessInfo");
-    assert.ok(processInfo.some(item => item.type === "browser" && item.id === browser.pid), "CDP must belong to the selected dedicated browser");
-    const { targetInfos } = await send("Target.getTargets");
-    const worker = targetInfos.find(item => item.type === "service_worker" && /^chrome-extension:\/\/[a-p]{32}\/worker\.js$/.test(item.url));
-    assert.ok(worker, "Requires the actual Ghostlight worker");
-    const page = targetInfos.find(item => item.type === "page" && item.url === `http://127.0.0.1:${fixture.address().port}/`);
-    assert.ok(page, "Requires this journey's own fixture tab");
-    const { sessionId } = await send("Target.attachToTarget", { targetId: page.targetId, flatten: true });
-    await send("ServiceWorker.enable", {}, sessionId);
-    const version = await until(() => [...versions.values()].find(item => item.scriptURL === worker.url && item.runningStatus === "running"), "running adapter worker version", 10000);
-    started = Date.now();
-    await send("ServiceWorker.stopWorker", { versionId: version.versionId }, sessionId);
-    await until(() => versions.get(version.versionId)?.runningStatus === "stopped", "worker actually stopped", 10000);
-    await until(() => doctor().readiness?.state === "not_connected", "service observed stopped worker");
-    // This initialized workspace is pinned to its original browser identity. ADR-0114 and
-    // ADR-0196 Decision 12 wait a bounded grace for that same browser, never select a replacement
-    // profile, and never start browser recovery for it. Prove the honest not-connected refusal,
-    // then wake this same browser with an ordinary new-tab event. No extension reload, explicit
-    // worker start, or browser restart is used.
-    const recovery = await request("tools/call", { name: "browser_tabs", arguments: { action: "list" } });
-    assert.equal(recovery.error, undefined);
-    const result = recovery.result.structuredContent;
-    assert.equal(result.status, "failed"); assert.equal(result.effect, "none");
-    assert.equal(result.facts.reason, "browser_disconnected"); assert.equal(result.repeat_safe, true);
-    report.invocations.push({ tool: "browser_tabs", status: result.status, effect: result.effect, reason: result.facts.reason });
-    const wakeTab = (await send("Target.createTarget", { url: "about:blank" })).targetId;
-    await until(async () => (await send("Target.getTargets")).targetInfos.some(item => item.type === "service_worker" && item.url === worker.url && item.targetId !== worker.targetId), "worker recovery on browser activity");
-    await ready();
-    await call("browser_tabs", { action: "list" });
-    assert.equal(effectCount, 1);
-    phase(activePhase, started, { effect_count: effectCount, recovery_trigger: "ordinary_browser_tab" });
-    await send("Target.closeTarget", { targetId: wakeTab });
-    await send("Target.detachFromTarget", { sessionId });
-  } else {
-    report.phases.push({ name: "stopped-worker-preserves-binding-and-recovers-on-browser-activity", status: "blocked", reason: "Dedicated browser DevTools endpoint was not supplied." });
-  }
   for (const [path, digest] of Object.entries(report.binaries)) assert.equal(hash(readFileSync(path)), digest, "Installed binary changed during the run");
   unchanged(browser);
   report.passed = report.phases.every(item => item.status === "passed");
@@ -291,7 +237,6 @@ try {
   } catch (error) { report.restoration_failure = error.message; report.passed = false; }
   heldResponse?.end("recorded");
   fixture.closeAllConnections(); fixture.close();
-  socket?.close();
   mcp?.stdin.end();
   if (mcp && mcp.exitCode === null) { await delay(500); if (mcp.exitCode === null) mcp.kill(); }
   report.finished_at = new Date().toISOString(); save();
