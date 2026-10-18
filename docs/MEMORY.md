@@ -703,6 +703,13 @@ Every one of these cost something to learn.
   from the active tree, excluding prerender, cached and pending-deletion pages before root checks.
   Keep exact active identities and fail closed on ambiguous lifecycle or malformed active graphs.
   Generic verification refusals need per-operation evidence before assigning a cause (ADR-0189).
+- **On Linux, tao keeps neither time nor a window's end for you.** `ControlFlow::WaitUntil` is a
+  plain wait in its GTK loop, so a deadline fires only when another event comes; and it reports a
+  window destroyed only once a later loop turn has wired the window, so a window dropped the
+  moment it was built is never reported. A shell with only its tray icon waited 18 s to
+  reconnect, and a window replaced at birth left the shell windowless for good (linux-1, L05).
+  The shell keeps its own clock and records its own window's end; judge the shell by the windows
+  the compositor counts, not by what the process believes.
 
 ## Where to look
 
