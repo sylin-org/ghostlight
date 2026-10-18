@@ -41,10 +41,14 @@ rebuild (ADR-0202) follows in [request-1](../request-1/LEDGER.md) before rc.1.
   it`) and the ADR-0200 amendment of that day.
 - The accent rule is "teal means live": teal for work happening and the one primary action per
   view; everything at rest is ink.
-- The "Build release candidate" rehearsal is approved. Its first dispatch waited for a green CI run
-  and found a race in the Windows desktop journey instead (fixed in `test(desktop): the Windows
-  journey lets the MCP edge start its service before the session ends`); it runs on the next green
-  head.
+- The "Build release candidate" rehearsal is approved and passed. The first run (39162168362)
+  failed on Windows: a step ran the fixed-installation journey with release binaries on GitHub's
+  elevated runner, where they rightly refuse to start; that check moved to CI's every-push journeys
+  (`ci(release): the Windows fixed-installation check runs in CI on every push, not in the release
+  build`). The second run (39173522935, at `26e48ad0`) passed every job. On the owner's word the
+  coordinator downloaded its bundle: `scripts/check-release-candidate.ps1` verified version 2.0.0,
+  the source commit and 16 artifacts, and `winget validate` accepted the WinGet manifest. The
+  `.mcpb` install is left for the clean Windows test machine.
 
 ## Before rc.1, not code
 
