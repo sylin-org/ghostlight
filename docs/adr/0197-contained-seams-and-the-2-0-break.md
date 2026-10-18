@@ -314,21 +314,33 @@ Ghostlight, outside, finds a packaged client's settings. The owner asked for a p
   `Packages` once, keeps the packages that have such a private copy, and tests only the settings
   folder the catalog names for each client. There is no recursive search and no registry read.
   The next look finds a Store edition installed or removed since.
-- **Choosing a copy.** A private copy beats the plain one, because the packaged app reads its
-  private copy first. Among several private copies, the package the Store icon lookup names for
-  the agent's app wins, else the copy written most recently (its file, or its folder while it has
-  no file). When the chosen copy goes away, the next look falls back cleanly.
-- **What Ghostlight says.** The Integrations pane and `doctor` name the chosen file, say when it is
-  the Store edition's own copy, and, when another copy of the settings exists, say in one sentence
-  where Ghostlight's entry goes and where the other copy is. It is never a refusal.
+- **Choosing a copy.** Ghostlight uses the copy the agent reads, ranked by ownership. A copy in a
+  package of the agent's own app beats the plain path, because that app reads its private copy
+  first. The agent's own app is a package whose family matches the catalog's packaged app or Store
+  icon names for that agent. A copy in any other package, such as one an install run inside
+  another app's container left in that app's view, beats the plain path only when neither the
+  plain settings file nor its folder exists, so a Store edition the catalog does not name is still
+  found. Among copies of the same rank, the one written most recently wins (its file, or its
+  folder while it has no file). When the chosen copy goes away, the next look falls back cleanly.
+- **A Store folder without its file.** Windows shows a packaged app a merged view: while its
+  private folder holds no settings file, the app reads the plain file. So when the agent's own
+  folder has no settings file and the plain file exists, the plain file is the one Ghostlight
+  reads and writes. Inspection reports what the app loads, and the person's other servers stay
+  visible. Ghostlight never creates a private file holding only its own entry over a plain file.
+- **What Ghostlight says.** The Integrations pane and `doctor` name the chosen file and say it is
+  the Store edition's own copy only when it is in the agent's own package. When another copy of
+  the settings exists, they say in one sentence where Ghostlight's entry goes and where the other
+  copy is. Another package's copy is never called the Store edition's. It is never a refusal.
 - **A plain copy left behind.** A plain `%APPDATA%` file from an earlier non-Store install is not
-  the one the Store edition reads. Inspection reports the private copy and Install, Fix and Check
-  do not edit the plain one. Uninstall removes Ghostlight's own entry from every copy that holds
-  one, since earlier installs may have written either; a foreign entry stays.
+  the one the Store edition reads once it has its own file. Inspection reports the private copy and
+  Install, Fix and Check do not edit the plain one. Uninstall removes Ghostlight's own entry from
+  every copy that holds one, since earlier installs may have written either; a foreign entry stays.
+  `ghostlight uninstall` and the product's removal take the agent whenever any copy holds
+  Ghostlight's own entry, so they reach an entry left only in the plain copy.
 - **Containers are unchanged.** Inside the client's own container, the plain path the private view
-  shows and the private copy are one file, and it is written normally. Inside any other container
-  the private copy lies below `%LOCALAPPDATA%` and is left with the one command that finishes it
-  from a regular terminal. Ghostlight still uses no WMI, Task Scheduler or other container escape.
+  shows and the private copy are one file. It is written normally and is not named as another copy.
+  Inside any other container the private copy lies below `%LOCALAPPDATA%` and is left with the one
+  command that finishes it from a regular terminal. Ghostlight still uses no WMI, Task Scheduler or other container escape.
 - **No change elsewhere.** A client found only at its plain path behaves as before, and Linux has no
   packages to look at.
 

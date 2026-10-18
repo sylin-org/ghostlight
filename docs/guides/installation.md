@@ -132,8 +132,10 @@ On Windows an agent installed from the Microsoft Store, such as Claude Desktop, 
 in its own folder instead of the `%APPDATA%` path the table names: for Claude Desktop,
 `%LOCALAPPDATA%\Packages\Claude_<publisher id>\LocalCache\Roaming\Claude\claude_desktop_config.json`.
 Ghostlight looks there every time it checks, sets that file up, and says so on the **Integrations**
-page and in `ghostlight doctor`. A plain `%APPDATA%` file left from an earlier install is not edited;
-`ghostlight uninstall` removes Ghostlight's own entry from both.
+page and in `ghostlight doctor`. Until the Store edition writes that file, it reads the plain
+`%APPDATA%` file, so Ghostlight sets up that one instead. Once the Store file exists, a plain file
+left from an earlier install is not edited. `ghostlight uninstall` removes Ghostlight's own entry
+from both, also when only the plain file still holds one.
 
 ## Workbench installation behavior
 

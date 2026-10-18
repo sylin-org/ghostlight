@@ -4,9 +4,9 @@
 //! Each host of the roster is set up from fixed seed files on three computers: Windows, Linux,
 //! and Windows seen from inside another app's container. On Windows the Store app's host is also
 //! set up with the Store edition installed, its settings in the package's private copy below
-//! `AppData/Local/Packages`, alone and beside a plain copy an earlier install left. For each seed
-//! the golden records what
-//! inspection says, what the Check, Install, Fix and Uninstall acts say, and every file each act
+//! `AppData/Local/Packages`, alone and beside a plain copy an earlier install left; with the Store
+//! edition's folder holding no settings file beside a plain one; and as a plain install beside a
+//! copy another app's private view kept. For each seed the golden records what inspection says, what the Check, Install, Fix and Uninstall acts say, and every file each act
 //! wrote or removed, each act starting from a fresh copy of the seed. A setup of everything is
 //! recorded once per computer. The files change only on purpose: run this test with
 //! [`UPDATE_VARIABLE`] set, then read the diff line by line.
@@ -64,6 +64,9 @@ const OLD_PERSON: &str = "Old Home";
 /// The app container the third computer runs Ghostlight from.
 const CONTAINER_APP: &str = "OpenAI.Codex";
 
+/// The package family of [`CONTAINER_APP`].
+const CONTAINER_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+
 /// The host whose Store edition the Windows computer also has installed.
 const STORE_HOST: &str = "claude-desktop";
 
@@ -86,6 +89,20 @@ const STORE_ROAMING: [&str; 6] = [
     "LocalCache",
     "Roaming",
 ];
+
+/// [`CONTAINER_APP`]'s private copy of the roaming application data below the person's home,
+/// where an install run inside it once wrote.
+const CONTAINER_ROAMING: [&str; 6] = [
+    "AppData",
+    "Local",
+    "Packages",
+    CONTAINER_FAMILY,
+    "LocalCache",
+    "Roaming",
+];
+
+/// Another file the Store edition keeps in its own settings folder, beside the settings file.
+const STORE_HOST_OTHER_FILE: &str = "config.json";
 
 /// The argument a seed's entry gives the edge, written out as a person's file holds it.
 const EDGE_ARGUMENT: &str = "mcp";
@@ -141,7 +158,12 @@ impl Computer {
                 .filter(|seed| matches!(seed, Seed::Absent | Seed::Other | Seed::Current))
                 .collect(),
             Self::Windows if row.id == STORE_HOST => {
-                all.extend([Seed::Packaged, Seed::PackagedBesidePlain]);
+                all.extend([
+                    Seed::Packaged,
+                    Seed::PackagedBesidePlain,
+                    Seed::PackagedFolderBesidePlain,
+                    Seed::PlainBesideOtherApp,
+                ]);
                 all
             }
             Self::Windows | Self::Linux => all,
@@ -220,6 +242,12 @@ enum Seed {
     /// The Store edition installed: the other seed in the package's private copy, and the current
     /// entry in a plain file an earlier install left.
     PackagedBesidePlain,
+    /// The Store edition installed with its own folder but no settings file there, and the other
+    /// seed in the plain file, which the app's merged view shows.
+    PackagedFolderBesidePlain,
+    /// A plain install: the other seed in the plain file, and the current entry in a copy that
+    /// [`CONTAINER_APP`]'s private view kept from an install run inside it.
+    PlainBesideOtherApp,
 }
 
 impl Seed {
@@ -242,6 +270,14 @@ impl Seed {
             Self::PackagedBesidePlain => {
                 "packaged beside plain: the Store edition's own copy holds the other seed, and a \
                  plain file an earlier install left holds the current entry"
+            }
+            Self::PackagedFolderBesidePlain => {
+                "packaged folder beside plain: the Store edition's own folder holds no settings \
+                 file, and the plain file holds the other seed"
+            }
+            Self::PlainBesideOtherApp => {
+                "plain beside another app's copy: the plain file holds the other seed, and \
+                 another app's private view holds the current entry"
             }
         }
     }
@@ -457,13 +493,23 @@ impl Run {
     }
 
     /// The file a seed writes besides its own, with its bytes: the plain file an earlier install
-    /// left beside the Store edition's copy.
+    /// left beside the Store edition's copy, the Store edition's other file in its own folder, or
+    /// the copy another app's private view kept.
     fn beside(&self, row: &AgentRow, seed: Seed) -> Option<(PathBuf, String)> {
-        (seed == Seed::PackagedBesidePlain).then(|| {
-            let bytes = seed_bytes(self, Shape::of(row), Seed::Current)
-                .expect("the current seed is a file");
-            (self.store_host_file(&PLAIN_ROAMING), bytes)
-        })
+        let current =
+            || seed_bytes(self, Shape::of(row), Seed::Current).expect("the current seed is a file");
+        match seed {
+            Seed::PackagedBesidePlain => Some((self.store_host_file(&PLAIN_ROAMING), current())),
+            Seed::PackagedFolderBesidePlain => Some((
+                self.store_host_file(&STORE_ROAMING)
+                    .with_file_name(STORE_HOST_OTHER_FILE),
+                "{}\n".into(),
+            )),
+            Seed::PlainBesideOtherApp => {
+                Some((self.store_host_file(&CONTAINER_ROAMING), current()))
+            }
+            _ => None,
+        }
     }
 
     /// Write `seed` for the host `row` and point Ghostlight at it when the seed is located. The
@@ -504,9 +550,11 @@ fn seed_bytes(run: &Run, shape: Shape, seed: Seed) -> Option<String> {
     match seed {
         Seed::Absent => return None,
         Seed::Empty => return Some(String::new()),
-        Seed::Located | Seed::Packaged | Seed::PackagedBesidePlain => {
-            return seed_bytes(run, shape, Seed::Other)
-        }
+        Seed::Located
+        | Seed::Packaged
+        | Seed::PackagedBesidePlain
+        | Seed::PackagedFolderBesidePlain
+        | Seed::PlainBesideOtherApp => return seed_bytes(run, shape, Seed::Other),
         _ => {}
     }
     Some(match shape {
