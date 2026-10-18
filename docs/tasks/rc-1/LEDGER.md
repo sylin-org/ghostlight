@@ -88,7 +88,12 @@ gate, the in-place deploy and the owner-held items below.
   the registry; run ghostlight doctor from a regular terminal." in `doctor` and the install dry
   run, and `doctor --json` gives those rows `not_visible` with the same words. A Ghostlight value
   naming a missing `org.sylin.ghostlight.json` is Missing, so install rewrites it; any other
-  dangling value still needs attention. The writer golden did not change.
+  dangling value still needs attention. The writer golden did not change. Review fix: that rule
+  holds only outside a container. Inside one the dangling value is the app's private copy, so
+  calling it Missing made every in-container install list the browsers as kept private and send
+  the person to a regular terminal whose install found nothing to do. Now the row stays
+  unjudged there: the install writes no registry value, keeps none private, does not fail on it,
+  and names it with the same "cannot be checked from here" line.
 - f1 (j-23, j-32, j-33, j-35, j-36): the popup's Paused shows a held lantern (the waiting ghost
   with a still amber ember) and an amber title, and Session ended shows the waiting lantern, so
   neither looks like Ready. The shortcut cap on the teal Resume button takes the button's dark ink

@@ -790,9 +790,14 @@ fn inspect_browser(
             };
             let registered_path = PathBuf::from(registered_path);
             let contents = registration_io.read_file(&registered_path)?;
-            if contents.is_none() && names_host_manifest(&registered_path) {
+            if contents.is_none()
+                && names_host_manifest(&registered_path)
+                && context.private_registry().is_none()
+            {
                 // Ghostlight's own value names Ghostlight's own manifest and the file is gone:
-                // nothing registers the browser, so install writes the registration again.
+                // nothing registers the browser, so install writes the registration again. Inside
+                // an app container the value read is that app's own copy, which says nothing
+                // about the value the browser reads, so the row stays one nobody can check here.
                 return Ok((NativeHostState::Missing, None));
             }
             classify_manifest(
@@ -2404,6 +2409,41 @@ mod tests {
             .iter()
             .all(|browser| browser.state == NativeHostState::Current));
         assert!(!apply_install(&context, &registration_io).unwrap().changed);
+    }
+
+    #[test]
+    fn inside_a_container_a_value_naming_a_manifest_that_is_gone_is_neither_written_nor_kept_private(
+    ) {
+        let (_root, context) = windows_context_with_connector();
+        let context = inside_container(context, "Claude");
+        let registration_io = MemoryIo::default();
+        let gone = legacy_windows_manifest_directory(&context).join("org.sylin.ghostlight.json");
+        for browser in BROWSERS {
+            registration_io.registry().insert(
+                windows_registry_key(browser),
+                gone.to_string_lossy().into_owned(),
+            );
+        }
+
+        let observed = inspect(&context, &registration_io).unwrap();
+        assert!(observed
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::NeedsAttention));
+
+        let result = apply_install(&context, &registration_io).unwrap();
+        assert!(result.private.is_empty());
+        assert!(registration_io.registry_writes().is_empty());
+        for browser in BROWSERS {
+            assert_eq!(
+                registration_io
+                    .registry()
+                    .get(&windows_registry_key(browser)),
+                Some(&gone.to_string_lossy().into_owned()),
+                "{}",
+                browser.id
+            );
+        }
     }
 
     #[test]

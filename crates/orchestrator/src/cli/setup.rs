@@ -199,7 +199,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
                 .as_ref()
                 .is_none_or(|browser_ids| browser_ids.contains(&browser.id)))
                 && (browser.state == NativeHostState::Current
-                    || result.private.contains(&browser.name))
+                    || result.private.contains(&browser.name)
+                    || not_checkable(&result.report, browser))
                 && (browser.package.native_messaging_usable() || options.all_browsers)
         });
         for line in browser_attention_lines(
@@ -444,14 +445,20 @@ fn install_agents(
 /// The lines about browsers that a person has to read after a real install: a registration that
 /// needs attention or belongs to another installation, and, when no browser ended up usable, every
 /// browser the install chose, so the reason is in front of them. Inside an app container the
-/// report is that app's own view and says nothing; the closing lines name what it kept private.
+/// report is that app's own view: a registration the install could not judge there is named as
+/// one that cannot be checked from here, and the closing lines name what it kept private.
 fn browser_attention_lines(
     report: &NativeHostReport,
     selected: Option<&[String]>,
     install_usable: bool,
 ) -> Vec<String> {
-    if report.private_view.is_some() {
-        return Vec::new();
+    if let Some(container) = &report.private_view {
+        return report
+            .browsers
+            .iter()
+            .filter(|browser| not_checkable(report, browser))
+            .map(|browser| not_visible_line(browser, container))
+            .collect();
     }
     report
         .browsers
@@ -973,16 +980,29 @@ pub(crate) fn browser_report_lines(report: &NativeHostReport) -> Vec<String> {
         .browsers
         .iter()
         .map(|browser| match &report.private_view {
-            Some(container) => format!(
-                "Browser: {} -- {} -- {} -- {}",
-                browser.name,
-                browser.package_detail,
-                container::NOT_VISIBLE,
-                container::registry_view_detail(container)
-            ),
+            Some(container) => not_visible_line(browser, container),
             None => browser_line(browser),
         })
         .collect()
+}
+
+/// One browser's line inside `container`: its package, and in place of its registration state
+/// that the state cannot be checked from here, because the registry read is that app's own.
+fn not_visible_line(browser: &BrowserRegistration, container: &AppContainer) -> String {
+    format!(
+        "Browser: {} -- {} -- {} -- {}",
+        browser.name,
+        browser.package_detail,
+        container::NOT_VISIBLE,
+        container::registry_view_detail(container)
+    )
+}
+
+/// Whether an install inside an app container left `browser` unjudged: the value in that app's
+/// own view of the registry is not one Ghostlight can read as its own, which says nothing about
+/// the value the browser reads, so the row is neither a failure nor a registration kept private.
+fn not_checkable(report: &NativeHostReport, browser: &BrowserRegistration) -> bool {
+    report.private_view.is_some() && browser.state == NativeHostState::NeedsAttention
 }
 
 /// Print the command path link status report to stdout.
@@ -1905,10 +1925,25 @@ mod tests {
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].starts_with("Browser: chrome -- "));
 
-        // Inside an app container the report is that app's own view and says nothing.
+        // Inside an app container the report is that app's own view: a registration it holds
+        // is never blamed, and one the install could not judge cannot be checked from here.
         report.private_view = Some(crate::install::container::AppContainer {
             app: "Claude".into(),
         });
         assert!(browser_attention_lines(&report, None, false).is_empty());
+        report.browsers[2].state = NativeHostState::NeedsAttention;
+        let lines = browser_attention_lines(&report, None, true);
+        assert_eq!(
+            lines,
+            [format!(
+                "Browser: brave -- {} -- cannot be checked from here -- Claude's own view of the \
+                 registry; run ghostlight doctor from a regular terminal.",
+                report.browsers[2].package_detail
+            )]
+        );
+        assert!(super::not_checkable(&report, &report.browsers[2]));
+        assert!(!super::not_checkable(&report, &report.browsers[0]));
+        report.private_view = None;
+        assert!(!super::not_checkable(&report, &report.browsers[2]));
     }
 }
