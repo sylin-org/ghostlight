@@ -280,7 +280,8 @@ Journey complete; owed live checks and owner items above. j17-docs has landed, s
   (7) The kit has no `--r-5` radius token: only the hero card used it.
 - Release clock (coordinator, 2026-10-16): the owner's week of daily use starts 2026-10-16, now
   that the shell is complete. Only a change to the service or shell lifecycle (start, stop,
-  presence, session end, update) restarts it. Install-time work does not.
+  presence, session end, update) restarts it. Install-time work does not. Withdrawn on 2026-10-18
+  by the owner (ADR-0199 amendment of that date): no waiting period gates the release.
 - The owner pushed `dev` on 2026-10-16 (832d1abe..8a21f8d1).
 - j03: ran the gate checks the files require: (1) `cargo fmt --all -- --check`, `cargo clippy
   --workspace --all-targets -- -D warnings`, `cargo test -p ghostlight-service` (1718 pass), (3)

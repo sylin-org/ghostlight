@@ -76,15 +76,17 @@ release order below.
 
 ## Release bar
 
-2.0 ships when it passes the bar the owner set on 2026-10-14, not on a date: clean installs on
-Windows and the Linux test machines, a 1.x upgrade on another machine, and a week of daily use
-with no shutdown blocks and no second service. The 1.x user base is three reachable people and
-they are told directly. 2.0 freezes the seams (executables, relay and adapter protocols, policy
-schema, agent entries, install home) and rebuilds internals lean in 2.x behind them.
+2.0 ships when it passes checks that prove its promises, never on a date or after a waiting
+period: clean installs on Windows and the Linux test machines, a 1.x upgrade on another machine,
+and, on Windows, a restart and a sign-out with an agent session, the browser and the window open,
+which must show no shutdown block and leave exactly one service. The 1.x user base is three
+reachable people and they are told directly. 2.0 freezes the seams (executables, relay and adapter
+protocols, policy schema, agent entries, install home) and rebuilds internals lean in 2.x behind
+them.
 
-The week of daily use started on 2026-10-16, once the shell was complete. Only a change to the
-service or shell lifecycle (start, stop, presence, session end, update) restarts it; install-time
-work does not (the owner delegated this call to the coordinator, 2026-10-16).
+The week of daily use the owner set on 2026-10-14 is withdrawn (owner, 2026-10-18: "The whole week
+of use is a fallacy and unnecessary bureaucracy. We were supposed to eliminate that kind of
+requirement."). What it was meant to catch is checked directly by the restart and sign-out above.
 
 Release order (`docs/RELEASE.md`, The 2.0 cutover; `docs/release/store-disclosure-2.0.md`;
 ADR-0200): the `v2.0.0-rc.1` GitHub prerelease, the pinned install proof on Windows PowerShell 5.1,

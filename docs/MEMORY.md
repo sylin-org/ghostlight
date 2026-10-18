@@ -542,6 +542,9 @@ Every one of these cost something to learn.
   A golden pins only its own subject; a field outside it is noise that turns every unrelated
   change into churn (owner, 2026-10-16 and 2026-10-17, after a zero-diff rule blocked the icon
   endpoint over the window's symbol, which the installer neither writes nor says).
+  No waiting periods either: a release is gated by checks that prove a promise, never by elapsed
+  time (owner, 2026-10-18, withdrawing the week of daily use as "a fallacy and unnecessary
+  bureaucracy").
 - **History helps people resume work.** Readable history is the default, with detail on demand
   and policy controlling retention. State what happened plainly; explain uncertainty when it
   changes the next step. Displaying more existing detail never authorizes capturing more content.

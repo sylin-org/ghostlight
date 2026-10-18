@@ -713,3 +713,13 @@ runs the service's `serve` and an edge command that would start a service with t
 cleared, asserts both refuse with the administrator-rights sentence and leave no service, and then
 asserts that the variable set to `1` lets `serve` start. An unelevated run prints `SKIP not
 elevated` and passes.
+
+## Amendment (2026-10-18): no waiting period in the release bar
+
+The release bar above names "a week of daily use with no shutdown block and no second service".
+The owner withdrew the week on 2026-10-18: "The whole week of use is a fallacy and unnecessary
+bureaucracy. We were supposed to eliminate that kind of requirement." 2.0 ships when its checks
+pass, never after a waiting period. What the week was meant to catch is checked directly: on
+Windows, a restart and a sign-out with an agent session, the browser and the window open show no
+shutdown block and leave exactly one service. Clean installs on Windows and the Linux test
+machines and a 1.x upgrade on another machine stay in the bar.
