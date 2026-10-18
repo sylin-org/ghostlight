@@ -3,7 +3,7 @@
 use super::*;
 use crate::intake::session::SessionMarker;
 use crate::provenance::ConnectionEvidence;
-use crate::work::{InvocationId, PreparedInvocation};
+use crate::work::{Admission, InvocationId, PreparedInvocation};
 
 #[test]
 fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace_release() {
@@ -19,7 +19,13 @@ fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace
     let prepared: Vec<_> = ["policy_explain", "policy_explain", "browser_invalid"]
         .into_iter()
         .map(|tool| {
-            PreparedInvocation::new(InvocationId::mint(), tool, json!({}), Some(first.clone()))
+            PreparedInvocation::new(
+                InvocationId::mint(),
+                tool,
+                json!({}),
+                workspace.clone(),
+                first.clone(),
+            )
         })
         .collect();
     let second = Arc::new(ConnectionEvidence::claimed(
@@ -30,11 +36,15 @@ fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace
     store.release(&workspace);
 
     for (index, prepared) in prepared.iter().enumerate() {
-        let cancelled = CancellationToken::default();
         if index == 0 {
-            cancelled.cancel();
+            prepared.cancel();
         }
-        let result = executor.execute_prepared(&workspace, prepared, &cancelled, index == 1);
+        let admission = if index == 1 {
+            Admission::OverCapacity
+        } else {
+            Admission::Queued
+        };
+        let result = executor.execute_prepared(prepared, admission);
         assert_eq!(result.effect, Effect::None);
         assert!(!serde_json::to_string(&result).unwrap().contains("PRIVATE_"));
     }

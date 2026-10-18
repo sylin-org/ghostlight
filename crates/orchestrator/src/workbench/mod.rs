@@ -120,9 +120,10 @@ struct OperationState {
     tool: String,
     activity: PresentationActivity,
     capabilities: CapabilitySet,
+    /// When the service received the request; a row keeps it from waiting to running.
     started_at_ms: u64,
     phase: OperationPhase,
-    provenance: Option<crate::provenance::ConnectionDetails>,
+    provenance: crate::provenance::ConnectionDetails,
 }
 
 impl WorkbenchProjection {
@@ -280,6 +281,7 @@ impl WorkbenchProjection {
                     activity,
                     capabilities,
                     provenance,
+                    received_at_ms,
                 }
                 | DomainEvent::WorkStarted {
                     invocation,
@@ -288,6 +290,7 @@ impl WorkbenchProjection {
                     activity,
                     capabilities,
                     provenance,
+                    received_at_ms,
                 } => {
                     let operation = OperationState {
                         invocation: invocation.clone(),
@@ -296,7 +299,7 @@ impl WorkbenchProjection {
                         activity: *activity,
                         capabilities: *capabilities,
                         provenance: provenance.clone(),
-                        started_at_ms: unix_ms(),
+                        started_at_ms: *received_at_ms,
                         phase: if matches!(event, DomainEvent::WorkWaiting { .. }) {
                             OperationPhase::Waiting
                         } else {
@@ -1821,13 +1824,8 @@ impl From<&OperationState> for OperationSummary {
             capability: value.capabilities.label(),
             started_at_ms: Some(value.started_at_ms),
             phase: value.phase,
-            agent: value
-                .provenance
-                .as_ref()
-                .map_or_else(crate::agent::Agent::unknown, |details| {
-                    details.agent.clone()
-                }),
-            provenance: value.provenance.clone(),
+            agent: value.provenance.agent.clone(),
+            provenance: Some(value.provenance.clone()),
         }
     }
 }

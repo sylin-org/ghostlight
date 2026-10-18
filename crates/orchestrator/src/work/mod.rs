@@ -91,12 +91,21 @@ impl CancellationToken {
     }
 }
 
-/// Decoded once at service intake; waiting consumes the original invocation deadline.
+/// One model request, built once at service intake and owned by it until its completion.
+///
+/// It carries everything the request is: its id, tool, workspace, the evidence of the connection
+/// that sent it, its cancellation, when it was received, its deadline and its decoded operation.
+/// Waiting behind earlier work consumes the original deadline.
 pub(crate) struct PreparedInvocation {
     pub(crate) id: InvocationId,
     pub(crate) tool: String,
-    provenance: Option<Arc<ConnectionEvidence>>,
-    started: Instant,
+    workspace: WorkspaceId,
+    provenance: Arc<ConnectionEvidence>,
+    cancellation: CancellationToken,
+    /// When the service received the request; the deadline and the recorded span count from it.
+    received: Instant,
+    /// The same moment in wall-clock milliseconds, where a live row starts.
+    received_at_ms: u64,
     deadline: Instant,
     /// Whether a longer `timeout_ms` would give this call more time: its value is below the
     /// maximum.
@@ -111,6 +120,16 @@ struct InvocationStage {
     waiting_reported: bool,
 }
 
+/// How the session queue took a request: queued for its worker, or refused because the queue was
+/// full, which the executor answers through the completion path without running it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Admission {
+    /// The request waited its turn in the session queue.
+    Queued,
+    /// The session queue was full; the request is refused for capacity.
+    OverCapacity,
+}
+
 impl PreparedInvocation {
     /// Expiration is measured from intake, including time waiting behind earlier work.
     pub(crate) fn expired(&self) -> bool {
@@ -122,9 +141,11 @@ impl PreparedInvocation {
         id: InvocationId,
         tool: &str,
         input: Value,
-        provenance: Option<Arc<ConnectionEvidence>>,
+        workspace: WorkspaceId,
+        provenance: Arc<ConnectionEvidence>,
     ) -> Self {
-        let started = Instant::now();
+        let received = Instant::now();
+        let received_at_ms = crate::audit::unix_ms();
         let decoded = language::decode(tool, input);
         let timeout = decoded
             .as_ref()
@@ -134,9 +155,12 @@ impl PreparedInvocation {
         Self {
             id,
             tool: tool.into(),
+            workspace,
             provenance,
-            started,
-            deadline: started + Duration::from_millis(timeout),
+            cancellation: CancellationToken::default(),
+            received,
+            received_at_ms,
+            deadline: received + Duration::from_millis(timeout),
             deadline_adjustable,
             decoded,
             stage: Mutex::default(),
@@ -148,6 +172,16 @@ impl PreparedInvocation {
         self.decoded
             .as_ref()
             .is_ok_and(|operation| !operation_requires_workspace_lease(operation))
+    }
+
+    /// Cancel this request: queued, it completes as cancelled; running, its dispatch stops.
+    pub(crate) fn cancel(&self) {
+        self.cancellation.cancel();
+    }
+
+    /// Whether this request has been cancelled.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
     }
 }
 
@@ -265,32 +299,37 @@ impl ApplicationExecutor {
         ExtensionAdvice::resolve(complete, !complete && (self.extension_probe)())
     }
 
-    /// Decode, govern, execute, react, audit, and complete one invocation.
-    pub fn execute(
+    /// Run one call in `workspace` as its one connection's request, cancelled by `cancellation`.
+    #[cfg(test)]
+    pub(crate) fn execute(
         &self,
         workspace: &WorkspaceId,
         tool: &str,
         input: Value,
         cancellation: &CancellationToken,
     ) -> InvocationResult {
-        let prepared = PreparedInvocation::new(
+        let mut prepared = PreparedInvocation::new(
             InvocationId::mint(),
             tool,
             input,
-            self.workspaces.single_connection(workspace),
+            workspace.clone(),
+            self.workspaces
+                .single_connection(workspace)
+                .expect("a test workspace has one connection"),
         );
-        self.execute_prepared(workspace, &prepared, cancellation, false)
+        prepared.cancellation = cancellation.clone();
+        self.execute_prepared(&prepared, Admission::Queued)
     }
 
     /// Show a sustained admission wait on the existing operation surface, without a popup.
-    pub(crate) fn show_waiting(&self, workspace: &WorkspaceId, prepared: &PreparedInvocation) {
+    pub(crate) fn show_waiting(&self, prepared: &PreparedInvocation) {
         let mut stage = prepared
             .stage
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if stage.running_or_finished
             || stage.waiting_reported
-            || prepared.started.elapsed() < Duration::from_millis(500)
+            || prepared.received.elapsed() < Duration::from_millis(500)
         {
             return;
         }
@@ -300,28 +339,27 @@ impl ApplicationExecutor {
         stage.waiting_reported = true;
         self.workbench.react(&DomainEvent::WorkWaiting {
             invocation: prepared.id.to_string(),
-            workspace: workspace.as_str().into(),
+            workspace: prepared.workspace.as_str().into(),
             tool: prepared.tool.clone(),
             activity: operation_activity(operation),
             capabilities: language::capability_map::requirements(operation),
-            provenance: prepared
-                .provenance
-                .as_ref()
-                .map(|connection| connection.details()),
+            provenance: prepared.provenance.details(),
+            received_at_ms: prepared.received_at_ms,
         });
     }
 
     /// Execute or refuse one prepared request through the same truthful completion path.
     pub(crate) fn execute_prepared(
         &self,
-        workspace: &WorkspaceId,
         prepared: &PreparedInvocation,
-        cancellation: &CancellationToken,
-        capacity_refused: bool,
+        admission: Admission,
     ) -> InvocationResult {
         let invocation = prepared.id.clone();
         let tool = prepared.tool.as_str();
-        let started = prepared.started;
+        let workspace = &prepared.workspace;
+        let cancellation = &prepared.cancellation;
+        let started = prepared.received;
+        let capacity_refused = admission == Admission::OverCapacity;
         let gate = CompletionGate::default();
         let (operation, requirements) = match &prepared.decoded {
             Ok(operation) => {
@@ -359,7 +397,7 @@ impl ApplicationExecutor {
                         requirements: CapabilitySet::READ,
                         snapshot: &snapshot,
                         duration_ms: elapsed_ms(started),
-                        provenance: prepared.provenance.as_deref(),
+                        provenance: &prepared.provenance,
                     },
                 );
             }
@@ -370,7 +408,7 @@ impl ApplicationExecutor {
             if let Ok(lease) = self.workspaces.acquire(workspace) {
                 Some(lease)
             } else {
-                self.show_waiting(workspace, prepared);
+                self.show_waiting(prepared);
                 self.workspaces
                     .acquire_until(workspace, deadline, cancellation)
                     .ok()
@@ -385,7 +423,7 @@ impl ApplicationExecutor {
             settlement_pending: &settlement_pending,
             settlement_requested,
             requirements,
-            provenance: prepared.provenance.as_deref(),
+            provenance: &prepared.provenance,
             invocation: &invocation,
             workspace,
             requested_browser: operation_browser(operation),
@@ -432,10 +470,8 @@ impl ApplicationExecutor {
                 tool: tool.into(),
                 activity: operation_activity(operation),
                 capabilities: requirements,
-                provenance: prepared
-                    .provenance
-                    .as_ref()
-                    .map(|connection| connection.details()),
+                provenance: prepared.provenance.details(),
+                received_at_ms: prepared.received_at_ms,
             });
             if let Some(lease) = lease.as_ref() {
                 self.run(&context, lease, operation)
@@ -497,7 +533,7 @@ impl ApplicationExecutor {
                 requirements,
                 snapshot: &snapshot,
                 duration_ms: elapsed_ms(started),
-                provenance: prepared.provenance.as_deref(),
+                provenance: &prepared.provenance,
             },
         )
     }
@@ -2231,7 +2267,7 @@ struct Completion<'a> {
     /// Measured span from decode to terminal outcome. For a navigation this is time to settle.
     duration_ms: u64,
     /// Immutable evidence from this operation's original connection.
-    provenance: Option<&'a ConnectionEvidence>,
+    provenance: &'a ConnectionEvidence,
 }
 
 /// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
@@ -2248,7 +2284,8 @@ struct InvocationContext<'a> {
     /// changes once the budget is spent, so a spent budget is not read as an opt-out.
     settlement_requested: bool,
     requirements: CapabilitySet,
-    provenance: Option<&'a ConnectionEvidence>,
+    /// Immutable evidence from the connection that sent this call.
+    provenance: &'a ConnectionEvidence,
     invocation: &'a InvocationId,
     workspace: &'a WorkspaceId,
     /// The browser this call named, when it named one.

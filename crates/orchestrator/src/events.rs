@@ -25,7 +25,10 @@ pub enum DomainEvent {
         tool: String,
         activity: PresentationActivity,
         capabilities: CapabilitySet,
-        provenance: Option<crate::provenance::ConnectionDetails>,
+        /// The details of the connection that sent the request.
+        provenance: crate::provenance::ConnectionDetails,
+        /// When the service received the request, in Unix milliseconds: a live row's start.
+        received_at_ms: u64,
     },
     /// One unit of work started.
     WorkStarted {
@@ -34,7 +37,10 @@ pub enum DomainEvent {
         tool: String,
         activity: PresentationActivity,
         capabilities: CapabilitySet,
-        provenance: Option<crate::provenance::ConnectionDetails>,
+        /// The details of the connection that sent the request.
+        provenance: crate::provenance::ConnectionDetails,
+        /// When the service received the request, in Unix milliseconds: a live row's start.
+        received_at_ms: u64,
     },
     /// A controlled tab was created.
     TabCreated {

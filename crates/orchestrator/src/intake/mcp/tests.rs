@@ -433,14 +433,14 @@ fn a_service_error_for_a_call_is_an_internal_error_naming_its_code() {
     ));
     let lines = session.render(ServiceResponse::Error {
         id: Some(id.clone()),
-        code: "duplicate_request".into(),
-        message: "Request id is already active.".into(),
+        code: crate::language::intake::SHUTTING_DOWN_CODE.into(),
+        message: "Ghostlight is quitting.".into(),
     });
     assert_eq!(lines[0]["id"], 1);
     assert_eq!(lines[0]["error"]["code"], -32603);
     assert_eq!(
         lines[0]["error"]["message"],
-        "duplicate_request: Request id is already active."
+        "shutting_down: Ghostlight is quitting."
     );
     assert!(session
         .render(ServiceResponse::Error {

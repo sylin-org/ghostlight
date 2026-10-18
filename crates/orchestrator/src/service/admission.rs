@@ -6,9 +6,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::lifetime::{Drain, InFlight};
-use crate::work::{CancellationToken, InvocationId, PreparedInvocation};
+use crate::work::{InvocationId, PreparedInvocation};
 
-const SESSION_WORK: usize = 32;
+/// The most ordinary calls one session holds at once, the running one included.
+pub(super) const SESSION_WORK: usize = 32;
 const SESSION_CONTROLS: usize = 8;
 const SESSION_BYTES: usize = 16 * 1024 * 1024;
 const SERVICE_BYTES: usize = 64 * 1024 * 1024;
@@ -71,15 +72,9 @@ impl Default for QueueBudget {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct Job {
-    pub id: InvocationId,
-    pub prepared: Arc<PreparedInvocation>,
-    pub cancellation: CancellationToken,
-}
-
+/// An admitted request, held until its worker completes it, with the reservations it holds.
 struct Active {
-    job: Job,
+    request: Arc<PreparedInvocation>,
     bytes: usize,
     _permit: Permit,
     _flight: InFlight,
@@ -87,7 +82,7 @@ struct Active {
 
 #[derive(Default)]
 struct State {
-    queues: [VecDeque<Job>; 2],
+    queues: [VecDeque<Arc<PreparedInvocation>>; 2],
     active: HashMap<InvocationId, Active>,
     bytes: [usize; 2],
     counts: [usize; 2],
@@ -96,7 +91,6 @@ struct State {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Refused {
-    Duplicate,
     Full,
     Closed,
     ShuttingDown,
@@ -124,17 +118,21 @@ impl SessionQueue {
         self.drain.admit().map_err(|_| Refused::ShuttingDown)
     }
 
-    pub(super) fn admit(&self, job: Job, bytes: usize) -> Result<(), Refused> {
+    /// Queue `request` in its lane, reserving `bytes` of the session's and the service's budget.
+    ///
+    /// Its id is unique: the MCP session mints one per call and refuses a client id still
+    /// running.
+    pub(super) fn admit(
+        &self,
+        request: Arc<PreparedInvocation>,
+        bytes: usize,
+    ) -> Result<(), Refused> {
         let mut state = super::lock(&self.state);
         if state.stopped {
             return Err(Refused::Closed);
         }
         let flight = self.begin_unqueued()?;
-        // Never replace the cancellation token of a request already admitted.
-        if state.active.contains_key(&job.id) {
-            return Err(Refused::Duplicate);
-        }
-        let lane = usize::from(job.prepared.independent());
+        let lane = usize::from(request.independent());
         let count_limit = if lane == 0 {
             SESSION_WORK
         } else {
@@ -153,11 +151,11 @@ impl SessionQueue {
         let permit = capacity.acquire(bytes).ok_or(Refused::Full)?;
         state.bytes[lane] += bytes;
         state.counts[lane] += 1;
-        state.queues[lane].push_back(job.clone());
+        state.queues[lane].push_back(Arc::clone(&request));
         state.active.insert(
-            job.id.clone(),
+            request.id.clone(),
             Active {
-                job,
+                request,
                 bytes,
                 _permit: permit,
                 _flight: flight,
@@ -167,12 +165,13 @@ impl SessionQueue {
         Ok(())
     }
 
-    pub(super) fn next(&self, independent: bool) -> Option<Job> {
+    /// The next request of one lane, waiting for one; None once the queue has stopped and drained.
+    pub(super) fn next(&self, independent: bool) -> Option<Arc<PreparedInvocation>> {
         let mut state = super::lock(&self.state);
         loop {
             // On disconnect drain cancelled work through completion; never execute its effects.
-            if let Some(job) = state.queues[usize::from(independent)].pop_front() {
-                return Some(job);
+            if let Some(request) = state.queues[usize::from(independent)].pop_front() {
+                return Some(request);
             }
             if state.stopped {
                 return None;
@@ -187,7 +186,7 @@ impl SessionQueue {
     pub(super) fn complete(&self, id: &InvocationId) {
         let mut state = super::lock(&self.state);
         if let Some(active) = state.active.remove(id) {
-            let lane = usize::from(active.job.prepared.independent());
+            let lane = usize::from(active.request.independent());
             state.bytes[lane] -= active.bytes;
             state.counts[lane] -= 1;
         }
@@ -195,7 +194,7 @@ impl SessionQueue {
 
     pub(super) fn cancel(&self, id: &InvocationId) {
         if let Some(active) = super::lock(&self.state).active.get(id) {
-            active.job.cancellation.cancel();
+            active.request.cancel();
         }
         self.advance_cancelled();
     }
@@ -203,22 +202,23 @@ impl SessionQueue {
     pub(super) fn advance_cancelled(&self) {
         let mut state = super::lock(&self.state);
         let mut waiting = VecDeque::new();
-        while let Some(job) = state.queues[0].pop_front() {
-            if job.cancellation.is_cancelled() || job.prepared.expired() {
-                state.queues[1].push_back(job);
+        while let Some(request) = state.queues[0].pop_front() {
+            if request.is_cancelled() || request.expired() {
+                state.queues[1].push_back(request);
             } else {
-                waiting.push_back(job);
+                waiting.push_back(request);
             }
         }
         state.queues[0] = waiting;
         self.available.notify_all();
     }
 
-    pub(super) fn jobs(&self) -> Vec<Job> {
+    /// Every admitted request not yet completed, queued or running.
+    pub(super) fn admitted(&self) -> Vec<Arc<PreparedInvocation>> {
         super::lock(&self.state)
             .active
             .values()
-            .map(|active| active.job.clone())
+            .map(|active| Arc::clone(&active.request))
             .collect()
     }
 
@@ -226,7 +226,7 @@ impl SessionQueue {
         let mut state = super::lock(&self.state);
         state.stopped = true;
         for active in state.active.values() {
-            active.job.cancellation.cancel();
+            active.request.cancel();
         }
         self.available.notify_all();
     }
@@ -248,52 +248,51 @@ impl SessionQueue {
 mod tests {
     use super::*;
     use crate::intake::mcp::{McpSession, Step};
-    use crate::intake::session::ServiceRequest;
+    use crate::intake::session::{IntakeChannel, ServiceRequest};
+    use crate::provenance::ConnectionEvidence;
+    use crate::workspace::WorkspaceStore;
     use serde_json::json;
 
-    /// A queued call to an ordinary tool, or to an independent one, under `id`.
-    fn job_named(id: InvocationId, independent: bool) -> Job {
-        Job {
-            id: id.clone(),
-            cancellation: CancellationToken::default(),
-            prepared: Arc::new(PreparedInvocation::new(
-                id,
-                if independent {
-                    "policy_explain"
-                } else {
-                    "browser_tabs"
-                },
-                if independent {
-                    json!({})
-                } else {
-                    json!({"action":"list"})
-                },
-                None,
-            )),
-        }
+    /// A call to an ordinary tool, or to an independent one, under `id`, from its own connection.
+    fn request_named(id: InvocationId, independent: bool) -> Arc<PreparedInvocation> {
+        let connection = Arc::new(ConnectionEvidence::claimed(
+            "queue test",
+            IntakeChannel::Mcp,
+        ));
+        let workspace = WorkspaceStore::default().connect(Arc::clone(&connection), None);
+        Arc::new(PreparedInvocation::new(
+            id,
+            if independent {
+                "policy_explain"
+            } else {
+                "browser_tabs"
+            },
+            if independent {
+                json!({})
+            } else {
+                json!({"action":"list"})
+            },
+            workspace,
+            connection,
+        ))
     }
 
-    /// A queued call under a fresh id.
-    fn job(independent: bool) -> Job {
-        job_named(InvocationId::mint(), independent)
+    /// A call under a fresh id.
+    fn request(independent: bool) -> Arc<PreparedInvocation> {
+        request_named(InvocationId::mint(), independent)
     }
 
     #[test]
-    fn duplicates_keep_the_original_token_and_queued_cancellation_bypasses_work() {
+    fn a_queued_cancellation_bypasses_work_and_touches_no_later_request() {
         let queue = SessionQueue::new(QueueBudget::default(), Arc::default());
-        let original = job(false);
-        let same = original.id.clone();
-        queue.admit(original.clone(), 512).unwrap();
-        assert_eq!(
-            queue.admit(job_named(same.clone(), false), 512),
-            Err(Refused::Duplicate)
-        );
-        queue.cancel(&same);
-        assert!(original.cancellation.is_cancelled());
-        assert_eq!(queue.next(true).unwrap().id, same);
-        queue.complete(&same);
-        queue.admit(job_named(same, false), 512).unwrap();
-        assert!(!queue.next(false).unwrap().cancellation.is_cancelled());
+        let cancelled = request(false);
+        queue.admit(Arc::clone(&cancelled), 512).unwrap();
+        queue.cancel(&cancelled.id);
+        assert!(cancelled.is_cancelled());
+        assert_eq!(queue.next(true).unwrap().id, cancelled.id);
+        queue.complete(&cancelled.id);
+        queue.admit(request(false), 512).unwrap();
+        assert!(!queue.next(false).unwrap().is_cancelled());
     }
 
     #[test]
@@ -318,50 +317,50 @@ mod tests {
                 .expect("the line is forwarded to the queue")
         };
         let queue = SessionQueue::new(QueueBudget::default(), Arc::default());
-        let mut jobs = Vec::new();
+        let mut requests = Vec::new();
         for client_id in ["\"a\"", "7"] {
             let ServiceRequest::Invoke { id, .. } = forwarded(&format!(
                 r#"{{"jsonrpc":"2.0","id":{client_id},"method":"tools/call","params":{{"name":"browser_tabs","arguments":{{"action":"list"}}}}}}"#
             )) else {
                 panic!("a call is an invocation");
             };
-            let job = job_named(id, false);
-            queue.admit(job.clone(), 512).unwrap();
-            jobs.push(job);
+            let request = request_named(id, false);
+            queue.admit(Arc::clone(&request), 512).unwrap();
+            requests.push(request);
         }
         let ServiceRequest::Cancel { id } = forwarded(
             r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}}"#,
         ) else {
             panic!("a cancel of a running call is forwarded");
         };
-        assert_eq!(id, jobs[1].prepared.id);
+        assert_eq!(id, requests[1].id);
         queue.cancel(&id);
-        assert!(jobs[1].cancellation.is_cancelled());
-        assert!(!jobs[0].cancellation.is_cancelled());
-        assert_eq!(queue.next(true).unwrap().id, jobs[1].id);
+        assert!(requests[1].is_cancelled());
+        assert!(!requests[0].is_cancelled());
+        assert_eq!(queue.next(true).unwrap().id, requests[1].id);
     }
 
     #[test]
     fn bursts_are_fifo_and_full_work_preserves_controls_and_another_session() {
         let budget = QueueBudget::default();
         let queue = SessionQueue::new(budget.clone(), Arc::default());
-        let burst: Vec<Job> = (0..SESSION_WORK).map(|_| job(false)).collect();
+        let burst: Vec<_> = (0..SESSION_WORK).map(|_| request(false)).collect();
         for queued in &burst {
-            queue.admit(queued.clone(), 512).unwrap();
+            queue.admit(Arc::clone(queued), 512).unwrap();
         }
-        assert_eq!(queue.admit(job(false), 512), Err(Refused::Full));
-        let control = job(true);
-        queue.admit(control.clone(), 512).unwrap();
+        assert_eq!(queue.admit(request(false), 512), Err(Refused::Full));
+        let control = request(true);
+        queue.admit(Arc::clone(&control), 512).unwrap();
         assert_eq!(queue.next(true).unwrap().id, control.id);
         let other = SessionQueue::new(budget, Arc::default());
-        let elsewhere = job(false);
-        other.admit(elsewhere.clone(), 512).unwrap();
+        let elsewhere = request(false);
+        other.admit(Arc::clone(&elsewhere), 512).unwrap();
         assert_eq!(other.next(false).unwrap().id, elsewhere.id);
         for queued in &burst {
             assert_eq!(queue.next(false).unwrap().id, queued.id);
             queue.complete(&queued.id);
         }
-        queue.admit(job(false), 512).unwrap();
+        queue.admit(request(false), 512).unwrap();
     }
 
     #[test]
@@ -378,29 +377,29 @@ mod tests {
             controls: Capacity::new(1024),
         };
         let queue = SessionQueue::new(budget.clone(), Arc::default());
-        let big = job(false);
-        queue.admit(big.clone(), 1024).unwrap();
+        let big = request(false);
+        queue.admit(Arc::clone(&big), 1024).unwrap();
         let other = SessionQueue::new(budget, Arc::default());
-        assert_eq!(other.admit(job(false), 1), Err(Refused::Full));
-        other.admit(job(true), 512).unwrap();
+        assert_eq!(other.admit(request(false), 1), Err(Refused::Full));
+        other.admit(request(true), 512).unwrap();
         queue.stop();
-        assert!(queue.next(false).unwrap().cancellation.is_cancelled());
+        assert!(queue.next(false).unwrap().is_cancelled());
         queue.complete(&big.id);
-        other.admit(job(false), 1024).unwrap();
+        other.admit(request(false), 1024).unwrap();
     }
 
     #[test]
-    fn a_quit_refuses_admission_and_a_finished_job_leaves_the_drain() {
+    fn a_quit_refuses_admission_and_a_finished_request_leaves_the_drain() {
         let drain = Arc::new(Drain::default());
         let queue = SessionQueue::new(QueueBudget::default(), drain.clone());
-        let running = job(false);
-        queue.admit(running.clone(), 512).unwrap();
+        let running = request(false);
+        queue.admit(Arc::clone(&running), 512).unwrap();
         assert_eq!(drain.in_flight(), 1);
         drain.begin_quit();
-        assert_eq!(queue.admit(job(false), 512), Err(Refused::ShuttingDown));
+        assert_eq!(queue.admit(request(false), 512), Err(Refused::ShuttingDown));
         assert_eq!(queue.begin_unqueued().err(), Some(Refused::ShuttingDown));
         assert_eq!(queue.next(false).unwrap().id, running.id);
-        assert_eq!(drain.in_flight(), 1, "a job runs until it completes");
+        assert_eq!(drain.in_flight(), 1, "a request runs until it completes");
         queue.complete(&running.id);
         assert_eq!(drain.in_flight(), 0);
         assert!(drain.wait_idle(Duration::from_millis(10)));

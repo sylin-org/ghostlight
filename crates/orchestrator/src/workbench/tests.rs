@@ -57,12 +57,17 @@ fn projection_tracks_current_work_then_moves_it_to_history() {
     let notifications = Arc::new(Notifications::default());
     projection.attach_presentation(notifications.clone());
     projection.react(&DomainEvent::WorkWaiting {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         tool: "browser_read".into(),
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
     assert_eq!(
         projection.operations()[0].phase,
@@ -74,12 +79,17 @@ fn projection_tracks_current_work_then_moves_it_to_history() {
     );
     assert!(notifications.0.lock().unwrap().is_empty());
     projection.react(&DomainEvent::WorkStarted {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         tool: "browser_read".into(),
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
     assert_eq!(projection.operations().len(), 1);
     assert_eq!(
@@ -134,12 +144,17 @@ fn operation_lifetime_publishes_one_gapless_sequence() {
     projection.attach_events(events.clone());
 
     projection.react(&DomainEvent::WorkStarted {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         tool: "browser_fill_form".into(),
         activity: PresentationActivity::Fill,
         capabilities: Capability::Write.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
     projection.react(&DomainEvent::WorkCompleted {
         invocation: "invocation_1".into(),
@@ -197,12 +212,17 @@ fn published_changes_stay_content_minimized() {
     let events = Arc::new(Events::default());
     projection.attach_events(events.clone());
     projection.react(&DomainEvent::WorkStarted {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         tool: "browser_execute".into(),
         activity: PresentationActivity::Script,
         capabilities: Capability::Execute.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
 
     let settled = WorkbenchChange::OperationSettled {
@@ -253,12 +273,17 @@ fn published_changes_stay_content_minimized() {
 fn a_projection_without_a_sink_still_numbers_what_it_publishes() {
     let projection = WorkbenchProjection::default();
     projection.react(&DomainEvent::WorkStarted {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         tool: "browser_read".into(),
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
     assert_eq!(projection.current_seq(), 1);
     assert_eq!(projection.operations().len(), 1);
@@ -311,12 +336,17 @@ fn presentation_failure_does_not_change_projection() {
         presentation: DenialPresentation::Guardrail,
     });
     projection.react(&DomainEvent::WorkStarted {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_2".into(),
         workspace: "workspace_1".into(),
         tool: "browser_tabs".into(),
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
     assert_eq!(projection.operations().len(), 1);
 }
@@ -664,12 +694,17 @@ fn the_sequence_advances_with_no_listener_and_every_sink_hears_every_event() {
     projection.attach_events(second.clone());
     projection.audit_health_changed(failing_health(2));
     projection.react(&DomainEvent::WorkStarted {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         tool: "browser_read".into(),
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
 
     let one = heard(&first);
@@ -837,12 +872,17 @@ fn work_and_saving_health_refresh_the_status_and_connections_without_a_pull() {
     facade.attach_events(events.clone());
 
     projection.react(&DomainEvent::WorkStarted {
-        provenance: None,
+        provenance: crate::provenance::ConnectionEvidence::claimed(
+            "test",
+            crate::intake::session::IntakeChannel::Mcp,
+        )
+        .details(),
         invocation: "invocation_1".into(),
         workspace: "workspace_1".into(),
         tool: "browser_read".into(),
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
     let working = statuses(&heard(&events)).pop().unwrap();
     assert_eq!(
@@ -1478,12 +1518,13 @@ fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::
         &root.join("state"),
     ));
     projection.react(&DomainEvent::WorkStarted {
-        provenance: Some(evidence.details()),
+        provenance: evidence.details(),
         invocation: "invocation_running".into(),
         workspace: workspace.as_str().into(),
         tool: "browser_read".into(),
         activity: PresentationActivity::Read,
         capabilities: Capability::Read.into(),
+        received_at_ms: crate::audit::unix_ms(),
     });
     let recorder = AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone());
     let governance = GovernanceFacade::new(None, None);

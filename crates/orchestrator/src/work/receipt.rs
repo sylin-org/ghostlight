@@ -109,13 +109,13 @@ impl ApplicationExecutor {
             &terminal.audit,
             duration_ms,
         )
-        .with_provenance(provenance.map(ConnectionEvidence::attribution))
+        .with_provenance(Some(provenance.attribution()))
         .with_policy(snapshot, terminal.decision)
         .with_observation(observed)
         .with_browser(browser_label);
         record.step = step;
         record.permissions = self.take_permissions(terminal.result.invocation.as_str());
-        let storage = self.audit.record_with_provenance(&record, provenance);
+        let storage = self.audit.record_with_provenance(&record, Some(provenance));
         terminal.result.summary = if storage == language::audit_health::Storage::Saved {
             language::audit_health::qualify_children(
                 &terminal.result.summary,
@@ -191,10 +191,10 @@ impl ApplicationExecutor {
             &Outcome::StepNotStarted.audit(),
             0,
         )
-        .with_provenance(context.provenance.map(ConnectionEvidence::attribution));
+        .with_provenance(Some(context.provenance.attribution()));
         record.step = Some(step);
         self.audit
-            .record_with_provenance(&record, context.provenance)
+            .record_with_provenance(&record, Some(context.provenance))
     }
 
     /// Retain the bounded evidence for the operation currently using this invocation.

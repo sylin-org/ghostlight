@@ -475,7 +475,10 @@ mod tests {
             let context = InvocationContext {
                 settlement_pending: &std::sync::atomic::AtomicBool::new(false),
                 settlement_requested: false,
-                provenance: None,
+                provenance: &crate::provenance::ConnectionEvidence::claimed(
+                    "test",
+                    IntakeChannel::Mcp,
+                ),
                 requirements: crate::governance::CapabilitySet::READ,
                 invocation: &super::super::InvocationId::mint(),
                 workspace: &workspace,
@@ -548,7 +551,7 @@ mod tests {
         let context = InvocationContext {
             settlement_pending: &std::sync::atomic::AtomicBool::new(false),
             settlement_requested: false,
-            provenance: None,
+            provenance: &crate::provenance::ConnectionEvidence::claimed("test", IntakeChannel::Mcp),
             requirements: crate::governance::CapabilitySet::READ,
             invocation: &super::super::InvocationId::mint(),
             workspace: &workspace,

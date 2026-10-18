@@ -403,12 +403,17 @@ mod tests {
     fn child_receipt_updates_do_not_settle_parent_or_notify_and_reload_equally() {
         let projection = super::super::WorkbenchProjection::default();
         projection.react(&crate::events::DomainEvent::WorkStarted {
-            provenance: None,
+            provenance: crate::provenance::ConnectionEvidence::claimed(
+                "test",
+                crate::intake::session::IntakeChannel::Mcp,
+            )
+            .details(),
             invocation: "parent".into(),
             workspace: "workspace".into(),
             tool: "browser_flow".into(),
             activity: crate::browser::adapter::PresentationActivity::Quiet,
             capabilities: CapabilitySet::EMPTY,
+            received_at_ms: crate::audit::unix_ms(),
         });
         let receipt = child(1);
         projection.record(&receipt, crate::language::audit_health::Storage::Saved);

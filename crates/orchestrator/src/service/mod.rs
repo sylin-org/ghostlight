@@ -72,7 +72,7 @@ use crate::language::outcome::DialogKind;
 use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::{Attribution, ConnectionEvidence, SourceReader};
-use crate::work::{ApplicationExecutor, CancellationToken, InvocationId, PreparedInvocation};
+use crate::work::{Admission, ApplicationExecutor, InvocationId, PreparedInvocation};
 use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{
@@ -101,7 +101,7 @@ const RESTORE_DEADLINE: Duration = Duration::from_secs(5);
 /// How long the accept loop rests after a failed accept before it asks again.
 const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
-use admission::{Capacity, Job, QueueBudget, Refused, SessionQueue};
+use admission::{Capacity, QueueBudget, Refused, SessionQueue};
 use idle::Streams;
 use lifetime::{Clock, Drain, ReadyWatch, SystemClock, QUIT_GRACE, READY_LIMIT};
 use lock::ServiceLock;
@@ -1589,8 +1589,8 @@ impl LiveSession {
                         break;
                     }
                     queue.advance_cancelled();
-                    for job in queue.jobs() {
-                        executor.show_waiting(&workspace, &job.prepared);
+                    for request in queue.admitted() {
+                        executor.show_waiting(&request);
                     }
                     restore_returned_tabs(&intake, &wire, &workspace);
                     if let Some(tools) = advertised.changed_by(&governance.snapshot()) {
@@ -1618,17 +1618,12 @@ impl LiveSession {
         thread::Builder::new()
             .name("ghostlight-session-work".into())
             .spawn(move || {
-                while let Some(job) = queue.next(independent) {
+                while let Some(request) = queue.next(independent) {
                     restore_returned_tabs(&intake, &wire, &workspace);
-                    let result = executor.execute_prepared(
-                        &workspace,
-                        &job.prepared,
-                        &job.cancellation,
-                        false,
-                    );
+                    let result = executor.execute_prepared(&request, Admission::Queued);
                     deliver_result(&wire, result);
                     wire.publish_resume(&workspaces, &workspace);
-                    queue.complete(&job.id);
+                    queue.complete(&request.id);
                 }
             })
             .context("start bounded session worker")
@@ -1647,38 +1642,27 @@ impl LiveSession {
                     + id.as_str().len()
                     + tool.len()
                     + QUEUED_METADATA_BYTES;
-                let job = Job {
-                    id: id.clone(),
-                    prepared: Arc::new(PreparedInvocation::new(
-                        id,
-                        &tool,
-                        input,
-                        Some(self.connection.clone()),
-                    )),
-                    cancellation: CancellationToken::default(),
-                };
-                match self.queue.admit(job.clone(), bytes) {
+                let request = Arc::new(PreparedInvocation::new(
+                    id,
+                    &tool,
+                    input,
+                    self.workspace.clone(),
+                    Arc::clone(&self.connection),
+                ));
+                match self.queue.admit(Arc::clone(&request), bytes) {
                     Ok(()) => {}
-                    Err(Refused::Duplicate) => wire.render(ServiceResponse::Error {
-                        id: Some(job.id),
-                        code: "duplicate_request".into(),
-                        message: "Request id is already active.".into(),
-                    }),
                     Err(Refused::Full) => match self.queue.begin_unqueued() {
                         Ok(_flight) => {
                             restore_returned_tabs(intake, wire, &self.workspace);
-                            let result = intake.executor.execute_prepared(
-                                &self.workspace,
-                                &job.prepared,
-                                &job.cancellation,
-                                true,
-                            );
+                            let result = intake
+                                .executor
+                                .execute_prepared(&request, Admission::OverCapacity);
                             deliver_result(wire, result);
                             wire.publish_resume(&intake.workspaces, &self.workspace);
                         }
-                        Err(_) => refuse_while_quitting(wire, job.id),
+                        Err(_) => refuse_while_quitting(wire, request.id.clone()),
                     },
-                    Err(Refused::ShuttingDown) => refuse_while_quitting(wire, job.id),
+                    Err(Refused::ShuttingDown) => refuse_while_quitting(wire, request.id.clone()),
                     Err(Refused::Closed) => return false,
                 }
             }
@@ -2115,7 +2099,7 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use crate::intake::session::IntakeChannel;
+    use crate::intake::session::{IntakeChannel, SessionMarker};
     use crate::provenance::{Attribution, ConnectionEvidence, Source, SourceReader};
     use ghostlight_relay::endpoint::{pair, Connection, Endpoint, Listener};
     use ghostlight_relay::frame;
@@ -3015,6 +2999,122 @@ mod tests {
         };
         eventually(|| recorded().len() == invocations.len());
         assert_eq!(recorded(), invocations);
+    }
+
+    /// Join an `mcp` stream to a declared session whose workspace the test holds leased, so its
+    /// calls wait in the session queue. The lease is the second value.
+    fn open_held_session(
+        served: &Served,
+        key: &str,
+    ) -> (Connection, crate::workspace::WorkspaceLease) {
+        let marker = SessionMarker::Declared { key: key.into() };
+        let workspace = served.intake.workspaces.connect(
+            Arc::new(ConnectionEvidence::claimed("holder", IntakeChannel::Cli)),
+            Some(marker.clone()),
+        );
+        let lease = served.intake.workspaces.acquire(&workspace).unwrap();
+        let mut opening = mcp_opening(None);
+        opening.session = Some(serde_json::to_value(marker).unwrap());
+        let (mut socket, reply) = dial(&opening);
+        assert!(reply.accepted, "{reply:?}");
+        initialize(&mut socket);
+        (socket, lease)
+    }
+
+    /// Send a `browser_tabs` list under `id` that may wait as long as a call can.
+    fn send_list(socket: &mut Connection, id: u64) {
+        send_line(
+            socket,
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": {
+                    "name": "browser_tabs",
+                    "arguments": {"action": "list", "timeout_ms": 30_000}
+                }
+            }),
+        );
+    }
+
+    /// The audit lines of the test home, oldest first.
+    fn audit_lines(home: &TestHome) -> Vec<Value> {
+        std::fs::read_to_string(home.path().join("audit.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .collect()
+    }
+
+    #[test]
+    fn a_full_queue_refuses_through_the_completion_path() {
+        let home = TestHome::new("mcp-full-queue");
+        let served = serve_fake(&home);
+        let (mut socket, lease) = open_held_session(&served, "full-queue");
+        // One call waits for the lease and the rest fill the ordinary lane behind it.
+        let queued = 2..2 + super::admission::SESSION_WORK as u64;
+        for id in queued.clone() {
+            send_list(&mut socket, id);
+        }
+        let refused = queued.end;
+        send_list(&mut socket, refused);
+        let (called, _) = response(&mut socket, refused);
+        let result = &called["result"]["structuredContent"];
+        assert_eq!(result["status"], "failed", "{called}");
+        assert_eq!(result["facts"]["reason"], "capacity", "{called}");
+        let invocation = result["invocation"].clone();
+        eventually(|| {
+            audit_lines(&home)
+                .iter()
+                .any(|record| record["invocation"] == invocation)
+        });
+        let records: Vec<Value> = audit_lines(&home)
+            .into_iter()
+            .filter(|record| record["invocation"] == invocation)
+            .collect();
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(records[0]["status"], "failed");
+        drop(lease);
+        for id in queued {
+            let (called, _) = response(&mut socket, id);
+            assert_ne!(
+                called["result"]["structuredContent"]["facts"]["reason"],
+                "capacity"
+            );
+        }
+    }
+
+    #[test]
+    fn a_disconnect_cancels_queued_work_and_records_it_once() {
+        let home = TestHome::new("mcp-disconnect-queue");
+        let served = serve_fake(&home);
+        let (mut socket, lease) = open_held_session(&served, "disconnect-queue");
+        for id in 2..5 {
+            send_list(&mut socket, id);
+        }
+        eventually(|| {
+            served
+                .intake
+                .workbench
+                .snapshot()
+                .operations
+                .iter()
+                .any(|operation| operation.phase == crate::workbench::OperationPhase::Waiting)
+        });
+        drop(socket);
+        eventually(|| audit_lines(&home).len() == 3);
+        drop(lease);
+        eventually(|| served.intake.workbench.snapshot().operations.is_empty());
+        let records = audit_lines(&home);
+        assert_eq!(records.len(), 3, "{records:?}");
+        let invocations: std::collections::BTreeSet<String> = records
+            .iter()
+            .map(|record| record["invocation"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(invocations.len(), 3, "each request is recorded once");
+        for record in &records {
+            assert_eq!(record["status"], "cancelled", "{record}");
+        }
     }
 
     #[test]

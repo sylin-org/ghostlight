@@ -564,12 +564,17 @@ mod tests {
         let port = Arc::new(RecordingPort::default());
         let reactor = PresentationReactor::new(port.clone());
         reactor.react(&DomainEvent::WorkStarted {
-            provenance: None,
+            provenance: crate::provenance::ConnectionEvidence::claimed(
+                "test",
+                crate::intake::session::IntakeChannel::Mcp,
+            )
+            .details(),
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
             tool: "browser_read".into(),
             activity: PresentationActivity::Read,
             capabilities: Capability::Read.into(),
+            received_at_ms: crate::audit::unix_ms(),
         });
         reactor.react(&DomainEvent::TargetIndicated {
             invocation: "invocation_x".into(),
@@ -612,12 +617,17 @@ mod tests {
             let port = Arc::new(RecordingPort::default());
             let reactor = PresentationReactor::new(port.clone());
             reactor.react(&DomainEvent::WorkStarted {
-                provenance: None,
+                provenance: crate::provenance::ConnectionEvidence::claimed(
+                    "test",
+                    crate::intake::session::IntakeChannel::Mcp,
+                )
+                .details(),
                 invocation: "invocation_x".into(),
                 workspace: "workspace_x".into(),
                 tool: "browser_read".into(),
                 activity,
                 capabilities: Capability::Read.into(),
+                received_at_ms: crate::audit::unix_ms(),
             });
             reactor.react(&DomainEvent::TargetIndicated {
                 invocation: "invocation_x".into(),
@@ -691,12 +701,17 @@ mod tests {
         let port = Arc::new(RecordingPort::default());
         let reactor = PresentationReactor::new(port.clone());
         reactor.react(&DomainEvent::WorkStarted {
-            provenance: None,
+            provenance: crate::provenance::ConnectionEvidence::claimed(
+                "test",
+                crate::intake::session::IntakeChannel::Mcp,
+            )
+            .details(),
             invocation: "invocation_x".into(),
             workspace: "workspace_x".into(),
             tool: "browser_tabs".into(),
             activity: PresentationActivity::Quiet,
             capabilities: Capability::Action.into(),
+            received_at_ms: crate::audit::unix_ms(),
         });
         reactor.react(&DomainEvent::WorkBlocked {
             invocation: "invocation_x".into(),
@@ -746,7 +761,12 @@ mod tests {
                 tool: "browser_read".into(),
                 activity: PresentationActivity::Read,
                 capabilities: Capability::Read.into(),
-                provenance: None,
+                provenance: crate::provenance::ConnectionEvidence::claimed(
+                    "test",
+                    crate::intake::session::IntakeChannel::Mcp,
+                )
+                .details(),
+                received_at_ms: crate::audit::unix_ms(),
             });
             let command = BrowserCommand::ReadDocument {
                 tab_id: tab,

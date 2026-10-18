@@ -501,6 +501,14 @@ it for each tool call and keeps the client's own id beside it, so a cancel names
 session queue, the domain events, the result the client receives, the audit line and the
 diagnostics all carry that id, so a result joins its audit line.
 
+A request arrives as one value, a `PreparedInvocation`, built once when the session reads the
+call. It owns its id, tool, workspace, the evidence of the connection that sent it, its
+cancellation, when it was received, its deadline and its decoded operation. The session queue
+holds it, and the executor takes it whole with how the queue admitted it: queued, or refused for
+capacity, which completes through the same path without running. Its deadline and its recorded
+span count from when the service received it, and a live row starts at that time, so a call that
+waited shows the same span live as in history.
+
 ### Workspace
 
 Owns MCP sessions, controlled tabs, opaque tab and target handles, document generations,
@@ -779,8 +787,8 @@ is ending.
 
 ## Chokepoints and unit of work
 
-Every direct call and flow enters `ApplicationExecutor::execute`. One invocation owns one
-unit of work until exactly one completion is committed.
+Every direct call and flow enters `ApplicationExecutor::execute_prepared`. One invocation owns
+one unit of work until exactly one completion is committed.
 
 The synchronous path is:
 
@@ -821,14 +829,18 @@ view state remains disposable. Policy previews consider recorded children, not e
 
 The in-process vocabulary is:
 
+- `WorkWaiting`
 - `WorkStarted`
 - `TabCreated`
 - `DocumentCommitted`
 - `TargetIndicated`
-- `WorkProgressed`
+- `WorkPhaseStarted`
 - `HoldEntered`
 - `WorkBlocked`
 - `WorkCompleted`
+
+`WorkWaiting` and `WorkStarted` carry the details of the connection that sent the request and
+the time the service received it. Every other event joins its request by invocation id.
 
 Events describe completed state changes. They separate audit, presentation, workspace
 bookkeeping, and lifecycle reactions. They do not grant authority, dispatch effects, or create

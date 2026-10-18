@@ -94,7 +94,7 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
 
 #[test]
 fn policy_explain_still_honors_cancellation_and_original_deadlines() {
-    let (executor, browser, _, workspace, audit) = fixture();
+    let (executor, browser, store, workspace, audit) = fixture();
     let cancellation = CancellationToken::default();
     cancellation.cancel();
     let result = executor.execute(&workspace, "policy_explain", json!({}), &cancellation);
@@ -104,15 +104,78 @@ fn policy_explain_still_honors_cancellation_and_original_deadlines() {
         crate::work::InvocationId::mint(),
         "policy_explain",
         json!({}),
-        None,
+        workspace.clone(),
+        store.single_connection(&workspace).unwrap(),
     );
     expired.deadline = Instant::now() - Duration::from_millis(1);
-    let result =
-        executor.execute_prepared(&workspace, &expired, &CancellationToken::default(), false);
+    let result = executor.execute_prepared(&expired, crate::work::Admission::Queued);
     assert_eq!(result.status, Status::Failed);
     assert_eq!(result.facts["reason"], "deadline");
     assert!(browser.calls().is_empty());
     assert_eq!(audit.0.lock().unwrap().len(), 2);
+}
+
+/// Every change the window would hear, in order.
+#[derive(Default)]
+struct Changes(Mutex<Vec<crate::workbench::WorkbenchChange>>);
+
+impl crate::workbench::WorkbenchEventSink for Changes {
+    fn publish(&self, event: crate::workbench::WorkbenchEvent) {
+        self.0.lock().unwrap().push(event.change);
+    }
+}
+
+#[test]
+fn a_waiting_call_keeps_its_start_time_when_it_runs() {
+    let (executor, _, store, workspace, _) = fixture();
+    let changes = Arc::new(Changes::default());
+    executor.workbench.attach_events(changes.clone());
+    let mut prepared = crate::work::PreparedInvocation::new(
+        crate::work::InvocationId::mint(),
+        "browser_tabs",
+        json!({"action":"list"}),
+        workspace.clone(),
+        store.single_connection(&workspace).unwrap(),
+    );
+    // Received a second ago, so its wait is long enough to show.
+    prepared.received -= Duration::from_secs(1);
+    prepared.received_at_ms -= 1_000;
+    let lease = store.acquire(&workspace).unwrap();
+    let started = |phase| {
+        changes
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|change| match change {
+                crate::workbench::WorkbenchChange::OperationStarted { operation }
+                    if operation.phase == phase =>
+                {
+                    Some(operation.started_at_ms)
+                }
+                _ => None,
+            })
+    };
+    std::thread::scope(|scope| {
+        let running =
+            scope.spawn(|| executor.execute_prepared(&prepared, crate::work::Admission::Queued));
+        let until = Instant::now() + Duration::from_secs(10);
+        while started(crate::workbench::OperationPhase::Waiting).is_none() {
+            assert!(Instant::now() < until, "the call never showed its wait");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(lease);
+        running.join().unwrap();
+    });
+    let received = Some(prepared.received_at_ms);
+    assert_eq!(
+        started(crate::workbench::OperationPhase::Waiting),
+        Some(received)
+    );
+    assert_eq!(
+        started(crate::workbench::OperationPhase::Running),
+        Some(received)
+    );
 }
 
 #[derive(Default)]

@@ -102,7 +102,9 @@ the architecture sweep.
   workspace, so calls wait in its queue. `a_waiting_call_keeps_its_start_time_when_it_runs` is in
   `work::tests::control`. Two tests used `duplicate_request` as a sample service code and now use
   `SHUTTING_DOWN_CODE`, the one code the service still sends. ARCHITECTURE's domain event list
-  now names `WorkWaiting` and `WorkPhaseStarted`; its `WorkProgressed` never existed.
+  now names `WorkWaiting` and `WorkPhaseStarted`; its `WorkProgressed` never existed. The S6
+  row and this note first landed in 80868c31, which another lane committed while S6 was still in
+  the working tree; the code landed in the commit that adds this sentence.
 - S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed

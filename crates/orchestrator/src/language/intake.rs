@@ -166,7 +166,7 @@ impl EdgeFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{EdgeFailure, ProtocolRefusal, SHUTTING_DOWN_MESSAGE};
+    use super::{EdgeFailure, ProtocolRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
 
     #[test]
     fn every_failure_sentence_is_plain_ascii() {
@@ -204,11 +204,11 @@ mod tests {
     #[test]
     fn a_service_refusal_names_its_code_and_stays_bounded() {
         let refusal = ProtocolRefusal::Service {
-            code: "duplicate_request".into(),
+            code: SHUTTING_DOWN_CODE.into(),
             message: "x".repeat(2_000),
         };
         let message = refusal.message();
-        assert!(message.starts_with("duplicate_request: x"));
+        assert!(message.starts_with("shutting_down: x"));
         assert_eq!(message.chars().count(), 500);
     }
 }

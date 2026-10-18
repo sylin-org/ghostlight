@@ -747,7 +747,11 @@ impl WorkspaceStore {
     }
 
     /// Return evidence only when an in-process caller has exactly one possible connection.
-    pub fn single_connection(&self, workspace: &WorkspaceId) -> Option<Arc<ConnectionEvidence>> {
+    #[cfg(test)]
+    pub(crate) fn single_connection(
+        &self,
+        workspace: &WorkspaceId,
+    ) -> Option<Arc<ConnectionEvidence>> {
         let state = self.lock();
         let connections = &state.workspaces.get(workspace)?.connections;
         (connections.len() == 1).then(|| connections.values().next().unwrap().clone())
