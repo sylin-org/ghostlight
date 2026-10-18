@@ -5,9 +5,12 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `landed` (with com
 
 ## RESUME HERE
 
-Every slice has landed (2026-10-18), the docs lane last. Next: the coordinator's integration
-gate, the in-place deploy and the owner-held items below; `docs/STATUS.md` carries the release
-checklist with an owner per line.
+Every slice has landed and the integration review passed (2026-10-18): the full gate is green, and
+its one finding (the notes over-claimed the tab rule) is fixed in
+`fix(language): shared-session agents open their own tab`. The owner's four held items are
+decided below. Next: the in-place deploy and live check, the push, the release-candidate rehearsal
+on a green head, and the items under "Before rc.1" and "Before v2.0.0". The request pipeline
+rebuild (ADR-0202) follows in [request-1](../request-1/LEDGER.md) before rc.1.
 
 ## Slices
 
@@ -28,15 +31,20 @@ checklist with an owner per line.
 | b3-every-connection-knows-its-source | provenance | landed (`feat(provenance): every connection knows the app that started it`): the service reads the app that started each MCP connection from the peer process's ancestors, recognizes an agent's app by where it is installed, and sets the client's claim beside it in the window, history and audit, never as authority (ADR-0161, amendment of 2026-10-18) |
 | e1-the-rc-commit-tells-the-truth | docs | landed (`fix(cli): the manual page and completions describe 2.0`, `docs(release): the rc commit tells the truth`, `docs(install): WinGet says it serves 1.x until its manifest merges`): CHANGELOG [2.0.0], the 2.0.0 notes and new rc.1 notes, README, SECURITY, the trust pages, PRIVACY, the npm README, ROADMAP, RELEASE's cutover, the store steps, STATUS's release checklist and INTENT match the tree; README and the installation guide carry the WinGet caveat, and the cutover's step 10 replaces it once winget-pkgs merges |
 
-## Held for the owner
+## Decided by the owner (2026-10-18, "Proceed.")
 
-- Patch `main`'s 1.x `scripts/get.ps1` (the same SHA256SUMS defect breaks today's public Windows
-  install); the owner pushes `main`.
-- The popup fixes fold into the 2.0 extension (owner, 2026-10-18, "Proceed."): slice f1 and the
-  ADR-0200 amendment of that day. The Pause agents wording is not part of f1.
-- The accent rule: the coordinator applies "teal means live" (teal for work happening and the one
-  primary action per view) unless the owner rules otherwise.
-- Dispatch the "Build release candidate" workflow as a rehearsal (no tag, sign or publish).
+- `main`'s 1.x `scripts/get.ps1` is patched (`fix(install): the Windows one-line installer reads a
+  real release's checksums` on `main`, pushed and live through sylin.org's redirect), checked
+  against the real v1.3.14 release in Windows PowerShell 5.1 and PowerShell 7.
+- The popup fixes are folded into the 2.0 extension: slice f1, the ended-state alignment
+  (`fix(extension): an ended session holds the popup's lantern, as the tray and the window show
+  it`) and the ADR-0200 amendment of that day.
+- The accent rule is "teal means live": teal for work happening and the one primary action per
+  view; everything at rest is ink.
+- The "Build release candidate" rehearsal is approved. Its first dispatch waited for a green CI run
+  and found a race in the Windows desktop journey instead (fixed in `test(desktop): the Windows
+  journey lets the MCP edge start its service before the session ends`); it runs on the next green
+  head.
 
 ## Before rc.1, not code
 
