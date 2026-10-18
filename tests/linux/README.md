@@ -16,7 +16,7 @@ Reports and generated state stay under the ignored `.tmp/`.
 | File | What it checks |
 | --- | --- |
 | `installed-journey.mjs` | Recovery of the real installation: the browser registrations reinstalled while the browser runs, a crashed browser edge, a crashed service under an initialized MCP stream, and an in-flight effect that is not replayed. It uses `~/.ghostlight/bin`, the real registered native host and the running system browser, and stops the service and the browser edge by exact process. |
-| `installed/desktop-check.py` | KWin window checks: Open focuses one window, Open after minimize, close keeps the service, concurrent Opens give one window. Needs KDE KWin, `qdbus6` and the user journal. Still 1.x-shaped (it names the window by the edge's image); the linux-1 batch aligns it with the 2.0 shell. |
+| `installed/desktop-check.py` | The real installation's window as KWin counts it: Open shows one active window, Open after minimize brings one back, closing keeps the service, eight concurrent Opens give one window, and a lost service comes back without opening the window. Needs KDE KWin, `qdbus6` and the user journal. |
 | `startup-recovery.mjs` | A start with no desktop session and four MCP clients at once converge on one service. It runs in a temporary test home with no browser, from the build `GHOSTLIGHT_BIN_DIR` names. |
 | `installed-reporting.test.mjs`, `lib/reporting.mjs` | The installed journey's result reporting. The hardening suite's browser-harness runs this test. |
 
@@ -31,6 +31,8 @@ connected. Its report goes under `.tmp/linux-installed/recovery/`, or under
 ```bash
 node tests/linux/installed-journey.mjs --bin-dir ~/.ghostlight/bin \
   --browser /usr/lib/chromium/chromium --exercise-installed-stack
+
+python3 tests/linux/installed/desktop-check.py
 
 GHOSTLIGHT_BIN_DIR=.target-ghostlight-1.0/debug node tests/linux/startup-recovery.mjs
 ```
