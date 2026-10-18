@@ -1318,6 +1318,8 @@ test("an agent's image waits on the neutral tile, an app's own icon keeps it, an
 test("the summary counts in words, singular for one and plain for none", () => {
   assert.deepEqual([0, 1, 3].map(Words.agentsCount), ["No agents", "1 agent", "3 agents"]);
   assert.deepEqual([0, 1, 2].map(Words.browsersCount), ["no browser", "1 browser", "2 browsers"]);
+  assert.deepEqual([0, 1, 2].map((count) => Words.noun(count, "session", "sessions")),
+    ["sessions", "session", "sessions"], "the band says 1 session, not 1 sessions");
   const lone = glance({ sessions: [GLANCE_SESSIONS[0]], browsers: [], noBrowser: "No browser connected" }).read();
   assert.deepEqual(lone.wearing("glance-side").map((side) => side.textContent), ["1 agent", "no browser"]);
 });

@@ -87,6 +87,9 @@
     return count === 1 ? `1 ${one}` : `${count} ${many}`;
   }
 
+  /** The noun after a count: `one` for exactly one, otherwise `many` ("1 session", "0 sessions"). */
+  const noun = (count, one, many) => (count === 1 ? one : many);
+
   /** How many agents are connected, as the summary says it. */
   const agentsCount = (count) => counted(count, "agent", "agents", "No agents");
 
@@ -943,7 +946,7 @@
     POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
-    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine,
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,

@@ -22,7 +22,7 @@
     escapeHtml, words, duration, stopwatch, ago, shortId,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
-    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine
+    agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
@@ -576,8 +576,10 @@
       if (!facts.snapshot) {
         el["state-facts"].textContent = "";
       } else {
-        el["state-facts"].innerHTML = `<b>${facts.snapshot.sessions.length}</b> sessions`
-          + ` &middot; <b>${facts.snapshot.browsers.length}</b> browsers`
+        const sessions = facts.snapshot.sessions.length;
+        const browsers = facts.snapshot.browsers.length;
+        el["state-facts"].innerHTML = `<b>${sessions}</b> ${noun(sessions, "session", "sessions")}`
+          + ` &middot; <b>${browsers}</b> ${noun(browsers, "browser", "browsers")}`
           + ` &middot; <b>${facts.running}</b> running`
           + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
       }
