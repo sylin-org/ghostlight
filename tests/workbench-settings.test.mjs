@@ -2744,6 +2744,21 @@ test("a draft whose rules were all removed refuses everything, and says so only 
   assert.equal(shown.el("rules-note").hidden, true);
 });
 
+test("an applied policy with no rules refuses everything, and a setting never widens it", () => {
+  const shown = drawing();
+  shown.view.policy(openPolicy([{
+    kind: "user", title: "Your rules", policy_name: "Your rules", version: "2026-10-18", path: null, document: "{}",
+    settings: [{ key: "browser.startup", value: "\"manual\"", level: "mandatory" }], rules: []
+  }]));
+  assert.deepEqual(shown.failures, []);
+  assert.equal(shown.el("editor-status").textContent, Words.NO_RULES_LEFT);
+  assert.equal(shown.el("apply-policy").disabled, true);
+  shown.view.setPermission("browser.tabs.allow_close", false);
+  assert.equal(shown.el("editor-status").textContent, Words.NO_RULES_LEFT);
+  assert.equal(shown.el("apply-policy").disabled, true);
+  assert.deepEqual(JSON.parse(shown.view.draftDocument()).grants, []);
+});
+
 test("Closing tabs names the browser's Preserve Ghostlight tabs, which is set in the browser", () => {
   const shown = drawing();
   shown.view.policy(openPolicy());

@@ -1514,16 +1514,17 @@
     /**
      * Turn the applied user layer into an editable draft, or start an empty one.
      *
-     * A draft that starts with no rules is `open`: while it has none, its document carries
-     * OPEN_RULE, so a setting turned off applies alone and agents keep the ordinary websites they
-     * have now. A draft that had rules and lost them all is not, and refuses everything.
+     * Only a draft with no user layer behind it is `open`: while it has no rules, its document
+     * carries OPEN_RULE, so a setting turned off applies alone and agents keep the ordinary
+     * websites they have now. An applied layer is never open, even with no rules: a policy with no
+     * grants refuses everything today, and its draft says so instead of widening it.
      */
     function draftFrom(view) {
       const layer = view.layers.find((entry) => entry.kind === "user");
       if (!layer) return { rules: [], settings: emptySettings(), dirty: false, open: true };
       return {
         dirty: false,
-        open: layer.rules.length === 0,
+        open: false,
         rules: layer.rules.map((rule) => ({
           id: rule.id,
           hosts: rule.allow.join(", "),
