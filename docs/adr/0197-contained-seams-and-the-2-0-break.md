@@ -427,7 +427,9 @@ I can always see what's being worked on."
   keeps running from its moved-aside name until it exits, and the deploy does not fail on it.
 - The plan and the deploy report say in one line when the edge is replaced and why. When the edge
   stays, they say nothing about it.
-- Releases and restores keep Decision 14 unchanged: an intact edge of the same relay revision
-  stays, whatever its bytes. The relay protocol does not change.
+- Releases and restores over a release install keep Decision 14 unchanged: an intact edge of the
+  same relay revision stays, whatever its bytes. A release install or a restore over a development
+  install replaces an edge whose bytes differ, so the way back from development brings back the
+  release's edge too. The relay protocol does not change.
 
 The rule is `edge_replacement` in `crates/orchestrator/src/install/deployment.rs`.

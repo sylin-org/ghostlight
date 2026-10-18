@@ -189,6 +189,7 @@ pub fn edge_replaced(reason: EdgeReplacement) -> String {
         EdgeReplacement::Missing => "the edge in bin is missing",
         EdgeReplacement::Altered => "the edge in bin is not the one the record names",
         EdgeReplacement::Rebuilt => "this development build changed it",
+        EdgeReplacement::LeavingDevelopment => "the release replaces the development build's edge",
     };
     format!("The edge is replaced because {because}.")
 }

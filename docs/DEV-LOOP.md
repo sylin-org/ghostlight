@@ -84,7 +84,7 @@ regular terminal.
 `doctor` inside a container cannot see what other apps see, and says so.
 
 Going back to a release needs a release carrier, because restore installs that carrier's own
-package. Run it from the carrier:
+package, its edge included when the development one differs. Run it from the carrier:
 
 ```powershell
 npx ghostlight deployment install --restore                     # the npm package

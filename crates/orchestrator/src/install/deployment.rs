@@ -575,6 +575,9 @@ pub enum EdgeReplacement {
     /// Cargo relinks the edge only when its code or dependencies change, so a development edge
     /// follows its build and an unchanged one stays (ADR-0197, amendment of 2026-10-18).
     Rebuilt,
+    /// A release install or a restore over a development install whose payload edge differs from
+    /// the installed one: the way back from development brings back the release's edge too.
+    LeavingDevelopment,
 }
 
 impl Serialize for EdgeReplacement {
@@ -1120,10 +1123,16 @@ fn edge_replacement(
         }
         Err(error) => return Err(error),
     }
-    if channel == Channel::Development
+    let leaving_development =
+        channel != Channel::Development && installed.channel == Channel::Development;
+    if (channel == Channel::Development || leaving_development)
         && record::sha256_file(&context.payload.join(EDGE_EXECUTABLE_NAME))? != recorded
     {
-        return Ok(Some(EdgeReplacement::Rebuilt));
+        return Ok(Some(if leaving_development {
+            EdgeReplacement::LeavingDevelopment
+        } else {
+            EdgeReplacement::Rebuilt
+        }));
     }
     Ok(None)
 }
@@ -2097,20 +2106,28 @@ mod tests {
     }
 
     #[test]
-    fn a_restore_keeps_an_intact_edge_of_its_relay_revision_whatever_its_bytes() {
+    fn a_restore_over_a_development_install_brings_back_the_release_edge() {
         let fixture = Fixture::new();
         fixture
             .run(Mode::Development, VERSION, &FakeControl::new())
             .unwrap();
-        let recorded = fixture.record().unwrap().edge_sha256;
         fs::write(fixture.payload.join(EDGE_EXECUTABLE_NAME), "release edge").unwrap();
         let outcome = fixture
             .run(Mode::Restore, VERSION, &FakeControl::new())
             .unwrap();
-        assert_eq!(placed_names(&outcome.plan), [SERVICE_EXECUTABLE_NAME]);
-        assert_eq!(outcome.plan.edge_replaced, None);
-        assert_eq!(fixture.read(fixture.layout.edge()), edge_text(RELAY));
-        assert_eq!(fixture.record().unwrap().edge_sha256, recorded);
+        assert_eq!(
+            outcome.plan.edge_replaced,
+            Some(EdgeReplacement::LeavingDevelopment)
+        );
+        assert_eq!(fixture.read(fixture.layout.edge()), "release edge");
+        assert_eq!(fixture.record().unwrap().channel, Channel::Release);
+
+        // Once back on the release, a restore of the same release keeps its intact edge.
+        let again = fixture
+            .run(Mode::Restore, VERSION, &FakeControl::new())
+            .unwrap();
+        assert_eq!(placed_names(&again.plan), [SERVICE_EXECUTABLE_NAME]);
+        assert_eq!(again.plan.edge_replaced, None);
     }
 
     #[cfg(windows)]
