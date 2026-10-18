@@ -80,9 +80,10 @@ release order below.
 period: clean installs on Windows and the Linux test machines, a 1.x upgrade on another machine,
 and, on Windows, a restart and a sign-out with an agent session, the browser and the window open,
 which must show no shutdown block and leave exactly one service. The 1.x user base is three
-reachable people and they are told directly. 2.0 freezes the seams (executables, relay and adapter
-protocols, policy schema, agent entries, install home) and rebuilds internals lean in 2.x behind
-them.
+reachable people and they are told directly. 2.0 settles the seams (executables, relay and adapter
+protocols, policy schema, agent entries, install home) and 2.x rebuilds internals lean behind them.
+Until something is published it changes whenever the architecture needs it; after that,
+compatibility with what people run is what binds (ADR-0197 amendment of 2026-10-18).
 
 The week of daily use the owner set on 2026-10-14 is withdrawn (owner, 2026-10-18: "The whole week
 of use is a fallacy and unnecessary bureaucracy. We were supposed to eliminate that kind of

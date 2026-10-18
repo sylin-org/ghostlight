@@ -104,9 +104,9 @@ The tree is a Rust workspace with these process/trust concerns:
   `src/browser/adapter/` is the browser adapter component: one module per browser family
   (`chromium/`), holding the wire levels the extension can speak and every page asset, JavaScript
   and CSS, that runs in a page.
-- `crates/relay/` -- the frozen relay protocol 4: endpoint, framing, start reasons, the session
+- `crates/relay/` -- relay protocol 4: endpoint, framing, start reasons, the session
   listener and the route an edge invocation takes.
-- `crates/edge/` -- the frozen `ghostlight` executable. It is the MCP relay (`ghostlight mcp`),
+- `crates/edge/` -- the `ghostlight` executable. It is the MCP relay (`ghostlight mcp`),
   the browser relay (a `chrome-extension://` argument) and the front door that hands every other
   command to `ghostlight-service`. It owns protocol lifecycle and generic rendering, never
   product decisions, and knows no verb.
@@ -165,9 +165,10 @@ Before committing, run the checks for what you changed. CI runs the full set on 
   and `cargo clippy --workspace --all-targets -- -D warnings` (always workspace-wide: a manifest
   change can break clippy in untouched code), then `cargo test` for the touched crates, or
   `cargo test --workspace` if bridge, relay, win-peer or a manifest changed.
-- Extension: `npm test` in `extension/`. Any packaged extension file is frozen by
-  `tests/guards/extension-freeze.test.mjs`; change one only with a recorded owner decision to
-  withdraw the store submission and resubmit (ADR-0200 Decision 16).
+- Extension: `npm test` in `extension/`. The packaged files are recorded in
+  `tests/golden/extension-2.0.0.files.sha256` (checked by `tests/guards/extension-freeze.test.mjs`);
+  an extension change regenerates that record. Once a store submission is staged, changing a
+  packaged file means resubmitting, which is the owner's call (ADR-0200 Decision 16).
 - Page assets: `node --test "crates/orchestrator/src/browser/adapter/chromium/protocol4/assets/tests/*.test.js"`,
   plus `cargo test -p ghostlight-service` and `npm test` in `extension/`, which also read the
   expanded bundle.

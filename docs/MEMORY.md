@@ -158,7 +158,13 @@ the owner wants, and what this project learned the hard way.
   in the next minor. The 2.0 break grew by accretion (agent experience, rules, process surgery,
   desktop shell, install journey) while 1.x users stayed exposed to known hazards, and the owner
   had asked for lean (2026-10-14). Before adding work to a release in flight, ask whether it must
-  freeze with it; if not, it waits.
+  ship with it; if not, it waits.
+- **Get the architecture right; no artificial freezes.** Nothing unpublished is frozen: a
+  protocol, an executable, a package or a schema changes whenever the architecture needs it, and
+  "it freezes at the release candidate" is never a reason to rush or to refuse a change. What
+  binds after publication is compatibility with what people run, kept by versioned negotiation,
+  and real external costs such as a store resubmission (owner, 2026-10-18: "let's stop with the
+  artificial freezes and week tests, etc. The objective is to get the architecture right.").
 - **Show working software, and ask design questions as questions.** Every milestone ends with
   something the owner can see or try, live, before the next one starts; summaries do not
   replace it. Reuse what exists (adapting it) before building anew, and never build throwaways.

@@ -433,3 +433,19 @@ I can always see what's being worked on."
   release's edge too. The relay protocol does not change.
 
 The rule is `edge_replacement` in `crates/orchestrator/src/install/deployment.rs`.
+
+## Amendment 2026-10-18: no artificial freezes
+
+This record calls the relay connectors, the edge and the extension package frozen. The owner, on
+2026-10-18: "let's stop with the artificial freezes and week tests, etc. The objective is to get
+the architecture right." Read every freeze in this record and its amendments that way:
+
+- Nothing unpublished is frozen. Relay protocol 4, the edge, the adapter protocol, the extension
+  package, policy schema 4 and audit v2 change whenever the architecture needs it until they are
+  published, and "it freezes at the release candidate" is never a reason to rush or refuse a
+  change.
+- After publication, what binds is compatibility with what people run, kept by the versioned
+  negotiation these seams already carry (relay and adapter revisions, schema versions), and real
+  external costs such as resubmitting a staged store package.
+- The guards stay as change records, not locks: the extension's package record and the edge
+  source check show what changed and what a published home will receive.
