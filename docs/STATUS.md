@@ -60,9 +60,14 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   the real installation and, by the owner's leave, fixed what it found (each fix is in the
   ledger, the record). On 2026-10-18 its open questions were settled by the user-delight test and
   old leftovers removed (ledger, "Follow-up"). Owed: the release candidate's pinned install.
-  On 2026-10-18 the owner unfroze the extension for a proper fix of saved tab groups piling up
-  (ADR-0137 reuse misses a group Chromium saved when it closed). Not started; the fix, its
-  ADR-0200 Decision 16 amendment and the regenerated freeze golden land together.
+  On 2026-10-18 the owner unfroze the extension for a proper fix of saved tab groups piling up, and
+  it landed the same day ([ADR-0201](adr/0201-a-kept-tab-leaves-the-group.md), 0018941b): a tab
+  preserve-tabs keeps after its session ends leaves Ghostlight's group, so Chromium deletes the
+  idle group instead of saving it, and reuse adopts the tab back. `lib/tabs.js` is the one
+  packaged file that changed; the freeze golden is regenerated (ADR-0200 amendment of
+  2026-10-18). A session still live at a browser exit leaves one saved group, which no extension
+  API can reach. The owner's browser runs the new extension code after a reload of Ghostlight in
+  `chrome://extensions`.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
