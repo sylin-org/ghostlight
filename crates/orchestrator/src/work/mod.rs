@@ -2253,8 +2253,9 @@ impl<'a> InvocationContext<'a> {
     /// The frame of one flow step running `operation` inside this flow frame.
     ///
     /// The step shares its flow's id, workspace, caller, deadline, cancellation and authority
-    /// snapshot, and owns its operation's requirements, gesture and settlement and its own
-    /// findings. It still names the flow's requested browser, tab and target.
+    /// snapshot. It owns its operation's requirements, requested browser, tab and target, repeat
+    /// tool, gesture and settlement, and its own findings, so it answers as the same call outside
+    /// a flow would (ADR-0202 Decision 13).
     fn step<'b>(&self, operation: &'b Operation, frame: &'b Frame) -> InvocationContext<'b>
     where
         'a: 'b,
@@ -2263,6 +2264,10 @@ impl<'a> InvocationContext<'a> {
             settlement_pending: &frame.settlement_pending,
             settlement_requested: language::settlement::enabled(operation),
             requirements: language::capability_map::requirements(operation),
+            requested_browser: operation_browser(operation),
+            requested_tab: operation_tab(operation),
+            requested_target: operation_target(operation),
+            repeat_tool: repeatable_tool(operation),
             gesture: PageGesture::of(operation),
             findings: &frame.findings,
             ..*self

@@ -1,12 +1,17 @@
-//! What a frame learns lives with the frame (ADR-0202 Decision 9 to 12): a flow and each of its
-//! steps record only their own checks, coverage and browser, and two calls in one workspace never
+//! What a frame learns lives with the frame (ADR-0202 Decision 9 to 13): a flow and each of its
+//! steps record only their own checks, coverage and browser, a step answers for its own browser,
+//! tab and target as the same call outside a flow would, and two calls in one workspace never
 //! share what they learned.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Instant;
 
+use serde_json::Value;
+
 use super::documents::{inventory, open, policy_file};
+use super::execution::workspace_with_a_target;
+use super::replacement::{one_same, removed};
 use super::*;
 use crate::browser::adapter::BrowserCommand as Work;
 use crate::browser::{BrowserPort, BrowserSummary};
@@ -265,4 +270,129 @@ fn two_calls_in_one_workspace_keep_their_own_findings() {
             .all(|check| check.requirements != CapabilitySet::EMPTY),
         "the read holds none of the explanation's checks: {checks:?}"
     );
+}
+
+/// The result of the step at `index` of a flow's result.
+fn step_result(flow: &crate::work::result::InvocationResult, index: usize) -> &Value {
+    &flow.facts["steps"][index]["result"]
+}
+
+#[test]
+fn a_flow_step_opens_in_the_browser_it_names() {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.connect(vec![
+        summary("browser_chrome", false),
+        summary("browser_edge", true),
+    ]);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let flow = executor.execute(
+        &workspace,
+        "browser_flow",
+        json!({"on_error":"continue","steps":[
+            {"id":"chrome","tool":"browser_navigate",
+                "arguments":{"url":"https://example.com","new_tab":true,"browser":"browser_chrome"}},
+            {"id":"edge","tool":"browser_navigate",
+                "arguments":{"url":"https://example.com","new_tab":true,"browser":"browser_edge"}}
+        ]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(
+        step_result(&flow, 0)["status"],
+        "succeeded",
+        "{}",
+        flow.facts
+    );
+    assert_eq!(browser.routed(), vec!["browser_chrome"]);
+    assert_eq!(
+        workspaces.browser_of(workspace.as_str()).as_deref(),
+        Some("browser_chrome")
+    );
+    // The second step names another browser than the one the session now works in, and meets
+    // the refusal the same call meets outside a flow.
+    let pinned = step_result(&flow, 1);
+    assert_eq!(pinned["status"], "failed", "{pinned}");
+    assert_eq!(pinned["facts"]["reason"], "browser_pinned");
+    assert_eq!(browser.routed(), vec!["browser_chrome"]);
+}
+
+#[test]
+fn a_flow_step_whose_target_the_page_removed_is_marked_and_offered_its_replacement() {
+    let (executor, browser, _, workspace, tab_handle, target) = workspace_with_a_target();
+    browser.push(Err(removed(one_same())));
+    let flow = executor.execute(
+        &workspace,
+        "browser_flow",
+        json!({"steps":[{"id":"click","tool":"browser_click",
+            "arguments":{"tab":tab_handle,"target":target}}]}),
+        &CancellationToken::default(),
+    );
+    let refused = step_result(&flow, 0);
+    assert_eq!(refused["facts"]["reason"], "stale_target", "{refused}");
+    assert_eq!(refused["facts"]["stale"], "removed");
+    let replacement = refused["facts"]["replacement"]
+        .as_str()
+        .expect("the step names the proven replacement");
+    assert_ne!(replacement, target);
+    assert_eq!(
+        refused["next_steps"],
+        json!([format!("Repeat browser_click with target {replacement}.")])
+    );
+
+    // The step marked the handle removed, so its next use refuses before any action reaches
+    // the page.
+    let before = browser.calls().len();
+    let again = executor.execute(
+        &workspace,
+        "browser_click",
+        json!({"tab":tab_handle,"target":target}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(again.facts["reason"], "stale_target");
+    assert_eq!(again.facts["stale"], "removed");
+    assert!(browser.calls()[before..]
+        .iter()
+        .all(|call| matches!(call, Work::QuerySemantic { .. })));
+}
+
+#[test]
+fn a_flow_step_refused_for_another_sessions_tab_names_that_session() {
+    let (executor, browser, _, workspace_a, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    let workspace_b = executor
+        .workspaces
+        .admit("Workspace B".into(), IntakeChannel::Mcp);
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(42, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace_b,
+        "browser_navigate",
+        json!({"url": "https://example.com", "new_tab": true}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded);
+    let tab_b = opened.facts["tab"].as_str().unwrap().to_owned();
+    let dispatched = browser.calls().len();
+
+    let flow = executor.execute(
+        &workspace_a,
+        "browser_flow",
+        json!({"steps":[{"id":"read","tool":"browser_read","arguments":{"tab":tab_b}}]}),
+        &CancellationToken::default(),
+    );
+    let refused = step_result(&flow, 0);
+    assert_eq!(
+        refused["facts"]["reason"], "ownership_mismatch",
+        "{refused}"
+    );
+    assert_eq!(refused["facts"]["owner_workspace"], "Workspace B");
+    assert_eq!(
+        refused["summary"],
+        "That tab handle belongs to Workspace B."
+    );
+    assert_eq!(browser.calls().len(), dispatched);
 }

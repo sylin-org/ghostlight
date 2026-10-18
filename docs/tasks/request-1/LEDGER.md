@@ -23,7 +23,7 @@ the architecture sweep.
 | S5 one-request-id | request | landed (0f1b1a78 and this commit) |
 | S6 request-owns-itself | request | landed (this commit) |
 | S7 findings-per-frame | request | landed (this commit) |
-| S8 flow-step-own-facts | request | todo |
+| S8 flow-step-own-facts | request | landed (this commit) |
 | S9 cancel-cause | request | todo |
 | S10 watcher-words | window | landed (this commit) |
 | S11 channel-switches | governance | landed (this commit) |
@@ -128,6 +128,13 @@ the architecture sweep.
   `policy_explain` beside it, and shares the documents suite's fixture helpers, now
   `pub(super)`. `an_observation_never_outlives_the_invocation_it_describes` went with the table
   it guarded.
+- S8: the three tests are in `work/tests/findings.rs`, beside S7's frame tests, and read each
+  step's result from the flow's `steps` facts. `a_flow_step_opens_in_the_browser_it_names` also
+  runs a second step that names the other browser and meets `browser_pinned`, as a direct call
+  does. The removed-target test reuses the replacement suite's `removed` and `one_same`, now
+  `pub(super)`, and proves the mark by refusing the handle's next use before any action. Each
+  test failed before the change. The live browser journeys that run flows are left to the
+  coordinator's live checks.
 - S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed

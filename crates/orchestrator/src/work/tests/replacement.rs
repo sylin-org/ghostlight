@@ -24,7 +24,7 @@ fn candidate(locator: &str, context: &str, nth: Option<u32>, same: bool) -> Stal
 }
 
 /// The lookup of a page that found three buttons and proved the second is the same control.
-fn one_same() -> StaleLookup {
+pub(super) fn one_same() -> StaleLookup {
     StaleLookup {
         matched: 3,
         same_count: 1,
@@ -38,7 +38,7 @@ fn one_same() -> StaleLookup {
 }
 
 /// The failure of a call whose handle the page found removed, with what it found again.
-fn removed(lookup: StaleLookup) -> BrowserError {
+pub(super) fn removed(lookup: StaleLookup) -> BrowserError {
     BrowserError::StaleLocator {
         reason: StaleReason::Removed,
         lookup: Some(lookup),
