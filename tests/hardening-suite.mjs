@@ -75,7 +75,7 @@ const PROCESS_JOURNEYS = [
   { name: "journey-helpers", kind: "test", files: ["lib/home.test.mjs", "lib/installed.test.mjs", "lib/browser.test.mjs", "lib/cdp-pipe.test.mjs"], needsBuild: false },
   { name: "shell-installer", file: "installer-shell.mjs", platform: "linux" },
   { name: "edge-parent", file: "edge-parent-lifecycle.mjs" },
-  { name: "fixed-installation", file: "fixed-installation-journey.mjs", platform: "linux" },
+  { name: "fixed-installation", file: "fixed-installation-journey.mjs" },
   { name: "elevation", file: "elevation-journey.mjs", platform: "win32" },
   { name: "process", file: "process-journey.mjs" },
   { name: "continuity", file: "local-resilience-journey.mjs" },
