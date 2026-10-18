@@ -6,9 +6,11 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `pass`, `fail` (wi
 ## RESUME HERE
 
 L01 to L04 passed (L03 with a scope change: the owner directed on 2026-10-17 that acceptance
-uses the real installation and the real system browser, never a sandbox; L04 with findings for
-the coordinator). The development build is installed in the real `~/.ghostlight` and the
-system Chromium's ordinary profile is connected. Next: L05, the window and the tray.
+uses the real installation and the real system browser, never a sandbox). The owner then let this
+session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed and proven on the
+real install (see L04). The development build at ad43f65c is installed in the real
+`~/.ghostlight`, the system Chromium's ordinary profile is connected, and diagnostics are on.
+Next: L05, the window and the tray.
 
 ## Tasks
 
@@ -191,6 +193,43 @@ Findings for the coordinator (no product change made):
    `ghostlight-relay` that no longer exists. Ghostlight reads it as a foreign entry without a
    usable command and leaves it ("needs attention"). This follows the foreign-entry rule; noted
    in case such old Ghostlight entries should be recognized as Ghostlight's own.
+
+What became of them. The owner then let this session investigate and fix what it found (the
+BOOTSTRAP records it), with every solution judged by delight, and in an MCP the user to delight is
+the model (docs/MEMORY.md). Each fix ran fmt, clippy and its crates' tests (the workspace when the
+bridge changed), was deployed with `pwsh scripts/dev-loop.ps1` into the real `~/.ghostlight`, and
+was checked there with the system Chromium:
+
+1. Fixed in eaf7948d (ADR-0197 amendment of 2026-10-17). The edge holds a line whose write failed,
+   and sends a lone `initialize` or catalog listing cut off by a lost service to the next service,
+   once; tool calls are still answered "may have taken effect" and never sent again. Then the
+   installed journey met two over-eager checks: it counted service processes the moment readiness
+   returned, while the start that loses the lock waits 5 s by design, and its stopped-worker phase
+   needed a dedicated browser's DevTools port, so a real run was always "blocked". Both aligned in
+   9c439606. The journey now passes all 4 phases on the real install, every run (6 runs).
+2. and 3. Fixed in bd29366c. A failed start leaves its reason in `run/start-failure` and in
+   diagnostics (the bind failure included); the installer stops waiting once no process runs the
+   service image and names the spawn error, the recorded reason or the timeout.
+4. Fixed in d6c55ef3. The dry run says what each client would become: "Would leave Cline (CLI)
+   as it is: the entry under Ghostlight's name is not Ghostlight's.", "Codex already has the
+   current Ghostlight entry; nothing would change.", "Would remove Ghostlight from Zed."
+5. Fixed in 1e67edee, and wider than seen: a real `install --client nope` stopped older programs
+   and wrote the browser registrations, completions, man pages and Applications entry before it
+   refused. Both selections are now checked first; on the real install the refusal exits 1 and
+   changes nothing. The CLI journey pins it, and fails against the old order.
+6. By design and documented: zsh has no user completion directory. The man page now gives the one
+   `fpath` line and no longer names the retired Debian package (aadf76e6).
+7. The connector man pages were 1.x's and are now retired by install and uninstall, recognized by
+   their `.TH` line across all 36 released versions (00c6eccf); on the real install only
+   `ghostlight.1` remains. The `adapters/` and `extension/v0.*` folders were never written by a
+   release (hand copies from the 0.5 and 0.6 live lanes), so the installer leaves them: it removes
+   only what Ghostlight wrote.
+8. Unchanged (the foreign-entry rule).
+9. Found while diagnosing finding 1: `diagnostics show` never read the edge's logs
+   (`edge-mcp.jsonl`, `edge-browser.jsonl`) and said their diagnostics were off, and pruning never
+   rotated them, so a full edge log went silent for good. Fixed in 22f882db and ad43f65c: the
+   timeline merges them, `--component` filters them, a full one is rotated, and a filter no longer
+   reports the components it left out as off.
 
 ### L05 The window and the tray (todo)
 
