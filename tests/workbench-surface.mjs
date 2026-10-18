@@ -119,7 +119,7 @@ const controlsPart = ({
       label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
       acts: { test_notification: act() }
     },
-    service: { word: "Ghostlight service is up; 1 MCP client and 1 browser connected." },
+    service: { word: "Ghostlight is running; 1 agent and 1 browser connected." },
     you: {
       context, word: control ? "Full control" : "Watching",
       sentence: control ? (watch ? SHEET_WATCHED : SHEET_PRIVATE) : SHEET_WATCHER
@@ -796,7 +796,7 @@ const interactiveDuration = durationCellOf("interactive");
 // The ADR-0145 status card: rendered from the orchestrator-owned state, with both person acts.
 view.collections({
   sessions: [], browsers: [],
-  diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Ghostlight is accepting local connections." }],
+  diagnostics: [{ severity: "passing", label: "Ghostlight", detail: "Running and accepting agents." }],
   history: [], service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
   configuration: { managed_policy: { configured: false } },
   harnesses: []
@@ -1104,7 +1104,7 @@ function fakeService(kind, { served = true } = {}) {
     activity: { operations: [], history: [], document_coverage: [] },
     integrations: { harnesses: roster() },
     diagnostics: {
-      diagnostics: [{ severity: "passing", label: "Orchestrator", detail: "Accepting connections." }]
+      diagnostics: [{ severity: "passing", label: "Ghostlight", detail: "Running and accepting agents." }]
     },
     controls: controls(),
     ...(kind === "control" ? { setup: retiredSetup } : {})
@@ -1629,7 +1629,7 @@ const httpChecks = [
     JSON.stringify(watchOpening)],
   ["Sharing says who can see a watching page, and Status carries the service's sentence at its top",
     watchOpening.who === SHEET_WATCHER
-      && watchOpening.statusService === "Ghostlight service is up; 1 MCP client and 1 browser connected."
+      && watchOpening.statusService === "Ghostlight is running; 1 agent and 1 browser connected."
       && watchOpening.statusServiceHidden === false,
     JSON.stringify({ who: watchOpening.who, status: watchOpening.statusService })],
   ["a watching page draws the wheel while agents are running, and Apply as a way to the window",
@@ -1683,7 +1683,7 @@ const httpChecks = [
     JSON.stringify({ ...controlOpening, roster: undefined, status: undefined })],
   ["the window's Settings offers Quit, says who can see, and Status carries the service's sentence",
     controlOpening.quitHidden === false && controlOpening.who === SHEET_WATCHED
-      && controlOpening.statusService === "Ghostlight service is up; 1 MCP client and 1 browser connected."
+      && controlOpening.statusService === "Ghostlight is running; 1 agent and 1 browser connected."
       && controlOpening.addressWritten === 0,
     JSON.stringify({ quit: controlOpening.quitHidden, who: controlOpening.who, status: controlOpening.statusService })],
   ["the window with no watch view served says so once, offers no toggle, and does not send itself to the window",
@@ -1778,7 +1778,7 @@ const httpChecks = [
     JSON.stringify({ closedViews, closedState })],
   ["a closed page still shows the About page in full, without the counts that come from data",
     closedAbout.includes("<dt>Version</dt><dd>2.0.0</dd>") && closedAbout.includes("<dt>License</dt><dd>Apache-2.0 OR MIT</dd>")
-      && !closedAbout.includes("Sessions") && !closedAbout.includes("Recorded"),
+      && !closedAbout.includes("Agents") && !closedAbout.includes("Recorded"),
     closedAbout],
   ["a closed page opens an About link in a new tab", closedState.opened.length === 1
     && closedState.opened[0][0] === LINKS.source, JSON.stringify(closedState.opened)],
@@ -1801,7 +1801,7 @@ const checks = [
     sheetAfterBoot.runtimeLabel === "Browser work"
       && sheetAfterBoot.runtimeWord === "Running" && sheetAfterBoot.hold === false
       && sheetAfterBoot.resume === true && sheetAfterBoot.start === true
-      && sheetAfterBoot.service === "Ghostlight service is up; 1 MCP client and 1 browser connected."
+      && sheetAfterBoot.service === "Ghostlight is running; 1 agent and 1 browser connected."
       && sheetAfterBoot.viewingWord === "On -- anyone on this computer can open this view"
       && sheetAfterBoot.viewingUrl === "http://127.0.0.1:41234/"
       && sheetAfterBoot.viewingToggle === "Turn off" && sheetAfterBoot.viewingToggleHidden === false

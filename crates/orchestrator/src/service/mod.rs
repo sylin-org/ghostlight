@@ -4430,9 +4430,9 @@ mod tests {
         let DesktopFrame::TrayModel { model } = next_frame(&mut stream) else {
             panic!("the first frame after a pause is the new tray");
         };
-        // No browser is connected here, so the icon looks ready, as the band does (owner answer,
-        // 2026-10-15); the entries follow the runtime.
-        assert_eq!(model.state, crate::intake::desktop::TrayState::Ready);
+        // A pause shows on the icon with or without a browser, as it does on the band; the entries
+        // follow the runtime.
+        assert_eq!(model.state, crate::intake::desktop::TrayState::Paused);
         let enabled: Vec<(&str, bool)> = model
             .items
             .iter()

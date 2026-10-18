@@ -75,14 +75,14 @@ try {
   const absent = edge(["status"]);
   assert.equal(absent.status, 0, absent.stderr);
   assert.match(absent.stdout, new RegExp(`^Ghostlight ${version.replaceAll(".", "\\.")}$`, "m"));
-  assert.match(absent.stdout, /Ghostlight service is not running\./);
+  assert.match(absent.stdout, /Ghostlight is not running\./);
   const absentJson = edge(["status", "--json"]);
   assert.equal(absentJson.status, 0, absentJson.stderr);
   assert.equal(JSON.parse(absentJson.stdout).running, false);
   const absentDoctor = edge(["doctor"]);
   assert.equal(absentDoctor.status, 0, absentDoctor.stderr);
   assert.match(absentDoctor.stdout, new RegExp(`Ghostlight ${version.replaceAll(".", "\\.")} diagnostics`));
-  assert.match(absentDoctor.stdout, /Ghostlight service is not running\./);
+  assert.match(absentDoctor.stdout, /Ghostlight is not running\./);
   const absentDiagnosis = edge(["doctor", "--json"]);
   assert.equal(absentDiagnosis.status, 0, absentDiagnosis.stderr);
   const unreached = JSON.parse(absentDiagnosis.stdout);

@@ -99,3 +99,17 @@ window.
 - The rest of the correction stands: the authored outcome sentence is secondary, exceptional
   recovery stays below uncertain and partial rows, and the whole mixed list is the test of
   comprehension.
+
+## Amendment (2026-10-18): a pause outranks no browser, and a browser that starts is Ready
+
+Found in the rc-1 product and visual review (finding j-07) and settled in rc-1 slice
+c3-one-vocabulary-and-plain-status. With disconnection owning the readiness word, closing the
+browser painted the window grey and said "Not connected" while At a glance said Ghostlight would
+start the browser itself, and it hid a pause the person had just made.
+
+This supersedes the sentence of decision 4 that says disconnection owns the shared readiness word.
+A person's pause and ended session come first. With no browser connected, the answer is Not
+connected only when Ghostlight would start none (the manual posture, or no browser it can start);
+when an agent's request would start one, the answer is Ready, with the quiet lamp and the detail
+"Starts Google Chrome when an agent asks." naming that browser. Runtime control stays offered in
+every state, as decision 4 says.

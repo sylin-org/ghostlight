@@ -182,7 +182,7 @@ const controlsFixture = {
     label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
     acts: { test_notification: { available: true, why_not: null } }
   },
-  service: { word: "Ghostlight service is up; 3 MCP clients and 2 browsers connected." },
+  service: { word: "Ghostlight is running; 3 agents and 2 browsers connected." },
   you: { context: "control", word: "Full control", sentence: "Others on this computer can watch this view in a browser." }
 };
 
@@ -234,9 +234,10 @@ const snapshot = {
     { timestamp_ms: Date.now() - 420000, invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", provenance: previewEvidence("connection_restored", null, "mcp") }
   ],
   diagnostics: [
-    { id: "service", label: "Orchestrator", severity: "passing", detail: "Ghostlight is accepting local connections." },
-    { id: "browser", label: "Browser adapters", severity: "passing", detail: "Compatible browser adapters are connected." },
-    { id: "authority", label: "Authority", severity: "passing", detail: "Configured authority sources are valid." }
+    { id: "service", label: "Ghostlight", severity: "passing", detail: "Running and accepting agents." },
+    { id: "browser", label: "Browser", severity: "passing", detail: "Ghostlight in Browser is connected in Google Chrome and Microsoft Edge." },
+    { id: "authority", label: "Rules", severity: "passing", detail: "Your rules are valid." },
+    { id: "audit", label: "History", severity: "passing", detail: "History is saving." }
   ],
   harnesses,
   controls: controlsFixture,

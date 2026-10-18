@@ -55,7 +55,7 @@ const parts = {
     document_coverage: [{ invocation: "b" }]
   },
   integrations: { harnesses: [{ id: "codex" }] },
-  diagnostics: { diagnostics: [{ label: "Orchestrator" }] },
+  diagnostics: { diagnostics: [{ label: "Ghostlight" }] },
   controls: { viewing: { watch: true }, you: { context: "control" } }
 };
 

@@ -1543,7 +1543,9 @@ impl Refusal {
                 host,
                 origin,
             } => return blocked(*reason, host, origin),
-            Self::LocalInterlock => "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
+            Self::LocalInterlock => {
+                "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings."
+            }
             Self::CredentialAuthorization { control } => {
                 return format!("Nothing was typed. {} is credential-class.", control.phrase());
             }
@@ -3291,7 +3293,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::LocalInterlock,
-                "Kept the tab open: Ghostlight's preserve-tabs setting is on.",
+                "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings.",
             ),
             (
                 Refusal::CredentialAuthorization {

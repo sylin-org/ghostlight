@@ -1,7 +1,7 @@
 {
   "kind": "tray_model",
   "model": {
-    "tooltip": "Paused -- Ghostlight service is up; 2 MCP clients and 2 browsers connected.",
+    "tooltip": "Paused -- Ghostlight is running; 2 agents and 2 browsers connected.",
     "items": [
       {
         "id": "open",
@@ -10,12 +10,12 @@
       },
       {
         "id": "hold",
-        "label": "Pause browser work",
+        "label": "Pause agents",
         "enabled": false
       },
       {
         "id": "resume",
-        "label": "Resume browser work",
+        "label": "Resume agents",
         "enabled": true
       },
       {

@@ -449,6 +449,7 @@ mod tests {
     /// The counts the goldens' tray describes.
     fn golden_counts() -> ConnectionCounts {
         ConnectionCounts {
+            agents: 2,
             mcp_clients: 2,
             command_line: 0,
             browsers: 2,
@@ -622,15 +623,15 @@ mod tests {
         let tray = golden_tray();
         assert_eq!(
             tray.tooltip,
-            "Ready -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+            "Ready -- Ghostlight is running; 2 agents and 2 browsers connected."
         );
         assert_eq!(tray.state, TrayState::Ready);
         assert_eq!(
             listed(&tray),
             [
                 ("open", "Open Ghostlight", true),
-                ("hold", "Pause browser work", true),
-                ("resume", "Resume browser work", false),
+                ("hold", "Pause agents", true),
+                ("resume", "Resume agents", false),
                 ("quit", "Quit Ghostlight", true),
             ]
         );
@@ -648,8 +649,8 @@ mod tests {
                 listed(&tray),
                 [
                     ("open", "Open Ghostlight", true),
-                    ("hold", "Pause browser work", false),
-                    ("resume", "Resume browser work", true),
+                    ("hold", "Pause agents", false),
+                    ("resume", "Resume agents", true),
                     ("quit", "Quit Ghostlight", true),
                 ]
             );
@@ -676,6 +677,7 @@ mod tests {
         // sessions, and as many browsers or none, in every state.
         for browsers in [999, 0] {
             let counts = ConnectionCounts {
+                agents: 1998,
                 mcp_clients: 999,
                 command_line: 999,
                 browsers,

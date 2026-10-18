@@ -54,7 +54,7 @@ function part({ context = "control", watch = true, runtime = "active", layer = "
       word: on ? `On (${layer})` : "Off", acts: { set_diagnostics: act(), reveal_diagnostics: act() }
     },
     notifications: { label: "Notifications", word: "Send one local checkup notification.", acts: { test_notification: act() } },
-    service: { word: "Ghostlight service is up; 1 MCP client connected." },
+    service: { word: "Ghostlight is running; 1 agent connected." },
     you: { context, word: control ? "Full control" : "Watching", sentence: control ? (watch ? WATCHED : PRIVATE) : WATCHER }
   };
 }
@@ -563,7 +563,7 @@ test("the page's own labels fill the rail, the headings and the buttons", () => 
   assert.deepEqual(SECTIONS.map((section) => shown.el(`rail-${section}`).children[0].textContent),
     ["This screen", "Sharing", "Browser work", "Notifications", "Diagnostics"]);
   assert.equal(said(shown, "settings-browser-work-title"), "Browser work");
-  assert.equal(said(shown, "controls-hold"), "Pause");
+  assert.equal(said(shown, "controls-hold"), "Pause agents");
   assert.equal(said(shown, "controls-end"), "End session");
   assert.equal(said(shown, "test-notification"), "Send test");
   assert.equal(said(shown, "controls-diagnostics-reveal"), "Open log folder");
@@ -2170,7 +2170,7 @@ test("an action whose effect cannot be confirmed reads Unknown in the failed ton
 
 test("a kept row says Kept beside its duration in ink, with no mark, and a refusal keeps its own treatment", () => {
   const kept = rowOf(settledRead({ invocation: "kept-1", tool: "browser_tabs", capability: "action",
-    status: "blocked", effect: "none", summary: "Kept the tab open: the preserve-tabs setting is on." }));
+    status: "blocked", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on." }));
   assert.match(queueRows(kept.shown)[0].className, /\bkept\b/);
   assert.equal(kept.cell("row-dur").textContent, "Kept 1.2s");
   assert.equal(kept.cell("row-dur").children.some((child) => child.classes.has("outcome-glyph")), false);
@@ -2659,4 +2659,101 @@ test("the mascot keeps its face in the agent pane: averaged below its size, cris
   const drawnAt = pxOf(ghost.width);
   const whole = drawnAt >= native && drawnAt % native === 0;
   assert.ok(whole || ghost["image-rendering"] !== "pixelated", `${drawnAt}px from a ${native}px sprite drops rows of its face`);
+});
+
+/* ------------------------------ one vocabulary ------------------------------ */
+
+test("the band, the pill and About count one thing, the agents At a glance groups", () => {
+  // Four sessions of three agents: Claude Code, Codex twice, and the command line.
+  const shown = glance();
+  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0 });
+  assert.match(shown.el("state-facts").innerHTML, /^<b>3<\/b> agents &middot; <b>1<\/b> browser &middot; /);
+  assert.equal(shown.read().wearing("glance-side")[0].textContent, "3 agents");
+  const about = drawn(shown.el("about-facts").innerHTML).root.children.map((node) => node.textContent);
+  assert.deepEqual(about.slice(2, 4), ["Agents", "3 connected"]);
+  assert.equal(about.includes("Sessions"), false);
+});
+
+test("the band's wheel says Pause agents and Resume agents, the words of the tray and the toolbar", () => {
+  const shown = glance();
+  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0 });
+  assert.equal(shown.el("wheel-label").textContent, "Pause agents");
+  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "held", running: 0 });
+  assert.equal(shown.el("wheel-label").textContent, "Resume agents");
+  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "ended", running: 0 });
+  assert.equal(shown.el("wheel-label").textContent, "Start session");
+  assert.equal(said(kit(), "controls-resume"), "Resume agents");
+});
+
+test("Status asks whether Ghostlight is working", () => {
+  const status = [...drawn(markup).root.descendants()].find((node) => node.id === "view-status");
+  const kicker = [...status.descendants()].find((node) => node.classes.has("kicker"));
+  assert.equal(kicker.textContent.trim(), "Is Ghostlight working");
+});
+
+/** The compiled policy of a machine with no rules anywhere, where the person may write their own. */
+function openPolicy(layers = []) {
+  return {
+    headline: "No rules apply. Agents may work on ordinary websites, within the limits below.",
+    organization: null, capabilities: [], ceilings: [], layers,
+    user_layer: { source: layers.length ? "workbench" : "none", editable: true, path: "/home/ann/.ghostlight/policy.json", blocked_reason: null }
+  };
+}
+
+test("with no rules the open case is said once, and how rules are checked waits for a rule", () => {
+  const shown = drawing();
+  shown.view.policy(openPolicy());
+  assert.deepEqual(shown.failures, []);
+  assert.equal(shown.el("rules-note").hidden, true);
+  assert.equal(shown.el("rule-list").innerHTML, '<p class="rules-empty">No rules yet.</p>');
+  assert.equal(shown.el("editor-status").textContent, "");
+  assert.equal(shown.el("apply-policy").disabled, true, "nothing changed yet");
+  const hint = [...drawn(markup).root.descendants()].find((node) => node.classes.has("editor-hint"));
+  assert.equal(hint.textContent.trim(), "Each starts at its most open setting; you can only narrow it.");
+
+  shown.view.addRule("example.com");
+  assert.equal(shown.el("rules-note").hidden, false);
+});
+
+test("with no rules, turning one setting off applies alone and keeps the ordinary websites", () => {
+  const shown = drawing();
+  shown.view.policy(openPolicy());
+  shown.view.setPermission("browser.tabs.allow_close", false);
+  assert.equal(shown.el("apply-policy").disabled, false);
+  assert.equal(shown.el("check-policy").disabled, false);
+  assert.equal(shown.el("editor-status").textContent, Words.OPEN_RULE_NOTE);
+  const document = JSON.parse(shown.view.draftDocument());
+  assert.deepEqual(document.grants, [{
+    id: "ordinary-websites", hosts: { allow: ["*"] }, allowed: ["read", "action", "write", "execute"],
+    description: "Agents may work on ordinary websites."
+  }]);
+  assert.deepEqual(document.config, [{ key: "browser.tabs.allow_close", value: false, level: "mandatory" }]);
+});
+
+test("a draft whose rules were all removed refuses everything, and says so only then", () => {
+  const shown = drawing();
+  shown.view.policy(openPolicy([{
+    kind: "user", title: "Your rules", policy_name: "Your rules", version: "2026-10-18", path: null, document: "{}",
+    settings: [], rules: [{ id: "rule-1", allow: ["example.com"], deny: [], allowed: ["read"], description: "" }]
+  }]));
+  assert.equal(shown.el("rules-note").hidden, false);
+  assert.equal(shown.el("editor-status").textContent, "");
+  shown.view.ruleAction(0, "remove");
+  assert.equal(shown.el("editor-status").textContent, Words.NO_RULES_LEFT);
+  assert.equal(shown.el("apply-policy").disabled, true);
+  assert.equal(shown.el("rules-note").hidden, true);
+});
+
+test("Closing tabs names the browser's Preserve Ghostlight tabs, which is set in the browser", () => {
+  const shown = drawing();
+  shown.view.policy(openPolicy());
+  const rows = drawn(shown.el("setting-groups").innerHTML).wearing("setting-row");
+  const closing = rows.find((row) => row.textContent.includes("Closing tabs"));
+  const also = [...closing.descendants()].find((node) => node.classes.has("setting-also"));
+  assert.ok(also, "Closing tabs does not name the browser's setting");
+  assert.match(also.textContent, /^Preserve Ghostlight tabs keeps them open while it is on\. It starts on\./);
+  const chip = [...also.descendants()].find((node) => node.classes.has("context-chip"));
+  assert.equal(chip.textContent, "Set in the browser");
+  assert.equal([...also.descendants()].some((node) => node.tag === "input" || node.tag === "button"), false,
+    "the browser's setting is a line here, never a control");
 });

@@ -150,9 +150,10 @@ mod tests {
 
     fn counts() -> Option<ConnectionCounts> {
         Some(ConnectionCounts {
-            mcp_clients: 2,
+            agents: 2,
+            mcp_clients: 3,
             command_line: 0,
-            browsers: 2,
+            browsers: 1,
         })
     }
 
@@ -177,7 +178,7 @@ mod tests {
         assert_eq!(
             runtime_lines(&seen, false),
             [
-                "Ghostlight service is up; 2 MCP clients and 2 browsers connected.",
+                "Ghostlight is running; 2 agents and 1 browser connected.",
                 "Workbench: http://127.0.0.1:47600/ -- others on this computer can watch",
             ]
         );
@@ -188,7 +189,7 @@ mod tests {
                 "version": "2.0.0",
                 "instance": "instance_a",
                 "endpoint": ENDPOINT,
-                "connections": {"mcp_clients": 2, "command_line": 0, "browsers": 2},
+                "connections": {"agents": 2, "mcp_clients": 3, "command_line": 0, "browsers": 1},
                 "workbench": {"url": URL, "watching": true, "usual_port": true},
             })
         );
@@ -227,7 +228,7 @@ mod tests {
             endpoint: ENDPOINT.into(),
             status: Some(older),
         };
-        assert_eq!(runtime_lines(&seen, true), ["Ghostlight service is up."]);
+        assert_eq!(runtime_lines(&seen, true), ["Ghostlight is running."]);
         assert_eq!(
             runtime_document(&seen),
             json!({
@@ -285,10 +286,7 @@ mod tests {
     #[test]
     fn no_service_answering_reads_as_not_running() {
         let seen = nothing_answers();
-        assert_eq!(
-            runtime_lines(&seen, false),
-            ["Ghostlight service is not running."]
-        );
+        assert_eq!(runtime_lines(&seen, false), ["Ghostlight is not running."]);
         assert_eq!(
             runtime_document(&seen),
             json!({"running": false, "endpoint": ENDPOINT})
@@ -299,9 +297,7 @@ mod tests {
     fn an_idle_service_that_can_start_says_how_it_starts() {
         assert_eq!(
             runtime_lines(&nothing_answers(), true),
-            [
-                "Ghostlight service is not running. It starts when a browser or an MCP client connects."
-            ]
+            ["Ghostlight is not running. It starts when a browser or an agent connects."]
         );
     }
 }

@@ -734,3 +734,16 @@ pass, never after a waiting period. What the week was meant to catch is checked 
 Windows, a restart and a sign-out with an agent session, the browser and the window open show no
 shutdown block and leave exactly one service. Clean installs on Windows and the Linux test
 machines and a 1.x upgrade on another machine stay in the bar.
+
+## Amendment (2026-10-18): one counted thing, the agents
+
+Found in the rc-1 product and visual review (findings j-08 and window-1) and settled in rc-1 slice
+c3-one-vocabulary-and-plain-status. At one moment the band said 4 sessions, At a glance 2 agents,
+Status 3 MCP clients and About 4 sessions: different counts and four nouns for one fact.
+
+This supersedes the wording of web apps Decision 10 above. The window, the tray and `status` count
+one thing, the connected agents, grouped the way At a glance groups them: every session of one
+agent counts once. The line reads "Ghostlight is running; 2 agents and 1 browser connected." or
+"Ghostlight is not running.". It still counts connections and never services, and `status --json`
+and `doctor` keep the MCP client and command-line counts beside the agents. Pause reads "Pause
+agents" and "Resume agents" on the band, in the tray and in Settings, the browser toolbar's words.

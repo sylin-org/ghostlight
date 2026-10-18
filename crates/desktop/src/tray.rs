@@ -630,8 +630,8 @@ mod tests {
             tooltip: "Ghostlight".to_string(),
             items: vec![
                 item("open", "Open Ghostlight"),
-                item("hold", "Pause browser work"),
-                item("resume", "Resume browser work"),
+                item("hold", "Pause agents"),
+                item("resume", "Resume agents"),
                 item("quit", "Quit Ghostlight"),
             ],
             state: TrayState::Ready,

@@ -15,6 +15,7 @@
     VIEWS, SETTINGS_SECTIONS, DEFAULT_SECTION, addressOf, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
+    OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES, SETTINGS,
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
@@ -686,9 +687,10 @@
       if (!facts.snapshot) {
         el["state-facts"].textContent = "";
       } else {
-        const sessions = facts.snapshot.sessions.length;
+        // The agents At a glance shows, grouped the same way, so the band and the pill agree.
+        const agents = agentGroups(facts.snapshot.sessions).length;
         const browsers = facts.snapshot.browsers.length;
-        el["state-facts"].innerHTML = `<b>${sessions}</b> ${noun(sessions, "session", "sessions")}`
+        el["state-facts"].innerHTML = `<b>${agents}</b> ${noun(agents, "agent", "agents")}`
           + ` &middot; <b>${browsers}</b> ${noun(browsers, "browser", "browsers")}`
           + ` &middot; <b>${facts.running}</b> running`
           + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
@@ -711,7 +713,7 @@
       const intent = facts.runtime === "ended" ? ACT.startSession : paused ? ACT.resume : ACT.hold;
       el.wheel.disabled = lost || facts.connected === false || !(facts.snapshot?.readiness?.invites_control ?? false);
       el.wheel.dataset.intent = intent;
-      el["wheel-label"].textContent = facts.runtime === "ended" ? "Start session" : paused ? "Resume" : "Pause";
+      el["wheel-label"].textContent = facts.runtime === "ended" ? SETTINGS.startSession : paused ? SETTINGS.resume : SETTINGS.pause;
       el["wheel-icon"].innerHTML = paused
         ? '<path d="M7 4.5 19 12 7 19.5z"/>'
         : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
@@ -936,7 +938,7 @@
       const facts = [["Version", exact || "unknown"]];
       if (counts) {
         facts.push(
-          ["Sessions", `${counts.sessions} connected`],
+          ["Agents", `${counts.agents} connected`],
           ["Browsers", `${counts.browsers} attached`],
           ["Recorded", `${counts.recorded} actions on this device`]
         );
@@ -1509,12 +1511,19 @@
 
     /* ------------------------------ the editor ----------------------------- */
 
-    /** Turn the applied user layer into an editable draft, or start an empty one. */
+    /**
+     * Turn the applied user layer into an editable draft, or start an empty one.
+     *
+     * A draft that starts with no rules is `open`: while it has none, its document carries
+     * OPEN_RULE, so a setting turned off applies alone and agents keep the ordinary websites they
+     * have now. A draft that had rules and lost them all is not, and refuses everything.
+     */
     function draftFrom(view) {
       const layer = view.layers.find((entry) => entry.kind === "user");
-      if (!layer) return { rules: [], settings: emptySettings(), dirty: false };
+      if (!layer) return { rules: [], settings: emptySettings(), dirty: false, open: true };
       return {
         dirty: false,
+        open: layer.rules.length === 0,
         rules: layer.rules.map((rule) => ({
           id: rule.id,
           hosts: rule.allow.join(", "),
@@ -1596,13 +1605,18 @@
       const detail = forcedBy
         ? `${escapeHtml(forcedBy)} already turned this off.`
         : escapeHtml(checked ? item.on : item.off);
+      // A setting the browser keeps is read here and changed there, so it is a line, not a control.
+      const also = item.browser
+        ? `<span class="setting-also">${escapeHtml(item.browser.word)}`
+          + `<span class="chip context-chip">${escapeHtml(item.browser.where)}</span></span>`
+        : "";
       return `<div class="setting-row${forcedBy ? " setting-forced" : ""}">`
         + `<label class="toggle">`
         + `<input type="checkbox" data-restriction="${escapeHtml(item.key)}"`
         + `${checked ? " checked" : ""}${forcedBy ? " disabled" : ""}>`
         + `<span class="toggle-track"><span class="toggle-thumb"></span></span></label>`
         + `<div class="setting-body"><span class="setting-name">${escapeHtml(item.name)}</span>`
-        + `<span class="setting-detail">${detail}</span></div></div>`;
+        + `<span class="setting-detail">${detail}</span>${also}</div></div>`;
     }
 
     /** Render the first closed string setting without turning it into a free-form field. */
@@ -1735,8 +1749,10 @@
       const rows = organization.flatMap((layer) =>
         layer.rules.map((rule) => organizationRow(rule, layer)));
       const mine = draft ? draft.rules.map((rule, index) => userRow(rule, index)) : [];
+      // How rules are checked matters once there is one; before that the headline says it all.
+      el["rules-note"].hidden = !(rows.length || mine.length);
       el["rule-list"].innerHTML = rows.concat(mine).join("")
-        || `<p class="rules-empty">No rules anywhere. Agents may work on ordinary websites.</p>`;
+        || `<p class="rules-empty">${escapeHtml(NO_RULES)}</p>`;
       if (draft) {
         el["discard-policy"].hidden = !draft.dirty;
         renderSettings();
@@ -1834,27 +1850,26 @@
     /**
      * What the editor will let you do with the draft as it stands.
      *
-     * A draft with no rules is a policy that refuses everything, so neither applying it nor asking
-     * what it would have done is a question worth answering. Saying that once, plainly, beats
-     * letting someone press a button and read a number that sounds like an accusation.
+     * A draft whose rules were all removed is a policy that refuses everything, so neither applying
+     * it nor asking what it would have done is a question worth answering. Saying that once,
+     * plainly, beats letting someone press a button and read a number that sounds like an
+     * accusation. An open draft with no rules carries OPEN_RULE, and says so once it has a change.
      */
     function editorReady() {
       if (!draft) return;
-      // Rules are what make a policy decide anything. Restrictions alone still need one, because a
-      // rule-less policy refuses everything regardless of what else it says.
-      const empty = !draft.rules.length;
+      const bare = !draft.rules.length;
+      const empty = bare && !draft.open;
       el["apply-policy"].disabled = empty || !draft.dirty;
       el["check-policy"].disabled = empty;
+      // Clearing matters as much as setting: a note about the rules must not outlive the rules it
+      // was about and sit under good ones, contradicting them.
+      const said = el["editor-status"].textContent;
+      if (said === NO_RULES_LEFT || said === OPEN_RULE_NOTE) el["editor-status"].textContent = "";
       if (empty) {
         previewCleared();
-        el["editor-status"].textContent =
-          "No rules yet. A policy with none refuses everything, so add at least one.";
-        return;
-      }
-      // Clearing matters as much as setting: the empty-draft warning outlived the empty draft and
-      // sat under two perfectly good rules, contradicting them.
-      if (el["editor-status"].textContent.startsWith("No rules yet")) {
-        el["editor-status"].textContent = "";
+        el["editor-status"].textContent = NO_RULES_LEFT;
+      } else if (bare && draft.dirty) {
+        el["editor-status"].textContent = OPEN_RULE_NOTE;
       }
     }
 
@@ -1885,8 +1900,10 @@
 
     /** What a draft says: its rules and its settings, and nothing about when it was written. */
     function documentBody(source) {
+      const open = { ...OPEN_RULE, allowed: new Set(CAPABILITY_ORDER) };
+      const rules = source.rules.length || !source.open ? source.rules : [open];
       return {
-        grants: source.rules.map((rule, index) => {
+        grants: rules.map((rule, index) => {
           const grant = {
             id: rule.id && /^[A-Za-z0-9._-]+$/.test(rule.id) ? rule.id : `rule-${index + 1}`,
             hosts: { allow: splitHosts(rule.hosts) },
@@ -2062,7 +2079,7 @@
       const product = {
         version: access?.product?.version ?? snapshot.service?.version,
         license: access?.product?.license,
-        counts: { sessions: snapshot.sessions.length, browsers: snapshot.browsers.length, recorded: snapshot.history.length }
+        counts: { agents: agentGroups(snapshot.sessions).length, browsers: snapshot.browsers.length, recorded: snapshot.history.length }
       };
       ifChanged("about", product, () => about(product));
       // The page's own memo decides; its facts hold each agent's live sessions, which change alone.

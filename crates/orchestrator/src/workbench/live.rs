@@ -23,7 +23,7 @@
 //! read happens outside every lock, so no snapshot waits on another's; two snapshots that miss at
 //! once may each read them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
@@ -64,6 +64,9 @@ pub(super) struct Gathered {
     pub browsers: Vec<BrowserInstanceSummary>,
     /// What the window says in place of a browser, while none is connected.
     pub no_browser: Option<String>,
+    /// The browser an agent's request would start, while none is connected and Ghostlight would
+    /// start one.
+    pub starts: Option<String>,
     /// The ids of the cached client roster's rows these sessions put in use
     /// ([`parts::harnesses_in_use`]).
     pub harnesses_in_use: Vec<String>,
@@ -92,6 +95,17 @@ impl Gathered {
             no_browser: self.no_browser.clone(),
             harnesses_in_use: self.harnesses_in_use.clone(),
         }
+    }
+
+    /// What is connected in this look: the agents as At a glance groups them, the connections by
+    /// intake, and the browsers.
+    pub fn counts(&self) -> ConnectionCounts {
+        count_connections(
+            self.sessions
+                .iter()
+                .map(|session| (session.agent.id.clone(), session.connections.as_slice())),
+            self.browsers.len(),
+        )
     }
 }
 
@@ -159,21 +173,28 @@ impl BrowserStarts {
     }
 }
 
-/// Count `connections` by the intake that admitted each, beside `browsers`.
+/// Count `sessions`, each its agent's id and its connections: the agents as At a glance groups
+/// them, one per agent id, and the connections by the intake that admitted each, beside
+/// `browsers`.
 fn count_connections<'a>(
-    connections: impl Iterator<Item = &'a ConnectionDetails>,
+    sessions: impl Iterator<Item = (String, &'a [ConnectionDetails])>,
     browsers: usize,
 ) -> ConnectionCounts {
     let mut counts = ConnectionCounts {
         browsers,
         ..ConnectionCounts::default()
     };
-    for connection in connections {
-        match connection.channel {
-            IntakeChannel::Mcp => counts.mcp_clients += 1,
-            IntakeChannel::Cli => counts.command_line += 1,
+    let mut agents = BTreeSet::new();
+    for (agent, connections) in sessions {
+        agents.insert(agent);
+        for connection in connections {
+            match connection.channel {
+                IntakeChannel::Mcp => counts.mcp_clients += 1,
+                IntakeChannel::Cli => counts.command_line += 1,
+            }
         }
     }
+    counts.agents = agents.len();
     counts
 }
 
@@ -303,13 +324,15 @@ impl Live {
                 connected: true,
             })
             .collect();
-        let no_browser = if browsers.is_empty() {
-            let starts = self.starts_on_request(self.governance.browser_startup());
-            Some(words::no_browser(starts.as_deref()))
+        let starts = if browsers.is_empty() {
+            self.starts_on_request(self.governance.browser_startup())
         } else {
             lock(&self.starts).end_stretch();
             None
         };
+        let no_browser = browsers
+            .is_empty()
+            .then(|| words::no_browser(starts.as_deref()));
         let roster = lock(&self.sources).harnesses.clone();
         let harnesses_in_use = parts::harnesses_in_use(&roster.summaries(), &sessions);
         let authority = self.governance.diagnostics();
@@ -319,6 +342,7 @@ impl Live {
         let readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
             audit_required_unavailable: audit_required && audit_health.unavailable(),
             browser_connected: !browsers.is_empty(),
+            starts: starts.as_deref(),
             session_ended: runtime_state == RuntimeControlState::Ended,
             paused: runtime_state == RuntimeControlState::Held,
             authority_invalid: !authority.authority_valid,
@@ -331,6 +355,7 @@ impl Live {
             sessions,
             browsers,
             no_browser,
+            starts,
             harnesses_in_use,
             authority,
             runtime_state,
@@ -376,13 +401,7 @@ impl Live {
                 url: facts.address.url(),
             }),
             diagnostics: &report,
-            counts: count_connections(
-                gathered
-                    .sessions
-                    .iter()
-                    .flat_map(|session| session.connections.iter()),
-                gathered.browsers.len(),
-            ),
+            counts: gathered.counts(),
             user_home: user_home.as_deref(),
         })
     }
@@ -450,13 +469,7 @@ impl Live {
         TrayModel::of(
             gathered.readiness.state,
             gathered.runtime_state,
-            count_connections(
-                gathered
-                    .sessions
-                    .iter()
-                    .flat_map(|session| session.connections.iter()),
-                gathered.browsers.len(),
-            ),
+            gathered.counts(),
         )
     }
 
@@ -474,9 +487,12 @@ impl Live {
     pub fn connection_counts(&self) -> ConnectionCounts {
         let summaries = self.workspaces.summaries();
         count_connections(
-            summaries
-                .iter()
-                .flat_map(|workspace| workspace.connections.iter()),
+            summaries.iter().map(|workspace| {
+                (
+                    crate::agent::Agent::of(Some(&workspace.client_label), workspace.channel).id,
+                    workspace.connections.as_slice(),
+                )
+            }),
             self.browser.browsers().len(),
         )
     }

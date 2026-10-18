@@ -332,8 +332,8 @@ the owner wants, and what this project learned the hard way.
   to?" A deploy replaces the live installation in place; if it breaks, the owner restores. Do
   not hedge with parallel deployments. Journeys that start their own service run on the test
   machines or in CI only (owner, 2026-10-15). In the product too, the service is zero or one:
-  status reads like "Ghostlight service is up; 2 MCP clients and 2 browsers connected" and never
-  counts services. The small processes agents and browsers launch are its connections and are
+  status reads like "Ghostlight is running; 2 agents and 2 browsers connected" and never counts
+  services. The small processes agents and browsers launch are its connections and are
   named as such; the window is its window. Anything else running from Ghostlight is a fault that
   doctor names with its fix.
 - **Browser support means full ordinary-session capability.** Do not ship a partial adapter under a

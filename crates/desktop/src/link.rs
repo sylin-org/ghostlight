@@ -529,7 +529,7 @@ mod tests {
     /// A tray of the right shape.
     fn tray() -> TrayModel {
         TrayModel {
-            tooltip: "Ghostlight service is up; nothing is connected yet.".to_owned(),
+            tooltip: "Ghostlight is running; nothing is connected yet.".to_owned(),
             items: Vec::new(),
             state: TrayState::Ready,
         }
@@ -559,7 +559,7 @@ mod tests {
         assert_eq!(tray.state, TrayState::Ready);
         assert_eq!(
             tray.tooltip,
-            "Ready -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+            "Ready -- Ghostlight is running; 2 agents and 2 browsers connected."
         );
         let ids: Vec<(&str, bool)> = tray
             .items

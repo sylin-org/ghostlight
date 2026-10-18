@@ -24,7 +24,7 @@
 
       <button class="wheel" type="button" id="wheel" data-intent="hold" disabled>
         <svg viewBox="0 0 24 24" id="wheel-icon" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
-        <span id="wheel-label">Pause</span>
+        <span id="wheel-label">Pause agents</span>
       </button>
 
       <span class="wheel-state" id="wheel-state" hidden>
@@ -109,9 +109,9 @@
         <p class="closed-line" id="closed-status" hidden></p>
         <div class="page-heading">
           <div>
-            <span class="kicker">Local diagnostics and authority</span>
+            <span class="kicker">Is Ghostlight working</span>
             <h1 id="status-heading">Status</h1>
-            <p>Whether Ghostlight is ready and connected, and which authority sources apply.</p>
+            <p>Whether Ghostlight is running, a browser is connected, the rules hold and history is saving.</p>
           </div>
           <button class="ghost-button" type="button" id="refresh-status">Refresh</button>
         </div>
@@ -142,8 +142,8 @@
 
         <div class="rules-head">
           <h2 class="subhead">Rules</h2>
-          <p id="rules-note">Checked in this order. The first rule that covers what an agent is
-            doing decides it; anything no rule covers is refused.</p>
+          <p id="rules-note" hidden>Checked in this order. The first rule that covers what an agent
+            is doing decides it; anything no rule covers is refused.</p>
           <button class="ghost-button" type="button" id="add-rule" hidden>Add a rule</button>
         </div>
         <div class="rules" id="rule-list"></div>
@@ -153,9 +153,7 @@
 
         <section class="editor" id="policy-editor" hidden>
           <h2 class="subhead">Control your browser</h2>
-          <p class="editor-hint">Everything below starts on. Turning one off is the only thing
-            you can do here; nothing lets you turn back on something an organization already
-            turned off.</p>
+          <p class="editor-hint">Each starts at its most open setting; you can only narrow it.</p>
           <div class="setting-groups" id="setting-groups"></div>
           <div class="sacred">
             <label class="sacred-label" for="sacred-hosts">Sites agents must never touch</label>

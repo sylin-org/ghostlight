@@ -435,9 +435,7 @@ fn headline(situation: Situation, organization: Option<&OrganizationIdentity>) -
     let named = organization.map(|identity| identity.name.as_str());
     match situation {
         Situation::AllOpen => {
-            "No policy is applied. Agents can work on ordinary websites, within the boundaries \
-             below that no policy can lift."
-                .into()
+            "No rules apply. Agents may work on ordinary websites, within the limits below.".into()
         }
         Situation::OrganizationOnly => named.map_or_else(
             || "Your organization sets the rules on this machine.".into(),
@@ -790,7 +788,10 @@ mod tests {
     fn all_open_answers_completely_and_still_states_the_permanent_boundaries() {
         let view = compile(&inputs(None, None));
         assert_eq!(view.situation, Situation::AllOpen);
-        assert!(view.headline.starts_with("No policy is applied."));
+        assert_eq!(
+            view.headline,
+            "No rules apply. Agents may work on ordinary websites, within the limits below."
+        );
         assert_eq!(view.capabilities.len(), 4);
         assert!(view
             .capabilities

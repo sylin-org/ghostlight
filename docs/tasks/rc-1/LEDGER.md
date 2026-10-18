@@ -20,7 +20,7 @@ gate, the in-place deploy and the owner-held items below.
 | b2-page-refusals-say-what-to-do | agent | landed: a hidden, disabled, read-only or non-text control is refused in plain words, says nothing was clicked or typed, and names one step that works (ADR-0198, amendment of 2026-10-18) |
 | c1-screen-readers-and-failures | window | landed (`fix(workbench): the window is calm for a screen reader, and a failure looks like one`): one status line says each settled action, at most one a second; failed and kept rows and the card say so in words; a destination that cannot be read says so in place, with Try again; both dialogs hold focus and give it back |
 | c2-one-legible-type-and-colour-system | window | landed (`fix(workbench): one legible type and colour system on every tab`): every word is at least --ink-4 (5.6:1) and about 11px; one eyebrow, one data tag and one page title; Policy's restrictions no longer collide with the kit's Settings grid; summaries, the agent pane's mascot and the About orbs fixed |
-| c3-one-vocabulary-and-plain-status | window | todo |
+| c3-one-vocabulary-and-plain-status | window | landed (`fix(workbench): the window, the tray and status say the same thing in plain words`): one count, the agents At a glance groups, on the band, the pill, Status, About, the tray and `status`; Pause agents and Resume agents everywhere; Status says Ghostlight, Browser, Rules and History in plain words; a pause outranks no browser, and a browser that starts on request reads Ready; Policy says the open case once and a setting alone applies; the Windows first-close notice names the hidden icons and the Start menu; Closing tabs names Preserve Ghostlight tabs (ADR-0199 and ADR-0187 amendments of 2026-10-18) |
 | c4-rows-and-widths | window | todo |
 | d1-native-frame-fits-the-person | native | landed (`feat(tray): the tooltip names the state and says when no browser is connected`, `feat(desktop): the frame and the tray fit a light-mode laptop`): the title bar is dark in light mode; a new window opens no taller than the primary monitor less 96 px (624 high on 1280x720), centered above the taskbar; the minimum width is 720; the Windows tray draws the 16 px ghost at 16 px and the 32 px one at 24 and 32, and Linux always draws the 32 px one for its host to size, inks it on a light taskbar (re-read every 2 s) and rings a 3 px dot in the taskbar's ground; the executable carries 16/32/48/128; the tooltip leads with the band's word and says "No browser connected" (ADR-0199 amendment of 2026-10-18). Owed: the light-mode 150% check under Before v2.0.0 |
 | f1-extension-popup-and-kit | extension | landed (`fix(extension): the popup tells Paused apart and reaches the window`) |
@@ -102,3 +102,24 @@ gate, the in-place deploy and the owner-held items below.
   chevron and turns to ink when open; `--sky` is gone from `ui/` and a test keeps it gone. The
   50px mascot is averaged rather than pixelated. The About orbs take their green and teal from
   classes, and a test finds no inline `style` anywhere in `ui/`.
+- c3 (j-08, window-1, window-2, j-29, j-07, j-15, window-5, window-6, j-18): `ConnectionCounts` gains
+  `agents`, one per agent id the way At a glance groups sessions, and `service_line` counts agents
+  and browsers: "Ghostlight is running; 3 agents and 1 browser connected." (and "Ghostlight is not
+  running."). The band facts, the pill, About ("Agents"), Status, the tray tooltip and `status` all
+  read it; `status --json` and `doctor --json` keep `mcp_clients` and `command_line` beside it. The
+  band's wheel, the tray and Settings say Pause agents and Resume agents. Status's kicker is "Is
+  Ghostlight working" and its checks are Ghostlight ("Running and accepting agents."), Browser
+  ("Ghostlight in Browser is connected in Google Chrome.", "Waiting for Ghostlight in Browser.", or
+  the browser that starts on request), Rules ("No rules apply." or "Your rules are valid.") and
+  History, all from `language/workbench.rs`. `readiness::resolve` ranks Session ended and Paused
+  first; with no browser it is Not connected only when none would start, and otherwise Ready with
+  "Starts Google Chrome when an agent asks." (the browser's own name, not always Chrome). Policy's
+  open headline is "No rules apply. Agents may work on ordinary websites, within the limits below.";
+  the first-rule-decides note shows only once a rule exists, and the refuses-everything warning only
+  after a draft's rules were all removed. A draft that starts with no rules carries the open rule
+  (`*`, all four capabilities) while it has none, says so once it changes, and a toggle alone
+  applies. The Status Rules check says "No rules apply." rather than the spec's "no policy applied",
+  so Status and Policy name the open case the same way. The service never learns the browser's
+  Preserve Ghostlight tabs value (the extension is frozen), so the line beside Closing tabs says how
+  it starts rather than claiming it is on, with a "Set in the browser" chip; the interlock refusal
+  now names Ghostlight in Browser settings. The desktop goldens are regenerated and read.

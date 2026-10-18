@@ -191,8 +191,8 @@
     motion: "Motion",
     followSystem: "Follow the system",
     reduced: "Reduced",
-    pause: "Pause",
-    resume: "Resume",
+    pause: "Pause agents",
+    resume: "Resume agents",
     startSession: "Start session",
     endSession: "End session",
     turnOn: "Turn on",
@@ -736,7 +736,13 @@
           key: "browser.tabs.allow_close",
           name: "Closing tabs",
           on: "Agents may close a tab they control.",
-          off: "Closing a tab stays something only you do."
+          off: "Closing a tab stays something only you do.",
+          // The browser's own setting, which keeps those tabs open whatever this one says. Its
+          // value lives in the browser, so the line says how it starts and where it is changed.
+          browser: Object.freeze({
+            word: "Preserve Ghostlight tabs keeps them open while it is on. It starts on.",
+            where: "Set in the browser"
+          })
         },
         {
           key: "browser.screenshots.enabled",
@@ -778,6 +784,26 @@
 
   /** Registered key for the never-touch destination list, which is a list rather than a switch. */
   const SACRED_KEY = "content.security.sacred_domains";
+
+  /**
+   * The rule that does what no rules do: agents may work on ordinary websites. A draft that starts
+   * with no rules carries it, so turning one setting off applies that alone and changes nothing
+   * else.
+   */
+  const OPEN_RULE = Object.freeze({
+    id: "ordinary-websites",
+    hosts: "*",
+    description: "Agents may work on ordinary websites."
+  });
+
+  /** What the editor says of a draft that will carry the open rule. */
+  const OPEN_RULE_NOTE = "Applying adds one rule that lets agents work on ordinary websites, as they do now.";
+
+  /** What the editor says of a draft whose rules were all removed. */
+  const NO_RULES_LEFT = "No rules left. A policy with none refuses everything, so add at least one.";
+
+  /** What the rule list says while there is no rule anywhere. The headline says what that means. */
+  const NO_RULES = "No rules yet.";
 
   /** Every setting item, in one flat list, for lookups that do not care about grouping. */
   const SETTING_ITEMS = SETTING_GROUPS.flatMap((group) => group.items);
@@ -1001,6 +1027,7 @@
     GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
+    OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES,
     validHostPattern, hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId });
 });

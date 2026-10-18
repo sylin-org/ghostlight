@@ -504,16 +504,27 @@ fn pause_and_resume_apply_while_no_browser_is_connected() {
         "the reachable authority must offer Pause without a browser"
     );
 
-    for (intent, state) in [
-        (WorkbenchRuntimeIntent::Hold, RuntimeControlState::Held),
-        (WorkbenchRuntimeIntent::Resume, RuntimeControlState::Active),
+    // A person's pause and ended session are what the band says first, browser or not.
+    for (intent, state, readiness) in [
+        (
+            WorkbenchRuntimeIntent::Hold,
+            RuntimeControlState::Held,
+            Readiness::Paused,
+        ),
+        (
+            WorkbenchRuntimeIntent::Resume,
+            RuntimeControlState::Active,
+            Readiness::NotConnected,
+        ),
         (
             WorkbenchRuntimeIntent::EndSession,
             RuntimeControlState::Ended,
+            Readiness::SessionEnded,
         ),
         (
             WorkbenchRuntimeIntent::StartSession,
             RuntimeControlState::Active,
+            Readiness::NotConnected,
         ),
     ] {
         let result = facade.apply_runtime_intent(intent);
@@ -531,7 +542,7 @@ fn pause_and_resume_apply_while_no_browser_is_connected() {
         );
         let snapshot = facade.snapshot();
         assert_eq!(snapshot.service.runtime_state, state);
-        assert_eq!(snapshot.readiness.state, Readiness::NotConnected);
+        assert_eq!(snapshot.readiness.state, readiness);
         assert!(snapshot.readiness.invites_control);
     }
 }
@@ -1331,11 +1342,12 @@ fn an_address_that_is_not_secure_never_reaches_the_computer() {
 }
 
 #[test]
-fn connections_are_counted_by_the_intake_that_admitted_each_and_browsers_by_adapter() {
+fn agents_are_counted_as_at_a_glance_groups_them_and_connections_by_intake() {
     use crate::intake::session::IntakeChannel;
     use crate::language::workbench::{service_line, ConnectionCounts};
 
     let workspaces = crate::workspace::WorkspaceStore::default();
+    workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
     workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
     workspaces.admit("Cursor".into(), IntakeChannel::Mcp);
     workspaces.admit("a script".into(), IntakeChannel::Cli);
@@ -1346,19 +1358,25 @@ fn connections_are_counted_by_the_intake_that_admitted_each_and_browsers_by_adap
         ControlledBrowser::new(true, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
+    // Two Claude Code sessions are one agent, the way At a glance groups them.
     let counts = ConnectionCounts {
-        mcp_clients: 2,
+        agents: 3,
+        mcp_clients: 3,
         command_line: 1,
         browsers: 1,
     };
     assert_eq!(facade.connection_counts(), counts);
-    assert_eq!(
-        facade.snapshot().controls.service.word,
-        service_line(Some(counts))
-    );
+    let snapshot = facade.snapshot();
+    assert_eq!(snapshot.controls.service.word, service_line(Some(counts)));
+    let grouped: std::collections::BTreeSet<&str> = snapshot
+        .sessions
+        .iter()
+        .map(|session| session.agent.id.as_str())
+        .collect();
+    assert_eq!(grouped.len(), counts.agents);
     assert_eq!(
         service_line(Some(counts)),
-        "Ghostlight service is up; 2 MCP clients, 1 command-line session and 1 browser connected."
+        "Ghostlight is running; 3 agents and 1 browser connected."
     );
 }
 
@@ -2050,6 +2068,105 @@ fn with_no_browser_the_glance_says_which_browser_a_request_starts_and_only_then(
             "{posture}"
         );
     }
+}
+
+#[test]
+fn a_browser_that_starts_on_request_leaves_the_band_ready_and_status_passing() {
+    use crate::browser::recovery::RecoveryCandidate;
+    use crate::install::browser_package::BrowserPackage;
+    use crate::install::native_host::NativeHostState;
+    use crate::language::readiness::Readiness;
+    use crate::language::workbench as words;
+
+    let chrome = RecoveryCandidate {
+        id: "chrome".into(),
+        name: "Google Chrome".into(),
+        package: BrowserPackage::Native,
+        package_detail: String::new(),
+        registration: NativeHostState::Current,
+        ordinary_executable: Some("/installed/chrome".into()),
+    };
+    for (posture, state, detail, severity, browser_line) in [
+        (
+            "on_demand",
+            Readiness::Ready,
+            "Starts Google Chrome when an agent asks.",
+            super::DiagnosticSeverity::Passing,
+            "Starts Google Chrome when an agent asks.",
+        ),
+        (
+            "manual",
+            Readiness::NotConnected,
+            Readiness::NotConnected.detail(),
+            super::DiagnosticSeverity::Warning,
+            words::STATUS_BROWSER_WAITING,
+        ),
+    ] {
+        let path = startup_policy(posture);
+        let facade = facade_over(
+            GovernanceFacade::new(Some(path.to_path_buf()), None),
+            ControlledBrowser::new(false, false),
+        )
+        .with_installed_browsers(vec![chrome.clone()]);
+        let snapshot = facade.snapshot();
+        assert_eq!(snapshot.readiness.state, state, "{posture}");
+        assert_eq!(snapshot.readiness.detail, detail, "{posture}");
+        let card = snapshot
+            .diagnostics
+            .iter()
+            .find(|item| item.id == "browser")
+            .expect("a browser check");
+        assert_eq!(card.label, words::STATUS_BROWSER_LABEL);
+        assert_eq!(
+            (card.severity, card.detail.as_str()),
+            (severity, browser_line),
+            "{posture}"
+        );
+    }
+}
+
+#[test]
+fn the_status_checks_say_ghostlight_browser_rules_and_history_in_plain_words() {
+    use crate::language::workbench as words;
+
+    let snapshot = facade_over(
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+    )
+    .snapshot();
+    let checks: Vec<(&str, &str)> = snapshot
+        .diagnostics
+        .iter()
+        .map(|item| (item.label.as_str(), item.detail.as_str()))
+        .collect();
+    assert_eq!(checks[0], ("Ghostlight", words::STATUS_SERVICE_RUNNING));
+    assert_eq!(checks[1].0, "Browser");
+    assert!(
+        checks[1]
+            .1
+            .starts_with("Ghostlight in Browser is connected in "),
+        "{}",
+        checks[1].1
+    );
+    assert_eq!(checks[2], ("Rules", "No rules apply."));
+    assert_eq!(checks[3], ("History", "History is saving."));
+}
+
+#[test]
+fn with_no_browser_and_no_installed_one_the_glance_says_no_browser() {
+    use crate::browser::recovery::RecoveryCandidate;
+    use crate::install::browser_package::BrowserPackage;
+    use crate::install::native_host::NativeHostState;
+    use crate::language::workbench as words;
+
+    let chrome = || RecoveryCandidate {
+        id: "chrome".into(),
+        name: "Google Chrome".into(),
+        package: BrowserPackage::Native,
+        package_detail: String::new(),
+        registration: NativeHostState::Current,
+        ordinary_executable: Some("/installed/chrome".into()),
+    };
 
     let path = startup_policy("on_demand");
     let facade = facade_over(

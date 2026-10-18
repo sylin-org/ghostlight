@@ -179,6 +179,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
         readiness: ReadinessSummary::resolve(&crate::language::readiness::ReadinessFacts {
             audit_required_unavailable: false,
             browser_connected: true,
+            starts: None,
             session_ended: false,
             paused: false,
             authority_invalid: false,
@@ -223,9 +224,9 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
         history: vec![item],
         diagnostics: vec![DiagnosticItem {
             id: "service".into(),
-            label: "Orchestrator".into(),
+            label: crate::language::workbench::STATUS_SERVICE_LABEL.into(),
             severity: DiagnosticSeverity::Passing,
-            detail: "Ghostlight is accepting local connections.".into(),
+            detail: crate::language::workbench::STATUS_SERVICE_RUNNING.into(),
         }],
         harnesses: vec![HarnessSummary {
             id: "cursor".into(),
@@ -296,6 +297,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
                 used_bytes: 4,
             },
             counts: ConnectionCounts {
+                agents: 1,
                 mcp_clients: 1,
                 command_line: 0,
                 browsers: 1,
@@ -1067,7 +1069,7 @@ fn settings_say_what_they_are_told_in_the_service_words() {
     assert_eq!(controls["diagnostics"]["word"], "On (marker)");
     assert_eq!(
         controls["service"]["word"],
-        "Ghostlight service is up; 1 MCP client and 1 browser connected."
+        "Ghostlight is running; 1 agent and 1 browser connected."
     );
 }
 

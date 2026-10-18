@@ -3,8 +3,10 @@
 //!
 //! The page asks the service what context it is in and renders what it is told. Every sentence a
 //! request can end in lives here, so the server routes and decides and never words anything
-//! itself (ADR-0199, amendment of 2026-10-15). It also holds the lines `status` and `doctor` print
-//! about the service, the workbench and anything an older installation left running.
+//! itself (ADR-0199, amendment of 2026-10-15). It also holds the checks the Status page shows, and
+//! the lines `status` and `doctor` print about the service, the workbench and anything an older
+//! installation left running. The window, the tray and `status` count one thing, the agents, the
+//! way At a glance groups them (ADR-0199, amendment of 2026-10-18).
 
 use serde::{Deserialize, Serialize};
 
@@ -97,11 +99,12 @@ pub const TOO_MANY_SCREENS: &str = "Too many screens are watching. Close one and
 /// The tray entry that brings the Ghostlight window forward.
 pub const TRAY_OPEN: &str = "Open Ghostlight";
 
-/// The tray entry that pauses the agents' browser work.
-pub const TRAY_HOLD: &str = "Pause browser work";
+/// The tray entry that pauses the agents' browser work: the words the band, Settings and the
+/// browser toolbar use.
+pub const TRAY_HOLD: &str = "Pause agents";
 
 /// The tray entry that lets the agents' browser work continue.
-pub const TRAY_RESUME: &str = "Resume browser work";
+pub const TRAY_RESUME: &str = "Resume agents";
 
 /// The tray entry that quits Ghostlight.
 pub const TRAY_QUIT: &str = "Quit Ghostlight";
@@ -110,8 +113,11 @@ pub const TRAY_QUIT: &str = "Quit Ghostlight";
 pub const TRAY_HINT_TITLE: &str = "Ghostlight is still running";
 
 /// The body of that notice: where the icon is and how to open the window again.
+///
+/// Windows 11 hides a new icon under the notification area's arrow, so the notice names that place
+/// and the Start menu too.
 #[cfg(windows)]
-pub const TRAY_HINT_BODY: &str = "Open it again from the Ghostlight icon in the notification area.";
+pub const TRAY_HINT_BODY: &str = "Open it again from the Ghostlight icon in the notification area (under ^ if it is hidden) or from the Start menu.";
 
 /// The body of that notice: where the icon is and how to open the window again.
 #[cfg(not(windows))]
@@ -304,9 +310,14 @@ pub fn no_browser(starts: Option<&str>) -> String {
     )
 }
 
-/// How many of each kind of connection the service has right now.
+/// What is connected to the service right now: the agents a person sees, and the connections
+/// diagnostics count.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ConnectionCounts {
+    /// Connected agents, one per agent At a glance shows: every session of one agent counts once.
+    /// A service that predates the count reports none.
+    #[serde(default)]
+    pub agents: usize,
     /// Connections whose channel is MCP, across every session.
     pub mcp_clients: usize,
     /// Connections whose channel is the command line, across every session.
@@ -315,23 +326,19 @@ pub struct ConnectionCounts {
     pub browsers: usize,
 }
 
-/// The one sentence the window, `status` and `doctor` say about the service.
+/// The one sentence the window's Status page, the tray, `status` and `doctor` say about the
+/// service.
 ///
-/// The service is zero or one, so this counts connections and never services. `None` means the
-/// service is not running.
+/// The service is zero or one, so this counts agents and browsers and never services. `None` means
+/// the service is not running.
 #[must_use]
 pub fn service_line(counts: Option<ConnectionCounts>) -> String {
     let Some(counts) = counts else {
-        return "Ghostlight service is not running.".to_owned();
+        return SERVICE_NOT_RUNNING.to_owned();
     };
     let mut parts = Vec::new();
     for (count, one, many) in [
-        (counts.mcp_clients, "MCP client", "MCP clients"),
-        (
-            counts.command_line,
-            "command-line session",
-            "command-line sessions",
-        ),
+        (counts.agents, "agent", "agents"),
         (counts.browsers, "browser", "browsers"),
     ] {
         match count {
@@ -340,32 +347,86 @@ pub fn service_line(counts: Option<ConnectionCounts>) -> String {
             _ => parts.push(format!("{count} {many}")),
         }
     }
-    let connected = match parts.split_last() {
-        None => return "Ghostlight service is up; nothing is connected yet.".to_owned(),
-        Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-    };
-    format!("Ghostlight service is up; {connected} connected.")
+    if parts.is_empty() {
+        return "Ghostlight is running; nothing is connected yet.".to_owned();
+    }
+    format!("Ghostlight is running; {} connected.", parts.join(" and "))
 }
 
 /// What the tray icon says on hover: the band's word for `readiness`, then [`service_line`] for
-/// `counts`, then [`NO_BROWSER`] when something is connected but no browser is.
+/// `counts`, then [`NO_BROWSER`] when an agent is connected but no browser is.
 #[must_use]
 pub fn tray_tooltip(readiness: Readiness, counts: ConnectionCounts) -> String {
     let line = service_line(Some(counts));
-    let others = counts.mcp_clients + counts.command_line;
-    if counts.browsers == 0 && others > 0 {
+    if counts.browsers == 0 && counts.agents > 0 {
         format!("{} -- {line} {NO_BROWSER}.", readiness.word())
     } else {
         format!("{} -- {line}", readiness.word())
     }
 }
 
+/// What `status` says when no service answers.
+const SERVICE_NOT_RUNNING: &str = "Ghostlight is not running.";
+
 /// What `status` says about a service that answered but did not report its connections.
-pub const SERVICE_UP: &str = "Ghostlight service is up.";
+pub const SERVICE_UP: &str = "Ghostlight is running.";
 
 /// What `status` adds to "not running" when nothing needs doing: the service starts by itself.
-pub const SERVICE_STARTS_ON_DEMAND: &str = "It starts when a browser or an MCP client connects.";
+pub const SERVICE_STARTS_ON_DEMAND: &str = "It starts when a browser or an agent connects.";
+
+/// The label of the Status check that says whether Ghostlight itself runs.
+pub const STATUS_SERVICE_LABEL: &str = "Ghostlight";
+
+/// What that check says while the service answers, which it does whenever the page has data.
+pub const STATUS_SERVICE_RUNNING: &str = "Running and accepting agents.";
+
+/// The label of the Status check that says whether a browser is connected.
+pub const STATUS_BROWSER_LABEL: &str = "Browser";
+
+/// What that check says while no browser is connected and Ghostlight would start none.
+pub const STATUS_BROWSER_WAITING: &str = "Waiting for Ghostlight in Browser.";
+
+/// What that check says while `browsers` (their names, one per connected browser) are connected.
+/// A name is said once however many of that browser are connected.
+#[must_use]
+pub fn status_browser_connected(browsers: &[&str]) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for name in browsers {
+        if !names.contains(name) {
+            names.push(name);
+        }
+    }
+    let joined = match names.split_last() {
+        None => return STATUS_BROWSER_WAITING.to_owned(),
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    };
+    format!("Ghostlight in Browser is connected in {joined}.")
+}
+
+/// The label of the Status check that says whether the rules hold.
+pub const STATUS_RULES_LABEL: &str = "Rules";
+
+/// What that check says while a policy that applies cannot be read, so every request is refused.
+pub const STATUS_RULES_INVALID: &str = "A policy that applies here is not valid, so Ghostlight refuses all browser work. A policy file still in schema 3 needs ghostlight policy migrate <file>.";
+
+/// What that check says while the latest edit of the person's own rules is not valid.
+pub const STATUS_RULES_EDIT_INVALID: &str =
+    "Your latest rules are not valid. The last valid version stays in force.";
+
+/// What that check says while every policy that applies is valid: whose rules apply, or that none
+/// do, the same open case the Policy page names.
+#[must_use]
+pub const fn status_rules_valid(own: bool, organization: bool) -> &'static str {
+    match (own, organization) {
+        (false, false) => "No rules apply.",
+        (true, _) => "Your rules are valid.",
+        (false, true) => "Your organization's rules are valid.",
+    }
+}
+
+/// The label of the Status check that says whether history is saving.
+pub const STATUS_HISTORY_LABEL: &str = "History";
 
 /// The line that says the service is not running, with how it starts when `idle_is_ready`.
 #[must_use]
@@ -530,7 +591,10 @@ mod tests {
         assert!(TRAY_HINT_BODY.is_ascii());
         assert!(TRAY_HINT_BODY.starts_with("Open it again from the Ghostlight icon in the "));
         if cfg!(windows) {
-            assert!(TRAY_HINT_BODY.ends_with("notification area."));
+            assert_eq!(
+                TRAY_HINT_BODY,
+                "Open it again from the Ghostlight icon in the notification area (under ^ if it is hidden) or from the Start menu."
+            );
         } else {
             assert!(TRAY_HINT_BODY.ends_with("system tray or from Applications."));
         }
@@ -579,6 +643,13 @@ mod tests {
             SETUP_BROWSER_NOT_STARTED,
             SERVICE_UP,
             SERVICE_STARTS_ON_DEMAND,
+            STATUS_SERVICE_RUNNING,
+            STATUS_BROWSER_WAITING,
+            STATUS_RULES_INVALID,
+            STATUS_RULES_EDIT_INVALID,
+            status_rules_valid(false, false),
+            status_rules_valid(true, false),
+            status_rules_valid(false, true),
         ] {
             assert!(sentence.is_ascii(), "{sentence}");
             assert!(sentence.ends_with('.'), "{sentence}");
@@ -596,16 +667,43 @@ mod tests {
             "3 sites are marked never-touch by policy."
         );
     }
-    fn counts(
-        mcp_clients: usize,
-        command_line: usize,
-        browsers: usize,
-    ) -> Option<ConnectionCounts> {
+    /// `agents` agents over as many MCP connections, and `browsers` browsers.
+    fn counts(agents: usize, browsers: usize) -> Option<ConnectionCounts> {
         Some(ConnectionCounts {
-            mcp_clients,
-            command_line,
+            agents,
+            mcp_clients: agents,
+            command_line: 0,
             browsers,
         })
+    }
+
+    #[test]
+    fn the_status_checks_speak_of_ghostlight_the_browser_rules_and_history() {
+        assert_eq!(
+            [
+                STATUS_SERVICE_LABEL,
+                STATUS_BROWSER_LABEL,
+                STATUS_RULES_LABEL,
+                STATUS_HISTORY_LABEL
+            ],
+            ["Ghostlight", "Browser", "Rules", "History"]
+        );
+        assert_eq!(
+            status_browser_connected(&["Google Chrome"]),
+            "Ghostlight in Browser is connected in Google Chrome."
+        );
+        assert_eq!(
+            status_browser_connected(&["Google Chrome", "Microsoft Edge", "Google Chrome"]),
+            "Ghostlight in Browser is connected in Google Chrome and Microsoft Edge."
+        );
+        assert_eq!(status_browser_connected(&[]), STATUS_BROWSER_WAITING);
+        assert_eq!(status_rules_valid(false, false), "No rules apply.");
+        assert_eq!(status_rules_valid(true, true), "Your rules are valid.");
+    }
+
+    #[test]
+    fn the_pause_entries_use_the_words_of_the_band_and_the_browser_toolbar() {
+        assert_eq!((TRAY_HOLD, TRAY_RESUME), ("Pause agents", "Resume agents"));
     }
 
     #[test]
@@ -629,11 +727,11 @@ mod tests {
     fn an_idle_service_says_how_it_starts() {
         assert_eq!(
             service_not_running_line(false),
-            "Ghostlight service is not running."
+            "Ghostlight is not running."
         );
         assert_eq!(
             service_not_running_line(true),
-            "Ghostlight service is not running. It starts when a browser or an MCP client connects."
+            "Ghostlight is not running. It starts when a browser or an agent connects."
         );
     }
 
@@ -655,75 +753,81 @@ mod tests {
 
     #[test]
     fn a_service_that_is_not_running_says_so() {
-        assert_eq!(service_line(None), "Ghostlight service is not running.");
+        assert_eq!(service_line(None), "Ghostlight is not running.");
     }
 
     #[test]
     fn a_service_with_nothing_connected_says_so() {
         assert_eq!(
-            service_line(counts(0, 0, 0)),
-            "Ghostlight service is up; nothing is connected yet."
+            service_line(counts(0, 0)),
+            "Ghostlight is running; nothing is connected yet."
         );
     }
 
     #[test]
-    fn one_connection_reads_in_the_singular() {
+    fn one_agent_reads_in_the_singular() {
         assert_eq!(
-            service_line(counts(1, 0, 0)),
-            "Ghostlight service is up; 1 MCP client connected."
+            service_line(counts(1, 0)),
+            "Ghostlight is running; 1 agent connected."
         );
     }
 
     #[test]
-    fn two_kinds_are_joined_with_and() {
+    fn agents_and_browsers_are_joined_with_and() {
         assert_eq!(
-            service_line(counts(2, 0, 2)),
-            "Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+            service_line(counts(3, 1)),
+            "Ghostlight is running; 3 agents and 1 browser connected."
         );
     }
 
     #[test]
-    fn three_kinds_are_listed_and_the_last_is_joined_with_and() {
+    fn the_line_counts_agents_never_their_connections() {
+        let one_agent_two_ways = ConnectionCounts {
+            agents: 1,
+            mcp_clients: 3,
+            command_line: 1,
+            browsers: 2,
+        };
         assert_eq!(
-            service_line(counts(1, 1, 1)),
-            "Ghostlight service is up; 1 MCP client, 1 command-line session and 1 browser connected."
+            service_line(Some(one_agent_two_ways)),
+            "Ghostlight is running; 1 agent and 2 browsers connected."
         );
     }
 
     #[test]
     fn a_kind_with_none_connected_is_left_out() {
         assert_eq!(
-            service_line(counts(0, 0, 3)),
-            "Ghostlight service is up; 3 browsers connected."
+            service_line(counts(0, 3)),
+            "Ghostlight is running; 3 browsers connected."
         );
         assert_eq!(
-            service_line(counts(0, 2, 0)),
-            "Ghostlight service is up; 2 command-line sessions connected."
+            service_line(counts(2, 0)),
+            "Ghostlight is running; 2 agents connected."
         );
     }
 
     #[test]
     fn the_tray_tooltip_names_the_state_in_the_bands_word() {
-        let both = counts(2, 0, 2).unwrap();
+        let both = counts(2, 2).unwrap();
         assert_eq!(
             tray_tooltip(Readiness::Ready, both),
-            "Ready -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+            "Ready -- Ghostlight is running; 2 agents and 2 browsers connected."
         );
         assert_eq!(
             tray_tooltip(Readiness::Paused, both),
-            "Paused -- Ghostlight service is up; 2 MCP clients and 2 browsers connected."
+            "Paused -- Ghostlight is running; 2 agents and 2 browsers connected."
         );
     }
 
     #[test]
     fn the_tray_tooltip_says_when_no_browser_is_connected() {
         assert_eq!(
-            tray_tooltip(Readiness::NotConnected, counts(1, 0, 0).unwrap()),
-            "Not connected -- Ghostlight service is up; 1 MCP client connected. No browser connected."
+            tray_tooltip(Readiness::NotConnected, counts(1, 0).unwrap()),
+            "Not connected -- Ghostlight is running; 1 agent connected. No browser connected."
         );
         assert_eq!(
-            tray_tooltip(Readiness::Ready, counts(0, 0, 0).unwrap()),
-            "Ready -- Ghostlight service is up; nothing is connected yet."
+            tray_tooltip(Readiness::Ready, counts(0, 0).unwrap()),
+            "Ready -- Ghostlight is running; nothing is connected yet."
         );
     }
 }

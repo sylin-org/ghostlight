@@ -829,6 +829,7 @@ impl WorkbenchFacade {
             sessions,
             browsers,
             no_browser,
+            starts,
             authority,
             audit_health,
             audit_required,
@@ -836,20 +837,30 @@ impl WorkbenchFacade {
         } = gathered;
         let mut diagnostics = vec![DiagnosticItem::passing(
             "service",
-            "Orchestrator",
-            "Ghostlight is accepting local connections.",
+            words::STATUS_SERVICE_LABEL,
+            words::STATUS_SERVICE_RUNNING,
         )];
-        diagnostics.push(if browsers.is_empty() {
-            DiagnosticItem::warning(
-                "browser",
-                "Browser adapter",
-                "Waiting for Ghostlight in Browser to connect.",
-            )
-        } else {
+        diagnostics.push(if !browsers.is_empty() {
+            let names: Vec<&str> = browsers
+                .iter()
+                .map(|browser| browser.family.as_str())
+                .collect();
             DiagnosticItem::passing(
                 "browser",
-                "Browser adapter",
-                "A compatible browser adapter is connected.",
+                words::STATUS_BROWSER_LABEL,
+                &words::status_browser_connected(&names),
+            )
+        } else if let Some(browser) = &starts {
+            DiagnosticItem::passing(
+                "browser",
+                words::STATUS_BROWSER_LABEL,
+                &readiness::starts_when_asked(browser),
+            )
+        } else {
+            DiagnosticItem::warning(
+                "browser",
+                words::STATUS_BROWSER_LABEL,
+                words::STATUS_BROWSER_WAITING,
             )
         });
         // The same validity governance enforces, so this card, the header, and the Policy tab
@@ -857,26 +868,37 @@ impl WorkbenchFacade {
         diagnostics.push(if !authority.authority_valid {
             DiagnosticItem::failing(
                 "authority",
-                "Authority",
-                "A configured authority source is invalid; work fails closed. A policy file still in schema 3 needs ghostlight policy migrate <file>.",
+                words::STATUS_RULES_LABEL,
+                words::STATUS_RULES_INVALID,
             )
         } else if !authority.local_policy_valid {
             DiagnosticItem::warning(
                 "authority",
-                "Authority",
-                "The latest local policy edit is not valid. Its last valid version stays in force.",
+                words::STATUS_RULES_LABEL,
+                words::STATUS_RULES_EDIT_INVALID,
             )
         } else {
             DiagnosticItem::passing(
                 "authority",
-                "Authority",
-                "Configured authority sources are valid.",
+                words::STATUS_RULES_LABEL,
+                words::status_rules_valid(
+                    authority.local_policy_active,
+                    authority.managed_authority_active,
+                ),
             )
         });
         diagnostics.push(if audit_health.quiet() {
-            DiagnosticItem::passing("audit", "History", &audit_health.detail(audit_required))
+            DiagnosticItem::passing(
+                "audit",
+                words::STATUS_HISTORY_LABEL,
+                &audit_health.detail(audit_required),
+            )
         } else {
-            DiagnosticItem::warning("audit", "History", &audit_health.detail(audit_required))
+            DiagnosticItem::warning(
+                "audit",
+                words::STATUS_HISTORY_LABEL,
+                &audit_health.detail(audit_required),
+            )
         });
         let history = self.projection.history();
         WorkbenchSnapshot {
@@ -1711,12 +1733,12 @@ pub struct ReadinessSummary {
 impl ReadinessSummary {
     /// Resolve the answer and carry its words.
     #[must_use]
-    pub fn resolve(facts: &readiness::ReadinessFacts) -> Self {
+    pub fn resolve(facts: &readiness::ReadinessFacts<'_>) -> Self {
         let state = readiness::resolve(facts);
         Self {
             state,
             word: state.word().to_owned(),
-            detail: state.detail().to_owned(),
+            detail: readiness::explain(state, facts),
             tone: state.tone().to_owned(),
             invites_control: state.invites_control(),
         }

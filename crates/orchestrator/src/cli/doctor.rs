@@ -345,6 +345,7 @@ mod tests {
                     pid: 42,
                     started_by: ghostlight_relay::protocol::StartReason::Agent,
                     connections: Some(crate::language::workbench::ConnectionCounts {
+                        agents: 1,
                         mcp_clients: 1,
                         command_line: 0,
                         browsers: 1,
@@ -442,7 +443,7 @@ mod tests {
         assert_eq!(document["service"]["running"], true);
         assert_eq!(
             document["service"]["connections"],
-            serde_json::json!({"mcp_clients": 1, "command_line": 0, "browsers": 1})
+            serde_json::json!({"agents": 1, "mcp_clients": 1, "command_line": 0, "browsers": 1})
         );
         assert_eq!(
             document["service"]["workbench"],

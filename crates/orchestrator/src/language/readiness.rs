@@ -3,11 +3,12 @@
 //! Two surfaces ask this question: the workbench, which shows it as its front door, and `doctor`,
 //! which prints it in a terminal. Both read this one answer, so they share one vocabulary.
 //!
-//! The states are ordered by what a person needs to hear first. Being disconnected outranks being
-//! paused, because a paused product that cannot reach a browser has a bigger problem than the
-//! pause. An invalid policy comes after a human pause: the control beside the word cannot fix it,
-//! and it refuses everything, so it outranks missing history, which refuses only what policy says
-//! must be recorded.
+//! The states are ordered by what a person needs to hear first. A person's own pause or ended
+//! session comes first: it is what they did, and the control beside the word undoes it. No browser
+//! comes next, but only when Ghostlight cannot start one itself; a browser an agent's request
+//! starts is nothing to report, so that answer is Ready and says which browser starts. An invalid
+//! policy comes after: the control beside the word cannot fix it, and it refuses everything, so it
+//! outranks missing history, which refuses only what policy says must be recorded.
 //!
 //! Pause and Resume are the authority's own state, not something a browser holds, so the front door
 //! offers them whenever this authority answers, with or without a connected browser.
@@ -18,12 +19,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Readiness {
-    /// No browser is connected, so no browser work can happen.
-    NotConnected,
     /// A person ended the session. Terminal until a new one starts.
     SessionEnded,
     /// A person paused browser work.
     Paused,
+    /// No browser is connected and Ghostlight would start none, so no browser work can happen.
+    NotConnected,
     /// A configured policy is not valid, so governance refuses every governed request.
     PolicyInvalid,
     /// Policy requires saving history and the destination is currently unavailable.
@@ -37,9 +38,9 @@ pub enum Readiness {
 impl Readiness {
     /// Every state, in precedence order. Exhaustiveness guards iterate this.
     pub const ALL: &'static [Readiness] = &[
-        Readiness::NotConnected,
         Readiness::SessionEnded,
         Readiness::Paused,
+        Readiness::NotConnected,
         Readiness::PolicyInvalid,
         Readiness::HistoryUnavailable,
         Readiness::Working,
@@ -61,6 +62,9 @@ impl Readiness {
     }
 
     /// One sentence explaining the word, and where it is true, what to do about it.
+    ///
+    /// A Ready with no browser connected says which browser starts instead; [`explain`] gives the
+    /// sentence for a resolved answer.
     #[must_use]
     pub const fn detail(self) -> &'static str {
         match self {
@@ -103,11 +107,14 @@ impl Readiness {
 
 /// The content-free facts the answer is derived from.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ReadinessFacts {
+pub struct ReadinessFacts<'a> {
     /// Strict audit policy currently prevents browser dispatch.
     pub audit_required_unavailable: bool,
     /// Whether at least one browser adapter is connected.
     pub browser_connected: bool,
+    /// While no browser is connected, the name of the browser an agent's request would start, when
+    /// Ghostlight would start one.
+    pub starts: Option<&'a str>,
     /// Whether a person ended the session.
     pub session_ended: bool,
     /// Whether a person paused browser work.
@@ -120,15 +127,15 @@ pub struct ReadinessFacts {
 
 /// Resolve the one answer.
 #[must_use]
-pub const fn resolve(facts: &ReadinessFacts) -> Readiness {
-    if !facts.browser_connected {
-        return Readiness::NotConnected;
-    }
+pub const fn resolve(facts: &ReadinessFacts<'_>) -> Readiness {
     if facts.session_ended {
         return Readiness::SessionEnded;
     }
     if facts.paused {
         return Readiness::Paused;
+    }
+    if !facts.browser_connected && facts.starts.is_none() {
+        return Readiness::NotConnected;
     }
     if facts.authority_invalid {
         return Readiness::PolicyInvalid;
@@ -142,11 +149,27 @@ pub const fn resolve(facts: &ReadinessFacts) -> Readiness {
     Readiness::Ready
 }
 
+/// The sentence for `state`, the answer `facts` resolved to: its [`Readiness::detail`], except
+/// that a Ready with no browser connected names the browser an agent's request starts.
+#[must_use]
+pub fn explain(state: Readiness, facts: &ReadinessFacts<'_>) -> String {
+    match (state, facts.browser_connected, facts.starts) {
+        (Readiness::Ready, false, Some(browser)) => starts_when_asked(browser),
+        _ => state.detail().to_owned(),
+    }
+}
+
+/// What a Ready says while no browser is connected and `browser` starts on an agent's request.
+#[must_use]
+pub fn starts_when_asked(browser: &str) -> String {
+    format!("Starts {browser} when an agent asks.")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn connected() -> ReadinessFacts {
+    fn connected() -> ReadinessFacts<'static> {
         ReadinessFacts {
             browser_connected: true,
             ..ReadinessFacts::default()
@@ -165,16 +188,71 @@ mod tests {
     }
 
     #[test]
-    fn disconnection_outranks_every_other_answer() {
+    fn a_pause_or_an_ended_session_outranks_having_no_browser() {
+        for (facts, expected) in [
+            (
+                ReadinessFacts {
+                    paused: true,
+                    ..ReadinessFacts::default()
+                },
+                Readiness::Paused,
+            ),
+            (
+                ReadinessFacts {
+                    session_ended: true,
+                    paused: true,
+                    ..ReadinessFacts::default()
+                },
+                Readiness::SessionEnded,
+            ),
+        ] {
+            assert_eq!(resolve(&facts), expected);
+        }
+    }
+
+    #[test]
+    fn no_browser_that_ghostlight_cannot_start_outranks_policy_history_and_work() {
         let facts = ReadinessFacts {
-            audit_required_unavailable: false,
-            browser_connected: false,
-            session_ended: true,
-            paused: true,
+            audit_required_unavailable: true,
             authority_invalid: true,
             working: true,
+            ..ReadinessFacts::default()
         };
         assert_eq!(resolve(&facts), Readiness::NotConnected);
+        assert_eq!(
+            explain(Readiness::NotConnected, &facts),
+            Readiness::NotConnected.detail()
+        );
+    }
+
+    #[test]
+    fn a_browser_that_starts_on_request_reads_as_ready_and_names_the_browser() {
+        let facts = ReadinessFacts {
+            starts: Some("Google Chrome"),
+            ..ReadinessFacts::default()
+        };
+        let state = resolve(&facts);
+        assert_eq!(state, Readiness::Ready);
+        assert_eq!(state.tone(), "quiet");
+        assert_eq!(
+            explain(state, &facts),
+            "Starts Google Chrome when an agent asks."
+        );
+        // A connected browser needs no such sentence, whatever would start.
+        let connected = ReadinessFacts {
+            browser_connected: true,
+            ..facts
+        };
+        assert_eq!(
+            explain(resolve(&connected), &connected),
+            Readiness::Ready.detail()
+        );
+        // An invalid policy still outranks a browser that would start.
+        let invalid = ReadinessFacts {
+            authority_invalid: true,
+            ..facts
+        };
+        assert_eq!(resolve(&invalid), Readiness::PolicyInvalid);
     }
 
     #[test]
