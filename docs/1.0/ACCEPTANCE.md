@@ -38,7 +38,8 @@ process, package, launcher, install, upgrade, and uninstall gate runs against th
    cut off with the service's own words, and the next request resumes the session by token.
    The browser edge exits when a service accepts again, and the extension reconnects with a fresh
    hello. Lines held while the service was away are delivered once, and a cut-off call is answered,
-   never resent (`tests/process-journey.mjs`; the rules are in `crates/edge/src/hold.rs` and
+   never resent; a cut-off handshake or catalog listing, which changes nothing, is sent to the
+   next service once (`tests/process-journey.mjs`; the rules are in `crates/edge/src/hold.rs` and
    `forward.rs`).
 11. The browser engine suppresses duplicate operation ids, retains a content-free disposition
      across service-worker suspension, and reports uncertainty rather than repeating an effect when

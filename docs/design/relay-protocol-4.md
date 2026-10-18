@@ -102,7 +102,11 @@ stream needs no new relay revision.
 | `goodbye` | service to edge | `reason`: a goodbye reason (section 6). |
 
 The edge parses no MCP. It forwards lines, answers outstanding requests from the failure templates
-when the service goes away, and holds new lines for a bounded time while it starts the service.
+when the service goes away, and holds new lines for a bounded time while it starts the service. A
+line whose write failed is held, since it never reached the service. A lone `initialize`,
+`tools/list`, `prompts/list`, `resources/list` or `resources/templates/list` cut off by a lost
+service or a `replace` goodbye changes nothing, so it is held and sent to the next service once
+instead of being answered (ADR-0197 amendment of 2026-10-17).
 
 **`browser`.** The stream carries the adapter protocol untouched in both directions. The edge
 holds the extension's first frame, opens the stream, sends that frame and then pumps bytes. When
@@ -155,13 +159,13 @@ What each peer does:
 | Reason | MCP edge | Browser edge | Shell |
 |---|---|---|---|
 | `quit` | Answers every outstanding request from the `cut_off` template and holds nothing. The next request starts the service again, as an `agent` start. | Tells the extension the service is away, waits, never starts the service, and exits when a service accepts again. | Exits. |
-| `replace` | Answers outstanding requests as cut off, then holds lines and reconnects without starting the service for up to the hold limit. After that it behaves as after a lost connection. | As for `quit`: it exits when a service accepts again, so the extension reconnects with a fresh hello. | Shows Updating. |
+| `replace` | Answers outstanding requests as cut off, except the handshake and listings it sends again, then holds lines and reconnects without starting the service for up to the hold limit. After that it behaves as after a lost connection. | As for `quit`: it exits when a service accepts again, so the extension reconnects with a fresh hello. | Shows Updating. |
 | `uninstall` | Answers outstanding requests as cut off, then exits. | Exits at once. | Exits. |
 | `session_end` | Exits. | Exits. | Exits. |
 
 The service sends the goodbye after in-flight work has finished and before it closes the streams.
-A stream that ends without a goodbye is a crash: MCP edges answer cut-off requests from the templates and resume by
-token; browser edges exit on the next accepted opening.
+A stream that ends without a goodbye is a crash: MCP edges answer cut-off requests from the templates, send the
+handshake and listings again, and resume by token; browser edges exit on the next accepted opening.
 
 ## 7. Start reasons
 

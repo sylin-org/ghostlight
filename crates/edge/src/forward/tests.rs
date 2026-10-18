@@ -549,7 +549,7 @@ fn an_expired_request_is_answered_with_its_methods_template_or_the_default() {
 fn a_cut_off_request_is_answered_with_the_cut_off_template() {
     let harness = Harness::connected(true);
     harness.send(&request(&json!(1), "tools/call"));
-    harness.send(&request(&json!(2), "resources/list"));
+    harness.send(&request(&json!(2), "completion/complete"));
     harness.wait(|| harness.fake.received(0).len() == 2);
     harness.fake.go_down();
     assert_eq!(
@@ -575,6 +575,95 @@ fn nothing_written_to_a_service_is_sent_again() {
     assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/call")]);
     assert_eq!(harness.fake.received(0).len(), 2);
     assert!(harness.answer(&json!(1))["result"]["isError"] == json!(true));
+}
+
+#[test]
+fn a_listing_cut_off_by_a_lost_service_is_sent_again_to_the_next_one() {
+    let harness = Harness::connected(true);
+    harness.send(&request(&json!(1), "tools/call"));
+    harness.send(&request(&json!(2), "tools/list"));
+    harness.wait(|| harness.fake.received(0).len() == 2);
+    harness.fake.go_down();
+    assert_eq!(harness.answer(&json!(1))["result"]["isError"], json!(true));
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
+    assert_eq!(harness.fake.received(1), [request(&json!(2), "tools/list")]);
+    harness.settle();
+    assert!(
+        !harness.values().iter().any(|value| value["id"] == json!(2)),
+        "the next service answers the listing, not the edge"
+    );
+}
+
+#[test]
+fn a_listing_is_sent_again_once_and_then_answered_as_cut_off() {
+    let harness = Harness::connected(true);
+    harness.send(&request(&json!(1), "initialize"));
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    harness.fake.go_down();
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    harness.advance_until(BACKOFF_FIRST, || harness.fake.received(1).len() == 1);
+    harness.fake.go_down();
+    assert_eq!(
+        harness.answer(&json!(1))["error"]["code"],
+        json!(-32603),
+        "a request that brings each service down is not sent a third time"
+    );
+    harness.settle();
+    assert_eq!(
+        harness.fake.starts.load(Ordering::SeqCst),
+        1,
+        "nothing is held"
+    );
+}
+
+#[test]
+fn after_a_quit_goodbye_a_listing_is_answered_and_nothing_starts() {
+    let harness = Harness::connected(true);
+    harness.send(&request(&json!(1), "tools/list"));
+    harness.wait(|| harness.fake.received(0).len() == 1);
+    say_goodbye(&harness, GoodbyeReason::Quit);
+    assert_eq!(harness.answer(&json!(1))["error"]["code"], json!(-32603));
+    harness.advance(Duration::from_secs(60));
+    harness.settle();
+    assert_eq!(harness.fake.starts.load(Ordering::SeqCst), 0, "Quit holds");
+}
+
+#[test]
+fn a_line_whose_write_failed_is_held_and_delivered_in_order_to_the_next_service() {
+    let harness = Harness::connected(true);
+    harness.go_away(0);
+    harness.fake.drop_next.store(true, Ordering::SeqCst);
+    let large = json!({
+        "jsonrpc": "2.0",
+        "id": "large",
+        "method": "tools/call",
+        "params": {"padding": "x".repeat(2 * 1024 * 1024)},
+    })
+    .to_string();
+    harness.send(&large);
+    let small: Vec<String> = (0..4).map(|n| request(&json!(n), "tools/call")).collect();
+    for line in &small {
+        harness.send(line);
+    }
+    harness.settle();
+    harness.wait(|| harness.fake.starts.load(Ordering::SeqCst) == 1);
+    let expected: Vec<String> = std::iter::once(large).chain(small).collect();
+    harness.advance_until(BACKOFF_FIRST, || {
+        harness.fake.received(2).len() == expected.len()
+    });
+    assert_eq!(
+        harness.fake.received(2),
+        expected,
+        "nothing lost, nothing reordered"
+    );
+    assert!(
+        !harness
+            .values()
+            .iter()
+            .any(|value| value["id"] == json!("large") || value["id"].is_number()),
+        "a line that never reached a service is delivered, not answered"
+    );
 }
 
 #[test]

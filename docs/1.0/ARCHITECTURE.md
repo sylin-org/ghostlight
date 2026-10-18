@@ -183,7 +183,8 @@ latch was set while it waited for the lock; any other start deletes it after tak
 serves. So after Quit a browser restart does not bring
 Ghostlight back; the next agent request, a command that needs it, or a person does. Before it
 closes its streams the service sends a goodbye on each: `quit`, `replace` (the installer's quit)
-or `uninstall`. The MCP relay answers its outstanding requests as cut off on every goodbye.
+or `uninstall`. The MCP relay answers its outstanding requests as cut off on every goodbye,
+except that after `replace` it sends a cut-off handshake or catalog listing to the next service.
 After `quit` it holds nothing and starts the service again only for the next request. After
 `replace` it holds lines and reconnects without starting the service for up to the hold limit,
 and then behaves as after a lost connection. After `uninstall` it exits. The browser relay
@@ -320,7 +321,9 @@ and the extension.
 The MCP edge passes JSON-RPC lines between the client and the service unchanged
 (`crates/edge/src/forward.rs`: the edge authors no words). It looks inside a line only to track
 outstanding request ids per direction, to answer `ping`, and to answer outstanding requests with
-the failure templates the service handed over when the service is cut off. The MCP session engine
+the failure templates the service handed over when the service is cut off. A lone handshake or
+catalog listing cut off by a lost service is sent to the next service once instead, and a line
+whose write failed is held, because neither can have taken effect. The MCP session engine
 lives in the service (`intake/mcp.rs`): it negotiates the revision, serves `tools/list` and
 `tools/call`, and renders each result as the lean model view in `structuredContent`, with the
 authored summary and safe next steps in the ordinary text block; a session on an MCP revision

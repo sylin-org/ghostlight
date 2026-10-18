@@ -8,6 +8,14 @@
 //! handed over in its last accepted reply; the edge authors no words, and before any reply
 //! it answers the bare internal error.
 //!
+//! Two kinds of request are held for the next service instead of being answered as cut off
+//! (ADR-0197 amendment of 2026-10-17). A line whose write failed never reached the service, since a
+//! service acts only on a whole frame, so it is held like any line sent while the service was
+//! away. And a lone handshake or catalog listing ([`rpc::SENT_AGAIN`]) changes nothing, so when a
+//! lost connection or a `replace` goodbye cuts it off it is sent again to the next service, and
+//! the agent gets its answer instead of an error. Every other cut-off request may have taken
+//! effect and is answered, never sent again.
+//!
 //! A client response reaches the service only when it answers a request the live connection made.
 //! A lone response that answers nothing outstanding is dropped, and a batch loses such elements
 //! and is sent without them, or not at all when nothing is left. So a late answer to a service
@@ -64,6 +72,15 @@ mod rpc {
     pub const RESULT: &str = "result";
     /// The method the edge answers itself.
     pub const PING: &str = "ping";
+    /// The requests that change nothing: the handshake and the catalog listings. Cut off by a
+    /// lost service, a lone one is sent again to the next service rather than answered.
+    pub const SENT_AGAIN: [&str; 5] = [
+        "initialize",
+        "tools/list",
+        "prompts/list",
+        "resources/list",
+        "resources/templates/list",
+    ];
 }
 
 /// Why this edge starts the service: an agent needs it.
@@ -176,6 +193,26 @@ enum Flow {
     Exit,
 }
 
+/// What a dropped connection does with its outstanding handshakes and listings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Again {
+    /// Hold them once for the next service: the service was lost or is being replaced.
+    Listings,
+    /// Answer them as cut off like every other request: the service said it is not coming back
+    /// on its own (`quit`, `uninstall`, `session_end`).
+    Nothing,
+}
+
+/// Whether `held` is a lone request the edge may send again after a lost service: a handshake
+/// or a catalog listing, which changes nothing. A batch is never sent again, because its other
+/// elements may.
+fn sent_again(held: &HeldLine) -> bool {
+    let [request] = held.requests.as_slice() else {
+        return false;
+    };
+    held.line.trim_start().starts_with('{') && rpc::SENT_AGAIN.contains(&request.method.as_str())
+}
+
 /// The state of one forwarded session.
 struct Forwarder<W: Write> {
     environment: Environment,
@@ -203,6 +240,9 @@ struct Forwarder<W: Write> {
     hold: Hold,
     /// Client requests delivered to the service and not yet answered, by id key.
     client_requests: BTreeMap<String, Request>,
+    /// The delivered lines among those that are a lone request the edge may send again
+    /// ([`rpc::SENT_AGAIN`]), oldest first.
+    again: Vec<HeldLine>,
     /// Requests the live connection wrote to the client and that are not yet answered, by id
     /// key. Only answers to these reach the service.
     service_requests: BTreeMap<String, Request>,
@@ -227,6 +267,7 @@ impl<W: Write> Forwarder<W> {
             templates: None,
             hold: Hold::default(),
             client_requests: BTreeMap::new(),
+            again: Vec::new(),
             service_requests: BTreeMap::new(),
         }
     }
@@ -295,7 +336,7 @@ impl<W: Write> Forwarder<W> {
             Event::Gone(generation) => {
                 if self.is_current(generation) {
                     (self.environment.log)(LogEvent::ServiceDisconnected, "");
-                    self.disconnect()?;
+                    self.disconnect(Again::Listings, None)?;
                 }
             }
             Event::ParentGone => {
@@ -383,7 +424,7 @@ impl<W: Write> Forwarder<W> {
             let Some(held) = self.hold.pop() else {
                 break;
             };
-            self.deliver(held.line, held.requests, &[])?;
+            self.deliver(held, &[])?;
         }
         Ok(())
     }
@@ -418,37 +459,39 @@ impl<W: Write> Forwarder<W> {
                 None => return Ok(()),
             }
         };
-        if self.link.is_some() {
-            return self.deliver(line, inspection.requests, &answered);
-        }
         let held = HeldLine {
             line,
             requests: inspection.requests,
             held_at: self.environment.clock.now(),
+            sent_again: false,
         };
+        if self.link.is_some() {
+            return self.deliver(held, &answered);
+        }
         match self.hold.push(held) {
             Ok(()) => Ok(()),
             Err(refused) => self.answer(&refused.requests, Failure::Expired),
         }
     }
 
-    /// Write one client line to the live connection, once.
+    /// Write one client line to the live connection, once. `responses` are the keys of the
+    /// line's answers to requests this connection made.
     ///
-    /// Its requests become outstanding before the write, so a write that fails leaves them to be
-    /// answered as cut off rather than sent again. A line too large to frame never reaches the
-    /// service and its requests are answered as expired.
-    fn deliver(
-        &mut self,
-        line: String,
-        requests: Vec<Request>,
-        responses: &[String],
-    ) -> io::Result<()> {
-        let payload = serde_json::to_vec(&McpFrame::Message { line }).map_err(io::Error::other)?;
+    /// Its requests become outstanding before the write. A write that fails delivered nothing,
+    /// because the service acts only on a whole frame, so the line goes back to the hold without
+    /// its answers to this connection, and the connection is dropped. A line too large to frame
+    /// never reaches the service and its requests are answered as expired.
+    fn deliver(&mut self, held: HeldLine, responses: &[String]) -> io::Result<()> {
+        let payload = serde_json::to_vec(&McpFrame::Message {
+            line: held.line.clone(),
+        })
+        .map_err(io::Error::other)?;
         if payload.len() > MAX_FRAME_BYTES {
-            return self.answer(&requests, Failure::Expired);
+            return self.answer(&held.requests, Failure::Expired);
         }
-        for request in requests {
-            self.client_requests.insert(request.key.clone(), request);
+        for request in &held.requests {
+            self.client_requests
+                .insert(request.key.clone(), request.clone());
         }
         for key in responses {
             self.service_requests.remove(key);
@@ -458,7 +501,18 @@ impl<W: Write> Forwarder<W> {
         };
         if let Err(error) = frame::write_frame_raw(link, &payload) {
             (self.environment.log)(LogEvent::ServiceDisconnected, &error.to_string());
-            self.disconnect()?;
+            for request in &held.requests {
+                self.client_requests.remove(&request.key);
+            }
+            let undelivered = if responses.is_empty() {
+                Some(held)
+            } else {
+                without_responses(&held.line, responses).map(|line| HeldLine { line, ..held })
+            };
+            return self.disconnect(Again::Listings, undelivered);
+        }
+        if !held.sent_again && sent_again(&held) {
+            self.again.push(held);
         }
         Ok(())
     }
@@ -475,6 +529,11 @@ impl<W: Write> Forwarder<W> {
                 for key in &inspection.responses {
                     self.client_requests.remove(key);
                 }
+                self.again.retain(|held| {
+                    held.requests
+                        .iter()
+                        .all(|request| !inspection.responses.contains(&request.key))
+                });
                 self.write_line(line.as_bytes())?;
             }
             McpFrame::Resume { token } => self.resume = Some(token),
@@ -491,7 +550,11 @@ impl<W: Write> Forwarder<W> {
     /// the next service for [`HOLD_LIMIT`]. `uninstall` and `session_end` end the edge.
     fn goodbye(&mut self, reason: GoodbyeReason) -> io::Result<Flow> {
         (self.environment.log)(LogEvent::ServiceDisconnected, reason.as_str());
-        self.disconnect()?;
+        let again = match reason {
+            GoodbyeReason::Replace => Again::Listings,
+            _ => Again::Nothing,
+        };
+        self.disconnect(again, None)?;
         match reason {
             GoodbyeReason::Replace => {
                 self.replacing_until = Some(self.environment.clock.now() + HOLD_LIMIT);
@@ -502,21 +565,45 @@ impl<W: Write> Forwarder<W> {
         }
     }
 
-    /// Drop the connection, answer every outstanding client request as cut off, and let the next
-    /// attempt run as soon as a held request wants one.
+    /// Drop the connection and settle what it left outstanding, then let the next attempt run as
+    /// soon as a held request wants one.
+    ///
+    /// With [`Again::Listings`], each outstanding lone handshake or listing goes back to the hold
+    /// once, ahead of `undelivered` (a line whose write failed), which goes ahead of every line
+    /// already held. Every other outstanding client request is answered as cut off. A line the
+    /// hold cannot take back is answered at once: as cut off when it was sent, as expired when
+    /// it never was.
     ///
     /// Requests the service made of the client are forgotten, so the client's late answers to them
     /// are dropped rather than sent to whichever service comes next.
-    fn disconnect(&mut self) -> io::Result<()> {
+    fn disconnect(&mut self, again: Again, undelivered: Option<HeldLine>) -> io::Result<()> {
         if let Some(link) = self.link.take() {
             link.shutdown();
         }
-        self.next_attempt = self.environment.clock.now();
+        let now = self.environment.clock.now();
+        self.next_attempt = now;
         self.service_requests.clear();
-        let cut_off: Vec<Request> = std::mem::take(&mut self.client_requests)
-            .into_values()
-            .collect();
-        self.answer(&cut_off, Failure::CutOff)
+        let mut outstanding = std::mem::take(&mut self.client_requests);
+        let mut resend = std::mem::take(&mut self.again);
+        if again == Again::Nothing {
+            resend.clear();
+        }
+        for held in &mut resend {
+            held.held_at = now;
+            held.sent_again = true;
+            for request in &held.requests {
+                outstanding.remove(&request.key);
+            }
+        }
+        let cut_off: Vec<Request> = outstanding.into_values().collect();
+        self.answer(&cut_off, Failure::CutOff)?;
+        for refused in self.hold.put_back(undelivered.into_iter().collect()) {
+            self.answer(&refused.requests, Failure::Expired)?;
+        }
+        for refused in self.hold.put_back(resend) {
+            self.answer(&refused.requests, Failure::CutOff)?;
+        }
+        Ok(())
     }
 
     /// Answer each request with the service's template for `failure`, or the bare error.

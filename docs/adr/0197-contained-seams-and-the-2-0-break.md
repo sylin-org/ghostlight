@@ -315,3 +315,26 @@ Decision 25's JavaScript lint for unused variables and undefined names is withdr
 it, and it would report on frozen extension files that cannot change without a store
 resubmission (ADR-0200 Decision 16). The 2.0 guard set is the one ADR-0199 Decision 21 lists.
 `node --check` over runtime JavaScript and the page-asset tests stay.
+
+## Amendment 2026-10-17: what the MCP edge sends again
+
+Decision 2 answered every outstanding request as cut off when the service went away. That is
+right for a request that may have taken effect, and wrong for two kinds that cannot have. The
+owner authorized the change on the Linux batch (linux-1), where a real installation showed the
+agent an error for its tool listing after a service crash: the listing had reached the dying
+service's socket before the edge saw the stream end.
+
+- A line whose write failed never reached the service, because the service acts only on a whole
+  frame. It is held like a line sent while the service was away, keeps its place and its hold
+  time, and loses only its answers to the connection that failed.
+- A lone `initialize`, `tools/list`, `prompts/list`, `resources/list` or
+  `resources/templates/list` changes nothing. When a lost connection or a `replace` goodbye cuts
+  it off, it goes back to the front of the hold and is sent to the next service, once. Cut off a
+  second time, it is answered as cut off, so a request that brings the service down cannot keep
+  doing so. A batch is never sent again.
+
+Every other cut-off request is still answered from the service's template and never sent again.
+After `quit`, `uninstall` and `session_end` the listings are answered too, so Quit still holds.
+The agent sees its answer instead of an error for the requests it cannot get wrong, and an honest
+"may have taken effect" for the ones it can. The rules are in `crates/edge/src/forward.rs` and
+`hold.rs`; relay protocol 4 is unpublished, so the edge source lock does not apply yet.

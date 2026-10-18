@@ -11,6 +11,7 @@ fn line(text: &str, held_at: Instant, requests: Vec<Request>) -> HeldLine {
         line: text.to_owned(),
         requests,
         held_at,
+        sent_again: false,
     }
 }
 
@@ -46,6 +47,32 @@ fn a_line_past_the_byte_limit_is_refused() {
     hold.push(line("y", now, vec![])).unwrap();
     hold.drain();
     hold.push(line("yz", now, vec![])).unwrap();
+}
+
+#[test]
+fn lines_put_back_go_ahead_of_the_held_ones_in_their_order() {
+    let now = Instant::now();
+    let mut hold = Hold::default();
+    hold.push(line("c", now, vec![])).unwrap();
+    let refused = hold.put_back(vec![line("a", now, vec![]), line("b", now, vec![])]);
+    assert!(refused.is_empty());
+    let order: Vec<_> = hold.drain().into_iter().map(|held| held.line).collect();
+    assert_eq!(order, ["a", "b", "c"]);
+}
+
+#[test]
+fn a_line_put_back_past_the_byte_limit_comes_back_refused() {
+    let now = Instant::now();
+    let mut hold = Hold::default();
+    hold.push(line(&"x".repeat(HOLD_LIMIT_BYTES - 1), now, vec![]))
+        .unwrap();
+    let refused = hold.put_back(vec![
+        line("y", now, vec![]),
+        line("yz", now, vec![request(1)]),
+    ]);
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].requests, [request(1)]);
+    assert_eq!(hold.pop().unwrap().line, "y");
 }
 
 #[test]

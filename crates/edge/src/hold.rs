@@ -2,7 +2,9 @@
 //!
 //! Held lines keep their order and are bounded twice: by [`HOLD_LIMIT_BYTES`] in all and by
 //! [`HOLD_LIMIT`] each. A held line never reached any service, so flushing it later is its first
-//! delivery, never a replay.
+//! delivery, never a replay. The one exception is a line the edge puts back with
+//! [`Hold::put_back`]: a handshake or catalog listing that changes nothing, cut off by a lost
+//! service and sent again to the next one.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -30,6 +32,9 @@ pub struct HeldLine {
     pub requests: Vec<Request>,
     /// When the line was held.
     pub held_at: Instant,
+    /// Whether the line was already sent again once after a lost service. It is not sent a
+    /// third time, so a request that brings the service down cannot keep doing so.
+    pub sent_again: bool,
 }
 
 /// The ordered, bounded queue of held lines.
@@ -51,6 +56,25 @@ impl Hold {
         self.bytes += line.line.len();
         self.lines.push_back(line);
         Ok(())
+    }
+
+    /// Put `lines` back ahead of every line already held, keeping their order.
+    ///
+    /// They were taken from the hold, or delivered, before anything held now. A line that would
+    /// take the hold past [`HOLD_LIMIT_BYTES`] is not put back; the refused lines come back in
+    /// their order so their requests can be answered at once.
+    pub fn put_back(&mut self, lines: Vec<HeldLine>) -> Vec<HeldLine> {
+        let mut refused = Vec::new();
+        for line in lines.into_iter().rev() {
+            if self.bytes + line.line.len() > HOLD_LIMIT_BYTES {
+                refused.push(line);
+                continue;
+            }
+            self.bytes += line.line.len();
+            self.lines.push_front(line);
+        }
+        refused.reverse();
+        refused
     }
 
     /// Take the oldest held line, if any.
