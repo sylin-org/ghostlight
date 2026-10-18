@@ -14,7 +14,7 @@ the push.
 
 | Slice | Lane | Items | Status |
 | --- | --- | --- | --- |
-| u0 preview-shows-every-state | window | j-38 | todo |
+| u0 preview-shows-every-state | window | j-38 | landed (this commit) |
 | u1 teal-means-live | window | n-d-02, j-27, j-24, j-34 (window) | todo |
 | u2 only-running-work-glows | window | n-d-01, j-25, window-10, window-9 (time format) | todo |
 | u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | todo |
@@ -52,3 +52,11 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   dark-taskbar art; the left column of each half is on a light ground (#f3f3f3), the right on a
   dark one (#202020). The 24 pixel frames are the 32 pixel art scaled down, as Windows does at
   150%.
+- u0 (j-38): the preview's head comment lists every query parameter. One part of the original
+  j-38 was already true on the tree: Policy reads the policy the page script was handed, so
+  nothing threw. The diagnostics folder path was left as it is: the agreed change does not name
+  it, and the live layout is machine state. The default page's second operation now waits
+  instead of being held while the runtime runs, which the service never shows; held work is on
+  `?readiness=paused`. `?readiness=channel_off` says Ready on the band because the service has
+  no channel state yet; u4 (n-s-02) changes the answer, and the fixture's mirrored words follow
+  it there.

@@ -1,3 +1,27 @@
+// The design-review preview: the window's real page served with a synthetic service, so a
+// reviewer can look at every state the window draws without a Ghostlight running. No person ever
+// sees it; it exists so the window can be judged state by state.
+//
+// Run it with `node tests/workbench-preview-server.mjs`. GHOSTLIGHT_PREVIEW_PORT picks the port
+// (41737 by default, 0 for any free one); the address it serves is printed on start.
+// GHOSTLIGHT_PREVIEW_SCENARIO=h4 serves the still history scenario the history journey reads.
+//
+// Query parameters choose what the page is shown, and combine:
+//   ?readiness=working        (the default) Ready, with work running, waiting and starting again;
+//                             the band says Working while anything is in flight.
+//   ?readiness=ready          Ready and idle: nothing runs and nothing starts.
+//   ?readiness=not_connected  No browser connected and none would start.
+//   ?readiness=paused         Paused, with the waiting work held.
+//   ?readiness=ended          Session ended.
+//   ?readiness=channel_off    MCP agents switched off in your rules and the command line on.
+//                             Policy shows the two channel switches with MCP off.
+//   ?setup=<stage>            The setup view at one of its stages (workbench-setup-fixtures.mjs).
+//   ?browsers=none            No browser connected, with Google Chrome starting on request.
+//   ?agents=connected         Every agent found on this computer has Ghostlight.
+//   ?history=capped           410 recorded actions, more than the window's list holds.
+// Every page shows the Policy destination with an organization and your rules, and history with
+// succeeded, failed, kept, blocked, switched-off and invalid-call rows. Times are relative to
+// page load: work that is running, waiting or held started seconds before the page opened.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -232,10 +256,39 @@ function previewDetails({ connection_id = null, channel, claimed_agent = null, s
   };
 }
 
+/**
+ * The moment every fixture time is written against. The page moves each time forward by however
+ * long ago this was, so the fixture reads as if it started just before the page opened.
+ */
+const FIXTURE_EPOCH = Date.now();
+const ago = (ms) => FIXTURE_EPOCH - ms;
+
+/**
+ * The service's readiness answer, mirrored from `language/readiness.rs`: each state's word,
+ * detail and tone. The page resolves the state from the fixture's facts in the service's order.
+ */
+const READINESS = {
+  session_ended: { word: "Session ended", detail: "This session was ended. Start a new session to let agents work again.", tone: "held" },
+  paused: { word: "Paused", detail: "Browser work is paused. Resume when you are ready.", tone: "held" },
+  not_connected: { word: "Not connected", detail: "No browser is connected. Open a supported Chromium browser with the Ghostlight extension installed.", tone: "offline" },
+  policy_invalid: { word: "Policy not valid", detail: "A configured policy is not valid, so Ghostlight refuses all browser work. Open Policy to see what applies. A policy file still in schema 3 needs ghostlight policy migrate <file>.", tone: "attention" },
+  working: { word: "Working", detail: "An agent is working in your browser right now.", tone: "working" },
+  ready: { word: "Ready", detail: "Connected and idle. Agents can work when they ask.", tone: "quiet" }
+};
+
+/** What the window shows with no browser connected and none starting (`language::workbench`). */
+const NO_BROWSER = "No browser connected";
+
+/** The browser the `?browsers=none` page starts on request. */
+const STARTS_ON_REQUEST = "Google Chrome";
+
+/** What a waiting operation's activity says (`language::outcome::WAITING_FOR_WORK`). */
+const WAITING_FOR_WORK = "Waiting for earlier browser work";
+
 const snapshot = {
   seq: 0,
-  generated_at_ms: Date.now(),
-  service: { version: "1.0.0", started_at_ms: Date.now() - 540000, runtime_state: "active" },
+  generated_at_ms: FIXTURE_EPOCH,
+  service: { version: "1.0.0", started_at_ms: ago(540000), runtime_state: "active" },
   overview: { active_sessions: 2, active_operations: 2, connected_browsers: 2, blocked_in_history: 1 },
   sessions: [
     { id: "workspace_codex", agent: agentNamed("Codex"), channel: "mcp", tab_count: 3, active_operations: 1, browser: "Chrome" },
@@ -245,8 +298,8 @@ const snapshot = {
     { id: "workspace_script", agent: agentNamed("Command line"), channel: "cli", tab_count: 1, active_operations: 0, browser: "Chrome" }
   ],
   operations: [
-    { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: Date.now() - 12000, phase: "running" },
-    { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: "Filling form", capability: "write", started_at_ms: Date.now() - 35000, phase: "held" }
+    { invocation: "invocation_read", workspace: "workspace_codex", tool: "browser_read", activity: "Reading page", capability: "read", started_at_ms: ago(12000), phase: "running" },
+    { invocation: "invocation_fill", workspace: "workspace_claude", tool: "browser_fill_form", activity: WAITING_FOR_WORK, capability: "write", started_at_ms: ago(35000), phase: "waiting" }
   ],
   // The rows the service says are in use: a live session of the agent with its entry in place.
   harnesses_in_use: ["codex", "claude-code"],
@@ -258,11 +311,16 @@ const snapshot = {
   // that never reached one. A restored record is named for the agent it kept as claimed, and one
   // that kept no claim and no source reads "Unknown agent".
   history: [
-    { timestamp_ms: Date.now() - 60000, invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
-    { timestamp_ms: Date.now() - 90000, invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
-    { timestamp_ms: Date.now() - 240000, invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", ...previewDetails({ connection_id: "connection_script", channel: "cli" }) },
-    { timestamp_ms: Date.now() - 420000, invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored", channel: "mcp" }) },
-    { timestamp_ms: Date.now() - 480000, invocation: "invocation_restored_claimed", workspace: "workspace_0193f1c2a8b4e7d6826", tool: "browser_read", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Read example.com.", duration_ms: 30, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored_claimed", channel: "mcp", claimed_agent: "claude-code", source: { agent: "cursor", image: "Cursor.exe" } }) }
+    { timestamp_ms: ago(60000), invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
+    { timestamp_ms: ago(90000), invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    // A tab the browser's Preserve Ghostlight tabs setting kept open: refused, but not by policy.
+    { timestamp_ms: ago(120000), invocation: "invocation_kept", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: true, reason: "browser_local_interlock", status: "blocked", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings.", duration_ms: 60, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    // Work from a channel your rules switched off, and a call that does not match the catalog.
+    { timestamp_ms: ago(150000), invocation: "invocation_channel_off", workspace: "workspace_claude", tool: "browser_read", capability: "read", allowed: false, reason: "channel_denied", status: "blocked", effect: "none", summary: "Blocked: the user's Ghostlight policy turns off work from MCP agents.", duration_ms: 4, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
+    { timestamp_ms: ago(180000), invocation: "invocation_invalid", workspace: "workspace_codex", tool: "browser_click", capability: "action", allowed: false, reason: "invalid_request", status: "blocked", effect: "none", summary: "The call does not match the Ghostlight catalog.", duration_ms: 2, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    { timestamp_ms: ago(240000), invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", ...previewDetails({ connection_id: "connection_script", channel: "cli" }) },
+    { timestamp_ms: ago(420000), invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored", channel: "mcp" }) },
+    { timestamp_ms: ago(480000), invocation: "invocation_restored_claimed", workspace: "workspace_0193f1c2a8b4e7d6826", tool: "browser_read", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Read example.com.", duration_ms: 30, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored_claimed", channel: "mcp", claimed_agent: "claude-code", source: { agent: "cursor", image: "Cursor.exe" } }) }
   ],
   diagnostics: [
     { id: "service", label: "Ghostlight", severity: "passing", detail: "Running and accepting agents." },
@@ -340,7 +398,7 @@ const policyView = {
     configured: true, verified: true, freshness: "fresh", sequence: 7,
     organization: "Northwind", rationale: "Browser work stays inside approved support sites.",
     contacts: [{ kind: "email", value: "security@northwind.example", label: "Security team" }],
-    source_class: "https", last_success_ms: Date.now() - 240000, last_attempt_ms: Date.now() - 240000
+    source_class: "https", last_success_ms: ago(240000), last_attempt_ms: ago(240000)
   }
 };
 
@@ -362,7 +420,7 @@ if (historyScenario) {
   const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed }] }], truncated: false });
   const child = (tool, summary, status, effect, capability) => ({ invocation: "history_example", workspace: "workspace_codex", tool, summary, status, effect, capability, allowed: status === "succeeded", complete: true, duration_ms: 120, observed: {}, permissions: permission(status === "succeeded", capability), permission_explanations: [status === "succeeded" ? "Allowed: organization policy permits this work (browsing)." : "Refused: organization policy refuses this work (browsing)."] });
   snapshot.operations = [];
-  snapshot.history.unshift({ invocation: "history_example", workspace: "workspace_codex", tool: "browser_flow", capability: "", allowed: false, reason: "capability_denied", status: "blocked", effect: "partial", summary: "Completed 2 of 4 steps. Step 3 blocked by policy.", complete: true, timestamp_ms: Date.now(), duration_ms: 920, observed: {}, steps: [
+  snapshot.history.unshift({ invocation: "history_example", workspace: "workspace_codex", tool: "browser_flow", capability: "", allowed: false, reason: "capability_denied", status: "blocked", effect: "partial", summary: "Completed 2 of 4 steps. Step 3 blocked by policy.", complete: true, timestamp_ms: FIXTURE_EPOCH, duration_ms: 920, observed: {}, steps: [
     { position: 1, state: "recorded", tool: "browser_navigate", record: child("browser_navigate", "Opened example.com.", "succeeded", "applied", "read") },
     { position: 2, state: "recorded", tool: "browser_fill_form", record: child("browser_fill_form", "Filled 3 fields on example.com.", "succeeded", "applied", "read + write") },
     { position: 3, state: "recorded", tool: "browser_execute", record: child("browser_execute", "Policy blocked JavaScript execution on example.com.", "blocked", "none", "execute") },
@@ -394,9 +452,68 @@ const retainConnection = (record) => {
 snapshot.operations.forEach(retainConnection);
 snapshot.history.forEach(retainConnection);
 
+// `?history=capped` holds more recorded actions than the window's list shows, all older than the
+// rows above, so the band's count and the list's length differ.
+const CAPPED_HISTORY_LENGTH = 410;
+const olderHistory = Array.from({ length: CAPPED_HISTORY_LENGTH - snapshot.history.length }, (_, at) => {
+  const spec = script[at % script.length];
+  const record = {
+    timestamp_ms: ago(600000 + at * 45000), invocation: `invocation_older_${at}`, workspace: "workspace_codex",
+    tool: spec.tool, capability: spec.capability, allowed: true, reason: "permitted", status: "succeeded",
+    effect: spec.effect, summary: spec.summary, duration_ms: spec.ms, observed: spec.observed, channel: "mcp", browser: "Chrome"
+  };
+  retainConnection(record);
+  return record;
+});
+const withCappedHistory = (flat) => ({ ...flat, history: [...flat.history, ...olderHistory] });
+
 // `?browsers=none` shows At a glance with no browser connected, as the service words it when
 // Chrome would start on request.
-const withoutBrowsers = (flat) => ({ ...flat, browsers: [], no_browser: "Starts Google Chrome on request" });
+const withoutBrowsers = (flat) => ({ ...flat, browsers: [], no_browser: `Starts ${STARTS_ON_REQUEST} on request` });
+
+/** What Settings says of the runtime in each of its states (`language::control`). */
+const RUNTIME_WORD = { active: "Running", held: "Paused", ended: "Session ended" };
+
+/** The page with the runtime in `state`, said alike by the service, its configuration and Settings. */
+const withRuntime = (flat, state) => {
+  const changed = structuredClone(flat);
+  changed.service.runtime_state = state;
+  changed.configuration.runtime_state = state;
+  changed.controls.runtime.state = state;
+  changed.controls.runtime.word = RUNTIME_WORD[state];
+  return changed;
+};
+
+/** The page with nothing in flight: no operation, and every session idle. */
+const idle = (flat) => ({
+  ...flat, operations: [], sessions: flat.sessions.map((session) => ({ ...session, active_operations: 0 }))
+});
+
+/** What a held operation shows again: what it was doing, no longer the wait. */
+const HELD_ACTIVITY = { browser_read: "Reading page", browser_fill_form: "Filling form" };
+const heldWork = (operation) => ({ ...operation, phase: "held", activity: HELD_ACTIVITY[operation.tool] ?? operation.activity });
+
+/**
+ * What each `?readiness=` value does to the page. The band's answer is not written here: the page
+ * resolves it from the facts these leave, as the service does. Only `working` starts new work.
+ */
+const READINESS_SCENES = {
+  working: (flat) => flat,
+  ready: (flat) => idle(flat),
+  not_connected: (flat) => ({ ...idle(flat), browsers: [], no_browser: NO_BROWSER }),
+  paused: (flat) => withRuntime({ ...flat, operations: flat.operations.map(heldWork) }, "held"),
+  ended: (flat) => withRuntime(idle(flat), "ended"),
+  channel_off: (flat) => idle(flat)
+};
+const TICKING_SCENE = "working";
+
+/** The policy with your rules switching MCP agents off, which `?readiness=channel_off` shows. */
+const MCP_OFF = { key: "channels.mcp.enabled", value: "false", level: "mandatory" };
+const policyWithMcpOff = (() => {
+  const view = structuredClone(policyView);
+  view.layers.find((layer) => layer.kind === "user").settings.push(MCP_OFF);
+  return view;
+})();
 
 // `?agents=connected` shows Integrations when every agent found on this computer has Ghostlight.
 const allConnected = (flat) => ({
@@ -407,16 +524,59 @@ const allConnected = (flat) => ({
   }))
 });
 
-const fixtureFor = (stage, noBrowsers, connected) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify((connected ? allConnected : (flat) => flat)((noBrowsers ? withoutBrowsers : (flat) => flat)({ ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] })))};
+/** The page's starting snapshot for the query parameters `choice` holds. */
+const pageSnapshot = ({ stage, noBrowsers, connected, capped, scene }) => [
+  noBrowsers && withoutBrowsers,
+  connected && allConnected,
+  capped && withCappedHistory,
+  READINESS_SCENES[scene]
+].filter(Boolean).reduce((flat, change) => change(flat), { ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] });
+
+const fixtureFor = (choice) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(pageSnapshot(choice))};
 window.__GHOSTLIGHT_SETUP_STATES__ = ${JSON.stringify(setupStates)};
-window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(stage)};
+window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(choice.stage)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
-window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyView)};
+window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ? policyWithMcpOff : policyView)};
 (() => {
   const preview = window.__GHOSTLIGHT_PREVIEW__;
   const listeners = [];
   let counter = 0;
   let step = 0;
+  const ticks = ${!historyScenario && choice.scene === TICKING_SCENE};
+
+  // Every fixture time moves forward to this page load, so work in flight began seconds ago.
+  const shift = Date.now() - ${FIXTURE_EPOCH};
+  const MOMENT = /^(timestamp_ms|started_at_ms|generated_at_ms|last_[a-z]+_ms)$/;
+  const rebase = value => {
+    if (Array.isArray(value)) value.forEach(rebase);
+    else if (value && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) {
+        if (MOMENT.test(key) && typeof item === "number") value[key] = item + shift;
+        else rebase(item);
+      }
+    }
+  };
+  rebase(preview);
+  rebase(window.__GHOSTLIGHT_POLICY__);
+
+  // The band's answer, resolved from the fixture's facts in the order language/readiness.rs uses.
+  const READINESS = ${JSON.stringify(READINESS)};
+  const resolveReadiness = () => {
+    const runtime = preview.service.runtime_state;
+    const configuration = preview.configuration;
+    const connected = preview.browsers.length > 0;
+    const starts = !connected && preview.no_browser && preview.no_browser !== ${JSON.stringify(NO_BROWSER)}
+      ? ${JSON.stringify(STARTS_ON_REQUEST)} : null;
+    const state = runtime === "ended" ? "session_ended"
+      : runtime === "held" ? "paused"
+        : !connected && !starts ? "not_connected"
+          : configuration.local_policy_valid === false || configuration.managed_authority_valid === false ? "policy_invalid"
+            : preview.operations.length > 0 ? "working" : "ready";
+    const words = READINESS[state];
+    const detail = state === "ready" && starts ? "Starts " + starts + " when an agent asks." : words.detail;
+    return { state, word: words.word, detail, tone: words.tone, invites_control: true };
+  };
+  preview.readiness = resolveReadiness();
 
   // The service's snapshot holds a settled or composed record once; a later snapshot must too.
   const foldHistory = record => {
@@ -430,6 +590,14 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyView)};
     preview.seq += 1;
     const event = { seq: preview.seq, change };
     for (const handler of listeners) handler({ payload: event });
+  };
+
+  // The status part follows the facts: a changed answer is pushed whole, as the service does.
+  const publishStatus = () => {
+    const readiness = resolveReadiness();
+    if (JSON.stringify(readiness) === JSON.stringify(preview.readiness)) return;
+    preview.readiness = readiness;
+    publish({ kind: "status_changed", status: partsOf(preview).status });
   };
 
   // The sheet follows the service: a change to the runtime, watching or diagnostics is pushed whole.
@@ -479,6 +647,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyView)};
     };
     preview.operations.push(operation);
     publish({ kind: "operation_started", operation });
+    publishStatus();
 
     setTimeout(() => {
       const index = preview.operations.indexOf(operation);
@@ -508,6 +677,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyView)};
         }
       };
       publish({ kind: "operation_settled", record });
+      publishStatus();
       setTimeout(runOne, blocked ? 3000 : 700 + Math.random() * 1300);
     }, spec.ms);
   };
@@ -561,8 +731,9 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyView)};
       preview.service.runtime_state = state;
       preview.configuration.runtime_state = state;
       publish({ kind: "runtime_changed", runtime_state: state });
+      publishStatus();
       publishControls();
-      if (state === "active") runOne();
+      if (state === "active" && ticks) runOne();
       // Mirrors crates/orchestrator/src/language/control.rs: the confirmation states the
       // authority's state only, never browser delivery.
       const confirmation = {
@@ -663,7 +834,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyView)};
     }
   };
 
-  if (!${historyScenario}) setTimeout(runOne, 1200);
+  if (ticks) setTimeout(runOne, 1200);
   window.__GHOSTLIGHT_PUBLISH__ = publish;
 })();`;
 
@@ -680,10 +851,19 @@ const server = createServer(async (request, response) => {
       response.writeHead(400, { "content-type": "text/plain" }).end(`setup is one of ${Object.keys(setupStates).join(", ")}`);
       return;
     }
+    const scene = address.searchParams.get("readiness") ?? TICKING_SCENE;
+    if (!Object.hasOwn(READINESS_SCENES, scene)) {
+      response.writeHead(400, { "content-type": "text/plain" }).end(`readiness is one of ${Object.keys(READINESS_SCENES).join(", ")}`);
+      return;
+    }
     if (pathname === "/fixture.js") {
       response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
-      response.end(fixtureFor(stage, address.searchParams.get("browsers") === "none",
-        address.searchParams.get("agents") === "connected"));
+      response.end(fixtureFor({
+        stage, scene,
+        noBrowsers: address.searchParams.get("browsers") === "none",
+        connected: address.searchParams.get("agents") === "connected",
+        capped: address.searchParams.get("history") === "capped"
+      }));
       return;
     }
     const name = pathname === "/" ? "index.html" : pathname.slice(1);
