@@ -64,7 +64,7 @@ const RETIRED_LAYOUT_STABLE: &str = "layout_stable";
 /// long handles last, and trust what each result says about its effect. It also carries the guidance
 /// every tool shares, `tab` and `timeout_ms`, so no tool repeats it (ADR-0198 decision 26).
 pub const SERVER_INSTRUCTIONS: &str = "Ghostlight controls the user's visible Chromium browser. \
-Open or reuse a tab with browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is unambiguous. \
+Open or reuse a tab with browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is unambiguous, and pass it when other agents may share the session. \
 Read a page with browser_read, and get handles for its controls from browser_find or browser_inspect, which also show what each form control accepts. \
 Act with those handles, for example with browser_click or browser_fill_form; timeout_ms bounds the whole call. \
 Handles expire when the page navigates; a handle follows its control through a re-render the page can prove, and a stale handle's refusal says why. \
@@ -2657,7 +2657,11 @@ mod tests {
             .filter(|sentence| !sentence.trim().is_empty())
             .count();
         assert!(sentences <= 6, "{sentences} sentences");
-        for shared in ["omit tab when one tab is unambiguous", "timeout_ms bounds"] {
+        for shared in [
+            "omit tab when one tab is unambiguous",
+            "pass it when other agents may share the session",
+            "timeout_ms bounds",
+        ] {
             assert!(
                 SERVER_INSTRUCTIONS.contains(shared),
                 "instructions lost the shared guidance \"{shared}\""

@@ -527,3 +527,225 @@ fn a_committed_document_in_the_same_origin_still_expires_handles() {
     );
     assert_eq!(stale.facts["reason"], "stale_target");
 }
+
+/// Open one fresh controlled tab titled `title` and return its handle.
+fn open_titled(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &crate::workspace::WorkspaceId,
+    tab_id: u64,
+    url: &str,
+    title: &str,
+) -> String {
+    let mut opened = tab(tab_id, url);
+    opened.title = title.into();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: opened,
+        committed_urls: vec![url.into()],
+    }));
+    let result = executor.execute(
+        workspace,
+        "browser_navigate",
+        json!({"url":url,"new_tab":true}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    result.facts["tab"].as_str().unwrap().to_owned()
+}
+
+/// Answer one script evaluation on `tab_id`, the browser work a no-tab call reaches.
+fn push_script(browser: &FakeBrowser, tab_id: u64, url: &str) {
+    browser.push(Ok(BrowserOutcome::ScriptEvaluated {
+        tab: tab(tab_id, url),
+        value: "1".into(),
+        truncated: false,
+        form: crate::browser::adapter::ScriptForm::AsWritten,
+        committed_urls: vec![],
+    }));
+}
+
+fn script_without_tab(
+    executor: &ApplicationExecutor,
+    workspace: &crate::workspace::WorkspaceId,
+) -> crate::work::result::InvocationResult {
+    executor.execute(
+        workspace,
+        "browser_execute",
+        json!({"script":"1"}),
+        None,
+        &CancellationToken::default(),
+    )
+}
+
+#[test]
+fn a_call_without_a_tab_uses_the_sessions_only_tab() {
+    let (executor, browser, _, workspace, _) = fixture();
+    let only = open_titled(
+        &executor,
+        &browser,
+        &workspace,
+        7,
+        "https://example.com/",
+        "Home",
+    );
+    push_script(&browser, 7, "https://example.com/");
+    let before = browser.calls().len();
+
+    let result = script_without_tab(&executor, &workspace);
+
+    assert_eq!(result.status, Status::Succeeded, "{}", result.summary);
+    assert_eq!(result.facts["tab"], only.as_str());
+    let calls = browser.calls()[before..].to_vec();
+    assert!(
+        matches!(
+            calls.as_slice(),
+            [BrowserCommand::EvaluateScript { tab_id: 7, .. }]
+        ),
+        "{calls:?}"
+    );
+}
+
+/// Workflow subagents of one client share its one connection, so one session can hold a tab
+/// each. A call that names no tab is then refused before any browser work, and the refusal
+/// lists the tabs so the caller can repeat it with its own.
+#[test]
+fn a_call_without_a_tab_among_several_is_refused_with_the_tabs_and_does_nothing() {
+    let (executor, browser, _, workspace, audit) = fixture();
+    let first = open_titled(
+        &executor,
+        &browser,
+        &workspace,
+        7,
+        "https://example.com/",
+        "Home",
+    );
+    let second = open_titled(
+        &executor,
+        &browser,
+        &workspace,
+        9,
+        "https://example.org/",
+        "Docs",
+    );
+    let before = browser.calls().len();
+    let audited = audit.0.lock().unwrap().len();
+
+    for result in [
+        script_without_tab(&executor, &workspace),
+        navigate(&executor, &workspace, "https://example.net/"),
+    ] {
+        assert_eq!(result.status, Status::Failed, "{}", result.summary);
+        assert_eq!(result.effect, Effect::None);
+        assert!(result.repeat_safe);
+        assert_eq!(
+            result.summary,
+            "More than one tab is open in this session, so the call must name one."
+        );
+        assert_eq!(result.facts["reason"], "ambiguous_tab");
+        let mut listed = result.facts["tabs"].as_array().unwrap().clone();
+        listed.sort_by_key(|tab| tab["tab"].as_str().unwrap().to_owned());
+        let mut expected = vec![
+            json!({"tab":first,"title":"Home","url":"https://example.com/"}),
+            json!({"tab":second,"title":"Docs","url":"https://example.org/"}),
+        ];
+        expected.sort_by_key(|tab| tab["tab"].as_str().unwrap().to_owned());
+        assert_eq!(listed, expected);
+        assert_eq!(
+            result.next_steps,
+            vec!["Repeat the call with tab set to the handle of the tab you mean, listed in tabs."]
+        );
+    }
+    assert_eq!(browser.calls().len(), before, "nothing reached the browser");
+    let records = audit.0.lock().unwrap();
+    assert_eq!(records.len(), audited + 2);
+    assert!(
+        records[audited..]
+            .iter()
+            .all(|record| !serde_json::to_string(record).unwrap().contains("Docs")),
+        "the candidate tabs are recovery help, never audit"
+    );
+    drop(records);
+
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![
+            tab(7, "https://example.com/"),
+            tab(9, "https://example.org/"),
+        ],
+    }));
+    let listed = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"list"}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(listed.status, Status::Succeeded, "a list needs no tab");
+    assert_eq!(listed.facts["tabs"].as_array().unwrap().len(), 2);
+
+    push_script(&browser, 9, "https://example.org/");
+    let named = executor.execute(
+        &workspace,
+        "browser_execute",
+        json!({"script":"1","tab":second}),
+        None,
+        &CancellationToken::default(),
+    );
+    assert_eq!(named.status, Status::Succeeded, "{}", named.summary);
+    assert_eq!(named.facts["tab"], second.as_str());
+}
+
+/// A flow that opens a tab means that tab in its later steps, however many tabs the session
+/// already holds.
+#[test]
+fn a_flow_that_opens_a_tab_acts_in_it_without_naming_it() {
+    let (executor, browser, _, workspace, _) = fixture();
+    open_titled(
+        &executor,
+        &browser,
+        &workspace,
+        7,
+        "https://example.com/",
+        "Home",
+    );
+    open_titled(
+        &executor,
+        &browser,
+        &workspace,
+        9,
+        "https://example.org/",
+        "Docs",
+    );
+    let mut opened = tab(11, "https://example.net/");
+    opened.title = "Mine".into();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: opened,
+        committed_urls: vec!["https://example.net/".into()],
+    }));
+    push_script(&browser, 11, "https://example.net/");
+    let before = browser.calls().len();
+
+    let result = executor.execute(
+        &workspace,
+        "browser_flow",
+        json!({"steps":[
+            {"id":"open","tool":"browser_navigate","arguments":{"url":"https://example.net/","new_tab":true}},
+            {"id":"run","tool":"browser_execute","arguments":{"script":"1"}}
+        ]}),
+        None,
+        &CancellationToken::default(),
+    );
+
+    assert_eq!(result.status, Status::Succeeded, "{result:?}");
+    let steps = result.facts["steps"].as_array().unwrap();
+    let mine = steps[0]["result"]["facts"]["tab"].clone();
+    assert_eq!(steps[1]["result"]["facts"]["tab"], mine);
+    let calls = browser.calls()[before..].to_vec();
+    assert!(
+        matches!(
+            calls.last(),
+            Some(BrowserCommand::EvaluateScript { tab_id: 11, .. })
+        ),
+        "{calls:?}"
+    );
+}

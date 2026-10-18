@@ -1818,6 +1818,9 @@ pub const STALE_FACT: &str = "stale";
 pub const RECOVERY_CANDIDATES_FACT: &str = "recovery_candidates";
 /// The fact that names the one control the page proved is the stale handle's control.
 pub const REPLACEMENT_FACT: &str = "replacement";
+/// The fact that lists this session's tabs, each with its handle, title and URL, in an
+/// `ambiguous_tab` refusal, so the caller can repeat the call naming its own tab.
+pub const CANDIDATE_TABS_FACT: &str = "tabs";
 
 /// What a stale-target refusal offers beyond the word (ADR-0198 Decision 28).
 ///
@@ -1929,10 +1932,9 @@ impl WorkspaceReason {
     pub fn next_steps(&self) -> Vec<String> {
         match self {
             Self::NoTab => vec![OPEN_FIRST_TAB.into()],
-            Self::AmbiguousTab => vec![
-                "Call browser_tabs with action list, then repeat the call with tab set to the handle you want."
-                    .into(),
-            ],
+            Self::AmbiguousTab => {
+                vec!["Repeat the call with tab set to the handle of the tab you mean, listed in tabs.".into()]
+            }
             Self::TabUnavailable => {
                 vec!["Call browser_tabs with action list to obtain current tab handles.".into()]
             }
@@ -3655,7 +3657,7 @@ Changes are \"unsaved\".".into()),
         );
         assert_eq!(
             WorkspaceReason::AmbiguousTab.next_steps(),
-            vec!["Call browser_tabs with action list, then repeat the call with tab set to the handle you want."]
+            vec!["Repeat the call with tab set to the handle of the tab you mean, listed in tabs."]
         );
         assert_eq!(
             WorkspaceReason::TabUnavailable.next_steps(),

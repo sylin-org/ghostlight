@@ -51,7 +51,8 @@ use crate::language::{
     outcome::{
         ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason,
         CheckFailure, ExtensionAdvice, Observed, Outcome, Refusal, StaleHelp, TargetRole,
-        WorkspaceReason, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT, STALE_FACT,
+        WorkspaceReason, CANDIDATE_TABS_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT,
+        STALE_FACT,
     },
     Operation, Record, TakeScreenshot,
 };
@@ -2114,6 +2115,9 @@ impl ApplicationExecutor {
         if let Some(owner) = owner {
             facts["owner_workspace"] = Value::String(owner);
         }
+        if reason == WorkspaceReason::AmbiguousTab {
+            facts[CANDIDATE_TABS_FACT] = self.candidate_tabs(context);
+        }
         if let Some(offer) = offer {
             facts[RECOVERY_CANDIDATES_FACT] = Value::Array(offer.candidates);
             if let WorkspaceReason::StaleTarget {
@@ -2149,6 +2153,17 @@ impl ApplicationExecutor {
             observed: Observed::default(),
             audit: refusal.audit(),
         }
+    }
+
+    /// The session's tabs an `ambiguous_tab` refusal lists, with the facts the session already
+    /// saw for each: its handle, last governed title and URL.
+    fn candidate_tabs(&self, context: &InvocationContext<'_>) -> Value {
+        let tabs = self.workspaces.tabs(context.workspace).unwrap_or_default();
+        Value::Array(
+            tabs.into_iter()
+                .map(|tab| json!({"tab":tab.handle.as_str(),"title":tab.title,"url":tab.url}))
+                .collect(),
+        )
     }
 
     fn emit(&self, event: DomainEvent) {

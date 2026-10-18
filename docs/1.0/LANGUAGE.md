@@ -44,14 +44,18 @@ with catalog-refresh guidance; nothing retries automatically.
 See [ADR-0162](../adr/0162-configured-authority-and-one-flow-tool.md) and
 [ADR-0196](../adr/0196-simple-pipeline-and-contained-boundaries.md).
 
-An optional `tab` selects an opaque controlled tab. Omission selects the only controlled tab, or
-the sole active controlled tab when ownership is unambiguous. Otherwise the call is rejected
-before any browser work, and the refusal says which case it hit:
+An optional `tab` selects an opaque controlled tab. Omission selects the session's only
+controlled tab. Otherwise the call is rejected before any browser work, and the refusal says which
+case it hit. Several agents that share one client connection share its session, so with several
+tabs no tab is a default, and the refusal lists them in `tabs`, each with its `tab`, `title` and
+`url`. `browser_tabs` list needs no tab, a target or view handle names its own tab, and in a
+`browser_flow` that names no tab, a step that opens a tab makes it the tab of the later steps
+(ADR-0198, amendment of 2026-10-18):
 
 | Case | Summary | `reason` | Next step |
 | --- | --- | --- | --- |
 | No tab yet | `This session has no open tab yet.` | `no_tab` | `browser_navigate` with `url` |
-| Several tabs could be meant | `More than one tab is open in this session, so the call must name one.` | `ambiguous_tab` | `browser_tabs` list, then repeat with `tab` |
+| Several tabs could be meant | `More than one tab is open in this session, so the call must name one.` | `ambiguous_tab` | repeat with `tab` from `tabs` |
 | Named tab is gone | `That tab is no longer open.` | `tab_unavailable` | `browser_tabs` list |
 
 Each session works only in its own workspace. A tab, target, or view handle that belongs to
@@ -162,7 +166,7 @@ loop in six short sentences and names only catalog tools:
 
 > Ghostlight controls the user's visible Chromium browser. Open or reuse a tab with
 > browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is
-> unambiguous. Read a page with browser_read, and get handles for its controls from browser_find or
+> unambiguous, and pass it when other agents may share the session. Read a page with browser_read, and get handles for its controls from browser_find or
 > browser_inspect, which also show what each form control accepts. Act with those handles, for example with browser_click or browser_fill_form;
 > timeout_ms bounds the whole call. Handles expire when the page navigates; a handle follows its
 > control through a re-render the page can prove, and a stale handle's refusal says why. Every

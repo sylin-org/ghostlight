@@ -229,8 +229,6 @@ pub struct SelectedTab {
     pub readiness: BrowserReadiness,
     /// Whether runtime governance holds the tab.
     pub held: bool,
-    /// Whether the tab is active in the workspace.
-    pub active: bool,
 }
 
 /// Immutable current target facts used at a browser-effect boundary.
@@ -515,7 +513,6 @@ struct TabState {
     url: String,
     title: String,
     readiness: BrowserReadiness,
-    active: bool,
     held: bool,
 }
 
@@ -961,6 +958,22 @@ impl WorkspaceStore {
         }
     }
 
+    /// The workspace's controlled tabs, ordered by handle.
+    pub fn tabs(&self, workspace: &WorkspaceId) -> Result<Vec<SelectedTab>, WorkspaceError> {
+        let state = self.lock();
+        let workspace = state
+            .workspaces
+            .get(workspace)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        let mut tabs: Vec<_> = workspace
+            .tabs
+            .iter()
+            .map(|(handle, tab)| selected(handle, tab))
+            .collect();
+        tabs.sort_by(|left, right| left.handle.as_str().cmp(right.handle.as_str()));
+        Ok(tabs)
+    }
+
     /// Return presentation-only client label without using it for routing or authority.
     pub fn client_label(&self, workspace: &WorkspaceId) -> Result<String, WorkspaceError> {
         self.lock()
@@ -1326,21 +1339,14 @@ impl WorkspaceLease {
 
     /// List current governed controlled-tab facts.
     pub fn tabs(&self) -> Result<Vec<SelectedTab>, WorkspaceError> {
-        let state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let mut tabs: Vec<_> = workspace
-            .tabs
-            .iter()
-            .map(|(handle, tab)| selected(handle, tab))
-            .collect();
-        tabs.sort_by(|left, right| left.handle.as_str().cmp(right.handle.as_str()));
-        Ok(tabs)
+        self.store.tabs(&self.workspace)
     }
 
-    /// Select an exact or unambiguous controlled tab.
+    /// Select the named controlled tab, or the only one when the call names none.
+    ///
+    /// A call that names no tab is refused with [`WorkspaceError::AmbiguousTab`] while the
+    /// workspace holds several: callers that share one connection share its workspace, so no
+    /// tab among several is the one every caller means.
     pub fn select_tab(&self, requested: Option<&str>) -> Result<SelectedTab, WorkspaceError> {
         let state = self.store.lock();
         let workspace = state
@@ -1361,22 +1367,12 @@ impl WorkspaceLease {
                 WorkspaceError::StaleTab
             });
         }
-        if workspace.tabs.len() == 1 {
-            let (handle, tab) = workspace.tabs.iter().next().expect("length checked");
-            return held_or_selected(handle, tab);
+        let mut tabs = workspace.tabs.iter();
+        match (tabs.next(), tabs.next()) {
+            (None, _) => Err(WorkspaceError::NoTab),
+            (Some((handle, tab)), None) => held_or_selected(handle, tab),
+            (Some(_), Some(_)) => Err(WorkspaceError::AmbiguousTab),
         }
-        let mut active = workspace.tabs.iter().filter(|(_, tab)| tab.active);
-        let Some((handle, tab)) = active.next() else {
-            return Err(if workspace.tabs.is_empty() {
-                WorkspaceError::NoTab
-            } else {
-                WorkspaceError::AmbiguousTab
-            });
-        };
-        if active.next().is_some() {
-            return Err(WorkspaceError::AmbiguousTab);
-        }
-        held_or_selected(handle, tab)
     }
 
     /// The client label of another admitted workspace that owns the requested tab handle, if it
@@ -1409,9 +1405,6 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        for known in workspace.tabs.values_mut() {
-            known.active = false;
-        }
         let handle = TabHandle(short_handle("tab_", |candidate| {
             workspace.tabs.contains_key(&TabHandle(candidate.into()))
         }));
@@ -1421,28 +1414,11 @@ impl WorkspaceLease {
             url: String::new(),
             title: String::new(),
             readiness: BrowserReadiness::Unknown,
-            active: true,
             held: false,
             dialog: None,
         };
         workspace.tabs.insert(handle.clone(), value.clone());
         Ok(selected(&handle, &value))
-    }
-
-    /// Mark one controlled tab active and all sibling tabs inactive.
-    pub fn mark_active(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
-        let mut state = self.store.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        if !workspace.tabs.contains_key(handle) {
-            return Err(WorkspaceError::StaleTab);
-        }
-        for (candidate, tab) in &mut workspace.tabs {
-            tab.active = candidate == handle;
-        }
-        Ok(())
     }
 
     /// Apply one governed committed document and invalidate prior targets by generation.
@@ -1467,7 +1443,6 @@ impl WorkspaceLease {
         known.url.clone_from(&tab.url);
         known.title = bounded(&tab.title, 500);
         known.readiness = tab.readiness;
-        known.active = tab.active;
         known.held = false;
         let current = selected(handle, known);
         workspace.targets.prune_tab(handle, current.generation);
@@ -1499,7 +1474,6 @@ impl WorkspaceLease {
         known.url.clone_from(&tab.url);
         known.title = bounded(&tab.title, 500);
         known.readiness = tab.readiness;
-        known.active = tab.active;
         let current = selected(handle, known);
         workspace.views.retain(|_, view| &view.tab != handle);
         Ok(current)
@@ -1716,16 +1690,12 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        for known in workspace.tabs.values_mut() {
-            known.active = false;
-        }
         let value = TabState {
             physical_id: tab.tab_id,
             generation: 0,
             url: tab.url.clone(),
             title: tab.title.clone(),
             readiness: tab.readiness,
-            active: true,
             held,
             dialog: None,
         };
@@ -2037,7 +2007,6 @@ fn selected(handle: &TabHandle, tab: &TabState) -> SelectedTab {
         title: tab.title.clone(),
         readiness: tab.readiness,
         held: tab.held,
-        active: tab.active,
     }
 }
 
@@ -3149,7 +3118,7 @@ mod tests {
     }
 
     #[test]
-    fn omission_selects_only_an_unambiguous_tab() {
+    fn omission_selects_only_a_sole_tab() {
         let store = WorkspaceStore::default();
         let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
@@ -3157,7 +3126,20 @@ mod tests {
         let first = lease.add_tab(&physical(1, "about:blank")).unwrap();
         assert_eq!(lease.select_tab(None).unwrap().handle, first.handle);
         let second = lease.add_tab(&physical(2, "about:blank")).unwrap();
-        assert_eq!(lease.select_tab(None).unwrap().handle, second.handle);
+        assert_eq!(
+            lease.select_tab(None).unwrap_err(),
+            WorkspaceError::AmbiguousTab,
+            "the newest of several tabs is not a default"
+        );
+        assert_eq!(
+            lease
+                .select_tab(Some(second.handle.as_str()))
+                .unwrap()
+                .handle,
+            second.handle
+        );
+        lease.confirm_tab_closed(&second.handle).unwrap();
+        assert_eq!(lease.select_tab(None).unwrap().handle, first.handle);
     }
 
     #[test]

@@ -139,9 +139,6 @@ impl ApplicationExecutor {
                 active,
                 window_focused,
             }) if tab_id == selected.physical_id => {
-                if let Err(error) = lease.mark_active(&selected.handle) {
-                    return self.workspace_failure_after_effect(context, error, tab_id);
-                }
                 self.succeeded(
                     context,
                     decision,

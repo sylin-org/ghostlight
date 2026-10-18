@@ -7,8 +7,8 @@ use serde_json::{json, Map, Value};
 use crate::governance::CapabilitySet;
 use crate::language::composition::StepCause;
 use crate::language::history::{CompositionKind, StepReceipt};
-use crate::language::RunFlow;
-use crate::workspace::WorkspaceLease;
+use crate::language::{Operation, RunFlow};
+use crate::workspace::{TabHandle, WorkspaceLease};
 
 use super::{result::Readiness, ApplicationExecutor, Effect, InvocationContext, Status, Terminal};
 
@@ -39,6 +39,9 @@ impl ApplicationExecutor {
         let mut rows = Vec::with_capacity(total);
         let mut progress = Composition::new(total, decision, Readiness::NotApplicable, None);
         let mut budget_used = 0usize;
+        // A flow that names no tab gets one when a step opens a tab: the steps after that mean
+        // the tab this flow opened last, however many other tabs the session holds.
+        let mut flow_tab = value.tab.clone();
         for (index, step) in value.steps.iter().enumerate() {
             let position = index + 1;
             if progress.stop_at_boundary(context, position) {
@@ -50,7 +53,7 @@ impl ApplicationExecutor {
                 })
                 .map_err(|error| (StepCause::MissingReference, error))
                 .and_then(|arguments| {
-                    crate::language::decode_flow_step(&step.tool, arguments, value.tab.as_deref())
+                    crate::language::decode_flow_step(&step.tool, arguments, flow_tab.as_deref())
                         .map_err(|error| (StepCause::InvalidArguments, error.to_string()))
                 });
             let decoded = match prepared {
@@ -81,6 +84,7 @@ impl ApplicationExecutor {
                     continue;
                 }
             };
+            let before = (value.tab.is_none() && opens_tab(&decoded)).then(|| handles(lease));
             let terminal = self.run_child(
                 context,
                 lease,
@@ -92,6 +96,14 @@ impl ApplicationExecutor {
                     preparation_failed: false,
                 },
             );
+            if let Some(before) = before {
+                if let Some(opened) = handles(lease)
+                    .into_iter()
+                    .find(|handle| !before.contains(handle))
+                {
+                    flow_tab = Some(opened.as_str().to_owned());
+                }
+            }
             let cause = progress.record(position, &terminal);
             let mut row = terminal_row(position, &terminal, cause);
             row["id"] = json!(step.id);
@@ -125,6 +137,23 @@ impl ApplicationExecutor {
             .with_tools(value.steps.iter().map(|step| &step.tool));
         terminal
     }
+}
+
+/// Whether a step may open a tab: a navigation that names no tab.
+fn opens_tab(operation: &Operation) -> bool {
+    match operation {
+        Operation::OpenPage(_) => true,
+        Operation::NavigatePage(navigate) => navigate.tab.is_none(),
+        _ => false,
+    }
+}
+
+/// The handles of the session's tabs right now.
+fn handles(lease: &WorkspaceLease) -> Vec<TabHandle> {
+    lease
+        .tabs()
+        .map(|tabs| tabs.into_iter().map(|tab| tab.handle).collect())
+        .unwrap_or_default()
 }
 
 /// Substitute every embedded `{"flow_ref":{...}}` with the referenced value.

@@ -16,7 +16,7 @@ gate, the in-place deploy and the owner-held items below.
 | a2-uninstall-says-what-it-leaves | frontdoor | todo |
 | a3-private-views-are-named-not-blamed | frontdoor | todo |
 | a4-adaptive-small-promises | frontdoor | todo |
-| b1-no-tab-never-guesses | agent | todo |
+| b1-no-tab-never-guesses | agent | landed: with several tabs a call that names none is refused and lists them; no per-caller marker exists (ADR-0198, amendment of 2026-10-18) |
 | b2-page-refusals-say-what-to-do | agent | todo |
 | c1-screen-readers-and-failures | window | todo |
 | c2-one-legible-type-and-colour-system | window | todo |

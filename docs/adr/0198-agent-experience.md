@@ -416,3 +416,57 @@ has a different link.
   as `removed` instead of acting on another row.
 - Contexts, links, handles and candidates in audit or history. Audit gains only the reason word and
   the rebound flag.
+
+## Amendment 2026-10-18: a call that names no tab never picks among several
+
+### Evidence
+
+In the product-owner pass before the release candidate (finding agentx-1), an agent that never
+opened a second tab found its session holding two. Workflow subagents of one Claude Code session
+share that session's one MCP connection, and Ghostlight keeps one workspace per connection
+(ADR-0196). A call with no tab went to the tab opened or focused last, which was another
+subagent's. Every tool's `tab` field said "Omit when one tab is unambiguous", yet with several tabs
+the service picked one anyway. A navigate could move another agent's page away, and a read could
+report another agent's page as the caller's own.
+
+### What tells callers apart on one connection
+
+The owner asked whether metadata kept with each request could tell the callers apart. What the
+service has:
+
+- Per connection: the service-issued connection id (ADR-0161) and the client name the client
+  claimed at `initialize`, or in the discovery `_meta`. Every subagent of one client session shares
+  both.
+- Per request: a `tools/call` carries `name`, `arguments` and an optional `_meta`. The keys MCP
+  defines there, `progressToken` and the reserved `io.modelcontextprotocol/` names, correlate one
+  request or task. None names a session, an agent or a caller. A client-specific key that names
+  one tool use names that call, not its caller: two calls of one subagent never share it. The MCP
+  intake reads only `name` and `arguments`.
+
+So no stable per-caller marker exists, and the default stays per connection. If a client later
+sends one, it may scope this default and nothing else. It never grants or narrows authority, the
+same bound ADR-0161 puts on provenance.
+
+### Decision
+
+- A call that names no tab uses the session's tab only when the session holds exactly one. With
+  none, the `no_tab` refusal stands, and a navigate opens the first tab. With several, every tool
+  that works in a tab refuses the call before any browser work, reads included: a read of the
+  wrong tab reports another agent's page as the caller's. The refusal is `ambiguous_tab`, effect
+  `none`, safe to repeat. Its `tabs` fact lists each tab with its `tab`, `title` and `url`, the
+  facts the session already received, and its one step says to repeat the call with `tab` from
+  that list. The list is recovery help and never reaches audit or history.
+- The workspace no longer tracks which of its tabs was opened or focused last. Nothing reads it.
+- `browser_tabs` list needs no tab. A target or view handle names its own tab, so a call that
+  passes one needs no `tab`.
+- A tab the call opened is the call's. `browser_navigate` with `new_tab` names its tab in its
+  result. In a `browser_flow` that names no tab, a step that opens a tab makes it the tab of the
+  later steps; after a second opens, the later steps mean the newer one.
+- The server instructions gain one clause: omit tab when one tab is unambiguous, "and pass it when
+  other agents may share the session". Decision 37's text carries the same clause when it lands.
+- This replaces the "sole active controlled tab" rule of ADR-0107 Decision 3. Which tabs a session
+  may act on is unchanged, and every result still names its tab.
+
+Tests: `omission_selects_only_a_sole_tab`, `a_call_without_a_tab_uses_the_sessions_only_tab`,
+`a_call_without_a_tab_among_several_is_refused_with_the_tabs_and_does_nothing` and
+`a_flow_that_opens_a_tab_acts_in_it_without_naming_it`.
