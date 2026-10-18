@@ -2,6 +2,8 @@
 
 Observed executable reporting (ADR-0105 stage 2, observed peer identity) superseded by ADR-0197 Decision 22.
 
+Amended by ADR-0202 (2026-10-18): when the source is read, the accept time, the claimed agent's catalog id kept as a labelled claim, and when "in" may be said.
+
 - Status: Accepted; reporting foundation implemented and verified locally; not deployed
 - Date: 2026-09-07
 - Amends: ADR-0105's reporting stage

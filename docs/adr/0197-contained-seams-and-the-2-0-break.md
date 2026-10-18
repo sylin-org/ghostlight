@@ -3,6 +3,9 @@
 Date: 2026-10-13. Status: Accepted by owner direction (the owner authorized the redesign and its
 recommended decisions; each decision below is reversible on its own).
 
+Amended by ADR-0202 (2026-10-18): Decision 12 (the resume token) and Decision 19 (the channel
+switches return, enforced on every request).
+
 Builds on ADR-0196 and keeps its Decisions 1-6 and 8-13. Supersedes ADR-0096 Decisions 1-3 (MCP
 negotiation moves into the service), ADR-0181 (replaced by adapter protocol 4), ADR-0196
 Decision 7 (no transition level: the break is strict), ADR-0165 (Flatpak route), ADR-0167's installation selection,
