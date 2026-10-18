@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn the_connector_pages_1x_left_are_retired_and_anything_else_there_is_kept() {
-        let context = context("retired");
+        let (_root, context) = context("retired");
         let man = context.data_home.join("man/man1");
         fs::create_dir_all(&man).unwrap();
         let mcp = man.join("ghostlight-mcp-connector.1");
@@ -466,25 +466,24 @@ mod tests {
 
         // Someone's own file under that name, and a symlink, are kept.
         fs::write(&mcp, "someone's own notes").unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink(&mcp, &browser).unwrap();
         apply_install(&context).unwrap();
         apply_uninstall(&context).unwrap();
         assert_eq!(fs::read_to_string(&mcp).unwrap(), "someone's own notes");
+        #[cfg(unix)]
         assert!(is_symlink(&browser).unwrap());
-
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn an_uninstall_retires_the_connector_pages_1x_left() {
-        let context = context("retired-uninstall");
+        let (_root, context) = context("retired-uninstall");
         let man = context.data_home.join("man/man1");
         fs::create_dir_all(&man).unwrap();
         let mcp = man.join("ghostlight-mcp-connector.1");
         fs::write(&mcp, page_of_1x("GHOSTLIGHT-MCP-CONNECTOR", "1.3.14")).unwrap();
         assert!(apply_uninstall(&context).unwrap().changed);
         assert!(!mcp.exists());
-        fs::remove_dir_all(context.data_home.parent().unwrap()).unwrap();
     }
 
     #[test]
