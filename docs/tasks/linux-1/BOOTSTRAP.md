@@ -28,8 +28,10 @@ never force.
 - Build, run the full gate, run every journey, and install the development channel into its own
   `~/.ghostlight` with `pwsh scripts/dev-loop.ps1`. This machine is a test machine: journeys and
   temporary test homes are fine here.
-- Load the extension unpacked from `extension/` into its own Chrome or Chromium for the browser
-  checks.
+- Load the extension unpacked from `extension/` into the system Chromium's ordinary profile for
+  the browser checks. The owner directed on 2026-10-17 that acceptance never uses a sandbox: no
+  bubblewrap home, no dedicated or throwaway browser profile, always the real installation and
+  the real system browser.
 - Commit and push to `dev` as the owner (docs/MEMORY.md, "Coordinated machines may commit and push
   as the owner").
 

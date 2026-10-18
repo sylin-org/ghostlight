@@ -313,6 +313,9 @@ the owner wants, and what this project learned the hard way.
   locations (owner, 2026-09-08 Windows boot investigation; ADR-0145 amendment). Isolated checks
   supplement this evidence but cannot prove installation, startup or recovery. Ask before running
   a separate desktop test installation. A separate build directory only avoids locked files.
+  A sandboxed run (a bubblewrap home, a test home with its own browser profile, Chrome for
+  Testing) is a false integration test: acceptance always uses the real installation and the
+  system browser the person uses (owner, 2026-10-17, on the Linux batch).
 - **One live Ghostlight on the owner's machine, always.** Never run a second service, a demo or
   spike build of any Ghostlight executable, or a journey that starts its own service in a test
   home on the owner's machine: two of anything invites "which service is this adapter talking
