@@ -18,8 +18,8 @@ primary action in a view. Everything at rest is ink.
   widths, the popup's teal eyebrow, the idle Ready lantern, the ended state's primary step and
   the breathing tempo. The 2.0 package is not staged with any store yet, so this costs no
   resubmission. Staging and submitting stay the owner's call (AGENTS.md, ADR-0200 Decision 16).
-- **The light-taskbar tray ghost is redrawn** as a monochrome glyph. The owner approves it at
-  validation.
+- **The tray keeps the mascot**, made legible on a light taskbar, per the owner ("I think it's
+  fine to use the mascot in the tray icon, just not in the Integrations page").
 - **The taskbar app icon (n-d-09) waits** for the owner's look on a light-mode account. It is
   only changed if the problem shows up there.
 - **The width-stacked layout stays as it is.** The owner saw it and said "it's fine that way then".
@@ -30,7 +30,7 @@ primary action in a view. Everything at rest is ink.
   `language/workbench.rs`, `language/readiness.rs`, `governance/effective.rs`,
   `workbench/mod.rs`, `intake/desktop.rs` and `tests/golden/desktop`. The slices run in order,
   u0 to u7, because most of them share the window's page files.
-- **native**: `crates/desktop` (the light-taskbar tray glyph).
+- **native**: `crates/desktop` (the light-taskbar tray mascot).
 - **extension**: `extension/` and its package record.
 - **outcome**: `language/outcome.rs` and the result goldens.
 - **docs**: the brand reference and the 1.x feedback dictionary.

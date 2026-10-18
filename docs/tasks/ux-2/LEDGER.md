@@ -23,6 +23,7 @@ the push.
 | u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | todo |
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
+| n2 the-tray-keeps-the-mascot | native | j-11 (owner) | landed (this commit) |
 | e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit) | todo |
 | o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | landed (this commit) |
 | k1 brand-reference-for-2-0 | docs | j-37 | landed (this commit) |
@@ -69,6 +70,25 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   say the light Windows taskbar shows the shipped tray glyph under the dot, and that the ready
   icon is that art's own bytes. Both had said the light taskbar inked the original icon and that
   no other artwork shipped.
+- n2 (j-11, owner): shown n1's glyph, the owner said: "I think it's fine to use the mascot in
+  the tray icon, just not in the Integrations page." So the tray shows the mascot on both
+  taskbars, and n2 replaces n1's glyph: tray-glyph-16.png and tray-glyph-32.png and their tests
+  are deleted. The dark taskbar still shows the product icon's own bytes, and a test pins it.
+- n2, what the light frames change: crates/desktop/assets/tray-mascot-light-16.png and -32.png
+  are made once from extension/icons/icon16.png and icon32.png. The sparkles and stray pixels
+  are removed; the ghost, its lantern and the shadow under it stay. The silhouette is grown by
+  one pixel and drawn beneath the art in the night colour at 60 percent, so the head parts from
+  the taskbar. At 16 pixels the two eye pixels take the 32 pixel art's darkest eye colour and
+  the two mouth pixels a mid grey-blue, by hand, since the source's were nearly as light as the
+  head. Everything else keeps the mascot's own colours. The shadow stays at both sizes: at 16
+  pixels it sits on the outline as the ghost's base rather than as a stray line. Tests pin
+  properties, not bytes: one piece, a night outline bordering the art, every edge pixel dark
+  against the taskbar, and eyes clearly darker than the head at 16 pixels.
+- n2 previews, in the coordinator's scratchpad folder ux2-tray-preview/ (FILES.txt lists them):
+  sheet-1x.png and sheet-8x.png have three bands, the new light-taskbar mascot, the plain
+  mascot untreated on a light taskbar for comparison, and the dark taskbar. The throwaway maker
+  and sheet scripts are in its n2/ folder. ARCHITECTURE.md and ACCEPTANCE.md item 12 now name
+  the light-taskbar mascot instead of the glyph.
 - o1 (n-d-07): an unconfirmed check now leads with why it fell short and gives the action's own
   sentence after it: "The expected condition did not hold after the action. Clicked the "Submit"
   button on example.com." The item's wording ("did not hold after clicking ...") would need a

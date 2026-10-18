@@ -11,9 +11,10 @@
 //! pixel art is drawn at the 16 pixel small-icon size and the 32 pixel art at any larger one. A
 //! Linux StatusNotifier host draws the icon at its own size, so it gets the 32 pixel art.
 //!
-//! A dark taskbar shows the product icon. On a light Windows taskbar the pale colour art would be
-//! a faceless speck, so the ghost is the tray glyph in `assets/`: one monochrome silhouette in the
-//! window's night colour with its eyes cut out, drawn by hand at 16 pixels and smooth at 32.
+//! Both taskbars show the product's mascot. A dark taskbar shows the product icon itself. On a
+//! light Windows taskbar the mascot's near-white head would wash out, so the tray draws the
+//! light-taskbar mascot in `assets/`: the same art without its sparkles, on a soft outline in the
+//! window's night colour, with the eyes and mouth darkened at 16 pixels so the face still reads.
 //! `watch_taskbar` notices when the taskbar turns light or dark.
 //!
 //! Thread rule: the tray is created and updated on the event-loop thread, after the loop has
@@ -60,7 +61,7 @@ pub const PAUSED_COLOUR: [u8; 3] = [0xfb, 0xbf, 0x24];
 pub const ATTENTION_COLOUR: [u8; 3] = [0xf8, 0x71, 0x71];
 
 /// The window's night ground `--bg`: the ground of a dark taskbar, so the ring around the dot
-/// there, and the colour of the tray glyph on a light taskbar.
+/// there, and the colour of the soft outline under the mascot on a light taskbar.
 pub const NIGHT_COLOUR: [u8; 3] = [0x0f, 0x0e, 0x12];
 
 /// The ground of a light Windows taskbar, so the ring around the dot there.
@@ -96,11 +97,13 @@ const ICON_PNG: &[u8] = include_bytes!("../../../extension/icons/icon32.png");
 /// The product icon at 16 pixels, drawn at the 16 pixel small-icon size.
 const ICON_16_PNG: &[u8] = include_bytes!("../../../extension/icons/icon16.png");
 
-/// The tray glyph at 32 pixels, the ghost on a light taskbar.
-const GLYPH_PNG: &[u8] = include_bytes!("../assets/tray-glyph-32.png");
+/// The mascot at 32 pixels prepared for a light taskbar: the product icon's art without its
+/// sparkles, on a soft outline in [`NIGHT_COLOUR`].
+const LIGHT_PNG: &[u8] = include_bytes!("../assets/tray-mascot-light-32.png");
 
-/// The tray glyph at 16 pixels, drawn at the 16 pixel small-icon size of a light taskbar.
-const GLYPH_16_PNG: &[u8] = include_bytes!("../assets/tray-glyph-16.png");
+/// The mascot at 16 pixels prepared for a light taskbar, drawn at the 16 pixel small-icon size:
+/// as [`LIGHT_PNG`], with the eyes and mouth darkened by hand so the face reads.
+const LIGHT_16_PNG: &[u8] = include_bytes!("../assets/tray-mascot-light-16.png");
 
 /// Where Windows keeps whether the taskbar is light, below the current user.
 #[cfg(windows)]
@@ -299,13 +302,13 @@ impl Taskbar {
         }
     }
 
-    /// The art drawn on this taskbar: the tray glyph on a light taskbar and the product icon on a
-    /// dark one, at 16 pixels for a small-icon size of 16 or fewer and at 32 pixels for any larger
-    /// size, which Windows scales down to 24.
+    /// The art drawn on this taskbar: the light-taskbar mascot on a light taskbar and the product
+    /// icon on a dark one, at 16 pixels for a small-icon size of 16 or fewer and at 32 pixels for
+    /// any larger size, which Windows scales down to 24.
     fn source(self) -> &'static [u8] {
         match (self.light, self.small_icon <= SMALL_ICON) {
-            (true, true) => GLYPH_16_PNG,
-            (true, false) => GLYPH_PNG,
+            (true, true) => LIGHT_16_PNG,
+            (true, false) => LIGHT_PNG,
             (false, true) => ICON_16_PNG,
             (false, false) => ICON_PNG,
         }
@@ -361,7 +364,7 @@ pub fn icon_image() -> Result<(Vec<u8>, u32, u32), TrayError> {
 
 /// The icon for `state` on `taskbar`: the taskbar's art at its size, with a filled dot in the
 /// lower right for every state but ready. The ready icon is the art's own pixels: the product icon
-/// on a dark taskbar and the tray glyph on a light one.
+/// on a dark taskbar and the light-taskbar mascot on a light one.
 pub fn state_icon(state: TrayState, taskbar: Taskbar) -> Result<(Vec<u8>, u32, u32), TrayError> {
     let (mut rgba, width, height) = decode_rgba(taskbar.source())?;
     if let Some(colour) = state.dot() {
@@ -909,53 +912,120 @@ mod tests {
         count
     }
 
+    /// The lightness of an RGB colour on a scale of 0 to 255, by the Rec. 709 weights.
+    fn lightness(rgb: [u8; 3]) -> u32 {
+        (2126 * u32::from(rgb[0]) + 7152 * u32::from(rgb[1]) + 722 * u32::from(rgb[2])) / 10_000
+    }
+
+    /// The colour a person sees where `pixel` lies over an opaque `ground`.
+    fn seen_over(pixel: [u8; 4], ground: [u8; 3]) -> [u8; 3] {
+        let alpha = u32::from(pixel[3]);
+        let mut seen = [0; 3];
+        for channel in 0..3 {
+            let mixed =
+                u32::from(pixel[channel]) * alpha + u32::from(ground[channel]) * (255 - alpha);
+            seen[channel] = (mixed / 255) as u8;
+        }
+        seen
+    }
+
     #[test]
-    fn a_light_taskbar_shows_the_glyph_in_one_ink_and_one_piece() {
+    fn a_light_taskbar_shows_the_mascot_in_one_piece() {
         for (taskbar, size) in [(LIGHT_16, 16), (LIGHT_32, 32)] {
-            let (glyph, width, height) = decode_rgba(taskbar.source()).unwrap();
+            let (mascot, width, height) = decode_rgba(taskbar.source()).unwrap();
             assert_eq!((width, height), (size as u32, size as u32), "{taskbar:?}");
             let ready = state_icon(TrayState::Ready, taskbar).unwrap().0;
-            assert_eq!(ready, glyph, "{taskbar:?}: ready is the glyph's own pixels");
+            assert_eq!(ready, mascot, "{taskbar:?}: ready is the art's own pixels");
             let dark = Taskbar {
                 light: false,
                 ..taskbar
             };
-            assert_ne!(glyph, decode_rgba(dark.source()).unwrap().0);
-            for pixel in glyph.chunks(4) {
-                if pixel[3] != 0 {
-                    assert_eq!(pixel[..3], NIGHT_COLOUR, "{taskbar:?}: one ink");
-                }
-            }
-            assert_eq!(pieces(&glyph, size), 1, "{taskbar:?}: no sparkle or speck");
+            assert_ne!(mascot, decode_rgba(dark.source()).unwrap().0);
+            assert_eq!(pieces(&mascot, size), 1, "{taskbar:?}: no sparkle or speck");
         }
     }
 
     #[test]
-    fn the_glyph_keeps_its_face_at_16_and_32_pixels() {
-        // Each eye is clear for two pixels down, with solid ink beside it and above it.
-        for (taskbar, size, eyes) in [
-            (LIGHT_16, 16, [(5, 6), (10, 6)]),
-            (LIGHT_32, 32, [(10, 13), (20, 13)]),
-        ] {
-            let glyph = state_icon(TrayState::Ready, taskbar).unwrap().0;
-            for (x, y) in eyes {
-                assert_eq!(pixel_of(&glyph, size, x, y)[3], 0, "{taskbar:?} eye");
-                assert_eq!(pixel_of(&glyph, size, x, y + 1)[3], 0, "{taskbar:?} eye");
-                for (beside_x, beside_y) in [(x - 2, y), (x + 3, y), (x, y - 3)] {
-                    assert_eq!(
-                        pixel_of(&glyph, size, beside_x, beside_y)[3],
-                        255,
-                        "{taskbar:?}: ink at ({beside_x}, {beside_y})"
+    fn a_soft_night_outline_parts_the_light_mascot_from_the_taskbar() {
+        for (taskbar, size) in [(LIGHT_16, 16), (LIGHT_32, 32)] {
+            let mascot = state_icon(TrayState::Ready, taskbar).unwrap().0;
+            let at = |x: usize, y: usize| pixel_of(&mascot, size, x, y);
+            let around = |x: usize, y: usize| {
+                let (left, top) = (x.saturating_sub(1), y.saturating_sub(1));
+                (top..=(y + 1).min(size - 1))
+                    .flat_map(move |ny| (left..=(x + 1).min(size - 1)).map(move |nx| (nx, ny)))
+                    .filter(move |near| *near != (x, y))
+            };
+            let mut outline = 0;
+            for (x, y) in (0..size).flat_map(|y| (0..size).map(move |x| (x, y))) {
+                let pixel = at(x, y);
+                if pixel[..3] == NIGHT_COLOUR && pixel[3] > 0 && pixel[3] < 255 {
+                    outline += 1;
+                    assert!(
+                        around(x, y).any(|(nx, ny)| {
+                            let near = at(nx, ny);
+                            near[3] != 0 && near[..3] != NIGHT_COLOUR
+                        }),
+                        "{taskbar:?}: the outline at ({x}, {y}) borders the mascot"
+                    );
+                }
+                // A pixel on the edge of the art is dark against the taskbar.
+                let on_edge = pixel[3] != 0
+                    && (x == 0
+                        || y == 0
+                        || x == size - 1
+                        || y == size - 1
+                        || [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)]
+                            .iter()
+                            .any(|near| near[3] == 0));
+                if on_edge {
+                    let seen = lightness(seen_over(pixel, LIGHT_GROUND));
+                    assert!(
+                        seen + EDGE_CONTRAST <= lightness(LIGHT_GROUND),
+                        "{taskbar:?}: the edge at ({x}, {y}) is {seen}"
                     );
                 }
             }
+            assert!(outline >= size, "{taskbar:?}: {outline} outline pixels");
         }
     }
 
+    /// How much darker than a light taskbar each edge pixel of the light mascot is.
+    const EDGE_CONTRAST: u32 = 80;
+
     #[test]
-    fn a_dot_on_a_light_taskbar_lies_over_the_glyph() {
+    fn the_light_mascot_keeps_its_face_at_16_pixels() {
+        // The eyes are a clear margin darker than the head above and between them.
+        let mascot = state_icon(TrayState::Ready, LIGHT_16).unwrap().0;
+        let light = |x: usize, y: usize| {
+            let pixel = pixel_of(&mascot, 16, x, y);
+            assert_eq!(pixel[3], 255, "({x}, {y}) is solid");
+            lightness([pixel[0], pixel[1], pixel[2]])
+        };
+        for (x, y) in [(6, 5), (9, 5)] {
+            let eye = light(x, y);
+            for (head_x, head_y) in [(x, y - 1), (7, 5), (8, 5)] {
+                assert!(
+                    eye + FACE_CONTRAST <= light(head_x, head_y),
+                    "the eye at ({x}, {y}) against the head at ({head_x}, {head_y})"
+                );
+            }
+        }
+    }
+
+    /// How much darker than the head around them the eyes of the 16 pixel light mascot are.
+    const FACE_CONTRAST: u32 = 96;
+
+    #[test]
+    fn the_dark_taskbar_shows_the_product_icon_bytes() {
+        assert_eq!(DARK_16.source(), ICON_16_PNG);
+        assert_eq!(DARK_32.source(), ICON_PNG);
+    }
+
+    #[test]
+    fn a_dot_on_a_light_taskbar_lies_over_the_mascot() {
         for (taskbar, size, centre) in [(LIGHT_32, 32, 24), (LIGHT_16, 16, 12)] {
-            let glyph = state_icon(TrayState::Ready, taskbar).unwrap().0;
+            let mascot = state_icon(TrayState::Ready, taskbar).unwrap().0;
             for (state, colour) in DOT_STATES {
                 let icon = state_icon(state, taskbar).unwrap().0;
                 assert_eq!(
@@ -965,7 +1035,7 @@ mod tests {
                 );
                 assert_eq!(
                     pixel_of(&icon, size, size / 4, size / 4),
-                    pixel_of(&glyph, size, size / 4, size / 4),
+                    pixel_of(&mascot, size, size / 4, size / 4),
                     "{state:?} on {taskbar:?}: the ghost is kept away from the dot"
                 );
             }
