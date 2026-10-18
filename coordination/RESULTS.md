@@ -1,34 +1,29 @@
 # Latest result
 
-## [0044] linux-1 is done: L01 to L10 pass on test-01, with the fixes they needed
+## [0046] linux-claude: the open questions settled by the user-delight test; old leftovers gone
 
-linux-claude, on test-01 (CachyOS, KDE Plasma 6.8 on Wayland), on the real installation and the
-system Chromium. The record is [the ledger](../docs/tasks/linux-1/LEDGER.md); each fix there was
-deployed and checked live.
+linux-claude, on test-01, at the owner's request ("delete unnecessary old stuff; use the user
+delight point of view for all questions"). Details: [the ledger](../docs/tasks/linux-1/LEDGER.md),
+"Follow-up, 2026-10-18". Each fix was deployed and checked live where the state can occur.
 
-Since [0040]:
+- 564bf635 `fix(language)`: the install's Next line is the step the window shows. With the
+  extension in a profile and no browser connected it reads "Next: open Chrome, where Ghostlight is
+  already added." instead of skipping to the agent step (ADR-0200 amendment).
+- a241b633 `fix(browser)`: a browser that reports no name is Chromium, so plain Chromium is
+  remembered as the last browser and the model reads "Chromium", not null (ADR-0149 amendment).
+- 7cdd4031 `fix(language)`: an upload names the file input it used a "file field".
+- dbd52fa6 `fix(install)`: every Linux install removes the folders 1.x left that nothing reads (the
+  emptied `~/.local/state/ghostlight`, the 1.x window's `~/.local/share/org.sylin.ghostlight`).
+  On Windows the 1.x window data may sit under `%LOCALAPPDATA%\org.sylin.ghostlight`; nothing
+  removes it there yet.
 
-- 5107be98 `fix(workbench)` (L09): an app icon whose plate sits in a transparent margin, like
-  Zed's, is its own plate and is served as cached (no more dark plate inside an off-white square).
-- e964e858 `fix(setup)` (L10): a whole `ghostlight uninstall` asks the running service to quit with
-  `uninstall` and says so; until now the service, the tray shell and the browser relay kept
-  running after it and nothing sent that goodbye. The home stays (ADR-0199 Decision 20).
-- 1024a994 `fix(workbench)` (L08): at the setup view's agent step a long agent list no longer
-  pushes the mascot and the steps below the fold; the window's `styles.css` keeps the companion
-  centered on the window (the extension kit is unchanged). This one was not claimed first; it
-  touched only that stylesheet.
+For the owner, not changed: saved tab groups pile up in Chromium's bookmarks bar because Chromium
+keeps every closed group and the extension API cannot see or reopen one; reuse (ADR-0137) works
+only for open groups. Any fix is in the frozen extension.
 
-For the owner, not changed (details in the ledger, "seen and left"):
+Removed on test-01: the old home, the 0.x, 1.x and 0.5.7 leftovers, about 110 GB of stale build
+folders and old `.tmp` evidence. Cline (CLI)'s 0.5.7 entry was replaced through Integrations' own
+Fix first.
 
-- L08: when the extension is in a profile but no browser is connected, the install's Next line
-  says "restart your agents, then ask one" while the window shows the browser step.
-- L07: on plain Chromium the extension names no browser, so no ADR-0149 last-browser record is
-  written; an upload calls a file input a "text field".
-- L10: 0.x and 1.x left `~/.local/share/ghostlight`, `~/.local/share/org.sylin.ghostlight` and an
-  emptied `~/.local/state/ghostlight`.
-
-Machine: test-01 runs the development build at 1024a994 in a fresh `~/.ghostlight` with the
-owner's policy copied back; the home from before L10 is kept at `~/.ghostlight.l10-before`.
-
-Still owed: the release candidate's pinned install on Linux (`get.sh` with `GHOSTLIGHT_VERSION`),
-once `v2.0.0-rc.1` is published.
+Please pull before touching `language/setup.rs` (install lines), `browser/mod.rs` (the browser
+name), `work/forms.rs` (the upload subject) or `install/migration.rs` (leftovers).
