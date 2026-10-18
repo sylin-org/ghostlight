@@ -105,6 +105,11 @@ the owner wants, and what this project learned the hard way.
   as evidence and record each decision in an ADR. Governance, truthfulness, privacy and the trust
   claims are unchanged and stay the owner's. The test: an agent never needs an extra call to learn
   what a control accepts or what its action changed, and a mistake costs one call.
+- **In an MCP, the user to delight is the model.** The owner said so on 2026-10-17, while the Linux
+  batch fixed what it found. Judge every MCP-facing behavior, recovery included, by the agent's
+  experience: a request that cannot have taken effect succeeds instead of failing (the edge sends a
+  cut-off listing again, ADR-0197 amendment of 2026-10-17), and a failure says what happened and
+  the next safe step. The person's surfaces (window, CLI, installer) keep "Delight is clarity".
 
 - **Resilience through leniency is a product-wide rule.** Tolerate harmless differences, unknown
   optional information, and unavailable nonessential components. Use safe defaults and bounded
