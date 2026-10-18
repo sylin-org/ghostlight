@@ -63,6 +63,8 @@ struct Collected {
     removed_browsers: Vec<String>,
     /// The agents a real uninstall removed Ghostlight's entry from, by name.
     removed_agents: Vec<String>,
+    /// Whether a real uninstall removed the `ghostlight` command.
+    command_removed: bool,
 }
 
 /// Run installation or uninstallation across detected browsers and MCP clients.
@@ -88,13 +90,16 @@ pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
     }
     let running = if whole {
         stop_running_for_uninstall(&layout)
-    } else {
+    } else if ServiceLock::is_free(&layout.service_lock()) {
         RunningAfterUninstall::Unchanged
+    } else {
+        RunningAfterUninstall::LeftRunning
     };
     let facts = UninstallFacts {
         whole,
         agents: collected.removed_agents,
         browsers: collected.removed_browsers,
+        command_removed: collected.command_removed,
         running,
         home: layout.home().display().to_string(),
     };
@@ -176,10 +181,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         );
         print_native_host_report(&initial_browser_report);
         if !install {
-            for browser in &initial_browser_report.browsers {
-                if browser.state.owned() {
-                    println!("{}", deployment_words::browser_would_remove(&browser.name));
-                }
+            for name in would_remove_browsers(&initial_browser_report, &options.browser_ids) {
+                println!("{}", deployment_words::browser_would_remove(&name));
             }
         }
     } else if install {
@@ -247,6 +250,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
                 .push(PATH_ENTRY_REGISTRATION.to_owned());
         }
         collected.path_written = result.needs_new_terminal;
+        collected.command_removed = !install && result.changed;
     }
 
     let user_assets = UserAssets::discover();
@@ -380,6 +384,22 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         );
     }
     Ok(collected)
+}
+
+/// The browsers a real uninstall would remove Ghostlight's connection from, by name: each one
+/// whose registration is Ghostlight's, among `browser_ids` when the person named any. Inside an
+/// app container a real uninstall is refused, so it would remove none.
+fn would_remove_browsers(report: &NativeHostReport, browser_ids: &[String]) -> Vec<String> {
+    if report.private_view.is_some() {
+        return Vec::new();
+    }
+    report
+        .browsers
+        .iter()
+        .filter(|browser| browser.state.owned())
+        .filter(|browser| browser_ids.is_empty() || browser_ids.contains(&browser.id))
+        .map(|browser| browser.name.clone())
+        .collect()
 }
 
 /// The browsers whose Ghostlight registration was there `before` an uninstall and is gone `after`
@@ -1305,6 +1325,31 @@ mod tests {
         ]);
         assert_eq!(removed_browsers(&before, &after), ["chrome", "edge"]);
         assert!(removed_browsers(&before, &before).is_empty());
+    }
+
+    #[test]
+    fn a_dry_run_names_only_the_browsers_the_uninstall_would_act_on() {
+        use super::would_remove_browsers;
+
+        let with_state = |id: &str, state| BrowserRegistration {
+            state,
+            ..browser(id, BrowserPackage::Native)
+        };
+        let mut report = browser_report(vec![
+            with_state("chrome", NativeHostState::Current),
+            with_state("edge", NativeHostState::OwnedElsewhere),
+            with_state("brave", NativeHostState::NeedsAttention),
+            with_state("chromium", NativeHostState::Missing),
+        ]);
+        assert_eq!(would_remove_browsers(&report, &[]), ["chrome", "edge"]);
+        assert_eq!(
+            would_remove_browsers(&report, &["chrome".to_owned(), "brave".to_owned()]),
+            ["chrome"]
+        );
+        report.private_view = Some(crate::install::container::AppContainer {
+            app: "Claude_pzs8sxrjxfjjc".into(),
+        });
+        assert!(would_remove_browsers(&report, &[]).is_empty());
     }
 
     #[test]

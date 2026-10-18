@@ -270,8 +270,9 @@ installs from inside the container only rewrite the manifest.
 
 `ghostlight uninstall` removes what Ghostlight registered: its entry in each agent, its connection
 to each browser, the `ghostlight` command (the PATH entry on Windows; `~/.local/bin/ghostlight`,
-the manual page and the completions on Linux), and on Windows the Start-menu shortcut and the
-installed-apps entry. It stops the running Ghostlight, then says what it did:
+the manual page and the completions on Linux), the applications-menu entry on Linux, and on
+Windows the Start-menu shortcut and the installed-apps entry. It stops the running Ghostlight,
+then says what it did:
 
 ```text
 Ghostlight is uninstalled.
@@ -283,8 +284,15 @@ Ghostlight in Browser stays in your browser until you remove it from the browser
 ```
 
 `ghostlight uninstall --dry-run` lists what it would remove, the PATH entry among it, and changes
-nothing. `--browser` and `--client` remove Ghostlight from only the browsers or agents you name, and
-leave it running.
+nothing.
+
+`--browser` limits which browsers lose their connection, and `--client` limits which agents lose
+their entry. The kind you do not name is removed everywhere: `ghostlight uninstall --browser chrome`
+removes Chrome's connection and every agent's entry, and `--client zed` removes Zed's entry and
+every browser's connection. `--no-clients` leaves every agent's entry alone. Each of these still
+removes the `ghostlight` command, the documentation, the shortcuts and the installed-apps entry,
+and leaves Ghostlight running. The summary says when the command was removed and when Ghostlight
+is still running.
 
 Uninstall keeps the Ghostlight home, `~/.ghostlight`: the executables, the audit history, your
 policy and your settings. To remove those too, delete the folder after the uninstall finishes:

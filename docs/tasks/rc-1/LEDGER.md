@@ -13,7 +13,7 @@ gate, the in-place deploy and the owner-held items below.
 | Slice | Lane | Status |
 | --- | --- | --- |
 | a1-get-ps1-reads-real-releases | frontdoor | landed (`fix(install): the Windows one-line installer reads a real release's checksums`) |
-| a2-uninstall-says-what-it-leaves | frontdoor | landed (`feat(uninstall): uninstall says what it removed and what it keeps`) |
+| a2-uninstall-says-what-it-leaves | frontdoor | landed (`feat(uninstall): uninstall says what it removed and what it keeps`, `fix(uninstall): a partial uninstall and its dry run say what it really removes`) |
 | a3-private-views-are-named-not-blamed | frontdoor | todo |
 | a4-adaptive-small-promises | frontdoor | todo |
 | b1-no-tab-never-guesses | agent | landed: with several tabs a call that names none is refused and lists them; no per-caller marker exists (ADR-0198, amendment of 2026-10-18) |

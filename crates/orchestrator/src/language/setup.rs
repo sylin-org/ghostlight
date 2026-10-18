@@ -34,7 +34,8 @@
 //!
 //! A real uninstall prints [`uninstall_lines`] the same way: what it removed, whether the running
 //! Ghostlight stopped, and for a whole uninstall the home it kept and the extension the browser
-//! keeps. Beside it print only the lines that need a person: errors, registrations that need
+//! keeps. One that names browsers or agents also says that the command went with it and that
+//! Ghostlight keeps running. Beside it print only the lines that need a person: errors, registrations that need
 //! attention, and `platform_entry_kept`. What it would remove, the `Path` entry among it, prints
 //! only in `--dry-run`.
 
@@ -1027,6 +1028,11 @@ const RUNNING_STOPPED: &str = "The running Ghostlight was stopped.";
 /// What a whole uninstall says when the running Ghostlight did not stop in time.
 const RUNNING_DID_NOT_STOP: &str =
     "The running Ghostlight did not stop in time; quit it from its icon, or sign out.";
+/// What an uninstall that named browsers or agents says when it also removed the command.
+const COMMAND_REMOVED: &str = "The ghostlight command was removed too.";
+/// What an uninstall that named browsers or agents says while Ghostlight still runs.
+const LEFT_RUNNING: &str =
+    "Ghostlight keeps running for the agents and browsers that still have it.";
 /// The last line of a whole uninstall: the extension is the browser's to remove.
 const EXTENSION_STAYS: &str =
     "Ghostlight in Browser stays in your browser until you remove it from the browser's extensions page.";
@@ -1034,8 +1040,10 @@ const EXTENSION_STAYS: &str =
 /// What became of the Ghostlight that was running when an uninstall finished.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunningAfterUninstall {
-    /// Nothing was asked to stop: no Ghostlight ran, or the uninstall removed only part of it.
+    /// No Ghostlight was running.
     Unchanged,
+    /// The uninstall removed only part of Ghostlight and left the running one as it was.
+    LeftRunning,
     /// The running Ghostlight stopped.
     Stopped,
     /// The running Ghostlight was asked to stop and was still running when the wait ended.
@@ -1052,6 +1060,9 @@ pub struct UninstallFacts {
     pub agents: Vec<String>,
     /// The browsers whose connection to Ghostlight was removed, by name.
     pub browsers: Vec<String>,
+    /// Whether the uninstall removed the `ghostlight` command. Only a partial uninstall says so,
+    /// since a whole one removes everything it registered.
+    pub command_removed: bool,
     /// What became of the running Ghostlight.
     pub running: RunningAfterUninstall,
     /// The Ghostlight home the uninstall left in place, as a person types it.
@@ -1085,8 +1096,12 @@ pub fn uninstall_lines(facts: &UninstallFacts) -> Vec<String> {
     if facts.agents.is_empty() && facts.browsers.is_empty() {
         lines.push(NOTHING_REMOVED.to_owned());
     }
+    if !facts.whole && facts.command_removed {
+        lines.push(COMMAND_REMOVED.to_owned());
+    }
     match facts.running {
         RunningAfterUninstall::Unchanged => {}
+        RunningAfterUninstall::LeftRunning => lines.push(LEFT_RUNNING.to_owned()),
         RunningAfterUninstall::Stopped => lines.push(RUNNING_STOPPED.to_owned()),
         RunningAfterUninstall::StillRunning => lines.push(RUNNING_DID_NOT_STOP.to_owned()),
     }
@@ -2036,6 +2051,7 @@ mod tests {
             whole: true,
             agents: agents.iter().map(|&name| name.to_owned()).collect(),
             browsers: browsers.iter().map(|&name| name.to_owned()).collect(),
+            command_removed: true,
             running: RunningAfterUninstall::Stopped,
             home: r"C:\Users\person\.ghostlight".to_owned(),
         }
@@ -2075,9 +2091,10 @@ mod tests {
     }
 
     #[test]
-    fn a_partial_uninstall_names_only_what_it_removed() {
+    fn a_partial_uninstall_names_what_it_removed_and_that_ghostlight_still_runs() {
         let mut facts = uninstall(&["Zed"], &[]);
         facts.whole = false;
+        facts.command_removed = false;
         facts.running = RunningAfterUninstall::Unchanged;
         assert_eq!(
             uninstall_lines(&facts),
@@ -2085,12 +2102,25 @@ mod tests {
         );
         facts.agents = vec!["Zed".to_owned(), "Cursor".to_owned()];
         facts.browsers = vec!["Brave".to_owned()];
+        facts.command_removed = true;
+        facts.running = RunningAfterUninstall::LeftRunning;
         assert_eq!(
             uninstall_lines(&facts),
             [
                 "Removed from agents: Zed and Cursor (restart them to unload Ghostlight's tools).",
                 "Removed from browsers: Brave.",
+                "The ghostlight command was removed too.",
+                "Ghostlight keeps running for the agents and browsers that still have it.",
             ]
+        );
+    }
+
+    #[test]
+    fn a_whole_uninstall_does_not_single_out_the_command() {
+        let lines = uninstall_lines(&uninstall(&["Zed"], &[]));
+        assert!(
+            !lines.iter().any(|line| line.contains("command")),
+            "{lines:?}"
         );
     }
 
@@ -2142,6 +2172,7 @@ mod tests {
         let mut gone = uninstall(&["Alpha"], &["Beta"]);
         for running in [
             RunningAfterUninstall::Unchanged,
+            RunningAfterUninstall::LeftRunning,
             RunningAfterUninstall::Stopped,
             RunningAfterUninstall::StillRunning,
         ] {
