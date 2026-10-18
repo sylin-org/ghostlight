@@ -74,8 +74,17 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   (a call with no tab among several is refused, page refusals say what to do, each connection
   names the app that started it); the window's words, type and widths; the frame and the tray;
   and the extension's popup. The docs lane made the CHANGELOG, the notes, the trust pages and the
-  release steps match. Next: the coordinator's integration gate, the in-place deploy and the
-  checklist below.
+  release steps match. Integrated, deployed in place on the owner's machine and checked live on
+  2026-10-18. The release-candidate rehearsal then passed on 26e48ad0 (run 39173522935, no tag,
+  sign or publish). Its bundle verifies with `scripts/check-release-candidate.ps1` (version
+  2.0.0, 16 artifacts), and `winget validate` accepts its manifest.
+- **request-1** ([LEDGER](tasks/request-1/LEDGER.md)): opened and closed 2026-10-18.
+  [ADR-0202](adr/0202-what-a-request-carries.md), what a request carries. Every request now
+  carries one id from intake to audit, its observed source and declared channel, and its own
+  findings. The channel switches are back in policy. Deployed and checked live.
+- **ux-2** ([LEDGER](tasks/ux-2/LEDGER.md)): opened 2026-10-18. The designer and the specialist
+  walked the deployed build again; 25 of 49 items were confirmed. This batch carries the rest and
+  what the walk found, under the owner's rule that teal means live. It lands before rc.1.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
@@ -105,12 +114,9 @@ installation guide lines that say WinGet carries 2.0. Not before approval.
 
 ## CI
 
-The last green run is 39143571465 on `dev` e3e861b7 (2026-10-18): all 11 jobs, including the Rust,
+The last green run is 39173115353 on `dev` 26e48ad0 (2026-10-18): every job, including the Rust,
 extension and page-asset gates, supply chain, and every process and real-browser journey on Linux
-and Windows. The next run, 39144699322 on 1463b43d, failed in the Windows process journeys: the
-desktop journey ended the MCP edge's session before the service it starts was up. a7af2a78 fixes the
-journey, not the product. The rc-1 commits after it are checked by their lane gates; CI runs when
-the owner pushes.
+and Windows.
 
 ## Release checklist
 
@@ -119,16 +125,14 @@ the owner. The ledgers keep the detail; this is what still gates the release.
 
 Before rc.1:
 
-- Coordinator: the rc-1 integration gate, the in-place deploy on the owner's machine, and a green
-  CI run on the pushed head.
-- Coordinator: a rehearsal of the "Build release candidate" workflow on that head (no tag, sign or
-  publish), then `scripts/check-release-candidate.ps1`, `winget validate` and one MCPB install in
-  Claude Desktop from that unit.
+- Coordinator: ux-2, then its in-place deploy on the owner's machine and a green CI run on the
+  pushed head.
+- Coordinator: one MCPB install in Claude Desktop from the rehearsed unit, on a clean Windows test
+  machine. The rehearsal, the candidate check and `winget validate` passed on 26e48ad0.
 - Coordinator: a Windows Chrome and Edge check of the extension: a session end with preserve-tabs
   on, a reuse, and the popup states.
 - Owner: JQ3, keep or drop the extension's host permissions, recorded as a decision.
 - Owner: the installer's wait times (90 s and 120 s), one timed cold run or "keep" recorded.
-- Owner: patch `main`'s 1.x `scripts/get.ps1` (rc-1 LEDGER, held for the owner).
 - Owner: the `v2.0.0-rc.1` tag and prerelease, with `docs/release/notes-v2.0.0-rc.1.md`.
 
 Between rc.1 and the cutover:
