@@ -13,7 +13,7 @@
 
   const {
     VIEWS, SETTINGS_SECTIONS, DEFAULT_SECTION, addressOf, GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
-    DESTINATIONS, glyphFor, capabilityClass,
+    DESTINATIONS, glyphFor, capabilityClass, capabilityWord, capabilityLabel, capabilitiesSaid, stepsUsed,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES, SETTINGS,
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
@@ -423,7 +423,14 @@
       if (entry.agent) meta.push(agentMarkup("span", "hero-agent", entry));
       const browser = browserFor(entry);
       if (browser) meta.push(`<span><i></i>${escapeHtml(browser)}</span>`);
-      if (entry.capability && !entry.steps?.length) meta.push(`<span><i></i>${escapeHtml(entry.capability)} authority</span>`);
+      // A composition used what its steps used: said once, in a person's words, beside each step's own.
+      const label = capabilityLabel(entry);
+      if (entry.steps?.length) {
+        const steps = stepsUsed(entry);
+        if (steps) meta.push(`<span><i></i>${escapeHtml(steps)}</span>`);
+      } else if (label) {
+        meta.push(`<span><i></i>${escapeHtml(label)} authority</span>`);
+      }
       if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
       if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);
       if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
@@ -433,7 +440,8 @@
         ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>${refusalMarkup(entry)}`
         : "";
 
-      return `<div class="hero-tool" title="${escapeHtml(entry.tool ?? "")}">${escapeHtml(toolWords(entry.tool))}<span class="cap-label">${escapeHtml(entry.steps?.length ? "per step" : entry.capability ?? "read")}</span></div>`
+      return `<div class="hero-tool" title="${escapeHtml(entry.tool ?? "")}">${escapeHtml(toolWords(entry.tool))}`
+        + (label ? `<span class="cap-label">${escapeHtml(label)}</span>` : "") + "</div>"
         + `<p class="hero-activity">${escapeHtml(sentence(entry))}</p>`
         + reason
         + compositionMarkup(entry)
@@ -577,13 +585,21 @@
       const said = word
         ? `${isFailed(entry) ? OUTCOME_GLYPH : ""}${escapeHtml(word)} ${escapeHtml(time)}`
         : escapeHtml(time);
+      // The list names one capability, the most consequential, in its own column, or under the tool
+      // where there is no room for the column. A screen reader hears the whole set on the button.
+      const capability = escapeHtml(capabilityWord(entry));
+      const heard = capabilitiesSaid(entry);
       return `<div class="med-mini" aria-hidden="true">${glyphFor(entry)}</div>`
-        + `<button class="row-tool" type="button" title="${escapeHtml(entry.tool ?? "")}" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(toolWords(entry.tool))}</button>`
+        + `<button class="row-tool" type="button" title="${escapeHtml(entry.tool ?? "")}" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">`
+        + `<span class="row-tool-name">${escapeHtml(toolWords(entry.tool))}</span>`
+        + (capability ? `<span class="row-tool-cap" aria-hidden="true">${capability}</span>` : "")
+        + (heard ? `<span class="sr-only">, ${escapeHtml(heard)}</span>` : "")
+        + "</button>"
         + intakeMarkup(entry)
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
         + agentMarkup("div", "row-client", entry)
         + `<div class="row-browser">${escapeHtml(browserFor(entry))}</div>`
-        + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
+        + `<div class="row-cap" aria-hidden="true">${capability}</div>`
         + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${said}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
         + `<div class="row-history action-details" id="${escapeHtml(detailsId)}"${open ? "" : " hidden"}>${heroMarkup(entry)}</div>`;

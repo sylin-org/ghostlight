@@ -188,6 +188,9 @@
     density: "Density",
     comfortable: "Comfortable",
     compact: "Compact",
+    textSize: "Text size",
+    standardText: "Standard",
+    largeText: "Large",
     motion: "Motion",
     followSystem: "Follow the system",
     reduced: "Reduced",
@@ -209,10 +212,11 @@
   });
 
   /** How the personal settings read together, as the rail's state word for This screen. */
-  function screenState(density, motion) {
+  function screenState(density, text, motion) {
     const dense = density === "compact" ? SETTINGS.compact : SETTINGS.comfortable;
+    const size = text === "large" ? "large text" : "standard text";
     const moving = motion === "reduced" ? "motion reduced" : "motion follows the system";
-    return `${dense}, ${moving}`;
+    return `${dense}, ${size}, ${moving}`;
   }
 
   /** How a count of bytes reads in Settings. */
@@ -944,14 +948,44 @@
 
   const glyphFor = entry =>
     GLYPHS[ACTIVITY_GLYPH[entry.activity] ?? TOOL_GLYPH[entry.tool] ?? "scan"];
-  const capabilityClass = entry => {
-    const facts = String(entry.capability ?? "").split(" + ");
-    // Consequence colour only. RAWX remains an independent set in authority and audit.
-    for (const capability of ["execute", "write", "action", "read"]) {
-      if (facts.includes(capability)) return CAPABILITY_CLASS[capability];
-    }
-    return "cap-read";
-  };
+  /** How the service joins a set of capabilities into one label, as in "read + action". */
+  const CAPABILITY_JOIN = " + ";
+
+  /**
+   * The capabilities an action used, in canonical order. A composition such as a flow carries
+   * none of its own, so it uses what its steps used. A label that names no capability, such as
+   * the service's "local" for an empty set, adds nothing.
+   */
+  function capabilitiesOf(entry) {
+    const labels = [entry?.capability, ...(entry?.steps ?? []).map((step) => step.record?.capability)];
+    const used = new Set(labels.flatMap((label) => String(label ?? "").split(CAPABILITY_JOIN)));
+    return CAPABILITY_ORDER.filter((capability) => used.has(capability));
+  }
+
+  /**
+   * The one capability the activity list names for an action: the most consequential it used, or
+   * "" when it used none. Consequence only: the full set stays in the detail card, in authority and
+   * in audit.
+   */
+  const capabilityWord = entry => capabilitiesOf(entry).at(-1) ?? "";
+
+  /** The class that colours an action's edge and word by its most consequential capability. */
+  const capabilityClass = entry => CAPABILITY_CLASS[capabilityWord(entry)] ?? CAPABILITY_CLASS.read;
+
+  /** An action's capabilities as the detail card shows them, as in "read + action". */
+  const capabilityLabel = entry => capabilitiesOf(entry).join(CAPABILITY_JOIN);
+
+  /** An action's capabilities as a screen reader hears them on its row, as in "read and action". */
+  function capabilitiesSaid(entry) {
+    const used = capabilitiesOf(entry);
+    return used.length < 2 ? used.join("") : `${used.slice(0, -1).join(", ")} and ${used.at(-1)}`;
+  }
+
+  /** What a composition's steps used, in a person's words, as in "Steps: look at pages, click and type". */
+  function stepsUsed(entry) {
+    const used = capabilitiesOf(entry);
+    return used.length ? `Steps: ${used.map((capability) => CAPABILITY_WORDS[capability]).join(", ")}` : "";
+  }
 
   /** What the audit can honestly say happened to the page, with no payload to draw on. */
   const EFFECT_STORY = {
@@ -1025,7 +1059,8 @@
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
-    DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
+    DESTINATIONS, glyphFor, capabilitiesOf, capabilityWord, capabilityClass, capabilityLabel, capabilitiesSaid, stepsUsed,
+    CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES,
     validHostPattern, hostReadback, patternCovers,

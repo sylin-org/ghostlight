@@ -85,7 +85,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { width: 100%; min-width: 720px; height: 100%; margin: 0; overflow: hidden; }
+html, body { width: 100%; min-width: 600px; height: 100%; margin: 0; overflow: hidden; }
 body {
   color: var(--ink-2);
   background: var(--bg);
@@ -101,13 +101,20 @@ svg { display: block; }
 h1, h2, h3 { margin: 0; font-weight: 400; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-.app-shell { display: grid; width: 100%; height: 100%; min-height: 0; overflow: hidden; grid-template-rows: var(--band) minmax(0, 1fr); }
+/*
+ * The shell is the container every width rule asks, never the viewport: Large text draws the shell
+ * larger, so the room the page really has is the shell's own width, not the window's.
+ */
+.app-shell {
+  display: grid; width: 100%; height: 100%; min-height: 0; overflow: hidden; grid-template-rows: auto minmax(0, 1fr);
+  container: shell / inline-size;
+}
 
 /* ---------------------------- the lamp band ---------------------------- */
 .lampband {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center; gap: 18px;
-  padding: 0 16px;
+  min-height: var(--band); padding: 0 16px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, .014), transparent);
 }
@@ -133,7 +140,7 @@ body.runtime-offline .lamp-halo { opacity: .12; background: radial-gradient(circ
 body.runtime-attention .lamp-core { background: #f87171; box-shadow: 0 0 12px rgba(248, 113, 113, .6); }
 body.runtime-offline .lamp-core { background: var(--faint); box-shadow: none; }
 
-.state { display: flex; min-width: 0; align-items: baseline; gap: 12px; }
+.state { display: flex; min-width: 0; align-items: baseline; gap: 12px; overflow: hidden; }
 .state-word { flex: none; color: var(--ink); font-size: 15px; font-weight: 300; letter-spacing: -.01em; }
 body.runtime-working .state-word { color: var(--a); }
 body.runtime-held .state-word { color: var(--held); }
@@ -196,7 +203,7 @@ body.runtime-offline .state-word { color: var(--ink-4); }
 .kicker, .queue-head, .agents-group-head, .about-group h2, .about-facts dt {
   color: var(--ink-4); font: 500 11.5px/1.4 var(--sans); letter-spacing: .18em; text-transform: uppercase;
 }
-.cap-label, .outcome, .row-cap, .agent-state, .severity, .hit-kind, .cap-state, .rule-owner, .rule-edit-hint, .rule-detail dt {
+.cap-label, .outcome, .row-cap, .row-tool-cap, .agent-state, .severity, .hit-kind, .cap-state, .rule-owner, .rule-edit-hint, .rule-detail dt {
   color: var(--ink-4); font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
 }
 /* One page title on every destination. */
@@ -377,8 +384,12 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 }
 .row:hover { background: rgba(255, 255, 255, .022); }
 .row.blocked { border-left-color: var(--danger); }
-.row-tool { overflow: hidden; padding: 0; color: var(--ink-2); font-size: 12.5px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-.row-tool:hover, .row-tool[aria-expanded="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.row-tool { min-width: 0; padding: 0; color: var(--ink-2); font-size: 12.5px; text-align: left; }
+.row-tool-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-tool:hover, .row-tool[aria-expanded="true"] { color: var(--ink); }
+.row-tool:hover .row-tool-name, .row-tool[aria-expanded="true"] .row-tool-name { text-decoration: underline; text-underline-offset: 3px; }
+/* The capability under the tool's name, where the row has no column for it. */
+.row-tool-cap { display: none; margin-top: 2px; }
 .action-details { padding: 16px; margin-block: 8px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .025); }
 /* The intake that drove the action, marked only when it is the command line. Neutral on purpose:
    capability is the coloured chip, and two competing colours in one row would say neither. */
@@ -388,7 +399,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .row.blocked .row-activity { color: var(--danger-soft); }
 .row-client { overflow: hidden; color: var(--ink-4); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .row-browser { overflow: hidden; color: var(--ink-4); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.row-cap { color: var(--cap-ink, var(--ink-3)); }
+.row-cap, .row-tool-cap { color: var(--cap-ink, var(--ink-3)); white-space: nowrap; }
 .row-dur { overflow: hidden; color: var(--ink-4); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 /* The word says what happened; the colour only helps the eye find it. */
 .row.failed .row-dur { color: var(--danger-soft); }
@@ -647,8 +658,14 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
   .agent-steps li > button { grid-column: 2; justify-self: start; }
   .agent-live .link-button { margin-left: 0; }
 }
-@media (max-width: 960px) {
+@container shell (max-width: 960px) {
   .agents { grid-template-columns: 222px minmax(0, 1fr); gap: 12px; }
+}
+/* Narrowest: the headline keeps the width, and its actions sit under it. */
+@container shell (max-width: 660px) {
+  .agents-heading { flex-direction: column; align-items: stretch; }
+  .agents-heading-side { width: auto; align-items: flex-start; }
+  .agents-command, .page-heading .agents-caption { text-align: left; }
 }
 
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 10px; }
@@ -710,21 +727,34 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 
 :focus-visible { outline: 2px solid rgba(var(--argb), .7); outline-offset: 2px; border-radius: 4px; }
 
-/* Narrow: the capability already reads as the left edge, and the age matters least. */
-@media (max-width: 1040px) {
-  .row { grid-template-columns: 24px 156px 34px minmax(0, 1fr) 116px 92px; }
-  .row-cap, .row-browser, .row-when { display: none; }
+/* Narrow: the browser and the agent give way first. The capability word and the age keep their
+   columns, since the edge's colour alone does not say which capability it is. */
+@container shell (max-width: 1040px) {
+  .row { grid-template-columns: 24px 156px 34px minmax(0, 1fr) 62px 92px 46px; }
+  .row-client, .row-browser { display: none; }
 }
 
-/* Narrowest: the intake goes last, after the client. Which tool ran and what it did outrank who
-   drove it once there is no room for both. */
-@media (max-width: 820px) {
-  .lampband { gap: 10px; padding-inline: 10px; }
+/* The band's facts repeat At a glance, so they give way before the state word would truncate. */
+@container shell (max-width: 1000px) {
   .state-facts { display: none; }
+}
+
+/* The tabs take a line of their own under the state and the wheel, so neither crowds the other. */
+@container shell (max-width: 900px) {
+  .lampband { grid-template-rows: 48px auto; row-gap: 0; padding-bottom: 8px; }
+  .tabs { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; }
+}
+
+/* Narrowest: which tool ran and what it did outrank who drove it, the intake and the age. The
+   capability word moves under the tool's name. */
+@container shell (max-width: 820px) {
+  .lampband { column-gap: 10px; padding-inline: 10px; }
   .tab { padding-inline: 9px; }
   .hero { grid-template-columns: 54px minmax(0, 1fr) auto; gap: 14px; }
   .row { grid-template-columns: 24px 140px minmax(0, 1fr) 92px; }
-  .row-client, .row-channel { display: none; }
+  .row-channel, .row-cap, .row-when { display: none; }
+  .row-tool { line-height: 1.3; }
+  .row-tool-cap { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1067,7 +1097,7 @@ details[open] > .disclosure svg { transform: rotate(180deg); }
 .permission-details ul { padding-left: 20px; }
 .permission-details li p { margin: 3px 0 8px; overflow-wrap: anywhere; }
 .history-step > .permission-details, .history-step > .connection-details { margin-left: 32px; }
-@media (max-width: 820px) { .row-history { grid-column: 1 / -1; } .step-line { grid-template-columns: 20px minmax(0, 1fr); } .step-status { grid-column: 2; } }
+@container shell (max-width: 820px) { .row-history { grid-column: 1 / -1; } .step-line { grid-template-columns: 20px minmax(0, 1fr); } .step-status { grid-column: 2; } }
 
 /* ---------------- what this screen may do, and what it may not ---------------- */
 /* The chip beside the state word says who can see this view. It wears the quiet chip as it is. */
@@ -1084,7 +1114,7 @@ details[open] > .disclosure svg { transform: rotate(180deg); }
 .view.closed > :not(.closed-line) { display: none !important; }
 /* A link that looks like the buttons beside it. */
 a.ghost-button { text-decoration: none; }
-@media (max-width: 820px) { .wheel-state small, .band-continue span { display: none; } }
+@container shell (max-width: 820px) { .wheel-state small, .band-continue span { display: none; } }
 
 /* Windows High Contrast swaps every colour for the system's, so the washes and tints that tell the
    band's state, and the tab you are on, vanish. Borders stay visible and the selected tab takes the

@@ -26,6 +26,7 @@
   /** The personal settings: the values each may take, the first being the default, and the body class each value wears. */
   const PERSONAL = Object.freeze({
     density: Object.freeze({ values: Object.freeze(["comfortable", "compact"]), classes: Object.freeze({ compact: "density-compact" }) }),
+    text: Object.freeze({ values: Object.freeze(["standard", "large"]), classes: Object.freeze({ large: "text-large" }) }),
     motion: Object.freeze({ values: Object.freeze(["system", "reduced"]), classes: Object.freeze({ reduced: "motion-reduced" }) })
   });
 
@@ -128,7 +129,7 @@
         button.setAttribute("aria-pressed", String(chosen));
         button.classList?.toggle("chosen", chosen);
       }
-      drawRailState("screen", words.screenState?.(personal.density, personal.motion) ?? "");
+      drawRailState("screen", words.screenState?.(personal.density, personal.text, personal.motion) ?? "");
     }
 
     function choose(name, value) {

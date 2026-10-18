@@ -1,11 +1,12 @@
 /* ==========================================================================
    Ghostlight web apps -- the shared kit.
 
-   Settings: the rail of sections, the section beside it, its rows, and the two
+   Settings: the rail of sections, the section beside it, its rows, and the
    personal settings a screen keeps for itself. Colours, curves and spacing come
    from the page's own custom properties, so every Ghostlight app that loads
-   this sheet wears its own ground. Nothing here carries a sentence: the words
-   are the page's and the service's.
+   this sheet wears its own ground, and widths are asked of the page's `shell`
+   container. Nothing here carries a sentence: the words are the page's and the
+   service's.
    ========================================================================== */
 
 /* ------------------------------ the page -------------------------------- */
@@ -75,17 +76,22 @@
 .density-compact .connections { margin-bottom: 8px; }
 .density-compact .settings-row { min-height: 36px; padding: 5px 0; }
 
+/* Large text draws the shell, the setup view and what floats above them larger. Every width rule
+   asks the shell, so the layout follows the room that is left. */
+.text-large .app-shell, .text-large #setup-root, .text-large .palette-backdrop, .text-large .notices,
+.text-large .dialog-backdrop { zoom: 1.15; }
+
 /* Reduced motion stops what moves, whatever the system asks for. */
 .motion-reduced *, .motion-reduced *::before, .motion-reduced *::after { animation: none !important; transition-duration: .001ms !important; }
 
 /* Below this width the rail stacks above the section and its entries wrap. */
-@media (max-width: 880px) {
+@container shell (max-width: 880px) {
   .settings { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .settings-rail { flex-direction: row; flex-wrap: wrap; }
   .rail-entry { flex: 1 1 150px; width: auto; }
 }
 
-@media (max-width: 820px) {
+@container shell (max-width: 820px) {
   .settings-row { grid-template-columns: 96px minmax(0, 1fr); }
   .settings-acts { grid-column: 1 / -1; justify-content: flex-start; }
 }

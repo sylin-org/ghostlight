@@ -79,7 +79,7 @@ class Element {
     this.style = { setProperty() {} };
     this.classes = new Set(String(attributes.class ?? "").split(/\s+/).filter(Boolean));
     for (const [name, value] of Object.entries(attributes)) {
-      if (["aria-current", "aria-expanded", "open", "src", "title"].includes(name)) this.attributes[name] = value;
+      if (["aria-current", "aria-expanded", "aria-hidden", "open", "src", "title"].includes(name)) this.attributes[name] = value;
       if (!name.startsWith("data-")) continue;
       this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
     }
@@ -309,8 +309,8 @@ const said = (shown, id) => shown.el(id).textContent;
 /* ------------------------------- stylesheet rules ------------------------------ */
 
 /**
- * The rules of a stylesheet, each with the media condition it sits under (null at the top level),
- * its selectors and its declarations by property. Comments are dropped.
+ * The rules of a stylesheet, each with the media or container condition it sits under (null at the
+ * top level), its selectors and its declarations by property. Comments are dropped.
  */
 function rulesOf(sheet) {
   const rules = [];
@@ -327,8 +327,9 @@ function rulesOf(sheet) {
         if (text[close] === "}") depth -= 1;
       }
       const body = text.slice(open + 1, close - 1);
-      if (prelude.startsWith("@media")) {
-        walk(body, prelude.slice("@media".length).trim());
+      const condition = /^@(media|container)\s/.exec(prelude);
+      if (condition) {
+        walk(body, prelude.slice(condition[0].length).trim());
       } else if (!prelude.startsWith("@")) {
         const declarations = {};
         for (const line of body.split(";")) {
@@ -349,8 +350,12 @@ const RULES = rulesOf(styles);
 /** The rules that name `selector` exactly. */
 const naming = (selector, rules = RULES) => rules.filter((rule) => rule.selectors.includes(selector));
 
-/** The widest width a media condition applies up to, or null when it is not a width at all. */
-const widthOf = (media) => Number(/^\(max-width: (\d+)px\)$/.exec(media ?? "")?.[1] ?? NaN) || null;
+/**
+ * The widest width of the window's `shell` container a condition applies up to, or null when it is
+ * not a shell width at all. Every width rule asks the shell, so Large text moves the layout with the
+ * room the shell has.
+ */
+const widthOf = (media) => Number(/^shell \(max-width: (\d+)px\)$/.exec(media ?? "")?.[1] ?? NaN) || null;
 
 /** The rules that apply at `width`: the top level, and every width query that reaches down to it. */
 const applyingAt = (width) => RULES.filter((rule) => rule.media === null
@@ -520,7 +525,7 @@ test("a page that cannot be addressed still navigates", () => {
 test("each rail entry shows the state of its section, in the service's words", () => {
   const shown = kit();
   shown.settings.render(part({ runtime: "held" }));
-  assert.equal(said(shown, "rail-screen-state"), "Comfortable, motion follows the system");
+  assert.equal(said(shown, "rail-screen-state"), "Comfortable, standard text, motion follows the system");
   assert.equal(said(shown, "rail-sharing-state"), "On -- anyone on this computer can open this view");
   assert.equal(said(shown, "rail-browser-work-state"), "Paused");
   assert.equal(said(shown, "rail-notifications-state"), "Send one local checkup notification.");
@@ -538,10 +543,12 @@ test("the rail's word for This screen follows the personal settings", () => {
   const choice = (name, value) => shown.document.querySelectorAll("[data-personal]")
     .find((button) => button.dataset.personal === name && button.dataset.value === value);
   shown.click(choice("density", "compact"));
-  assert.equal(said(shown, "rail-screen-state"), "Compact, motion follows the system");
+  assert.equal(said(shown, "rail-screen-state"), "Compact, standard text, motion follows the system");
   shown.click(choice("motion", "reduced"));
-  assert.equal(said(shown, "rail-screen-state"), "Compact, motion reduced");
-  assert.equal(Words.screenState("comfortable", "reduced"), "Comfortable, motion reduced");
+  assert.equal(said(shown, "rail-screen-state"), "Compact, standard text, motion reduced");
+  shown.click(choice("text", "large"));
+  assert.equal(said(shown, "rail-screen-state"), "Compact, large text, motion reduced");
+  assert.equal(Words.screenState("comfortable", "standard", "reduced"), "Comfortable, standard text, motion reduced");
 });
 
 test("the sections say what the part says, in the service's words", () => {
@@ -735,7 +742,7 @@ test("in Watch This screen works, and nothing it does is sent anywhere", () => {
     .find((button) => button.dataset.personal === "density" && button.dataset.value === "compact");
   shown.click(compact);
   assert.equal(shown.body.classes.has("density-compact"), true);
-  assert.equal(said(shown, "rail-screen-state"), "Compact, motion follows the system");
+  assert.equal(said(shown, "rail-screen-state"), "Compact, standard text, motion follows the system");
   assert.deepEqual(shown.calls, []);
 });
 
@@ -753,7 +760,7 @@ test("with watching off This screen works and every other section says so in one
     assert.equal(said(shown, `rail-${section}-state`), "", section);
   }
   assert.equal(shown.el("settings-quit").hidden, true);
-  assert.equal(said(shown, "rail-screen-state"), "Comfortable, motion follows the system");
+  assert.equal(said(shown, "rail-screen-state"), "Comfortable, standard text, motion follows the system");
 
   const compact = shown.document.querySelectorAll("[data-personal]")
     .find((button) => button.dataset.personal === "density" && button.dataset.value === "compact");
@@ -885,10 +892,10 @@ const chosen = (shown, name) => shown.document.querySelectorAll("[data-personal]
   .filter((button) => button.dataset.personal === name && button.attributes["aria-pressed"] === "true")
   .map((button) => button.dataset.value);
 
-test("density and motion are kept in the browser and dress the page again after a reload", () => {
+test("density, text size and motion are kept in the browser and dress the page again after a reload", () => {
   const storage = memory();
   const first = kit({ storage });
-  assert.deepEqual(first.settings.personal(), { density: "comfortable", motion: "system" });
+  assert.deepEqual(first.settings.personal(), { density: "comfortable", text: "standard", motion: "system" });
   assert.deepEqual(chosen(first, "density"), ["comfortable"]);
   assert.equal(first.body.classes.has("density-compact"), false);
 
@@ -896,20 +903,27 @@ test("density and motion are kept in the browser and dress the page again after 
     .find((button) => button.dataset.personal === "density" && button.dataset.value === "compact");
   const reduced = first.document.querySelectorAll("[data-personal]")
     .find((button) => button.dataset.personal === "motion" && button.dataset.value === "reduced");
+  const large = first.document.querySelectorAll("[data-personal]")
+    .find((button) => button.dataset.personal === "text" && button.dataset.value === "large");
   first.settings.render(part());
+  assert.equal(first.body.classes.has("text-large"), false);
   first.click(compact);
+  first.click(large);
   first.click(reduced);
   assert.equal(first.body.classes.has("density-compact"), true);
+  assert.equal(first.body.classes.has("text-large"), true);
   assert.equal(first.body.classes.has("motion-reduced"), true);
   assert.deepEqual(chosen(first, "density"), ["compact"]);
-  assert.deepEqual(JSON.parse(storage.kept[Settings.STORAGE_KEY]), { density: "compact", motion: "reduced" });
+  assert.deepEqual(chosen(first, "text"), ["large"]);
+  assert.deepEqual(JSON.parse(storage.kept[Settings.STORAGE_KEY]), { density: "compact", text: "large", motion: "reduced" });
   assert.deepEqual(first.calls, [], "a personal setting is never sent anywhere");
 
   const reloaded = kit({ storage });
-  assert.deepEqual(reloaded.settings.personal(), { density: "compact", motion: "reduced" });
+  assert.deepEqual(reloaded.settings.personal(), { density: "compact", text: "large", motion: "reduced" });
   assert.equal(reloaded.body.classes.has("density-compact"), true);
+  assert.equal(reloaded.body.classes.has("text-large"), true);
   assert.equal(reloaded.body.classes.has("motion-reduced"), true);
-  assert.equal(said(reloaded, "rail-screen-state"), "Compact, motion reduced");
+  assert.equal(said(reloaded, "rail-screen-state"), "Compact, large text, motion reduced");
 
   const comfortable = first.document.querySelectorAll("[data-personal]")
     .find((button) => button.dataset.personal === "density" && button.dataset.value === "comfortable");
@@ -925,18 +939,18 @@ test("a browser that keeps nothing, or keeps rubbish, still draws Settings with 
   const blocked = kit({ storage: broken });
   blocked.settings.render(part());
   assert.equal(said(blocked, "controls-viewing-label"), "Others can watch");
-  assert.deepEqual(blocked.settings.personal(), { density: "comfortable", motion: "system" });
+  assert.deepEqual(blocked.settings.personal(), { density: "comfortable", text: "standard", motion: "system" });
   const compact = blocked.document.querySelectorAll("[data-personal]")
     .find((button) => button.dataset.value === "compact");
   blocked.click(compact);
   assert.equal(blocked.body.classes.has("density-compact"), true, "the choice still applies to this screen");
 
-  for (const kept of ["not json", '{"density":"huge","motion":3}', "null", "[]"]) {
+  for (const kept of ["not json", '{"density":"huge","text":"huge","motion":3}', "null", "[]"]) {
     const rubbish = kit({ storage: memory({ [Settings.STORAGE_KEY]: kept }) });
-    assert.deepEqual(rubbish.settings.personal(), { density: "comfortable", motion: "system" }, kept);
+    assert.deepEqual(rubbish.settings.personal(), { density: "comfortable", text: "standard", motion: "system" }, kept);
   }
   const none = kit({ storage: null });
-  assert.deepEqual(none.settings.personal(), { density: "comfortable", motion: "system" });
+  assert.deepEqual(none.settings.personal(), { density: "comfortable", text: "standard", motion: "system" });
 });
 
 test("the storage key of the personal settings is the one the reload test reads", () => {
@@ -1837,11 +1851,61 @@ test("a tool reads without the shared browser_ prefix, in words, and a tool with
 
 test("a row names its tool in words, the exact name on hover and among the detail card's facts", () => {
   const { cell, cells } = rowOf(settledRead({ invocation: "fill-1", tool: "browser_fill_form", capability: "write" }));
-  assert.equal(cell("row-tool").textContent, "fill form");
+  assert.equal(cell("row-tool-name").textContent, "fill form");
   assert.equal(cell("row-tool").attributes.title, "browser_fill_form");
   const meta = cells.wearing("hero-meta")[0];
   assert.ok(meta.textContent.includes("browser_fill_form"), meta.textContent);
   assert.equal(cells.wearing("hero-tool")[0].attributes.title, "browser_fill_form");
+});
+
+test("a row names one capability, the most consequential, and a screen reader hears the whole set", () => {
+  const { cell, cells } = rowOf(settledRead({ invocation: "fill-2", tool: "browser_fill_form", capability: "read + write" }));
+  assert.equal(cell("row-cap").textContent, "write");
+  assert.equal(cell("row-tool-cap").textContent, "write", "the word under the tool, for the narrowest row");
+  for (const shown of [cell("row-cap"), cell("row-tool-cap")]) assert.equal(shown.attributes["aria-hidden"], "true");
+  const heard = cell("row-tool").children.filter((node) => node.classes.has("sr-only"));
+  assert.deepEqual(heard.map((node) => node.textContent), [", read and write"]);
+  assert.equal(cells.wearing("cap-label")[0].textContent, "read + write", "the detail card shows the whole set");
+  assert.ok(cells.wearing("hero-meta")[0].textContent.includes("read + write authority"));
+
+  for (const [capability, word, said] of [["read", "read", "read"], ["read + action", "action", "read and action"],
+    ["read + action + execute", "execute", "read, action and execute"]]) {
+    const entry = { capability };
+    assert.equal(Words.capabilityWord(entry), word, capability);
+    assert.equal(Words.capabilityClass(entry), `cap-${word}`, capability);
+    assert.equal(Words.capabilitiesSaid(entry), said, capability);
+  }
+});
+
+/** A flow that clicked, typed and filled a form, with a fourth step it never ran. */
+function flowRecord() {
+  const step = (position, tool, capability) => ({
+    position, tool, state: "recorded", record: settledRead({ invocation: "flow-1", tool, capability })
+  });
+  return settledRead({
+    invocation: "flow-1", tool: "browser_flow", capability: "local", summary: "Completed 3 of 4 steps.",
+    steps: [step(1, "browser_click", "read + action"), step(2, "browser_type_text", "read + action"),
+      step(3, "browser_fill_form", "read + write"), { position: 4, tool: "browser_read", state: "not_run", record: null }]
+  });
+}
+
+test("a flow takes the most consequential capability its steps used, and never says local", () => {
+  const entry = Entries.entryFromRecord(flowRecord(), null);
+  assert.deepEqual(Words.capabilitiesOf(entry), ["read", "action", "write"]);
+  assert.equal(Words.capabilityClass(entry), "cap-write", "the edge is the write colour, not the read grey");
+  const { cell, cells, text } = rowOf(flowRecord());
+  assert.equal(cell("row-cap").textContent, "write");
+  assert.equal(cells.wearing("cap-label")[0].textContent, "read + action + write");
+  assert.ok(cells.wearing("hero-meta")[0].textContent.includes("Steps: look at pages, click and type, fill in forms"));
+  assert.deepEqual(cells.wearing("step-meta").map((node) => node.textContent.split(";")[0]),
+    ["read + action", "read + action", "read + write"], "each step keeps its own label");
+  assert.doesNotMatch(text, /\blocal\b|per step/i);
+
+  // A flow still running has no step receipts yet: it names no capability rather than a place.
+  const running = { capability: "local", steps: [] };
+  assert.equal(Words.capabilityWord(running), "");
+  assert.equal(Words.capabilityLabel(running), "");
+  assert.equal(Words.capabilityClass(running), "cap-read");
 });
 
 test("an action the service names no agent for says Unknown agent, its workspace id only on hover", () => {
@@ -1989,6 +2053,62 @@ test("every cell of a row has a column at every width, and the details span the 
       `at ${width}px the row declares ${grid.declarations["grid-template-columns"]} for ${showing.length} cells`);
     const span = naming(".row-history", rules).map((rule) => rule.declarations["grid-column"]).filter(Boolean).at(-1);
     assert.match(span, /\/ -1$/, `at ${width}px the details do not span to the row's end`);
+  }
+});
+
+/** The display the last rule naming `selector` sets at a shell `width`, or "" when none sets one. */
+const displayAt = (width, selector) =>
+  naming(selector, applyingAt(width)).map((rule) => rule.declarations.display).filter(Boolean).at(-1) ?? "";
+
+test("the capability word keeps a column until the row is narrowest, then sits under the tool", () => {
+  assert.ok(naming(".row-cap").some((rule) => rule.declarations["white-space"] === "nowrap"), "one word never wraps");
+  for (const cell of [".row-cap", ".row-client", ".row-browser", ".row-when"]) assert.notEqual(displayAt(Infinity, cell), "none", cell);
+  assert.equal(displayAt(Infinity, ".row-tool-cap"), "none");
+  // A half-snapped window: the browser and the agent give way first.
+  for (const cell of [".row-client", ".row-browser"]) assert.equal(displayAt(1040, cell), "none", cell);
+  for (const width of [1040, 821]) {
+    assert.notEqual(displayAt(width, ".row-cap"), "none", `the capability is hidden at ${width}px`);
+    assert.equal(displayAt(width, ".row-tool-cap"), "none", `the capability shows twice at ${width}px`);
+  }
+  for (const width of [820, 720, 600]) {
+    assert.equal(displayAt(width, ".row-cap"), "none", `${width}px`);
+    assert.equal(displayAt(width, ".row-tool-cap"), "block", `the capability is gone at ${width}px`);
+  }
+});
+
+test("at 600px the narrowest row leaves the activity room to read", () => {
+  const columns = naming(".row", applyingAt(600)).map((rule) => rule.declarations["grid-template-columns"]).filter(Boolean).at(-1);
+  const fixed = [...columns.matchAll(/(?:^|\s)(\d+)px/g)].reduce((sum, [, px]) => sum + Number(px), 0);
+  const gaps = (tracksIn(columns) - 1) * pxOf(naming(".row")[0].declarations.gap);
+  // The content's padding, its scrollbar, and the row's own padding and edge.
+  const around = 18 * 2 + 10 + 12 + 11 + 3;
+  const activity = 600 - around - fixed - gaps;
+  assert.ok(activity >= 200, `the activity has ${activity}px at 600px`);
+});
+
+test("the band's facts give way below 1000px, and below 900px the tabs take a line of their own", () => {
+  assert.notEqual(displayAt(1001, ".state-facts"), "none");
+  assert.equal(displayAt(1000, ".state-facts"), "none");
+  const tabs = (width) => Object.assign({}, ...naming(".tabs", applyingAt(width)).map((rule) => rule.declarations));
+  assert.equal(tabs(901)["grid-row"], undefined);
+  assert.equal(tabs(900)["grid-row"], "2");
+  assert.equal(tabs(900)["grid-column"], "1 / -1");
+  assert.equal(naming(".lampband")[0].declarations["min-height"], "var(--band)", "the band grows to hold the second line");
+  assert.match(naming(".app-shell")[0].declarations["grid-template-rows"], /^auto /);
+});
+
+test("every width rule asks the shell, which Large text draws larger, and the page holds at 600px", () => {
+  assert.equal(naming(".app-shell")[0].declarations.container, "shell / inline-size");
+  assert.equal(naming("html")[0].declarations["min-width"], "600px");
+  // The one viewport width left is the setup view's, which follows the extension kit's own breakpoint.
+  const viewport = (sheet) => [...sheet.matchAll(/@media([^{]*)\{/g)].map(([, condition]) => condition.trim())
+    .filter((condition) => /width/.test(condition));
+  assert.deepEqual(viewport(readFileSync(join(ui, "styles.css"), "utf8")), ["(min-width: 761px)"]);
+  assert.deepEqual(viewport(readFileSync(join(ui, "kit", "kit.css"), "utf8")), []);
+  const large = naming(".text-large .app-shell")[0];
+  assert.equal(large.declarations.zoom, "1.15");
+  for (const place of ["#setup-root", ".palette-backdrop", ".notices", ".dialog-backdrop"]) {
+    assert.ok(large.selectors.includes(`.text-large ${place}`), `Large text leaves ${place} small`);
   }
 });
 
@@ -2516,7 +2636,7 @@ test("only a data tag, in capitals, is as small as 10px, and every other word is
 });
 
 const EYEBROWS = [".kicker", ".queue-head", ".agents-group-head", ".about-group h2", ".about-facts dt"];
-const TAGS = [".cap-label", ".outcome", ".row-cap", ".agent-state", ".severity", ".hit-kind", ".cap-state",
+const TAGS = [".cap-label", ".outcome", ".row-cap", ".row-tool-cap", ".agent-state", ".severity", ".hit-kind", ".cap-state",
   ".rule-owner", ".rule-edit-hint", ".rule-detail dt"];
 
 test("a place is named by one eyebrow and a value by one data tag, on every tab", () => {

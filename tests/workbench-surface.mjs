@@ -1624,7 +1624,7 @@ const httpChecks = [
     watchOpening.sheetPause === false && watchOpening.quitHidden === true
       && watchOpening.sheetViewingWord === "On -- anyone on this computer can open this view"
       && JSON.stringify(watchOpening.rail) === JSON.stringify([
-        "Comfortable, motion follows the system", "On -- anyone on this computer can open this view", "Running",
+        "Comfortable, standard text, motion follows the system", "On -- anyone on this computer can open this view", "Running",
         "Send one local checkup notification. Nothing leaves this device.", "On (marker)"]),
     JSON.stringify(watchOpening)],
   ["Sharing says who can see a watching page, and Status carries the service's sentence at its top",
@@ -1765,7 +1765,7 @@ const httpChecks = [
   ["a closed page keeps This screen and gives every other section one line saying watching is off",
     closedSettings.lines.every(([line, lineHidden, rowsHidden, rail]) =>
       line === CLOSED_SENTENCE && lineHidden === false && rowsHidden === true && rail === "")
-      && closedSettings.rail === "Comfortable, motion follows the system" && closedSettings.quitHidden === true
+      && closedSettings.rail === "Comfortable, standard text, motion follows the system" && closedSettings.quitHidden === true
       && closedSettings.statusService === "",
     JSON.stringify(closedSettings)],
   ["a closed page asks for its context and nothing else",
@@ -1808,7 +1808,7 @@ const checks = [
       && sheetAfterBoot.notificationsWord.startsWith("Send one local checkup notification"),
     JSON.stringify(sheetAfterBoot)],
   ["the rail states the sections, and the window is offered Quit and told who can see",
-    sheetAfterBoot.railScreen === "Comfortable, motion follows the system"
+    sheetAfterBoot.railScreen === "Comfortable, standard text, motion follows the system"
       && sheetAfterBoot.railSharing === "On -- anyone on this computer can open this view"
       && sheetAfterBoot.railBrowserWork === "Running" && sheetAfterBoot.railDiagnostics === "On (marker)"
       && sheetAfterBoot.railNotifications.startsWith("Send one local checkup notification")

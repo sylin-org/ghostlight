@@ -21,7 +21,7 @@ gate, the in-place deploy and the owner-held items below.
 | c1-screen-readers-and-failures | window | landed (`fix(workbench): the window is calm for a screen reader, and a failure looks like one`): one status line says each settled action, at most one a second; failed and kept rows and the card say so in words; a destination that cannot be read says so in place, with Try again; both dialogs hold focus and give it back |
 | c2-one-legible-type-and-colour-system | window | landed (`fix(workbench): one legible type and colour system on every tab`): every word is at least --ink-4 (5.6:1) and about 11px; one eyebrow, one data tag and one page title; Policy's restrictions no longer collide with the kit's Settings grid; summaries, the agent pane's mascot and the About orbs fixed |
 | c3-one-vocabulary-and-plain-status | window | landed (`fix(workbench): the window, the tray and status say the same thing in plain words`): one count, the agents At a glance groups, on the band, the pill, Status, About, the tray and `status`; Pause agents and Resume agents everywhere; Status says Ghostlight, Browser, Rules and History in plain words; a pause outranks no browser, and a browser that starts on request reads Ready; Policy says the open case once and a setting alone applies; the Windows first-close notice names the hidden icons and the Start menu; Closing tabs names Preserve Ghostlight tabs (ADR-0199 and ADR-0187 amendments of 2026-10-18) |
-| c4-rows-and-widths | window | todo |
+| c4-rows-and-widths | window | landed (`fix(workbench): the activity list keeps its meaning at every width, and the window fits a laptop half`): a row names one capability, the most consequential, and a flow takes its steps' (no more LOCAL); the band's facts give way below 1000px and the tabs take their own line below 900px; every destination holds at 720 and 600 CSS px; Settings > This screen offers Text size Standard / Large. The window minimum is 720 (lane native, `crates/desktop/src/window.rs` `WINDOW_MIN_SIZE`, already 720 x 620) |
 | d1-native-frame-fits-the-person | native | landed (`feat(tray): the tooltip names the state and says when no browser is connected`, `feat(desktop): the frame and the tray fit a light-mode laptop`): the title bar is dark in light mode; a new window opens no taller than the primary monitor less 96 px (624 high on 1280x720), centered above the taskbar; the minimum width is 720; the Windows tray draws the 16 px ghost at 16 px and the 32 px one at 24 and 32, and Linux always draws the 32 px one for its host to size, inks it on a light taskbar (re-read every 2 s) and rings a 3 px dot in the taskbar's ground; the executable carries 16/32/48/128; the tooltip leads with the band's word and says "No browser connected" (ADR-0199 amendment of 2026-10-18). Owed: the light-mode 150% check under Before v2.0.0 |
 | f1-extension-popup-and-kit | extension | landed (`fix(extension): the popup tells Paused apart and reaches the window`) |
 | e1-the-rc-commit-tells-the-truth | docs | todo |
@@ -123,3 +123,26 @@ gate, the in-place deploy and the owner-held items below.
   Preserve Ghostlight tabs value (the extension is frozen), so the line beside Closing tabs says how
   it starts rather than claiming it is on, with a "Set in the browser" chip; the interlock refusal
   now names Ghostlight in Browser settings. The desktop goldens are regenerated and read.
+- c4 (j-09, j-17, j-14, j-19, j-20): the activity list names one capability per row, the most
+  consequential the action used (READ, ACTION, WRITE or EXECUTE, nowrap). The row's button carries
+  the whole set for a screen reader (", read and write"), and the detail card's tag shows it
+  ("read + write"). A flow carries no capability of its own (the service's empty set, "local"), so
+  its row, edge and card take the union of its steps' receipts: one that clicked, typed and filled
+  a form reads WRITE on the write edge, its card says "read + action + write" and "Steps: look at
+  pages, click and type, fill in forms", and each step keeps its own label. A flow still running
+  names none. Every width rule now asks the window's `shell` container (`.app-shell`) instead of
+  the viewport, so Large text, which draws the shell larger, moves the layout with the room that is
+  left; the setup view's one viewport rule stays, paired with the frozen extension kit. Below
+  1040px the row drops the browser and the agent and keeps the capability and the age; below
+  820px the capability moves under the tool's name. The band's facts hide below 1000px; below
+  900px the tabs take a line of their own, so the state word and its chip never run under the
+  wheel. Integrations stacks its heading's actions under the headline below 660px. Settings >
+  This screen adds Text size (Standard, Large); Large sets `zoom: 1.15` on the shell, the setup
+  view, the palette, the dialog and the notices, is kept with density and motion in the browser,
+  and reads in the rail ("Comfortable, standard text, motion follows the system"). `html, body`
+  hold at 600px. The window minimum the page is built for is 720 wide: lane native owns
+  `WINDOW_MIN_SIZE` and set it to 720 x 620 in d1, so nothing changes there. Checked in a browser
+  over the preview server at 1280, 960, 720 and 600 px, Standard and Large, on every destination:
+  nothing runs past the shell and no page scrolls sideways. The stylesheet tests read container
+  rules and check the row at 1040, 821, 820, 720 and 600, the band at 1001, 1000, 901 and 900, and
+  the activity's room at 600.
