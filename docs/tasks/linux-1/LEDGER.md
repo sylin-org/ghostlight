@@ -244,7 +244,7 @@ Result, 2026-10-17, on the real installation, KDE Plasma 6.8 on Wayland. The win
 a person would: the Applications entry (`gtk-launch`), clicks through a virtual pointer on
 `/dev/uinput`, the tray menu through StatusNotifierItem and dbusmenu, KWin's own window list,
 and screenshots. Every check passes after the fixes below; `tests/linux/installed/desktop-check.py`
-(aligned with 2.0 in d86463ca) passes its five phases.
+(aligned with 2.0 in 9a879144) passes its five phases.
 
 - One window: a second Applications launch, a burst of five and of eight `ghostlight open`, and
   Open after minimize each leave one active window and one shell (the window is rebuilt on
