@@ -14,6 +14,10 @@
 //! start, and starts nothing when the browser is already running in another profile (ADR-0196
 //! Decision 12 amendment, 2026-10-17).
 //!
+//! A service that reaches no display, such as one an agent started over SSH, cannot show the
+//! browser it would start, so either flight leaves startup to the person there too (ADR-0149
+//! amendment "A service with no display").
+//!
 //! Where the selected platform and policy permit it, a flight performs one ordinary-profile
 //! launch and waits within the invocation deadline for an inbound adapter. Every flight shares
 //! one launch guard per installed browser: while a start Ghostlight made is younger than
@@ -111,7 +115,8 @@ impl RecoveryFailure {
 pub enum RecoveryDecision {
     /// Startup is left to the person: either the configured posture is manual, or more than one
     /// browser could serve and none of them is a usable browser that last connected, or the one
-    /// browser a request named is not one Ghostlight can start.
+    /// browser a request named is not one Ghostlight can start, or no display is reachable from
+    /// the service.
     Manual {
         /// Installed browsers with a current Ghostlight native-host registration.
         browsers: Vec<RecoveryCandidate>,
@@ -157,6 +162,9 @@ type MechanismFailure = (RecoveryFailure, String);
 enum MechanismError {
     Wait(RecoveryWaitError),
     Failed(MechanismFailure),
+    /// No display is reachable from the service, so a browser it started could not be shown;
+    /// the person can still open one on their desktop. Nothing was started.
+    NoDisplay,
 }
 
 trait RecoveryMechanism: Send + Sync {
@@ -330,12 +338,7 @@ impl SystemRecoveryMechanism {
             .map_err(|error| {
                 MechanismError::Failed((RecoveryFailure::LaunchFailed, error.to_string()))
             })?
-            .ok_or_else(|| {
-                MechanismError::Failed((
-                    RecoveryFailure::LaunchFailed,
-                    "No verified graphical user session is available for browser startup.".into(),
-                ))
-            })?;
+            .ok_or(MechanismError::NoDisplay)?;
         ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
         let mut command = ordinary_browser_command(executable);
         command.envs(environment.values());
@@ -345,6 +348,27 @@ impl SystemRecoveryMechanism {
                 format!("{}: {error}", executable.display()),
             ))
         })
+    }
+}
+
+/// Where a flight goes when a repair or a launch of `browser` did not happen: a lost wait ends
+/// the request, a failure is the answer, and a service with no display leaves startup to the
+/// person, who can open `browser` on their desktop.
+fn settled(
+    error: MechanismError,
+    browser: RecoveryCandidate,
+) -> Result<FlightPhase, RecoveryWaitError> {
+    match error {
+        MechanismError::Wait(error) => Err(error),
+        MechanismError::Failed((reason, detail)) => {
+            Ok(FlightPhase::Complete(RecoveryDecision::Failed {
+                reason,
+                details: vec![detail],
+            }))
+        }
+        MechanismError::NoDisplay => Ok(FlightPhase::Complete(RecoveryDecision::Manual {
+            browsers: vec![browser],
+        })),
     }
 }
 
@@ -712,13 +736,7 @@ impl BrowserRecovery {
                 Ok(()) => Ok(FlightPhase::Complete(RecoveryDecision::Manual {
                     browsers: vec![browser],
                 })),
-                Err(MechanismError::Wait(error)) => Err(error),
-                Err(MechanismError::Failed((reason, detail))) => {
-                    Ok(FlightPhase::Complete(RecoveryDecision::Failed {
-                        reason,
-                        details: vec![detail],
-                    }))
-                }
+                Err(error) => settled(error, browser),
             },
             (
                 _,
@@ -738,13 +756,7 @@ impl BrowserRecovery {
                         named.push(browser);
                         Ok(FlightPhase::RepairingQueue { remaining, named })
                     }
-                    Err(MechanismError::Wait(error)) => Err(error),
-                    Err(MechanismError::Failed((reason, detail))) => {
-                        Ok(FlightPhase::Complete(RecoveryDecision::Failed {
-                            reason,
-                            details: vec![detail],
-                        }))
-                    }
+                    Err(error) => settled(error, browser),
                 }
             }
             (_, FlightPhase::Launching { browser }) => {
@@ -753,16 +765,9 @@ impl BrowserRecovery {
                 }
                 match self.mechanism.launch(&browser, deadline, cancelled) {
                     Ok(()) => Ok(FlightPhase::Launched { browser }),
-                    Err(MechanismError::Wait(error)) => {
+                    Err(error) => {
                         self.release_launch(&browser.id);
-                        Err(error)
-                    }
-                    Err(MechanismError::Failed((reason, detail))) => {
-                        self.release_launch(&browser.id);
-                        Ok(FlightPhase::Complete(RecoveryDecision::Failed {
-                            reason,
-                            details: vec![detail],
-                        }))
+                        settled(error, browser)
                     }
                 }
             }
@@ -1086,7 +1091,7 @@ mod tests {
     struct FakeMechanism {
         repairs: AtomicUsize,
         launches: AtomicUsize,
-        outcome: Mutex<Result<(), MechanismFailure>>,
+        outcome: Mutex<Result<(), MechanismError>>,
         connect: Option<Arc<FakeBrowser>>,
         /// Additional adapter ids that arrive inside the same launch wait.
         extra_arrivals: Vec<String>,
@@ -1120,7 +1125,7 @@ mod tests {
                     browser.connect(arrivals);
                 }
             }
-            outcome.map_err(MechanismError::Failed)
+            outcome
         }
     }
 
@@ -1131,7 +1136,7 @@ mod tests {
         Arc::new(FakeMechanism {
             repairs: AtomicUsize::new(0),
             launches: AtomicUsize::new(0),
-            outcome: Mutex::new(outcome),
+            outcome: Mutex::new(outcome.map_err(MechanismError::Failed)),
             connect,
             extra_arrivals: Vec::new(),
         })
@@ -2292,6 +2297,37 @@ mod tests {
 
         assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), refused);
         assert_eq!(request_chrome(&recovery, Duration::from_secs(1)), refused);
+        assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_service_with_no_display_leaves_startup_to_the_person() {
+        let browser = Arc::new(FakeBrowser::default());
+        browser.connect(Vec::new());
+        browser.remember_last_connected("chrome");
+        let mechanism = mechanism(Ok(()), None);
+        *lock(&mechanism.outcome) = Err(MechanismError::NoDisplay);
+        let (mut recovery, _) =
+            named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
+        let _still = hand_clock(&mut recovery);
+        let left_to_the_person = RecoveryDecision::Manual {
+            browsers: vec![chrome_and_edge(NativeHostState::Current).remove(0)],
+        };
+
+        assert_eq!(
+            recovery
+                .request(
+                    Instant::now() + Duration::from_secs(1),
+                    &AtomicBool::new(false),
+                )
+                .unwrap(),
+            left_to_the_person
+        );
+        assert_eq!(
+            request_chrome(&recovery, Duration::from_secs(1)),
+            left_to_the_person
+        );
+        // Nothing was started, so nothing holds the guard against the next try.
         assert_eq!(mechanism.launches.load(Ordering::SeqCst), 2);
     }
 

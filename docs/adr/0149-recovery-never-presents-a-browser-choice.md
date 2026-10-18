@@ -154,3 +154,23 @@ Additional acceptance evidence:
    home reads it back, and an unparsable record is no memory.
 3. Owed live check: on Windows with Chrome and Edge installed, Chrome closed after it last
    connected, an agent request starts Chrome and proceeds; on a fresh home the answer names both.
+
+## Amendment 2026-10-17: a service with no display
+
+A service an agent started over SSH or in CI reaches no display: it has neither `WAYLAND_DISPLAY`
+nor `DISPLAY`. Until now a launch it attempted under `on_demand` failed as
+`browser_launch_failed`, and the model read "Ghostlight could not start the selected browser."
+and "Start the selected browser yourself, then repeat the call." The model can act on neither:
+nothing it can do starts a visible browser from that service, and the person can still open one
+on the computer's desktop, where its connection reaches the same service (linux-1, L06).
+
+Such a launch now leaves startup to the person, as Decision 5 defines it. Nothing is started and
+the launch guard is free again. A session working in no browser yet gets the manual answer that
+names the browser it would have started ("No browser is connected. Ask the user to open a
+Chromium browser window with the Ghostlight extension installed, then repeat the call."). A
+session whose own browser is gone gets the not-connected answer and its "Ask the user to reopen
+that browser" step. `browser_launch_failed` keeps the failures that remain: no verified
+executable, an unreadable runtime directory, or a spawn the system refuses.
+
+Additional acceptance evidence: a unit test pins both flights with no display, and the batch
+checks a call over SSH on the real installation.
