@@ -362,22 +362,46 @@ pub enum LinkEnd {
     Lost,
 }
 
+/// What the shell shows, said in the `channel` of its opening. The service believes it: `status`
+/// reads it, and a shell started for the tray alone that finds the place taken brings no window
+/// forward. The words are the service's `ShellView`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum View {
+    /// The shell shows its window to a person, or is about to.
+    Window,
+    /// The shell shows only the tray icon.
+    Tray,
+}
+
+impl View {
+    /// The word in the opening's `channel`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Window => "window",
+            Self::Tray => "tray",
+        }
+    }
+}
+
 /// The shell's end of the stream, after the workbench was handed over.
 pub struct Link {
     connection: Connection,
 }
 
-/// Connects to the service of `home`, opens it as the desktop shell and reads the workbench.
+/// Connects to the service of `home`, opens it as the desktop shell showing `view` and reads the
+/// workbench.
 ///
 /// A refused opening is [`LinkError::Refused`] with the service's own words. A first frame that is
 /// not a workbench frame, an address that is not `http://127.0.0.1:<port>/` or a bearer of the
 /// wrong shape is [`LinkError::Contract`].
-pub fn open_link(home: &std::path::Path) -> Result<(Link, Workbench), LinkError> {
+pub fn open_link(home: &std::path::Path, view: View) -> Result<(Link, Workbench), LinkError> {
     let deadline = Instant::now() + OPEN_DEADLINE;
-    let opening = Opening::new(
+    let mut opening = Opening::new(
         Role::Desktop,
         Edge::new(Program::Desktop, env!("CARGO_PKG_VERSION").to_owned()),
     );
+    opening.channel = Some(view.as_str().to_owned());
     let (connection, reply) = protocol::connect(home, &opening, deadline)?;
     if !reply.accepted {
         return Err(LinkError::Refused {
@@ -967,7 +991,8 @@ mod tests {
                 },
             ],
         );
-        let (link, workbench) = open_link(&home.0).expect("the workbench is handed over");
+        let (link, workbench) =
+            open_link(&home.0, View::Window).expect("the workbench is handed over");
         assert_eq!(workbench.url, URL);
         assert_eq!(workbench.bearer, BEARER);
         assert_eq!(workbench.tray, tray());
@@ -975,6 +1000,11 @@ mod tests {
         assert_eq!(opening.role, Role::Desktop);
         assert_eq!(opening.edge.program, Program::Desktop);
         assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            opening.channel.as_deref(),
+            Some("window"),
+            "the shell says what it shows"
+        );
         let (ended, rx) = mpsc::channel();
         link.spawn_reader(|_| {}, move |end| ended.send(end).unwrap())
             .unwrap();
@@ -1002,7 +1032,7 @@ mod tests {
             let heard: DesktopFrame = frame::read_frame(&mut shell).unwrap().unwrap();
             clicked.send(heard).unwrap();
         });
-        let (link, _) = open_link(&home.0).unwrap();
+        let (link, _) = open_link(&home.0, View::Window).unwrap();
         link.send_tray(TrayItemId::Resume).unwrap();
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -1036,7 +1066,7 @@ mod tests {
             let answer: DesktopFrame = frame::read_frame(&mut shell).unwrap().unwrap();
             heard.send(answer).unwrap();
         });
-        let (link, _) = open_link(&home.0).unwrap();
+        let (link, _) = open_link(&home.0, View::Window).unwrap();
         let (asked, requests) = mpsc::channel();
         link.spawn_reader(move |request| asked.send(request).unwrap(), |_| {})
             .unwrap();
@@ -1059,7 +1089,7 @@ mod tests {
     fn the_stream_ending_ends_the_link() {
         let home = Home::new();
         let service = fake_service(&home.0, accepted(), vec![workbench_frame(URL)]);
-        let (link, _) = open_link(&home.0).unwrap();
+        let (link, _) = open_link(&home.0, View::Window).unwrap();
         drop(service.join().unwrap());
         let (ended, rx) = mpsc::channel();
         link.spawn_reader(|_| {}, move |end| ended.send(end).unwrap())
@@ -1079,7 +1109,9 @@ mod tests {
             accepted(),
             vec![workbench_frame("http://localhost:1/")],
         );
-        let failure = open_link(&home.0).err().expect("the address is refused");
+        let failure = open_link(&home.0, View::Window)
+            .err()
+            .expect("the address is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
         service.join().unwrap();
     }
@@ -1088,7 +1120,9 @@ mod tests {
     fn a_first_frame_of_already_open_is_the_already_open_failure() {
         let home = Home::new();
         let service = fake_service(&home.0, accepted(), vec![DesktopFrame::AlreadyOpen]);
-        let failure = open_link(&home.0).err().expect("the shell is turned away");
+        let failure = open_link(&home.0, View::Window)
+            .err()
+            .expect("the shell is turned away");
         assert!(matches!(failure, LinkError::AlreadyOpen), "{failure:?}");
         service.join().unwrap();
     }
@@ -1097,7 +1131,9 @@ mod tests {
     fn a_first_frame_that_is_not_the_workbench_is_a_contract_failure() {
         let home = Home::new();
         let service = fake_service(&home.0, accepted(), vec![DesktopFrame::Unknown]);
-        let failure = open_link(&home.0).err().expect("the frame is refused");
+        let failure = open_link(&home.0, View::Window)
+            .err()
+            .expect("the frame is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
         service.join().unwrap();
     }
@@ -1114,7 +1150,9 @@ mod tests {
                 tray: tray(),
             }],
         );
-        let failure = open_link(&home.0).err().expect("the bearer is refused");
+        let failure = open_link(&home.0, View::Window)
+            .err()
+            .expect("the bearer is refused");
         assert!(matches!(failure, LinkError::Contract { .. }), "{failure:?}");
         assert!(!failure.to_string().contains("short"));
         service.join().unwrap();
@@ -1128,7 +1166,9 @@ mod tests {
             Reply::refused(RefusalCode::Capacity, "Another window is open.".to_owned()),
             Vec::new(),
         );
-        let failure = open_link(&home.0).err().expect("the opening is refused");
+        let failure = open_link(&home.0, View::Window)
+            .err()
+            .expect("the opening is refused");
         match failure {
             LinkError::Refused { code, say } => {
                 assert_eq!(code, Some(RefusalCode::Capacity));
@@ -1142,7 +1182,9 @@ mod tests {
     #[test]
     fn no_service_is_a_connect_failure() {
         let home = Home::new();
-        let failure = open_link(&home.0).err().expect("nothing listens");
+        let failure = open_link(&home.0, View::Window)
+            .err()
+            .expect("nothing listens");
         assert!(
             matches!(failure, LinkError::Connect(ConnectError::NoService)),
             "{failure:?}"

@@ -14,6 +14,11 @@
 //! place: a shell that finds it taken is sent `already_open` in place of the workbench and
 //! leaves, and the shell that holds the place is asked to show its window.
 //!
+//! The shell's opening says what it shows in its `channel` ([`ShellView`]): `window` while it
+//! shows its window to a person or is about to, `tray` for the icon alone. The service believes
+//! it, so `status` tells the truth after a restart, and a shell started for the tray alone that
+//! finds the place taken brings no window forward.
+//!
 //! A reader skips a frame kind it does not know. The service ends a stream only for a frame that
 //! does not decode.
 //!
@@ -121,6 +126,37 @@ impl DesktopFrame {
             bearer: bearer.to_owned(),
             tray,
         }
+    }
+}
+
+/// What a shell shows, as the `channel` of its `desktop` opening says. A shell that says nothing,
+/// as an older build does, is taken as it was before: by how it was started.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellView {
+    /// The shell shows its window to a person, or is about to: a person started it, or its window
+    /// was open when it connected again.
+    Window,
+    /// The shell shows only the tray icon.
+    Tray,
+}
+
+impl ShellView {
+    /// The word in the opening's `channel`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Window => "window",
+            Self::Tray => "tray",
+        }
+    }
+
+    /// The view an opening's `channel` names, or `None` for none or a word this build does not
+    /// know.
+    #[must_use]
+    pub fn from_channel(channel: Option<&str>) -> Option<Self> {
+        [Self::Window, Self::Tray]
+            .into_iter()
+            .find(|view| channel == Some(view.as_str()))
     }
 }
 

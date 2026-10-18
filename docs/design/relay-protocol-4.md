@@ -74,7 +74,7 @@ The peer sends one opening. The service answers with one reply. Both are single 
 | `reason` | Why the peer started the service, when it had to (section 7). |
 | `resume` | The resume token the service last handed this session. |
 | `origin` | For `browser`, the origin of the extension that opened the port. |
-| `channel` | For `mcp`, how the client reached the edge: `mcp` for the stdio edge, `cli` for the command line. |
+| `channel` | For `mcp`, how the client reached the edge: `mcp` for the stdio edge, `cli` for the command line. For `desktop`, what the shell shows: `window` while it shows its window to a person or is about to, `tray` for the icon alone. The service sets the window state from it, and a `tray` shell that finds the desktop place taken brings no window forward. |
 | `session` | For `mcp`, an opaque marker the peer uses to identify its session, such as its process. |
 | `control` | For `control`, the operation (section 5). |
 

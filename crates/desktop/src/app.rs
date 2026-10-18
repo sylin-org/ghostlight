@@ -48,7 +48,7 @@ use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
 
 use crate::link::{open_link, ActOutcome, DesktopFrame, Link, LinkEnd, LinkError, NativeAct};
-use crate::link::{TrayItemId, UnavailableReason, Workbench};
+use crate::link::{TrayItemId, UnavailableReason, View, Workbench};
 use crate::machine::{self, Answer, Effect, Image, Machine, Outside, Screen};
 use crate::native::{self, ThisComputer};
 use crate::session::{self, Session, ThisSession};
@@ -300,6 +300,16 @@ impl Alarm {
     }
 }
 
+/// What a shell shows, as its opening says: its window while the window is open, and before the
+/// first attach the window a person's start is about to open; otherwise only the tray icon.
+fn view_of(window_open: bool, attached_before: bool, launch: Launch) -> View {
+    if window_open || (!attached_before && launch != Launch::Tray) {
+        View::Window
+    } else {
+        View::Tray
+    }
+}
+
 fn post(proxy: &EventLoopProxy<ShellEvent>, event: ShellEvent) {
     // A closed loop has nothing left to tell.
     let _ = proxy.send_event(event);
@@ -408,9 +418,14 @@ impl Shell {
         }
         let home = self.home.clone();
         let proxy = self.proxy.clone();
+        let view = view_of(
+            self.lifecycle.is_open(),
+            self.machine.has_attached(),
+            self.launch,
+        );
         let spawned = thread::Builder::new()
             .name(OPEN_THREAD_NAME.to_owned())
-            .spawn(move || post(&proxy, ShellEvent::Opened(open_link(&home))));
+            .spawn(move || post(&proxy, ShellEvent::Opened(open_link(&home, view))));
         if let Err(error) = spawned {
             eprintln!("ghostlight-desktop: {error}");
             post(&self.proxy, ShellEvent::Opened(Err(LinkError::Io(error))));
@@ -823,7 +838,7 @@ pub fn run(launch: Launch) -> ExitCode {
         }
     };
     // First, so that a shell that cannot run can say why.
-    let first_open = open_link(&home);
+    let first_open = open_link(&home, view_of(false, false, launch));
     if let Err(missing) = preflight(launch, &ThisPlace) {
         eprintln!("ghostlight-desktop: {}", missing.detail);
         if let Ok((link, _)) = &first_open {
@@ -891,6 +906,23 @@ pub fn run(launch: Launch) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shell_says_it_shows_its_window_while_it_is_open_or_a_person_started_it() {
+        assert_eq!(view_of(false, false, Launch::Person), View::Window);
+        assert_eq!(view_of(false, false, Launch::Updating), View::Window);
+        assert_eq!(view_of(false, false, Launch::Tray), View::Tray);
+        assert_eq!(
+            view_of(true, true, Launch::Tray),
+            View::Window,
+            "reconnecting, window open"
+        );
+        assert_eq!(
+            view_of(false, true, Launch::Person),
+            View::Tray,
+            "reconnecting, window closed"
+        );
+    }
 
     #[test]
     fn the_alarm_wakes_at_the_latest_deadline_it_was_given() {

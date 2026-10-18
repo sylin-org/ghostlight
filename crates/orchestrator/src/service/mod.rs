@@ -62,7 +62,7 @@ use crate::diagnostics::DiagnosticsHub;
 use crate::governance::{AuthoritySnapshot, GovernanceFacade, JsonlAuditSink};
 use crate::install;
 use crate::install::icons::{self, IconCache, IconPlaces};
-use crate::intake::desktop::{DesktopFrame, TrayItemId, TrayModel};
+use crate::intake::desktop::{DesktopFrame, ShellView, TrayItemId, TrayModel};
 use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
 use crate::intake::MCP_CHANNEL;
@@ -958,7 +958,8 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
                 };
                 // A shell that goes away abruptly or sends a frame this build cannot read ends
                 // its own stream and nothing else.
-                let _ = serve_desktop(connection, intake);
+                let view = ShellView::from_channel(opening.channel.as_deref());
+                let _ = serve_desktop(connection, intake, view);
             }
             Role::Command | Role::Unknown => {
                 listener::refuse(&connection, OpeningRefusal::Unsupported);
@@ -970,7 +971,9 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
 /// Serve one shell of this build on an accepted `desktop` stream.
 ///
 /// The service has one desktop place. A shell that finds it taken is told `already_open` instead of
-/// the workbench, the shell that holds the place is asked to show its window, and the stream ends.
+/// the workbench and the stream ends. The shell that holds the place is asked to show its window,
+/// unless the newcomer said it shows only the tray: that is presence's own launch, made while the
+/// shell it would have replaced was coming back, and nothing is there to show.
 /// Otherwise the shell is handed the workbench address and its secret and the tray to draw. It is
 /// then attached, so the window, notices and native acts of the workbench go to it, a quit says
 /// goodbye to it, and presence knows a shell is there. If a request to show the window was waiting
@@ -979,7 +982,11 @@ fn serve_connection(connection: Connection, judgement: Judgement, intake: &Arc<I
 /// first close that stays is explained once. The shell opens its own window, so an `open` click
 /// only tells presence that a person has it open; a frame kind this build does not know is
 /// skipped. A frame that does not decode ends the stream, and the shell is detached.
-fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
+fn serve_desktop(
+    connection: Connection,
+    intake: &Arc<Intake>,
+    view: Option<ShellView>,
+) -> Result<()> {
     let Some(server) = intake.workbench_server.get() else {
         listener::refuse(&connection, OpeningRefusal::Unsupported);
         return Ok(());
@@ -995,7 +1002,7 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let claim = match intake.quit.shells().claim() {
         Ok(claim) => claim,
         Err(occupied) => {
-            if occupied.show() {
+            if view != Some(ShellView::Tray) && occupied.show() {
                 intake.presence.person_acted();
                 intake.presence.window_shown();
             }
@@ -1013,7 +1020,7 @@ fn serve_desktop(connection: Connection, intake: &Arc<Intake>) -> Result<()> {
     let _present = ShellPresent::begin(&intake.presence);
     // Whether a reveal for the tray's Open is in flight: clicks that arrive meanwhile join it.
     let revealing = Arc::new(AtomicBool::new(false));
-    if let Some(wanted) = intake.presence.attached() {
+    if let Some(wanted) = intake.presence.attached(view) {
         attached.show(wanted.address);
     }
     // A change between the tray handed over and the shell being attached would have gone nowhere.
@@ -2101,7 +2108,9 @@ mod tests {
     use crate::browser::adapter::RuntimeControlState;
     use crate::browser::testing::{FakeBrowser, FAKE_BROWSER};
     use crate::cli::client as cli_client;
-    use crate::intake::desktop::{ActOutcome, DesktopFrame, NativeAct, TrayItemId, TrayModel};
+    use crate::intake::desktop::{
+        ActOutcome, DesktopFrame, NativeAct, ShellView, TrayItemId, TrayModel,
+    };
     use crate::intake::listener::{self, control};
     use crate::intake::mcp::failure_templates;
     use crate::intake::mcp::ResumeState;
@@ -4864,6 +4873,33 @@ mod tests {
         assert!(
             matches!(handed, DesktopFrame::Workbench { .. }),
             "the place is free again: {handed:?}"
+        );
+        drop(host);
+    }
+
+    #[test]
+    fn a_shell_started_for_the_tray_that_finds_the_place_taken_brings_no_window_forward() {
+        let home = TestHome::new("shell-tray-already-open");
+        let host = ServiceHost::start(home.path()).unwrap();
+        host.publish_ready().unwrap();
+        let mut first = attached_shell(&host);
+
+        let mut tray = desktop_opening();
+        tray.channel = Some(ShellView::Tray.as_str().to_owned());
+        let (mut second, reply) = dial(&tray);
+        assert!(reply.accepted, "{reply:?}");
+        assert_eq!(
+            frame::read_frame::<DesktopFrame>(&mut second).unwrap(),
+            Some(DesktopFrame::AlreadyOpen)
+        );
+
+        host.workbench.reveal(Some(PageAddress::About)).unwrap();
+        assert_eq!(
+            next_frame(&mut first),
+            DesktopFrame::Show {
+                address: Some(PageAddress::About)
+            },
+            "the first frame the holder hears is this show: the tray shell asked for none"
         );
         drop(host);
     }

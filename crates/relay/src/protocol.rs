@@ -243,7 +243,8 @@ pub struct Opening {
     /// For a `browser` stream, the origin of the extension that opened the port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
-    /// For an `mcp` stream, how the client reached the edge (for example `cli`).
+    /// For an `mcp` stream, how the client reached the edge (for example `cli`). For a `desktop`
+    /// stream, what the shell shows: `window` or `tray`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
     /// For an `mcp` stream, an opaque marker the peer uses to identify its session.

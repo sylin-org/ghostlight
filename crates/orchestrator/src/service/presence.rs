@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 use ghostlight_relay::os;
 
 use crate::install::layout::Layout;
+use crate::intake::desktop::ShellView;
 use crate::language::workbench::WindowReason;
 use crate::workbench::PageAddress;
 
@@ -175,8 +176,9 @@ impl Presence {
     /// request to show it was waiting.
     ///
     /// A shell that attaches while no launch of presence's own is pending is a person's start and
-    /// clears what was latched.
-    pub fn attached(&self) -> Option<Wanted> {
+    /// clears what was latched. Whether the window is open is what the shell said (`view`); a
+    /// shell that said nothing is taken as open unless presence launched it for the tray.
+    pub fn attached(&self, view: Option<ShellView>) -> Option<Wanted> {
         let now = self.outside.now();
         let mut state = lock(&self.state);
         let own_launch =
@@ -185,7 +187,12 @@ impl Presence {
             Self::clear_latch(&mut state);
         }
         let wanted = state.wanted.take();
-        state.window_open = wanted.is_some() || !own_launch;
+        state.window_open = wanted.is_some()
+            || match view {
+                Some(ShellView::Window) => true,
+                Some(ShellView::Tray) => false,
+                None => !own_launch,
+            };
         state.attached = true;
         state.pending_until = None;
         state.pending_is_tray = false;
@@ -591,7 +598,7 @@ mod tests {
     fn nothing_is_launched_when_a_shell_is_attached() {
         let (presence, fake) = presence();
         presence.published();
-        presence.attached();
+        presence.attached(None);
         fake.advance(LAUNCH_DELAY * 2);
         presence.tick();
         assert!(fake.launches().is_empty());
@@ -599,9 +606,30 @@ mod tests {
     }
 
     #[test]
+    fn the_window_is_what_the_shell_says_it_shows_whoever_launched_it() {
+        // A shell that comes back with its window open while presence's own tray launch is
+        // pending, the shell a crash left, still has its window open.
+        let (crashed, fake) = presence();
+        crashed.published();
+        run(&crashed, &fake, 2);
+        assert_eq!(
+            fake.launches(),
+            [true],
+            "a tray launch of presence's own is pending"
+        );
+        crashed.attached(Some(ShellView::Window));
+        assert_eq!(crashed.window_reason(), Some(WindowReason::Shown));
+
+        // A shell with only its icon that comes back with no launch pending has no window open.
+        let (iconic, _) = presence();
+        iconic.attached(Some(ShellView::Tray));
+        assert_eq!(iconic.window_reason(), Some(WindowReason::Tray));
+    }
+
+    #[test]
     fn a_shell_whose_stream_ended_without_goodbye_is_launched_again_after_two_seconds() {
         let (presence, fake) = presence();
-        presence.attached();
+        presence.attached(None);
         presence.detached();
         fake.advance(SECOND);
         presence.tick();
@@ -641,7 +669,7 @@ mod tests {
             "nothing more launches"
         );
         // A shell attaching with no launch of presence's own pending is a person's start.
-        presence.attached();
+        presence.attached(None);
         presence.detached();
         run(&presence, &fake, 3);
         assert_eq!(fake.launches().len(), BUDGET_LAUNCHES + 1);
@@ -672,7 +700,7 @@ mod tests {
         while fake.launches().is_empty() {
             thread::sleep(Duration::from_millis(2));
         }
-        let wanted = presence.attached();
+        let wanted = presence.attached(None);
         assert_eq!(
             wanted,
             Some(Wanted {
@@ -700,7 +728,7 @@ mod tests {
         };
         thread::sleep(Duration::from_millis(20));
         assert_eq!(fake.launches(), [false], "one launch for both");
-        let wanted = presence.attached();
+        let wanted = presence.attached(None);
         assert_eq!(
             wanted,
             Some(Wanted {
@@ -714,7 +742,7 @@ mod tests {
     #[test]
     fn a_request_to_show_finds_the_attached_shell() {
         let (presence, fake) = presence();
-        presence.attached();
+        presence.attached(None);
         assert_eq!(presence.request_show(None), Ok(Shown::Attached));
         assert!(fake.launches().is_empty());
     }
@@ -730,7 +758,7 @@ mod tests {
             presence.published();
             run(&presence, &fake, 2);
             assert_eq!(fake.launches().len(), 1);
-            presence.attached();
+            presence.attached(None);
             presence.unavailable(blocked);
             presence.detached();
             run(&presence, &fake, 60);
@@ -738,7 +766,7 @@ mod tests {
             assert_eq!(presence.window_reason(), Some(expected));
         }
         let (presence, fake) = presence();
-        presence.attached();
+        presence.attached(None);
         presence.closed(false);
         presence.detached();
         run(&presence, &fake, 60);
@@ -749,7 +777,7 @@ mod tests {
     #[test]
     fn a_close_that_stays_leaves_the_icon_and_the_shell_running() {
         let (presence, _fake) = presence();
-        presence.attached();
+        presence.attached(None);
         presence.window_shown();
         assert_eq!(presence.window_reason(), Some(WindowReason::Shown));
         presence.closed(true);
@@ -759,7 +787,7 @@ mod tests {
     #[test]
     fn a_reason_the_attached_shell_gave_is_the_window_reason_until_a_person_acts() {
         let (presence, _fake) = presence();
-        presence.attached();
+        presence.attached(None);
         presence.window_shown();
         presence.unavailable(WindowReason::NoWebview);
         assert_eq!(presence.window_reason(), Some(WindowReason::NoWebview));
@@ -774,7 +802,7 @@ mod tests {
         let (presence, fake) = presence();
         presence.published();
         run(&presence, &fake, 2);
-        presence.attached();
+        presence.attached(None);
         assert_eq!(presence.window_reason(), Some(WindowReason::Tray));
         presence.window_shown();
         assert_eq!(presence.window_reason(), Some(WindowReason::Shown));

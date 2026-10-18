@@ -1,0 +1,10 @@
+{
+  "relay": 4,
+  "role": "desktop",
+  "edge": {
+    "program": "desktop",
+    "revision": 4,
+    "build": "2.0.0"
+  },
+  "channel": "tray"
+}

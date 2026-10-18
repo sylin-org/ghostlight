@@ -149,6 +149,9 @@ fn opening_fixtures_round_trip() {
     let desktop: Opening = assert_round_trip("opening.desktop.json");
     assert_eq!(desktop.role, Role::Desktop);
     assert_eq!(desktop.edge.program, Program::Desktop);
+    let tray: Opening = assert_round_trip("opening.desktop.tray.json");
+    assert_eq!(tray.role, Role::Desktop);
+    assert_eq!(tray.channel.as_deref(), Some("tray"));
     let command: Opening = assert_round_trip("opening.command.json");
     assert_eq!(command.role, Role::Command);
     assert_eq!(command.reason, Some(StartReason::Command));
