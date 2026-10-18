@@ -50,7 +50,15 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   dot, first-close hint, Start-menu launch, Quit in Settings, Continue at a section from a watch
   tab).
 - **Window design** ([design.md](tasks/break-2.0/design.md)): landed on `dev` on 2026-10-17 and
-  awaits the owner's live check.
+  awaits the owner's live check. The same ledger records the agent catalog, the icon endpoint and
+  its tiles (decisions 9 and 10), a Store app's own settings copy found on every look (t04,
+  ADR-0197 amendment of 2026-10-17), and the test hygiene slices t01, t02 and t05. All of it is
+  pushed and deployed on the owner's Windows machine; CI was all green on both systems at
+  51e1cecb.
+- **Linux** ([linux-1](tasks/linux-1/BOOTSTRAP.md)): opened 2026-10-17. A Claude Code session on
+  the owner's CachyOS machine works the owed Linux checks on the real installation, reports
+  through `coordination/CHAT.md`, and, by the owner's leave, fixes what it finds. Its ledger is
+  the record.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
