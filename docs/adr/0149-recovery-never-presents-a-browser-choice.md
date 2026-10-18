@@ -186,3 +186,19 @@ had no installed id to start again, and the model read the browser's name as nul
 A connection that reports no name is now named Chromium, which is what such a browser calls
 itself. It is remembered as `chromium`, a session in it can have Chromium started again, and the
 model reads "Chromium". A reported name that maps to no supported browser still writes nothing.
+
+## Amendment 2026-10-18: a service inside an app container
+
+An agent in a Store app, such as Claude Desktop or Codex, can start the service inside that app's
+container. A browser that service started under `on_demand` would start inside the container too:
+its profile writes could land in the app's private copy of `AppData`, and it could close when the
+app quits (install-6, rel-8).
+
+A service that finds itself in a container now leaves startup to the person, exactly as one with
+no display does. It reads the container from the probe the install already uses
+(`Residence::detect`), once per process. Nothing is started and the launch guard stays free. The
+model reads the words of the no-display case: ask the user to open the browser, or to reopen the
+one the session was using. The window no longer says the browser starts when an agent asks.
+
+Additional acceptance evidence: unit tests pin that a contained launch starts nothing and ends as
+the manual answer, and that `starts_on_request` names no browser there.

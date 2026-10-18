@@ -16,7 +16,9 @@
 //!
 //! A service that reaches no display, such as one an agent started over SSH, cannot show the
 //! browser it would start, so either flight leaves startup to the person there too (ADR-0149
-//! amendment "A service with no display").
+//! amendment "A service with no display"). So does a service inside a Windows app container, such
+//! as one an agent in a Store app started: a browser it started would write to that app's private
+//! view and might close with the app (ADR-0149 amendment "A service inside an app container").
 //!
 //! Where the selected platform and policy permit it, a flight performs one ordinary-profile
 //! launch and waits within the invocation deadline for an inbound adapter. Every flight shares
@@ -39,6 +41,7 @@ use super::{choose_browser, BrowserPort};
 use crate::governance::manifest::BrowserStartup;
 use crate::governance::GovernanceFacade;
 use crate::install::browser_package::BrowserPackage;
+use crate::install::container::Residence;
 use crate::install::native_host::{NativeHostRegistry, NativeHostState};
 use crate::language::MAX_TIMEOUT_MS;
 
@@ -116,7 +119,7 @@ pub enum RecoveryDecision {
     /// Startup is left to the person: either the configured posture is manual, or more than one
     /// browser could serve and none of them is a usable browser that last connected, or the one
     /// browser a request named is not one Ghostlight can start, or no display is reachable from
-    /// the service.
+    /// the service, or the service runs inside an app container.
     Manual {
         /// Installed browsers with a current Ghostlight native-host registration.
         browsers: Vec<RecoveryCandidate>,
@@ -162,9 +165,11 @@ type MechanismFailure = (RecoveryFailure, String);
 enum MechanismError {
     Wait(RecoveryWaitError),
     Failed(MechanismFailure),
-    /// No display is reachable from the service, so a browser it started could not be shown;
-    /// the person can still open one on their desktop. Nothing was started.
-    NoDisplay,
+    /// A browser the service started would not be the person's: no display is reachable from the
+    /// service, or the service runs inside an app container. The person can still open the
+    /// browser on their desktop, where its connection reaches the same service. Nothing was
+    /// started.
+    LeftToThePerson,
 }
 
 trait RecoveryMechanism: Send + Sync {
@@ -181,6 +186,12 @@ trait RecoveryMechanism: Send + Sync {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<(), MechanismError>;
+
+    /// Whether every launch leaves startup to the person, because the service runs inside an app
+    /// container.
+    fn leaves_startup_to_the_person(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -307,16 +318,28 @@ impl RecoveryMechanism for SystemRecoveryMechanism {
         deadline: Instant,
         cancelled: &AtomicBool,
     ) -> Result<(), MechanismError> {
-        self.launch_unless_ending(session::session_ending(), browser, deadline, cancelled)
+        self.launch_unless_ending(
+            session::session_ending(),
+            self.leaves_startup_to_the_person(),
+            browser,
+            deadline,
+            cancelled,
+        )
+    }
+
+    fn leaves_startup_to_the_person(&self) -> bool {
+        Residence::detect().container().is_some()
     }
 }
 
 impl SystemRecoveryMechanism {
     /// Launch `browser`, unless the session is ending: then nothing is started and the call ends
-    /// as cancelled (ADR-0199 Decision 13).
+    /// as cancelled (ADR-0199 Decision 13). In a service `contained` in an app container nothing
+    /// is started either, and startup is left to the person.
     fn launch_unless_ending(
         &self,
         session_ending: bool,
+        contained: bool,
         browser: &RecoveryCandidate,
         deadline: Instant,
         cancelled: &AtomicBool,
@@ -324,6 +347,9 @@ impl SystemRecoveryMechanism {
         ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
         if session_ending {
             return Err(MechanismError::Wait(RecoveryWaitError::Cancelled));
+        }
+        if contained {
+            return Err(MechanismError::LeftToThePerson);
         }
         let executable = browser.ordinary_executable.as_ref().ok_or_else(|| {
             MechanismError::Failed((
@@ -338,7 +364,7 @@ impl SystemRecoveryMechanism {
             .map_err(|error| {
                 MechanismError::Failed((RecoveryFailure::LaunchFailed, error.to_string()))
             })?
-            .ok_or(MechanismError::NoDisplay)?;
+            .ok_or(MechanismError::LeftToThePerson)?;
         ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
         let mut command = ordinary_browser_command(executable);
         command.envs(environment.values());
@@ -352,8 +378,8 @@ impl SystemRecoveryMechanism {
 }
 
 /// Where a flight goes when a repair or a launch of `browser` did not happen: a lost wait ends
-/// the request, a failure is the answer, and a service with no display leaves startup to the
-/// person, who can open `browser` on their desktop.
+/// the request, a failure is the answer, and a service with no display or inside an app container
+/// leaves startup to the person, who can open `browser` on their desktop.
 fn settled(
     error: MechanismError,
     browser: RecoveryCandidate,
@@ -366,7 +392,7 @@ fn settled(
                 details: vec![detail],
             }))
         }
-        MechanismError::NoDisplay => Ok(FlightPhase::Complete(RecoveryDecision::Manual {
+        MechanismError::LeftToThePerson => Ok(FlightPhase::Complete(RecoveryDecision::Manual {
             browsers: vec![browser],
         })),
     }
@@ -564,12 +590,12 @@ impl BrowserRecovery {
     /// The name of the installed browser that a request from a session working in no browser yet
     /// would start now, when it would start one: the posture is `on_demand` and one browser is
     /// selected, the one that last connected or the only one installed, with a registration
-    /// Ghostlight can use. Nothing is started or repaired; the installed browsers are read only
-    /// under `on_demand`.
+    /// Ghostlight can use, and the service is not inside an app container. Nothing is started or
+    /// repaired; the installed browsers are read only under `on_demand`.
     #[must_use]
     pub fn starts_on_request(&self) -> Option<String> {
         let mode = self.governance.browser_startup();
-        if mode != BrowserStartup::OnDemand {
+        if mode != BrowserStartup::OnDemand || self.mechanism.leaves_startup_to_the_person() {
             return None;
         }
         let candidates = self.inventory.inspect().ok()?;
@@ -1913,13 +1939,48 @@ mod tests {
         let (recovery, _) = answering("on_demand", broken, None);
         assert_eq!(recovery.starts_on_request(), None);
 
-        let (recovery, inventory) = answering("manual", unique, Some("chrome"));
+        let (recovery, inventory) = answering("manual", unique.clone(), Some("chrome"));
         assert_eq!(recovery.starts_on_request(), None);
         assert_eq!(
             inventory.inspections.load(Ordering::SeqCst),
             0,
             "a manual posture reads no installed browser"
         );
+
+        let (mut recovery, _) = answering("on_demand", unique, Some("chrome"));
+        recovery.mechanism = Arc::new(Contained);
+        assert_eq!(
+            recovery.starts_on_request(),
+            None,
+            "a service inside an app container starts no browser"
+        );
+    }
+
+    /// The launcher of a service inside an app container: it starts nothing.
+    struct Contained;
+
+    impl RecoveryMechanism for Contained {
+        fn repair(
+            &self,
+            _browser: &RecoveryCandidate,
+            _deadline: Instant,
+            _cancelled: &AtomicBool,
+        ) -> Result<(), MechanismError> {
+            Ok(())
+        }
+
+        fn launch(
+            &self,
+            _browser: &RecoveryCandidate,
+            _deadline: Instant,
+            _cancelled: &AtomicBool,
+        ) -> Result<(), MechanismError> {
+            Err(MechanismError::LeftToThePerson)
+        }
+
+        fn leaves_startup_to_the_person(&self) -> bool {
+            true
+        }
     }
 
     #[test]
@@ -2326,7 +2387,7 @@ mod tests {
         browser.connect(Vec::new());
         browser.remember_last_connected("chrome");
         let mechanism = mechanism(Ok(()), None);
-        *lock(&mechanism.outcome) = Err(MechanismError::NoDisplay);
+        *lock(&mechanism.outcome) = Err(MechanismError::LeftToThePerson);
         let (mut recovery, _) =
             named_recovery("on_demand", NativeHostState::Current, &browser, &mechanism);
         let _still = hand_clock(&mut recovery);
@@ -2611,7 +2672,7 @@ mod tests {
         let cancelled = AtomicBool::new(false);
 
         let refused = SystemRecoveryMechanism
-            .launch_unless_ending(true, &browser, deadline, &cancelled)
+            .launch_unless_ending(true, false, &browser, deadline, &cancelled)
             .unwrap_err();
         assert!(matches!(
             refused,
@@ -2622,8 +2683,34 @@ mod tests {
         // a display or starts anything, on any host; that failure is how the test tells an
         // attempt from a refusal.
         let attempted = SystemRecoveryMechanism
-            .launch_unless_ending(false, &browser, deadline, &cancelled)
+            .launch_unless_ending(false, false, &browser, deadline, &cancelled)
             .unwrap_err();
         assert!(matches!(attempted, MechanismError::Failed(_)));
+    }
+
+    #[test]
+    fn a_service_inside_an_app_container_starts_no_browser() {
+        let browser = candidate_without_executable(
+            "Chromium",
+            BrowserPackage::Native,
+            NativeHostState::Current,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let cancelled = AtomicBool::new(false);
+
+        // A browser with no executable fails any launch that is attempted, so this answer shows
+        // that none was.
+        assert_eq!(
+            SystemRecoveryMechanism
+                .launch_unless_ending(false, true, &browser, deadline, &cancelled)
+                .unwrap_err(),
+            MechanismError::LeftToThePerson
+        );
+        assert_eq!(
+            settled(MechanismError::LeftToThePerson, browser.clone()).unwrap(),
+            FlightPhase::Complete(RecoveryDecision::Manual {
+                browsers: vec![browser],
+            })
+        );
     }
 }
