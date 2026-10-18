@@ -1,20 +1,50 @@
 # Latest result
 
-## [0027] linux-1: the machine is ready and the full gate passes on Linux
+## [0028] linux-1: L03 and L04 pass; real install on test-01; findings for you
 
-linux-claude, on test-01 (CachyOS rolling, kernel 7.2.9, KDE Plasma 6.8 on Wayland), at dev
-17a0c060. Details are in [the ledger](../docs/tasks/linux-1/LEDGER.md), L01 and L02.
+linux-claude, on test-01. Details and evidence are in
+[the ledger](../docs/tasks/linux-1/LEDGER.md), L03 and L04.
 
-- L01 pass. rustc and cargo 1.95.0, node 22.22.1, pwsh 7.6.5 (the extracted build in
-  `.tmp/linux-tools`, linked into `~/.local/bin`; this session has no sudo password for pacman),
-  Chromium 154, webkit2gtk-4.1 2.54.1, Zed 1.24.3. The 1.x-era home, the Chromium host manifest
-  and 14 agent files that named a deleted fleet build are backed up under ignored `.tmp/linux-1/`.
-- L02 pass. fmt and clippy clean; `cargo test --workspace` 2251 passed, 0 failed (the writer
-  golden with `native/linux.txt`, the Codex forwarding, the agent list, the 16 icon tests and the
-  private-file tests all ran on Linux); extension 492, page assets 270, workbench 140, workbench
-  surface ok, npm 26, guards 10, `sh -n` and the integrity script clean.
-- One wording fix for the batch, no product change: `node --test tests/guards/` fails on Node 22
-  (a directory is read as a module path). The glob `node --test "tests/guards/*.test.mjs"` is what
-  ran.
+Owner directions given during this run (2026-10-17):
 
-Next: L03, the journeys, from a fresh target directory.
+- Fine tune or remove tests that are misaligned, overly eager or bureaucratic.
+- Sandboxed versions are false integration tests; always use the real system browser. Recorded
+  in docs/MEMORY.md ("Full integration means the installation in place") and the batch
+  BOOTSTRAP.
+
+What ran:
+
+- L03: the hardening suite's process lane (11 journeys) and browser lane (5) pass, the live
+  sylin.org frame journey passes (56 checks), and `tests/linux/startup-recovery.mjs` passes.
+  These are regression gates, not integration evidence.
+- The `tests/linux/acceptance` drivers (bubblewrap homes, dedicated browsers) ran before the
+  owner's direction. Test-only commits: 2de3e190 (the sandbox now mounts a working /dev),
+  71465b67 (startup-check retired, superseded by ADR-0199 Decision 11 and startup-recovery),
+  d4d628a7 (the embedded-pixel samples avoid the frame's own input). They no longer count as
+  evidence. Deleting them waits for the owner's explicit word; this session's permission check
+  refused the deletion.
+- L04: `pwsh scripts/dev-loop.ps1` installed the development build into the real
+  `~/.ghostlight`, as its plan said. status, doctor, help, `call --help`, the c11 id selection
+  and refusal, and the man page pass. Completions work in fish and bash. The system Chromium on
+  its ordinary profile connected on its own; readiness Ready.
+
+Findings for you (product code is yours; nothing changed):
+
+1. After a lost service (SIGKILL), the MCP edge fails the first request with -32603 "Ghostlight
+   restarted before this request finished.", even a `tools/list` sent after the loss; the next
+   request works. `tests/linux/installed-journey.mjs` fails there in 4 of 4 runs; its earlier
+   phases pass.
+2. When the service cannot start, the installer always says "did not start within 30 s" and
+   waits the full 30 s, also when the spawn failed at once or the service exited at once.
+3. A service whose start fails (for example an endpoint path over the 108-byte socket limit)
+   writes the cause only to its null stderr; the diagnostics log stops at "service starting".
+4. `install --dry-run` prints Rust variant names: "(NeedsAttention)", "(Installed)",
+   "(NotDetected)".
+5. `install --client nope` prints the whole dry-run summary before refusing.
+6. The zsh completion goes to `~/.local/share/zsh/site-functions`, which zsh does not search by
+   default here.
+7. 1.x leftovers neither removed nor named by doctor: `~/.ghostlight/adapters/v1.1.1`, three
+   `~/.ghostlight/extension/v0.*`, and two 1.x connector man pages.
+8. Cline (CLI)'s 0.5.7-era entry (`transport.command`) is read as foreign and left alone.
+
+Next: L05, the window and the tray, on the real install.
