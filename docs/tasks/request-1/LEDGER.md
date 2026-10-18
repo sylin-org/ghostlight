@@ -22,7 +22,7 @@ the architecture sweep.
 | S4 workspace-opener | connection | landed (this commit) |
 | S5 one-request-id | request | landed (0f1b1a78 and this commit) |
 | S6 request-owns-itself | request | landed (this commit) |
-| S7 findings-per-frame | request | todo |
+| S7 findings-per-frame | request | landed (this commit) |
 | S8 flow-step-own-facts | request | todo |
 | S9 cancel-cause | request | todo |
 | S10 watcher-words | window | landed (this commit) |
@@ -114,6 +114,20 @@ the architecture sweep.
   now names `WorkWaiting` and `WorkPhaseStarted`; its `WorkProgressed` never existed. The S6
   row and this note first landed in 80868c31, which another lane committed while S6 was still in
   the working tree; the code landed in the commit that adds this sentence.
+- S7: a frame's stack value is `work::findings::Frame`, its settlement budget and its
+  `FrameFindings`, the `RefCell<Findings>` behind short methods (`observe`, `reach`, `permit`,
+  `cover`, `offer`, `take_offer`, `take`), so `InvocationContext` gains one `findings` reference
+  and every `..*context` override keeps its frame's findings. The constructors are
+  `InvocationContext::of(prepared, operation, snapshot, frame)` and `context.step(operation,
+  frame)`. `retain_permission` went with its table, and each check writes
+  `context.findings.permit`; `retain_coverage` stays as the one place that merges a frame's
+  coverage and sends the live notice. The remaining hand-built `Completion` is the undecoded
+  request's, which has no frame. The operation lines read `<tool> <status> <effect> <ms>ms on
+  <connection>`, through `receipt::operation_line`, which the test reads. The new tests are in
+  `work/tests/findings.rs`; the concurrent one holds a scoped read in a wrapping port and runs
+  `policy_explain` beside it, and shares the documents suite's fixture helpers, now
+  `pub(super)`. `an_observation_never_outlives_the_invocation_it_describes` went with the table
+  it guarded.
 - S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed

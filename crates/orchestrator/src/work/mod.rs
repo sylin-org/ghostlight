@@ -2,6 +2,7 @@
 
 mod composition;
 mod documents;
+mod findings;
 mod flow;
 mod forms;
 mod interaction;
@@ -17,7 +18,6 @@ pub mod result;
 
 pub use invocation_id::InvocationId;
 
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -66,6 +66,7 @@ use crate::workspace::{
     SelectedTab, SelectedTarget, SelectedView, StaleReason, StaleTargetContext, WorkspaceError,
     WorkspaceId, WorkspaceLease, WorkspaceStore,
 };
+use findings::{Findings, Frame, FrameFindings, StaleOffer};
 use item::candidate_item;
 use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
 
@@ -195,11 +196,6 @@ pub struct ApplicationExecutor {
     workbench: WorkbenchProjection,
     audit: Arc<crate::audit::AuditRecorder>,
     diagnostics: Arc<crate::diagnostics::DiagnosticsHub>,
-    observations: ObservationRegistry,
-    reached: ReachedRegistry,
-    stale_offers: StaleOfferRegistry,
-    permissions: Mutex<HashMap<String, crate::governance::evidence::PermissionTrace>>,
-    coverage: Mutex<HashMap<String, language::coverage::Coverage>>,
     /// Whether any browser profile on this computer holds the Ghostlight extension. It is asked
     /// only while setup is incomplete and a refusal is about to send the person to a browser.
     extension_probe: ExtensionProbe,
@@ -216,45 +212,6 @@ fn extension_in_a_browser_profile() -> bool {
     )
     .iter()
     .any(|browser| !browser.scan.with_extension.is_empty())
-}
-
-/// What each in-flight invocation has been observed doing at the browser boundary.
-///
-/// An entry lives from the invocation's first browser crossing until the completion path reads it,
-/// which happens exactly once per invocation.
-type ObservationRegistry = Arc<Mutex<HashMap<String, Observed>>>;
-
-/// The browser each in-flight invocation's commands reached, by invocation.
-///
-/// An entry lives from the invocation's first command a browser received until the invocation
-/// itself completes. A call refused or finished before any browser received a command never has
-/// one, so its record names no browser.
-type ReachedRegistry = Mutex<HashMap<String, Reached>>;
-
-/// The browser one invocation reached, by name.
-///
-/// A flow's steps run under the flow's invocation, so each step's record names only a browser
-/// reached since the previous step completed, while the flow's own record names the browser any
-/// of its steps reached.
-#[derive(Default)]
-struct Reached {
-    /// The browser the invocation reached, kept until the invocation completes.
-    invocation: Option<String>,
-    /// The browser reached since the invocation's last step completed.
-    step: Option<String>,
-}
-
-/// What one invocation's stale-target refusal offers, consumed by the completion path exactly once.
-type StaleOfferRegistry = Arc<Mutex<HashMap<String, StaleOffer>>>;
-
-/// The recovery a stale-target refusal offers (ADR-0198 Decision 28): controls the page found,
-/// each already registered as a handle, and the one of them the page proved is the control the
-/// stale handle named, when it did and the call can safely be repeated with it.
-struct StaleOffer {
-    /// The facts for each candidate, as the model sees them.
-    candidates: Vec<Value>,
-    /// The handle of the proven replacement.
-    replacement: Option<String>,
 }
 
 impl ApplicationExecutor {
@@ -279,11 +236,6 @@ impl ApplicationExecutor {
             workbench,
             audit,
             diagnostics,
-            observations: Arc::new(Mutex::new(HashMap::new())),
-            reached: Mutex::new(HashMap::new()),
-            stale_offers: Arc::new(Mutex::new(HashMap::new())),
-            permissions: Mutex::new(HashMap::new()),
-            coverage: Mutex::new(HashMap::new()),
             extension_probe: Arc::new(extension_in_a_browser_profile),
         }
     }
@@ -361,11 +313,8 @@ impl ApplicationExecutor {
         let started = prepared.received;
         let capacity_refused = admission == Admission::OverCapacity;
         let gate = CompletionGate::default();
-        let (operation, requirements) = match &prepared.decoded {
-            Ok(operation) => {
-                let requirements = language::capability_map::requirements(operation);
-                (operation, requirements)
-            }
+        let operation = match &prepared.decoded {
+            Ok(operation) => operation,
             Err(error) => {
                 let snapshot = self.governance.snapshot();
                 let decision = Decision::refused(ReasonCode::InvalidRequest);
@@ -391,13 +340,15 @@ impl ApplicationExecutor {
                 return self.finish(
                     &gate,
                     terminal,
+                    // A request that never decoded asked for nothing and learned nothing.
                     Completion {
                         workspace,
                         tool,
-                        requirements: CapabilitySet::READ,
+                        requirements: CapabilitySet::EMPTY,
                         snapshot: &snapshot,
                         duration_ms: elapsed_ms(started),
                         provenance: &prepared.provenance,
+                        findings: Findings::default(),
                     },
                 );
             }
@@ -417,25 +368,8 @@ impl ApplicationExecutor {
             None
         };
         let snapshot = self.governance.snapshot();
-        let settlement_requested = language::settlement::enabled(operation);
-        let settlement_pending = AtomicBool::new(settlement_requested);
-        let context = InvocationContext {
-            settlement_pending: &settlement_pending,
-            settlement_requested,
-            requirements,
-            provenance: &prepared.provenance,
-            invocation: &invocation,
-            workspace,
-            requested_browser: operation_browser(operation),
-            requested_tab: operation_tab(operation),
-            requested_target: operation_target(operation),
-            repeat_tool: repeatable_tool(operation),
-            gesture: PageGesture::of(operation),
-            snapshot: &snapshot,
-            deadline,
-            deadline_adjustable: prepared.deadline_adjustable,
-            cancellation,
-        };
+        let frame = Frame::of(operation);
+        let context = InvocationContext::of(prepared, operation, &snapshot, &frame);
         let terminal = if capacity_refused {
             let refusal = Refusal::Capacity;
             Terminal {
@@ -469,7 +403,7 @@ impl ApplicationExecutor {
                 workspace: workspace.as_str().into(),
                 tool: tool.into(),
                 activity: operation_activity(operation),
-                capabilities: requirements,
+                capabilities: context.requirements,
                 provenance: prepared.provenance.details(),
                 received_at_ms: prepared.received_at_ms,
             });
@@ -524,18 +458,7 @@ impl ApplicationExecutor {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .running_or_finished = true;
-        self.finish(
-            &gate,
-            terminal,
-            Completion {
-                workspace,
-                tool,
-                requirements,
-                snapshot: &snapshot,
-                duration_ms: elapsed_ms(started),
-                provenance: &prepared.provenance,
-            },
-        )
+        self.finish(&gate, terminal, Completion::of(&context, tool, started))
     }
 
     fn run(
@@ -909,16 +832,10 @@ impl ApplicationExecutor {
         let replacement = proven
             .and_then(|index| registered.get(index))
             .map(|(handle, _)| handle.as_str().to_owned());
-        self.stale_offers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(
-                context.invocation.to_string(),
-                StaleOffer {
-                    candidates,
-                    replacement,
-                },
-            );
+        context.findings.offer(StaleOffer {
+            candidates,
+            replacement,
+        });
     }
 
     /// Up to three controls the page names like a stale handle's control, from a separate
@@ -1207,12 +1124,11 @@ impl ApplicationExecutor {
         if decision.allowed {
             return None;
         }
-        self.retain_permission(
-            context,
-            context
-                .snapshot
-                .decision_evidence(context.requirements, None, decision),
-        );
+        context.findings.permit(context.snapshot.decision_evidence(
+            context.requirements,
+            None,
+            decision,
+        ));
         Some(self.blocked(
             context,
             decision,
@@ -1231,12 +1147,11 @@ impl ApplicationExecutor {
         if decision.allowed {
             Ok(())
         } else {
-            self.retain_permission(
-                context,
-                context
-                    .snapshot
-                    .decision_evidence(CapabilitySet::EMPTY, None, decision),
-            );
+            context.findings.permit(context.snapshot.decision_evidence(
+                CapabilitySet::EMPTY,
+                None,
+                decision,
+            ));
             Err(BrowserError::RuntimeControl(decision.reason))
         }
     }
@@ -1269,7 +1184,7 @@ impl ApplicationExecutor {
                     .decision_evidence(requirements, url, runtime),
             )
         };
-        self.retain_permission(context, evidence);
+        context.findings.permit(evidence);
         decision
     }
 
@@ -1301,7 +1216,7 @@ impl ApplicationExecutor {
         let (decision, evidence) = context
             .snapshot
             .authorize_with_evidence(requirements.into(), Some(url));
-        self.retain_permission(context, evidence);
+        context.findings.permit(evidence);
         decision
     }
 
@@ -1314,19 +1229,18 @@ impl ApplicationExecutor {
         if close.allowed {
             action
         } else {
-            self.retain_permission(
-                context,
-                context
-                    .snapshot
-                    .decision_evidence(CapabilitySet::ACTION, None, close),
-            );
+            context.findings.permit(context.snapshot.decision_evidence(
+                CapabilitySet::ACTION,
+                None,
+                close,
+            ));
             close
         }
     }
 
     /// The one browser seam.
     ///
-    /// Every model-requested browser command crosses here, which is why the invocation's
+    /// Every model-requested browser command crosses here, which is why the frame's
     /// observation is gathered here rather than at each of the call sites that funnel into it. A
     /// tool written tomorrow is observed for free; a tool that had to remember would not be.
     fn dispatch(
@@ -1341,7 +1255,7 @@ impl ApplicationExecutor {
             outcome => outcome,
         };
         if let Ok(outcome) = &outcome {
-            self.observe(context.invocation.as_str(), observed_from(outcome));
+            context.findings.observe(observed_from(outcome));
         }
         outcome
     }
@@ -1375,8 +1289,8 @@ impl ApplicationExecutor {
         }
     }
 
-    /// Send one command to `browser` under runtime control, and remember that the invocation
-    /// reached it when the port wrote any of the command, whatever the outcome.
+    /// Send one command to `browser` under runtime control, and remember in the frame's findings
+    /// that it reached the browser when the port wrote any of the command, whatever the outcome.
     ///
     /// The name is read before sending, so a browser that disconnects after taking the command is
     /// still named in the record of the work it took part in.
@@ -1407,37 +1321,9 @@ impl ApplicationExecutor {
             },
         );
         if let Some(name) = name.filter(|_| written.load(Ordering::SeqCst)) {
-            let mut reached = self.reached();
-            let entry = reached.entry(context.invocation.into()).or_default();
-            entry.invocation = Some(name.clone());
-            entry.step = Some(name);
+            context.findings.reach(name);
         }
         outcome
-    }
-
-    /// Take the name of the browser the invocation reached, or None when no browser received
-    /// any of its commands.
-    ///
-    /// A step's completion takes only what was reached since the previous step; the
-    /// invocation's own completion takes the rest and leaves nothing behind, which keeps the
-    /// registry bounded by work in flight.
-    fn take_reached(&self, invocation: &str, step: bool) -> Option<String> {
-        let mut reached = self.reached();
-        if step {
-            reached
-                .get_mut(invocation)
-                .and_then(|entry| entry.step.take())
-        } else {
-            reached
-                .remove(invocation)
-                .and_then(|entry| entry.invocation)
-        }
-    }
-
-    fn reached(&self) -> std::sync::MutexGuard<'_, HashMap<String, Reached>> {
-        self.reached
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Admit this invocation's next browser crossing and name the browser it goes to.
@@ -1612,38 +1498,6 @@ impl ApplicationExecutor {
             Err(RecoveryWaitError::Cancelled) => Err(BrowserError::CancelledBeforeDispatch),
             Err(RecoveryWaitError::Deadline) => Err(BrowserError::DeadlineBeforeDispatch),
         }
-    }
-
-    /// Record what one crossing saw, on top of what the invocation already observed.
-    fn observe(&self, invocation: &str, observed: Observed) {
-        let mut registry = self.observations();
-        let merged = registry
-            .remove(invocation)
-            .unwrap_or_default()
-            .merged(observed);
-        registry.insert(invocation.into(), merged);
-    }
-
-    /// Take the invocation's observation and leave nothing behind.
-    ///
-    /// The completion path runs exactly once per invocation, so reading here is what keeps the
-    /// registry bounded by work in flight rather than by work ever done.
-    fn take_observation(&self, invocation: &str) -> Observed {
-        self.observations().remove(invocation).unwrap_or_default()
-    }
-
-    /// Consume any recovery recorded for this invocation's stale-target refusal.
-    fn take_stale_offer(&self, invocation: &str) -> Option<StaleOffer> {
-        self.stale_offers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(invocation)
-    }
-
-    fn observations(&self) -> std::sync::MutexGuard<'_, HashMap<String, Observed>> {
-        self.observations
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn compensate_close(
@@ -2159,7 +2013,7 @@ impl ApplicationExecutor {
                 .and_then(|target| self.workspaces.target_owner(context.workspace, target)),
             _ => None,
         };
-        let offer = self.take_stale_offer(context.invocation.as_str());
+        let offer = context.findings.take_offer();
         let mut reason = match error {
             WorkspaceError::NotOwnedTab
             | WorkspaceError::NotOwnedTarget
@@ -2255,7 +2109,7 @@ fn denial_presentation(tool: &str, result: &InvocationResult) -> DenialPresentat
     DenialPresentation::Guardrail
 }
 
-/// What the single completion path needs to record one terminal outcome.
+/// What the single completion path needs to record one frame's terminal outcome.
 ///
 /// These travel together and only together, so they arrive as one value rather than as a
 /// growing parameter list on `finish`.
@@ -2268,6 +2122,24 @@ struct Completion<'a> {
     duration_ms: u64,
     /// Immutable evidence from this operation's original connection.
     provenance: &'a ConnectionEvidence,
+    /// Everything the frame learned, taken once for its record.
+    findings: Findings,
+}
+
+impl<'a> Completion<'a> {
+    /// What the frame `context` records as `tool`, timed from `started`, with the findings it
+    /// gathered. Taking the findings leaves the frame with none.
+    fn of(context: &InvocationContext<'a>, tool: &'a str, started: Instant) -> Self {
+        Self {
+            workspace: context.workspace,
+            tool,
+            requirements: context.requirements,
+            snapshot: context.snapshot,
+            duration_ms: elapsed_ms(started),
+            provenance: context.provenance,
+            findings: context.findings.take(),
+        }
+    }
 }
 
 /// Milliseconds elapsed since an invocation began, saturating rather than wrapping.
@@ -2275,9 +2147,14 @@ fn elapsed_ms(started: std::time::Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+/// What one frame runs with: its request's shared facts and its own operation's facts.
+///
+/// A frame is a request's top-level operation ([`InvocationContext::of`]) or one flow step
+/// ([`InvocationContext::step`]). An override inside one frame keeps `..*context`, and with it
+/// that frame's findings.
 #[derive(Clone, Copy)]
 struct InvocationContext<'a> {
-    /// Whether this call's preparation budget is still unspent. The first dispatch that settles
+    /// Whether this frame's preparation budget is still unspent. The first dispatch that settles
     /// takes it.
     settlement_pending: &'a AtomicBool,
     /// The agent's intent: false only when the call said `visual_settle: false`. It never
@@ -2310,6 +2187,56 @@ struct InvocationContext<'a> {
     /// field that would give them more time.
     deadline_adjustable: bool,
     cancellation: &'a CancellationToken,
+    /// What this frame learns, read once by its own completion.
+    findings: &'a FrameFindings,
+}
+
+impl<'a> InvocationContext<'a> {
+    /// The top-level frame of `prepared`, running its decoded `operation` under `snapshot`.
+    fn of(
+        prepared: &'a PreparedInvocation,
+        operation: &'a Operation,
+        snapshot: &'a AuthoritySnapshot,
+        frame: &'a Frame,
+    ) -> Self {
+        Self {
+            settlement_pending: &frame.settlement_pending,
+            settlement_requested: language::settlement::enabled(operation),
+            requirements: language::capability_map::requirements(operation),
+            provenance: &prepared.provenance,
+            invocation: &prepared.id,
+            workspace: &prepared.workspace,
+            requested_browser: operation_browser(operation),
+            requested_tab: operation_tab(operation),
+            requested_target: operation_target(operation),
+            repeat_tool: repeatable_tool(operation),
+            gesture: PageGesture::of(operation),
+            snapshot,
+            deadline: prepared.deadline,
+            deadline_adjustable: prepared.deadline_adjustable,
+            cancellation: &prepared.cancellation,
+            findings: &frame.findings,
+        }
+    }
+
+    /// The frame of one flow step running `operation` inside this flow frame.
+    ///
+    /// The step shares its flow's id, workspace, caller, deadline, cancellation and authority
+    /// snapshot, and owns its operation's requirements, gesture and settlement and its own
+    /// findings. It still names the flow's requested browser, tab and target.
+    fn step<'b>(&self, operation: &'b Operation, frame: &'b Frame) -> InvocationContext<'b>
+    where
+        'a: 'b,
+    {
+        InvocationContext {
+            settlement_pending: &frame.settlement_pending,
+            settlement_requested: language::settlement::enabled(operation),
+            requirements: language::capability_map::requirements(operation),
+            gesture: PageGesture::of(operation),
+            findings: &frame.findings,
+            ..*self
+        }
+    }
 }
 
 struct Terminal {
@@ -3076,6 +3003,7 @@ mod tests {
     mod credentials;
     mod documents;
     mod execution;
+    mod findings;
     mod golden;
     mod presentation;
     mod protocol4;

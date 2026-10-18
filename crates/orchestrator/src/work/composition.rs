@@ -491,6 +491,7 @@ mod tests {
                 deadline: Instant::now(),
                 deadline_adjustable: false,
                 cancellation: &token,
+                findings: &super::super::findings::FrameFindings::default(),
             };
             let mut composition =
                 Composition::new(3, Decision::permitted(), Readiness::NotApplicable, None);
@@ -564,6 +565,7 @@ mod tests {
             deadline: Instant::now(),
             deadline_adjustable: false,
             cancellation: &token,
+            findings: &super::super::findings::FrameFindings::default(),
         };
         let finish = |children: Vec<Terminal>| {
             let mut composition = Composition::new(

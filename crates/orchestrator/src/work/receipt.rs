@@ -1,8 +1,8 @@
 //! One receipt/completion seam for direct operations, composition children, and preparation facts.
 
 use super::*;
-use crate::governance::evidence::{PermissionCheck, PermissionTrace};
 use crate::language::history::StepReceipt;
+use crate::provenance::Attribution;
 
 impl ApplicationExecutor {
     /// Complete a direct operation or the composition parent through the shared receipt seam.
@@ -30,11 +30,12 @@ impl ApplicationExecutor {
             snapshot,
             duration_ms,
             provenance,
+            findings,
         } = completion;
-        if let Some(coverage) = self.take_coverage(terminal.result.invocation.as_str()) {
+        if let Some(coverage) = &findings.coverage {
             terminal.result.summary =
-                language::coverage::qualify(&terminal.result.summary, &coverage);
-            terminal.audit = terminal.audit.with_coverage(&coverage);
+                language::coverage::qualify(&terminal.result.summary, coverage);
+            terminal.audit = terminal.audit.with_coverage(coverage);
             terminal.result.facts["coverage"] = json!(coverage);
         }
         let tool = language::audit::tool_name(tool);
@@ -90,13 +91,15 @@ impl ApplicationExecutor {
                 ghostlight_bridge::diagnostics::Level::Info
             },
             Some(terminal.result.invocation.as_str()),
-            &format!("{tool} {status} {effect} {}ms", duration_ms),
+            &operation_line(
+                tool,
+                &status,
+                &effect,
+                duration_ms,
+                provenance.attribution(),
+            ),
         );
-        let observed = self
-            .take_observation(terminal.result.invocation.as_str())
-            .merged(terminal.observed.clone());
-        // The record names a browser only when one received a command of this work.
-        let browser_label = self.take_reached(terminal.result.invocation.as_str(), step.is_some());
+        let observed = findings.observed.merged(terminal.observed.clone());
         let mut record = AuditRecord::now(
             terminal.result.invocation.as_str(),
             workspace.as_str(),
@@ -112,9 +115,10 @@ impl ApplicationExecutor {
         .with_provenance(Some(provenance.attribution()))
         .with_policy(snapshot, terminal.decision)
         .with_observation(observed)
-        .with_browser(browser_label);
+        // The record names a browser only when one received a command of this frame.
+        .with_browser(findings.reached);
         record.step = step;
-        record.permissions = self.take_permissions(terminal.result.invocation.as_str());
+        record.permissions = findings.permissions;
         let storage = self.audit.record_with_provenance(&record, Some(provenance));
         terminal.result.summary = if storage == language::audit_health::Storage::Saved {
             language::audit_health::qualify_children(
@@ -132,24 +136,19 @@ impl ApplicationExecutor {
     }
 
     /// Execute and complete an ordinary child without taking another lease or snapshot.
+    ///
+    /// The step runs in its own frame, so its record holds only its own checks, coverage and
+    /// browser. The flow takes one fact back: the browser the step reached.
     pub(super) fn run_child(
         &self,
-        context: &InvocationContext<'_>,
+        flow: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         operation: &Operation,
         step: StepReceipt,
     ) -> Terminal {
-        let _ = self.take_permissions(context.invocation.as_str());
         let started = Instant::now();
-        let settlement_requested = language::settlement::enabled(operation);
-        let settlement_pending = AtomicBool::new(settlement_requested);
-        let context = InvocationContext {
-            settlement_pending: &settlement_pending,
-            settlement_requested,
-            requirements: language::capability_map::requirements(operation),
-            gesture: PageGesture::of(operation),
-            ..*context
-        };
+        let frame = Frame::of(operation);
+        let context = flow.step(operation, &frame);
         self.emit(DomainEvent::WorkPhaseStarted {
             invocation: context.invocation.into(),
             workspace: context.workspace.as_str().into(),
@@ -157,17 +156,13 @@ impl ApplicationExecutor {
             activity: operation_activity(operation),
         });
         let terminal = self.run(&context, lease, operation);
+        if let Some(browser) = context.findings.reached() {
+            flow.findings.reach(browser);
+        }
         self.complete_terminal(
             &CompletionGate::default(),
             terminal,
-            Completion {
-                workspace: context.workspace,
-                tool: operation.name(),
-                requirements: language::capability_map::requirements(operation),
-                snapshot: context.snapshot,
-                duration_ms: elapsed_ms(started),
-                provenance: context.provenance,
-            },
+            Completion::of(&context, operation.name(), started),
             Some(step),
         )
     }
@@ -196,26 +191,50 @@ impl ApplicationExecutor {
         self.audit
             .record_with_provenance(&record, Some(context.provenance))
     }
+}
 
-    /// Retain the bounded evidence for the operation currently using this invocation.
-    pub(super) fn retain_permission(
-        &self,
-        context: &InvocationContext<'_>,
-        check: PermissionCheck,
-    ) {
-        self.permissions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(context.invocation.into())
-            .or_default()
-            .record(check);
+/// The diagnostics line of one completed operation: what ran, how it ended, how long it took and
+/// the connection that sent it. Never the client's claim (ADR-0161).
+fn operation_line(
+    tool: &str,
+    status: &str,
+    effect: &str,
+    duration_ms: u64,
+    attribution: &Attribution,
+) -> String {
+    let line = format!("{tool} {status} {effect} {duration_ms}ms");
+    match attribution.connection_id.as_deref() {
+        Some(connection) => format!("{line} on {connection}"),
+        None => line,
     }
+}
 
-    fn take_permissions(&self, invocation: &str) -> PermissionTrace {
-        self.permissions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(invocation)
-            .unwrap_or_default()
+#[cfg(test)]
+mod tests {
+    use super::operation_line;
+    use crate::intake::session::IntakeChannel;
+    use crate::provenance::{Attribution, ConnectionEvidence};
+
+    #[test]
+    fn operation_lines_name_the_connection() {
+        let evidence =
+            ConnectionEvidence::new(Attribution::accepted(IntakeChannel::Mcp), "PRIVATE_CLAIM");
+        let attribution = evidence.attribution();
+        let connection = attribution.connection_id.as_deref().unwrap();
+        let line = operation_line("browser_read", "succeeded", "none", 12, attribution);
+        assert_eq!(
+            line,
+            format!("browser_read succeeded none 12ms on {connection}")
+        );
+        assert!(!line.contains("PRIVATE_CLAIM"));
+
+        let restored = Attribution {
+            connection_id: None,
+            ..Attribution::accepted(IntakeChannel::Cli)
+        };
+        assert_eq!(
+            operation_line("browser_click", "failed", "unknown", 3, &restored),
+            "browser_click failed unknown 3ms"
+        );
     }
 }

@@ -509,6 +509,16 @@ capacity, which completes through the same path without running. Its deadline an
 span count from when the service received it, and a live row starts at that time, so a call that
 waited shows the same span live as in history.
 
+What a frame learns lives with the frame and is read once by its completion. A frame is the
+request's top-level operation or one flow step, each built by its own constructor from its own
+operation. Its findings are what the page showed, the browser that received its commands, its
+governance checks, its document coverage and the recovery a stale-target refusal offers. They sit
+on the frame's stack, never on the executor and never keyed by an id. A step shares its flow's
+id, workspace, caller, deadline, cancellation and authority snapshot, and records only its own
+checks, coverage and browser. The flow keeps its own admission check and takes one fact from each
+step, the browser it reached, so the flow's record names the last browser a step reached. A
+request that never decoded records no capabilities.
+
 ### Workspace
 
 Owns MCP sessions, controlled tabs, opaque tab and target handles, document generations,

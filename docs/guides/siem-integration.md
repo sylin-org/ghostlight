@@ -78,7 +78,7 @@ when the service writes a different shape.
 | `timestamp_ms` | Local observation time as Unix milliseconds. |
 | `invocation`, `workspace` | Opaque correlation handles. |
 | `tool` | Catalog tool name, or `unknown_tool` for an unrecognized request name. |
-| `capabilities` | Complete independent RAWX requirement set. Empty is valid. |
+| `capabilities` | Complete independent RAWX requirement set. Empty is valid, and a request that never decoded records it empty. |
 | `authority` | Opaque immutable authority snapshot id. |
 | `policy_seq` | Signed managed publish sequence, when active. |
 | `allowed`, `reason` | Final-boundary decision and stable reason. |
@@ -92,7 +92,7 @@ when the service writes a different shape.
 | `step` | Optional child correlation: `parent` form, one-based `position`, `total`, and `preparation_failed`. `invocation` remains the parent id. |
 | `composition` | Optional safe parent progress. Aggregate wrappers do not represent another attempted child. |
 | `composition_tools` | Optional bounded canonical tool plan. Caller labels and arguments are excluded. |
-| `permissions` | Bounded actual evaluation checks and a `truncated` flag; includes allowed work as well as refusals. |
+| `permissions` | Bounded actual evaluation checks and a `truncated` flag; includes allowed work as well as refusals. Each child record holds only its own checks, and a flow's own record holds its admission check. |
 | `coverage` | Optional document coverage of a read: `targeted`, the inspected, excluded, page excluded and unavailable document counts, and `limited_by_size`. |
 | `unconfirmed_history_steps` | Optional count of child receipts whose storage was not confirmed; absent when zero. |
 | `channel` | `mcp` or `cli`; attribution, not authority. |
@@ -137,6 +137,10 @@ evaluated layer's bounded grant identities. A trace can omit checks after its bo
 evidence comes from the original immutable-snapshot evaluation. See [H4 source and verification
 state](../tasks/security-hardening/h4-grouped-history.md) before assuming an installed version
 writes these fields.
+
+Two values read differently on lines from builds before 2.0. There, a request that never decoded
+records `capabilities` as `["read"]`, and a flow's own record has no `permissions` checks, because
+the flow's admission check was dropped when its first step started.
 
 Older versions could retain page content in failed-flow records and browser text in failure
 summaries. This correction does not rewrite old files. The reader ignores arbitrary

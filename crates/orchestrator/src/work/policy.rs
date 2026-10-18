@@ -18,12 +18,11 @@ impl ApplicationExecutor {
         // authority stops browser work. Keep the ordinary completion/audit path, without changing
         // human controls or inventing a grant evaluation (ADR-0136).
         let decision = Decision::permitted();
-        self.retain_permission(
-            context,
-            context
-                .snapshot
-                .decision_evidence(CapabilitySet::EMPTY, None, decision),
-        );
+        context.findings.permit(context.snapshot.decision_evidence(
+            CapabilitySet::EMPTY,
+            None,
+            decision,
+        ));
         let mut authority = self.governance.effective_authority();
         // Machine-local reading aids stay out of model results (ADR-0136 Decision 2). The
         // person's workbench destination keeps rendering them.

@@ -166,6 +166,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         deadline: Instant::now() + Duration::from_secs(1),
         deadline_adjustable: false,
         cancellation: &cancellation,
+        findings: &crate::work::findings::FrameFindings::default(),
     };
     assert!(executor.admit_dispatch(&context).is_ok());
     executor.audit.record(&AuditRecord::now(

@@ -6,7 +6,7 @@ use crate::scratch::Scratch;
 use crate::workbench::WorkbenchFacade;
 use crate::workspace::WorkspaceId;
 
-fn inventory(child_supported: bool) -> DocumentInventory {
+pub(super) fn inventory(child_supported: bool) -> DocumentInventory {
     DocumentInventory {
         documents: vec![
             PhysicalDocument {
@@ -64,7 +64,7 @@ fn semantic_preparation_and_action_share_one_budget_and_opt_out_reaches_both() {
     }
 }
 
-fn policy_file(child_read: bool) -> Scratch {
+pub(super) fn policy_file(child_read: bool) -> Scratch {
     let path = Scratch::file("documents-policy.json");
     let mut grants = vec![
         json!({"id":"main","hosts":{"allow":["example.com"]},"allowed":["read","action","write","execute"]}),
@@ -83,7 +83,7 @@ fn policy_file(child_read: bool) -> Scratch {
     path
 }
 
-fn open(executor: &ApplicationExecutor, browser: &FakeBrowser, workspace: &WorkspaceId) {
+pub(super) fn open(executor: &ApplicationExecutor, browser: &FakeBrowser, workspace: &WorkspaceId) {
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec![],

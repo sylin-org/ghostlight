@@ -676,8 +676,8 @@ fn invalid_input_names_no_browser_in_the_record() {
     assert_eq!(audit.0.lock().unwrap()[0].browser, None);
 }
 
-/// A flow's steps share the flow's invocation: the step that reached the browser names it, a
-/// later step that reached none names none, and the flow's own record names the browser its work
+/// Each flow step records its own browser: the step that reached the browser names it, a later
+/// step that reached none names none, and the flow's own record names the browser its steps
 /// reached.
 #[test]
 fn a_flow_names_the_browser_only_on_the_records_of_work_that_reached_it() {

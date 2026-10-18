@@ -176,35 +176,21 @@ impl RequestScope {
 }
 
 impl ApplicationExecutor {
-    pub(super) fn take_coverage(&self, invocation: &str) -> Option<Coverage> {
-        self.coverage
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(invocation)
-    }
-
+    /// Merge `coverage` into this frame's findings and tell the window what the frame's reads
+    /// have covered so far.
     pub(super) fn retain_coverage(
         &self,
         context: &InvocationContext<'_>,
-        mut coverage: Coverage,
+        coverage: Coverage,
         hosts: Vec<String>,
     ) {
-        {
-            let mut retained = self
-                .coverage
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(previous) = retained.get(context.invocation.as_str()) {
-                coverage.include(previous);
-            }
-            retained.insert(context.invocation.into(), coverage.clone());
-        }
+        let coverage = context.findings.cover(coverage);
         self.workbench.document_coverage(HumanCoverage {
             summary: language::coverage::human_summary(&coverage),
             explanation: language::coverage::HUMAN_EXPLANATION.into(),
             invocation: context.invocation.into(),
             proactive: coverage.limited(),
-            coverage: coverage.clone(),
+            coverage,
             excluded_hosts: hosts,
         });
     }
@@ -250,7 +236,7 @@ impl ApplicationExecutor {
             // The raising frame may be embedded, and an embedded document's host never enters
             // the durable audit; the tab admission already records the top document's host.
             evidence.host = None;
-            self.retain_permission(context, evidence);
+            context.findings.permit(evidence);
             if !decision.allowed {
                 return Err(BrowserError::DocumentAccess(decision));
             }
@@ -293,12 +279,11 @@ impl ApplicationExecutor {
         ) {
             let decision = context.snapshot.authorize_screenshot();
             if !decision.allowed {
-                self.retain_permission(
-                    context,
-                    context
-                        .snapshot
-                        .decision_evidence(context.requirements, None, decision),
-                );
+                context.findings.permit(context.snapshot.decision_evidence(
+                    context.requirements,
+                    None,
+                    decision,
+                ));
                 return Err(BrowserError::DocumentAccess(decision));
             }
             if let BrowserCommand::Screenshot { visual_settle, .. }
@@ -371,7 +356,7 @@ impl ApplicationExecutor {
             if document.parent.is_some() {
                 evidence.host = None;
             }
-            self.retain_permission(context, evidence);
+            context.findings.permit(evidence);
             if decision.allowed {
                 allowed.push(document.id.clone());
             } else {

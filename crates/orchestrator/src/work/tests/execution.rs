@@ -2229,32 +2229,6 @@ fn outcome_language_and_the_seam_observe_without_carrying_page_detail() {
 }
 
 #[test]
-fn an_observation_never_outlives_the_invocation_it_describes() {
-    let (executor, browser, _, workspace, _) = fixture();
-    browser.push(Ok(BrowserOutcome::TabOpened {
-        tab: tab(7, "https://example.com/"),
-        committed_urls: vec!["https://example.com/".into()],
-    }));
-    executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"url":"https://example.com"}),
-        &CancellationToken::default(),
-    );
-    // A failure before any browser crossing must not leave a key behind either.
-    executor.execute(
-        &workspace,
-        "browser_navigate",
-        json!({"nonsense":true}),
-        &CancellationToken::default(),
-    );
-    assert!(
-        executor.observations().is_empty(),
-        "the registry grows with every invocation instead of with work in flight"
-    );
-}
-
-#[test]
 fn a_capture_reports_its_size_and_a_wait_reports_how_long_it_waited() {
     let (executor, browser, _, workspace, audit) = fixture();
     browser.push(Ok(BrowserOutcome::TabOpened {
