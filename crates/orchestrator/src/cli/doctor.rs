@@ -18,6 +18,7 @@ use crate::install::container;
 use crate::install::deployment::{stray_processes, StrayProcess};
 use crate::install::icons::{AgentIcon, IconCache, IconPlaces};
 use crate::install::layout::Layout;
+use crate::install::native_host::NativeHostReport;
 use crate::install::record::{Channel, InstallRecord};
 use crate::install::version_directories;
 use crate::language::agent_icon;
@@ -257,7 +258,7 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
             }))
             .collect::<Vec<_>>(),
         "browser_program": observation.native_host.connector.display().to_string(),
-        "browsers": observation.native_host.browsers,
+        "browsers": browsers_document(&observation.native_host),
         "private_view": observation.native_host.private_view,
         "command": observation.command_path,
         "documentation": observation.user_assets,
@@ -270,6 +271,25 @@ pub fn doctor_document(observation: &DoctorObservation) -> serde_json::Value {
         "readiness": observation.readiness,
         "process_diagnostics": observation.diagnostics,
     })
+}
+
+/// What `doctor --json` says about each browser: the report's rows, or, inside an app container,
+/// each row in the `not_visible` state with the words the text prints, because the registry read
+/// there is that app's own and says nothing about what the browser sees.
+fn browsers_document(report: &NativeHostReport) -> serde_json::Value {
+    let Some(container) = &report.private_view else {
+        return serde_json::json!(report.browsers);
+    };
+    report
+        .browsers
+        .iter()
+        .map(|browser| {
+            let mut row = serde_json::json!(browser);
+            row["state"] = container::NOT_VISIBLE_STATE.into();
+            row["detail"] = container::registry_view_detail(container).into();
+            row
+        })
+        .collect()
 }
 
 /// What `doctor --json` says about one agent's icon: whether one was found and, when it was, the
@@ -302,9 +322,10 @@ mod tests {
 
     /// An observation of a machine where the service answers and one retired connector runs.
     fn observation(strays: Vec<crate::install::deployment::StrayProcess>) -> DoctorObservation {
+        use crate::install::browser_package::BrowserPackage;
         use crate::install::command_path::{CommandPathReport, CommandPathState};
         use crate::install::desktop_entry::{DesktopIntegrationReport, DesktopIntegrationState};
-        use crate::install::native_host::NativeHostReport;
+        use crate::install::native_host::{BrowserRegistration, NativeHostReport, NativeHostState};
         use crate::install::user_assets::{UserAssetReport, UserAssetState};
 
         DoctorObservation {
@@ -315,7 +336,14 @@ mod tests {
             sibling_set_ready: true,
             native_host: NativeHostReport {
                 connector: PathBuf::from("ghostlight"),
-                browsers: Vec::new(),
+                browsers: vec![BrowserRegistration {
+                    id: "chrome".into(),
+                    name: "Google Chrome".into(),
+                    package: BrowserPackage::Native,
+                    package_detail: "Google Chrome is installed.".into(),
+                    state: NativeHostState::NeedsAttention,
+                    detail: "Malformed or foreign state was found and will not be changed.".into(),
+                }],
                 private_view: None,
             },
             command_path: CommandPathReport {
@@ -421,6 +449,40 @@ mod tests {
         assert!(doctor_document(&observation(Vec::new()))["service"]
             .get("window")
             .is_none());
+    }
+
+    #[test]
+    fn inside_an_app_container_text_and_json_name_the_apps_view_instead_of_blaming_the_browser() {
+        use crate::install::container::AppContainer;
+
+        let mut observed = observation(Vec::new());
+        let open = doctor_document(&observed);
+        assert_eq!(open["browsers"][0]["state"], "needs_attention");
+        assert!(
+            crate::cli::setup::browser_report_lines(&observed.native_host)[0]
+                .contains("needs attention")
+        );
+
+        observed.native_host.private_view = Some(AppContainer {
+            app: "Claude".into(),
+        });
+        let words =
+            "Claude's own view of the registry; run ghostlight doctor from a regular terminal.";
+        let document = doctor_document(&observed);
+        let row = &document["browsers"][0];
+        assert_eq!(row["state"], "not_visible");
+        assert_eq!(row["detail"], words);
+        assert_eq!(row["name"], "Google Chrome");
+        assert_eq!(document["private_view"]["app"], "Claude");
+        let lines = crate::cli::setup::browser_report_lines(&observed.native_host);
+        assert_eq!(
+            lines,
+            [format!(
+                "Browser: Google Chrome -- Google Chrome is installed. -- cannot be checked from \
+                 here -- {words}"
+            )]
+        );
+        assert!(!lines[0].contains("Malformed"));
     }
 
     #[test]

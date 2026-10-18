@@ -264,7 +264,9 @@ app's container, where registry and `AppData` writes are visible only to that ap
 from such a terminal writes everything else and says which registrations it left, the PATH entry,
 the Start-menu shortcut and the installed-apps entry among them while they are out of date; run
 `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal to finish them. After that,
-installs from inside the container only rewrite the manifest.
+installs from inside the container only rewrite the manifest. `ghostlight doctor` run from such a
+terminal reads that app's own view of the registry, so it says it cannot check the browsers'
+registrations there; run it from a regular terminal to check them.
 
 ### Uninstall
 

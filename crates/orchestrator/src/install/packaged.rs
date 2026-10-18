@@ -89,6 +89,24 @@ fn is_publisher_id(publisher: &str) -> bool {
     !publisher.is_empty() && publisher.chars().all(|unit| unit.is_ascii_alphanumeric())
 }
 
+/// The package families installed for the person below `local_app_data`, in family name order,
+/// from one listing of [`PACKAGES_DIRECTORY`] of at most [`MAX_PACKAGES`] entries. A folder that
+/// cannot be read lists none.
+pub(super) fn families(local_app_data: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(local_app_data.join(PACKAGES_DIRECTORY)) else {
+        return Vec::new();
+    };
+    let mut families: Vec<String> = entries
+        .take(MAX_PACKAGES)
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|family| is_family(family))
+        .collect();
+    families.sort();
+    families
+}
+
 /// The person's two data roots on Windows.
 #[derive(Clone, Debug)]
 pub(super) struct DataRoots {
@@ -180,30 +198,19 @@ impl Packages {
     /// The packages installed for the person below `roots.local` that keep a private copy of a
     /// data root, in family name order. A folder that cannot be read lists none.
     pub(super) fn listed(roots: DataRoots) -> Self {
-        let packages = match fs::read_dir(roots.local.join(PACKAGES_DIRECTORY)) {
-            Ok(entries) => {
-                let mut packages: Vec<PackageData> = entries
-                    .take(MAX_PACKAGES)
-                    .filter_map(Result::ok)
-                    .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .filter(|family| is_family(family))
-                    .filter_map(|family| {
-                        let kept: Vec<DataRoot> = DATA_ROOTS
-                            .into_iter()
-                            .filter(|root| private_root(&roots.local, &family, *root).is_dir())
-                            .collect();
-                        (!kept.is_empty()).then_some(PackageData {
-                            family,
-                            roots: kept,
-                        })
-                    })
+        let packages = families(&roots.local)
+            .into_iter()
+            .filter_map(|family| {
+                let kept: Vec<DataRoot> = DATA_ROOTS
+                    .into_iter()
+                    .filter(|root| private_root(&roots.local, &family, *root).is_dir())
                     .collect();
-                packages.sort_by(|left, right| left.family.cmp(&right.family));
-                packages
-            }
-            Err(_) => Vec::new(),
-        };
+                (!kept.is_empty()).then_some(PackageData {
+                    family,
+                    roots: kept,
+                })
+            })
+            .collect();
         Self {
             roots: Some(roots),
             packages,

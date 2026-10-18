@@ -9,32 +9,24 @@
 //! container, leaves those redirected registrations unwritten and says which ones, with the one
 //! command that finishes them from a regular terminal (ADR-0197 amendment, 2026-10-14).
 //!
-//! Detection has two steps, because a packaged ancestor alone proves nothing: Windows Terminal,
-//! Store PowerShell and other packaged apps run in the open. The parent chain names the packaged
-//! apps the process descends from, meaning images directly below a package directory of
-//! `WindowsApps` (`<drive>:\Program Files\WindowsApps\<package>\...`). The process is inside the
-//! container of the first such app whose private copy of `%LOCALAPPDATA%` holds a probe file this
-//! process just wrote, which is the effect that matters. Nothing here starts a process or reads
-//! the registry.
+//! The container is found by its effect alone, never by the processes above this one, because a
+//! wrapper such as `timeout` or a pipeline breaks a parent chain while the container holds. The
+//! detection writes a probe file below `%LOCALAPPDATA%` and lists its `Packages` folder once: the
+//! process is inside the container of the package whose private copy of `%LOCALAPPDATA%` also
+//! holds the probe. Windows shows a process inside a container only the merged view of `HKCU`,
+//! `HKEY_USERS` included, and keeps the app's private registry hive locked, so the registry view
+//! is private exactly when the probe lands privately (ADR-0197 amendment, 2026-10-18). Nothing
+//! here starts a process or reads the registry.
 
-use std::cell::OnceCell;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use serde::Serialize;
+use uuid::Uuid;
 
 use super::layout::Layout;
-use super::packaged::{private_root, DataRoot};
-
-/// How many ancestors the detection walks before it stops.
-pub const MAX_ANCESTOR_DEPTH: usize = 16;
-
-/// The directory below which Windows keeps the files of packaged apps.
-const PACKAGE_ROOT_DIRECTORY: &str = "WindowsApps";
-
-/// The directory that holds [`PACKAGE_ROOT_DIRECTORY`] on the system drive.
-const PROGRAM_FILES_DIRECTORY: &str = "Program Files";
+use super::packaged::{families, private_root, DataRoot};
 
 /// Separates the fields of a package directory such as `Claude_1.2.3_x64__id`: name, version,
 /// architecture, resource id and publisher id. A package family name, `Claude_id`, is the first
@@ -44,8 +36,14 @@ pub(super) const PACKAGE_FIELD_SEPARATOR: char = '_';
 /// The prefix of the probe file the detection writes below `%LOCALAPPDATA%`.
 const PROBE_PREFIX: &str = "ghostlight-residence-probe-";
 
+/// The variable that names this person's `%LOCALAPPDATA%`.
+const LOCAL_APP_DATA_VARIABLE: &str = "LOCALAPPDATA";
+
 /// What `doctor` says of a registration whose state only another app can see.
 pub const NOT_VISIBLE: &str = "cannot be checked from here";
+
+/// The state `doctor --json` gives a registration whose state only another app can see.
+pub const NOT_VISIBLE_STATE: &str = "not_visible";
 
 /// The subcommand of the installed service that registers browsers and clients.
 const FINISHING_SUBCOMMAND: &str = "install";
@@ -53,11 +51,21 @@ const FINISHING_SUBCOMMAND: &str = "install";
 /// The app whose container this process runs in.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AppContainer {
-    /// The app's package name, as its package directory spells it.
+    /// The app's package name, as its package family name spells it.
     pub app: String,
 }
 
 impl AppContainer {
+    /// The container of the package family `family`, `<name>_<publisher id>`.
+    fn of_family(family: &str) -> Self {
+        let app = family
+            .rsplit_once(PACKAGE_FIELD_SEPARATOR)
+            .map_or(family, |(name, _publisher)| name);
+        Self {
+            app: app.to_owned(),
+        }
+    }
+
     /// Whether this container belongs to the app with package name `package`.
     #[must_use]
     pub fn is_app(&self, package: &str) -> bool {
@@ -75,40 +83,30 @@ pub enum Residence {
 }
 
 impl Residence {
-    /// Where this process runs, decided once from its parent chain and a probe write.
+    /// Where this process runs, decided once from a probe write. Only Windows has app containers.
     #[must_use]
     pub fn detect() -> Self {
         static DETECTED: OnceLock<Residence> = OnceLock::new();
         DETECTED
             .get_or_init(|| {
-                let probe = OnceCell::new();
-                Self::from_ancestors(
-                    &ghostlight_win_peer::ancestor_images(MAX_ANCESTOR_DEPTH),
-                    |family| {
-                        probe
-                            .get_or_init(Probe::write)
-                            .as_ref()
-                            .is_some_and(|probe| probe.landed_privately(family))
-                    },
-                )
+                if !cfg!(target_os = "windows") {
+                    return Self::Regular;
+                }
+                std::env::var_os(LOCAL_APP_DATA_VARIABLE).map_or(Self::Regular, |local| {
+                    Probe::write_in(PathBuf::from(local))
+                        .as_ref()
+                        .map_or(Self::Regular, Self::of_probe)
+                })
             })
             .clone()
     }
 
-    /// Where a process runs whose ancestors' executables are `images`, nearest first.
-    ///
-    /// `redirected` answers, for a package family name, whether this process's `%LOCALAPPDATA%`
-    /// writes land in that app's private copy. It is asked only about packaged ancestors.
-    #[must_use]
-    pub fn from_ancestors<P: AsRef<Path>>(images: &[P], redirected: impl Fn(&str) -> bool) -> Self {
-        images
-            .iter()
-            .take(MAX_ANCESTOR_DEPTH)
-            .filter_map(|image| Package::of(image.as_ref()))
-            .find(|package| redirected(&package.family))
-            .map_or(Self::Regular, |package| {
-                Self::AppContainer(AppContainer { app: package.name })
-            })
+    /// Where a process runs that wrote `probe`: inside the container of the package whose private
+    /// copy of `%LOCALAPPDATA%` holds it too, or in the open when none does.
+    fn of_probe(probe: &Probe) -> Self {
+        probe.private_family().map_or(Self::Regular, |family| {
+            Self::AppContainer(AppContainer::of_family(&family))
+        })
     }
 
     /// The container, when this process is inside one.
@@ -121,69 +119,33 @@ impl Residence {
     }
 }
 
-/// A packaged app named by the package directory its image lies in.
-struct Package {
-    /// The package name, such as `Claude`.
-    name: String,
-    /// The package family name, `<name>_<publisher id>`, which names the app's private data.
-    family: String,
-}
-
-impl Package {
-    /// The package whose directory holds `image`, when that directory is a package root.
-    ///
-    /// Only `<drive>:\Program Files\WindowsApps\<package>\...` and `<drive>:\WindowsApps\<package>\...`
-    /// qualify. Any other directory called `WindowsApps`, such as the per-user
-    /// `%LOCALAPPDATA%\Microsoft\WindowsApps` of app execution aliases, does not.
-    fn of(image: &Path) -> Option<Self> {
-        // Windows paths are split by hand so the answer does not depend on the host operating system.
-        let text = image.to_string_lossy();
-        let mut components = text.split(['\\', '/']).filter(|part| !part.is_empty());
-        let drive = components.next()?;
-        if !(drive.len() == 2 && drive.ends_with(':')) {
-            return None;
-        }
-        let mut directory = components.next()?;
-        if directory.eq_ignore_ascii_case(PROGRAM_FILES_DIRECTORY) {
-            directory = components.next()?;
-        }
-        if !directory.eq_ignore_ascii_case(PACKAGE_ROOT_DIRECTORY) {
-            return None;
-        }
-        let package: Vec<&str> = components.next()?.split(PACKAGE_FIELD_SEPARATOR).collect();
-        let [name, _version, _architecture, _resource, publisher] = package[..] else {
-            return None;
-        };
-        (!name.is_empty() && !publisher.is_empty()).then(|| Self {
-            name: name.to_owned(),
-            family: format!("{name}{PACKAGE_FIELD_SEPARATOR}{publisher}"),
-        })
-    }
-}
-
-/// A file written below `%LOCALAPPDATA%` to see whether Windows redirects the write. It is
-/// removed when dropped.
+/// A file written below `%LOCALAPPDATA%` to see whether Windows redirects the write. Its name is
+/// new on every write, so a probe an earlier process left behind is never mistaken for this one.
+/// It is removed when dropped.
 struct Probe {
     local_data: PathBuf,
     name: String,
 }
 
 impl Probe {
-    /// Write a probe below this user's `%LOCALAPPDATA%`.
-    fn write() -> Option<Self> {
-        Self::write_in(PathBuf::from(std::env::var_os("LOCALAPPDATA")?))
-    }
-
     /// Write a probe below `local_data`.
     fn write_in(local_data: PathBuf) -> Option<Self> {
-        let name = format!("{PROBE_PREFIX}{}", std::process::id());
+        let name = format!("{PROBE_PREFIX}{}", Uuid::new_v4().simple());
         fs::write(local_data.join(&name), []).ok()?;
         Some(Self { local_data, name })
     }
 
+    /// The package family whose private copy of `%LOCALAPPDATA%` also holds the probe, which is
+    /// where a redirected write goes, from one listing of the installed packages.
+    fn private_family(&self) -> Option<String> {
+        families(&self.local_data)
+            .into_iter()
+            .find(|family| self.landed_in(family))
+    }
+
     /// Whether the probe is also in the private copy of `%LOCALAPPDATA%` of package family
-    /// `family`, which is where a redirected write goes.
-    fn landed_privately(&self, family: &str) -> bool {
+    /// `family`.
+    fn landed_in(&self, family: &str) -> bool {
         private_root(&self.local_data, family, DataRoot::Local)
             .join(&self.name)
             .is_file()
@@ -244,6 +206,16 @@ pub fn client_cannot_see_line(client: &str) -> String {
     )
 }
 
+/// What `doctor` and the install dry run say of a browser registration inside `container`, in
+/// place of its state: the registry they read is that app's own.
+#[must_use]
+pub fn registry_view_detail(container: &AppContainer) -> String {
+    format!(
+        "{}'s own view of the registry; run ghostlight doctor from a regular terminal.",
+        container.app
+    )
+}
+
 /// The refusal when an uninstall would only change the private view.
 #[must_use]
 pub fn uninstall_refusal(container: &AppContainer, layout: &Layout) -> String {
@@ -258,130 +230,77 @@ pub fn uninstall_refusal(container: &AppContainer, layout: &Layout) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
     use crate::scratch::Scratch;
 
-    const CLAUDE_IMAGE: &str =
-        r"C:\Program Files\WindowsApps\Claude_1.4.2.0_x64__pzs8sxrjxfjjc\app\Claude.exe";
-    const TERMINAL_IMAGE: &str = r"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.24.12741.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe";
-
-    fn chain(images: &[&str], redirected: &[&str]) -> Residence {
-        Residence::from_ancestors(
-            &images.iter().map(PathBuf::from).collect::<Vec<_>>(),
-            |family| redirected.contains(&family),
-        )
-    }
+    const CLAUDE_FAMILY: &str = "Claude_pzs8sxrjxfjjc";
 
     fn temporary(name: &str) -> Scratch {
         Scratch::named(&format!("container-{name}"))
     }
 
+    /// Give `family` a private copy of `%LOCALAPPDATA%` below `local`, and return it.
+    fn private_copy(local: &std::path::Path, family: &str) -> PathBuf {
+        let private = private_root(local, family, DataRoot::Local);
+        fs::create_dir_all(&private).unwrap();
+        private
+    }
+
     #[test]
-    fn an_ancestor_whose_package_redirects_puts_the_process_in_its_container() {
-        let residence = chain(
-            &[
-                r"C:\Windows\System32\cmd.exe",
-                CLAUDE_IMAGE,
-                r"C:\Windows\explorer.exe",
-            ],
-            &["Claude_pzs8sxrjxfjjc"],
-        );
+    fn a_probe_in_any_packages_private_copy_decides_the_container_without_a_parent_chain() {
+        // Nothing names Claude but the redirected write: an agent's `timeout` or pipeline between
+        // Claude and this process changes nothing.
+        let local = temporary("any-package");
+        private_copy(&local, "Microsoft.WindowsTerminal_8wekyb3d8bbwe");
+        let claude = private_copy(&local, CLAUDE_FAMILY);
+        private_copy(&local, "OpenAI.Codex_2p2nqsd0c76g0");
+        let probe = Probe::write_in(local.to_path_buf()).unwrap();
+        assert_eq!(Residence::of_probe(&probe), Residence::Regular);
+
+        fs::write(claude.join(&probe.name), []).unwrap();
         assert_eq!(
-            residence.container(),
-            Some(&AppContainer {
+            Residence::of_probe(&probe),
+            Residence::AppContainer(AppContainer {
                 app: "Claude".into()
             })
         );
     }
 
     #[test]
-    fn the_directory_names_are_matched_without_regard_to_case() {
-        let residence = chain(
-            &[r"c:\program files\windowsapps\OpenAI.Codex_26.1_x64__abc\codex.exe"],
-            &["OpenAI.Codex_abc"],
-        );
-        assert_eq!(
-            residence.container().map(|c| c.app.as_str()),
-            Some("OpenAI.Codex")
-        );
-    }
-
-    #[test]
-    fn a_packaged_terminal_whose_writes_are_not_redirected_is_regular() {
-        let store_powershell = r"C:\Program Files\WindowsApps\Microsoft.PowerShell_7.5.0.0_x64__8wekyb3d8bbwe\pwsh.exe";
-        assert_eq!(
-            chain(
-                &[store_powershell, TERMINAL_IMAGE, r"C:\Windows\explorer.exe"],
-                &[]
-            ),
-            Residence::Regular
-        );
-    }
-
-    #[test]
-    fn the_first_ancestor_that_redirects_decides_the_app() {
-        let residence = chain(&[TERMINAL_IMAGE, CLAUDE_IMAGE], &["Claude_pzs8sxrjxfjjc"]);
-        assert!(residence.container().is_some_and(|c| c.is_app("claude")));
-    }
-
-    #[test]
-    fn only_a_package_root_below_windows_apps_counts() {
-        // The redirection answer would say yes to anything, so only the path can keep these out.
-        let always = |images: &[&str]| {
-            Residence::from_ancestors(
-                &images.iter().map(PathBuf::from).collect::<Vec<_>>(),
-                |_| true,
-            )
-        };
-        assert_eq!(
-            always(&[
-                r"C:\Users\person\AppData\Local\Microsoft\WindowsApps\pwsh.exe",
-                r"C:\Program Files\WindowsAppsTools\tool.exe",
-                r"C:\Program Files\Tool\WindowsApps\Claude_1_x64__id\Claude.exe",
-                r"C:\Program Files\WindowsApps\_1_x64__id\app.exe",
-                r"C:\Program Files\WindowsApps\Claude\app.exe",
-                r"C:\Windows\System32\cmd.exe",
-            ]),
-            Residence::Regular
-        );
-        assert_eq!(always(&[]), Residence::Regular);
-        assert!(always(&[r"D:\WindowsApps\Claude_1_x64__id\Claude.exe"])
-            .container()
-            .is_some());
-    }
-
-    #[test]
-    fn only_the_first_sixteen_ancestors_are_considered() {
-        let mut images = vec![r"C:\Windows\System32\cmd.exe"; MAX_ANCESTOR_DEPTH];
-        images.push(CLAUDE_IMAGE);
-        let redirected = ["Claude_pzs8sxrjxfjjc"];
-        assert_eq!(chain(&images, &redirected), Residence::Regular);
-        images.remove(0);
-        assert!(chain(&images, &redirected).container().is_some());
-    }
-
-    #[test]
-    fn a_probe_counts_only_when_it_also_lands_in_the_packages_private_copy() {
-        let local = temporary("probe");
+    fn a_folder_that_is_no_package_family_never_counts() {
+        let local = temporary("not-a-family");
         let probe = Probe::write_in(local.to_path_buf()).unwrap();
-        let file = local.join(&probe.name);
+        for folder in ["NotAFamily", "_pzs8sxrjxfjjc", "Claude_pzs-8"] {
+            fs::write(private_copy(&local, folder).join(&probe.name), []).unwrap();
+        }
+        assert_eq!(Residence::of_probe(&probe), Residence::Regular);
+    }
+
+    #[test]
+    fn without_a_packages_folder_the_process_is_regular() {
+        let local = temporary("no-packages");
+        let probe = Probe::write_in(local.to_path_buf()).unwrap();
+        assert_eq!(Residence::of_probe(&probe), Residence::Regular);
+    }
+
+    #[test]
+    fn every_probe_has_a_new_name_and_is_removed_when_dropped() {
+        let local = temporary("probe");
+        let first = Probe::write_in(local.to_path_buf()).unwrap();
+        let second = Probe::write_in(local.to_path_buf()).unwrap();
+        assert_ne!(first.name, second.name);
+        let file = local.join(&first.name);
         assert!(file.is_file());
-        assert!(!probe.landed_privately("Claude_pzs8sxrjxfjjc"));
-
-        let private = local
-            .join("Packages")
-            .join("Claude_pzs8sxrjxfjjc")
-            .join("LocalCache")
-            .join("Local");
-        fs::create_dir_all(&private).unwrap();
-        fs::write(private.join(&probe.name), []).unwrap();
-        assert!(probe.landed_privately("Claude_pzs8sxrjxfjjc"));
-        assert!(!probe.landed_privately("Microsoft.WindowsTerminal_8wekyb3d8bbwe"));
-
-        drop(probe);
+        drop(first);
         assert!(!file.exists());
+    }
+
+    #[test]
+    fn the_app_is_the_family_name_without_its_publisher_id() {
+        assert_eq!(AppContainer::of_family(CLAUDE_FAMILY).app, "Claude");
+        let codex = AppContainer::of_family("OpenAI.Codex_2p2nqsd0c76g0");
+        assert_eq!(codex.app, "OpenAI.Codex");
+        assert!(codex.is_app("openai.codex"));
     }
 
     #[test]
@@ -405,6 +324,17 @@ mod tests {
         assert!(lines[1].contains("ghostlight"));
         assert!(cannot_see_line(&container, &layout).contains("cannot see what other apps see"));
         assert!(uninstall_refusal(&container, &layout).ends_with("uninstall"));
+    }
+
+    #[test]
+    fn a_browser_row_names_the_apps_own_view_and_where_to_look_instead() {
+        let container = AppContainer {
+            app: "Claude".into(),
+        };
+        assert_eq!(
+            registry_view_detail(&container),
+            "Claude's own view of the registry; run ghostlight doctor from a regular terminal."
+        );
     }
 
     #[test]

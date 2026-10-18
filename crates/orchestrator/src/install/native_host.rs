@@ -790,6 +790,11 @@ fn inspect_browser(
             };
             let registered_path = PathBuf::from(registered_path);
             let contents = registration_io.read_file(&registered_path)?;
+            if contents.is_none() && names_host_manifest(&registered_path) {
+                // Ghostlight's own value names Ghostlight's own manifest and the file is gone:
+                // nothing registers the browser, so install writes the registration again.
+                return Ok((NativeHostState::Missing, None));
+            }
             classify_manifest(
                 contents.as_deref(),
                 &expected,
@@ -1309,6 +1314,16 @@ fn browser_manifest_path(context: &NativeHostContext, browser: &BrowserSpec) -> 
         .config
         .join(browser.linux_directory)
         .join(format!("{HOST_NAME}.json"))
+}
+
+/// Whether `path` names a manifest file of Ghostlight's host, `org.sylin.ghostlight.json`, in any
+/// folder. Windows paths are split by hand so the answer does not depend on the host system.
+fn names_host_manifest(path: &Path) -> bool {
+    let file = format!("{HOST_NAME}.json");
+    path.to_string_lossy()
+        .rsplit(['\\', '/'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case(&file))
 }
 
 fn windows_registry_key(browser: &BrowserSpec) -> String {
@@ -2076,6 +2091,69 @@ mod tests {
             NativeHostState::NeedsAttention
         );
         assert_eq!(partial.report.browsers[1].state, NativeHostState::Current);
+    }
+
+    #[test]
+    fn a_ghostlight_value_naming_a_manifest_that_is_gone_is_missing_and_install_rewrites_it() {
+        let (_root, context) = windows_context_with_connector();
+        let registration_io = MemoryIo::default();
+        let gone = legacy_windows_manifest_directory(&context).join("org.sylin.ghostlight.json");
+        for browser in BROWSERS {
+            registration_io.registry().insert(
+                windows_registry_key(browser),
+                gone.to_string_lossy().into_owned(),
+            );
+        }
+        let foreign = context.local.join("Other").join("host.json");
+        registration_io.registry().insert(
+            windows_registry_key(&BROWSERS[1]),
+            foreign.to_string_lossy().into_owned(),
+        );
+
+        let observed = inspect(&context, &registration_io).unwrap();
+        assert_eq!(observed.browsers[0].state, NativeHostState::Missing);
+        assert_eq!(observed.browsers[1].state, NativeHostState::NeedsAttention);
+
+        assert!(apply_install(&context, &registration_io).unwrap().changed);
+        let repaired = inspect(&context, &registration_io).unwrap();
+        assert_eq!(repaired.browsers[0].state, NativeHostState::Current);
+        assert_eq!(
+            registration_io
+                .registry()
+                .get(&windows_registry_key(&BROWSERS[0])),
+            Some(
+                &normalize_path(&windows_manifest_path(&context))
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        // Another product's value is never touched, even when its file is gone too.
+        assert_eq!(repaired.browsers[1].state, NativeHostState::NeedsAttention);
+        assert_eq!(
+            registration_io
+                .registry()
+                .get(&windows_registry_key(&BROWSERS[1])),
+            Some(&foreign.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn only_the_hosts_own_file_name_makes_a_value_ghostlights() {
+        for own in [
+            r"C:\Users\person\AppData\Local\Ghostlight\NativeMessagingHosts\org.sylin.ghostlight.json",
+            r"C:\Users\person\.ghostlight\manifests\ORG.SYLIN.GHOSTLIGHT.JSON",
+            "/home/person/.config/google-chrome/NativeMessagingHosts/org.sylin.ghostlight.json",
+        ] {
+            assert!(names_host_manifest(Path::new(own)), "{own}");
+        }
+        for other in [
+            r"C:\Users\person\org.sylin.ghostlight\host.json",
+            r"C:\Users\person\org.sylin.ghostlight.json.bak",
+            r"C:\Users\person\org.example.foreign.json",
+            "",
+        ] {
+            assert!(!names_host_manifest(Path::new(other)), "{other}");
+        }
     }
 
     #[test]

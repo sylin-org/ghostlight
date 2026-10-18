@@ -9,18 +9,16 @@
 //! a security-sensitive path: every foreign function is declared by hand below against system
 //! link libraries, with a `// SAFETY:` note at each call site.
 //!
-//! The crate holds the executable paths of a process's ancestors in `process` (from which the
-//! installer learns whether it runs inside an app's container), whether the process token is
-//! elevated in `elevation` (the service refuses to run elevated), owner-private file
-//! creation in `private_file` (ADR-0160), the shell's item identifier list of a file in
-//! `item_id_list` (named by the installer's Start-menu shortcut), whether the process sits in the
-//! visible window station in `window_station` (the service starts the shell only where a person
-//! could see it), announcing a change of the user's environment variables to running programs
-//! in `settings_change`, a program's own icon read from its icon resource in `program_icon`, and
-//! the install folders of a Store package family in `package` (the window shows each agent's
-//! app icon). Starting the service, process identity and the session listener live in
-//! the relay's audited `os` module (ADR-0199 Decisions 3 and 14). Non-Windows targets compile the
-//! portable surface returning an empty answer.
+//! The crate holds whether the process token is elevated in `elevation` (the service refuses to
+//! run elevated), owner-private file creation in `private_file` (ADR-0160), the shell's item
+//! identifier list of a file in `item_id_list` (named by the installer's Start-menu shortcut),
+//! whether the process sits in the visible window station in `window_station` (the service starts
+//! the shell only where a person could see it), announcing a change of the user's environment
+//! variables to running programs in `settings_change`, a program's own icon read from its icon
+//! resource in `program_icon`, and the install folders of a Store package family in `package`
+//! (the window shows each agent's app icon). Starting the service, process identity and the
+//! session listener live in the relay's audited `os` module (ADR-0199 Decisions 3 and 14).
+//! Non-Windows targets compile the portable surface returning an empty answer.
 
 #[cfg(target_os = "windows")]
 mod elevation;
@@ -31,8 +29,6 @@ mod package;
 #[cfg(target_os = "windows")]
 mod private_file;
 #[cfg(target_os = "windows")]
-mod process;
-#[cfg(target_os = "windows")]
 mod program_icon;
 #[cfg(test)]
 mod scratch;
@@ -40,22 +36,6 @@ mod scratch;
 mod settings_change;
 #[cfg(target_os = "windows")]
 mod window_station;
-
-/// Executable paths of this process's ancestors, nearest parent first, walking at most `limit`
-/// parents. Empty where the platform cannot answer.
-///
-/// The paths decide where this process runs (the installer asks whether an ancestor is a packaged
-/// app). They are never logged or audited.
-#[must_use]
-pub fn ancestor_images(limit: usize) -> Vec<std::path::PathBuf> {
-    #[cfg(target_os = "windows")]
-    return process::ancestor_images(limit);
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = limit;
-        Vec::new()
-    }
-}
 
 /// Create a new file with a protected current-user/SYSTEM DACL before it can contain secrets.
 /// Existing paths are refused. Runtime publication belongs to the caller (ADR-0160).

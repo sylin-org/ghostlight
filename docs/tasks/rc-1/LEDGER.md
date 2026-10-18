@@ -14,7 +14,7 @@ gate, the in-place deploy and the owner-held items below.
 | --- | --- | --- |
 | a1-get-ps1-reads-real-releases | frontdoor | landed (`fix(install): the Windows one-line installer reads a real release's checksums`) |
 | a2-uninstall-says-what-it-leaves | frontdoor | landed (`feat(uninstall): uninstall says what it removed and what it keeps`, `fix(uninstall): a partial uninstall and its dry run say what it really removes`) |
-| a3-private-views-are-named-not-blamed | frontdoor | todo |
+| a3-private-views-are-named-not-blamed | frontdoor | landed (`fix(install): an app container is found by its effect, and its private view is named, not blamed`) |
 | a4-adaptive-small-promises | frontdoor | todo |
 | b1-no-tab-never-guesses | agent | landed: with several tabs a call that names none is refused and lists them; no per-caller marker exists (ADR-0198, amendment of 2026-10-18) |
 | b2-page-refusals-say-what-to-do | agent | landed: a hidden, disabled, read-only or non-text control is refused in plain words, says nothing was clicked or typed, and names one step that works (ADR-0198, amendment of 2026-10-18) |
@@ -75,6 +75,20 @@ gate, the in-place deploy and the owner-held items below.
   `~/.local/bin/ghostlight`) it would remove, read from the same check the uninstall acts on
   (`CommandPath::removable`). What uninstall removes did not change. The installation guide's
   uninstall section says the same and how to delete the home.
+- a3 (trust-9, window-12, install-11, rel-7): `Residence::detect` writes a probe with a new name
+  below `%LOCALAPPDATA%`, lists `Packages` once and finds the container whose
+  `LocalCache\Local` holds it, so a `timeout` or a pipeline between the app and the install no
+  longer hides the container; the parent-chain walk is gone from `win-peer`. Checked from this
+  batch's Claude Code session on the owner's machine: the probe lands in `Claude_pzs8sxrjxfjjc`,
+  and `HKCU` and `HKEY_USERS\<sid>` both show the stale 1.x value naming a missing
+  `%LOCALAPPDATA%\Ghostlight\NativeMessagingHosts\org.sylin.ghostlight.json` while the browser
+  works. No in-process read reaches the real `HKCU` (the private hive is locked), so the registry
+  view is private exactly when the probe lands privately (ADR-0197 amendment of 2026-10-18).
+  Inside a container each browser row says "cannot be checked from here -- Claude's own view of
+  the registry; run ghostlight doctor from a regular terminal." in `doctor` and the install dry
+  run, and `doctor --json` gives those rows `not_visible` with the same words. A Ghostlight value
+  naming a missing `org.sylin.ghostlight.json` is Missing, so install rewrites it; any other
+  dangling value still needs attention. The writer golden did not change.
 - f1 (j-23, j-32, j-33, j-35, j-36): the popup's Paused shows a held lantern (the waiting ghost
   with a still amber ember) and an amber title, and Session ended shows the waiting lantern, so
   neither looks like Ready. The shortcut cap on the teal Resume button takes the button's dark ink

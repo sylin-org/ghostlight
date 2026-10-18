@@ -961,18 +961,28 @@ fn print_program_line(program: &std::path::Path) {
 /// Print the native host registration status report to stdout.
 pub(crate) fn print_native_host_report(report: &NativeHostReport) {
     print_program_line(&report.connector);
-    for browser in &report.browsers {
-        match &report.private_view {
-            Some(container) => println!(
-                "Browser: {} -- {} -- {} -- Windows gives {} its own view of the registry.",
+    for line in browser_report_lines(report) {
+        println!("{line}");
+    }
+}
+
+/// One line per browser of `report`. Inside an app container each line says the registration
+/// cannot be checked from here, because the registry this process reads is that app's own.
+pub(crate) fn browser_report_lines(report: &NativeHostReport) -> Vec<String> {
+    report
+        .browsers
+        .iter()
+        .map(|browser| match &report.private_view {
+            Some(container) => format!(
+                "Browser: {} -- {} -- {} -- {}",
                 browser.name,
                 browser.package_detail,
                 container::NOT_VISIBLE,
-                container.app
+                container::registry_view_detail(container)
             ),
-            None => println!("{}", browser_line(browser)),
-        }
-    }
+            None => browser_line(browser),
+        })
+        .collect()
 }
 
 /// Print the command path link status report to stdout.
