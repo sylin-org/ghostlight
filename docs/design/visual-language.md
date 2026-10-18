@@ -125,28 +125,35 @@ Every effect, present and future, obeys these.
 3. Add its row to `TRANSIENT_EFFECTS` in `presentation.js`. The row's `beat` is its lifetime, and
    the row enrolls it for reduced motion; nothing else about it is kept by hand.
 4. Draw it from the matching branch of `render`, and add its rule to `presentation-css.js`.
-5. Add its row to the 2.0 vocabulary table above and its tool coverage to
-   [tool-visual-signatures.md](tool-visual-signatures.md). The tables and the code move together.
+5. Add its row to the 2.0 vocabulary table above, with every activity that triggers it in the
+   "Fires on" column. That column is the coverage record; the table and the code move together.
 
 ## Provenance
 
 The vocabulary draws on Screen Studio (cursor glide + click rings), KeyCastr/Keyviz (keystroke
 lozenges, scroll cues), and Playwright's `.highlight()` (confirm the target); the concept of an
 always-visible agent affordance follows the official Claude-in-Chrome extension (interface
-harvested, never code -- ADR-0050 D1). The denial severity taxonomy is SAPS PRES-HIGH-01. The
+harvested, never code -- ADR-0050 D1). The pre-1.0 denial severities came from SAPS PRES-HIGH-01. The
 field splash and this document were added when form filling joined the demo's visible repertoire
 (2026-07); the owner's directive: show the user what we're touching, and make it part of the
 visual language of the service. The controlled-tab border was clarified during the ADR-0081 live
 gate: the border discloses agent-reachable scope, while the effects inside it explain activity.
 
-## History: the 1.x in-page vocabulary (until 2026-10-14)
+## History: the pre-1.0 in-page vocabulary (until 2026-08-10)
 
-Before adapter protocol 4 (2026-10-14), the in-page effects were drawn by the extension's
-`agent-visual-indicator.js` and delivered by `extension/lib/presentation-broker.js`. Neither file
-exists in 2.0. The tool names below (`computer.key`, `read_page`, `form_input` and the rest) are
-the 1.x browser tools. The 1.x vocabulary also had find highlights and horizon glows, narration,
-image drops, explicit attention notices and four denial severities, which 2.0 does not draw. The
-sections below are kept as they were written.
+The sections below describe the 0.x extension, before the 1.0 rebuild of 2026-08-10. Its
+`agent-visual-indicator.js` drew the effects and `extension/lib/presentation-broker.js` delivered
+them; the rebuild deleted both. The tool names below (`computer.key`, `read_page`, `form_input`
+and the rest) are the 0.x tools. Find highlights and horizon glows, narration, image drops and four
+denial severities belong to this vocabulary, and no 1.x or 2.0 release drew them.
+
+Every 1.x release, v1.0.0 to v1.3.15, drew from the renderer the rebuild wrote,
+`extension/lib/presentation.js`, and its tools were already the `browser_*` tools. That renderer
+drew the set in the 2.0 table above, with two differences: it also drew an explicit attention
+notice in the denial ribbon, which 2.0 dropped, and its navigate pill's arrow was typed text
+rather than the SVG chevron. On 2026-10-14 the renderer moved into the orchestrator's Chromium
+adapter, and adapter protocol 4 placed it under `protocol4/assets/`. The sections below are kept
+as they were written.
 
 ### Foundations
 

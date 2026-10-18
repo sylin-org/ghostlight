@@ -1,5 +1,11 @@
 # Visual feedback vocabulary
 
+This note records the pre-1.0 (0.x) vocabulary, retired in the 1.0 rebuild of 2026-08-10. The
+files, messages and tool names it cites (`extension/agent-visual-indicator.js`, the `AGENT_*`
+messages, `read_page`, `narrate`) no longer exist. What a page shows today is the 2.0 vocabulary
+table in [visual-language.md](visual-language.md#the-20-vocabulary). The note is kept as it was
+written.
+
 A user watching an agent drive their real browser should be able to see what it is doing, and a
 recording of that should read clearly in a demo. Ghostlight gives every agent action a distinct,
 consistent on-page treatment: a small visual "dictionary" the phantom cursor speaks.

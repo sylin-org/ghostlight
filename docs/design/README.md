@@ -12,9 +12,7 @@ Maintained, and still describing the product as built.
 
 | Note | What it covers |
 | --- | --- |
-| [visual-language.md](visual-language.md) | The shared visual vocabulary across the in-page renderer and the desktop workbench: what 2.0 draws, with the 1.x vocabulary as history. |
-| [visual-feedback.md](visual-feedback.md) | The feedback vocabulary: what each treatment means. Its rendered companion, [visual-feedback-dictionary.html](visual-feedback-dictionary.html), plays the 1.x vocabulary. |
-| [tool-visual-signatures.md](tool-visual-signatures.md) | Which visual signature each tool carries. |
+| [visual-language.md](visual-language.md) | The shared visual vocabulary across the in-page renderer and the desktop workbench: what 2.0 draws, with the pre-1.0 vocabulary as history. |
 | [action-observations.md](action-observations.md) | Where per-action facts belong, and the two structural owners that keep the account complete. |
 | [adapter-protocol-4.md](adapter-protocol-4.md) | Adapter protocol 4, the implementation spec behind ADR-0197: frozen primitives, isolated-world assets, and the service-side Chromium translation. |
 | [relay-protocol-4.md](relay-protocol-4.md) | Relay protocol 4, the frozen contract between the service and everything that connects to it: endpoint, peer checks, opening and reply, the frames of each role, goodbye and start reasons. Its executable form is `tests/golden/relay4`. |
@@ -49,3 +47,5 @@ describe topology or features, [`1.0/ARCHITECTURE.md`](../1.0/ARCHITECTURE.md) a
 | [bounded-delegation-scenario.md](bounded-delegation-scenario.md) | Three delegation scenarios and a prototype script. |
 | [demo-brief.md](demo-brief.md) | The launch-brief demo. |
 | [tcg-foundry-demo.md](tcg-foundry-demo.md) | The Sylin Card Foundry demo. |
+| [visual-feedback.md](visual-feedback.md) | The pre-1.0 feedback vocabulary: what each 0.x treatment meant. Its rendered companion, [visual-feedback-dictionary.html](visual-feedback-dictionary.html), plays that vocabulary. |
+| [tool-visual-signatures.md](tool-visual-signatures.md) | Which visual signature each pre-1.0 tool carried. For 2.0, see the vocabulary table in visual-language.md. |

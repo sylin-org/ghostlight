@@ -35,9 +35,22 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   four effects the item named. The renderer still draws the cursor, ripples, trail, field splash
   and shimmer, scroll chevrons, read scan, navigate pill, screenshot and zoom frames, and five
   medallion kinds, so a table of four would have under-described 2.0. The navigate pill's
-  chevron is described as u6 draws it, an SVG chevron. The dictionary page is labelled as the 1.x
-  vocabulary rather than reskinned. The click section's emit site now points at
-  work/pointer.rs, and docs/design/README.md names the dictionary as 1.x.
+  chevron is described as u6 draws it, an SVG chevron. The dictionary page is labelled as the
+  pre-1.0 vocabulary rather than reskinned. The click section's emit site now points at
+  work/pointer.rs, and docs/design/README.md names the dictionary as pre-1.0.
+- k1 (j-37), corrected label: the item called the old rows "1.x". The tree says they are the
+  pre-1.0 (0.x) vocabulary. agent-visual-indicator.js and lib/presentation-broker.js belong to
+  the 0.9 extension (archive/0.9-pre-1.0) and the 1.0 rebuild deleted them on 2026-08-10. Every
+  1.x release, v1.0.0 to v1.3.15, drew from extension/lib/presentation.js with the browser_*
+  tools, which is the 2.0 set plus an attention notice and a typed nav arrow. The history
+  heading, the dictionary page and the design index now say pre-1.0, and visual-language.md
+  says what 1.x drew. The review said 1.x drew from the orchestrator's presentation.js; that
+  file only exists from 2026-10-14, after v1.3.15, so the note names extension/lib/presentation.js.
+- k1 (j-37), neighbouring references: option (a). visual-feedback.md and tool-visual-signatures.md
+  get a preface saying they record the pre-1.0 vocabulary and pointing at the 2.0 table; nothing
+  in them is deleted or rewritten. docs/design/README.md moves both out of Living references into
+  the prior-architecture table. For 2.0, the "Fires on" column of the vocabulary table is the
+  coverage record, and "Adding a new effect" says so instead of pointing at the old ledger.
 - n1 (j-11): both light-taskbar frames, 16 and 32 pixels, are now the monochrome tray glyph
   in crates/desktop/assets (tray-glyph-16.png drawn by hand, tray-glyph-32.png smooth): one
   silhouette in the night colour with its eyes cut out and no sparkles. Since no light frame is

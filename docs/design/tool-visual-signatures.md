@@ -1,5 +1,12 @@
 # Tool visual-signature coverage
 
+This ledger records the pre-1.0 (0.x) tools, retired in the 1.0 rebuild of 2026-08-10, and the
+signature each carried. Tools such as `computer.left_click`, `find`, `narrate` and `gif_creator`
+are not the 2.0 `browser_*` tools, and the find highlights, horizon glows and photo tile it lists
+are no longer drawn. For 2.0, the "Fires on" column of the vocabulary table in
+[visual-language.md](visual-language.md#the-20-vocabulary) is the coverage record. The ledger is
+kept as it was written.
+
 This is the coverage ledger for Ghostlight's complete tool surface. The normative shapes, colors,
 motion, and safety invariants live in [visual-language.md](visual-language.md). ADR-0083 defines the
 classification and shared signature-medallion architecture. ADR-0086 defines the composed find
