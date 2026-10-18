@@ -60,7 +60,7 @@ for _ in range(100):
 assert windows()==[],windows();assert observed()==pid
 recovered=opened();results.append({'phase':'renderer-loss-discards-only-view-and-open-recovers','renderer':renderer,'window':recovered})
 # Install Applications and CLI surfaces into this disposable home, with the private desktop bus.
-subprocess.run(['bwrap','--bind','/','/','--bind',str(pathlib.Path(os.environ['GHOSTLIGHT_LINUX_AREA'])/'home'),str(pathlib.Path.home()),'--',str(binary),'install','--all-browsers','--no-clients','--no-open'],env=product_env,check=True,stdout=subprocess.DEVNULL)
+subprocess.run(['bwrap','--bind','/','/','--dev','/dev','--bind',str(pathlib.Path(os.environ['GHOSTLIGHT_LINUX_AREA'])/'home'),str(pathlib.Path.home()),'--',str(binary),'install','--all-browsers','--no-clients','--no-open'],env=product_env,check=True,stdout=subprocess.DEVNULL)
 entry=area/'data/applications/org.sylin.ghostlight.desktop';assert entry.is_file()
 script('if(windows.length!==1)throw new Error("not one window");windows[0].closeWindow();');time.sleep(.3);assert windows()==[]
 subprocess.run(['gio','launch',str(entry)],env=product_env,check=True,timeout=30);time.sleep(.5)

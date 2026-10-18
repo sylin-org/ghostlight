@@ -3,7 +3,7 @@ import os,json,pathlib,subprocess,hashlib
 area=pathlib.Path(os.environ['GHOSTLIGHT_LINUX_AREA']);ctx=json.loads((area/'no-tray/context.json').read_text());env={**os.environ,**ctx['env']};binary=area/'no-tray/bin/ghostlight';home=area/'home';state=area/'no-tray';report={'passed':False,'release_ready':False,'checks':[]}
 # The bwrap home mount protects actual client config and the ordinary command symlink.
 def cli(*args):
- r=subprocess.run(['bwrap','--bind','/','/','--bind',str(home),str(pathlib.Path.home()),'--',str(binary),*args],env=env,text=True,capture_output=True,timeout=30)
+ r=subprocess.run(['bwrap','--bind','/','/','--dev','/dev','--bind',str(home),str(pathlib.Path.home()),'--',str(binary),*args],env=env,text=True,capture_output=True,timeout=30)
  (state/('lifecycle-'+str(len(report['checks']))+'.log')).write_text(r.stdout+r.stderr)
  assert r.returncode==0,r.stdout+r.stderr
  return r.stdout
