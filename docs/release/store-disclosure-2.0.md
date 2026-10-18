@@ -63,7 +63,7 @@ store listing, and a click on Open starts it in the profile that holds the exten
 Chrome opens google.com in the default browser. The extension's own bundled setup page and its
 Open Ghostlight button, which asks the application to show its window, are the only parts of this
 journey that live in the package. [PRIVACY.md](../legal/PRIVACY.md) carries a bullet for the
-profile check, and the public privacy page must carry it before publication.
+profile check, and the public privacy page must carry it before the staged submission (step 4).
 
 ## Policy reading (coordinator, 2026-10-16)
 
@@ -138,7 +138,7 @@ Until step 6, the latest release, `main` and every 1.x user are untouched.
 
    ```powershell
    pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Prerelease rc.1
-   pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Prerelease rc.1 -Action CreateDraft -NotesFile <notes.md> -Execute
+   pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Prerelease rc.1 -Action CreateDraft -NotesFile docs/release/notes-v2.0.0-rc.1.md -Execute
    pwsh scripts/publish-github-release.ps1 -CandidateDirectory dist/release-candidate -Prerelease rc.1 -Action PublishDraft -Execute
    ```
 
@@ -170,11 +170,17 @@ Until step 6, the latest release, `main` and every 1.x user are untouched.
    another reason (GitHub's rate limit of 60 unauthenticated requests an hour per address is one)
    reports the failure and never says the release does not exist. Wait or use another network, and
    run it again.
-4. Submit the zip as `STAGED_PUBLISH`. Do not publish. Put the text below in the Chrome
-   dashboard's "Notes for certification" and in Partner Center's "Notes for certification" for
-   Edge.
-5. Wait for approval (the item shows ready to publish) and make the public privacy page
-   (`https://sylin.org/ghostlight/privacy/`) carry the 2.0 text. Do not cut over before both hold.
+
+   The store serves the 1.x extension until step 6, so the proof loads `extension/` from the
+   `v2.0.0-rc.1` source unpacked. Its pinned key gives it the development id the install
+   registers. Then upgrade a 1.x install on another machine, as `docs/RELEASE.md` (The 2.0
+   cutover, step 3) describes, while the store still serves 1.x.
+4. Make the public privacy page (`https://sylin.org/ghostlight/privacy/`) carry the 2.0 text of
+   [PRIVACY.md](../legal/PRIVACY.md), then submit the zip as `STAGED_PUBLISH`. Do not publish. Put
+   the text below in the Chrome dashboard's "Notes for certification" and in Partner Center's
+   "Notes for certification" for Edge. For 1.x users the 2.0 privacy text only discloses more
+   than their version does.
+5. Wait for approval (the item shows ready to publish). Do not cut over before it.
 6. Cut over in one sitting, from the same commit as the rc:
    1. Publish `v2.0.0` as GitHub's latest release: push the tag `v2.0.0` on that commit, then
       run the same three commands as in step 2 without `-Prerelease`.
@@ -193,6 +199,10 @@ Until step 6, the latest release, `main` and every 1.x user are untouched.
    5. Publish the staged item only when all of these hold: `v2.0.0` is GitHub's latest release,
       the npm launcher is published, the frozen strings and the restore commands ran clean, and
       the privacy page carries the new text.
+
+   6. Finish with the steps after the store publish in `docs/RELEASE.md` (The 2.0 cutover, steps 6
+      to 9): a clean-profile run of the public path on Windows and Linux, the public-state commit
+      with a second fast-forward of `main` and a website rebuild, the MCP Registry, and WinGet.
 
    Keep the minutes between the release and the store publish short. 1.x users see "update" on
    one side until both sides update, as Decision 16 says.
@@ -251,5 +261,6 @@ Live checks the coordinator runs; none was run by this slice:
   `extension/manifest.json`, remove the host-permission section from the justifications and the
   listing, regenerate the freeze golden, and run the check again on the final zip.
 
-For the owner: the dashboard submission (staged), the remote-code answer above, the assets, the
-public privacy URL before publication, and the decision on an Edge Add-ons listing.
+For the owner: the 2.0 text on the public privacy URL before the staged submission, the
+dashboard submission (staged), the remote-code answer above, the assets, and the decision on an
+Edge Add-ons listing.

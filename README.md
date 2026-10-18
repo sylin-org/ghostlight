@@ -100,9 +100,10 @@ connection. For a read-only first task instead, ask:
 > Open https://example.com/ in a new Ghostlight tab, summarize the page, and tell me which tab
 > you used. Do not click, type, submit, or change the page.
 
-Next time, the same client reuses that group and a tab Ghostlight itself opened for it on that
-site and left open, so repeated work stops littering your tab strip. It never takes over a tab you
-opened, or a tab in another client's group.
+When a session ends, the tabs Ghostlight keeps open leave its group and stay where they are, so
+no idle group is saved to your bookmarks bar. Next time, the same client gets its group back and
+reuses a tab Ghostlight opened for it on that site and left open, so repeated work stops littering
+your tab strip. It never takes over a tab you opened, or a tab another client left open.
 
 If a step needs attention, run:
 
@@ -153,8 +154,9 @@ Closing a tab yourself always works.
 
 Personal use is complete without a policy manifest. Start with the full browser engine and get
 useful work done. When a workflow needs stronger boundaries, grant `read`, `action`, `write`, and
-`execute` capabilities by MCP identity and domain. Add sacred domains, dry-run preflight, and
-structured audit while the browser experience stays the same. The
+`execute` by domain. Add sacred domains and structured audit, and preview a policy against your
+own history before you apply it, with Check in the window or `ghostlight policy simulate`, while
+the browser experience stays the same. The
 [governance guide](docs/guides/governance-configuration.md) shows the operating model, and the
 [Trust Center](docs/trust/README.md) carries the security, privacy, continuity, deployment, and
 procurement evidence.
@@ -283,7 +285,7 @@ protocol, command runner, filesystem access, or browser primitives.
 | Install, verify, update, recover, or uninstall | [Installation guide](docs/guides/installation.md) |
 | Let an AI client perform setup | [Agent install guide](llms-install.md) |
 | Try a complete visible workflow | [Launch brief demo](https://sylin.org/ghostlight/demo/brief/) |
-| Build from source and test locally | [Source-development path](docs/guides/installation.md#path-b-build-from-source) |
+| Build from source and test locally | [Build from source](docs/guides/installation.md#build-from-source) |
 | Understand which browser operating model fits | [Decision aid](https://sylin.org/ghostlight/decision-aid/) |
 | Add boundaries or review trust evidence | [Governance guide](docs/guides/governance-configuration.md) and [Trust Center](docs/trust/README.md) |
 | Read the product promise and journeys | [`docs/1.0/INTENT.md`](docs/1.0/INTENT.md) |

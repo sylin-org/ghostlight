@@ -67,7 +67,7 @@ demand-starts Ghostlight if it is absent. The service starts the window's tray w
 can show it; an agent that starts Ghostlight shows only the icon, and a Start-menu launch,
 Applications or `ghostlight open` shows the window.
 
-Linux packages support x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
+Linux binaries support x86_64 glibc-based desktops and a native Chrome, Edge, Brave, or Chromium
 package. Snap and Flatpak browsers cannot start Ghostlight's browser relay through native
 messaging. Install and doctor identify those package forms and name the native-package remedy. Use
 `--all-browsers` only when deliberately preparing registrations before browser installation.
@@ -77,7 +77,7 @@ of its hosts that Ghostlight detects (`--client cline` selects whichever of Clin
 Visual Studio Code, Cursor and Windsurf hosts are installed, and all four with `--all-clients`), a host id such as
 `cline-vscode` selects that one host, and `ghostlight --help` lists them.
 
-Only checksum-bound, provenance-verified packages and a compatible published extension satisfy
+Only checksum-bound, provenance-verified binaries and a compatible published extension satisfy
 this journey. Provenance verification, clean-machine install, upgrade, and uninstall are release
 gates, not claims made by this source tree.
 

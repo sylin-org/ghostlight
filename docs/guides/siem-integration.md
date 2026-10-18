@@ -1,8 +1,11 @@
-# Collect Ghostlight 1.0 audit
+# Collect Ghostlight audit
 
 Ghostlight appends one content-minimized JSON object for every terminal invocation. It does not
-upload audit, send syslog, open a network listener, or call a hosted collector. SIEM delivery uses
-the endpoint's existing file-collection agent.
+upload audit, send syslog, or call a hosted collector. Its only listener is the window's own
+address on 127.0.0.1, which serves the history view built from this file to the Ghostlight window
+and, while "Others can watch" is on, to browser tabs on the same computer (see the Workbench page
+row in [data-flows.md](../trust/data-flows.md)). SIEM delivery uses the endpoint's existing
+file-collection agent.
 
 ## Select the file
 

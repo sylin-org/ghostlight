@@ -28,10 +28,24 @@ layout once, when you run the install again. The full release notes are in
 - One-line installers that need no Node.js: `irm https://sylin.org/ghostlight/get.ps1 | iex` on
   Windows and `curl -fsSL https://sylin.org/ghostlight/get.sh | sh` on Linux. With
   `GHOSTLIGHT_VERSION` set they install exactly that release, a prerelease included (ADR-0200).
-- The service serves the workbench on loopback HTTP, to the window and to browser tabs on the same
-  computer. "Others can watch" is on by default: another browser tab on this computer can watch
-  and Pause agents, and every other change needs the window. Settings turns watching off
-  (ADR-0199 amendment of 2026-10-15).
+- The `ghostlight` command on your PATH. On Windows the install adds `~/.ghostlight/bin` to your
+  user PATH (never the machine PATH), so terminals opened afterwards find it. On Linux it links
+  `~/.local/bin/ghostlight` and writes a manual page and bash, zsh and fish completions under
+  `~/.local/share`; when `~/.local/bin` is not on the PATH the install ran with, it names the full
+  path to run instead. Uninstall removes them.
+- The service serves the workbench on loopback HTTP, on 127.0.0.1 only, to the window and to
+  browser tabs on the same computer. "Others can watch" is on by default: anyone on this computer
+  can open that address in a browser tab, see activity with hosts, client names and policy rules,
+  and pause agents; every other change needs the window. Settings > Sharing turns watching off,
+  and `ghostlight status` shows the address (ADR-0199 amendment of 2026-10-15).
+- Each installed agent shows its own app icon in the window, on a tile the service picks so the
+  icon reads on the dark page, and otherwise a vendor mark or a monogram. The icons are read from
+  the agents' app files on this computer and kept in `state/icons`; nothing is fetched.
+- Each agent connection names the app that started it, read from the operating system and never
+  from what the client says: the window and the history say, for example, "Started by Claude
+  Desktop." beside the name the client gives, and audit lines carry `provenance.source`. It is
+  never used to decide what an agent may do (ADR-0161 amendment of 2026-10-18).
+- Settings > This screen offers Text size, Standard or Large.
 - `ghostlight policy migrate <file>` moves a schema-3 policy file to schema 4 only where the meaning
   stays the same. It keeps a `<file>.schema3.bak` copy and refuses anything it cannot move without
   changing what the policy does (ADR-0197 Decision 19).
@@ -67,13 +81,50 @@ layout once, when you run the install again. The full release notes are in
 - The service and the extension speak adapter protocol 4. A 2.0 service tells a 1.x extension to
   update and closes the connection, and a 2.0 extension tells you to update Ghostlight when it meets
   an older service (ADR-0197 Decision 5, ADR-0200 Decision 16).
-- The extension is version 2.0.0 and frozen at its 2.0 form. It carries no policy and no page code:
+- The extension is version 2.0.0. It carries no policy and no page code:
   the service gives it the page code when it connects, so a service update needs no extension
   update. The page code lives in the service's browser adapter, under
   `crates/orchestrator/src/browser/adapter/chromium/protocol4/assets` (ADR-0196 Decision 3,
   ADR-0197 Decision 5).
-- The popup shows Ready, Paused, Session ended, Not connected or Update needed. The extension opens
-  its setup page only when the service is absent (ADR-0200 Decision 14, ADR-0199 Decision 23).
+- The popup shows Ready, Paused, Session ended, Not connected or Update needed. Paused and Session
+  ended show the held lantern, as the tray and the window do, so neither looks like Ready. While
+  connected, a quiet Open Ghostlight link in the popup and on the options page brings the window
+  forward. Captions no longer depend on the effects setting, and the setup page's install command
+  never wraps. The extension opens its setup page only when the service is absent (ADR-0200
+  Decision 14 and its amendment of 2026-10-18, ADR-0199 Decision 23).
+- The window, the tray and `ghostlight status` say the same thing in the same words: one count of
+  agents and browsers ("Ghostlight is running; 3 agents and 1 browser connected."), Pause agents
+  and Resume agents, and a Status page that answers Ghostlight, Browser, Rules and History in plain
+  words. A pause or an ended session outranks having no browser, and a browser that starts on
+  request reads Ready ("Starts Google Chrome when an agent asks."). The tray's tooltip names the
+  state and says when no browser is connected (ADR-0199 and ADR-0187 amendments of 2026-10-18).
+- The window is easier to read and to follow. Every word meets the kit's contrast, labels use one
+  eyebrow and one data tag, and a screen reader hears each finished action once. A failed or
+  unconfirmed action says Failed or Unknown in words. An activity row names the most consequential
+  capability it used, and a flow takes its steps'. The window fits half a laptop screen: it opens
+  no taller than the screen, can be as narrow as 720 px, and has a dark title bar in light mode.
+- With several tabs in a session, a call that names no tab is refused before any browser work
+  with `ambiguous_tab`, and its `tabs` fact lists each tab with its handle, title and url. A call
+  without a tab no longer lands in the tab another subagent sharing the same connection opened or
+  focused last. A session with one tab, and `browser_tabs` list, need no tab (ADR-0198 amendment
+  of 2026-10-18).
+- A control the page refuses, because it is hidden, disabled, read-only or takes no text, is
+  refused in Ghostlight's words: what was refused, that nothing was clicked or typed, and one step
+  that works. The audit keeps `page_refused` with the page's code (ADR-0198 amendment of
+  2026-10-18).
+- `ghostlight uninstall` stops the running Ghostlight and ends by saying what it removed and what
+  it kept: the home `~/.ghostlight` stays, and deleting it removes the programs, the audit history
+  and the settings; Ghostlight in Browser stays until you remove it from the browser.
+  `--dry-run` lists every browser connection and the command entry it would remove (ADR-0199
+  Decision 20).
+- Ghostlight finds an agent's settings wherever the agent keeps them, including a Microsoft Store
+  app's own copy below `%LOCALAPPDATA%\Packages`, on every look (ADR-0197 amendment of
+  2026-10-17).
+- Run from a Store app's terminal, such as Claude Desktop's or Codex's, `doctor` and the install
+  say the browsers' registrations cannot be checked from there and to run `ghostlight doctor` from
+  a regular terminal, instead of calling working browsers broken. A service started inside such an
+  app leaves starting the browser to you, because a browser started there would run inside the
+  app (ADR-0197 and ADR-0149 amendments of 2026-10-18).
 - Policy files use schema 4. Ghostlight moves its own user policy the same way `policy migrate`
   does. Policy files an administrator owns are never rewritten; they fail closed in schema 3 until
   their owner moves them (ADR-0197 Decision 19).
@@ -100,7 +151,8 @@ layout once, when you run the install again. The full release notes are in
   built by `scripts/package-winget-archive.ps1` and is a carrier for `ghostlight install`, which
   installs into `~/.ghostlight/bin`; after `winget upgrade` the next install carries the newer
   version there, and an older copy never replaces a newer one. It is not offered as a separate
-  portable download.
+  portable download. WinGet carries 2.0 once its 2.0.0 manifest is accepted into winget-pkgs;
+  until then `winget install Sylin.Ghostlight` installs a 1.x release.
 - With several browsers installed and none open, an agent request starts the browser that last
   connected to Ghostlight, instead of asking you to open one. Ghostlight remembers only which
   browser that was, in `state/last-browser.json`. With no such memory it still names the
@@ -129,8 +181,13 @@ layout once, when you run the install again. The full release notes are in
   (ADR-0197 Decision 19).
 - The `layout_stable` wait condition. A call that names it is refused with a pointer to
   `visual_settle` (ADR-0197 Decision 21).
-- The popup's diagnostics toggle, the form-reset trace, the YAML editor for goose and Continue
-  (they get a Copy setup action) and observed peer identity (ADR-0197 Decision 22).
+- The popup's diagnostics toggle, the form-reset trace and the YAML editor for goose and Continue,
+  which get a Copy setup action instead (ADR-0197 Decision 22).
+- The folders 1.x left that 2.0 reads nothing from. Every install removes the 1.x window's web
+  view data when it holds nothing else and the 1.x policy folder once it is empty
+  (`%LOCALAPPDATA%\org.sylin.ghostlight` and `%LOCALAPPDATA%\Ghostlight` on Windows,
+  `~/.local/share/org.sylin.ghostlight` and `~/.local/state/ghostlight` on Linux), and says each
+  one it removed (ADR-0197 amendment of 2026-10-18).
 
 ### Fixed
 
@@ -157,10 +214,24 @@ layout once, when you run the install again. The full release notes are in
   workspace and its tabs open until the service restarted; that path is gone.
 - Default reuse no longer takes over a tab you opened. A plain open reuses only a tab Ghostlight
   opened on that host and a released session of the same client left open, after checking the
-  live browser, and the browser never picks a tab itself. A tab another client released stays in
-  that client's group and is not reused. A released tab is reusable only after the preserve-tabs
-  setting kept it open, so the old session's cleanup can never touch the new session's tab
-  (ADR-0196).
+  live browser, and the browser never picks a tab itself. A tab another client released is not
+  reused. A released tab is reusable only after the preserve-tabs setting kept it open, so the old
+  session's cleanup can never touch the new session's tab (ADR-0196).
+- Saved tab groups no longer pile up in the bookmarks bar. Chromium saves a tab group that is still
+  open when its window closes or the browser exits. A tab that preserve-tabs keeps open after its
+  session ends now leaves the `Ghostlight - <client>` group, so Chromium deletes the idle group
+  instead of saving it, and when the same client reuses the tab it goes back into that client's
+  group. A tab you moved into a group of your own stays there. A session still open when its
+  window closes or the browser exits leaves one saved group, which no extension can reach;
+  Ghostlight never touches saved groups (ADR-0201).
+- The Windows one-line installer reads a real release's `SHA256SUMS`. GitHub serves that file as
+  bytes, and the script split them into one-byte lines and refused every install before
+  downloading anything. Run with `irm | iex`, it now leaves your PowerShell session as it was.
+- An agent's configuration write leaves no temporary file beside the agent's settings when it
+  fails, and an install removes such files an earlier failure left.
+- `ghostlight doctor` lists the window program, `ghostlight-desktop`, with the other two.
+- An install reads the browsers' profile lists only while setup is incomplete, as the trust pages
+  say.
 - Chrome and Edge tabs with the same id no longer refuse each other.
 - A refusal found after the browser already opened, navigated, focused, or closed a tab reports
   the applied effect and is no longer marked safe to repeat.

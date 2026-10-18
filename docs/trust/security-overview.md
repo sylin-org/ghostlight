@@ -16,6 +16,28 @@ Every model-requested action crosses one executor, one immutable authority snaps
 port, and one completion path. Unknown effects are reported as unknown and are never replayed
 automatically.
 
+## Window on loopback
+
+The service serves the Ghostlight window's pages over HTTP on one loopback port. It binds
+127.0.0.1 only and answers only when the `Host` header is exactly that address and port, which
+defeats DNS rebinding. It sends no CORS header, refuses WebSocket upgrades and embedding, and
+needs a JSON body and a same-origin request for every change. The page carries no MCP and starts
+no browser work, and governance refuses agent navigation to its address whatever the policy says.
+
+Changes need a bearer: 256 random bits made at each service start, which the service hands only
+to the Ghostlight window, over the per-user pipe that checks the peer's user. It never appears
+in a URL, a log, an audit line or a response. A request without it is a watcher's, and a wrong
+bearer is refused rather than treated as one.
+
+"Others can watch" is on by default. While it is on, any program or account on this computer can
+open the address in a browser and see what the window's glance shows: readiness, which agents and
+browsers are connected, what agents are doing and on which hosts, the client names, and the policy
+rules and settings. The never-touch list and excluded hosts show only as counts. A watcher can
+search, check a policy against history, re-check clients, ask to bring the Ghostlight window
+forward and pause agents; every other change needs the window. A person turns watching off in
+the window's Settings > Sharing, and then a browser tab shows only the About page.
+`ghostlight status` shows the address and whether watching is on.
+
 ## Governance
 
 Read, Action, Write, and Execute are independent capabilities. Ordered schema-4 grants bind a
@@ -64,9 +86,12 @@ size, and supports an organization CA pin. No managed bootstrap means no policy 
 ## Release integrity
 
 Release artifacts are bound by per-file SHA-256 and keyless GitHub build-provenance attestations.
-The release unit includes platform packages, portable archives, raw binaries, the extension,
-component SBOMs, the mandatory npm launcher, and the MCPB package. Ghostlight has no Windows
-Authenticode certificate; that is a disclosed distribution fact, not a hidden readiness claim.
+A 2.0 release carries the three raw binaries for Windows and for Linux (`ghostlight`,
+`ghostlight-service` and `ghostlight-desktop`), the WinGet archive, the extension package, one
+SBOM per workspace crate, the mandatory npm launcher tarball, the Claude Desktop MCPB,
+`release-candidate.json` and `SHA256SUMS`. [supply-chain.md](supply-chain.md) shows how to check
+them. Ghostlight has no Windows Authenticode certificate; that is a disclosed distribution fact,
+not a hidden readiness claim.
 
 CI gates formatting, warnings-denied Rust linting, Rust and extension tests, process journeys,
 dependency policy, and release metadata. Organization policy signing keys belong to the customer
@@ -82,5 +107,5 @@ audit of Ghostlight will be published in full, including findings.
 
 See [data-flows.md](data-flows.md) and [supply-chain.md](supply-chain.md).
 
-Last reviewed: 2026-10-16 against the current source; local-destination policy follows ADR-0155.
+Last reviewed: 2026-10-18 against the current source; local-destination policy follows ADR-0155.
 Contact: hello@sylin.org

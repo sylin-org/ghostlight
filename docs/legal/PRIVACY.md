@@ -1,6 +1,6 @@
 # Ghostlight in Browser: Privacy Policy
 
-Last updated: 2026-10-17
+Last updated: 2026-10-18
 
 Canonical public URL: https://sylin.org/ghostlight/privacy/
 
@@ -76,7 +76,9 @@ its individual frames. This local process channel does not send data to Sylin. T
 handling of tool results is governed by that client's configuration and privacy terms.
 
 Ghostlight's local audit and desktop history are payload-free. They contain opaque ids, tool,
-capability, decision, reason, terminal status, effect class, and bounded operational measurements.
+capability, decision, reason, terminal status, effect class, bounded operational measurements, and
+the name of the app that started the agent's connection, which the application reads from the
+programs running on this computer.
 They may contain a normalized governed host and, when the configured privacy setting permits it, a
 bounded accessible name for the control Ghostlight acted on. They never contain URL paths, query
 strings, fragments, page text, selectors, form values, file paths, scripts, screenshots, recording
@@ -100,6 +102,12 @@ frames or GIFs, dialog text, console text, or network payloads.
   computer reads the agents' app files: a program's icon resource and a Store package's manifest
   and logo on Windows, a desktop entry and the icon it names on Linux. It keeps a copy of each icon in
   `state/icons` in its home folder and sends nothing.
+- The Ghostlight application shows its window's pages, the activity and history included, at an
+  address on 127.0.0.1 that only this computer can reach. While its "Others can watch" setting is
+  on, which is the default, other accounts and programs on this computer can open that address,
+  see what agents are doing and on which hosts, the client names and the policy rules, and pause
+  agents. Nothing is sent off the computer. Turn it off in the Ghostlight window's Settings >
+  Sharing.
 - No Chrome sync storage; adapter identity and user settings remain local to the browser profile.
 - No browsing-history database or background collection unrelated to a requested operation.
 

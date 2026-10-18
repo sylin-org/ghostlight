@@ -21,6 +21,8 @@ audit run on the endpoint.
 | Add and Open in a browser | A click in the Ghostlight window makes the service start the named browser, which opens the Chrome Web Store listing for Add, or the profile that holds the extension for Open | The browser then loads the store listing itself. |
 | Get Google Chrome | A click in the Ghostlight window opens google.com in the default browser | Google, in the person's browser. |
 | Setup command | The command a person pastes in a terminal. Its address is on sylin.org, which answers with a redirect to the script on GitHub; the script downloads the release files from GitHub | The person's own terminal, when the person runs it. |
+| npm launcher download | When npm runs the `ghostlight` package (`npx ghostlight`, or an MCP client entry that starts it) and the package is newer than the set installed in `~/.ghostlight/bin`, or nothing is installed, the launcher downloads that release's programs over HTTPS from GitHub's release host, checks each against the checksums the package carries, and installs them; `doctor`, `status` and the help commands run the checked download without installing it. When the installed set is the same or newer, the launcher runs it and downloads nothing. An entry that names an unpinned `ghostlight` therefore updates Ghostlight on a client start once npm serves a newer release; an entry that starts `~/.ghostlight/bin/ghostlight` or names an exact `ghostlight@<version>` does not | GitHub, for the release files. |
+| Connection source | Local reads by the service when an agent connects: the names of the programs above the connecting process, at most 16, to name the app that started it in the window, the history and the audit. Nothing is sent | Same endpoint. |
 | Suggested first request | The window shows a sentence for the person to give their agent. The agent's browser then opens a demo page on sylin.org, which the site states submits nothing elsewhere, calls out to nothing else and stores nothing | Browser page traffic the person asked for. |
 | Managed policy fetch | Local file read or conditional HTTPS GET | Customer-configured source, only when an administrator provisions `managed.json`. |
 | Workbench page | HTTP on 127.0.0.1 only, answered only when the Host header is that address and port. While "Others can watch" is on, anyone on this computer can see activity with hosts, client names and policy rules, and can pause agents; the person's never-touch list shows only as a count. Changes need a secret made at each service start, which the service hands out only on its per-user pipe, to the Ghostlight window. A person turns watching off in the Ghostlight window's Settings > Sharing; while it is off, a browser tab shows only the About page | Same endpoint. |
@@ -36,9 +38,10 @@ refused by monotonic sequence. No bootstrap means no policy network work.
 - No Ghostlight model-provider call. The MCP client owns its model relationship.
 - No vendor policy endpoint or embedded vendor policy key.
 
-There is zero vendor-bound traffic. The only Ghostlight-initiated network flow that may leave the
-endpoint is the explicitly configured managed HTTPS fetch to the customer's own source. Ordinary
-site traffic remains browser traffic.
+There is zero vendor-bound traffic. Two Ghostlight-initiated network flows may leave the endpoint:
+the explicitly configured managed HTTPS fetch to the customer's own source, and the npm launcher's
+download of release files from GitHub when npm runs a package newer than the installed set.
+Ordinary site traffic remains browser traffic.
 
 When the extension is installed on a computer where the Ghostlight service is absent, it opens its
 own bundled setup page once. That page loads nothing from the network. No vendor page opens, and
@@ -124,4 +127,4 @@ See [security-overview.md](security-overview.md),
 [the SIEM guide](../guides/siem-integration.md), and
 [the governance guide](../guides/governance-configuration.md).
 
-Last reviewed: 2026-10-17 against the current source | Contact: hello@sylin.org
+Last reviewed: 2026-10-18 against the current source | Contact: hello@sylin.org

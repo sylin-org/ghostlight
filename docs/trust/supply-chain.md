@@ -24,15 +24,26 @@ prepared only against observable matching assets. See
 
 ## Verify a release
 
-Both checks run against any release asset, straight from a shell:
+A 2.0 release publishes these files:
 
-    sha256sum -c ghostlight-v<version>-<target>.tar.gz.sha256
-    gh attestation verify ghostlight-v<version>-<target>.tar.gz --repo sylin-org/ghostlight
+- `ghostlight-<target>`, `ghostlight-service-<target>` and `ghostlight-desktop-<target>` for
+  `x86_64-pc-windows-msvc` (with `.exe`) and `x86_64-unknown-linux-gnu`;
+- `ghostlight-v<version>-x86_64-pc-windows-msvc.zip`, the WinGet archive;
+- `ghostlight-extension-v<adapter version>.zip`, the extension package;
+- `ghostlight-<version>.tgz`, the npm launcher;
+- `ghostlight-v<version>.mcpb`, the Claude Desktop bundle;
+- `ghostlight-v<version>-sbom-<crate>.cyclonedx.json`, one per workspace crate;
+- `release-candidate.json` and `SHA256SUMS`.
 
-The first prints `OK` when the archive matches its published checksum (on Windows,
-`Get-FileHash` computes the same SHA-256). The second, using the GitHub CLI, proves the
-artifact was built by this repository's release workflow and prints the source commit and
-workflow run that produced it.
+Download `SHA256SUMS` into the folder that holds the files you fetched, then check them:
+
+    sha256sum -c SHA256SUMS --ignore-missing
+    gh attestation verify <file> --repo sylin-org/ghostlight --signer-workflow sylin-org/ghostlight/.github/workflows/release.yml
+
+The first prints `OK` for each file you downloaded that matches its line in `SHA256SUMS`. On
+Windows, `(Get-FileHash <file> -Algorithm SHA256).Hash` computes the same SHA-256 to compare with
+that line. The second, using the GitHub CLI, proves the file was built by this repository's
+release workflow and prints the source commit and workflow run that produced it.
 
 ## SBOM
 
@@ -64,4 +75,4 @@ the best-effort advisory target in [SECURITY.md](../../SECURITY.md).
 
 See [security-overview.md](security-overview.md) for the vendor-side security posture.
 
-Last reviewed: 2026-10-16 against the current source and published service 1.3.14 | Contact: hello@sylin.org
+Last reviewed: 2026-10-18 against the current source and published service 1.3.14 | Contact: hello@sylin.org

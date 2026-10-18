@@ -37,8 +37,8 @@ Governance authorizes each invocation by capability class (`read`, `action`, `wr
 take. It does not infer whether page instructions match the user's intent. One residual risk
 follows directly.
 
-**In-domain prompt injection executes within policy.** When an identity is granted `write` on a
-domain (for example, `mail.example.com` for email triage), page content on that domain that
+**In-domain prompt injection executes within policy.** When policy grants `write` on a domain
+(for example, `mail.example.com` for email triage), page content on that domain that
 contains injected instructions can drive further writes on the same domain. Those writes are a
 permitted capability on a permitted domain and are authorized. This is inherent to capability-based
 authorization: tightening a policy does not remove it, because the authorized actions are exactly

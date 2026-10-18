@@ -5,8 +5,9 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `landed` (with com
 
 ## RESUME HERE
 
-The four lanes and the docs lane are running (2026-10-18). Next: the coordinator's integration
-gate, the in-place deploy and the owner-held items below.
+Every slice has landed (2026-10-18), the docs lane last. Next: the coordinator's integration
+gate, the in-place deploy and the owner-held items below; `docs/STATUS.md` carries the release
+checklist with an owner per line.
 
 ## Slices
 
@@ -25,7 +26,7 @@ gate, the in-place deploy and the owner-held items below.
 | d1-native-frame-fits-the-person | native | landed (`feat(tray): the tooltip names the state and says when no browser is connected`, `feat(desktop): the frame and the tray fit a light-mode laptop`): the title bar is dark in light mode; a new window opens no taller than the primary monitor less 96 px (624 high on 1280x720), centered above the taskbar; the minimum width is 720; the Windows tray draws the 16 px ghost at 16 px and the 32 px one at 24 and 32, and Linux always draws the 32 px one for its host to size, inks it on a light taskbar (re-read every 2 s) and rings a 3 px dot in the taskbar's ground; the executable carries 16/32/48/128; the tooltip leads with the band's word and says "No browser connected" (ADR-0199 amendment of 2026-10-18). Owed: the light-mode 150% check under Before v2.0.0 |
 | f1-extension-popup-and-kit | extension | landed (`fix(extension): the popup tells Paused apart and reaches the window`) |
 | b3-every-connection-knows-its-source | provenance | landed (`feat(provenance): every connection knows the app that started it`): the service reads the app that started each MCP connection from the peer process's ancestors, recognizes an agent's app by where it is installed, and sets the client's claim beside it in the window, history and audit, never as authority (ADR-0161, amendment of 2026-10-18) |
-| e1-the-rc-commit-tells-the-truth | docs | todo |
+| e1-the-rc-commit-tells-the-truth | docs | landed (`fix(cli): the manual page and completions describe 2.0`, `docs(release): the rc commit tells the truth`): CHANGELOG [2.0.0], the 2.0.0 notes and new rc.1 notes, README, SECURITY, the trust pages, PRIVACY, the npm README, ROADMAP, RELEASE's cutover, the store steps, STATUS's release checklist and INTENT match the tree |
 
 ## Held for the owner
 
@@ -199,3 +200,19 @@ gate, the in-place deploy and the owner-held items below.
   the Git `timeout.exe` wrapper an agent's shell uses ends the readable chain, which is why the
   MCP edge, a direct child of its client, is the case that matters. Not checked: the edges under
   the owner's Store Claude Desktop, which needs the deployed build.
+- e1 (rel-1, docs-1, trust-1, trust-2, trust-5, trust-8, docs-3, docs-10, docs-4, install-4,
+  install-5, trust-4, docs-6, rel-10, f1 review): the CHANGELOG's tab-group line follows ADR-0201
+  and the [2.0.0] section adds what a person notices: the PATH entry, agent icons, saved groups,
+  watching on 127.0.0.1 and Settings > Sharing, the Store app settings copy, uninstall's summary,
+  the 1.x leftovers, the connection's app, a call with no tab among several, page refusals, the
+  window's and the popup's changes. "Observed peer identity" left the Removed list, since b3 brings
+  the observed source back. `notes-v2.0.0-rc.1.md` is a prerelease preamble (the pinned commands,
+  the unpacked extension, the group change, what 1.x users avoid) over the 2.0.0 notes. The man
+  page's FILES names `~/.ghostlight` and the `~/.local` entries, documents `diagnostics` and drops
+  `GHOSTLIGHT_RUNTIME_FILE`, which nothing reads; `governance::inspection::SUBCOMMANDS` is the
+  policy list the completions and help are tested against. WinGet stays in the docs with one
+  honest line: it carries 2.0 once the 2.0.0 manifest merges into winget-pkgs, which today holds
+  1.3.6. RELEASE's cutover lists the steps before it (rc notes, the unpacked extension, the 1.x
+  upgrade, the privacy page before the staged submission) and after the store publish (a
+  clean-profile run, the public-state commit with a second fast-forward and a website rebuild,
+  the MCP Registry, WinGet), and the store steps say the same.

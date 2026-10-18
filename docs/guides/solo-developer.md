@@ -1,4 +1,4 @@
-# Ghostlight 1.0 for a solo developer
+# Ghostlight for a solo developer
 
 Ghostlight gives your local MCP client a visible workspace inside the Chromium profile where you
 are already signed in. It runs as you, on your machine, and that is the whole arrangement: no
@@ -20,13 +20,14 @@ If the install named an agent to restart, restart it first. There is no other re
 
 Ghostlight creates one blue group named for that client. If the group already exists in another
 normal browser window, new work goes there. If none exists, Ghostlight opens a dedicated window
-instead of changing your active personal window.
+instead of changing your active personal window. When a session ends, the tabs Ghostlight keeps
+open leave the group, and the next session puts a tab it reuses back in.
 
 ## Stay in control
 
 - Use the extension popup or `Alt+Shift+P` to pause and resume browser work.
 - Use the panic/end-session control when work must stop completely.
-- Keep **Preserve controlled tabs** enabled when you want browser evidence to survive a malicious
+- Keep **Preserve Ghostlight tabs** enabled when you want browser evidence to survive a malicious
   or mistaken close request.
 - Open the tray workbench to watch the current action and scroll back through what already
   happened, check health, and see anything that was blocked.

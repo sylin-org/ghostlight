@@ -221,8 +221,31 @@ artifact is independently observable.
 
 2.0 is a hard cutover (ADR-0200 Decision 16 and its amendments). The release candidate
 `v2.0.0-rc.1` is published as a prerelease and never as latest, the staged extension waits for
-approval, and the cutover is then one sitting from the same commit as the candidate, in this
-order. The detailed commands are in [store-disclosure-2.0.md](release/store-disclosure-2.0.md).
+approval, and the cutover is then one sitting from the same commit as the candidate. The detailed
+commands are in [store-disclosure-2.0.md](release/store-disclosure-2.0.md).
+
+Before the cutover, while every 1.x user is untouched:
+
+1. Publish `v2.0.0-rc.1` as a GitHub prerelease with
+   [notes-v2.0.0-rc.1.md](release/notes-v2.0.0-rc.1.md) as its notes.
+2. Prove the pinned install on Windows PowerShell 5.1, PowerShell 7 and a Linux shell. The store
+   still serves the 1.x extension, so load `extension/` from the `v2.0.0-rc.1` source unpacked;
+   its pinned key gives it the development id the install registers.
+3. Upgrade a 1.x install on another machine while the store still serves 1.x. On a test machine
+   that never ran 2.0, install 1.3.14 the way a user did (`npx -y ghostlight@1.3.14 install` and
+   the store extension) and use it once from an agent. Keep no `npx ghostlight` client entry and
+   no 1.x Claude Desktop extension on it, since either would put 1.x back. Then run the pinned
+   command from a regular terminal and check: exactly one service runs, the policy moved to
+   `~/.ghostlight/policy`, the 1.x audit log is archived under `state`, on Windows the Start-menu
+   shortcut and the Installed apps entry are 2.0's, the 1.x popup says version mismatch, the
+   agent's words are right, and the unpacked 2.0 extension reaches Ready.
+4. Publish the 2.0 privacy page: put `docs/legal/PRIVACY.md` from the candidate commit on
+   `https://sylin.org/ghostlight/privacy/` (the website repository, `sylin-org/website`), so
+   reviewers read the text that matches the package. For 1.x users it only discloses more than
+   their version does.
+5. Submit the extension as `STAGED_PUBLISH` and wait for approval.
+
+The cutover, in one sitting, in this order:
 
 1. Publish `v2.0.0` as GitHub's latest release.
 2. Fast-forward `main` to that commit, because the short commands fetch their scripts from `main`.
@@ -233,11 +256,25 @@ order. The detailed commands are in [store-disclosure-2.0.md](release/store-disc
 4. Prove the frozen one-line strings and the launcher restore commands.
 5. Publish the staged extension only when steps 1 to 4 hold and the public privacy page carries
    the 2.0 text.
-6. On `dev`, replace `Unreleased` in the CHANGELOG `[2.0.0]` heading with the date `v2.0.0`
-   became the latest release. This is a docs commit after the release commit; the tag keeps
-   `Unreleased`.
+6. On a clean profile on Windows and on Linux, run the public path once: the short install
+   command, Add in the window, the store's 2.0 extension, the first prompt, and Ready.
+7. Commit the public state on `dev` from what step 6 and the channels show:
+   `docs/public-status.json`, `server.json`, `compatibility.json`, the README's "Where it stands
+   today" block and its release details, `llms-install.md`, the installation guide, the trust
+   pages' "currently serve" lines (`supply-chain.md`, `faq.md`), and the date `v2.0.0` became the
+   latest release in place of `Unreleased` in the CHANGELOG `[2.0.0]` heading (the tag keeps
+   `Unreleased`). `scripts/check-public-surfaces.ps1 -Online` must pass. Then fast-forward `main`
+   to that commit and rebuild the website with `scripts/publish-website.ps1` (a `-DryRun` first),
+   which refreshes its install and public-status fallbacks.
+8. Publish the MCP Registry record with `scripts/publish-mcp-registry.ps1` once npm serves
+   `ghostlight@2.0.0` and `server.json` names it.
+9. Submit the WinGet manifests once the `v2.0.0` archive is observable:
+   `scripts/prepare-winget-manifest.ps1 -CandidateDirectory dist/release-candidate -ValidateWinGet`,
+   then a pull request to `microsoft/winget-pkgs`. Until it merges, `winget install
+   Sylin.Ghostlight` installs 1.x, which the 2.0 extension refuses; the release notes say so, and
+   the step 7 commit keeps the README's WinGet line only if it has merged.
 
-The MCP Registry follows the observable npm coordinate as before and never holds this order.
+The MCP Registry and WinGet follow their observable inputs and never hold the steps before them.
 
 Chrome upload and submission are separate explicit operations. `scripts/publish-extension.ps1`
 defaults to `Plan` and makes no request. `Upload` and `Submit` each require both the named action

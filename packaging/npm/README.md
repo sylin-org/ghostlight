@@ -44,10 +44,20 @@ Check the local connection at any time:
 npx -y ghostlight doctor
 ```
 
-For a client the installer does not recognize, use Ghostlight as this stdio server:
+For a client the installer does not recognize, point it at the installed edge with its full path,
+the way the installer sets up the clients it knows (`C:\Users\<you>\.ghostlight\bin\ghostlight.exe`
+on Windows):
 
 ```json
-{ "command": "npx", "args": ["-y", "ghostlight"] }
+{ "command": "/home/<you>/.ghostlight/bin/ghostlight", "args": ["mcp"] }
+```
+
+Using npm as the stdio server also works, but an unpinned entry updates itself: when npm serves
+a newer `ghostlight` than the one installed, the next client start downloads, verifies and
+installs it. Pin a version to update only when you choose:
+
+```json
+{ "command": "npx", "args": ["-y", "ghostlight@<version>"] }
 ```
 
 ## Links

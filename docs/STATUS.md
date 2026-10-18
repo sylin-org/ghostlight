@@ -68,11 +68,18 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   2026-10-18). A session still live at a browser exit leaves one saved group, which no extension
   API can reach. An unpacked extension runs the new code only after a reload of Ghostlight in
   `chrome://extensions`; the owner reloaded it on test-01.
+- **rc-1** ([LEDGER](tasks/rc-1/LEDGER.md)): opened 2026-10-18. A product-owner pass and a visual
+  coherence pass ran before the release candidate, a skeptic checked every finding, and the
+  confirmed ones landed in five lanes: the install scripts, uninstall and doctor; what agents see
+  (a call with no tab among several is refused, page refusals say what to do, each connection
+  names the app that started it); the window's words, type and widths; the frame and the tray;
+  and the extension's popup. The docs lane made the CHANGELOG, the notes, the trust pages and the
+  release steps match. Next: the coordinator's integration gate, the in-place deploy and the
+  checklist below.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
-The release candidate is next: the CHANGELOG [2.0.0] heading, a local test, then the owner's
-release order below.
+The release candidate is next: the checklist below, then the owner's release order.
 
 ## Release bar
 
@@ -86,32 +93,67 @@ The seams stay stable by default; one changes only when a separation-of-concerns
 meaningful architecture change needs it, never because of a freeze (ADR-0197 amendment of
 2026-10-18).
 
-The week of daily use the owner set on 2026-10-14 is withdrawn (owner, 2026-10-18: "The whole week
-of use is a fallacy and unnecessary bureaucracy. We were supposed to eliminate that kind of
-requirement."). What it was meant to catch is checked directly by the restart and sign-out above.
-
 Release order (`docs/RELEASE.md`, The 2.0 cutover; `docs/release/store-disclosure-2.0.md`;
 ADR-0200): the `v2.0.0-rc.1` GitHub prerelease, the pinned install proof on Windows PowerShell 5.1,
-PowerShell 7 and a Linux shell, the staged store submission, approval and the live privacy text,
-then in one sitting `v2.0.0` as latest, `main` fast-forwarded, the npm launcher published, the
-frozen install strings proved and the staged extension published. Not before approval.
+PowerShell 7 and a Linux shell, a 1.x upgrade on another machine while the store still serves 1.x,
+the 2.0 privacy text on the public page, the staged store submission and its approval. Then in one
+sitting: `v2.0.0` as latest, `main` fast-forwarded, the npm launcher published, the frozen install
+strings proved, the staged extension published, a clean-profile run of the public path on Windows
+and Linux, the public-state commit with a second fast-forward of `main` and a website rebuild, the
+MCP Registry record and the WinGet manifests. Not before approval.
 
 ## CI
 
-The last recorded green run is 39135419237 on `dev` cf056c5f (2026-10-18): all 11 jobs, including
-the Rust, extension and page-asset gates, supply chain, and every process and real-browser journey
-on Linux and Windows. It ends a red stretch from cb37cdbf, where one recovery test passed only on
-a host with a display (linux-1 ledger, Follow-up). Commits after it are checked locally by the
-lane gate; CI runs when the owner pushes.
+The last green run is 39143571465 on `dev` e3e861b7 (2026-10-18): all 11 jobs, including the Rust,
+extension and page-asset gates, supply chain, and every process and real-browser journey on Linux
+and Windows. The next run, 39144699322 on 1463b43d, failed in the Windows process journeys: the
+desktop journey ended the MCP edge's session before the service it starts was up. a7af2a78 fixes the
+journey, not the product. The rc-1 commits after it are checked by their lane gates; CI runs when
+the owner pushes.
 
-## Owed by the owner
+## Release checklist
 
-- Publish the sylin.org redirects `/ghostlight/get.ps1` and `/ghostlight/get.sh` to the scripts on
-  `main` (separate repository).
-- The dashboard submission for 2.0 (staged, never published ahead of the release order), the
-  remote-code answer (No), the recaptured store assets, and the public privacy page carrying the
-  setup profile text before publication.
-- The owner's checkpoint 2 on the desktop shell, and the live checks the ledgers list under
-  "Owed live checks".
-- The release order above, in the owner's hands: tags, publication and store actions are the
-  owner's call.
+Each line names who does it: the coordinator (the agent session that integrates and deploys) or
+the owner. The ledgers keep the detail; this is what still gates the release.
+
+Before rc.1:
+
+- Coordinator: the rc-1 integration gate, the in-place deploy on the owner's machine, and a green
+  CI run on the pushed head.
+- Coordinator: a rehearsal of the "Build release candidate" workflow on that head (no tag, sign or
+  publish), then `scripts/check-release-candidate.ps1`, `winget validate` and one MCPB install in
+  Claude Desktop from that unit.
+- Coordinator: a Windows Chrome and Edge check of the extension: a session end with preserve-tabs
+  on, a reuse, and the popup states.
+- Owner: JQ3, keep or drop the extension's host permissions, recorded as a decision.
+- Owner: the installer's wait times (90 s and 120 s), one timed cold run or "keep" recorded.
+- Owner: patch `main`'s 1.x `scripts/get.ps1` (rc-1 LEDGER, held for the owner).
+- Owner: the `v2.0.0-rc.1` tag and prerelease, with `docs/release/notes-v2.0.0-rc.1.md`.
+
+Between rc.1 and the cutover:
+
+- Coordinator: the pinned install proof on Windows PowerShell 5.1, PowerShell 7 and a Linux
+  shell, and clean installs from it on a Windows test machine and the Linux test machine.
+- Coordinator: a 1.x upgrade on another machine while the store still serves 1.x
+  (`docs/RELEASE.md`, The 2.0 cutover, step 3).
+- Owner: on Windows, a restart and a sign-out with an agent session, the browser and the window
+  open: no shutdown block, and one service afterwards.
+- Owner: the daily machine on the rc build, one check on a light-mode Windows account at 150%
+  (frame, height, tray), and the desktop shell's checkpoint 2.
+- Owner: tell the three 1.x users directly: remove the 1.x Claude Desktop extension or install the
+  2.0 `.mcpb`, and do not run `npx ghostlight` until the cutover.
+- Owner: the sylin.org redirects `/ghostlight/get.ps1` and `/ghostlight/get.sh` to the scripts
+  on `main`, and the website's 2.0 pages (separate repository).
+- Owner: the 2.0 privacy page published, then the staged store submission with the remote-code
+  answer (No) and the recaptured assets, and its approval.
+
+The cutover, in one sitting (`docs/RELEASE.md`, The 2.0 cutover):
+
+- Owner: `v2.0.0` as latest, `main` fast-forwarded, the npm launcher, the frozen strings and the
+  restore commands, and the store publish.
+- Coordinator: the clean-profile run of the public path on Windows and Linux.
+- Coordinator drafts, owner pushes: the public-state commit, the second fast-forward of `main`
+  and the website rebuild.
+- Owner: the MCP Registry record and the WinGet manifests.
+
+Tags, publication and store actions are the owner's call.

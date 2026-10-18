@@ -184,21 +184,25 @@ The unpacked extension is a complete local product surface, not an invisible rel
   extension reload. The pinned development key preserves the established unpacked extension id.
 - The toolbar popup says in one word whether Ghostlight is Ready, Paused, Session ended, Not
   connected or Update needed, who is browsing, and offers Pause agents with the take-the-wheel key
-  cap, End session, and a path to Settings. When Ghostlight does not answer it says to open
+  cap, End session, and a path to Settings. Paused and Session ended show the held lantern, as the
+  tray and the window do, so neither looks like Ready. While connected, a quiet Open Ghostlight
+  link asks Ghostlight to show its window. When Ghostlight does not answer it says to open
   Ghostlight on this computer and where it is, or offers the setup page.
 - The options page uses the Ghostlight kit, keeps the effects-on and captions-off defaults, shows
-  the connection in the popup's words with a setup button when Ghostlight does not answer, holds
-  the diagnostic toggle, and keeps a default-on local choice to preserve controlled tabs. It
-  owns only adapter-local presentation, diagnostics, and physical safety preferences. Authority
-  and policy never move into the extension.
+  the connection in the popup's words with a setup button when Ghostlight does not answer and the
+  same quiet Open Ghostlight link while connected, holds the diagnostic toggle, and keeps a
+  default-on local choice to preserve controlled tabs. It owns only adapter-local presentation,
+  diagnostics, and physical safety preferences. Authority and policy never move into the
+  extension.
 - Controlled tabs use one browser-wide blue exact-title group named
   `Ghostlight - <client label>`. New work reuses that group wherever the user placed it. When no
   Ghostlight group exists, the adapter creates a dedicated normal browser window instead of
   inserting work into the user's active window. Moves between windows preserve ownership. An
   opener never makes a tab Ghostlight's: child tabs and popups stay the person's (ADR-0164). A
   plain open reuses only a tab Ghostlight opened and a released session of the same client left
-  open, so the tab is already in that client's group, and never a tab the person opened (ADR-0196
-  Decision 9).
+  open, and never a tab the person opened (ADR-0196 Decision 9). A tab preserve-tabs keeps after
+  its session ends leaves the group, so Chromium deletes the idle group instead of saving it, and
+  a reuse puts the tab back in its client's group (ADR-0201).
 - Presentation preserves Ghostlight's luminous sky-blue visual language: controlled-tab border,
   phantom cursor, target and field treatments, click ripple, drag trail, scroll cue, read scan,
   action signatures, screenshot frame, denial, and optional captions. It survives
