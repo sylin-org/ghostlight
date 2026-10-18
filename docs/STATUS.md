@@ -66,8 +66,8 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   idle group instead of saving it, and reuse adopts the tab back. `lib/tabs.js` is the one
   packaged file that changed; the freeze golden is regenerated (ADR-0200 amendment of
   2026-10-18). A session still live at a browser exit leaves one saved group, which no extension
-  API can reach. The owner's browser runs the new extension code after a reload of Ghostlight in
-  `chrome://extensions`.
+  API can reach. An unpacked extension runs the new code only after a reload of Ghostlight in
+  `chrome://extensions`; the owner reloaded it on test-01.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
@@ -94,10 +94,11 @@ frozen install strings proved and the staged extension published. Not before app
 
 ## CI
 
-The last recorded green run is 38936325057 on `dev` ec0f61f4 (2026-10-16): all 11 jobs, including
+The last recorded green run is 39135419237 on `dev` cf056c5f (2026-10-18): all 11 jobs, including
 the Rust, extension and page-asset gates, supply chain, and every process and real-browser journey
-on Linux and Windows. Commits after it are checked locally by the lane gate; CI runs when the owner
-pushes.
+on Linux and Windows. It ends a red stretch from cb37cdbf, where one recovery test passed only on
+a host with a display (linux-1 ledger, Follow-up). Commits after it are checked locally by the
+lane gate; CI runs when the owner pushes.
 
 ## Owed by the owner
 
