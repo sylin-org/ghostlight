@@ -82,8 +82,9 @@ and, on Windows, a restart and a sign-out with an agent session, the browser and
 which must show no shutdown block and leave exactly one service. The 1.x user base is three
 reachable people and they are told directly. 2.0 settles the seams (executables, relay and adapter
 protocols, policy schema, agent entries, install home) and 2.x rebuilds internals lean behind them.
-Until something is published it changes whenever the architecture needs it; after that,
-compatibility with what people run is what binds (ADR-0197 amendment of 2026-10-18).
+The seams stay stable by default; one changes only when a separation-of-concerns analysis shows a
+meaningful architecture change needs it, never because of a freeze (ADR-0197 amendment of
+2026-10-18).
 
 The week of daily use the owner set on 2026-10-14 is withdrawn (owner, 2026-10-18: "The whole week
 of use is a fallacy and unnecessary bureaucracy. We were supposed to eliminate that kind of

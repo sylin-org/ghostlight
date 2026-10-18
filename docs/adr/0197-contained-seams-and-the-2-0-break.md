@@ -440,12 +440,41 @@ This record calls the relay connectors, the edge and the extension package froze
 2026-10-18: "let's stop with the artificial freezes and week tests, etc. The objective is to get
 the architecture right." Read every freeze in this record and its amendments that way:
 
-- Nothing unpublished is frozen. Relay protocol 4, the edge, the adapter protocol, the extension
-  package, policy schema 4 and audit v2 change whenever the architecture needs it until they are
-  published, and "it freezes at the release candidate" is never a reason to rush or refuse a
-  change.
-- After publication, what binds is compatibility with what people run, kept by the versioned
-  negotiation these seams already carry (relay and adapter revisions, schema versions), and real
-  external costs such as resubmitting a staged store package.
+- The seams stay stable by default, and nothing mandates changing them. Relay protocol 4, the
+  edge, the adapter protocol, the extension package, policy schema 4 and audit v2 change when a
+  proper separation-of-concerns analysis shows a meaningful architecture change needs it; "it is
+  frozen" or "it freezes at the release candidate" is never the reason to refuse that change, or
+  to rush one. The owner, the same day: "I'm not saying to unfreeze and change everything ... if a
+  proper analysis of SoC decides that they need to be modified to incorporate a meaningful
+  architecture change, so be it. But there's no mandate to change them."
+- After publication, that analysis includes compatibility with what people run, kept by the
+  versioned negotiation these seams already carry (relay and adapter revisions, schema versions),
+  and real external costs such as resubmitting a staged store package.
 - The guards stay as change records, not locks: the extension's package record and the edge
   source check show what changed and what a published home will receive.
+
+## Amendment 2026-10-18: a container is found by its effect
+
+Live finding: an agent in Claude desktop or Codex often wraps a command in `timeout` or a
+pipeline, which breaks the parent chain. The container rule above then judged an install outside
+any container, so it wrote registrations only that app could see, and `doctor` from the same
+terminal called every working browser "Malformed or foreign state". The owner's rule is to
+discover where things really are on every look. This amendment replaces the container rule's
+parent chain:
+
+- **Effect alone.** The install writes a probe file with a new name below `%LOCALAPPDATA%`, lists
+  `%LOCALAPPDATA%\Packages` once, and is inside the container of the package whose
+  `LocalCache\Local` also holds the probe. No ancestor is read, so `win-peer` no longer walks the
+  parent chain. The answer is still decided once per process.
+- **The registry follows the container.** A process inside a container sees only the merged view
+  of `HKCU`, `HKEY_USERS\<sid>` included, and the app's private hive stays locked, so no read can
+  compare the private and the real values (checked on the owner's machine, 2026-10-18). The
+  registry view is private exactly when the probe lands privately.
+- **Named, not blamed.** Inside a container, `doctor` and the install dry run say of each browser
+  "cannot be checked from here -- `<app>`'s own view of the registry; run ghostlight doctor from a
+  regular terminal." `doctor --json` gives those rows the state `not_visible` with the same words.
+- **A dangling value is ours.** A browser's `HKCU` value under `org.sylin.ghostlight` that names a
+  missing `org.sylin.ghostlight.json`, as a 1.x install left, is Missing, so an install writes the
+  registration again. Any other value whose file is missing still needs attention and is never
+  changed.
+- Ghostlight still uses no WMI, Task Scheduler or other container escape.

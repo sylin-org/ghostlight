@@ -159,12 +159,16 @@ the owner wants, and what this project learned the hard way.
   desktop shell, install journey) while 1.x users stayed exposed to known hazards, and the owner
   had asked for lean (2026-10-14). Before adding work to a release in flight, ask whether it must
   ship with it; if not, it waits.
-- **Get the architecture right; no artificial freezes.** Nothing unpublished is frozen: a
-  protocol, an executable, a package or a schema changes whenever the architecture needs it, and
-  "it freezes at the release candidate" is never a reason to rush or to refuse a change. What
-  binds after publication is compatibility with what people run, kept by versioned negotiation,
-  and real external costs such as a store resubmission (owner, 2026-10-18: "let's stop with the
-  artificial freezes and week tests, etc. The objective is to get the architecture right.").
+- **Get the architecture right; no artificial freezes.** The seams (protocols, executables, the
+  extension package, schemas) stay stable by default, and there is no mandate to change them. A
+  seam changes when a proper separation-of-concerns analysis shows a meaningful architecture
+  change needs it; "it is frozen" or "it freezes at the release candidate" is never the reason to
+  refuse that change, or to rush one. After publication, compatibility with what people run, kept
+  by versioned negotiation, and real external costs such as a store resubmission are part of that
+  analysis (owner, 2026-10-18: "let's stop with the artificial freezes and week tests, etc. The
+  objective is to get the architecture right." and "I'm not saying to unfreeze and change
+  everything ... if a proper analysis of SoC decides that they need to be modified to incorporate
+  a meaningful architecture change, so be it. But there's no mandate to change them.").
 - **Show working software, and ask design questions as questions.** Every milestone ends with
   something the owner can see or try, live, before the next one starts; summaries do not
   replace it. Reuse what exists (adapting it) before building anew, and never build throwaways.
