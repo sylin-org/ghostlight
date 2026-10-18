@@ -292,11 +292,16 @@ fn run_show(
     if malformed > 0 {
         println!("({malformed} unparseable lines skipped)");
     }
+    // A component the filter left out is absent by request, not because its diagnostics were off.
+    let wanted = component;
     for component in [
         Component::Orchestrator,
         Component::EdgeMcp,
         Component::EdgeBrowser,
-    ] {
+    ]
+    .into_iter()
+    .filter(|known| wanted.is_none_or(|wanted| wanted == known.as_str()))
+    {
         let present = records.iter().any(|record| {
             record.get("component").and_then(serde_json::Value::as_str) == Some(component.as_str())
         });
