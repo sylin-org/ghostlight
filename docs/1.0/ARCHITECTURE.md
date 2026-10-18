@@ -590,7 +590,8 @@ app's icon is served as a finished tile: the service decodes the cached copy, an
 outer ring is not opaque it sets the icon at its own size in the middle of a square of a dark gray
 or a warm off-white, whichever more of the icon's ink reads on, and encodes it as an opaque PNG.
 An icon with its own opaque plate, or one it cannot decode, is served as cached. Each tile is made
-once per cached copy and kept in memory. The monogram
+once per cached copy and kept in memory, but the copy is read and checked against its hash each
+time the symbol or the route asks, so a copy that is gone or changed gives the monogram. The monogram
 tiles are Ghostlight's own SVGs in `crates/orchestrator/src/agent/monograms/`, embedded per catalog
 row and served only at that address, never as page files. The agent's symbol, built where
 `crate::agent` builds the agent, is `{ "icon": "agent-icons/<id>?v=<version>" }`: the version is

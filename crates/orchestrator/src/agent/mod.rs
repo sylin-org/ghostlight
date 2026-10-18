@@ -82,9 +82,9 @@ pub enum Symbol {
     Icon {
         /// The agent's address beside the page, with the served image's version.
         address: String,
-        /// The sentence that says which installed app the image came from; none for a monogram.
-        /// The page reads it as the mark of an app's own icon, which may have no ground of its
-        /// own, and sets that image on a neutral tile; a monogram is a tile itself.
+        /// The sentence the Integrations pane shows for an installed app's own icon, saying which
+        /// app it came from; none for a monogram. Every image served at the address is a whole
+        /// tile, so the page draws an app icon and a monogram the same way.
         about: Option<String>,
     },
     /// A glyph the page draws.

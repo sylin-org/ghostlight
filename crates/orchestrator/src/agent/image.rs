@@ -8,7 +8,9 @@
 //! An app's icon is served as a finished tile ([`tile`]): the icon on the ground the service chose
 //! for it, or exactly as cached when it has its own opaque plate or cannot be read. So every image
 //! the page draws is whole, as a monogram is, and the page decides nothing about grounds. The
-//! image made from a cached copy is made once, keyed by the copy's SHA-256, and kept in memory.
+//! image made from a cached copy is made once, keyed by the copy's SHA-256, and kept in memory;
+//! the copy is still read and checked against its hash each time, so a copy that is gone or
+//! changed gives the monogram even after its tile was served.
 //! The agent's symbol names the address with the served image's version
 //! ([`AgentImage::version`]), so the address changes exactly when the image does, and the window
 //! serves those same bytes ([`served`]); both read [`AgentImage::best`], so they cannot disagree.
@@ -123,16 +125,17 @@ impl AgentImage {
     }
 }
 
-/// The image made from `agent_id`'s cached copy, whose SHA-256 is `sha256`: from memory when it
-/// was made before, else made now from the copy. None when the copy can no longer be read or is no
-/// longer the one the cache vouches for.
+/// The image made from `agent_id`'s cached copy, whose SHA-256 is `sha256`. The copy is read and
+/// hashed on every call, so a copy that can no longer be read or is no longer the one the cache
+/// vouches for gives none, also after its image was made; memory spares only the decode and the
+/// composite of a copy whose image was made before.
 fn app_image(cache: &IconCache, agent_id: &str, sha256: &str) -> Option<Arc<ServedImage>> {
-    if let Some(image) = app_images().get(sha256) {
-        return Some(Arc::clone(image));
-    }
     let icon = cache.icon(agent_id)?;
     if sha256_hex(&icon.bytes) != sha256 {
         return None;
+    }
+    if let Some(image) = app_images().get(sha256) {
+        return Some(Arc::clone(image));
     }
     let image = Arc::new(ServedImage::app_icon(icon));
     let mut images = app_images();
@@ -188,7 +191,8 @@ impl ServedImage {
 
 /// The image the window serves for the catalog agent `agent_id` from `cache` now
 /// ([`AgentImage::best`]); none for an id outside the catalog. A cached copy that can no longer be
-/// read gives the monogram, the best image left, until the next look drops it.
+/// read, or no longer matches its hash, gives the monogram, the best image left, also when its
+/// tile was served before, until the next look drops it.
 #[must_use]
 pub fn served(agent_id: &str, cache: Option<&IconCache>) -> Option<ServedImage> {
     let monogram = crate::install::monogram_of(agent_id)?;
@@ -300,19 +304,44 @@ mod tests {
         );
     }
 
+    /// The symbol and the window both give `zed`'s monogram from `cache`.
+    fn both_give_the_monogram(cache: &IconCache, case: &str) {
+        let served = served("zed", Some(cache)).unwrap();
+        assert_eq!(served.media_type, "image/svg+xml", "{case}");
+        assert_eq!(served.bytes, monogram!("zed.svg").bytes(), "{case}");
+        let best = AgentImage::best("zed", monogram!("zed.svg"), Some(cache));
+        assert_eq!(best, AgentImage::Monogram(monogram!("zed.svg")), "{case}");
+        assert_eq!(
+            best.version(),
+            served.version,
+            "{case}: the symbol and the window agree on the monogram"
+        );
+    }
+
     #[test]
     fn a_copy_the_cache_no_longer_vouches_for_gives_the_monogram() {
         let source = tile::tests::png_of(8, &[0xff; 8 * 8 * 4]);
         let (root, cache, _) = zed_cache("changed", &source);
         let copy = root.join("icons").join("zed.png");
         std::fs::write(&copy, b"changed underneath").unwrap();
-        let served = served("zed", Some(&cache)).unwrap();
-        assert_eq!(served.media_type, "image/svg+xml");
+        both_give_the_monogram(&cache, "changed before any tile was made");
+    }
+
+    #[test]
+    fn a_tile_already_served_gives_way_to_the_monogram_when_its_copy_goes() {
+        let (root, cache, _) = zed_cache("gone", &tile::tests::white_glyph_png());
+        let copy = root.join("icons").join("zed.png");
+        let tiled = served("zed", Some(&cache)).unwrap();
         assert_eq!(
-            AgentImage::best("zed", monogram!("zed.svg"), Some(&cache)).version(),
-            served.version,
-            "the symbol and the window agree on the monogram"
+            tile::tests::ground_of(&tiled.bytes),
+            Some(tile::Ground::Dark)
         );
+
+        std::fs::write(&copy, b"replaced underneath").unwrap();
+        both_give_the_monogram(&cache, "replaced after its tile was served");
+
+        std::fs::remove_file(&copy).unwrap();
+        both_give_the_monogram(&cache, "deleted after its tile was served");
     }
 
     /// The variable that rewrites the preview's app icons from the service's tiles.
