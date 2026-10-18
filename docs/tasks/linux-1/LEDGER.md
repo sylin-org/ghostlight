@@ -10,10 +10,11 @@ uses the real installation and the real system browser, never a sandbox). The ow
 session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed and proven on the
 real install (see L04). L05 passed after six fixes in the shell, the service and the window, and
 L06 after three, L07 after five, L08, L09 and L10 after one each (see each). The batch is done.
-The development build at 1024a994 runs in a fresh `~/.ghostlight` with the owner's policy copied
-back (browser.startup on_demand), the system Chromium's ordinary profile is connected, and
-diagnostics are on; the home from before L10 is kept at `~/.ghostlight.l10-before`. Owed for
-later: the release candidate's pinned install (L10), and the items marked "seen and left".
+On 2026-10-18 the owner had the old leftovers deleted and the open questions settled by the
+user-delight test; see "Follow-up" below. The development build at dbd52fa6 runs in a fresh
+`~/.ghostlight` with the owner's policy (browser.startup on_demand), the system Chromium's
+ordinary profile is connected, and diagnostics are on. Owed: the release candidate's pinned
+install (L10), and the owner's decision on saved tab groups (Follow-up).
 
 ## Tasks
 
@@ -490,5 +491,43 @@ Machine state after the batch: the fresh home runs the development build at 1024
 owner's policy copied back from the old home (browser.startup on_demand, their rules) and
 diagnostics on; the old home, with its audit history, stays at `~/.ghostlight.l10-before` for the
 owner to keep or delete.
+
+## Follow-up, 2026-10-18: old things removed, open questions settled
+
+The owner asked for unneeded old things to be deleted and for every open question to be settled by
+the user-delight test (the model for MCP behavior, the person for the window and the terminal).
+
+Removed: the home from before L10, the 0.x data folder, the 1.x window data and policy folders,
+the 0.5.7 testing tree (after Integrations' own Fix replaced the Cline (CLI) entry that pointed
+into it), the old fleet-test leftovers in the Trash, the Ghostlight backups of two older
+generations (goose, Cline's `.before-ghostlight`), a stray Cline settings copy the 0.5.7 installer
+wrote where Cline never reads, and about 110 GB of stale build folders and `.tmp` evidence in the
+repository (the dev loop's folder stays). The owner deleted the old Chromium fleet-test profile by
+hand: the browser's own data stays the owner's (docs/MEMORY.md). The deleted
+`.tmp/linux-tools` held the `pwsh` L01 linked; PowerShell 7.6.5 now sits in
+`~/.local/opt/powershell-7.6.5` (checksum verified), linked as `~/.local/bin/pwsh`.
+
+Settled, each deployed and checked:
+
+1. 564bf635: the install's Next line is the step the window shows (ADR-0200 amendment). Unit and
+   CLI tests; setup on this machine is complete, so the state no longer occurs live.
+2. a241b633: a browser that reports no name is Chromium (ADR-0149 amendment). Live: the record
+   reads `{"browser":"chromium"}` and the model reads the name "Chromium", not null.
+3. 7cdd4031: an upload names the file input it used a "file field". Live: "Uploaded 1 file
+   through the "Screenshot file for local preview" file field on sylin.org."
+4. dbd52fa6: every Linux install removes the folders 1.x left that nothing reads (the emptied
+   policy folder, the 1.x window's web view data). Live, on stand-in folders: both removed and
+   named in the install's output.
+
+Checked and not a defect: Ghostlight starts Chromium through `/usr/bin/chromium`, Arch's launcher,
+which applies `chromium-flags.conf` and runs `/usr/lib/chromium/chromium`.
+
+For the owner (extension-frozen): saved tab groups pile up in the bookmarks bar ("Ghostlight -
+linux-1 agent" and "Ghostlight - codex-mcp-client" twice each). Reuse works for open groups
+(ADR-0137), but Chromium keeps every closed group as a saved group, and the extension API of
+Chromium 154 (`tabGroups`: get, query, update, move) cannot see or reopen one, so the next session
+of the same agent creates a second. Any fix is in the frozen extension (ADR-0200 Decision 16); the
+best an extension can do is restore a recently closed group through `sessions`, which does not
+survive a browser restart. The existing duplicates are browser data, left for the owner.
 
 ## Notes
