@@ -1,8 +1,7 @@
 //! Per-user manual pages and shell completions.
 //!
-//! The Debian package installs these under `/usr/share`. The per-user route has no packaging step,
-//! so it writes the same bytes under the XDG user data directory, in the locations each consumer
-//! already searches:
+//! Ghostlight ships no system package, so the installation writes these under the XDG user data
+//! directory, in the locations each consumer already searches:
 //!
 //! - `man` looks in `../share/man` for every directory on PATH, and the per-user route owns
 //!   `~/.local/bin` (see [`super::command_path`]).
@@ -10,7 +9,7 @@
 //! - fish reads `$XDG_DATA_HOME/fish/vendor_completions.d`.
 //! - zsh reads no user data directory by default. The file is still written to the conventional
 //!   `site-functions` location so a person who adds it to `fpath` gets completions, and
-//!   `ghostlight.1` says so rather than implying it works untouched.
+//!   `ghostlight.1` gives the one line to add rather than implying it works untouched.
 //!
 //! Ownership follows the same rule the Applications entry uses. A symlink in a product-owned
 //! location is someone else's and is never touched. A regular file is replaced on install, and

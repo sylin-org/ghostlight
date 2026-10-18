@@ -162,12 +162,12 @@ Shell completions the per-user installation owns. Both shells read these
 locations without configuration.
 .TP
 .I ~/.local/share/zsh/site-functions/_ghostlight
-The zsh completion. Zsh does not read this directory by default; add it to
-.B fpath
-in your
+The zsh completion. Zsh does not read this directory by default. To use it,
+add this line to your
 .I .zshrc
-to use it. The Debian package installs into zsh's vendor directory instead,
-which needs no configuration.
+before
+.BR compinit :
+.B fpath+=(~/.local/share/zsh/site-functions)
 .TP
 .I $XDG_STATE_HOME/ghostlight
 Local state, including the append-only audit record.
