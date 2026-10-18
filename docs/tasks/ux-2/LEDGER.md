@@ -15,7 +15,7 @@ the push.
 | Slice | Lane | Items | Status |
 | --- | --- | --- | --- |
 | u0 preview-shows-every-state | window | j-38 | landed (this commit) |
-| u1 teal-means-live | window | n-d-02, j-27, j-24, j-34 (window) | todo |
+| u1 teal-means-live | window | n-d-02, j-27, j-24, j-34 (window) | landed (this commit) |
 | u2 only-running-work-glows | window | n-d-01, j-25, window-10, window-9 (time format) | todo |
 | u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | todo |
 | u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | todo |
@@ -108,3 +108,29 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   `?readiness=paused`. `?readiness=channel_off` says Ready on the band because the service has
   no channel state yet; u4 (n-s-02) changes the answer, and the fixture's mirrored words follow
   it there.
+- u1 (n-d-02): an agent wears the accent only while one of its sessions runs work
+  (`active_operations` above zero), not whenever the service names it in use. The rail line of a
+  working agent ends in "working" and the pane's state word says "Working", so working and
+  connected differ in words. The pane's in-use box is now `.agent-use`, neutral, and `.agent-use.live`
+  only while work runs; the item called it `.agent-live`. "Working" is composed by a helper
+  (agentStateWord) beside AGENT_STATE_WORDS, because that table is held to the roster's states by
+  a Rust test.
+- u1 (n-d-02), Apply: every `.primary-button` is a ghost while it is disabled, so Apply is a
+  ghost until there is a draft and Set up everything is a ghost when nothing can be set up. Only
+  an enabled primary wears the accent. Re-check in the needs-attention steps is always a ghost.
+- u1 (n-d-02), one more resting teal: the sacred-hosts readback (`.readback`) was set in the
+  accent at rest; it is now ink (--ink-2). The EDIT hint also turns teal on keyboard focus, not
+  only on hover. The stylesheet test lists every selector allowed the accent, by reason: work
+  running now, focus, the pointer on a control, and an enabled primary. The About card is
+  artwork and is left out.
+- u1 (j-27): the agent offers (Found, not connected and Needs an update) use a new --offer
+  token, ink-3, in place of --cap-action blue, on the dot, the wire, the state word and the rail
+  line. The never-settled duration is set in --ink-2 rather than amber.
+- u1 (j-24): every button (ghost, danger, primary and the band's wheel) is 32px, weight 500,
+  radius 6, 12.5px, ink on an .18 hairline; the 28px settings-row override is gone. "Details" in
+  the glance pill is the window's 12px sans disclosure with its chevron. Radii snap to
+  4/6/8/12/pill and sizes to 10/11.5/12/12.5/13/14.5/17/22/25. The item's scale left out 12px,
+  but the item itself sets the disclosure at 12px and 33 rules use it, so 12 stays a step. A
+  test holds both scales; the trading card, monograms, icon tiles, scrollbars and the agent wire
+  keep their own geometry.
+- u1 (j-34): the About card's halo breathes at --beat-breathe (4000ms), the band's tempo.

@@ -17,7 +17,7 @@
 /* The rail is a column of tabs that each carry their current state. */
 .settings-rail { display: flex; flex-direction: column; gap: 2px; }
 .rail-entry {
-  display: grid; width: 100%; gap: 2px; padding: 9px 12px; border-radius: 7px;
+  display: grid; width: 100%; gap: 2px; padding: 9px 12px; border-radius: 6px;
   color: var(--ink-4); text-align: left;
   transition: color .25s var(--calm), background .25s var(--calm);
 }
@@ -26,7 +26,7 @@
 .rail-label { font-size: 12.5px; }
 .rail-state {
   display: -webkit-box; overflow: hidden;
-  color: var(--ink-4); font: 400 10.5px/1.4 var(--mono);
+  color: var(--ink-4); font: 400 11.5px/1.4 var(--mono);
   -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
 }
 .rail-entry.active .rail-state { color: var(--ink-3); }
@@ -35,9 +35,9 @@
 .settings-body { min-width: 0; }
 .settings-section {
   padding: 6px 18px 14px;
-  border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2);
 }
-.settings-section h2 { margin: 12px 0 6px; color: var(--ink); font-size: 14px; font-weight: 400; }
+.settings-section h2 { margin: 12px 0 6px; color: var(--ink); font-size: 14.5px; font-weight: 400; }
 .settings-note { margin: 0 0 6px; color: var(--ink-3); font-size: 12px; }
 .settings-section .continue-line { margin: 10px 0 0; }
 
@@ -51,21 +51,22 @@
 .settings-label { color: var(--ink-2); font-size: 12.5px; }
 .settings-state { display: grid; min-width: 0; gap: 2px; }
 .settings-state b { color: var(--ink); font-size: 12.5px; font-weight: 400; }
-.settings-state small, .settings-detail { overflow: hidden; color: var(--ink-4); font-size: 11px; text-overflow: ellipsis; }
+.settings-state small, .settings-detail { overflow: hidden; color: var(--ink-4); font-size: 11.5px; text-overflow: ellipsis; }
 .settings-detail { font-family: var(--mono); user-select: text; word-break: break-all; white-space: normal; }
 .settings-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.settings-acts .ghost-button, .settings-acts .danger-button, .settings-acts .link-button { height: 28px; }
+.settings-acts .link-button { height: 28px; }
 .settings-acts .link-button { padding: 0 4px; }
 
 .settings-choices { display: inline-flex; gap: 4px; }
 .choice {
   height: 28px; padding: 0 11px;
-  border: 1px solid var(--line-2); border-radius: 7px;
+  border: 1px solid var(--line-2); border-radius: 6px;
   color: var(--ink-3); font-size: 12px;
   transition: border-color .25s var(--calm), color .25s var(--calm), background .25s var(--calm);
 }
 .choice:hover { border-color: rgba(255, 255, 255, .22); color: var(--ink); }
-.choice.chosen { border-color: rgba(var(--argb), .5); color: var(--a); background: rgba(var(--argb), .08); }
+/* The chosen segment is a setting at rest, so it is told by ink and fill, not by the accent. */
+.choice.chosen { border-color: rgba(255, 255, 255, .4); color: var(--ink); background: rgba(255, 255, 255, .12); }
 
 /* ----------------------- personal settings on this screen ---------------- */
 /* Density tightens the hero and the queue so a second monitor holds more. */

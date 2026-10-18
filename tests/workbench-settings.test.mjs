@@ -1564,8 +1564,16 @@ test("each state reads as its own words, and a group shows only when it holds an
   assert.equal(sub("goose"), "Copy setup only");
   const dot = (id) => shown.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id)
     .children.find((node) => node.classes.has("agent-dot"));
-  assert.ok(dot("zed").classes.has("d-live"), "an agent in use wears the teal dot");
+  assert.ok(dot("zed").classes.has("d-installed"), "an idle agent in use keeps the green dot");
   assert.ok(dot("codex").classes.has("d-installed"));
+  const busy = agentsPage(ROSTER, { sessions: [glanceSession("w1", "Zed", { tabs: 2, busy: true })], inUse: ["zed"] });
+  const busyEntry = busy.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === "zed");
+  assert.ok(busyEntry.children.find((node) => node.classes.has("agent-dot")).classes.has("d-live"),
+    "an agent running work wears the teal dot");
+  assert.equal([...busyEntry.descendants()].find((node) => node.classes.has("agent-entry-sub")).textContent,
+    "1 session, 2 tabs, working", "and says it is working, not only in colour");
+  busy.pick("zed");
+  assert.equal(busy.pane().wearing("agent-state")[0].textContent, "Working");
   const agentsAgain = agentsPage(ROSTER.filter((row) => row.state === "installed"));
   assert.deepEqual(agentsAgain.rail().wearing("agents-group-head").map((head) => head.children[0].textContent), ["Connected"]);
 });
@@ -1617,13 +1625,21 @@ test("a session that arrives after the first paint reaches the rail, the pane an
   const entry = () => shown.rail().wearing("agent-entry").find((node) => node.dataset.agent === "codex");
   const sub = () => [...entry().descendants()].find((node) => node.classes.has("agent-entry-sub"))?.textContent ?? null;
   assert.equal(sub(), null);
-  assert.equal(shown.pane().wearing("agent-live").length, 0);
+  assert.equal(shown.pane().wearing("agent-use").length, 0);
   assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "0");
-  shown.view.collections({ ...shown.snapshot, sessions: [glanceSession("w1", "Codex", { tabs: 3 })], harnesses_in_use: ["codex"] },
-    new Set());
+  const arrive = (busy) => shown.view.collections({
+    ...shown.snapshot, sessions: [glanceSession("w1", "Codex", { tabs: 3, busy })], harnesses_in_use: ["codex"]
+  }, new Set());
+  const dotOf = () => entry().children.find((node) => node.classes.has("agent-dot"));
+  arrive(false);
   assert.equal(sub(), "1 session, 3 tabs");
-  assert.ok(entry().children.find((node) => node.classes.has("agent-dot")).classes.has("d-live"), "the dot pulses teal");
-  assert.equal(shown.pane().wearing("agent-live")[0].children[1].textContent,
+  assert.ok(dotOf().classes.has("d-installed"), "an idle session keeps the green dot");
+  assert.equal(shown.pane().wearing("agent-use")[0].classes.has("live"), false);
+  arrive(true);
+  assert.equal(sub(), "1 session, 3 tabs, working");
+  assert.ok(dotOf().classes.has("d-live"), "the dot pulses teal while work runs");
+  assert.ok(shown.pane().wearing("agent-use")[0].classes.has("live"));
+  assert.equal(shown.pane().wearing("agent-use")[0].children[1].textContent,
     "1 Codex session is connected right now, with 3 browser tabs open.");
   assert.equal(shown.pane().wearing("agent-remove")[0].dataset.harnessSessions, "1");
   shown.view.collections({ ...shown.snapshot, sessions: [], harnesses_in_use: [] }, new Set());
@@ -1636,7 +1652,7 @@ test("only the rows the service says are in use pulse, and the page never puts a
   const cline = (id, label, state) => ({ ...agent(id, "Cline", state), label, agent: namedAgent("Cline") });
   const rows = [cline("cline-cli", "Cline (CLI)", "installed"), cline("cline-vscode", "Cline (Visual Studio Code)", "available"),
     cline("cline-cursor", "Cline (Cursor)", "updatable")];
-  const shown = agentsPage(rows, { sessions: [glanceSession("w1", "Cline", { tabs: 1 })], inUse: ["cline-cli"] });
+  const shown = agentsPage(rows, { sessions: [glanceSession("w1", "Cline", { tabs: 1, busy: true })], inUse: ["cline-cli"] });
   const dot = (id) => shown.rail().wearing("agent-entry").find((entry) => entry.dataset.agent === id)
     .children.find((node) => node.classes.has("agent-dot"));
   assert.ok(dot("cline-cli").classes.has("d-live"));
@@ -1697,7 +1713,7 @@ test("a copy-only agent with a live session is connected, and is never called no
   assert.equal(shown.title(), "goose", "the agent with tabs");
   assert.equal(shown.pane().wearing("agent-state")[0].textContent, "Connected");
   assert.match(shown.pane().wearing("agent-lead")[0].textContent, /^goose is using Ghostlight right now\./);
-  assert.equal(shown.pane().wearing("agent-live").length, 1);
+  assert.equal(shown.pane().wearing("agent-use").length, 1);
   assert.deepEqual(shown.pane().wearing("agent-act"), [], "nothing to do next");
   assert.equal(shown.pane().wearing("agent-remove").length, 0, "Ghostlight never edits its file, so it offers no Remove");
   assert.ok(!shown.el("agents-pane").innerHTML.includes("not connected"));
@@ -2621,6 +2637,58 @@ test("no word in the window is set in a token kept for strokes and decoration", 
   const root = naming(":root")[0].declarations;
   const kitInk = /--ink-4:\s*(#[0-9a-f]{6})/.exec(readFileSync(join(ui, "..", "..", "..", "extension", "kit.css"), "utf8"))[1];
   assert.equal(root["--ink-4"], kitInk, "the window's quietest text is the kit's");
+});
+
+/**
+ * Teal means live: the selectors allowed to draw in the accent, by why. Everything else at rest is
+ * ink. The About card's trading card (.tcg) is artwork and keeps its teal.
+ */
+const ACCENT = Object.freeze({
+  "work running now": ["body.runtime-working .lamp-halo", "body.runtime-working .lamp-core", "body.runtime-working .state-word",
+    ".glance-face.busy", ".glance-chip.busy", ".glance-card-head.busy", ".glance-chip.busy .symbol", ".glance-card-head.busy .symbol",
+    ".hero::after", ".hero.live .elapsed", ".hero.live .med", ".hero.live .med svg", ".row.running .row-dur",
+    ".row.running .med-mini svg", ".agent-entry-sub.live", ".agent-dot.d-live", ".agent-dot.d-live::after", ".s-live .agent-wire",
+    ".s-live .agent-wire i", ".s-live .agent-ghost", ".agent-state.t-live", ".agent-use.live"],
+  "a control with focus": [":focus-visible", ".hit:focus-visible", ".about-link:focus-visible", ".agents-search input:focus",
+    ".rule-detail input[type=\"text\"]:focus", "#sacred-hosts:focus", ".toggle input:focus-visible ~ .toggle-track",
+    ".rule-row:focus-visible .rule-edit-hint"],
+  "the pointer on a control": [".about-link:hover .about-link-title", ".rule-row:hover .rule-edit-hint"],
+  "an enabled primary": [".primary-button:not(:disabled)", ".primary-button:hover:not(:disabled)"]
+});
+
+test("teal means live: only running work, focus, the pointer and an enabled primary draw in the accent", () => {
+  const accent = /var\(--(a|al|argb)\)|#5eead4|94,\s*234,\s*212/i;
+  const allowed = new Set(Object.values(ACCENT).flat());
+  const drawn = [];
+  for (const [file, rules] of Object.entries(SHEETS)) {
+    for (const rule of rules.filter((each) => Object.values(each.declarations).some((value) => accent.test(value)))) {
+      for (const selector of rule.selectors.filter((each) => each !== ":root" && !each.startsWith(".tcg"))) {
+        assert.ok(allowed.has(selector), `${file}: ${selector} draws in the accent at rest`);
+        drawn.push(selector);
+      }
+    }
+  }
+  assert.deepEqual([...allowed].filter((selector) => !drawn.includes(selector)), [], "an allowed selector is gone");
+});
+
+/** Artwork and shapes keep their own geometry: the trading card, monograms, icon tiles, scrollbars and the wire. */
+const SHAPED = /^(\.tcg|\.glance-face|\.symbol|.*scrollbar|.*agent-wire)/;
+
+test("every word is set on one type scale and every corner on the kit's radii", () => {
+  const sizes = new Set([10, 11.5, 12, 12.5, 13, 14.5, 17, 22, 25]);
+  const radii = new Set(["4px", "6px", "8px", "12px", "999px", "50%"]);
+  for (const [file, rules] of Object.entries(SHEETS)) {
+    for (const rule of rules.filter((each) => !each.selectors.every((selector) => SHAPED.test(selector)))) {
+      const size = pxOf(rule.declarations.font) ?? pxOf(rule.declarations["font-size"]);
+      if (size !== null) assert.ok(sizes.has(size), `${file}: ${rule.selectors.join(", ")} is set at ${size}px`);
+      const radius = rule.declarations["border-radius"];
+      if (radius) {
+        for (const corner of radius.split(/\s+/).filter((each) => each !== "0")) {
+          assert.ok(radii.has(corner), `${file}: ${rule.selectors.join(", ")} rounds at ${radius}`);
+        }
+      }
+    }
+  }
 });
 
 test("the read capability keeps its quiet edge while its word reads in ink, and the settled clock reads", () => {

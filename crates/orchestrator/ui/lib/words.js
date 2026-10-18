@@ -301,6 +301,12 @@
   /* ----------------------------- Integrations ----------------------------- */
 
   /**
+   * The tone of an agent in use whose session is running work now. It is the only agent tone that
+   * wears the accent, and it names the classes that draw it (`d-live`, `t-live`, `s-live`).
+   */
+  const WORKING_TONE = "live";
+
+  /**
    * What each place an agent stands reads as, on the rail and in the pane: the service's states,
    * and `by_hand` for an agent found here whose file Ghostlight never reads (see agentStanding).
    */
@@ -312,6 +318,12 @@
     updatable: "Needs an update",
     needs_attention: "Needs your attention"
   });
+
+  /**
+   * The word for an agent's tone: "Working" for WORKING_TONE, a connected agent running work now,
+   * so working and connected differ in words and not only in colour, and otherwise its standing's.
+   */
+  const agentStateWord = (tone) => (tone === WORKING_TONE ? "Working" : AGENT_STATE_WORDS[tone] ?? "");
 
   /** The standing, and the rail group, of a copy-only agent found here that is not in use. */
   const BY_HAND = "by_hand";
@@ -434,10 +446,11 @@
     return `Will ${parts.join(" and ")}.${leftWords}`;
   }
 
-  /** An agent's sessions and tabs on its rail line: "3 sessions, 1 tab". */
-  function agentUse({ sessions, tabs }) {
+  /** An agent's sessions and tabs on its rail line, and whether one is working: "3 sessions, 1 tab, working". */
+  function agentUse({ sessions, tabs, working }) {
     const said = [plural(sessions, "session", "sessions")];
     if (tabs) said.push(plural(tabs, "tab", "tabs"));
+    if (working) said.push(GLANCE.working);
     return said.join(", ");
   }
 
@@ -1083,7 +1096,7 @@
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
-    AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
+    WORKING_TONE, AGENT_STATE_WORDS, agentStateWord, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,

@@ -16,7 +16,7 @@
     DESTINATIONS, glyphFor, capabilityClass, capabilityWord, capabilityLabel, capabilitiesSaid, stepsUsed,
     CAPABILITY_ORDER, CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords, settingLimits,
     OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES, SETTINGS,
-    AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
+    WORKING_TONE, AGENT_STATE_WORDS, agentStateWord, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
@@ -857,8 +857,8 @@
         + `<span class="glance-side">${stack}${escapeHtml(agentsCount(groups.length))}</span>`
         + `<span class="glance-toward">${KIND_GLYPHS.toward}</span>`
         + `<span class="glance-side"><span class="dot${browsers.length ? " on" : ""}"></span>${escapeHtml(browsersCount(browsers.length))}</span>`
-        + `<span class="glance-open"><span class="glance-closed-word">${escapeHtml(GLANCE.details)}</span>`
-        + `<span class="glance-open-word">${escapeHtml(GLANCE.hide)}</span></span>`
+        + `<span class="glance-open disclosure"><span class="glance-closed-word">${escapeHtml(GLANCE.details)}</span>`
+        + `<span class="glance-open-word">${escapeHtml(GLANCE.hide)}</span>${CHEVRON}</span>`
         + "</summary>";
     }
 
@@ -972,7 +972,8 @@
      * Every fact comes from the service's roster: the state, what each act may do, the settings
      * file, the entry and the evidence. Which agents are in use is the service's word too
      * (`harnesses_in_use`, the rule the setup view reads); the page counts an in-use agent's
-     * sessions and tabs for its words, and decides nothing.
+     * sessions and tabs for its words, and whether one of them is running work now, which is the
+     * only time the agent wears the accent. It decides nothing.
      * The pick is kept by id across repaints, so an agent that moves group when someone acts on it
      * stays in the pane.
      */
@@ -985,10 +986,16 @@
     /** The file an agent reads, from its settings path. */
     const fileOf = (path) => String(path ?? "").split(/[\\/]/).filter(Boolean).at(-1) ?? "";
 
-    /** The live sessions of `harness`'s agent, those with its agent id, and the tabs they hold. */
+    /**
+     * The live sessions of `harness`'s agent, those with its agent id, the tabs they hold, and
+     * whether any of them is running work now.
+     */
     function useOf(harness, sessions) {
       const own = sessions.filter((session) => session.agent.id === harness.agent.id);
-      return { sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0) };
+      return {
+        sessions: own.length, tabs: own.reduce((sum, session) => sum + (session.tab_count ?? 0), 0),
+        working: own.some((session) => session.active_operations > 0)
+      };
     }
 
     /**
@@ -1004,7 +1011,9 @@
     }
 
     const inUse = (agent) => agent.in_use;
-    const toneOf = (agent) => (inUse(agent) ? "live" : agent.standing);
+    /** Whether an agent in use is running work now: the one state that wears the accent. */
+    const working = (agent) => inUse(agent) && agent.use.working;
+    const toneOf = (agent) => (working(agent) ? WORKING_TONE : agent.standing);
     const byLabel = (left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
 
     /** The rail's groups that hold an agent, each sorted the way a person scans it. */
@@ -1080,9 +1089,10 @@
 
     /** The second line of a rail entry, only when the agent has something of its own to say. */
     function subOf(agent) {
-      if (inUse(agent)) return { tone: "live", text: agentUse(agent.use) };
+      if (working(agent)) return { tone: WORKING_TONE, text: agentUse(agent.use) };
+      if (inUse(agent)) return { tone: "", text: agentUse(agent.use) };
       if (agent.state === "needs_attention") return { tone: "warn", text: AGENT_STATE_WORDS.needs_attention };
-      if (agent.state === "updatable") return { tone: "action", text: AGENT_STATE_WORDS.updatable };
+      if (agent.state === "updatable") return { tone: "offer", text: AGENT_STATE_WORDS.updatable };
       // An agent set up by hand sits under a heading that already says so.
       if (agent.copy_only && agent.standing === "not_detected") return { tone: "", text: AGENTS.copyOnly };
       return null;
@@ -1092,7 +1102,7 @@
       const sub = subOf(agent);
       const second = sub
         ? `<span class="agent-entry-sub${sub.tone ? ` ${sub.tone}` : ""}">${escapeHtml(sub.text)}</span>`
-        : `<span class="sr-only">, ${escapeHtml(AGENT_STATE_WORDS[agent.standing] ?? "")}</span>`;
+        : `<span class="sr-only">, ${escapeHtml(agentStateWord(toneOf(agent)))}</span>`;
       return `<button class="agent-entry e-${escapeHtml(agent.standing)}" type="button" data-agent="${escapeHtml(agent.id)}"`
         + ` aria-controls="agents-pane" aria-current="${agent.id === agentPick}">`
         + `<span class="agent-dot d-${escapeHtml(toneOf(agent))}" aria-hidden="true"></span>`
@@ -1139,7 +1149,7 @@
         + `<img class="agent-ghost" src="${MASCOT}" alt="" width="50" height="50"></div>`
         + `<div class="agent-hero-text"><h2 id="agents-pane-title">${escapeHtml(agent.label)}</h2>`
         + `<div class="agent-state-line"><span class="agent-dot d-${escapeHtml(tone)}" aria-hidden="true"></span>`
-        + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(AGENT_STATE_WORDS[agent.standing] ?? "")}</span></div>`
+        + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(agentStateWord(tone))}</span></div>`
         + (about ? `<p class="agent-icon-about">${escapeHtml(about)}</p>` : "")
         + "</div></header>";
     }
@@ -1157,7 +1167,8 @@
       const steps = agent.evidence
         ? [{ act: "copy", what: AGENTS.copyStep, primary: true }]
         : [{ act: "repair", what: AGENTS.repairStep, primary: false }];
-      steps.push({ act: "recheck", what: AGENTS.recheckStep, primary: !agent.evidence });
+      // Re-check is never the view's primary: the heading's Set up everything is.
+      steps.push({ act: "recheck", what: AGENTS.recheckStep, primary: false });
       return steps.filter(({ act }) => act === "repair" || acts[act]);
     }
 
@@ -1222,7 +1233,9 @@
           + `<p>${escapeHtml(agent.evidence)}</p></div>`;
       }
       if (inUse(agent)) {
-        html += `<div class="agent-live"><span class="agent-dot d-live" aria-hidden="true"></span>`
+        const tone = toneOf(agent);
+        html += `<div class="agent-use${working(agent) ? ` ${WORKING_TONE}` : ""}">`
+          + `<span class="agent-dot d-${escapeHtml(tone)}" aria-hidden="true"></span>`
           + `<span>${escapeHtml(agentLive(agent.name, agent.use))}</span>`
           + `<button class="link-button" type="button" data-view="monitor" data-show-agent="${escapeHtml(agent.agent.id)}">`
           + `${escapeHtml(AGENTS.showSessions)}</button></div>`;

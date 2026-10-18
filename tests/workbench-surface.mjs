@@ -1897,9 +1897,9 @@ const checks = [
       && railNoMatch.includes("No agent called &quot;nothing like it&quot;."),
     railSearched + railNoMatch],
   ["a rail entry carries a second line only for what is its own",
-    agentsShown.rail.includes('<span class="agent-entry-sub live">2 sessions, 3 tabs</span>')
+    agentsShown.rail.includes('<span class="agent-entry-sub live">2 sessions, 3 tabs, working</span>')
       && agentsShown.rail.includes('<span class="agent-entry-sub">Copy setup only</span>')
-      && agentsShown.rail.includes('<span class="agent-entry-sub action">Needs an update</span>')
+      && agentsShown.rail.includes('<span class="agent-entry-sub offer">Needs an update</span>')
       && agentsShown.rail.includes('<span class="agent-entry-sub warn">Needs your attention</span>')
       && agentsShown.rail.includes('<span class="agent-dot d-live" aria-hidden="true"></span>')
       && agentsShown.rail.includes('<span class="sr-only">, Connected</span>'),
