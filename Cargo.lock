@@ -921,6 +921,7 @@ dependencies = [
  "ghostlight-relay",
  "ghostlight-win-peer",
  "jsonc-parser",
+ "png",
  "rustls",
  "serde",
  "serde_json",

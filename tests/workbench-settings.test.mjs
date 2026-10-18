@@ -1298,19 +1298,18 @@ test("the command line and an unknown agent are drawn from the glyph their symbo
   }
 });
 
-test("an agent's image waits on the neutral tile, an app's own icon keeps it, and a monogram draws on nothing", () => {
-  const tiled = (selector) => naming(selector).some((rule) => rule.declarations.background === "var(--icon-tile)");
-  assert.ok(tiled(".symbol img:not([src])"), "an image still loading, or one that failed, shows the tile");
+test("an agent's image is a whole tile the service made, and the page paints only a placeholder under one still loading", () => {
+  assert.ok(naming(".symbol img:not([src])").some((rule) => rule.declarations.background === "var(--icon-placeholder)"),
+    "an image still loading, or one that failed, shows the quiet placeholder");
   const appIcon = Words.symbolMarkup({ symbol: { icon: "agent-icons/zed?v=0123456789ab", about: "Icon from the installed Zed app." } }, "rail");
-  assert.ok(appIcon.includes(`class="symbol symbol-rail ${Words.APP_ICON_CLASS}"`), appIcon);
-  assert.ok(tiled(`.${Words.APP_ICON_CLASS} img`), "an app's icon, which may have no ground, keeps the tile");
-  assert.ok(!Words.symbolMarkup(namedAgent("Codex"), "rail").includes(Words.APP_ICON_CLASS), "a monogram is a tile itself");
-  const backed = RULES.filter((rule) => "background" in rule.declarations
-    && rule.selectors.some((selector) => /(^|\s)\.symbol(-[a-z-]+)?(\.[a-z-]+)*\s+img$/.test(selector)));
-  assert.deepEqual(backed.flatMap((rule) => rule.selectors), [`.${Words.APP_ICON_CLASS} img`],
-    "no rule paints the tile under every loaded image, where it would show at a monogram's corners");
+  assert.equal(appIcon, Words.symbolMarkup(namedAgent("Codex"), "rail").replace("agent-icons/codex?v=fedcba987654", "agent-icons/zed?v=0123456789ab"),
+    "an app's icon and a monogram are drawn the same way");
+  const grounds = RULES.filter((rule) => ["background", "background-color", "padding"].some((name) => name in rule.declarations)
+    && rule.selectors.some((selector) => selector.includes(".symbol")));
+  assert.deepEqual(grounds.flatMap((rule) => rule.selectors), [".symbol img:not([src])"],
+    "no rule paints a ground or room around a drawn agent image: the service's tile is whole");
   const symbolClasses = new Set(RULES.flatMap((rule) => rule.selectors.join(" ").match(/\.symbol-[a-z-]+/g) ?? []));
-  const drawn = new Set([...Object.keys(Words.SYMBOL_SIZES).map((size) => `.symbol-${size}`), `.${Words.APP_ICON_CLASS}`]);
+  const drawn = new Set(Object.keys(Words.SYMBOL_SIZES).map((size) => `.symbol-${size}`));
   assert.deepEqual([...symbolClasses].filter((name) => !drawn.has(name)), [],
     "the stylesheet styles no symbol class the page no longer draws");
 });

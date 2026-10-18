@@ -40,7 +40,12 @@ network resource. `tests/agent-ux-rerender-journey.mjs` serves it to a live brow
 which handles follow their control and which refuse (ADR-0198 Decision 17).
 
 `workbench/agent-icon.png` is a 48 px PNG drawn for the window's tests: a blue disc with a dark
-ring and a yellow diamond on a transparent ground, no app's artwork. The preview server
-(`tests/workbench-preview-server.mjs`) serves it as Codex's own icon at `agent-icons/codex`, the
-way the service serves an icon it found in an installed app, so the window shows one agent's icon
-beside the monograms.
+ring and a yellow diamond on a transparent ground, no app's artwork. `workbench/agent-icon-white.png`
+is a 48 px all-white ring and bar on a transparent ground, drawn by the service test
+`agent::image::tests::the_preview_serves_the_tiles_the_service_makes_one_on_each_ground`.
+`agent-icon-tile.png` and `agent-icon-white-tile.png` are the tiles the service makes of them,
+the first on the light ground and the second on the dark. The preview server
+(`tests/workbench-preview-server.mjs`) serves the two tiles as Codex's and Claude Code's own icons
+at `agent-icons/<id>`, the way the service serves an icon it found in an installed app, so the
+window shows one tile on each ground beside the monograms. The same test makes all three files
+again and compares; `GHOSTLIGHT_TILE_FIXTURES_UPDATE=1` rewrites them.

@@ -71,7 +71,7 @@ mod tests {
 
     fn found(app_id: &'static str, app_name: &'static str, found_in: IconSourceKind) -> FoundIcon {
         FoundIcon {
-            version: "0123456789ab".into(),
+            sha256: "0".repeat(64),
             app_id,
             app_name,
             found_in,

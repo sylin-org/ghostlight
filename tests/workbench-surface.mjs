@@ -909,8 +909,8 @@ const glanceChecks = [];
   };
   let html = draw({ sessions, browsers });
   glanceChecks.push(["an agent's image waits for its address in the summary face and on its shelf chip, beside glyphs, and an app's icon keeps its tile",
-    html.includes('<span class="symbol symbol-face symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="20" height="20"></span>')
-      && html.includes('<span class="symbol symbol-chip symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="14" height="14"></span>')
+    html.includes('<span class="symbol symbol-face" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="20" height="20"></span>')
+      && html.includes('<span class="symbol symbol-chip" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="14" height="14"></span>')
       && html.includes('<span class="symbol symbol-face" aria-hidden="true"><svg')
       && !html.includes(" src=\"agent-icons/") && !html.includes("integrations/")
       && !html.includes("Icon from the installed"), html]);
@@ -937,7 +937,7 @@ const glanceChecks = [];
   html = draw({ sessions, browsers });
   glanceChecks.push(["an agent's card says at most four sessions, how many more, and the trust note once",
     (html.match(/class="glance-line"/g) ?? []).length === 4 && html.includes(">and 1 more<")
-      && html.includes('<span class="symbol symbol-card symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="16" height="16"></span>')
+      && html.includes('<span class="symbol symbol-card" aria-hidden="true"><img data-icon="agent-icons/codex?v=0123456789ab" alt="" width="16" height="16"></span>')
       && (html.match(/is what the agent calls itself/g) ?? []).length === 1
       && html.includes('data-copy-connection="connection_codex_0"') && html.includes(">Copy id<")
       && !html.includes(">connection_codex_0<"), html]);
@@ -1921,10 +1921,10 @@ const checks = [
       && agentPanes.antigravity.includes("You can install it, or prepare its settings first."),
     JSON.stringify(agentPanes)],
   ["every agent's image is drawn the same way on the rail and in the pane; an app's icon keeps its tile and says once where it came from, and a monogram says nothing",
-    agentsShown.rail.includes('<span class="symbol symbol-rail symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="22" height="22"></span>')
+    agentsShown.rail.includes('<span class="symbol symbol-rail" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="22" height="22"></span>')
       && agentsShown.rail.includes('<span class="symbol symbol-rail" aria-hidden="true"><img data-icon="agent-icons/zed?v=fedcba987654" alt="" width="22" height="22"></span>')
       && !agentsShown.rail.includes(" src=") && !agentsShown.rail.includes("symbol-icon")
-      && agentPanes.windsurf.includes('<span class="symbol symbol-pane symbol-app-icon" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="46" height="46"></span>')
+      && agentPanes.windsurf.includes('<span class="symbol symbol-pane" aria-hidden="true"><img data-icon="agent-icons/windsurf?v=0123456789ab" alt="" width="46" height="46"></span>')
       && (agentPanes.windsurf.match(/<p class="agent-icon-about">Icon from the installed Windsurf app\.<\/p>/g) ?? []).length === 1
       && !agentPanes.zed.includes("agent-icon-about") && !agentPanes.cursor.includes("agent-icon-about"),
     agentsShown.rail + agentPanes.windsurf],

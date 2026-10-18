@@ -544,17 +544,11 @@
   const ICON_ATTRIBUTE = "data-icon";
 
   /**
-   * The class of a symbol whose image the service says is an installed app's own icon (it says
-   * where such an image came from, and only for one), which the stylesheet sets on a neutral tile.
-   */
-  const APP_ICON_CLASS = "symbol-app-icon";
-
-  /**
    * What the window shows for `agent` at `size`, one of SYMBOL_SIZES: the image at the address the
    * service names (whichever image the service serves there, filled in once the page has it), or
-   * the glyph it names. An image waits on a neutral tile; an app's own icon, which may have no
-   * ground of its own, keeps that tile once drawn, and a monogram is a tile itself. The page
-   * decides nothing about an agent's looks; every place that draws an agent draws it through this.
+   * the glyph it names. Every image the service serves is a whole tile, an app's icon on the ground
+   * the service chose for it or a monogram, so the page draws them all the same way and decides
+   * nothing about an agent's looks; every place that draws an agent draws it through this.
    */
   function symbolMarkup(agent, size) {
     const symbol = agent?.symbol ?? {};
@@ -562,8 +556,7 @@
     const shown = symbol.icon
       ? `<img ${ICON_ATTRIBUTE}="${escapeHtml(symbol.icon)}" alt="" width="${pixels}" height="${pixels}">`
       : SYMBOL_GLYPHS[symbol.glyph] ?? SYMBOL_GLYPHS[GLYPH.unknown];
-    const ground = symbol.icon && symbol.about ? ` ${APP_ICON_CLASS}` : "";
-    return `<span class="symbol symbol-${size}${ground}" aria-hidden="true">${shown}</span>`;
+    return `<span class="symbol symbol-${size}" aria-hidden="true">${shown}</span>`;
   }
 
   /** The sentence that says which installed app an agent's image came from, when the service says one. */
@@ -952,7 +945,7 @@
     AGENT_STATE_WORDS, BY_HAND, agentStanding, AGENT_GROUPS, ABSENT_GROUP, AGENT_ACTS, AGENTS, noAgentCalled, moreAgents,
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
-    GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, APP_ICON_CLASS, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
+    GLYPHS, GLYPH, SYMBOL_GLYPHS, SYMBOL_SIZES, ICON_ATTRIBUTE, symbolMarkup, symbolAbout, KIND_GLYPHS, EFFECT_STORY, READINESS_NOTE, readinessNeedsAttention,
     DESTINATIONS, glyphFor, capabilityClass, CAPABILITY_ORDER, CAPABILITY_WORDS,
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords,
     validHostPattern, hostReadback, patternCovers,

@@ -11,9 +11,10 @@ const extensionFolder = join(repository, "extension");
 const port = Number(process.env.GHOSTLIGHT_PREVIEW_PORT || 41737);
 const connectorPath = "/opt/ghostlight/ghostlight";
 const connectorCommand = `${connectorPath} mcp`;
-// The one app icon the preview shows, a small synthetic PNG, served the way the service serves an
-// agent's cached icon.
-const agentIconFile = join(repository, "tests", "fixtures", "workbench", "agent-icon.png");
+// The app icons the preview shows: the tiles the service makes of two small synthetic PNGs, a
+// colored one on its light ground and an all-white one on its dark ground. A service test
+// (crate::agent::image) makes them again from the sources beside them and compares.
+const agentIconFolder = join(repository, "tests", "fixtures", "workbench");
 // The packaged monogram tiles, which the service serves at an agent's address when it has no icon.
 const monogramFolder = join(repository, "crates", "orchestrator", "src", "agent", "monograms");
 const AGENT_ICON_DIRECTORY = "agent-icons";
@@ -51,7 +52,7 @@ const agentNamedBy = (id, name, image, appIcon) => {
 
 const previewHarness = ({
   id, agentId = id, productId = id, name, label = name, target, monogram = `${id}.svg`, state, configPath,
-  canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false, iconFound = false
+  canDownload = true, manualSetup = jsonSetup(), detail, evidence, copyOnly = false, appIcon
 }) => ({
   id,
   product_id: productId,
@@ -59,11 +60,11 @@ const previewHarness = ({
   label,
   target,
   // The agent the row sets up, as the service names it: one id for every host of one agent, and
-  // its one image address, which serves the app's own icon when the service found one (and then
-  // says where it came from) and its packaged monogram otherwise.
-  agent: agentNamedBy(agentId, name, iconFound
-    ? agentImage(agentIconFile, "image/png")
-    : agentImage(join(monogramFolder, monogram), "image/svg+xml"), iconFound),
+  // its one image address, which serves the app's own icon on its tile when the service found one
+  // (and then says where it came from) and its packaged monogram otherwise.
+  agent: agentNamedBy(agentId, name, appIcon
+    ? agentImage(join(agentIconFolder, appIcon), "image/png")
+    : agentImage(join(monogramFolder, monogram), "image/svg+xml"), Boolean(appIcon)),
   state,
   detail: detail ?? harnessDetail[state],
   ...(evidence ? { evidence } : {}),
@@ -92,7 +93,7 @@ const harnesses = [
   previewHarness({ id: "windsurf", name: "Windsurf", target: "User", state: "available", configPath: "/home/test/.codeium/windsurf/mcp_config.json" }),
   previewHarness({ id: "devin", productId: "windsurf", name: "Devin", target: "Devin user", monogram: "windsurf.svg", state: "installed", configPath: "/home/test/.config/devin/mcp_config.json" }),
   previewHarness({ id: "crush", name: "Crush", target: "User", state: "not_detected", configPath: "/home/test/.config/crush/crush.json", manualSetup: jsonSetup("mcp") }),
-  previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorPath}"\nargs = ["mcp"]\n`, iconFound: true }),
+  previewHarness({ id: "codex", name: "Codex", target: "User", state: "installed", configPath: "/home/test/.codex/config.toml", manualSetup: `[mcp_servers.ghostlight]\ncommand = "${connectorPath}"\nargs = ["mcp"]\n`, appIcon: "agent-icon-tile.png" }),
   previewHarness({ id: "continue", name: "Continue", target: "CLI and IDE", state: "not_detected", copyOnly: true, configPath: "/home/test/.continue/config.yaml", manualSetup: `name: Local Config\nversion: 1.0.0\nschema: v1\nmcpServers:\n  - name: Ghostlight\n    command: "${connectorPath}"\n    args: ["mcp"]\n` }),
   previewHarness({ id: "antigravity", name: "Antigravity", target: "CLI", state: "not_detected", configPath: "/home/test/.gemini/config/mcp_config.json" }),
   previewHarness({
@@ -119,7 +120,7 @@ const harnesses = [
     configPath: "/home/test/.config/kilo/kilo.json", manualSetup: jsonSetup("mcp"),
     evidence: `Found another program, \`alien-cli\` with 1 argument, where Ghostlight's entry belongs; Ghostlight maintains \`${connectorPath}\` there and changed nothing.`
   }),
-  previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "installed", configPath: "/home/test/.claude.json" }),
+  previewHarness({ id: "claude-code", name: "Claude Code", target: "User", state: "installed", configPath: "/home/test/.claude.json", appIcon: "agent-icon-white-tile.png" }),
   previewHarness({ id: "cline-windsurf", agentId: "cline", productId: "cline", name: "Cline", label: "Cline (Windsurf)", target: "Windsurf", monogram: "cline.svg", state: "not_detected", configPath: "/home/test/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" }),
   previewHarness({ id: "vscode", name: "Visual Studio Code", target: "User", state: "available", configPath: "/home/test/.config/Code/User/mcp.json", manualSetup: jsonSetup("servers") })
 ];

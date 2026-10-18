@@ -41,18 +41,18 @@ function scopeOf(images) {
 
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 
-test("the view draws every agent's image the same way, an address and no source, and keeps an app's icon on its tile", () => {
+test("the view draws every agent's image the same way, an address and no source, an app's icon like a monogram", () => {
   const appIcon = { symbol: { icon: ADDRESS, about: "Icon from the installed Zed app." } };
   const monogram = { symbol: { icon: "agent-icons/codex?v=fedcba987654" } };
   assert.equal(
     Words.symbolMarkup(appIcon, "chip"),
-    `<span class="symbol symbol-chip ${Words.APP_ICON_CLASS}" aria-hidden="true"><img ${Words.ICON_ATTRIBUTE}="${ADDRESS}" alt="" width="14" height="14"></span>`,
-    "the service says where an app's icon came from, so it stays on the neutral tile"
+    `<span class="symbol symbol-chip" aria-hidden="true"><img ${Words.ICON_ATTRIBUTE}="${ADDRESS}" alt="" width="14" height="14"></span>`,
+    "the service serves an app's icon as a whole tile, so the page marks it no differently"
   );
   assert.equal(
     Words.symbolMarkup(monogram, "chip"),
-    `<span class="symbol symbol-chip" aria-hidden="true"><img ${Words.ICON_ATTRIBUTE}="agent-icons/codex?v=fedcba987654" alt="" width="14" height="14"></span>`,
-    "a monogram is a tile of its own"
+    Words.symbolMarkup(appIcon, "chip").replace(ADDRESS, "agent-icons/codex?v=fedcba987654"),
+    "a monogram is drawn exactly as an app's icon is"
   );
   assert.equal(Words.symbolAbout(appIcon), "Icon from the installed Zed app.");
   assert.equal(Words.symbolAbout(monogram), "", "a monogram says nothing about where it came from");

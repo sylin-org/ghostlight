@@ -285,15 +285,23 @@ mod tests {
     #[test]
     fn a_roster_agent_wears_its_cached_icon_and_otherwise_its_monogram() {
         use crate::install::icons::{FoundIcon, IconSourceKind};
+        use std::sync::Arc;
 
-        let found = |app_id, app_name| FoundIcon {
-            version: "0123456789ab".into(),
-            app_id,
-            app_name,
-            found_in: IconSourceKind::DesktopEntry,
+        let found = |app_id, app_name| AgentImage::AppIcon {
+            found: FoundIcon {
+                sha256: "0".repeat(64),
+                app_id,
+                app_name,
+                found_in: IconSourceKind::DesktopEntry,
+            },
+            image: Arc::new(image::ServedImage {
+                media_type: "image/png",
+                bytes: Vec::new(),
+                version: "0123456789ab".into(),
+            }),
         };
         assert_eq!(
-            Symbol::image("zed", &AgentImage::AppIcon(found("zed", "Zed"))),
+            Symbol::image("zed", &found("zed", "Zed")),
             Symbol::Icon {
                 address: "agent-icons/zed?v=0123456789ab".into(),
                 about: Some("Icon from the installed Zed app.".into()),
@@ -302,7 +310,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Symbol::image(
                 "claude-code",
-                &AgentImage::AppIcon(found("claude-desktop", "Claude Desktop")),
+                &found("claude-desktop", "Claude Desktop"),
             ))
             .unwrap(),
             serde_json::json!({

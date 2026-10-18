@@ -3,21 +3,39 @@
 //! Every catalog agent has one address, [`ICON_DIRECTORY`]`/<agent id>`, and the service decides
 //! what it answers there, in the owner's order: the installed app's own icon when the cache
 //! ([`crate::install::icons`]) holds one, else the agent's packaged monogram tile. A curated vendor
-//! mark, once one is packaged, takes its place between the two; none is packaged today. The agent's
-//! symbol names the address with the served image's version ([`AgentImage::version`]), so the
-//! address changes exactly when the image does, and the window serves the bytes ([`served`]). The
-//! page asks for the address and draws what comes back; it never chooses between images.
+//! mark, once one is packaged, takes its place between the two; none is packaged today.
+//!
+//! An app's icon is served as a finished tile ([`tile`]): the icon on the ground the service chose
+//! for it, or exactly as cached when it has its own opaque plate or cannot be read. So every image
+//! the page draws is whole, as a monogram is, and the page decides nothing about grounds. The
+//! image made from a cached copy is made once, keyed by the copy's SHA-256, and kept in memory.
+//! The agent's symbol names the address with the served image's version
+//! ([`AgentImage::version`]), so the address changes exactly when the image does, and the window
+//! serves those same bytes ([`served`]); both read [`AgentImage::best`], so they cannot disagree.
+//! The page asks for the address and draws what comes back; it never chooses between images.
 //!
 //! The image is the agent's image and nothing else: whether the agent is connected or working is
 //! the page's dot and words, never part of the image.
 //!
 //! [`ICON_DIRECTORY`]: super::ICON_DIRECTORY
 
-use crate::install::icons::{sha256_hex, version_of, CachedIcon, FoundIcon, IconCache};
+mod tile;
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+use crate::install::icons::{sha256_hex, version_of, CachedIcon, FoundIcon, IconCache, IconKind};
 use crate::language::agent_icon::icon_from;
 
 /// The media type of a packaged monogram tile.
 const MONOGRAM_MEDIA_TYPE: &str = "image/svg+xml";
+
+/// The most images made from app icons that are kept in memory. The catalog has about twenty
+/// agents, so the memory is emptied only when icons change many times in one run.
+const APP_IMAGE_LIMIT: usize = 64;
+
+/// The image made from each cached app icon, by the cached copy's SHA-256.
+static APP_IMAGES: Mutex<BTreeMap<String, Arc<ServedImage>>> = Mutex::new(BTreeMap::new());
 
 /// Embeds the packaged monogram tile `$file` of `src/agent/monograms/` as a [`Monogram`].
 macro_rules! monogram {
@@ -59,28 +77,38 @@ impl Monogram {
 /// Which image the window serves for one catalog agent now.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentImage {
-    /// The installed app's own icon, as the cache found it.
-    AppIcon(FoundIcon),
+    /// The installed app's own icon, as the cache found it, and the image the window serves for
+    /// it: its tile, or the icon as cached.
+    AppIcon {
+        /// What the cache holds: which copy, and which app it came from.
+        found: FoundIcon,
+        /// The image made from that copy.
+        image: Arc<ServedImage>,
+    },
     /// The agent's packaged monogram tile.
     Monogram(Monogram),
 }
 
 impl AgentImage {
     /// The best image for the catalog agent `agent_id`, whose packaged tile is `monogram`: its
-    /// app's own icon when `cache` holds one for it, else the monogram. This is the one resolution
-    /// order; the symbol and the window both read it.
+    /// app's own icon when `cache` holds one for it that can still be read, else the monogram.
+    /// This is the one resolution order; the symbol and the window both read it.
     #[must_use]
     pub fn best(agent_id: &str, monogram: Monogram, cache: Option<&IconCache>) -> Self {
         cache
-            .and_then(|cache| cache.found(agent_id))
-            .map_or(Self::Monogram(monogram), Self::AppIcon)
+            .and_then(|cache| {
+                let found = cache.found(agent_id)?;
+                let image = app_image(cache, agent_id, &found.sha256)?;
+                Some(Self::AppIcon { found, image })
+            })
+            .unwrap_or(Self::Monogram(monogram))
     }
 
     /// The image's version: the first characters of the SHA-256 of the bytes the window serves.
     #[must_use]
     pub fn version(&self) -> String {
         match self {
-            Self::AppIcon(found) => found.version.clone(),
+            Self::AppIcon { image, .. } => image.version.clone(),
             Self::Monogram(monogram) => version_of(&sha256_hex(monogram.bytes())),
         }
     }
@@ -89,17 +117,41 @@ impl AgentImage {
     #[must_use]
     pub fn about(&self) -> Option<String> {
         match self {
-            Self::AppIcon(found) => Some(icon_from(found.app_name)),
+            Self::AppIcon { found, .. } => Some(icon_from(found.app_name)),
             Self::Monogram(_) => None,
         }
     }
 }
 
+/// The image made from `agent_id`'s cached copy, whose SHA-256 is `sha256`: from memory when it
+/// was made before, else made now from the copy. None when the copy can no longer be read or is no
+/// longer the one the cache vouches for.
+fn app_image(cache: &IconCache, agent_id: &str, sha256: &str) -> Option<Arc<ServedImage>> {
+    if let Some(image) = app_images().get(sha256) {
+        return Some(Arc::clone(image));
+    }
+    let icon = cache.icon(agent_id)?;
+    if sha256_hex(&icon.bytes) != sha256 {
+        return None;
+    }
+    let image = Arc::new(ServedImage::app_icon(icon));
+    let mut images = app_images();
+    if images.len() >= APP_IMAGE_LIMIT {
+        images.clear();
+    }
+    images.insert(sha256.to_owned(), Arc::clone(&image));
+    Some(image)
+}
+
+fn app_images() -> MutexGuard<'static, BTreeMap<String, Arc<ServedImage>>> {
+    APP_IMAGES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// An agent's image as the window serves it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServedImage {
-    /// Its media type: `image/png` or `image/x-icon` for an app's icon, `image/svg+xml` for a
-    /// monogram.
+    /// Its media type: `image/png` for an app's icon on its tile, the cached copy's type
+    /// (`image/png` or `image/x-icon`) for one served as cached, `image/svg+xml` for a monogram.
     pub media_type: &'static str,
     /// Its bytes.
     pub bytes: Vec<u8>,
@@ -116,11 +168,20 @@ impl ServedImage {
         }
     }
 
+    /// The image for the cached app icon `icon`: its tile, or the icon as cached when it is its
+    /// own plate or cannot be read ([`tile::tile`]).
     fn app_icon(icon: CachedIcon) -> Self {
-        Self {
-            media_type: icon.kind.media_type(),
-            version: version_of(&icon.sha256),
-            bytes: icon.bytes,
+        match tile::tile(icon.kind, &icon.bytes) {
+            Some(bytes) => Self {
+                media_type: IconKind::Png.media_type(),
+                version: version_of(&sha256_hex(&bytes)),
+                bytes,
+            },
+            None => Self {
+                media_type: icon.kind.media_type(),
+                version: version_of(&icon.sha256),
+                bytes: icon.bytes,
+            },
         }
     }
 }
@@ -131,11 +192,10 @@ impl ServedImage {
 #[must_use]
 pub fn served(agent_id: &str, cache: Option<&IconCache>) -> Option<ServedImage> {
     let monogram = crate::install::monogram_of(agent_id)?;
-    let icon = match AgentImage::best(agent_id, monogram, cache) {
-        AgentImage::AppIcon(_) => cache.and_then(|cache| cache.icon(agent_id)),
-        AgentImage::Monogram(_) => None,
-    };
-    Some(icon.map_or_else(|| ServedImage::monogram(monogram), ServedImage::app_icon))
+    Some(match AgentImage::best(agent_id, monogram, cache) {
+        AgentImage::AppIcon { image, .. } => ServedImage::clone(&image),
+        AgentImage::Monogram(monogram) => ServedImage::monogram(monogram),
+    })
 }
 
 #[cfg(test)]
@@ -144,9 +204,12 @@ mod tests {
     use crate::install::icons::IconPlaces;
     use crate::scratch::Scratch;
 
-    /// A cache in a fresh temp directory that has found Zed's icon on a Linux computer, and the
-    /// icon's bytes.
-    fn zed_cache(name: &str) -> (Scratch, IconCache, Vec<u8>) {
+    /// The bytes of a cached icon that starts like a PNG and cannot be decoded.
+    const UNREADABLE_PNG: &[u8] = b"\x89PNG\r\n\x1a\nzed";
+
+    /// A cache in a fresh temp directory that has found Zed's icon, `bytes`, on a Linux computer,
+    /// and those bytes.
+    fn zed_cache(name: &str, bytes: &[u8]) -> (Scratch, IconCache, Vec<u8>) {
         let root = Scratch::named(&format!("agent-image-{name}"));
         let share = root.join("share");
         let entry = share.join("applications").join("dev.zed.Zed.desktop");
@@ -154,7 +217,7 @@ mod tests {
         std::fs::write(&entry, "[Desktop Entry]\nName=Zed\nIcon=zed\n").unwrap();
         let png = share.join("icons/hicolor/64x64/apps/zed.png");
         std::fs::create_dir_all(png.parent().unwrap()).unwrap();
-        let bytes = b"\x89PNG\r\n\x1a\nzed".to_vec();
+        let bytes = bytes.to_vec();
         std::fs::write(&png, &bytes).unwrap();
         let cache = IconCache::open(root.join("icons"), IconPlaces::linux(vec![share]), None);
         assert!(cache.refresh());
@@ -172,12 +235,15 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_with_a_cached_icon_is_served_that_icon_and_its_version_moves_with_it() {
-        let (_root, cache, bytes) = zed_cache("served");
+    fn an_agent_with_a_cached_icon_that_cannot_be_decoded_is_served_that_icon_as_cached() {
+        let (_root, cache, bytes) = zed_cache("served", UNREADABLE_PNG);
         let before = served("zed", None).unwrap();
         let after = served("zed", Some(&cache)).unwrap();
         assert_eq!(after.media_type, "image/png");
-        assert_eq!(after.bytes, bytes);
+        assert_eq!(
+            after.bytes, bytes,
+            "an icon that cannot be decoded is served as cached"
+        );
         assert_eq!(after.version, version_of(&sha256_hex(&bytes)));
         assert_ne!(
             after.version, before.version,
@@ -204,6 +270,96 @@ mod tests {
         assert_eq!(
             AgentImage::best("codex", monogram!("codex.svg"), Some(&cache)).about(),
             None
+        );
+    }
+
+    #[test]
+    fn an_app_icon_is_served_as_its_tile_and_the_symbol_names_the_tile() {
+        let source = tile::tests::white_glyph_png();
+        let (_root, cache, _) = zed_cache("tile", &source);
+        let served = served("zed", Some(&cache)).unwrap();
+        assert_eq!(served.media_type, "image/png");
+        assert_ne!(served.bytes, source, "the icon is served on its ground");
+        assert_eq!(
+            tile::tests::ground_of(&served.bytes),
+            Some(tile::Ground::Dark),
+            "a white glyph sits on the dark ground"
+        );
+        assert_eq!(served.version, version_of(&sha256_hex(&served.bytes)));
+        assert_ne!(
+            served.version,
+            version_of(&cache.found("zed").unwrap().sha256),
+            "the version follows the tile, not the cached copy"
+        );
+        let best = AgentImage::best("zed", monogram!("zed.svg"), Some(&cache));
+        assert_eq!(best.version(), served.version, "the symbol names the tile");
+        assert_eq!(
+            super::served("zed", Some(&cache)).unwrap(),
+            served,
+            "the same copy gives the same image"
+        );
+    }
+
+    #[test]
+    fn a_copy_the_cache_no_longer_vouches_for_gives_the_monogram() {
+        let source = tile::tests::png_of(8, &[0xff; 8 * 8 * 4]);
+        let (root, cache, _) = zed_cache("changed", &source);
+        let copy = root.join("icons").join("zed.png");
+        std::fs::write(&copy, b"changed underneath").unwrap();
+        let served = served("zed", Some(&cache)).unwrap();
+        assert_eq!(served.media_type, "image/svg+xml");
+        assert_eq!(
+            AgentImage::best("zed", monogram!("zed.svg"), Some(&cache)).version(),
+            served.version,
+            "the symbol and the window agree on the monogram"
+        );
+    }
+
+    /// The variable that rewrites the preview's app icons from the service's tiles.
+    const FIXTURE_UPDATE: &str = "GHOSTLIGHT_TILE_FIXTURES_UPDATE";
+
+    /// The preview's synthetic all-white app icon, which the tests draw.
+    const WHITE_ICON: &str = "agent-icon-white.png";
+
+    /// Each app icon the preview server serves, a synthetic source, and the tile it serves for it.
+    const PREVIEW_TILES: [(&str, &str); 2] = [
+        ("agent-icon.png", "agent-icon-tile.png"),
+        (WHITE_ICON, "agent-icon-white-tile.png"),
+    ];
+
+    /// `path` holds `bytes`, or is rewritten to hold them when [`FIXTURE_UPDATE`] is set.
+    fn fixture_holds(path: &std::path::Path, bytes: &[u8]) {
+        if std::env::var_os(FIXTURE_UPDATE).is_some_and(|value| value == "1") {
+            std::fs::write(path, bytes).unwrap();
+        }
+        assert!(
+            std::fs::read(path).is_ok_and(|kept| kept == bytes),
+            "{} is not what the service makes; run with {FIXTURE_UPDATE}=1 and look at it",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn the_preview_serves_the_tiles_the_service_makes_one_on_each_ground() {
+        let folder =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/workbench");
+        fixture_holds(&folder.join(WHITE_ICON), &tile::tests::white_glyph_png());
+        let mut grounds = Vec::new();
+        for (source, tiled) in PREVIEW_TILES {
+            let bytes = std::fs::read(folder.join(source)).unwrap();
+            let served = ServedImage::app_icon(CachedIcon {
+                kind: IconKind::Png,
+                sha256: sha256_hex(&bytes),
+                bytes,
+            });
+            assert_eq!(served.media_type, "image/png", "{source}");
+            fixture_holds(&folder.join(tiled), &served.bytes);
+            grounds.push(tile::tests::ground_of(&served.bytes));
+        }
+        assert_eq!(
+            grounds,
+            [Some(tile::Ground::Light), Some(tile::Ground::Dark)],
+            "the colored icon sits on the light ground and the white one on the dark"
         );
     }
 

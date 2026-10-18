@@ -2605,8 +2605,12 @@ fn a_pause_changes_the_runtime_row_of_every_screens_controls() {
     );
 }
 
-/// A cache under `fixture` that has found Zed's icon on a Linux computer, and the icon's bytes.
-fn zed_icon_cache(fixture: &Fixture) -> (crate::install::icons::IconCache, Vec<u8>) {
+/// A cached icon that starts like a PNG and cannot be decoded, so it is served as cached.
+const UNREADABLE_PNG: &[u8] = b"\x89PNG\r\n\x1a\nzed";
+
+/// A cache under `fixture` that has found Zed's icon, `bytes`, on a Linux computer, and those
+/// bytes.
+fn zed_icon_cache(fixture: &Fixture, bytes: &[u8]) -> (crate::install::icons::IconCache, Vec<u8>) {
     use crate::install::icons::{IconCache, IconPlaces};
 
     let share = fixture.root.join("share");
@@ -2615,7 +2619,7 @@ fn zed_icon_cache(fixture: &Fixture) -> (crate::install::icons::IconCache, Vec<u
     std::fs::write(&entry, "[Desktop Entry]\nName=Zed\nIcon=zed\n").unwrap();
     let png = share.join("icons/hicolor/64x64/apps/zed.png");
     std::fs::create_dir_all(png.parent().unwrap()).unwrap();
-    let bytes = b"\x89PNG\r\n\x1a\nzed".to_vec();
+    let bytes = bytes.to_vec();
     std::fs::write(&png, &bytes).unwrap();
     let icons = fixture.root.join("state").join("icons");
     let cache = IconCache::open(icons, IconPlaces::linux(vec![share]), None);
@@ -2661,7 +2665,7 @@ fn every_catalog_agent_has_one_image_address_and_it_serves_the_best_image_there_
         assert_eq!(reply.header("Content-Type"), Some("image/svg+xml"), "{id}");
     }
 
-    let (cache, bytes) = zed_icon_cache(&fixture);
+    let (cache, bytes) = zed_icon_cache(&fixture, UNREADABLE_PNG);
     fixture.facade.attach_icons(cache.clone());
     let icon = fixture.control(get("/agent-icons/zed"));
     assert_eq!(icon.status, 200);
@@ -2678,7 +2682,12 @@ fn every_catalog_agent_has_one_image_address_and_it_serves_the_best_image_there_
     );
     assert_eq!(
         icon_tag,
-        format!("\"{}\"", cache.found("zed").unwrap().version)
+        format!(
+            "\"{}\"",
+            crate::agent::image::served("zed", Some(&cache))
+                .unwrap()
+                .version
+        )
     );
     assert_eq!(
         fixture
@@ -2728,9 +2737,36 @@ fn every_catalog_agent_has_one_image_address_and_it_serves_the_best_image_there_
 }
 
 #[test]
+fn an_app_icon_is_served_as_the_tile_the_service_made_for_it() {
+    let fixture = Fixture::start();
+    let source = include_bytes!("../../../../../tests/fixtures/workbench/agent-icon-white.png");
+    let (cache, _) = zed_icon_cache(&fixture, source);
+    fixture.facade.attach_icons(cache.clone());
+
+    let reply = fixture.control(get("/agent-icons/zed"));
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.header("Content-Type"), Some("image/png"));
+    assert_eq!(
+        reply.body,
+        include_bytes!("../../../../../tests/fixtures/workbench/agent-icon-white-tile.png"),
+        "the white icon on its dark ground, not the cached copy"
+    );
+    let served = crate::agent::image::served("zed", Some(&cache)).unwrap();
+    assert_eq!(
+        reply.header("ETag").map(str::to_owned),
+        Some(format!("\"{}\"", served.version)),
+        "the tag is the tile's version"
+    );
+    assert_eq!(
+        reply.header("Content-Security-Policy"),
+        Some("default-src 'none'; sandbox")
+    );
+}
+
+#[test]
 fn an_agents_image_answers_that_watching_is_off_and_never_shows_what_is_installed() {
     let fixture = Fixture::closed();
-    let (cache, bytes) = zed_icon_cache(&fixture);
+    let (cache, bytes) = zed_icon_cache(&fixture, UNREADABLE_PNG);
     fixture.facade.attach_icons(cache);
 
     let refusals: Vec<(u16, String, Vec<u8>)> = [

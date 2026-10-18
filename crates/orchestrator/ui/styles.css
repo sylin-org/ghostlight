@@ -30,9 +30,9 @@
   --line: rgba(255, 255, 255, .06);
   --line-2: rgba(255, 255, 255, .1);
 
-  /* The neutral tile an agent's image waits on and an app's own icon sits on: a mid gray, about
-     as far from white as from black, so an all-white icon and an all-black one both read. */
-  --icon-tile: #75757d;
+  /* The quiet placeholder an agent's image shows while it loads, or when it cannot be had: the
+     service's dark ground for app icons (crate::agent::image), so a tile arrives where it waited. */
+  --icon-placeholder: #3a3a41;
 
   /* Surfaces are washes over the ground, not boxes. */
   --panel: rgba(255, 255, 255, .022);
@@ -240,14 +240,14 @@ body.runtime-offline .state-word { color: var(--muted); }
 /*
  * An agent's symbol, as the service names it: the image the window serves at the agent's address,
  * or a glyph the page draws, at the size of the place that draws it (SYMBOL_SIZES in
- * ui/lib/words.js). Each place gives every image the same rounded outline, so a row that mixes app
- * icons and monograms keeps one shape. An image still on its way, or one that could not be had,
- * shows a neutral tile alone. A monogram, once drawn, is a tile of its own and sits on nothing, so
- * no light ground shows through its antialiased corners on the dark window.
+ * ui/lib/words.js). Every image the service serves is a whole tile (an app's icon on the ground
+ * the service chose for it, or a monogram), so each place gives every image the same rounded
+ * outline and no background. An image still on its way, or one that could not be had, shows the
+ * quiet placeholder alone.
  */
 .symbol { display: inline-grid; flex: none; place-items: center; }
 .symbol img { display: block; object-fit: contain; }
-.symbol img:not([src]) { background: var(--icon-tile); }
+.symbol img:not([src]) { background: var(--icon-placeholder); }
 .symbol svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .symbol-face, .symbol-face img { width: 100%; height: 100%; }
 .symbol-face img { border-radius: 50%; }
@@ -260,16 +260,6 @@ body.runtime-offline .state-word { color: var(--muted); }
 .symbol-rail svg { width: 16px; height: 16px; }
 .symbol-pane img { width: 46px; height: 46px; border-radius: 11px; box-shadow: 0 0 0 1px var(--line-2); }
 .symbol-pane svg { width: 30px; height: 30px; }
-/*
- * An installed app's own icon (the service says where it came from, and only for one) sits whole,
- * never stretched, on the neutral tile with a little room around it, so an icon drawn for a light
- * taskbar or with a transparent ground still reads on the dark window.
- */
-.symbol-app-icon img { background: var(--icon-tile); }
-.symbol-face.symbol-app-icon img { padding: 2px; }
-.symbol-chip.symbol-app-icon img, .symbol-card.symbol-app-icon img { padding: 1px; }
-.symbol-rail.symbol-app-icon img { padding: 2px; }
-.symbol-pane.symbol-app-icon img { padding: 5px; }
 
 /* The shelves the summary opens: agents, then the browsers they work in. */
 .glance-shelves {

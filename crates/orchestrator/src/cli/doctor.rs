@@ -472,7 +472,7 @@ mod tests {
                 agent_id: "claude-code",
                 name: "Claude Code",
                 found: Some(FoundIcon {
-                    version: "0123456789ab".into(),
+                    sha256: "0".repeat(64),
                     app_id: "claude-desktop",
                     app_name: "Claude Desktop",
                     found_in: IconSourceKind::StoreApp,

@@ -557,11 +557,11 @@ pub struct CachedIcon {
     pub sha256: String,
 }
 
-/// What the cache holds for one agent: the copy's version and where its icon came from.
+/// What the cache holds for one agent: which copy it is and where its icon came from.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FoundIcon {
-    /// The copy's version ([`version_of`] its SHA-256).
-    pub version: String,
+    /// The copy's SHA-256, in lowercase hex, which names the copy and what is made from it.
+    pub sha256: String,
     /// The catalog id of the agent whose app gave the icon: the agent's own, or its family's.
     pub app_id: &'static str,
     /// That agent's name, which is also its app's.
@@ -654,7 +654,7 @@ impl IconCache {
         }
     }
 
-    /// What is cached for `agent_id`: its icon's version and where it came from; none when no
+    /// What is cached for `agent_id`: which copy and where it came from; none when no
     /// icon is cached for it.
     #[must_use]
     pub fn found(&self, agent_id: &str) -> Option<FoundIcon> {
@@ -666,7 +666,7 @@ impl IconCache {
             .iter()
             .find(|app| app.agent_id == manifest.app)?;
         Some(FoundIcon {
-            version: version_of(&manifest.sha256),
+            sha256: manifest.sha256.clone(),
             app_id: app.agent_id,
             app_name: app.name,
             found_in: manifest.found_in,
@@ -691,7 +691,7 @@ impl IconCache {
     /// The version of `agent_id`'s cached icon, for tests that compare copies.
     #[cfg(test)]
     fn version(&self, agent_id: &str) -> Option<String> {
-        self.found(agent_id).map(|found| found.version)
+        self.found(agent_id).map(|found| version_of(&found.sha256))
     }
 
     /// The cached icon of `agent_id`, read from the cache now; none for an id outside the catalog
