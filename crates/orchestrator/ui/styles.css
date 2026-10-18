@@ -1071,10 +1071,19 @@ a.ghost-button { text-decoration: none; }
 
 /*
  * The setup view stands in for the whole shell while setup is under way. Its look is the
- * extension's kit (extension/kit.css, tokens scoped to .gl-page); this file only places the root
- * and styles the one control the kit has no class for. It sits above the shell and below the toast.
+ * extension's kit (extension/kit.css, tokens scoped to .gl-page); this file only places the root,
+ * keeps the companion in view, and styles the one control the kit has no class for. It sits above
+ * the shell and below the toast.
  */
 #setup-root { position: fixed; inset: 0; z-index: 30; overflow: auto; }
+
+/* The kit centers the companion on its row. A long list of agents makes the row taller than the
+   window, which put the mascot and the steps below the fold: center them on the window instead,
+   where they stay while the list scrolls. A short step looks as before. The narrow one-column
+   layout is the kit's alone. */
+@media (min-width: 761px) {
+  #setup-root .gl-companion { align-self: start; position: sticky; top: 50%; transform: translateY(-50%); }
+}
 
 /* "Skip for now": quiet text, never a second primary action. */
 .setup-skip { display: block; padding: 0; border: 0; background: none; font: 400 var(--fs-small)/1.4 var(--sans); color: var(--ink-4); cursor: pointer; transition: color var(--beat-quick) var(--calm); }
