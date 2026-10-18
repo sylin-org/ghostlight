@@ -8,10 +8,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `pass`, `fail` (wi
 L01 to L04 passed (L03 with a scope change: the owner directed on 2026-10-17 that acceptance
 uses the real installation and the real system browser, never a sandbox). The owner then let this
 session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed and proven on the
-real install (see L04). The development build at ad43f65c is installed in the real
+real install (see L04). L05 passed after six fixes in the shell, the service and the window, and
+L06 after three (see each). The development build at 56c49dc4 is installed in the real
 `~/.ghostlight`, the system Chromium's ordinary profile is connected, and diagnostics are on.
-L05 passed after six fixes in the shell, the service and the window (see L05). Next: L06,
-headless and SSH.
+Next: L07, the extension and the browser.
 
 ## Tasks
 
@@ -290,13 +290,51 @@ service ends the shell, because its process group is orphaned with a stopped mem
 kernel sends SIGHUP; a shell is never stopped in use. "Unknown agent" on restored history rows
 is by design. A Settings lag after a tray pause, seen once, did not reproduce.
 
-### L06 Headless and SSH (todo)
+### L06 Headless and SSH (pass, after fixes)
 
 Over SSH (no `DISPLAY`, no `WAYLAND_DISPLAY`): `ghostlight status` reports `no_display`; a service
 started by `ghostlight call` exits 10 minutes after the last command and `status` then says it is
 not running; a `call` a few seconds before that idle exit still gets its answer (m2-06 and m2-08 in
 shell-m2.md). `kill -TERM` of a service ends its MCP and browser streams and leaves no orphan
 (f07g in seams.md).
+
+Result, 2026-10-17, on the real installation. Every Ghostlight command ran in the environment an
+SSH login gets on test-01: no `DISPLAY` or `WAYLAND_DISPLAY`, the session's runtime directory and
+bus, and `SSH_CONNECTION` set (the account's SSH keys do not log in to itself, so the login was
+reproduced rather than made). Nothing else touched the service between commands.
+
+- No display: a `call` with nothing running starts a `command` service with no display variable
+  in its environment; `status` says "No Ghostlight window: no display is reachable from the
+  service." and `--json` carries `no_display`; no shell starts.
+- Idle exit (m2-06): with a `status` 5 minutes after the call, the service left 600.5 s after
+  that status, and `status` then said it is not running. A later service left 600 s after its
+  last call.
+- A call at the idle exit (m2-08): a call 0.27 s before the measured exit was answered by the
+  running service in 0.02 s, which armed its span again; a call 0.08 s after it found the old
+  service gone and was answered by a new one in 1.58 s. Neither said "did not become ready in
+  time".
+- f07g: `kill -TERM` of the service, with an initialized MCP session and the browser connected,
+  ended it in 22 ms. The MCP edge recorded `service_disconnected` with `session_end` and exited 0;
+  the browser edge recorded `session_ended` and exited. `kill -TERM` of an MCP edge exits 0 with
+  `session_ended`. Nothing was left running.
+
+Defects found and fixed (each deployed and checked on the real install):
+
+1. cb37cdbf: a call to a service with no display ended with "Ghostlight could not start the
+   selected browser." and "Start the selected browser yourself", which the model cannot act on.
+   The launch now leaves startup to the person (ADR-0149 amendment): the call says "No browser is
+   connected. Ask the user to open a Chromium browser window with the Ghostlight extension
+   installed, then repeat the call." Chromium opened at the desktop then reached the SSH-started
+   service in about 1.5 s, and the repeated call worked.
+2. c014f161: the step after a failed launch or a launched browser that never connected said
+   "Start the selected browser yourself"; it now asks the model to ask the user (ADR-0147
+   Decision 3).
+3. 56c49dc4: after an agent started Ghostlight over SSH, `ghostlight open` at the desktop waited
+   15 s for "did not open in time. Run 'ghostlight open' to try again", every time, and the
+   connected browser kept that service from idling out. When the service answers `no_display`,
+   `open` now starts the shell from the person's own session (as the Applications entry already
+   did): one active window in 54 ms, and a second `open` reuses it. Over SSH, `open` says why at
+   once (7 ms).
 
 ### L07 The extension and the browser (todo)
 
