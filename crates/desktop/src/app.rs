@@ -36,6 +36,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -89,6 +90,9 @@ const SHELL_EXECUTABLE_NAME: &str = "ghostlight-desktop";
 
 /// The name of the thread that opens the stream to the service.
 const OPEN_THREAD_NAME: &str = "ghostlight-desktop-open";
+
+/// The name of the thread that wakes the event loop when the machine's next try is due.
+const ALARM_THREAD_NAME: &str = "ghostlight-desktop-alarm";
 
 /// What the shell asks about the computer it runs on before it builds anything.
 pub trait Probe {
@@ -238,6 +242,62 @@ enum ShellEvent {
     /// The webview's renderer process ended.
     #[cfg(target_os = "linux")]
     RendererLost,
+    /// The machine's next try is due ([`Alarm`]).
+    Wake,
+}
+
+/// Wakes the event loop when the machine's next try is due.
+///
+/// On Linux `tao` treats `ControlFlow::WaitUntil` as a plain wait: the loop blocks in GTK until
+/// some other event arrives, not at the deadline. With the window open the web view wakes it often
+/// enough. With only the tray icon nothing does, so a shell that lost its service tried again only
+/// when a stray event came (18 s on test-01), while presence started a second shell and showed its
+/// window. The shell keeps its own clock instead: one thread sleeps until the latest deadline it
+/// was given and posts [`ShellEvent::Wake`], and posting wakes the loop.
+struct Alarm {
+    deadlines: mpsc::Sender<Instant>,
+    /// The deadline last sent, so an unchanged one is not sent again.
+    armed: Option<Instant>,
+}
+
+impl Alarm {
+    /// Starts the alarm's thread, which calls `wake` at each deadline it reaches.
+    fn start(wake: impl Fn() + Send + 'static) -> std::io::Result<Self> {
+        let (deadlines, inbox) = mpsc::channel::<Instant>();
+        thread::Builder::new()
+            .name(ALARM_THREAD_NAME.to_owned())
+            .spawn(move || {
+                let Ok(mut deadline) = inbox.recv() else {
+                    return;
+                };
+                loop {
+                    match inbox.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                        Ok(newer) => deadline = newer,
+                        Err(RecvTimeoutError::Timeout) => {
+                            wake();
+                            match inbox.recv() {
+                                Ok(next) => deadline = next,
+                                Err(_) => return,
+                            }
+                        }
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+            })?;
+        Ok(Self {
+            deadlines,
+            armed: None,
+        })
+    }
+
+    /// Wake the loop at `at`. A deadline already armed is not sent again; `None` asks for nothing,
+    /// and a wake that comes anyway only makes the loop look at the machine once more.
+    fn set(&mut self, at: Option<Instant>) {
+        if let Some(deadline) = at.filter(|deadline| self.armed != Some(*deadline)) {
+            let _ = self.deadlines.send(deadline);
+        }
+        self.armed = at;
+    }
 }
 
 fn post(proxy: &EventLoopProxy<ShellEvent>, event: ShellEvent) {
@@ -303,6 +363,8 @@ struct Shell {
     requested: Option<String>,
     /// Reaches the event loop from callbacks that end after the call that started them.
     proxy: EventLoopProxy<ShellEvent>,
+    /// Wakes the loop when the machine's next try is due; `None` if its thread could not start.
+    alarm: Option<Alarm>,
     session: ThisSession,
     /// Set when the shell is to end.
     exiting: bool,
@@ -729,12 +791,14 @@ impl Shell {
         {
             self.feed(machine::Event::Tick, target);
         }
+        let wake = self.machine.wake_at();
+        if let Some(alarm) = &mut self.alarm {
+            alarm.set(wake);
+        }
         *flow = if self.exiting || !self.goes_on() {
             ControlFlow::Exit
         } else {
-            self.machine
-                .wake_at()
-                .map_or(ControlFlow::Wait, ControlFlow::WaitUntil)
+            wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil)
         };
     }
 }
@@ -792,6 +856,10 @@ pub fn run(launch: Launch) -> ExitCode {
     let image = std::env::current_exe()
         .ok()
         .and_then(|path| Image::of(&path));
+    let alarm_proxy = proxy.clone();
+    let alarm = Alarm::start(move || post(&alarm_proxy, ShellEvent::Wake))
+        .inspect_err(|error| eprintln!("ghostlight-desktop: {error}"))
+        .ok();
     let mut shell = Shell {
         launch,
         tray_host: ThisPlace.tray_host(),
@@ -812,6 +880,7 @@ pub fn run(launch: Launch) -> ExitCode {
         home,
         requested: None,
         proxy,
+        alarm,
         session: ThisSession,
         exiting: false,
         _listener: listener,
@@ -822,6 +891,37 @@ pub fn run(launch: Launch) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_alarm_wakes_at_the_latest_deadline_it_was_given() {
+        let (woke, wakes) = mpsc::channel::<Instant>();
+        let mut alarm = Alarm::start(move || {
+            let _ = woke.send(Instant::now());
+        })
+        .unwrap();
+        let start = Instant::now();
+        alarm.set(Some(start + Duration::from_millis(400)));
+        alarm.set(Some(start + Duration::from_millis(80)));
+        alarm.set(Some(start + Duration::from_millis(80)));
+        let at = wakes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(
+            at >= start + Duration::from_millis(80),
+            "not before the deadline"
+        );
+        assert!(
+            at < start + Duration::from_millis(400),
+            "the earlier deadline replaced the later"
+        );
+        assert!(
+            wakes.recv_timeout(Duration::from_millis(500)).is_err(),
+            "one wake for one deadline"
+        );
+        alarm.set(Some(Instant::now()));
+        assert!(
+            wakes.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "a due deadline wakes at once"
+        );
+    }
 
     fn item(id: &str) -> TrayEvent {
         TrayEvent::Item(id.to_owned())
