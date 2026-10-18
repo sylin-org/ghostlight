@@ -21,7 +21,7 @@
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
-    OUTCOME_WORD, OUTCOME_GLYPH, actionSaid, LOAD_FAILED, TRY_AGAIN,
+    OUTCOME_WORD, actionSaid, LOAD_FAILED, TRY_AGAIN,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun
@@ -580,11 +580,10 @@
       const time = running
         ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
         : duration(settledMs(entry));
-      // An action that did not succeed says so in words beside its duration; a failure adds a mark.
-      const word = outcomeWord(entry);
-      const said = word
-        ? `${isFailed(entry) ? OUTCOME_GLYPH : ""}${escapeHtml(word)} ${escapeHtml(time)}`
-        : escapeHtml(time);
+      // The duration column holds the time alone. An action that did not succeed says so in its own
+      // sentence and its row's look; a screen reader hears the outcome word on the button.
+      const said = escapeHtml(time);
+      const outcome = isBlocked(entry) ? OUTCOME_WORD.blocked : outcomeWord(entry);
       // The list names one capability, the most consequential, in its own column, or under the tool
       // where there is no room for the column. A screen reader hears the whole set on the button.
       const capability = escapeHtml(capabilityWord(entry));
@@ -594,6 +593,7 @@
         + `<span class="row-tool-name">${escapeHtml(toolWords(entry.tool))}</span>`
         + (capability ? `<span class="row-tool-cap" aria-hidden="true">${capability}</span>` : "")
         + (heard ? `<span class="sr-only">, ${escapeHtml(heard)}</span>` : "")
+        + (outcome ? `<span class="sr-only">, ${escapeHtml(outcome.toLowerCase())}</span>` : "")
         + "</button>"
         + intakeMarkup(entry)
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`

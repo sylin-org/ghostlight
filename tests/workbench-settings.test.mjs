@@ -2267,34 +2267,52 @@ test("a failed, a kept and a refused action each say their outcome in the senten
   }
 });
 
-test("a failed row says Failed beside its duration with a mark, in the soft red, on its own capability edge", () => {
+test("a failed row reads like a refused one: its sentence in the soft red on the red edge, its time alone", () => {
   const { shown, cell } = rowOf(settledRead({ invocation: "fail-1", tool: "browser_click", capability: "action",
     status: "failed", effect: "none", summary: "Could not find that control." }));
   const [row] = queueRows(shown);
   assert.match(row.className, /\bfailed\b/);
-  assert.match(row.className, /\bcap-action\b/, "the capability edge is unchanged");
-  assert.doesNotMatch(row.className, /\bblocked\b/);
-  assert.equal(cell("row-dur").textContent, "Failed 1.2s");
-  assert.ok(cell("row-dur").children.some((child) => child.classes.has("outcome-glyph")));
-  assert.equal(naming(".row.failed .row-dur")[0].declarations.color, "var(--danger-soft)");
+  assert.equal(cell("row-dur").textContent, "1.2s", "the duration column holds the time alone");
+  assert.equal(cell("row-activity").textContent, "Could not find that control.");
+  for (const selector of [".row.failed .row-activity", ".row.blocked .row-activity"]) {
+    assert.equal(naming(selector)[0].declarations.color, "var(--danger-soft)", selector);
+  }
+  for (const selector of [".row.failed", ".row.blocked"]) {
+    assert.equal(naming(selector)[0].declarations["border-left-color"], "var(--danger)", selector);
+  }
   assert.equal(naming(":root")[0].declarations["--danger-soft"], "#fca5a5");
-  assert.ok(!RULES.some((rule) => rule.selectors.some((selector) => selector.startsWith(".row.failed")
-    && /border/.test(Object.keys(rule.declarations).join(" ")))), "a failure does not take the refusal's edge");
+  assert.ok(!RULES.some((rule) => rule.selectors.some((selector) => selector.includes("outcome-glyph"))),
+    "no mark sits beside the time");
 });
 
-test("an action whose effect cannot be confirmed reads Unknown in the failed tone", () => {
+test("a screen reader hears each row's outcome on its button", () => {
+  const cases = [
+    [{ invocation: "f", status: "failed", summary: "Could not find that control." }, ", failed"],
+    [{ invocation: "u", status: "unknown", effect: "unknown" }, ", unknown"],
+    [{ invocation: "k", status: "blocked", summary: "Kept the tab open." }, ", kept"],
+    [{ invocation: "r", allowed: false, reason: "denied_by_policy", status: "blocked" }, ", blocked"],
+  ];
+  for (const [record, heard] of cases) {
+    const { cell } = rowOf(settledRead(record));
+    assert.ok(cell("row-tool").textContent.endsWith(heard), `${record.invocation}: ${cell("row-tool").textContent}`);
+  }
+  const { cell } = rowOf(settledRead({ invocation: "fine-1" }));
+  assert.doesNotMatch(cell("row-tool").textContent, /, (failed|unknown|kept|blocked)$/);
+});
+
+test("an action whose effect cannot be confirmed wears the failed look", () => {
   const { shown, cell } = rowOf(settledRead({ invocation: "unknown-1", status: "unknown", effect: "unknown" }));
   assert.match(queueRows(shown)[0].className, /\bfailed\b/);
-  assert.equal(cell("row-dur").textContent, "Unknown 1.2s");
+  assert.equal(cell("row-dur").textContent, "1.2s");
 });
 
-test("a kept row says Kept beside its duration in ink, with no mark, and a refusal keeps its own treatment", () => {
+test("a kept row stays in ink with its time alone, and a refusal keeps the shared look", () => {
   const kept = rowOf(settledRead({ invocation: "kept-1", tool: "browser_tabs", capability: "action",
     status: "blocked", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on." }));
-  assert.match(queueRows(kept.shown)[0].className, /\bkept\b/);
-  assert.equal(kept.cell("row-dur").textContent, "Kept 1.2s");
-  assert.equal(kept.cell("row-dur").children.some((child) => child.classes.has("outcome-glyph")), false);
-  assert.equal(naming(".row.kept .row-dur")[0].declarations.color, "var(--ink-3)");
+  const keptClass = queueRows(kept.shown)[0].className;
+  assert.match(keptClass, /\bkept\b/);
+  assert.doesNotMatch(keptClass, /\b(failed|blocked)\b/);
+  assert.equal(kept.cell("row-dur").textContent, "1.2s");
 
   const refused = rowOf(settledRead({ invocation: "refused-1", allowed: false, reason: "denied_by_policy", status: "blocked" }));
   const className = queueRows(refused.shown)[0].className;
@@ -2307,17 +2325,17 @@ test("a kept row says Kept beside its duration in ink, with no mark, and a refus
   assert.equal(plain.cell("row-dur").textContent, "1.2s");
 });
 
-test("a failed hero colours its word and time in the soft red, with no red edge and no new glow", () => {
+test("a failed hero wears the refusal's edge and red word, and a kept one stays in ink", () => {
   const shown = drawing();
   shown.view.hero(Entries.entryFromRecord(settledRead({ status: "failed", summary: "Could not find that control." }), null), false);
   assert.ok(shown.el("hero").classes.has("failed"));
-  assert.equal(shown.el("hero").classes.has("blocked"), false);
   assert.equal(drawn(shown.el("hero-right").innerHTML).wearing("outcome")[0].textContent, "Failed");
-  for (const selector of [".hero.failed .elapsed", ".hero.failed .outcome"]) {
-    assert.equal(naming(selector)[0].declarations.color, "var(--danger-soft)", selector);
+  for (const selector of [".hero.failed::before", ".hero.blocked::before"]) {
+    assert.equal(naming(selector)[0].declarations.background, "var(--danger)", selector);
   }
-  assert.deepEqual(RULES.filter((rule) => rule.selectors.some((selector) => /^\.hero\.failed(::|\s+\.med)/.test(selector))), [],
-    "the edge, the glow and the medallion stay as they were");
+  for (const selector of [".hero.failed .outcome", ".hero.blocked .outcome"]) {
+    assert.equal(naming(selector)[0].declarations.color, "var(--danger)", selector);
+  }
 
   const kept = drawing();
   kept.view.hero(Entries.entryFromRecord(settledRead({ status: "blocked", summary: "Kept the tab open." }), null), false);

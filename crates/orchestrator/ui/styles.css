@@ -339,8 +339,8 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
   transition: opacity .8s var(--calm);
 }
 .hero.live::after { opacity: 1; }
-.hero.blocked::before { background: var(--danger); }
-.hero.blocked::after { opacity: 1; background: radial-gradient(680px 160px at 6% 50%, rgba(248, 113, 113, .1), transparent 70%); }
+.hero.blocked::before, .hero.failed::before { background: var(--danger); }
+.hero.blocked::after, .hero.failed::after { opacity: 1; background: radial-gradient(680px 160px at 6% 50%, rgba(248, 113, 113, .1), transparent 70%); }
 
 .cap-read { --cap: var(--cap-read); --cap-ink: var(--ink-3); }
 .cap-action { --cap: var(--cap-action); --cap-ink: var(--cap-action); }
@@ -359,12 +359,11 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .hero-right { position: relative; z-index: 1; text-align: right; }
 .elapsed { color: var(--ink-4); font: 400 25px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; transition: color .5s var(--calm); }
 .hero.live .elapsed { color: var(--a); }
-.hero.blocked .elapsed { color: var(--danger); }
+.hero.blocked .elapsed, .hero.failed .elapsed { color: var(--danger); }
 .outcome { margin-top: 7px; }
-.hero.blocked .outcome { color: var(--danger); }
-/* A permitted action that failed colours its word and time only: no edge, no glow. One a browser
-   setting kept back stays in ink. */
-.hero.failed .elapsed, .hero.failed .outcome { color: var(--danger-soft); }
+/* Anything that did not do what it was asked, refused or failed, wears one look. One a browser
+   setting kept back is not an error and stays in ink. */
+.hero.blocked .outcome, .hero.failed .outcome { color: var(--danger); }
 .hero.kept .outcome { color: var(--ink-3); }
 
 .swap-in { animation: swap-in var(--beat-settle) var(--spring) both; }
@@ -383,7 +382,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
   color: var(--ink-3); transition: background .2s var(--calm);
 }
 .row:hover { background: rgba(255, 255, 255, .022); }
-.row.blocked { border-left-color: var(--danger); }
+.row.blocked, .row.failed { border-left-color: var(--danger); }
 .row-tool { min-width: 0; padding: 0; color: var(--ink-2); font-size: 12.5px; text-align: left; }
 .row-tool-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-tool:hover, .row-tool[aria-expanded="true"] { color: var(--ink); }
@@ -396,15 +395,13 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .row-channel { display: flex; align-items: center; color: var(--ink-4); }
 .row-channel svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .row-activity { min-width: 0; overflow: hidden; color: var(--ink-4); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.row.blocked .row-activity { color: var(--danger-soft); }
+/* A row that did not do what it was asked, refused or failed, says so in its own sentence, in the
+   soft red on the red edge; the sentence's words, not the colour, carry the meaning. */
+.row.blocked .row-activity, .row.failed .row-activity { color: var(--danger-soft); }
 .row-client { overflow: hidden; color: var(--ink-4); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .row-browser { overflow: hidden; color: var(--ink-4); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .row-cap, .row-tool-cap { color: var(--cap-ink, var(--ink-3)); white-space: nowrap; }
 .row-dur { overflow: hidden; color: var(--ink-4); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-/* The word says what happened; the colour only helps the eye find it. */
-.row.failed .row-dur { color: var(--danger-soft); }
-.row.kept .row-dur { color: var(--ink-3); }
-.outcome-glyph { width: 10px; height: 10px; margin-right: 3px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .row-when { color: var(--ink-4); font: 400 11px/1 var(--mono); text-align: right; }
 .row.running .row-dur { color: var(--a); }
 /* A settled row whose document never settled, or whose readiness could not be observed, carries
@@ -426,7 +423,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .med-mini { display: grid; width: 22px; height: 22px; place-items: center; }
 .med-mini svg { width: 15px; height: 15px; fill: none; stroke: var(--faint); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .row.running .med-mini svg { stroke: var(--a); }
-.row.blocked .med-mini svg { stroke: var(--danger); }
+.row.blocked .med-mini svg, .row.failed .med-mini svg { stroke: var(--danger); }
 
 /* Inner treatments animate only while the action is genuinely running. */
 .hero.live .spin { animation: spin var(--beat-wheel) linear infinite; transform-origin: 12px 12px; }
