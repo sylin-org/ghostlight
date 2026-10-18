@@ -215,7 +215,11 @@ recorded as the reason, spends no budget, and nothing launches until a person ac
 launches while the session is ending or a quit has begun, when `bin` holds no shell, or when no
 display is reachable: on Linux `DISPLAY` or `WAYLAND_DISPLAY` is set in the service's environment,
 and on Windows the process sits in the visible window station (so not in session 0 and not over an
-OpenSSH session). The control `status` answer carries the reason as `window`.
+OpenSSH session). The control `status` answer carries the reason as `window`. A service that
+reaches no display, such as one an agent started over SSH, can still get a window from the person:
+the Applications entry starts the shell in their session, and so does `ghostlight open` when the
+service answers `no_display` and the command's own session names a display. With no display there
+either, `open` says why at once.
 
 The service owns the tray model and the shell draws it. The model is a state (ready, working,
 paused or attention, from the same readiness the band shows; a service with no browser connected

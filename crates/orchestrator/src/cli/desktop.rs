@@ -4,6 +4,8 @@
 //! bare launch) and a script's `call` find the service through a control opening, and when none
 //! answers they start one detached, as a `person` or a `command` start (ADR-0199 Decision 10),
 //! and then wait for it: `open` until the window is shown, `call` until the service is ready.
+//! A service that reaches no display, such as one an agent started over SSH, cannot bring its
+//! window up, so `open`, which a person runs on their own desktop, starts the shell itself there.
 //!
 //! `serve` runs the service in this process until a quit. It has no window of its own: it binds
 //! its endpoint as soon as it has started (ADR-0199 Decision 5), and the shell that shows the
@@ -23,6 +25,8 @@ use ghostlight_relay::protocol::StartReason;
 use crate::install::layout::Layout;
 use crate::install::record;
 use crate::language::environment::SESSION_LISTENER_FAILED;
+use crate::language::workbench::WindowReason;
+use crate::service::presence::{self, LaunchRefusal};
 use crate::service::{Quit, ServiceHost};
 
 const SERVICE_READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -190,11 +194,61 @@ pub fn open_desktop() -> anyhow::Result<()> {
 pub fn open_with(starter: &dyn Starter) -> anyhow::Result<()> {
     match crate::cli::client::activate_workbench() {
         Ok(true) => return Ok(()),
-        Ok(false) => return finish_activation(wait_for_workbench_activation()),
+        Ok(false) => {
+            bring_window_here()?;
+            return finish_activation(wait_for_workbench_activation());
+        }
         Err(_) => {}
     }
     start_service(starter, StartReason::Person)?;
     finish_activation(wait_for_workbench_activation())
+}
+
+/// What `open` does when the running service brought no window forward.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NoWindow {
+    /// Wait for the window the service is bringing up.
+    Wait,
+    /// The service reaches no display and this process does: start the shell here, as the
+    /// Applications entry does. It attaches to that service and opens its window.
+    StartShellHere,
+    /// No window can come from here either: say why at once.
+    Refuse(&'static str),
+}
+
+/// Decide [`NoWindow`] from the reason the service gives for having no window and whether a
+/// window this process starts could be seen.
+fn after_no_window(reason: Option<WindowReason>, display_here: bool) -> NoWindow {
+    match reason {
+        Some(WindowReason::NoDisplay) if display_here => NoWindow::StartShellHere,
+        Some(reason @ WindowReason::NoDisplay) => {
+            reason.sentence().map_or(NoWindow::Wait, NoWindow::Refuse)
+        }
+        _ => NoWindow::Wait,
+    }
+}
+
+/// When the service has no window because it reaches no display, start the shell from this
+/// process, or say why no window can come. Otherwise the service is bringing one up.
+fn bring_window_here() -> anyhow::Result<()> {
+    let reason = crate::cli::client::status()
+        .ok()
+        .and_then(|status| status.window);
+    match after_no_window(reason, presence::display_here().is_ok()) {
+        NoWindow::Wait => Ok(()),
+        NoWindow::Refuse(sentence) => anyhow::bail!(sentence),
+        NoWindow::StartShellHere => {
+            let home = ghostlight_relay::home::home()?;
+            match presence::start_shell(&Layout::new(&home), false) {
+                // A shell the system would not start leaves the wait to say the window did not
+                // open, as before.
+                Ok(()) | Err(LaunchRefusal::Failed) => Ok(()),
+                Err(LaunchRefusal::NoShellFile) => {
+                    anyhow::bail!(WindowReason::NoShellFile.sentence().unwrap_or_default())
+                }
+            }
+        }
+    }
 }
 
 /// Wait until the workbench presentation attaches and activates or times out.
@@ -459,6 +513,27 @@ mod tests {
             host.workbench.attach_presentation(self.reveals.clone());
             *self.host.borrow_mut() = Some(host);
             Ok(())
+        }
+    }
+
+    #[test]
+    fn open_starts_the_shell_where_the_person_is_when_the_service_reaches_no_display() {
+        assert_eq!(
+            after_no_window(Some(WindowReason::NoDisplay), true),
+            NoWindow::StartShellHere
+        );
+        assert_eq!(
+            after_no_window(Some(WindowReason::NoDisplay), false),
+            NoWindow::Refuse("No Ghostlight window: no display is reachable from the service.")
+        );
+        // Any other reason, or none yet, is a window the service is bringing up.
+        for reason in [
+            None,
+            Some(WindowReason::Tray),
+            Some(WindowReason::DidNotStay),
+            Some(WindowReason::NoShellFile),
+        ] {
+            assert_eq!(after_no_window(reason, true), NoWindow::Wait);
         }
     }
 

@@ -29,7 +29,6 @@
 
 use std::collections::VecDeque;
 use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -432,10 +431,59 @@ impl System {
     pub fn boxed(layout: Layout, ending: Ending) -> Box<dyn Outside> {
         Box::new(Self::new(layout, ending))
     }
+}
 
-    fn shell(&self) -> PathBuf {
-        self.layout.desktop_executable()
+/// Whether a window this process starts could be seen: on Windows when it runs on the interactive
+/// desktop, on Linux when its session names a display. The service asks it of itself through
+/// presence, and `ghostlight open` of the person's own session (`cli::desktop`).
+///
+/// # Errors
+///
+/// The reason no window could be seen.
+pub fn display_here() -> Result<(), WindowReason> {
+    #[cfg(windows)]
+    {
+        if ghostlight_win_peer::interactive_window_station() {
+            Ok(())
+        } else {
+            Err(WindowReason::NoInteractiveDesktop)
+        }
     }
+    #[cfg(target_os = "linux")]
+    {
+        display_named(
+            std::env::var_os("DISPLAY").as_deref(),
+            std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+        )
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        Ok(())
+    }
+}
+
+/// Start the shell of the installation `layout` names, detached, in the calling process's
+/// session: with `tray` it shows only the icon, without it it opens its own window. The service
+/// starts it through presence, and `ghostlight open` starts it when the service reaches no
+/// display (`cli::desktop`).
+///
+/// # Errors
+///
+/// [`LaunchRefusal::NoShellFile`] when the shell is not in the installation, and
+/// [`LaunchRefusal::Failed`] when the operating system would not start it.
+pub fn start_shell(layout: &Layout, tray: bool) -> Result<(), LaunchRefusal> {
+    let shell = layout.desktop_executable();
+    if !shell.is_file() {
+        return Err(LaunchRefusal::NoShellFile);
+    }
+    let arguments: &[&OsStr] = if tray {
+        &[OsStr::new(TRAY_ARGUMENT)]
+    } else {
+        &[]
+    };
+    os::spawn_detached(&shell, arguments, layout.home())
+        .map(|_| ())
+        .map_err(|_| LaunchRefusal::Failed)
 }
 
 impl Outside for System {
@@ -444,40 +492,11 @@ impl Outside for System {
     }
 
     fn display(&self) -> Result<(), WindowReason> {
-        #[cfg(windows)]
-        {
-            if ghostlight_win_peer::interactive_window_station() {
-                Ok(())
-            } else {
-                Err(WindowReason::NoInteractiveDesktop)
-            }
-        }
-        #[cfg(target_os = "linux")]
-        {
-            display_named(
-                std::env::var_os("DISPLAY").as_deref(),
-                std::env::var_os("WAYLAND_DISPLAY").as_deref(),
-            )
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            Ok(())
-        }
+        display_here()
     }
 
     fn launch(&self, tray: bool) -> Result<(), LaunchRefusal> {
-        let shell = self.shell();
-        if !shell.is_file() {
-            return Err(LaunchRefusal::NoShellFile);
-        }
-        let arguments: &[&OsStr] = if tray {
-            &[OsStr::new(TRAY_ARGUMENT)]
-        } else {
-            &[]
-        };
-        os::spawn_detached(&shell, arguments, self.layout.home())
-            .map(|_| ())
-            .map_err(|_| LaunchRefusal::Failed)
+        start_shell(&self.layout, tray)
     }
 
     fn ending(&self) -> bool {
