@@ -54,9 +54,10 @@ pub const WINDOW_CLASS: &str = "Ghostlight Window";
 /// suffix, the Applications entry's file name), so the shell groups under its installed entry.
 pub const APPLICATION_ID: &str = "org.sylin.ghostlight";
 
-/// How long after a tray Open the service's follow-up show is taken as the answer to that click.
-/// The service answers within a round trip; a show later than this is a request of its own.
-const TRAY_OPEN_ANSWER: Duration = Duration::from_secs(3);
+/// How long after an Open the shell made on its own the service's follow-up show is taken as the
+/// answer to it. The service answers within a round trip; a show later than this is a request of
+/// its own.
+const OWN_OPEN_ANSWER: Duration = Duration::from_secs(3);
 
 /// The environment variable that turns off the WebKitGTK DMA-BUF renderer.
 const RENDERER_VARIABLE: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
@@ -126,7 +127,10 @@ pub enum WindowAct {
     Create,
     /// Restore, show and focus the existing window.
     Focus,
-    /// Destroy the window. [`LifecycleEvent::Destroyed`] follows once it is gone.
+    /// Destroy the window. The glue feeds [`LifecycleEvent::Destroyed`] as soon as it has dropped
+    /// it: on Linux `tao` reports a window's end only once its loop has wired the window's events,
+    /// so a window dropped the moment it was built is never reported, and waiting for that report
+    /// left a replaced window's lifecycle waiting for good.
     Destroy,
 }
 
@@ -139,9 +143,10 @@ pub enum WindowAct {
 pub struct WindowLifecycle {
     state: WindowState,
     rebuild_on_open: bool,
-    /// When a tray Open built or began replacing the window, until the service's follow-up show
-    /// has been matched to it.
-    tray_open: Option<Instant>,
+    /// When an Open the shell made on its own (a tray click, or the window a person's start shows)
+    /// built or began replacing the window, until the service's follow-up show has been matched to
+    /// it.
+    own_open: Option<Instant>,
 }
 
 impl WindowLifecycle {
@@ -151,7 +156,7 @@ impl WindowLifecycle {
         WindowLifecycle {
             state: WindowState::Absent,
             rebuild_on_open,
-            tray_open: None,
+            own_open: None,
         }
     }
 
@@ -170,24 +175,25 @@ impl WindowLifecycle {
         self.state == WindowState::Open
     }
 
-    /// Applies a tray Open. Unlike [`LifecycleEvent::OpenRequested`] from the service, the click
-    /// is remembered when it built or began replacing the window, because the service may follow
-    /// it with a show at an address (see [`WindowLifecycle::answers_tray_open`]).
-    pub fn open_from_tray(&mut self, now: Instant) -> Option<WindowAct> {
+    /// Applies an Open the shell made on its own: a tray click, or the window a person's start
+    /// shows. Unlike [`LifecycleEvent::OpenRequested`] from the service, the Open is remembered
+    /// when it built or began replacing the window, because the service may follow it with a show
+    /// at an address (see [`WindowLifecycle::answers_own_open`]).
+    pub fn open_on_own(&mut self, now: Instant) -> Option<WindowAct> {
         let act = self.on(LifecycleEvent::OpenRequested);
         if matches!(act, Some(WindowAct::Create | WindowAct::Destroy)) {
-            self.tray_open = Some(now);
+            self.own_open = Some(now);
         }
         act
     }
 
-    /// Whether a show from the service answers a tray Open that already built or is replacing the
-    /// window. Such a show must not open the window again: the new page needs no more than the
-    /// address it already carries. Each tray Open is answered at most once.
-    pub fn answers_tray_open(&mut self, now: Instant) -> bool {
-        self.tray_open
+    /// Whether a show from the service answers an Open of the shell's own that already built or is
+    /// replacing the window. Such a show must not open the window again: the new page needs no
+    /// more than the address it already carries. Each Open is answered at most once.
+    pub fn answers_own_open(&mut self, now: Instant) -> bool {
+        self.own_open
             .take()
-            .is_some_and(|at| now.saturating_duration_since(at) <= TRAY_OPEN_ANSWER)
+            .is_some_and(|at| now.saturating_duration_since(at) <= OWN_OPEN_ANSWER)
     }
 
     /// Applies one event and returns what to do about it, if anything.
@@ -648,26 +654,26 @@ mod tests {
         let at = Instant::now();
         // A window closed to the tray, then opened from it.
         let mut lifecycle = linux();
-        assert_eq!(lifecycle.open_from_tray(at), Some(WindowAct::Create));
-        assert!(lifecycle.answers_tray_open(at));
+        assert_eq!(lifecycle.open_on_own(at), Some(WindowAct::Create));
+        assert!(lifecycle.answers_own_open(at));
         assert_eq!(lifecycle.state(), WindowState::Open);
 
         // A window still open: Open replaces it, the show finds the replacement pending or built.
         let mut lifecycle = linux();
         lifecycle.on(OpenRequested);
-        assert_eq!(lifecycle.open_from_tray(at), Some(WindowAct::Destroy));
-        assert!(lifecycle.answers_tray_open(at));
+        assert_eq!(lifecycle.open_on_own(at), Some(WindowAct::Destroy));
+        assert!(lifecycle.answers_own_open(at));
         assert_eq!(lifecycle.on(Destroyed), Some(WindowAct::Create));
-        assert!(!lifecycle.answers_tray_open(at), "answered once");
+        assert!(!lifecycle.answers_own_open(at), "answered once");
 
         // The same order when the replacement already stands before the show arrives.
         let mut lifecycle = linux();
         lifecycle.on(OpenRequested);
-        assert_eq!(lifecycle.open_from_tray(at), Some(WindowAct::Destroy));
+        assert_eq!(lifecycle.open_on_own(at), Some(WindowAct::Destroy));
         assert_eq!(lifecycle.on(Destroyed), Some(WindowAct::Create));
         assert!(lifecycle.is_open());
         assert!(
-            lifecycle.answers_tray_open(at),
+            lifecycle.answers_own_open(at),
             "no second create is asked for"
         );
         assert!(lifecycle.is_open());
@@ -678,16 +684,16 @@ mod tests {
         let at = Instant::now();
         let mut lifecycle = windows();
         lifecycle.on(OpenRequested);
-        assert_eq!(lifecycle.open_from_tray(at), Some(WindowAct::Focus));
+        assert_eq!(lifecycle.open_on_own(at), Some(WindowAct::Focus));
         assert!(
-            !lifecycle.answers_tray_open(at),
+            !lifecycle.answers_own_open(at),
             "the show still goes to the page"
         );
 
         let mut lifecycle = linux();
-        assert_eq!(lifecycle.open_from_tray(at), Some(WindowAct::Create));
-        let later = at + TRAY_OPEN_ANSWER + Duration::from_millis(1);
-        assert!(!lifecycle.answers_tray_open(later));
+        assert_eq!(lifecycle.open_on_own(at), Some(WindowAct::Create));
+        let later = at + OWN_OPEN_ANSWER + Duration::from_millis(1);
+        assert!(!lifecycle.answers_own_open(later));
         assert_eq!(lifecycle.on(OpenRequested), Some(WindowAct::Destroy));
     }
 

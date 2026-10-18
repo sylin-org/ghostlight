@@ -563,7 +563,10 @@ impl Shell {
                 Some(Ok(())) | None => {}
             }
         } else if present && self.lifecycle.state() == WindowState::Absent {
-            self.apply(LifecycleEvent::OpenRequested, target);
+            // The service may follow a person's start with a show at an address: the window this
+            // builds answers it, rather than being replaced the moment it exists.
+            let act = self.lifecycle.open_on_own(Instant::now());
+            self.carry_out(act, target);
         }
     }
 
@@ -584,7 +587,11 @@ impl Shell {
                     }
                 }
             }
-            Some(WindowAct::Destroy) => self.window = None,
+            Some(WindowAct::Destroy) => {
+                self.window = None;
+                // Dropped, so gone: see `WindowAct::Destroy`.
+                self.apply(LifecycleEvent::Destroyed, target);
+            }
             None => {}
         }
     }
@@ -638,7 +645,7 @@ impl Shell {
     /// nothing again: the page was built for this click and, while setup is incomplete, shows
     /// setup by itself. A replacement still pending takes the address.
     fn show(&mut self, address: Option<String>, target: &EventLoopWindowTarget<ShellEvent>) {
-        let answers = self.lifecycle.answers_tray_open(Instant::now());
+        let answers = self.lifecycle.answers_own_open(Instant::now());
         if let Some(address) = address.filter(|address| native::is_safe_address(address)) {
             if !answers || !self.lifecycle.is_open() {
                 self.requested = Some(address);
@@ -651,7 +658,7 @@ impl Shell {
 
     /// Carries out a tray Open.
     fn open_from_tray(&mut self, target: &EventLoopWindowTarget<ShellEvent>) {
-        let act = self.lifecycle.open_from_tray(Instant::now());
+        let act = self.lifecycle.open_on_own(Instant::now());
         self.carry_out(act, target);
     }
 
@@ -746,10 +753,16 @@ impl Shell {
                     self.exiting = true;
                 }
             }
+            // The shell reports the windows it drops itself. A report for the window it still holds
+            // means that window ended some other way.
             Event::WindowEvent {
+                window_id,
                 event: WindowEvent::Destroyed,
                 ..
-            } => self.apply(LifecycleEvent::Destroyed, target),
+            } if self.window.as_ref().is_some_and(|w| w.id() == window_id) => {
+                self.window = None;
+                self.apply(LifecycleEvent::Destroyed, target);
+            }
             Event::UserEvent(ShellEvent::Tray(event)) => {
                 if let Some(action) = tray_action(&event) {
                     // Told first, so a window that cannot be built answers `unavailable` after it.
