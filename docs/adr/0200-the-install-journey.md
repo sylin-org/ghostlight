@@ -342,3 +342,18 @@ the same commit, and the freeze holds again from that commit. The version stays 
 records no 2.0 store submission yet (`docs/STATUS.md`, Owed by the owner); if one was made, it is
 withdrawn and the new zip submitted instead. Decision 16's rule is unchanged: a packaged file
 changes only with a recorded owner decision.
+
+## Amendment (2026-10-18): the popup and kit fixes fold into 2.0
+
+The owner approved on 2026-10-18 folding the visual coherence pass's popup and kit fixes into the
+2.0 extension before its staged submission ("Proceed." to the coordinator's proposal). The
+extension was already unfrozen that day for ADR-0201 and is not submitted yet. The fixes: the
+popup shows Paused with a held lantern and an amber title and Session ended with the waiting
+lantern, so neither looks like Ready; the shortcut cap is legible on the primary button; the
+popup and the options page link quietly to the Ghostlight window through the existing
+`show_ghostlight` message; captions no longer depend on effects; a command in a code panel never
+wraps; the setup headline balances and its accent never breaks. The changed packaged files are
+`kit.css`, `lib/popup-view.js`, `popup.html`, `popup.js`, `options.html`, `options.css` and
+`options.js`. The window's setup view serves the same `kit.css` bytes. No permission, wire message
+or adapter protocol 4 behavior changes. The freeze golden is regenerated from the new zip in the
+same commit, the version stays 2.0.0, and Decision 16's rule is unchanged.

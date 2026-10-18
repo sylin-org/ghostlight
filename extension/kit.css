@@ -37,6 +37,7 @@
   --ink-2: #c9c9d1;       /* 11.69  lead, body on dark */
   --ink-3: #a1a1aa;       /*  7.50  secondary body */
   --ink-4: #8a8a93;       /*  5.62  smallest AA-safe text */
+  --ink-4-rgb: 138, 138, 147;
   --muted: #71717a;       /*  3.98  icons and borders only */
   --faint: #52525b;       /*  2.49  decoration only */
 
@@ -52,6 +53,7 @@
   --argb: 94, 234, 212;
   --a-hover: #99f6e4;     /* 15.18 with --on-a */
   --on-a: #08110f;        /* 12.94 */
+  --on-a-rgb: 8, 17, 15;
 
   /* Status. Each is at least 6.9:1. */
   --ok: #4ade80;
@@ -163,7 +165,7 @@
 .gl-head > .gl-h1 + .gl-lead, .gl-head > .gl-h2 + .gl-text { margin-top: var(--sp-4); }
 
 /* Tagline: italic, warm accent at .85 (9.5:1). */
-.gl-tagline { font-size: 16.5px; font-style: italic; line-height: 1.5; color: rgba(var(--argb), .85); }
+.gl-tagline { font-size: 16.5px; font-style: italic; line-height: 1.5; color: rgba(var(--argb), .85); text-wrap: balance; }
 
 /* ---------------------------------------------------------------------------
    5. BUTTONS
@@ -182,6 +184,12 @@
 .gl-btn-row { display: flex; flex-wrap: wrap; gap: 14px; }
 .gl-link { color: var(--a); text-decoration: underline; text-decoration-color: rgba(var(--argb), .4); text-underline-offset: 3px; }
 .gl-link:hover { text-decoration-color: var(--a); color: var(--a); }
+/* Quiet link: a route at rest, in the quiet eyebrow ink. A link or a button; never a primary. */
+.gl-quiet { display: inline-block; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-small); line-height: 1.4;
+  color: var(--ink-4); text-decoration: underline; text-decoration-color: rgba(var(--ink-4-rgb), .4); text-underline-offset: 3px; cursor: pointer;
+  transition: color var(--beat-quick) var(--calm); }
+.gl-quiet:hover { color: var(--ink); text-decoration-color: currentColor; }
+.gl-quiet[disabled] { opacity: .5; cursor: default; }
 
 /* ---------------------------------------------------------------------------
    6. CODE PANEL AND COPY
@@ -197,7 +205,10 @@
 .gl-code { position: relative; display: block; padding: 12px 96px 13px 14px; background: var(--code);
   border: 1px solid rgba(255, 255, 255, .09); border-radius: var(--r-3); }
 .gl-code__label { display: block; margin-bottom: 6px; font: 500 10px/1.4 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-4); }
-.gl-code__text { display: block; font: 500 13.5px/1.6 var(--mono); color: var(--al); white-space: pre-wrap; word-break: break-word; }
+/* A command never wraps: a person copying it by eye reads it as one line, and a narrow panel
+   scrolls it instead. */
+.gl-code__text { display: block; overflow-x: auto; font: 500 13.5px/1.6 var(--mono); color: var(--al);
+  white-space: pre; word-break: normal; overflow-wrap: normal; }
 .gl-code__p { color: var(--ink-4); user-select: none; }
 .gl-copy { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 5px;
   min-height: 30px; padding: 5px 10px; font: 500 12px/1 var(--sans); color: var(--ink-3);
@@ -209,7 +220,8 @@
 .gl-copy.is-copied { color: var(--ok); border-color: rgba(var(--ok-rgb), .45); }
 .gl-copy.is-copied .gl-copy__idle { display: none; }
 .gl-copy.is-copied .gl-copy__done { display: block; }
-@media (max-width: 480px) { .gl-code { padding-right: 14px; padding-bottom: 52px; } .gl-copy { top: auto; right: 8px; bottom: 8px; transform: none; } }
+/* Below 1000px the command gets the full width and Copy sits under it. */
+@media (max-width: 999px) { .gl-code { padding-right: 14px; padding-bottom: 52px; } .gl-copy { top: auto; right: 8px; bottom: 8px; transform: none; } }
 
 /* ---------------------------------------------------------------------------
    7. PILL
@@ -289,6 +301,8 @@
    --------------------------------------------------------------------------- */
 code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-kbd { padding: 2px 6px; border: 1px solid var(--line-3); border-radius: var(--r-1); color: var(--ink-3); background: rgba(255, 255, 255, .03); font: 11px/1.3 var(--mono); }
+/* On the accent fill the cap takes the button's dark ink (6.4:1 on --a). */
+.gl-btn--primary .gl-kbd { color: rgba(var(--on-a-rgb), .72); border-color: rgba(var(--on-a-rgb), .28); background: transparent; }
 
 /* ---------------------------------------------------------------------------
    12. MOTION   keyframes shared by the components
@@ -341,7 +355,8 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-setup__col > * + *, .gl-setup__part > * + * { margin-top: var(--sp-5); }
 .gl-setup__part:empty { display: none; }
 .gl-setup__part > .gl-code + .gl-note { margin-top: 10px; }
-.gl-setup__h1 { font-size: 46px; }
+.gl-setup__h1 { font-size: 46px; text-wrap: balance; }
+.gl-setup__h1 em { white-space: nowrap; }
 .gl-setup__text { margin-top: 10px; }
 .gl-setup__text + .gl-setup__text { margin-top: 6px; }
 .gl-setup__main--window .gl-setup__h1 { font-size: 34px; line-height: 1.12; }
@@ -375,7 +390,8 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
    The ghost stands alone: no border, radius, panel, shadow or art box. Its glow is a
    closest-side radial wash that fades to nothing inside its own bounds, so no edge shows.
    The lantern is the state. data-light is waiting, lit or off, on the companion or on the
-   popup (.gl-pop). Add is-celebrating to the companion once, when the halves first meet.
+   popup (.gl-pop); the popup also shows held, the waiting ghost with a still amber ember.
+   Add is-celebrating to the companion once, when the halves first meet.
    Markup:
      <section class="gl-companion" data-light="waiting" aria-label="Setup progress">
        <div class="gl-companion__art">
@@ -396,7 +412,7 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-companion, .gl-pop { --wash: 1; }
 .gl-companion { --d: 44px; }
 .gl-setup__main--window .gl-companion { --d: 40px; }
-.gl-page [data-light="waiting"] { --wash: .22; }
+.gl-page [data-light="waiting"], .gl-page [data-light="held"] { --wash: .22; }
 .gl-page [data-light="off"] { --wash: 0; }
 
 .gl-companion__art { position: relative; display: flex; align-items: center; justify-content: center; min-height: 236px; }
@@ -445,8 +461,8 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-companion__mascot--sm { --m: .5; width: 100px; height: 100px; }
 .gl-companion__mascot--sm .gl-mascot__halo { inset: -18px; }
 .gl-companion__mascot .gl-mascot__img { transition: filter var(--beat-settle) var(--calm); }
-.gl-page [data-light="waiting"] .gl-companion__mascot .gl-mascot__img { filter: saturate(.55) brightness(.74); animation: none; }
-.gl-page [data-light="waiting"] .gl-companion__mascot .gl-mascot__halo { opacity: .14; animation: none; }
+.gl-page :is([data-light="waiting"], [data-light="held"]) .gl-companion__mascot .gl-mascot__img { filter: saturate(.55) brightness(.74); animation: none; }
+.gl-page :is([data-light="waiting"], [data-light="held"]) .gl-companion__mascot .gl-mascot__halo { opacity: .14; animation: none; }
 .gl-page [data-light="off"] .gl-companion__mascot .gl-mascot__img { filter: grayscale(.9) brightness(.5); animation: none; }
 .gl-page [data-light="off"] .gl-companion__mascot .gl-mascot__halo { opacity: 0; animation: none; }
 .gl-companion.is-celebrating .gl-mascot__halo { animation: gl-bloom 1400ms var(--spring) 1 both, gl-halo var(--beat-breathe) ease-in-out 1400ms infinite; }
@@ -462,6 +478,8 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-page [data-light="waiting"] .gl-lantern__ember { --es: .8; --eo: .55; animation: gl-pilot var(--beat-wheel) ease-in-out infinite; }
 .gl-page [data-light="lit"] .gl-lantern__ember { --es: 2.3; --eo: .72; animation: gl-lamp var(--beat-glow) ease-in-out infinite; }
 .gl-page [data-light="off"] .gl-lantern__ember { --eo: 0; }
+.gl-page [data-light="held"] .gl-lantern__ember { --es: .9; --eo: .85; animation: none;
+  background: radial-gradient(circle, rgba(254, 243, 199, .95) 0%, rgba(var(--warn-rgb), .85) 30%, rgba(var(--warn-rgb), 0) 70%); }
 .gl-companion.is-celebrating .gl-lantern__ember { animation: gl-flare 1400ms var(--spring) both, gl-lamp var(--beat-glow) ease-in-out 1400ms infinite; }
 .gl-lantern__ring { position: absolute; width: calc(24px * var(--m)); height: calc(24px * var(--m)); left: calc(-12px * var(--m)); top: calc(-12px * var(--m));
   border-radius: 50%; border: 2px solid rgba(var(--argb), .9); opacity: 0; }
@@ -478,7 +496,7 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 /* ---------------------------------------------------------------------------
    15. TOOLBAR POPUP   284px wide
    Markup:
-     <div class="gl-pop" data-light="lit|waiting|off">
+     <div class="gl-pop" data-light="lit|held|waiting|off">
        <div class="gl-pop__head">
          <div class="gl-pop__art"><span class="gl-mascot gl-companion__mascot gl-companion__mascot--sm">...</span></div>
          <div role="status" aria-live="polite"><span class="gl-eyebrow">Ghostlight</span>
@@ -488,8 +506,11 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
        <button class="gl-btn gl-btn--ghost gl-pop__pause" type="button" aria-keyshortcuts="Alt+Shift+P"><svg ...></svg>
          <span class="gl-pop__pause-label">Pause agents</span><span class="gl-kbd" aria-hidden="true">Alt+Shift+P</span></button>
        <button class="gl-pop__quiet" type="button">End session</button>
-       <p class="gl-pop__foot"><a class="gl-link" href="options.html">Settings</a></p>
+       <p class="gl-pop__foot"><button class="gl-quiet" type="button">Open Ghostlight</button>
+         <a class="gl-quiet" href="options.html">Settings</a></p>
      </div>
+   Held titles the state in --warn. The pause label stays on one line; the cap gives way
+   first, and below about 260px it is dropped.
    --------------------------------------------------------------------------- */
 .gl-pop { width: 284px; padding: 16px; background: radial-gradient(ellipse 120% 80% at 20% 0%, #1d1a27 0%, #131218 60%, #0f0e12 100%); }
 .gl-pop__head { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 14px; align-items: center; }
@@ -497,16 +518,19 @@ code.gl-inline { font: 0.9em var(--mono); color: var(--al); }
 .gl-pop__art::before { content: ''; position: absolute; inset: 0; opacity: var(--wash);
   background: radial-gradient(closest-side at 50% 45%, rgba(var(--argb), .24), rgba(var(--argb), .05) 60%, rgba(var(--argb), 0) 100%); }
 .gl-pop__title { margin-top: 4px; font: 400 20px/1.2 var(--sans); letter-spacing: var(--tr-title); color: var(--ink); }
+.gl-pop[data-light="held"] .gl-pop__title { color: var(--warn); }
 .gl-pop__line { margin-top: 4px; font-size: var(--fs-small); line-height: 1.5; color: var(--ink-3); }
 .gl-pop .gl-btn { width: 100%; margin-top: 16px; }
-.gl-pop__pause { justify-content: flex-start; }
-.gl-pop__pause-label { flex: 1; text-align: left; }
+.gl-pop__pause { justify-content: flex-start; padding-inline: 14px; }
+.gl-pop__pause-label { flex: 1 0 auto; text-align: left; white-space: nowrap; }
+.gl-pop__pause .gl-kbd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 259px) { .gl-pop__pause .gl-kbd { display: none; } }
 .gl-pop__note { margin-top: 14px; font-size: var(--fs-small); line-height: 1.5; color: var(--ink-3); }
 .gl-pop__problem { margin-top: 12px; font-size: var(--fs-small); line-height: 1.5; color: var(--danger-soft); }
 .gl-pop__quiet { display: block; margin-top: 14px; padding: 0; border: 0; background: none; font: 400 var(--fs-small)/1.4 var(--sans); color: var(--ink-3); cursor: pointer; transition: color var(--beat-quick) var(--calm); }
 .gl-pop__quiet:hover { color: var(--ink); }
 .gl-pop__quiet[disabled] { opacity: .5; cursor: default; }
-.gl-pop__foot { margin-top: 14px; }
+.gl-pop__foot { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; }
 /* The popup page is exactly the popup: the browser sizes the window to the body. */
 .gl-popup { width: 284px; }
 

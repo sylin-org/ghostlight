@@ -1,3 +1,6 @@
+// Ghostlight -- the options page. It places the connection sentence GhostlightPopupView chose,
+// saves the person's browser preferences through the worker, and offers the same quiet link to the
+// Ghostlight window as the popup. It holds no policy.
 (function ghostlightOptions() {
   "use strict";
 
@@ -12,7 +15,11 @@
   const linkText = document.getElementById("link-text");
   const linkSub = document.getElementById("link-sub");
   const setupRoute = document.getElementById("setup-route");
+  const showWindow = document.getElementById("show-window");
+  const showStatus = document.getElementById("show-status");
   let platform = null;
+  // The window link the connection offers, or null.
+  let showAction = null;
   if (!globalThis.chrome?.runtime?.id) {
     linkPill.className = "gl-pill gl-pill--warn";
     linkText.textContent = "Open extension options";
@@ -36,14 +43,18 @@
     chrome.tabs.create({ url: chrome.runtime.getURL(SETUP_PAGE) }).catch(() => {});
   });
 
+  showWindow.addEventListener("click", async () => {
+    if (!showAction) return;
+    try {
+      await request({ kind: showAction.kind });
+      showStatus.textContent = "";
+    } catch (error) { showStatus.textContent = String(error?.message ?? error); }
+  });
+
   async function request(message) {
     const response = await chrome.runtime.sendMessage(message);
     if (!response?.ok) throw new Error(response?.error || "Ghostlight did not respond.");
     return response.value;
-  }
-
-  function syncCaptionsAvailability() {
-    captions.disabled = !effects.checked;
   }
 
   function renderLink(snapshot) {
@@ -54,6 +65,9 @@
     linkSub.textContent = connection.line;
     setupRoute.hidden = !connection.needsSetup;
     setupRoute.textContent = connection.setupLabel ?? "";
+    showAction = connection.show;
+    showWindow.hidden = showAction === null;
+    showWindow.textContent = showAction?.label ?? "";
   }
 
   async function load() {
@@ -66,7 +80,6 @@
     captions.checked = preferences.captions;
     diagnostics.checked = preferences.diagnostics;
     preserveTabs.checked = preferences.preserveTabs;
-    syncCaptionsAvailability();
     renderLink(snapshot);
   }
 
@@ -88,7 +101,7 @@
     }
   }
 
-  effects.addEventListener("change", () => { syncCaptionsAvailability(); save(); });
+  effects.addEventListener("change", save);
   captions.addEventListener("change", save);
   diagnostics.addEventListener("change", save);
   preserveTabs.addEventListener("change", save);

@@ -21,6 +21,7 @@
 .options-page .action-status:empty { display: none; }
 .options-page .card.info { padding: 18px 20px; background: rgba(255, 255, 255, .035); }
 .options-page .card.info p { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.options-page .card.info .gl-quiet, .options-page .card.info .action-status { margin-top: var(--sp-2); }
 
 .options-page .gl-pill { flex: none; }
 

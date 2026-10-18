@@ -46,6 +46,7 @@ test("connected and active is ready, with a pause and a quiet end", () => {
     release: null
   });
   assert.deepEqual(view.settings, { label: "Settings", open: OPEN.OPTIONS });
+  assert.deepEqual(view.show, { label: "Open Ghostlight", kind: "show_ghostlight" });
 });
 
 test("one client browsing is named, several clients are not", () => {
@@ -63,7 +64,7 @@ test("one client browsing is named, several clients are not", () => {
 
 test("held offers a primary resume with the shortcut", () => {
   const view = popup.popupView(snapshot({ control_state: "held" }), { shortcut: SHORTCUT, platform: LINUX });
-  assert.equal(view.light, LIGHT.LIT);
+  assert.equal(view.light, LIGHT.HELD);
   assert.equal(view.title, "Paused");
   assert.equal(view.line, "Agents can't use this browser until you resume.");
   assert.deepEqual(actions(view), {
@@ -76,7 +77,7 @@ test("held offers a primary resume with the shortcut", () => {
 
 test("an ended session offers a new one and no end", () => {
   const view = popup.popupView(snapshot({ control_state: "ended" }), { shortcut: SHORTCUT });
-  assert.equal(view.light, LIGHT.LIT);
+  assert.equal(view.light, LIGHT.WAITING);
   assert.equal(view.title, "Session ended");
   assert.equal(view.line, "Agents can't use this browser until you start a new session.");
   assert.deepEqual(actions(view), {
@@ -85,6 +86,22 @@ test("an ended session offers a new one and no end", () => {
     quiet: null,
     release: null
   });
+});
+
+test("ready, paused and ended show three different lanterns", () => {
+  const lights = ["active", "held", "ended"].map((control) => popup.popupView(snapshot({ control_state: control })).light);
+  assert.deepEqual(lights, [LIGHT.LIT, LIGHT.HELD, LIGHT.WAITING]);
+  assert.equal(new Set(lights).size, 3);
+});
+
+test("every connected state links to the Ghostlight window and no other state does", () => {
+  for (const control of ["active", "held", "ended"]) {
+    assert.deepEqual(popup.popupView(snapshot({ control_state: control })).show, { label: "Open Ghostlight", kind: "show_ghostlight" });
+  }
+  for (const linkState of [shared.LINK_HOST_ABSENT, shared.LINK_SERVICE_OUTDATED, shared.LINK_UNREACHABLE]) {
+    assert.equal(popup.popupView(away(linkState), { platform: WIN }).show, null);
+  }
+  assert.equal(popup.popupView(snapshot({ compatible: false, link_state: shared.LINK_UNREACHABLE })).show, null);
 });
 
 test("there is no key cap without a shortcut", () => {
@@ -181,6 +198,7 @@ test("the connection sentence agrees with the popup for each link state", () => 
       assert.equal(connection.line, view.line2 ? `${view.line} ${view.line2}` : view.line);
       assert.equal(connection.needsSetup, view.primary !== null);
       assert.equal(connection.setupLabel, view.primary ? view.primary.label : null);
+      assert.deepEqual(connection.show, view.show);
     }
   }
   const connected = popup.connection(snapshot(), { platform: WIN });
@@ -188,7 +206,8 @@ test("the connection sentence agrees with the popup for each link state", () => 
     title: "Connected",
     line: "Ghostlight on this computer is answering.",
     needsSetup: false,
-    setupLabel: null
+    setupLabel: null,
+    show: { label: "Open Ghostlight", kind: "show_ghostlight" }
   });
 });
 

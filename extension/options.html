@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Ghostlight in Browser -- Settings</title>
+    <title>Ghostlight in Browser settings</title>
     <link rel="stylesheet" href="kit.css">
     <link rel="stylesheet" href="options.css">
   </head>
@@ -49,7 +49,7 @@
         <div class="row sub-row">
           <div class="text">
             <h3>Action captions</h3>
-            <p>Names each action in a caption as the agent does it.</p>
+            <p>Names each action in a caption at the bottom of the page, with or without effects.</p>
           </div>
           <label class="switch"><input type="checkbox" id="captions" aria-label="Action captions"><span class="slider"></span></label>
         </div>
@@ -71,6 +71,8 @@
 
       <section class="card info">
         <p>Policy and activity are in the Ghostlight window.</p>
+        <button id="show-window" class="gl-quiet" type="button" hidden></button>
+        <p id="show-status" class="action-status" role="status"></p>
       </section>
 
       <p id="save-status" class="gl-sr" role="status"></p>

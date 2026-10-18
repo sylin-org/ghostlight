@@ -23,15 +23,15 @@ gate, the in-place deploy and the owner-held items below.
 | c3-one-vocabulary-and-plain-status | window | todo |
 | c4-rows-and-widths | window | todo |
 | d1-native-frame-fits-the-person | native | todo |
+| f1-extension-popup-and-kit | extension | landed (`fix(extension): the popup tells Paused apart and reaches the window`) |
 | e1-the-rc-commit-tells-the-truth | docs | todo |
 
 ## Held for the owner
 
 - Patch `main`'s 1.x `scripts/get.ps1` (the same SHA256SUMS defect breaks today's public Windows
   install); the owner pushes `main`.
-- Fold the popup fixes into the 2.0 extension before the staged submission (Paused and Session
-  ended no longer look like Ready, an Open Ghostlight link, Pause agents wording), or leave them
-  for the first extension update.
+- The popup fixes fold into the 2.0 extension (owner, 2026-10-18, "Proceed."): slice f1 and the
+  ADR-0200 amendment of that day. The Pause agents wording is not part of f1.
 - The accent rule: the coordinator applies "teal means live" (teal for work happening and the one
   primary action per view) unless the owner rules otherwise.
 - Dispatch the "Build release candidate" workflow as a rehearsal (no tag, sign or publish).
@@ -66,3 +66,15 @@ gate, the in-place deploy and the owner-held items below.
   and, in CI on Windows, the real v1.3.14 SHA256SUMS. `get.sh` already saves with `curl -o` and
   reads the file; its test now serves a release-shaped file. `main`'s 1.x `scripts/get.ps1` has
   the same line (held for the owner above).
+- f1 (j-23, j-32, j-33, j-35, j-36): the popup's Paused shows a held lantern (the waiting ghost
+  with a still amber ember) and an amber title, and Session ended shows the waiting lantern, so
+  neither looks like Ready. The shortcut cap on the teal Resume button takes the button's dark ink
+  (6.4:1), the label stays on one line, and the cap drops below 260px. A quiet "Open Ghostlight"
+  link in the popup and on the options page sends `show_ghostlight` while connected. Captions no
+  longer depend on effects. A code panel's command never wraps and Copy moves under it below
+  1000px. The setup headline balances and its accent never breaks. The options tab title lost its
+  double hyphen, the only typewriter dash in visible extension copy. The window serves the
+  extension's own `kit.css` bytes (`workbench/web/assets.rs`), so the code panel and headline fixes
+  reach its setup view with no second copy to change. The popup foot's Settings link takes the same
+  quiet ink as the new link beside it, so the foot rests in ink. `tests/pages.test.js` runs the
+  popup and options scripts over a fake document. The freeze golden is regenerated from the new zip.

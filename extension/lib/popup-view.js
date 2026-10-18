@@ -12,7 +12,9 @@
 })(globalThis, function createGhostlightPopupView(shared, setup) {
   "use strict";
 
-  const LIGHT = setup.LIGHT;
+  // The popup's lantern: the setup page's lights, plus held, the waiting ghost with an amber ember
+  // that the window and the tray also show for Paused.
+  const LIGHT = Object.freeze({ ...setup.LIGHT, HELD: "held" });
   // The runtime_control intents the popup sends. The orchestrator owns the state each one moves.
   const INTENT = Object.freeze({
     HOLD: "hold",
@@ -52,6 +54,7 @@
     }),
     release: (tabs) => (tabs === 1 ? "Release debugger session (1 tab)" : `Release debugger sessions (${tabs} tabs)`),
     settings: "Settings",
+    show: setup.WORDS.met.action,
     connected: Object.freeze({ title: "Connected", line: "Ghostlight on this computer is answering." })
   });
 
@@ -95,6 +98,12 @@
     return same ? WORDS.oneBrowsing(first) : WORDS.manyBrowsing;
   }
 
+  // The quiet link to the Ghostlight window. The worker can only ask the service to show it over
+  // a live link, so it exists only while connected.
+  function showWindow(kind) {
+    return kind === LINK.CONNECTED ? { label: WORDS.show, kind: setup.SHOW_GHOSTLIGHT } : null;
+  }
+
   // A hold or resume button carries the toggle shortcut when the browser has one.
   function keyed(action, shortcut) {
     return typeof shortcut === "string" && shortcut !== "" ? { ...action, key: shortcut } : action;
@@ -113,6 +122,7 @@
       secondary: null,
       quiet: null,
       release: null,
+      show: showWindow(kind),
       settings: { label: WORDS.settings, open: OPEN.OPTIONS }
     };
     if (kind !== LINK.CONNECTED) {
@@ -126,6 +136,7 @@
       return view;
     }
     if (snapshot.control_state === CONTROL.ENDED) {
+      view.light = LIGHT.WAITING;
       view.title = WORDS.ended.title;
       view.line = WORDS.ended.line;
       view.secondary = { label: WORDS.startSession, intent: INTENT.START_SESSION };
@@ -133,6 +144,7 @@
     }
     view.quiet = { label: WORDS.endSession, intent: INTENT.END_SESSION };
     if (snapshot.control_state === CONTROL.HELD) {
+      view.light = LIGHT.HELD;
       view.title = WORDS.held.title;
       view.line = WORDS.held.line;
       view.primary = keyed({ label: WORDS.resume, intent: INTENT.RESUME }, shortcut);
@@ -145,18 +157,26 @@
   }
 
   // The connection sentence the options page shows. It agrees with the popup for every link state;
-  // needsSetup says the person has a page to open, and setupLabel is that button's name.
+  // needsSetup says the person has a page to open, setupLabel is that button's name, and show is
+  // the same quiet link to the Ghostlight window the popup offers.
   function connection(snapshot, { platform = null } = {}) {
     const kind = link(snapshot);
     if (kind === LINK.CONNECTED) {
-      return { title: WORDS.connected.title, line: WORDS.connected.line, needsSetup: false, setupLabel: null };
+      return {
+        title: WORDS.connected.title,
+        line: WORDS.connected.line,
+        needsSetup: false,
+        setupLabel: null,
+        show: showWindow(kind)
+      };
     }
     const words = disconnected(kind, platform);
     return {
       title: words.title,
       line: words.line2 ? `${words.line} ${words.line2}` : words.line,
       needsSetup: words.action !== null,
-      setupLabel: words.action ? words.action.label : null
+      setupLabel: words.action ? words.action.label : null,
+      show: null
     };
   }
 

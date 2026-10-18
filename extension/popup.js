@@ -39,6 +39,7 @@
   const actions = document.getElementById("actions");
   const problem = document.getElementById("problem");
   const settings = document.getElementById("settings");
+  const show = document.getElementById("show");
 
   // What the connection is when the worker does not answer: the same words as an unreachable link.
   const UNREACHABLE = Object.freeze({
@@ -48,6 +49,8 @@
   let platform = null;
   let shortcut = null;
   let signature = null;
+  // The window link the drawn view offers, or null.
+  let showAction = null;
 
   async function request(message) {
     const response = await chrome.runtime.sendMessage(message);
@@ -150,6 +153,9 @@
     note.textContent = model.note ?? "";
     note.hidden = model.note === null;
     settings.textContent = model.settings.label;
+    showAction = model.show;
+    show.textContent = showAction?.label ?? "";
+    show.hidden = showAction === null;
     renderActions(model);
   }
 
@@ -171,6 +177,10 @@
     settings.addEventListener("click", (event) => {
       event.preventDefault();
       open(view.OPEN.OPTIONS);
+    });
+    // The window link sends the message the drawn view names.
+    show.addEventListener("click", () => {
+      if (showAction) send({ kind: showAction.kind });
     });
     chrome.runtime.onMessage.addListener((message) => { if (message?.kind === MESSAGE.STATE_CHANGED) refresh(); });
     setInterval(refresh, POLL_MS);
