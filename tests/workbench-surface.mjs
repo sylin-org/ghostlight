@@ -758,18 +758,18 @@ const editorHiddenWhenRefused = nodes.get("policy-editor").hidden
   && nodes.get("policy-blocked-reason").textContent.includes("Example Org");
 
 /*
- * A real browser nulls Event.currentTarget at the first await, so withButton must capture the
- * button before it awaits; this checks it against an event that expires the same way.
+ * A real browser nulls Event.currentTarget at the first await, so Re-check must take its button
+ * before it awaits; this checks it against an event that expires the same way.
  */
 const reCheckButton = node("refresh-integrations");
 let dispatchEnded = false;
 const clickEvent = { get currentTarget() { return dispatchEnded ? null : reCheckButton; } };
 queueMicrotask(() => { dispatchEnded = true; });
-let withButtonThrew = null;
+let reCheckThrew = null;
 try {
-  await sandbox.withButton(clickEvent, async () => {}, "done");
+  await elementHandlers.get("refresh-integrations:click")(clickEvent);
 } catch (error) {
-  withButtonThrew = error.message;
+  reCheckThrew = error.message;
 }
 
 // The never-settled treatment: the predicate lives beside the readiness words, and a row the
@@ -1463,7 +1463,7 @@ await controlling.settle();
 await controlling.settle();
 const staleWrite = controlRequests.find((request) => request.path === "/api/policy/user");
 const staleOutcome = {
-  toast: controlling.text("toast").textContent,
+  toast: controlling.text("alert-text").textContent,
   dirty: vm.runInContext("view.draftIsDirty()", controlling.page),
   draft: vm.runInContext("view.draftDocument()", controlling.page),
   reads: controlPolicyReads() - readsBeforeStale
@@ -2117,9 +2117,9 @@ const checks = [
     `settings: ${JSON.stringify(settingsShown)}`],
   ["the editor appears only when authoring is permitted",
     editorShown && editorHiddenWhenRefused],
-  ["withButton re-enables its button after currentTarget has expired, and never throws",
-    withButtonThrew === null && reCheckButton.disabled === false,
-    `threw: ${JSON.stringify(withButtonThrew)}, disabled: ${reCheckButton.disabled}`],
+  ["Re-check re-enables its button after currentTarget has expired, and never throws",
+    reCheckThrew === null && reCheckButton.disabled === false,
+    `threw: ${JSON.stringify(reCheckThrew)}, disabled: ${reCheckButton.disabled}`],
   ["failure reported", reported.some((r) => r.includes("deliberate About failure")),
     `reported: ${JSON.stringify(reported)}`],
   ["the failure names the panel", reported.some((r) => r.includes("painting about"))],

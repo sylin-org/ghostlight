@@ -18,7 +18,7 @@ gate, the in-place deploy and the owner-held items below.
 | a4-adaptive-small-promises | frontdoor | todo |
 | b1-no-tab-never-guesses | agent | landed: with several tabs a call that names none is refused and lists them; no per-caller marker exists (ADR-0198, amendment of 2026-10-18) |
 | b2-page-refusals-say-what-to-do | agent | todo |
-| c1-screen-readers-and-failures | window | todo |
+| c1-screen-readers-and-failures | window | landed (`fix(workbench): the window is calm for a screen reader, and a failure looks like one`): one status line says each settled action, at most one a second; failed and kept rows and the card say so in words; a destination that cannot be read says so in place, with Try again; both dialogs hold focus and give it back |
 | c2-one-legible-type-and-colour-system | window | todo |
 | c3-one-vocabulary-and-plain-status | window | todo |
 | c4-rows-and-widths | window | todo |

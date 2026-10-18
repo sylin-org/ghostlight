@@ -42,6 +42,47 @@
   /** Said after an agent's card copies the id of one of its connections. */
   const CONNECTION_ID_COPIED = "Connection id copied.";
 
+  /**
+   * Said in place of an exception's own text when part of this window could not be drawn. The
+   * exception goes to the console, where a person debugging the window reads it.
+   */
+  const WINDOW_FAULT = "Part of this window could not be drawn. Reopening the window draws it again.";
+
+  /** Said when a request to the service failed without the service saying why. */
+  const NO_ANSWER = "Ghostlight did not answer. Try again in a moment.";
+
+  /** Said when this screen's clipboard would not take what a Copy button put on it. */
+  const COPY_FAILED = "This screen could not copy it. Select the text and copy it by hand.";
+
+  /** What a destination says in place of its content when it could not be read, and its button. */
+  const LOAD_FAILED = Object.freeze({
+    policy: "Ghostlight could not read the policy.",
+    status: "Ghostlight could not read its status.",
+    integrations: "Ghostlight could not look for agents."
+  });
+
+  /** The button beside a destination that could not be read. */
+  const TRY_AGAIN = "Try again";
+
+  /**
+   * The word a settled action that did not succeed carries beside its duration and on the running
+   * card, by the outcome it had. The word, not only its colour, says what happened.
+   */
+  const OUTCOME_WORD = Object.freeze({ failed: "Failed", unknown: "Unknown", kept: "Kept", blocked: "Blocked" });
+
+  /** The small warning mark beside the word of an action that failed. */
+  const OUTCOME_GLYPH = '<svg class="outcome-glyph" viewBox="0 0 16 16" aria-hidden="true">'
+    + '<path d="M8 2.2 14.6 13.6H1.4z"/><path d="M8 6.6v3.2M8 11.6h.01"/></svg>';
+
+  /**
+   * The one sentence a screen reader hears when an action settles: the tool, the outcome word when
+   * it did not succeed, and the row's own sentence, as in "navigate: Opened example.com.".
+   */
+  function actionSaid(tool, sentence, outcome = "") {
+    const name = toolWords(tool);
+    return outcome ? `${name}, ${outcome.toLowerCase()}: ${sentence}` : `${name}: ${sentence}`;
+  }
+
   /** The intake that admitted a session, in the service's wire words. */
   const INTAKE = Object.freeze({ mcp: "mcp", cli: "cli" });
 
@@ -947,7 +988,8 @@
 
   return Object.freeze({ FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
-    POLICY_CHANGED_ELSEWHERE, CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
+    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, OUTCOME_GLYPH, actionSaid,
+    CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun,

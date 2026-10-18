@@ -47,6 +47,8 @@
   --amber: #fbbf24;
   --held: #fbbf24;
   --danger: #f87171;
+  /* A permitted action that failed: its word and duration, softer than a refusal's full red. */
+  --danger-soft: #fca5a5;
   --ok: #4ade80;
 
   --mono: 'Cascadia Code', 'JetBrains Mono', ui-monospace, Consolas, monospace;
@@ -336,6 +338,10 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .hero.blocked .elapsed { color: var(--danger); }
 .outcome { margin-top: 7px; color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
 .hero.blocked .outcome { color: var(--danger); }
+/* A permitted action that failed colours its word and time only: no edge, no glow. One a browser
+   setting kept back stays in ink. */
+.hero.failed .elapsed, .hero.failed .outcome { color: var(--danger-soft); }
+.hero.kept .outcome { color: var(--ink-3); }
 
 .swap-in { animation: swap-in var(--beat-settle) var(--spring) both; }
 @keyframes swap-in { from { opacity: 0; transform: translateY(-9px); } to { opacity: 1; transform: none; } }
@@ -346,7 +352,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .queue-clear { height: 24px; padding: 0 9px; font: 500 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .queue { display: flex; flex-direction: column; }
 .row {
-  display: grid; grid-template-columns: 24px 168px 34px minmax(0, 1fr) 116px 86px 62px 52px 46px;
+  display: grid; grid-template-columns: 24px 168px 34px minmax(0, 1fr) 116px 86px 62px 92px 46px;
   align-items: center; gap: 12px; overflow: hidden;
   min-height: 42px; grid-template-rows: 41px; row-gap: 0; padding: 0 12px 0 11px;
   border-bottom: 1px solid var(--line); border-left: 3px solid var(--cap, var(--cap-read));
@@ -362,11 +368,15 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .row-channel { display: flex; align-items: center; color: var(--faint); }
 .row-channel svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .row-activity { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.row.blocked .row-activity { color: #fca5a5; }
+.row.blocked .row-activity { color: var(--danger-soft); }
 .row-client { overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .row-browser { overflow: hidden; color: var(--muted); font: 400 11px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .row-cap { color: var(--cap, var(--cap-read)); font: 500 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-.row-dur { color: var(--faint); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.row-dur { overflow: hidden; color: var(--faint); font: 400 11px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+/* The word says what happened; the colour only helps the eye find it. */
+.row.failed .row-dur { color: var(--danger-soft); }
+.row.kept .row-dur { color: var(--ink-3); }
+.outcome-glyph { width: 10px; height: 10px; margin-right: 3px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .row-when { color: var(--faint); font: 400 10px/1 var(--mono); text-align: right; }
 .row.running .row-dur { color: var(--a); }
 /* A settled row whose document never settled, or whose readiness could not be observed, carries
@@ -439,7 +449,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agents-search kbd { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); pointer-events: none; }
 .agents-search input:not(:placeholder-shown) + kbd { display: none; }
 /* Positioned so the screen-reader words inside each entry stay inside the rail's own scroll. */
-.agents-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; margin-right: -6px; padding: 0 6px 32px 0; scrollbar-width: thin; }
+.agents-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -6px 0 -4px; padding: 0 6px 32px 4px; scrollbar-width: thin; }
 .agents-list::-webkit-scrollbar, .agents-pane::-webkit-scrollbar { width: 10px; }
 .agents-list::-webkit-scrollbar-thumb, .agents-pane::-webkit-scrollbar-thumb { border: 3px solid var(--bg); border-radius: 10px; background: #2a2830; }
 .agents-empty { margin: 16px 10px; color: var(--muted); font-size: 12px; }
@@ -636,6 +646,10 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .severity.passing { color: var(--ok); }
 .severity.warning { color: var(--held); }
 .severity.failing { color: var(--danger); }
+/* A destination that could not be read says so in place of what it would show. */
+.load-failure { display: flex; align-items: center; gap: 9px; margin: 8px 0 0; color: var(--danger); font-size: 12.5px; }
+.load-failure .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--danger); }
+.load-failure .ghost-button { margin-left: 6px; }
 
 .strip { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin-top: 22px; padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
 .strip h2 { color: var(--ink); font-size: 14px; font-weight: 400; }
@@ -653,7 +667,8 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; color: var(--muted); background: rgba(255, 255, 255, .03); font: 10px/1.3 var(--mono); }
 .palette-results { max-height: min(420px, 52vh); overflow-y: auto; padding: 6px; }
 .hit { display: grid; width: 100%; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; padding: 9px 10px; border-radius: 7px; color: inherit; text-align: left; }
-.hit:hover, .hit:focus-visible { outline: 0; background: rgba(255, 255, 255, .05); }
+.hit:hover, .hit:focus-visible { background: rgba(255, 255, 255, .05); }
+.hit:focus-visible { outline: 2px solid rgba(var(--argb), .7); outline-offset: -2px; }
 .hit-kind { padding: 3px 6px; border: 1px solid var(--line-2); border-radius: 5px; color: var(--muted); font: 500 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 .hit strong, .hit small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hit strong { color: var(--ink-2); font-size: 12.5px; font-weight: 400; }
@@ -662,7 +677,9 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 
 /* ------------------------------ toast, dialog --------------------------- */
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 40; max-width: 420px; padding: 11px 14px; border: 1px solid var(--line-2); border-radius: 9px; color: var(--ink-2); background: #17161b; box-shadow: 0 18px 50px rgba(0, 0, 0, .45); font-size: 12px; animation: toast-in var(--beat-arrive) var(--spring) both; }
-.toast.error { border-color: rgba(248, 113, 113, .45); color: #fecaca; background: #241419; }
+.toast.error { display: flex; align-items: baseline; gap: 14px; border-color: rgba(248, 113, 113, .45); color: #fecaca; background: #241419; }
+.toast.error .link-button { flex: none; color: #fecaca; }
+
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; padding: 20px; background: rgba(9, 8, 11, .72); place-items: center; backdrop-filter: blur(4px); animation: fade-in var(--beat-glance) ease-out both; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -675,7 +692,7 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 
 /* Narrow: the capability already reads as the left edge, and the age matters least. */
 @media (max-width: 1040px) {
-  .row { grid-template-columns: 24px 156px 34px minmax(0, 1fr) 116px 52px; }
+  .row { grid-template-columns: 24px 156px 34px minmax(0, 1fr) 116px 92px; }
   .row-cap, .row-browser, .row-when { display: none; }
 }
 
@@ -686,7 +703,7 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
   .state-facts { display: none; }
   .tab { padding-inline: 9px; }
   .hero { grid-template-columns: 54px minmax(0, 1fr) auto; gap: 14px; }
-  .row { grid-template-columns: 24px 140px minmax(0, 1fr) 52px; }
+  .row { grid-template-columns: 24px 140px minmax(0, 1fr) 92px; }
   .row-client, .row-channel { display: none; }
 }
 

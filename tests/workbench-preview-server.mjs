@@ -397,6 +397,7 @@ const fixtureFor = (stage, noBrowsers, connected) => `window.__GHOSTLIGHT_PREVIE
 window.__GHOSTLIGHT_SETUP_STATES__ = ${JSON.stringify(setupStates)};
 window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(stage)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
+window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyView)};
 (() => {
   const preview = window.__GHOSTLIGHT_PREVIEW__;
   const listeners = [];
@@ -527,7 +528,7 @@ window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
     if (command === "quit_ghostlight") return { message: "Ghostlight is quitting." };
     if (command === "workbench_snapshot") return preview;
     if (command === "workbench_search") return [];
-    if (command === "workbench_policy") return policyView;
+    if (command === "workbench_policy") return window.__GHOSTLIGHT_POLICY__;
     if (command === "preview_user_policy") {
       return {
         considered: 42,

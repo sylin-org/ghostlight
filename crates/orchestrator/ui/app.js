@@ -28,7 +28,7 @@
  */
 
 const {
-  FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, COPIED_SETUP, COPIED_COMMAND,
+  FEED_LIMIT, SEARCH_VIEWS, POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, COPIED_SETUP, COPIED_COMMAND,
   WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, CONNECTION_ID_COPIED, SETTINGS, DEFAULT_VIEW,
   SETUP_ADDRESS, SETUP, AGENTS, parseAddress, addressOf, screenState, byteSize
 } = globalThis.GhostlightWords;
@@ -49,17 +49,40 @@ const transport = globalThis.GhostlightTransport.overHttp({
  *
  * A surface that throws where nobody is looking is indistinguishable from a surface that is
  * merely slow, and the person waiting has no way to tell which. Every failure gets a visible
- * notice; identical failures are stated once so a repeating fault does not bury the screen.
+ * notice in the window's own words; the exception's text goes to the console, where a person
+ * debugging the window reads it. Identical failures are stated once so a repeating fault does not
+ * bury the screen.
  */
 let lastFailure = null;
 function reportFailure(what, error) {
+  if (!logFailure(what, error)) return;
+  if (view?.el.alert) view.toast(WINDOW_FAULT, true);
+}
+
+/** Write a failure to the console once. Answers whether it was new. */
+function logFailure(what, error) {
   const detail = `${what}: ${error?.message ?? error}`;
-  if (lastFailure === detail) return;
+  if (lastFailure === detail) return false;
   lastFailure = detail;
   // The console is the last channel that still works when the surface itself is broken, so a
   // failure goes there whether or not there is anything left to render a notice with.
   console.error(detail, error);
-  if (view?.el.toast) view.toast(detail, true);
+  return true;
+}
+
+/**
+ * What a person reads for a request that failed: the service's own sentence when it refused, and
+ * the window's when it did not answer. An exception's text is never shown.
+ */
+const failureWords = (error) => (globalThis.GhostlightTransport.isRefusal(error) ? error.message : NO_ANSWER);
+
+/** Say that a request failed, until the person dismisses it. */
+const sayFailure = (error) => view.toast(failureWords(error), true);
+
+/** Say that this screen's clipboard refused a copy; the console keeps why. */
+function copyFailed(error) {
+  logFailure("copying", error);
+  view.toast(COPY_FAILED, true);
 }
 
 /** Run one fallible step. Report what went wrong, and tell the caller it did not happen. */
@@ -215,10 +238,14 @@ let helloSeen = false;
 /* Acts waiting for the change they caused to reach this page. */
 const waiters = new Set();
 
+/**
+ * Read a fresh snapshot into the cache. Answers whether the service answered. One the person asked
+ * for (`quiet` false) that cannot be read says so on Status, in place of what it would have shown.
+ */
 async function resync({ rebuildFeed = false, quiet = true } = {}) {
   if (!transport.available) {
     store.setConnected(false);
-    return;
+    return false;
   }
   let snapshot;
   try {
@@ -226,15 +253,17 @@ async function resync({ rebuildFeed = false, quiet = true } = {}) {
   } catch (error) {
     // Losing the orchestrator is an ordinary condition with a state of its own to show.
     store.setConnected(false);
-    if (!quiet) view.toast(String(error), true);
-    return;
+    if (!quiet) view.loadFailed("status");
+    return false;
   }
   store.setConnected(true);
+  view.loaded("status");
   // A surface that failed to draw is not a surface that lost its connection. One catch around
   // both said "Not connected" for either, which sends the reader looking at the wrong thing.
   attempt("rendering the snapshot", () =>
     store.applySnapshot(snapshot, rebuildFeed || store.needsRebuild(snapshot)));
   caughtUp();
+  return true;
 }
 
 /** A snapshot is in: replay what arrived while it was on its way, and wake the acts that waited. */
@@ -352,7 +381,7 @@ function openedView(name) {
   if (!showsData()) return;
   if (name === "integrations" && allowed(ACT.rescan)) {
     outdated.delete("integrations");
-    rescan().catch((error) => view.toast(String(error), true));
+    lookForAgents();
     return;
   }
   for (const part of [...outdated]) {
@@ -365,6 +394,22 @@ function openedView(name) {
 /** Look for the supported clients again, and bring the cache up to date. */
 async function rescan() {
   await settled(await transport.refreshHarnesses());
+}
+
+/**
+ * Look for the agents for Integrations. Answers whether the look was made; one that could not be
+ * made says so on Integrations, with Try again.
+ */
+async function lookForAgents() {
+  try {
+    await rescan();
+  } catch (error) {
+    logFailure("looking for agents", error);
+    view.loadFailed("integrations");
+    return false;
+  }
+  view.loaded("integrations");
+  return true;
 }
 
 /* --------------------------------- policy ------------------------------- */
@@ -380,16 +425,29 @@ let policyWriting = false;
  * Pulling it on arrival and on demand keeps the safety pull small.
  */
 async function loadPolicy({ keepDraft = false } = {}) {
-  if (!transport.available) return;
+  if (!transport.available) return false;
+  let compiled;
   try {
-    const compiled = await transport.policy();
-    policyEtag = compiled.etag;
-    view.policy(compiled, { keepDraft });
-    outdated.delete("policy");
+    compiled = await transport.policy();
   } catch (error) {
-    reportFailure("reading the policy", error);
+    // The page says so in place of its loading line, with Try again; the console keeps the cause.
+    logFailure("reading the policy", error);
+    view.loadFailed("policy");
+    return false;
   }
+  view.loaded("policy");
+  policyEtag = compiled.etag;
+  if (!attempt("drawing the policy", () => view.policy(compiled, { keepDraft }))) return false;
+  outdated.delete("policy");
+  return true;
 }
+
+/** What Try again reads once more, by the destination that could not be read. */
+const RETRY = Object.freeze({
+  policy: () => loadPolicy({ keepDraft: view.draftIsDirty() }),
+  status: () => resync({ quiet: false }),
+  integrations: () => lookForAgents()
+});
 
 async function checkPolicy() {
   const draft = view.draftDocument();
@@ -398,7 +456,7 @@ async function checkPolicy() {
     view.previewResult(await transport.previewPolicy(draft));
   } catch (error) {
     view.previewCleared();
-    view.editorStatus(String(error));
+    view.editorStatus(failureWords(error));
   }
 }
 
@@ -414,7 +472,7 @@ async function writePolicy(write, refused) {
   } catch (error) {
     if (error?.code === globalThis.GhostlightTransport.STALE) {
       // Rules that moved on are read again, and the person's draft stays exactly as it is.
-      view.toast(String(error), true);
+      sayFailure(error);
       await loadPolicy({ keepDraft: true });
     } else {
       refused(error);
@@ -428,11 +486,11 @@ async function applyPolicy() {
   const draft = view.draftDocument();
   if (!draft) return;
   // A refused document changed nothing, so the draft stays exactly as the person left it.
-  await writePolicy(() => transport.applyPolicy(draft, policyEtag), (error) => view.editorStatus(String(error)));
+  await writePolicy(() => transport.applyPolicy(draft, policyEtag), (error) => view.editorStatus(failureWords(error)));
 }
 
 async function removePolicy() {
-  await writePolicy(() => transport.removePolicy(policyEtag), (error) => view.toast(String(error), true));
+  await writePolicy(() => transport.removePolicy(policyEtag), sayFailure);
 }
 
 /* -------------------------------- intents ------------------------------- */
@@ -444,7 +502,7 @@ async function applyIntent(intent) {
     view.toast(result.message);
     await settled(result);
   } catch (error) {
-    view.toast(String(error), true);
+    sayFailure(error);
   }
 }
 
@@ -456,7 +514,7 @@ async function continueInWindow(address = addressOf(view.showing(), view.showing
   try {
     await transport.continueInWindow(address);
   } catch (error) {
-    view.toast(String(error), true);
+    sayFailure(error);
   }
 }
 
@@ -468,7 +526,7 @@ async function setWatching(watch) {
     view.toast(watch ? WATCHING_TURNED_ON : WATCHING_TURNED_OFF);
     await settled(part);
   } catch (error) {
-    view.toast(String(error), true);
+    sayFailure(error);
     await resync();
   }
 }
@@ -482,7 +540,7 @@ async function setDiagnostics(turningOn) {
     view.toast(`Process diagnostics are ${report.layer === "off" ? "off" : `on (${report.layer})`}.`);
     await settled(report);
   } catch (error) {
-    view.toast(String(error), true);
+    sayFailure(error);
     await resync();
   }
 }
@@ -492,7 +550,7 @@ async function revealDiagnostics() {
   try {
     await transport.revealDiagnostics();
   } catch (error) {
-    view.toast(String(error), true);
+    sayFailure(error);
   }
 }
 
@@ -503,7 +561,7 @@ async function testNotification() {
     await transport.testNotification();
     view.toast(TEST_NOTIFICATION_SENT);
   } catch (error) {
-    view.toast(String(error), true);
+    sayFailure(error);
   }
 }
 
@@ -523,7 +581,7 @@ async function copyAddress(address) {
     await transport.copyText(address);
     view.toast(ADDRESS_COPIED);
   } catch (error) {
-    view.toast(String(error), true);
+    copyFailed(error);
   }
 }
 
@@ -533,7 +591,7 @@ async function copyConnectionId(ids) {
     await transport.copyText(ids);
     view.toast(CONNECTION_ID_COPIED);
   } catch (error) {
-    view.toast(String(error), true);
+    copyFailed(error);
   }
 }
 
@@ -556,7 +614,7 @@ async function handleHarnessAction(button) {
       await transport.openHarnessDownload(id);
       view.toast(`Opened the official ${name} download page.`);
     } catch (error) {
-      view.toast(String(error), true);
+      sayFailure(error);
     }
     return;
   }
@@ -565,7 +623,7 @@ async function handleHarnessAction(button) {
       await transport.copyText(harnessText(id, copyKind));
       view.toast(copyKind === COPY_KIND.command ? COPIED_COMMAND : COPIED_SETUP);
     } catch (error) {
-      view.toast(String(error), true);
+      copyFailed(error);
     }
     return;
   }
@@ -584,22 +642,19 @@ async function handleHarnessAction(button) {
     // An agent that changed since it was drawn is not an agent that could not be set up. One that
     // could not is shown, with the entry to paste by hand.
     if (operation === "manage" && error?.code !== globalThis.GhostlightTransport.STALE) view.showAgent(id);
-    view.toast(String(error), true);
+    sayFailure(error);
     await resync();
   } finally {
     store.endHarness(id);
   }
 }
 
-/** Look for the agents again from a Re-check inside the Integrations pane. */
+/** Look for the agents again from a Re-check, in the page heading or inside the Integrations pane. */
 async function recheckFrom(button) {
   if (button.disabled) return;
   button.disabled = true;
   try {
-    await rescan();
-    view.toast(AGENTS.rechecked);
-  } catch (error) {
-    view.toast(String(error), true);
+    if (await lookForAgents()) view.toast(AGENTS.rechecked);
   } finally {
     button.disabled = false;
   }
@@ -614,7 +669,7 @@ async function search(query) {
   try {
     view.searchResults(await transport.search(trimmed));
   } catch (error) {
-    view.searchFailed(error);
+    view.searchFailed(failureWords(error));
   }
 }
 
@@ -633,21 +688,7 @@ async function openDestination(destination) {
   try {
     await transport.openDestination(destination);
   } catch (error) {
-    view.toast(String(error), true);
-  }
-}
-
-async function withButton(event, work, done) {
-  // Capture the button: event.currentTarget is null once an async listener awaits.
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    await work();
-    if (done) view.toast(done);
-  } catch (error) {
-    view.toast(String(error), true);
-  } finally {
-    button.disabled = false;
+    sayFailure(error);
   }
 }
 
@@ -688,7 +729,8 @@ async function refreshSetup() {
   try {
     await takeSetup(() => transport.setupPart());
   } catch (error) {
-    reportFailure("reading setup", error);
+    logFailure("reading setup", error);
+    sayFailure(error);
   }
 }
 
@@ -724,7 +766,7 @@ function openSetup() {
   // The agent rows are as fresh as the last look; look once more as the view opens.
   if (!setupRescanned && allowed(ACT.rescan)) {
     setupRescanned = true;
-    rescan().catch((error) => view.toast(String(error), true));
+    rescan().catch(sayFailure);
   }
 }
 
@@ -780,7 +822,7 @@ async function setupAction(action, row) {
     }
   } catch (error) {
     setupScreen.clearPending(row.id);
-    view.toast(String(error), true);
+    sayFailure(error);
     await resync();
   }
 }
@@ -863,6 +905,8 @@ function wire() {
     if (harness) handleHarnessAction(harness);
     const recheck = event.target.closest("[data-agents-recheck]");
     if (recheck) recheckFrom(recheck);
+    const retry = event.target.closest("[data-retry]");
+    if (retry) RETRY[retry.dataset.retry]?.();
     const carryOn = event.target.closest("[data-continue]");
     if (carryOn) continueInWindow(carryOn.dataset.address || undefined);
     const destination = event.target.closest("[data-destination]");
@@ -926,11 +970,11 @@ function wire() {
   el["discard-policy"].addEventListener("click", () => discardPolicyDraft());
   el["remove-policy"].addEventListener("click", () => removePolicy());
   el["refresh-policy"].addEventListener("click", () => {
-    loadPolicy().then(() => view.toast("Policy re-read."));
+    loadPolicy().then((read) => { if (read) view.toast("Policy re-read."); });
   });
 
   el["refresh-status"].addEventListener("click", () => {
-    resync({ quiet: false }).then(() => view.toast("Status refreshed."));
+    resync({ quiet: false }).then((read) => { if (read) view.toast("Status refreshed."); });
   });
 
   el["clear-monitor"].addEventListener("click", () => {
@@ -939,8 +983,7 @@ function wire() {
     view.toast(`Cleared ${cleared} ${cleared === 1 ? "entry" : "entries"} from this view. Audit history is unchanged.`);
   });
 
-  el["refresh-integrations"].addEventListener("click", (event) =>
-    withButton(event, rescan, AGENTS.rechecked));
+  el["refresh-integrations"].addEventListener("click", (event) => recheckFrom(event.currentTarget));
 
   el["setup-integrations"].addEventListener("click", async (event) => {
     const button = event.currentTarget;
@@ -950,7 +993,7 @@ function wire() {
       await settled(result);
       view.toast(result.message, result.failures.length > 0);
     } catch (error) {
-      view.toast(String(error), true);
+      sayFailure(error);
     } finally {
       button.disabled = button.dataset.actionable !== "true";
     }
@@ -1017,7 +1060,8 @@ async function start() {
     context = await transport.context();
   } catch (error) {
     store.setConnected(false);
-    reportFailure("reading what this page may do", error);
+    logFailure("reading what this page may do", error);
+    sayFailure(error);
     return;
   }
   if (context.context === CONTEXT_CLOSED) {

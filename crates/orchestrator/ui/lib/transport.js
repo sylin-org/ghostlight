@@ -181,6 +181,9 @@
     return typeof result?.seq === "number" ? result.seq : undefined;
   }
 
+  /** Every refusal this module made, so a caller can tell the service's sentence from an exception. */
+  const refusals = new WeakSet();
+
   /**
    * A refusal, as the page reads it.
    *
@@ -188,8 +191,16 @@
    * status and the code for a caller that cares.
    */
   function refusal(message, status, code) {
-    return Object.freeze({ message, status, code, toString: () => message });
+    const refused = Object.freeze({ message, status, code, toString: () => message });
+    refusals.add(refused);
+    return refused;
   }
+
+  /**
+   * Whether `value` is a refusal the service answered: its message is the service's own sentence,
+   * which a person may read. Anything else that was thrown is an exception, whose text is not.
+   */
+  const isRefusal = (value) => typeof value === "object" && value !== null && refusals.has(value);
 
   /** The refusal an unsuccessful response holds. */
   async function refusalOf(response) {
@@ -513,6 +524,6 @@
   }
 
   return Object.freeze({
-    overHttp, flatten, seqOf, STALE, SNAPSHOT_PARTS, ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND
+    overHttp, flatten, seqOf, isRefusal, STALE, SNAPSHOT_PARTS, ACT, CONTEXT_CLOSED, OPENER_SERVICE, COPY_KIND
   });
 });

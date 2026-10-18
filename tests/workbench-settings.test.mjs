@@ -115,6 +115,11 @@ class Element {
     }
   }
 
+  prepend(...nodes) {
+    for (const node of nodes) node.parent = this;
+    this.children.unshift(...nodes);
+  }
+
   replaceChildren(...nodes) {
     this.children = [];
     this.append(...nodes);
@@ -224,10 +229,13 @@ function page() {
     addEventListener: (type, handler) => {
       if (!listeners.has(type)) listeners.set(type, []);
       listeners.get(type).push(handler);
+    },
+    removeEventListener: (type, handler) => {
+      listeners.set(type, (listeners.get(type) ?? []).filter((each) => each !== handler));
     }
   };
   const dispatch = (type, event) => {
-    for (const handler of listeners.get(type) ?? []) handler(event);
+    for (const handler of [...(listeners.get(type) ?? [])]) handler(event);
   };
   const el = (id) => {
     const found = byId.get(id);
@@ -1095,8 +1103,9 @@ test("the window comes up over the real markup and reports nothing", async () =>
 test("a snapshot the window cannot draw is reported as a drawing fault, not as a lost connection", async () => {
   // The answer reads, but it names no service, which the cache cannot fold in.
   const shown = await windowOver({ answer: healthy(snapshotAnswer({ service: null })) });
-  assert.match(said(shown, "toast"), /^rendering the snapshot: /);
-  assert.equal(shown.el("toast").hidden, false);
+  assert.equal(said(shown, "alert-text"), Words.WINDOW_FAULT);
+  assert.equal(shown.el("alert").hidden, false);
+  assert.ok(shown.logged.some((line) => /^rendering the snapshot: /.test(line)), "the console keeps the cause");
   assert.equal(shown.evaluate("store.connected()"), true, "the service answered, so the window is connected");
   assert.notEqual(said(shown, "state-word"), Words.RECONNECTING);
 });
@@ -1113,11 +1122,12 @@ test("a snapshot the service never gives is a lost connection, and nothing else 
 test("an error that escapes a listener or a promise reaches the person using the window", async () => {
   const shown = await windowOver({ answer: healthy() });
   shown.fire("error", { error: new Error("a listener broke") });
-  assert.equal(said(shown, "toast"), "surface: a listener broke");
-  assert.equal(shown.el("toast").hidden, false);
+  assert.equal(said(shown, "alert-text"), Words.WINDOW_FAULT, "the person reads the window's words, not the exception's");
+  assert.equal(shown.el("alert").hidden, false);
   shown.fire("unhandledrejection", { reason: new Error("a promise broke") });
-  assert.equal(said(shown, "toast"), "surface: a promise broke");
-  assert.equal(shown.logged.length, 2, "the console hears each failure too");
+  assert.equal(said(shown, "alert-text"), Words.WINDOW_FAULT);
+  assert.deepEqual(shown.logged, ["surface: a listener broke", "surface: a promise broke"],
+    "the console hears each failure, in its own words");
 });
 
 test("a listener that cannot attach costs its own wiring, not the first snapshot", async () => {
@@ -1127,7 +1137,8 @@ test("a listener that cannot attach costs its own wiring, not the first snapshot
     };
   };
   const shown = await windowOver({ answer: healthy(), before });
-  assert.match(said(shown, "toast"), /^wiring the surface: no listener here/);
+  assert.equal(said(shown, "alert-text"), Words.WINDOW_FAULT);
+  assert.ok(shown.logged.some((line) => /^wiring the surface: no listener here/.test(line)));
   assert.ok(shown.requests.some((path) => path.startsWith("/api/snapshot?parts=status")), "the snapshot was still read");
   assert.equal(said(shown, "state-word"), "Ready");
 });
@@ -2030,4 +2041,323 @@ test("About wears the published card and the product's own artwork, at a whole m
   assert.ok(rendered >= native, "the sprite is drawn below its own size");
   assert.equal(rendered % native, 0, `${rendered}px from a ${native}px sprite splits its pixels unevenly`);
   assert.equal(naming(".tcg img.px")[0].declarations["image-rendering"], "pixelated", "the sprite is smoothed");
+});
+
+/* ------------------------- a screen reader and a failure ------------------------- */
+
+/** The fewest milliseconds the view leaves between two sentences it says (view.js SAID_GAP_MS). */
+const SAID_GAP = 1000;
+
+/** The view over the page's markup with a clock this test moves, and the work it was asked to do later. */
+function clocked() {
+  const shown = page();
+  const later = [];
+  let clock = 10_000;
+  globalThis.document = shown.document;
+  globalThis.window = shown.window;
+  const view = View.create({ now: () => clock, schedule: (work, ms) => later.push({ work, ms }) });
+  const run = () => {
+    for (const { work } of later.splice(0)) work();
+  };
+  return { ...shown, view, later, run, pass: (ms) => { clock += ms; } };
+}
+
+/** A read the window watched start, as the live stream names it. */
+const runningRead = (invocation) => Entries.entryFromOperation({
+  invocation, workspace: "w1", tool: "browser_read", activity: "Reading page", capability: "read",
+  phase: "running", started_at_ms: 1
+});
+
+test("the running card is not a live region; one quiet status line outside it is", () => {
+  const hero = /<article[^>]*\bid="hero"[^>]*>/.exec(markup)[0];
+  assert.doesNotMatch(hero, /aria-live|role=/, "a stopwatch rewrites the card ten times a second");
+  const line = /<([a-z]+)[^>]*\bid="action-said"[^>]*>/.exec(markup)[0];
+  assert.match(line, /role="status"/);
+  assert.match(line, /class="sr-only"/);
+  const shown = page();
+  assert.equal(shown.el("action-said").closest("#hero"), null);
+  assert.ok(shown.el("action-said").closest("#view-monitor"), "it speaks only while At a glance is shown");
+  assert.match(/<div[^>]*\bid="hero-med"[^>]*>/.exec(markup)[0], /aria-hidden="true"/);
+});
+
+test("a running action says nothing, and its clock and medallions are hidden from a screen reader", () => {
+  const shown = clocked();
+  const running = runningRead("live-1");
+  shown.view.promote(running, null, [running]);
+  shown.run();
+  assert.equal(said(shown, "action-said"), "");
+  assert.match(shown.el("hero-right").innerHTML, /id="elapsed" aria-hidden="true"/);
+  const newest = Entries.entryFromRecord(settledRead({ invocation: "newest" }), null);
+  shown.view.rebuildFeed([newest, running]);
+  assert.match(queueRows(shown)[0].innerHTML, /^<div class="med-mini" aria-hidden="true">/);
+});
+
+test("a settled action is said once, in the row's own words, and what the feed already held is not", () => {
+  const shown = clocked();
+  const history = Entries.entryFromRecord(settledRead({ invocation: "old" }), null);
+  shown.view.rebuildFeed([history]);
+  shown.view.hero(history, false);
+  assert.equal(said(shown, "action-said"), "", "history drawn on arrival is not news");
+
+  const running = runningRead("read-2");
+  shown.view.promote(running, history, [running, history]);
+  const done = Entries.entryFromRecord(settledRead({ invocation: "read-2" }), running);
+  shown.view.hero(done, false);
+  assert.equal(said(shown, "action-said"), "read: Read 1,240 words from example.com.");
+  shown.el("action-said").textContent = "";
+  shown.view.hero(done, false);
+  assert.equal(said(shown, "action-said"), "", "a repaint of the same action says nothing again");
+});
+
+test("a burst of settled actions reaches a screen reader as at most one sentence a second, the latest", () => {
+  const shown = clocked();
+  const settle = (invocation, summary) => {
+    const entry = Entries.entryFromRecord(settledRead({ invocation, summary }), null);
+    shown.view.promote(entry, null, [entry]);
+  };
+  settle("a", "Read 10 words from a.example.");
+  assert.equal(said(shown, "action-said"), "read: Read 10 words from a.example.");
+  shown.pass(200);
+  settle("b", "Read 20 words from b.example.");
+  settle("c", "Read 30 words from c.example.");
+  assert.equal(said(shown, "action-said"), "read: Read 10 words from a.example.", "nothing more inside the second");
+  assert.equal(shown.later.length, 1, "one sentence waits, not two");
+  assert.equal(shown.later[0].ms, SAID_GAP - 200);
+  shown.pass(SAID_GAP - 200);
+  shown.run();
+  assert.equal(said(shown, "action-said"), "read: Read 30 words from c.example.");
+});
+
+test("a failed, a kept and a refused action each say their outcome in the sentence", () => {
+  const shown = clocked();
+  const cases = [
+    [{ invocation: "f", tool: "browser_click", status: "failed", summary: "Could not find that control." },
+      "click, failed: Could not find that control."],
+    [{ invocation: "k", tool: "browser_tabs", status: "blocked", summary: "Kept the tab open." },
+      "tabs, kept: Kept the tab open."],
+    [{ invocation: "r", tool: "browser_execute", allowed: false, status: "blocked", reason: "denied_by_policy", summary: "" },
+      "execute, blocked: denied by policy"]
+  ];
+  for (const [record, sentence] of cases) {
+    shown.pass(SAID_GAP);
+    const entry = Entries.entryFromRecord(settledRead(record), null);
+    shown.view.promote(entry, null, [entry]);
+    assert.equal(said(shown, "action-said"), sentence);
+  }
+});
+
+test("a failed row says Failed beside its duration with a mark, in the soft red, on its own capability edge", () => {
+  const { shown, cell } = rowOf(settledRead({ invocation: "fail-1", tool: "browser_click", capability: "action",
+    status: "failed", effect: "none", summary: "Could not find that control." }));
+  const [row] = queueRows(shown);
+  assert.match(row.className, /\bfailed\b/);
+  assert.match(row.className, /\bcap-action\b/, "the capability edge is unchanged");
+  assert.doesNotMatch(row.className, /\bblocked\b/);
+  assert.equal(cell("row-dur").textContent, "Failed 1.2s");
+  assert.ok(cell("row-dur").children.some((child) => child.classes.has("outcome-glyph")));
+  assert.equal(naming(".row.failed .row-dur")[0].declarations.color, "var(--danger-soft)");
+  assert.equal(naming(":root")[0].declarations["--danger-soft"], "#fca5a5");
+  assert.ok(!RULES.some((rule) => rule.selectors.some((selector) => selector.startsWith(".row.failed")
+    && /border/.test(Object.keys(rule.declarations).join(" ")))), "a failure does not take the refusal's edge");
+});
+
+test("an action whose effect cannot be confirmed reads Unknown in the failed tone", () => {
+  const { shown, cell } = rowOf(settledRead({ invocation: "unknown-1", status: "unknown", effect: "unknown" }));
+  assert.match(queueRows(shown)[0].className, /\bfailed\b/);
+  assert.equal(cell("row-dur").textContent, "Unknown 1.2s");
+});
+
+test("a kept row says Kept beside its duration in ink, with no mark, and a refusal keeps its own treatment", () => {
+  const kept = rowOf(settledRead({ invocation: "kept-1", tool: "browser_tabs", capability: "action",
+    status: "blocked", effect: "none", summary: "Kept the tab open: the preserve-tabs setting is on." }));
+  assert.match(queueRows(kept.shown)[0].className, /\bkept\b/);
+  assert.equal(kept.cell("row-dur").textContent, "Kept 1.2s");
+  assert.equal(kept.cell("row-dur").children.some((child) => child.classes.has("outcome-glyph")), false);
+  assert.equal(naming(".row.kept .row-dur")[0].declarations.color, "var(--ink-3)");
+
+  const refused = rowOf(settledRead({ invocation: "refused-1", allowed: false, reason: "denied_by_policy", status: "blocked" }));
+  const className = queueRows(refused.shown)[0].className;
+  assert.match(className, /\bblocked\b/);
+  assert.doesNotMatch(className, /\b(failed|kept)\b/);
+  assert.equal(refused.cell("row-dur").textContent, "1.2s");
+
+  const plain = rowOf(settledRead({ invocation: "fine-1" }));
+  assert.doesNotMatch(queueRows(plain.shown)[0].className, /\b(failed|kept|blocked)\b/);
+  assert.equal(plain.cell("row-dur").textContent, "1.2s");
+});
+
+test("a failed hero colours its word and time in the soft red, with no red edge and no new glow", () => {
+  const shown = drawing();
+  shown.view.hero(Entries.entryFromRecord(settledRead({ status: "failed", summary: "Could not find that control." }), null), false);
+  assert.ok(shown.el("hero").classes.has("failed"));
+  assert.equal(shown.el("hero").classes.has("blocked"), false);
+  assert.equal(drawn(shown.el("hero-right").innerHTML).wearing("outcome")[0].textContent, "Failed");
+  for (const selector of [".hero.failed .elapsed", ".hero.failed .outcome"]) {
+    assert.equal(naming(selector)[0].declarations.color, "var(--danger-soft)", selector);
+  }
+  assert.deepEqual(RULES.filter((rule) => rule.selectors.some((selector) => /^\.hero\.failed(::|\s+\.med)/.test(selector))), [],
+    "the edge, the glow and the medallion stay as they were");
+
+  const kept = drawing();
+  kept.view.hero(Entries.entryFromRecord(settledRead({ status: "blocked", summary: "Kept the tab open." }), null), false);
+  assert.ok(kept.el("hero").classes.has("kept"));
+  assert.equal(drawn(kept.el("hero-right").innerHTML).wearing("outcome")[0].textContent, "Kept");
+});
+
+/** A window whose policy read fails `failures` times and then answers. */
+async function policyWindow(failures) {
+  let left = failures;
+  const answer = (path) => {
+    if (path === "/api/policy") {
+      if (left > 0) {
+        left -= 1;
+        return new Error("ReferenceError: policyView is not defined");
+      }
+      return { headline: "No rules apply.", capabilities: [], ceilings: [], layers: [], etag: "tag-1" };
+    }
+    return healthy()(path);
+  };
+  const shown = await windowOver({ answer });
+  shown.evaluate("go(\"policy\")");
+  for (let turn = 0; turn < 3; turn += 1) await settle();
+  return shown;
+}
+
+/** The Try again button a failure line holds, as drawn. */
+const retryIn = (line) => [...drawn(line.innerHTML).root.descendants()].find((node) => node.tag === "button");
+
+test("a policy that cannot be read says so in place of its loading line, with Try again, and no exception", async () => {
+  const shown = await policyWindow(2);
+  const failure = shown.el("policy-failure");
+  assert.equal(failure.hidden, false);
+  assert.equal(shown.el("policy-headline").hidden, true, "the loading sentence does not stay");
+  const line = drawn(failure.innerHTML);
+  assert.ok(line.root.children.some((node) => node.textContent === Words.LOAD_FAILED.policy));
+  assert.ok(line.root.children.some((node) => node.classes.has("dot")), "the failing tone's dot");
+  const retry = retryIn(failure);
+  assert.equal(retry.textContent, Words.TRY_AGAIN);
+  assert.ok(retry.classes.has("ghost-button"));
+  assert.equal(shown.el("toast").hidden, true);
+  assert.equal(shown.el("alert").hidden, true, "the page says it once, in its place");
+  assert.doesNotMatch(failure.innerHTML, /ReferenceError|policyView/);
+  assert.ok(shown.logged.some((detail) => String(detail).startsWith("reading the policy")), "the console keeps the cause");
+  assert.equal(naming(".load-failure")[0].declarations.color, "var(--danger)");
+
+  const reads = () => shown.requests.filter((path) => path === "/api/policy").length;
+  const before = reads();
+  shown.click(retry);
+  for (let turn = 0; turn < 3; turn += 1) await settle();
+  assert.equal(reads(), before + 1, "Try again reads the policy once more");
+  assert.equal(failure.hidden, false, "a second failure still says so");
+
+  shown.click(retryIn(failure));
+  for (let turn = 0; turn < 3; turn += 1) await settle();
+  assert.equal(failure.hidden, true, "a policy that reads takes the failure away");
+  assert.equal(shown.el("policy-headline").hidden, false);
+  assert.equal(said(shown, "policy-headline"), "No rules apply.");
+});
+
+test("Status and Integrations each have a failure line of their own", () => {
+  const shown = drawing();
+  for (const destination of ["status", "integrations"]) {
+    const line = shown.el(`${destination}-failure`);
+    assert.equal(line.hidden, true);
+    assert.ok(line.closest(`#view-${destination}`));
+    shown.view.loadFailed(destination);
+    assert.equal(line.hidden, false);
+    assert.equal(retryIn(line).dataset.retry, destination);
+    assert.ok(drawn(line.innerHTML).root.children.some((node) => node.textContent === Words.LOAD_FAILED[destination]));
+    shown.view.loaded(destination);
+    assert.equal(line.hidden, true);
+  }
+});
+
+test("a failure the service did not word is said in the window's words, as an alert that stays until dismissed", async () => {
+  const shown = await windowOver({ answer: healthy() });
+  shown.evaluate("sayFailure(new Error(\"TypeError: Failed to fetch\"))");
+  assert.equal(said(shown, "alert-text"), Words.NO_ANSWER);
+  assert.equal(shown.el("alert").hidden, false);
+  assert.match(/<div[^>]*\bid="alert"[^>]*>/.exec(markup)[0], /role="alert"/);
+  for (const handler of shown.el("alert-dismiss").listeners.click) handler({});
+  assert.equal(shown.el("alert").hidden, true);
+});
+
+/* --------------------------------- dialog focus -------------------------------- */
+
+/** The view over the page, with the document's focus following the fake elements' own. */
+function focusable() {
+  const shown = drawing();
+  Object.defineProperty(shown.document, "activeElement", { get: () => Element.focused ?? null, configurable: true });
+  const key = (name, shiftKey = false) => {
+    let prevented = false;
+    shown.dispatch("keydown", { key: name, shiftKey, preventDefault: () => { prevented = true; } });
+    return prevented;
+  };
+  return { ...shown, key };
+}
+
+test("the search palette takes focus, keeps Tab inside, and gives focus back to the control that opened it", () => {
+  const shown = focusable();
+  const opener = shown.el("refresh-status");
+  opener.focus();
+  shown.view.openPalette();
+  assert.equal(Element.focused, shown.el("palette-query"));
+  assert.equal(shown.el("app-shell").inert, true, "the window behind the palette is inert");
+
+  const hit = new Element("button", { class: "hit" });
+  shown.el("palette").querySelectorAll = () => [shown.el("palette-query"), hit];
+  hit.focus();
+  assert.equal(shown.key("Tab"), true);
+  assert.equal(Element.focused, shown.el("palette-query"), "Tab from the last stop wraps to the first");
+  assert.equal(shown.key("Tab", true), true);
+  assert.equal(Element.focused, hit, "Shift+Tab from the first stop wraps to the last");
+
+  shown.view.closePalette();
+  assert.equal(shown.el("app-shell").inert, false);
+  assert.equal(Element.focused, opener);
+  assert.equal(shown.key("Tab"), false, "once closed, Tab is the page's again");
+});
+
+test("ArrowDown and ArrowUp walk from the search box through the hits, and a focused hit wears the ring", () => {
+  const shown = focusable();
+  shown.view.openPalette();
+  const first = new Element("button", { class: "hit" });
+  const second = new Element("button", { class: "hit" });
+  shown.el("palette-results").querySelectorAll = () => [first, second];
+  const press = (name) => {
+    for (const handler of shown.el("palette").listeners.keydown ?? []) handler({ key: name, preventDefault() {} });
+  };
+  press("ArrowDown");
+  assert.equal(Element.focused, first);
+  press("ArrowDown");
+  press("ArrowDown");
+  assert.equal(Element.focused, second, "the last hit stays");
+  press("ArrowUp");
+  press("ArrowUp");
+  assert.equal(Element.focused, shown.el("palette-query"));
+  assert.ok(naming(".hit:focus-visible").some((rule) => /^2px solid/.test(rule.declarations.outline ?? "")));
+});
+
+test("the confirmation takes focus on Cancel, and Escape or an answer gives it back, or to the page when its control is gone", async () => {
+  const shown = focusable();
+  const cancel = new Element("button");
+  const accept = new Element("button");
+  shown.el("confirm-dialog").querySelector = (selector) => (selector === "[data-confirm=\"cancel\"]" ? cancel : accept);
+  const opener = new Element("button");
+  opener.focus();
+  const asked = shown.view.confirmRemoval("Zed", "settings.json", 0);
+  assert.equal(Element.focused, cancel);
+  assert.equal(shown.el("app-shell").inert, true);
+  shown.key("Escape");
+  assert.equal(await asked, false);
+  assert.equal(shown.el("app-shell").inert, false);
+  assert.equal(Element.focused, opener);
+
+  const gone = new Element("button");
+  gone.focus();
+  const again = shown.view.confirmRemoval("Zed", "settings.json", 0);
+  gone.isConnected = false;
+  shown.view.answerConfirmation(true);
+  assert.equal(await again, true);
+  assert.equal(Element.focused, shown.el("main-content"), "a control that left the page hands focus to the page");
 });

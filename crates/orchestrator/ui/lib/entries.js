@@ -72,7 +72,31 @@
   const settledMs = entry =>
     entry.durationMs || (entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
   const isRunning = entry => !entry.settled && (entry.phase === "waiting" || entry.phase === "running" || entry.phase === "held");
+
+  /** Whether policy refused the action: the one outcome drawn in the full red treatment. */
   const isBlocked = entry => entry.phase === "blocked" || entry.allowed === false;
 
-  return Object.freeze({ entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isBlocked });
+  /**
+   * The terminal statuses a record names, in the service's wire words (work/result.rs `Status`).
+   */
+  const STATUS = Object.freeze({
+    succeeded: "succeeded", blocked: "blocked", failed: "failed", cancelled: "cancelled", unknown: "unknown"
+  });
+
+  /**
+   * Whether a permitted action settled without doing what it was asked: it failed, or what it did
+   * cannot be confirmed. A refusal is not a failure; it has its own treatment.
+   */
+  const isFailed = entry => Boolean(entry.settled) && !isBlocked(entry)
+    && (entry.status === STATUS.failed || entry.status === STATUS.unknown);
+
+  /**
+   * Whether a permitted action was held back by a browser setting rather than by policy, such as a
+   * tab the preserve-tabs setting kept open: the record is blocked, but policy allowed it.
+   */
+  const isKept = entry => Boolean(entry.settled) && !isBlocked(entry) && entry.status === STATUS.blocked;
+
+  return Object.freeze({
+    STATUS, entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isBlocked, isFailed, isKept
+  });
 });

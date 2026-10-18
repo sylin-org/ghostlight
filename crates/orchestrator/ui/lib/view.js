@@ -20,14 +20,24 @@
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, stopwatch, ago, shortId,
+    OUTCOME_WORD, OUTCOME_GLYPH, actionSaid, LOAD_FAILED, TRY_AGAIN,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun
   } = globalThis.GhostlightWords;
-  const { settledMs, isRunning, isBlocked } = globalThis.GhostlightEntries;
+  const { settledMs, isRunning, isBlocked, isFailed, isKept } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 
   const TOAST_MS = 4200;
+
+  /**
+   * The fewest milliseconds between two sentences the live region says, so a burst of quick actions
+   * reaches a screen reader as its latest action, not as a stream.
+   */
+  const SAID_GAP_MS = 1000;
+
+  /** What can take focus inside a dialog, in the order Tab walks it. */
+  const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
 
   /** The page disclosure key of the At a glance summary, which opens its shelves. */
   const GLANCE_KEY = "glance";
@@ -55,7 +65,10 @@
     Object.freeze({ line: "closed-policy", section: "view-policy" })
   ]);
 
-  function create({ sessionFor = () => null, coverageFor = () => null, onFailure = () => {} } = {}) {
+  function create({
+    sessionFor = () => null, coverageFor = () => null, onFailure = () => {},
+    now = () => Date.now(), schedule = (work, ms) => setTimeout(work, ms)
+  } = {}) {
     // Every element with an id, looked up once from the document, so a new id needs no list.
     const el = Object.create(null);
     for (const node of document.querySelectorAll("[id]")) el[node.id] = node;
@@ -435,13 +448,71 @@
       const outcome = running
         ? words(entry.phase)
         : isBlocked(entry)
-          ? "blocked"
-          : words(entry.status ?? "completed");
-      return `<div class="elapsed" id="elapsed">${escapeHtml(elapsed)}</div>`
+          ? OUTCOME_WORD.blocked
+          : outcomeWord(entry) || words(entry.status ?? "completed");
+      // The stopwatch is for the eye: a screen reader hears the settled sentence instead.
+      return `<div class="elapsed" id="elapsed" aria-hidden="true">${escapeHtml(elapsed)}</div>`
         + `<div class="outcome">${escapeHtml(outcome)}</div>`;
     }
 
+    /**
+     * The word a settled action that did not succeed carries, or "" for one that did: Failed, or
+     * Unknown when what it did cannot be confirmed, for a permitted action that did not do what it
+     * was asked, and Kept for one a browser setting held back. A refusal has its own treatment.
+     */
+    function outcomeWord(entry) {
+      if (isFailed(entry)) return OUTCOME_WORD[entry.status];
+      if (isKept(entry)) return OUTCOME_WORD.kept;
+      return "";
+    }
+
+    /** The class a settled outcome adds to its row and to the running card. */
+    function outcomeClass(entry) {
+      if (isFailed(entry)) return "failed";
+      if (isKept(entry)) return "kept";
+      return "";
+    }
+
+    /*
+     * The live region: one sentence per settled action, and never a running clock.
+     *
+     * The card and the rows are not live regions, because a stopwatch rewrites them ten times a
+     * second. An action is said once, when it settles while this window watches; what the feed
+     * already held when it was drawn is history and is not said. A burst of actions closer together
+     * than SAID_GAP_MS is said as its latest.
+     */
+    const spoken = new Set();
+    let toSay = null;
+    let sayTimer = null;
+    let saidAt = -Infinity;
+
+    /** Say a settled action once, at most one sentence a second. */
+    function say(entry) {
+      if (!entry?.settled || spoken.has(entry.invocation)) return;
+      spoken.add(entry.invocation);
+      const outcome = isBlocked(entry) ? OUTCOME_WORD.blocked : outcomeWord(entry);
+      toSay = actionSaid(entry.tool, describe(entry), outcome);
+      if (sayTimer !== null) return;
+      const wait = saidAt + SAID_GAP_MS - now();
+      if (wait <= 0) speak();
+      else sayTimer = schedule(speak, wait);
+    }
+
+    function speak() {
+      sayTimer = null;
+      if (toSay === null) return;
+      el["action-said"].textContent = toSay;
+      toSay = null;
+      saidAt = now();
+    }
+
+    /** Draw the running card, and say the action when it has just settled. */
     function hero(entry, animate) {
+      paintHero(entry, animate);
+      say(entry);
+    }
+
+    function paintHero(entry, animate) {
       if (!entry) {
         el.hero.className = "hero";
         el["hero-med"].innerHTML = GLYPHS.scan;
@@ -453,6 +524,8 @@
       el.hero.className = `hero ${capabilityClass(entry)}`;
       if (isRunning(entry)) el.hero.classList.add("live");
       if (isBlocked(entry)) el.hero.classList.add("blocked");
+      const outcome = outcomeClass(entry);
+      if (outcome) el.hero.classList.add(outcome);
       el["hero-med"].innerHTML = glyphFor(entry);
       replaceHistoryMarkup(el["hero-body"], heroMarkup(entry));
       el["hero-right"].innerHTML = heroRightMarkup(entry);
@@ -473,14 +546,19 @@
       const time = running
         ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
         : duration(settledMs(entry));
-      return `<div class="med-mini">${glyphFor(entry)}</div>`
+      // An action that did not succeed says so in words beside its duration; a failure adds a mark.
+      const word = outcomeWord(entry);
+      const said = word
+        ? `${isFailed(entry) ? OUTCOME_GLYPH : ""}${escapeHtml(word)} ${escapeHtml(time)}`
+        : escapeHtml(time);
+      return `<div class="med-mini" aria-hidden="true">${glyphFor(entry)}</div>`
         + `<button class="row-tool" type="button" title="${escapeHtml(entry.tool ?? "")}" data-action-details="${escapeHtml(detailsKey)}" aria-expanded="${open}" aria-controls="${escapeHtml(detailsId)}">${escapeHtml(toolWords(entry.tool))}</button>`
         + intakeMarkup(entry)
         + `<div class="row-activity">${escapeHtml(describe(entry))}</div>`
         + agentMarkup("div", "row-client", entry)
         + `<div class="row-browser">${escapeHtml(browserFor(entry))}</div>`
         + `<div class="row-cap">${escapeHtml(entry.capability ?? "")}</div>`
-        + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${escapeHtml(time)}</div>`
+        + `<div class="row-dur${readinessNeedsAttention(entry) ? " unsettled" : ""}">${said}</div>`
         + `<div class="row-when">${escapeHtml(entry.endedAt ? ago(entry.endedAt) : "")}</div>`
         + `<div class="row-history action-details" id="${escapeHtml(detailsId)}"${open ? "" : " hidden"}>${heroMarkup(entry)}</div>`;
     }
@@ -489,6 +567,8 @@
       let name = `row ${capabilityClass(entry)}`;
       if (isRunning(entry)) name += " running";
       if (isBlocked(entry)) name += " blocked";
+      const outcome = outcomeClass(entry);
+      if (outcome) name += ` ${outcome}`;
       return name;
     }
 
@@ -508,11 +588,13 @@
       if (!node) return;
       node.className = rowClass(entry);
       replaceHistoryMarkup(node, rowMarkup(entry));
+      say(entry);
     }
 
     function drop(entry) {
       rowNodes.get(entry.invocation)?.remove();
       rowNodes.delete(entry.invocation);
+      spoken.delete(entry.invocation);
       for (const key of expandedHistory) {
         if (key.startsWith(`${entry.invocation}:`)) expandedHistory.delete(key);
       }
@@ -531,7 +613,10 @@
       for (const key of expandedHistory) {
         if (!feed.some((entry) => key.startsWith(`${entry.invocation}:`))) expandedHistory.delete(key);
       }
-      hero(feed[0], false);
+      // What the feed already holds settled is history, and is not said.
+      spoken.clear();
+      for (const entry of feed) if (entry.settled) spoken.add(entry.invocation);
+      paintHero(feed[0], false);
       const rows = document.createDocumentFragment();
       for (const entry of feed.slice(1)) rows.append(buildRow(entry, false));
       el.queue.append(rows);
@@ -2010,24 +2095,121 @@
       writeAddress(addressOf(view, currentSection));
     }
 
+    /**
+     * Say what an act did. A sentence of success leaves on its own after TOAST_MS; a failure is
+     * an alert that stays until the person dismisses it or a later failure takes its place.
+     */
     function toast(message, error = false) {
+      if (error) {
+        el["alert-text"].textContent = message;
+        el.alert.hidden = false;
+        return;
+      }
       clearTimeout(toastTimer);
       el.toast.textContent = message;
-      el.toast.className = `toast${error ? " error" : ""}`;
       el.toast.hidden = false;
       toastTimer = setTimeout(() => { el.toast.hidden = true; }, TOAST_MS);
     }
 
+    el["alert-dismiss"]?.addEventListener("click", () => { el.alert.hidden = true; });
+
+    /* ---------------------------- load failures --------------------------- */
+
+    /** The line a destination shows while it is being read, where it has one. */
+    const LOADING_LINE = Object.freeze({ policy: "policy-headline" });
+
+    /**
+     * Say, in place of what a destination is waiting to show, that it could not be read, with a
+     * button that reads it again. `destination` is a key of LOAD_FAILED.
+     */
+    function loadFailed(destination) {
+      const line = el[`${destination}-failure`];
+      line.innerHTML = `<span class="dot" aria-hidden="true"></span><span>${escapeHtml(LOAD_FAILED[destination])}</span>`
+        + `<button class="ghost-button" type="button" data-retry="${escapeHtml(destination)}">${escapeHtml(TRY_AGAIN)}</button>`;
+      line.hidden = false;
+      const loading = LOADING_LINE[destination];
+      if (loading) el[loading].hidden = true;
+    }
+
+    /** Take a destination's failure line away once it has been read. */
+    function loaded(destination) {
+      el[`${destination}-failure`].hidden = true;
+      const loading = LOADING_LINE[destination];
+      if (loading) el[loading].hidden = false;
+    }
+
+    /* ------------------------------- dialogs ------------------------------ */
+
+    /*
+     * The window's two dialogs, the search palette and the confirmation, hold focus while open.
+     *
+     * Opening one remembers the control that held focus, makes the window behind it inert and moves
+     * focus in; Tab and Shift+Tab stay inside it; closing it gives the window back and returns
+     * focus to that control, or to the page when the control is gone.
+     */
+    let modal = null;
+
+    function holdFocus(box, first) {
+      const opener = document.activeElement;
+      const keep = (event) => {
+        if (event.key !== "Tab") return;
+        const stops = [...box.querySelectorAll(FOCUSABLE)].filter((stop) => !stop.hidden);
+        if (!stops.length) {
+          event.preventDefault();
+          return;
+        }
+        const at = stops.indexOf(document.activeElement);
+        const to = event.shiftKey
+          ? (at <= 0 ? stops.at(-1) : null)
+          : (at < 0 || at === stops.length - 1 ? stops[0] : null);
+        if (to) {
+          event.preventDefault();
+          to.focus();
+        }
+      };
+      el["app-shell"].inert = true;
+      document.addEventListener("keydown", keep);
+      modal = { opener, keep };
+      first.focus();
+    }
+
+    function releaseFocus() {
+      if (!modal) return;
+      const { opener, keep } = modal;
+      modal = null;
+      document.removeEventListener("keydown", keep);
+      el["app-shell"].inert = false;
+      const back = opener && opener !== document.body && opener.isConnected !== false ? opener : el["main-content"];
+      back.focus?.({ preventScroll: true });
+    }
+
     function openPalette() {
+      if (modal) return;
       el.palette.hidden = false;
       el["palette-query"].value = "";
       el["palette-results"].innerHTML = "";
-      el["palette-query"].focus();
+      holdFocus(el.palette, el["palette-query"]);
     }
 
-    const closePalette = () => { el.palette.hidden = true; };
+    function closePalette() {
+      if (el.palette.hidden) return;
+      el.palette.hidden = true;
+      releaseFocus();
+    }
+
     const paletteOpen = () => !el.palette.hidden;
     const paletteQuery = () => el["palette-query"].value;
+
+    // ArrowDown and ArrowUp walk the input and the hits below it.
+    el.palette?.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      const stops = [el["palette-query"], ...el["palette-results"].querySelectorAll(".hit")];
+      const at = stops.indexOf(document.activeElement);
+      if (at < 0) return;
+      const to = stops[event.key === "ArrowDown" ? Math.min(at + 1, stops.length - 1) : Math.max(at - 1, 0)];
+      event.preventDefault();
+      to.focus();
+    });
 
     function searchResults(hits) {
       el["palette-results"].innerHTML = hits.length
@@ -2037,11 +2219,12 @@
         : '<div class="palette-empty">No matching Ghostlight records.</div>';
     }
 
-    const searchFailed = (error) =>
-      { el["palette-results"].innerHTML = `<div class="palette-empty">${escapeHtml(String(error))}</div>`; };
+    /** Say in the palette that the search failed, in `sentence`, never an exception's text. */
+    const searchFailed = (sentence) =>
+      { el["palette-results"].innerHTML = `<div class="palette-empty">${escapeHtml(sentence)}</div>`; };
 
     function confirmHarnessChange(title, detail, action) {
-      if (confirmation) return Promise.resolve(false);
+      if (confirmation || modal) return Promise.resolve(false);
       el["confirm-title"].textContent = title;
       el["confirm-detail"].textContent = detail;
       const accept = el["confirm-dialog"].querySelector('[data-confirm="accept"]');
@@ -2051,12 +2234,13 @@
           el["confirm-dialog"].hidden = true;
           confirmation = null;
           document.removeEventListener("keydown", onKeyDown);
+          releaseFocus();
           resolve(confirmed);
         };
         const onKeyDown = (event) => { if (event.key === "Escape") finish(false); };
         confirmation = finish;
         el["confirm-dialog"].hidden = false;
-        el["confirm-dialog"].querySelector('[data-confirm="cancel"]').focus();
+        holdFocus(el["confirm-dialog"], el["confirm-dialog"].querySelector('[data-confirm="cancel"]'));
         document.addEventListener("keydown", onKeyDown);
       });
     }
@@ -2134,6 +2318,7 @@
       policy, draftDocument, draftIsDirty, editRule, toggleCapability, ruleAction, addRule, toggleRule,
       setPermission, setChoice, setSacred,
       discardDraft, renderRules, previewResult, previewCleared, editorStatus,
+      loadFailed, loaded,
       openPalette, closePalette, paletteOpen, paletteQuery, searchResults, searchFailed,
       confirmRemoval, confirmFix, answerConfirmation,
       tickElapsed, tickAges, armCard

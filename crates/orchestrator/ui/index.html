@@ -53,11 +53,12 @@
         <div class="connections" id="connections"></div>
         <p id="audit-health" class="coverage-note" role="status" hidden></p>
 
-        <article class="hero" id="hero" aria-live="polite">
+        <article class="hero" id="hero">
           <div class="med" id="hero-med" aria-hidden="true"></div>
           <div class="hero-body" id="hero-body"></div>
           <div class="hero-right" id="hero-right"></div>
         </article>
+        <p class="sr-only" id="action-said" role="status"></p>
 
         <div class="queue-head">
           <span>More activity</span>
@@ -89,6 +90,7 @@
             <p class="agents-caption" id="integrations-caption" aria-live="polite"></p>
           </div>
         </div>
+        <p class="load-failure" id="integrations-failure" hidden></p>
         <div class="continue-line" id="integrations-continue" hidden></div>
         <div class="agents">
           <nav class="agents-rail" aria-label="Agents">
@@ -113,6 +115,7 @@
           </div>
           <button class="ghost-button" type="button" id="refresh-status">Refresh</button>
         </div>
+        <p class="load-failure" id="status-failure" hidden></p>
         <p class="service-line" id="status-service"></p>
         <div class="card-grid" id="diagnostic-grid"></div>
         <p class="colophon" id="colophon"></p>
@@ -124,6 +127,7 @@
             <span class="kicker">What agents may do here, and who decided</span>
             <h1 id="policy-heading">Policy</h1>
             <p id="policy-headline">Reading the policy that applies to this machine.</p>
+            <p class="load-failure" id="policy-failure" hidden></p>
           </div>
           <button class="ghost-button" type="button" id="refresh-policy">Refresh</button>
         </div>
@@ -444,6 +448,10 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="toast error" id="alert" role="alert" hidden>
+    <span id="alert-text"></span>
+    <button class="link-button" type="button" id="alert-dismiss">Dismiss</button>
+  </div>
 
   <div class="dialog-backdrop" id="confirm-dialog" hidden>
     <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">

@@ -1049,8 +1049,8 @@ async function pageChecks() {
     await page.click(page.row("chrome").button);
     add("a step the service refuses puts the row back and says why",
       page.row("chrome").detail === "Not added" && page.row("chrome").button !== null
-        && page.el("toast").textContent === "Chrome is no longer offered.",
-      show({ row: page.row("chrome"), toast: page.el("toast").textContent }));
+        && page.el("alert-text").textContent === "Chrome is no longer offered.",
+      show({ row: page.row("chrome"), alert: page.el("alert-text").textContent }));
   }
   return checks;
 }
