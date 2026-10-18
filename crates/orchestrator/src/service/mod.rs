@@ -119,6 +119,17 @@ fn published_detail(endpoint: Option<&str>, workbench: Option<&WorkbenchAddress>
     )
 }
 
+/// Record in diagnostics that this start failed, with the whole chain of `error`: a started
+/// service's own output goes nowhere, so this is the line a person reads.
+fn startup_failed(diagnostics: &DiagnosticsHub, error: &anyhow::Error) {
+    diagnostics.sink().emit(
+        ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
+        ghostlight_bridge::diagnostics::Level::Error,
+        None,
+        &format!("service startup: {error:#}"),
+    );
+}
+
 /// The request that ends the service's wait for a quit, installed by the process that serves.
 pub type QuitSignal = Arc<dyn Fn() + Send + Sync>;
 
@@ -290,12 +301,7 @@ impl ServiceHost {
                         &format!("{}: {QUIT_HELD}", terms.reason.as_str()),
                     );
                 } else if !error.is::<AuthorityAlreadyRunning>() {
-                    diagnostics.sink().emit(
-                        ghostlight_bridge::diagnostics::event::PROCESS_FAILED,
-                        ghostlight_bridge::diagnostics::Level::Error,
-                        None,
-                        &format!("service startup: {error:#}"),
-                    );
+                    startup_failed(&diagnostics, error);
                 }
             })
     }
@@ -475,8 +481,13 @@ impl ServiceHost {
         // Edges that served an earlier service find this one from here on, so a call with no
         // browser waits for them from this moment, not from construction.
         self.browser.endpoint_published();
-        let listener =
-            Arc::new(Listener::bind_first(&self.home).context("bind the relay endpoint")?);
+        let listener = match Listener::bind_first(&self.home).context("bind the relay endpoint") {
+            Ok(listener) => Arc::new(listener),
+            Err(error) => {
+                startup_failed(&self.diagnostics, &error);
+                return Err(error);
+            }
+        };
         let thread = spawn_listener(Arc::clone(&listener), Arc::clone(&self.intake));
         *bound = Some(Bound { listener, thread });
         self.ready.settle();

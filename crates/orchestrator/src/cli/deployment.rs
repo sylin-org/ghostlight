@@ -62,8 +62,8 @@ pub fn run(request: &Request) -> anyhow::Result<()> {
             Stream::Problem => eprintln!("{}", line.text),
         }
     }
-    if outcome.service_started == Some(false) {
-        return Err(ServiceDidNotStart(layout.bin()).into());
+    if let Some(failure) = ServiceDidNotStart::of(&outcome, &layout) {
+        return Err(failure.into());
     }
     Ok(())
 }
@@ -240,6 +240,7 @@ mod tests {
             &Outcome {
                 plan: plan(mode, layout, deletions),
                 service_started: started,
+                start_failure: None,
                 registrations: None,
                 flatpak: Vec::new(),
                 left_behind,
@@ -354,6 +355,7 @@ mod tests {
                 vec![first.clone(), second.clone()],
             ),
             service_started: Some(true),
+            start_failure: None,
             registrations: None,
             flatpak: Vec::new(),
             left_behind,
@@ -405,6 +407,7 @@ mod tests {
         let outcome = Outcome {
             plan: plan(Mode::Release, &layout, Vec::new()),
             service_started: Some(true),
+            start_failure: None,
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),

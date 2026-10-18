@@ -106,13 +106,41 @@ pub fn payload_other_build(directory: &str) -> String {
     )
 }
 
-/// The new service did not answer in time.
+/// What follows when the new service did not answer, said after each reason.
+const NEXT_LAUNCH_INSTALLS_AGAIN: &str =
+    "The installation record was not written, so the next launch installs again";
+
+/// The new service ran but did not answer in time.
 #[must_use]
 pub fn service_did_not_start(bin: &str, seconds: u64) -> String {
     format!(
-        "The Ghostlight service in {bin} did not start within {seconds} s. The installation \
-         record was not written, so the next launch installs again"
+        "The Ghostlight service in {bin} did not start within {seconds} s. \
+         {NEXT_LAUNCH_INSTALLS_AGAIN}"
     )
+}
+
+/// The new service's process could not be created, for the system's `reason`.
+#[must_use]
+pub fn service_could_not_start(bin: &str, reason: &str) -> String {
+    format!(
+        "The Ghostlight service in {bin} could not be started: {reason}. \
+         {NEXT_LAUNCH_INSTALLS_AGAIN}"
+    )
+}
+
+/// The new service stopped while starting, for the `reason` it recorded.
+#[must_use]
+pub fn service_stopped_because(bin: &str, reason: &str) -> String {
+    format!(
+        "The Ghostlight service in {bin} stopped while starting: {reason}. \
+         {NEXT_LAUNCH_INSTALLS_AGAIN}"
+    )
+}
+
+/// The new service stopped while starting and recorded no reason.
+#[must_use]
+pub fn service_stopped(bin: &str) -> String {
+    format!("The Ghostlight service in {bin} stopped while starting. {NEXT_LAUNCH_INSTALLS_AGAIN}")
 }
 
 /// The files of an earlier Ghostlight installation were moved into the home.
@@ -389,6 +417,9 @@ mod tests {
             payload_in_place("d"),
             payload_other_build("d"),
             service_did_not_start("bin", 30),
+            service_could_not_start("bin", "r"),
+            service_stopped_because("bin", "r"),
+            service_stopped("bin"),
             removed_development_marker("m"),
             removed_version_directory("d"),
             archived_version_audit("a"),

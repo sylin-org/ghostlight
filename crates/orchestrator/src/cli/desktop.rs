@@ -9,6 +9,7 @@
 //! its endpoint as soon as it has started (ADR-0199 Decision 5), and the shell that shows the
 //! window and the tray is started by presence (`service::presence`).
 
+use std::fs;
 use std::io;
 use std::path::Path;
 use std::sync::mpsc;
@@ -16,10 +17,11 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::Context;
 use ghostlight_relay::os::session;
 use ghostlight_relay::protocol::StartReason;
 
+use crate::install::layout::Layout;
+use crate::install::record;
 use crate::language::environment::SESSION_LISTENER_FAILED;
 use crate::service::{Quit, ServiceHost};
 
@@ -84,12 +86,30 @@ impl Starter for Detached {
 /// nonzero status and a diagnostics event, when it is not accepting openings in time.
 pub fn serve(reason: StartReason) -> anyhow::Result<()> {
     let home = ghostlight_relay::home::home()?;
-    settle_serve(serve_in(
+    let ended = serve_in(
         &home,
         reason,
         listen_for_session_end,
         ServiceHost::start_waiting,
-    ))
+    );
+    record_start_failure(&home, &ended);
+    settle_serve(ended)
+}
+
+/// Leave the reason a start failed in the home's start-failure record, where its starter reads
+/// it: a started service's output goes nowhere. Meeting the running service and being held back
+/// by Quit are not failures and leave nothing.
+fn record_start_failure(home: &Path, ended: &anyhow::Result<()>) {
+    let Err(error) = ended else {
+        return;
+    };
+    if error.is::<crate::service::AuthorityAlreadyRunning>()
+        || error.is::<crate::service::QuitLatched>()
+    {
+        return;
+    }
+    let reason = format!("{error:#}\n");
+    let _ = record::atomic_replace(&Layout::new(home).start_failure(), reason.as_bytes());
 }
 
 /// Listen for the end of the session from this process's start.
@@ -135,7 +155,9 @@ fn serve_in<L>(
     host.expect_ready_by(host.ready_deadline(), || {
         std::process::exit(READY_STALLED_EXIT)
     })?;
-    host.publish_ready().context("bind the relay endpoint")?;
+    host.publish_ready()?;
+    // This start answers now, so a reason an earlier one recorded no longer applies.
+    let _ = fs::remove_file(Layout::new(home).start_failure());
     eprintln!("Ghostlight {} ready", env!("CARGO_PKG_VERSION"));
     // A quit signal that is never made, because the service was dropped, also ends the wait.
     let _ = quit_received.recv();
@@ -327,6 +349,65 @@ mod tests {
         assert!(settle_serve(Err(crate::service::QuitLatched.into())).is_ok());
         assert!(settle_serve(Err(anyhow::anyhow!("the endpoint could not be bound"))).is_err());
         assert!(settle_serve(Ok(())).is_ok());
+    }
+
+    #[test]
+    fn a_failed_start_leaves_its_reason_and_a_refusal_to_start_leaves_none() {
+        let home = crate::service::test_home::TestHome::new("start-failure");
+        let record = Layout::new(home.path()).start_failure();
+        record_start_failure(
+            home.path(),
+            &Err(crate::service::AuthorityAlreadyRunning.into()),
+        );
+        record_start_failure(home.path(), &Err(crate::service::QuitLatched.into()));
+        record_start_failure(home.path(), &Ok(()));
+        assert!(!record.exists());
+        let failed =
+            Err(anyhow::anyhow!("path must be shorter than SUN_LEN")
+                .context("bind the relay endpoint"));
+        record_start_failure(home.path(), &failed);
+        assert_eq!(
+            fs::read_to_string(&record).unwrap(),
+            "bind the relay endpoint: path must be shorter than SUN_LEN\n"
+        );
+    }
+
+    #[test]
+    fn a_service_that_publishes_removes_the_reason_an_earlier_start_left() {
+        let home = crate::service::test_home::TestHome::new("start-failure-cleared");
+        let path = home.path().to_path_buf();
+        let record = Layout::new(&path).start_failure();
+        fs::create_dir_all(record.parent().unwrap()).unwrap();
+        fs::write(&record, "an earlier reason\n").unwrap();
+        let probe = path.clone();
+        let quitter = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if crate::cli::client::status_at(&probe).is_ok() {
+                    let gone = !Layout::new(&probe).start_failure().exists();
+                    let _ = crate::cli::client::control_at(
+                        &probe,
+                        ghostlight_relay::protocol::Control::Quit {
+                            reason: ghostlight_relay::protocol::QuitReason::Replace,
+                        },
+                    );
+                    return gone;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            false
+        });
+        serve_in(
+            &path,
+            StartReason::Command,
+            |_| Ok(()),
+            |home, _| ServiceHost::start(home),
+        )
+        .unwrap();
+        assert!(
+            quitter.join().unwrap(),
+            "the record was gone once the service answered"
+        );
     }
 
     /// A starter that starts a real service in the test home and remembers why it was asked.

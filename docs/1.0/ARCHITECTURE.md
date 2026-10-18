@@ -149,7 +149,11 @@ beside each copy records what was copied, so an install that fails before this s
 by the next one by the same rule),
 archive the 1.x audit log, delete the 1.x lifecycle files with the installation record last,
 start `bin/ghostlight-service serve --reason update`, and write `install.json` only once a service answers
-a control status with an instance other than the one it replaced. The quit is a control `quit` for
+a control status with an instance other than the one it replaced. A start that fails says why: a
+service whose start fails writes the reason to `run/start-failure` (its own output goes nowhere)
+and to diagnostics, and removes the record once it serves; the installer stops waiting as soon as
+no process runs the service image, and names the spawn error, the recorded reason, or the 30 s
+timeout. The quit is a control `quit` for
 replacement, and the installer waits up to 10 s for `run/service.lock` to be free; an earlier
 development build that cannot be asked, or an installed image that still runs, is stopped by its
 exact image.

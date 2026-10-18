@@ -84,6 +84,10 @@ const READY_WAIT: Duration = Duration::from_secs(30);
 /// Pause between asks for a control status.
 const READY_POLL: Duration = Duration::from_millis(100);
 
+/// How long a started service has before the installer may conclude it stopped: no process runs
+/// its image and nothing answers. The new process runs its image well within this.
+const STOPPED_GRACE: Duration = Duration::from_secs(2);
+
 /// The relay revision of the development builds that preceded relay 4. They hold no service lock
 /// and cannot be asked to quit, so the installer stops their exact images instead.
 const EARLIER_DEVELOPMENT_RELAY: &str = "3";
@@ -182,8 +186,30 @@ pub trait ProcessControl {
     /// for it.
     fn start_serve(&self, layout: &Layout) -> io::Result<()>;
     /// Wait up to 30 s for the service of `layout`'s home to answer an accepted control status
-    /// whose instance is not `previous`.
-    fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> bool;
+    /// whose instance is not `previous`, and stop waiting early once no service runs.
+    fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> Readiness;
+}
+
+/// How the wait for a started service ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Readiness {
+    /// A new service answered.
+    Answered,
+    /// No process runs the service image and nothing answers: the service stopped.
+    Stopped,
+    /// A service ran but did not answer within the ready wait.
+    Silent,
+}
+
+/// Why a service the installer started did not answer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StartFailure {
+    /// The process could not be created; the system's reason.
+    Spawn(String),
+    /// The service stopped; the reason it recorded, when it recorded one.
+    Stopped(Option<String>),
+    /// The service ran but did not answer within the ready wait.
+    Silent,
 }
 
 /// The real processes of this user.
@@ -253,16 +279,21 @@ impl ProcessControl for SystemProcessControl {
         .map(|_| ())
     }
 
-    fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> bool {
-        let deadline = Instant::now() + READY_WAIT;
+    fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> Readiness {
+        let started = Instant::now();
+        let image = [layout.service_executable()];
         loop {
             let answered = client::status_at(layout.home())
                 .is_ok_and(|status| Some(status.instance.as_str()) != previous);
             if answered {
-                return true;
+                return Readiness::Answered;
             }
-            if Instant::now() >= deadline {
-                return false;
+            let waited = started.elapsed();
+            if waited >= STOPPED_GRACE && !migration::any_running_from(&image) {
+                return Readiness::Stopped;
+            }
+            if waited >= READY_WAIT {
+                return Readiness::Silent;
             }
             std::thread::sleep(READY_POLL);
         }
@@ -563,6 +594,8 @@ pub struct Outcome {
     pub plan: InstallPlan,
     /// Whether the new service answered; `None` when no service was started.
     pub service_started: Option<bool>,
+    /// Why the new service did not answer, when `service_started` is `Some(false)`.
+    pub start_failure: Option<StartFailure>,
     /// What the reconcile changed; `None` when nothing was installed.
     pub registrations: Option<ReconcileReport>,
     /// What became of the files the 1.x Flatpak route left in the home.
@@ -674,16 +707,53 @@ pub fn install_carrier(layout: &Layout) -> anyhow::Result<()> {
             plan_only: false,
         },
     )?;
-    match outcome.service_started {
-        Some(false) => Err(ServiceDidNotStart(layout.bin()).into()),
-        _ => Ok(()),
+    match ServiceDidNotStart::of(&outcome, layout) {
+        Some(failure) => Err(failure.into()),
+        None => Ok(()),
     }
 }
 
-/// The new service did not answer in time.
+/// The new service did not answer: where it was installed and why, as far as the installer saw.
 #[derive(Debug, Error)]
-#[error("{}", words::service_did_not_start(&.0.display().to_string(), READY_WAIT.as_secs()))]
-pub struct ServiceDidNotStart(pub PathBuf);
+#[error("{}", self.sentence())]
+pub struct ServiceDidNotStart {
+    /// The directory the service was installed in.
+    pub bin: PathBuf,
+    /// Why it did not answer.
+    pub failure: StartFailure,
+}
+
+impl ServiceDidNotStart {
+    /// The failure an install's `outcome` reports, when its service did not answer.
+    #[must_use]
+    pub fn of(outcome: &Outcome, layout: &Layout) -> Option<Self> {
+        (outcome.service_started == Some(false)).then(|| Self {
+            bin: layout.bin(),
+            failure: outcome
+                .start_failure
+                .clone()
+                .unwrap_or(StartFailure::Silent),
+        })
+    }
+
+    /// The sentence a person reads.
+    fn sentence(&self) -> String {
+        let bin = self.bin.display().to_string();
+        match &self.failure {
+            StartFailure::Spawn(reason) => words::service_could_not_start(&bin, reason),
+            StartFailure::Stopped(Some(reason)) => words::service_stopped_because(&bin, reason),
+            StartFailure::Stopped(None) => words::service_stopped(&bin),
+            StartFailure::Silent => words::service_did_not_start(&bin, READY_WAIT.as_secs()),
+        }
+    }
+}
+
+/// The reason the service of `layout`'s home recorded when its start failed, if it did.
+fn recorded_start_failure(layout: &Layout) -> Option<String> {
+    let text = fs::read_to_string(layout.start_failure()).ok()?;
+    let reason = text.trim();
+    (!reason.is_empty()).then(|| reason.to_owned())
+}
 
 /// Plan `request` and, unless it only asks for the plan, carry it out under the install lock.
 pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outcome> {
@@ -691,6 +761,7 @@ pub fn install(context: &Context<'_>, request: &Request) -> anyhow::Result<Outco
         return Ok(Outcome {
             plan: plan(context, request.mode)?,
             service_started: None,
+            start_failure: None,
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),
@@ -833,6 +904,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
         return Ok(Outcome {
             plan,
             service_started: None,
+            start_failure: None,
             registrations: None,
             flatpak: Vec::new(),
             left_behind: Vec::new(),
@@ -850,6 +922,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
     let mut left_behind = Vec::new();
     let mut archived_version_audits = Vec::new();
     let mut strays_left = Vec::new();
+    let mut start_failure = None;
     if migrating {
         migration::prepare(&plan.migration)?;
         copied = migration::copy_state(&plan.migration)?;
@@ -875,10 +948,17 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
             flatpak = migration::retire_flatpak_route(&plan.migration);
         }
         (left_behind, archived_version_audits) = remove_deletions(layout, &plan);
-        Some(
-            context.control.start_serve(layout).is_ok()
-                && context.control.wait_ready(layout, replaced.as_deref()),
-        )
+        // A reason left by an earlier failed start must not be read as this one's.
+        let _ = fs::remove_file(layout.start_failure());
+        start_failure = match context.control.start_serve(layout) {
+            Err(error) => Some(StartFailure::Spawn(error.to_string())),
+            Ok(()) => match context.control.wait_ready(layout, replaced.as_deref()) {
+                Readiness::Answered => None,
+                Readiness::Stopped => Some(StartFailure::Stopped(recorded_start_failure(layout))),
+                Readiness::Silent => Some(StartFailure::Silent),
+            },
+        };
+        Some(start_failure.is_none())
     } else {
         None
     };
@@ -890,6 +970,7 @@ pub fn execute(context: &Context<'_>, plan: InstallPlan) -> anyhow::Result<Outco
     Ok(Outcome {
         plan,
         service_started,
+        start_failure,
         registrations: Some(registrations),
         flatpak,
         left_behind,
@@ -1217,6 +1298,11 @@ mod tests {
     struct FakeControl {
         quits: bool,
         answers: bool,
+        /// When the new service does not answer: whether it stopped (rather than staying
+        /// silent), and the reason it records in the home while stopping, if any.
+        stops_recording: Option<Option<String>>,
+        /// The system's reason the new service's process could not be created, if it cannot.
+        spawn_error: Option<String>,
         /// The instance of the running service the installer replaces, when there is one.
         instance: Option<String>,
         /// What each wait for the new service was told to treat as stale.
@@ -1252,6 +1338,8 @@ mod tests {
             Self {
                 quits: true,
                 answers: true,
+                stops_recording: None,
+                spawn_error: None,
                 instance: None,
                 waited_for: RefCell::new(Vec::new()),
                 respawns: Cell::new(0),
@@ -1352,19 +1440,34 @@ mod tests {
 
         fn start_serve(&self, _layout: &Layout) -> io::Result<()> {
             self.note(Call::Start);
-            Ok(())
+            match &self.spawn_error {
+                Some(reason) => Err(io::Error::other(reason.clone())),
+                None => Ok(()),
+            }
         }
 
         fn instance(&self, _layout: &Layout) -> Option<String> {
             self.instance.clone()
         }
 
-        fn wait_ready(&self, _layout: &Layout, previous: Option<&str>) -> bool {
+        fn wait_ready(&self, layout: &Layout, previous: Option<&str>) -> Readiness {
             self.note(Call::Wait);
             self.waited_for
                 .borrow_mut()
                 .push(previous.map(str::to_owned));
-            self.answers
+            if self.answers {
+                return Readiness::Answered;
+            }
+            match &self.stops_recording {
+                None => Readiness::Silent,
+                Some(reason) => {
+                    if let Some(reason) = reason {
+                        fs::create_dir_all(layout.run()).unwrap();
+                        fs::write(layout.start_failure(), format!("{reason}\n")).unwrap();
+                    }
+                    Readiness::Stopped
+                }
+            }
         }
     }
 
@@ -2917,8 +3020,70 @@ mod tests {
         control.answers = false;
         let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
         assert_eq!(outcome.service_started, Some(false));
+        assert_eq!(outcome.start_failure, Some(StartFailure::Silent));
         assert!(fixture.layout.service_executable().is_file());
         assert_eq!(fixture.record(), None);
+        let failure = ServiceDidNotStart::of(&outcome, &fixture.layout).unwrap();
+        assert!(failure.to_string().contains("did not start within 30 s"));
+    }
+
+    #[test]
+    fn a_service_that_stops_while_starting_is_reported_with_the_reason_it_recorded() {
+        let fixture = Fixture::new();
+        let mut control = FakeControl::new();
+        control.answers = false;
+        control.stops_recording = Some(Some("bind the relay endpoint: no room".to_owned()));
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(
+            outcome.start_failure,
+            Some(StartFailure::Stopped(Some(
+                "bind the relay endpoint: no room".to_owned()
+            )))
+        );
+        let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
+            .unwrap()
+            .to_string();
+        assert!(sentence.contains("stopped while starting: bind the relay endpoint: no room"));
+        assert!(!sentence.contains("30 s"), "a stop is not a timeout");
+        assert_eq!(fixture.record(), None);
+    }
+
+    #[test]
+    fn a_reason_left_by_an_earlier_start_is_not_read_as_this_ones() {
+        let fixture = Fixture::new();
+        fs::create_dir_all(fixture.layout.run()).unwrap();
+        fs::write(fixture.layout.start_failure(), "an earlier reason\n").unwrap();
+        let mut control = FakeControl::new();
+        control.answers = false;
+        control.stops_recording = Some(None);
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(outcome.start_failure, Some(StartFailure::Stopped(None)));
+        let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
+            .unwrap()
+            .to_string();
+        assert!(sentence.contains("stopped while starting."), "{sentence}");
+    }
+
+    #[test]
+    fn a_service_that_cannot_be_spawned_is_reported_with_the_systems_reason_at_once() {
+        let fixture = Fixture::new();
+        let mut control = FakeControl::new();
+        control.spawn_error = Some("Permission denied (os error 13)".to_owned());
+        let outcome = fixture.run(Mode::Release, VERSION, &control).unwrap();
+        assert_eq!(
+            outcome.start_failure,
+            Some(StartFailure::Spawn(
+                "Permission denied (os error 13)".to_owned()
+            ))
+        );
+        assert!(
+            !control.calls().contains(&Call::Wait),
+            "nothing is waited for when nothing was started"
+        );
+        let sentence = ServiceDidNotStart::of(&outcome, &fixture.layout)
+            .unwrap()
+            .to_string();
+        assert!(sentence.contains("could not be started: Permission denied (os error 13)"));
     }
 
     #[test]
@@ -3101,8 +3266,24 @@ mod tests {
             SystemProcessControl.instance(layout).as_deref(),
             Some("instance_new")
         );
-        assert!(SystemProcessControl.wait_ready(layout, Some("instance_old")));
+        assert_eq!(
+            SystemProcessControl.wait_ready(layout, Some("instance_old")),
+            Readiness::Answered
+        );
         service.join().unwrap();
+    }
+
+    #[test]
+    fn a_wait_for_a_service_that_no_process_runs_ends_after_the_grace_not_the_ready_wait() {
+        let fixture = Fixture::new();
+        let started = Instant::now();
+        assert_eq!(
+            SystemProcessControl.wait_ready(&fixture.layout, None),
+            Readiness::Stopped
+        );
+        let waited = started.elapsed();
+        assert!(waited >= STOPPED_GRACE, "{waited:?}");
+        assert!(waited < READY_WAIT / 2, "{waited:?}");
     }
 
     /// What the plan places, as file name and directory in order.

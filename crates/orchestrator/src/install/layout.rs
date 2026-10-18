@@ -44,6 +44,11 @@ pub const INSTALL_LOCK_NAME: &str = "install.lock";
 /// Directory of the service's own state: audit log, harness locations, setup record.
 pub const STATE_DIRECTORY_NAME: &str = "state";
 
+/// The start-failure record under the run directory: one line saying why the last service start
+/// failed, written by that start and removed once a service publishes its endpoint. A started
+/// service's output goes nowhere, so this is how its starter learns the reason.
+pub const START_FAILURE_NAME: &str = "start-failure";
+
 /// The quit latch under the state directory: a person's Quit writes it, and a browser or recover
 /// start that finds it does not bring Ghostlight back.
 pub const QUIT_LATCH_NAME: &str = "quit";
@@ -174,6 +179,12 @@ impl Layout {
     #[must_use]
     pub fn service_lock(&self) -> PathBuf {
         self.run().join(SERVICE_LOCK_NAME)
+    }
+
+    /// The start-failure record: `home/run/start-failure`. See [`START_FAILURE_NAME`].
+    #[must_use]
+    pub fn start_failure(&self) -> PathBuf {
+        self.run().join(START_FAILURE_NAME)
     }
 
     /// The state directory: `home/state`.
