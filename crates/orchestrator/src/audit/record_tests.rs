@@ -135,6 +135,21 @@ fn a_record_carries_its_connection_s_source_and_a_line_without_one_still_reads()
 }
 
 #[test]
+fn a_record_keeps_the_claimed_catalog_agent_and_a_line_without_one_still_reads() {
+    let record = navigate_succeeded();
+    let line = serde_json::to_value(&record).unwrap();
+    assert_eq!(line["provenance"]["claimed_agent"], "claude-code");
+    let mut without = line;
+    without["provenance"]
+        .as_object_mut()
+        .unwrap()
+        .remove("claimed_agent");
+    let read = read(&without);
+    assert_eq!(read.provenance.as_ref().unwrap().claimed_agent, None);
+    assert_eq!(serde_json::to_value(&read).unwrap(), without);
+}
+
+#[test]
 fn audit_reads_lines_written_with_peer_observation_without_reemitting_it() {
     use crate::intake::session::IntakeChannel;
 
@@ -312,8 +327,8 @@ fn wire(value: impl serde::Serialize) -> String {
         .expect("a status or effect is a plain string")
 }
 
-/// The connection evidence a record carries, as the service attaches it: an MCP connection that
-/// Claude Desktop's installed app started.
+/// The connection evidence a record carries, as the service attaches it: an MCP connection whose
+/// client claimed to be Claude Code, started by Claude Desktop's installed app.
 fn golden_connection() -> crate::provenance::ConnectionEvidence {
     crate::provenance::ConnectionEvidence::new(
         crate::provenance::Attribution {
@@ -323,7 +338,7 @@ fn golden_connection() -> crate::provenance::ConnectionEvidence {
             }),
             ..crate::provenance::Attribution::accepted(crate::intake::session::IntakeChannel::Mcp)
         },
-        "golden client",
+        "claude-code",
     )
 }
 

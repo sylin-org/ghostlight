@@ -377,7 +377,12 @@ that lies in a catalog agent's installed app, else the first that is not a shell
 other wrapper, as an agent id and an executable file name (ADR-0161, amendment of 2026-10-18;
 ADR-0202 Decision 3). Neither answer waits on the read; the first request does. Nothing a client
 sends takes part. The window sets the client's claim
-beside that source, receipts keep the source, and provenance grants no authority. Audit lines with
+beside that source. Receipts keep the source and, when the claim names a catalog agent, that
+agent's catalog id as a labelled claim, never the client's words. One function in
+`language::provenance` names the agent and composes the explanation, live and from history alike:
+the claim names the agent, else the source's catalog agent, else Unknown agent, and "X, in Y." is
+said only when the catalog knows X runs inside Y (ADR-0202 Decisions 14 and 14a). Provenance
+grants no authority. Audit lines with
 extra attribution fields still read; the extra fields are ignored.
 
 Every peer reaches the service through one endpoint (relay protocol 4, ADR-0199 Decision 5; the
@@ -490,6 +495,11 @@ maximum.
 
 Owns invocation ids, lifecycle, deadlines, cancellation, flows, the application executor,
 unit-of-work state, uncertainty, and the single completion path.
+
+A request has one id, an `InvocationId` (`invocation_` and 32 hex digits). The MCP intake mints
+it for each tool call and keeps the client's own id beside it, so a cancel names the same id. The
+session queue, the domain events, the result the client receives, the audit line and the
+diagnostics all carry that id, so a result joins its audit line.
 
 ### Workspace
 

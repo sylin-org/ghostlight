@@ -53,7 +53,7 @@ pub(super) fn merge_stored(
         let mut item = HistoryItem::from(record.clone());
         item.storage = storage;
         if let Some(provenance) = &provenance {
-            item.agent = crate::agent::Agent::of_evidence(Some(provenance));
+            item.agent = provenance.agent.clone();
             item.provenance = Some(provenance.clone());
         }
         if storage == crate::language::audit_health::Storage::Unconfirmed {
@@ -297,7 +297,7 @@ mod tests {
         use crate::intake::session::IntakeChannel;
         use crate::provenance::ConnectionEvidence;
 
-        let mcp = ConnectionEvidence::claimed("Claude Code", IntakeChannel::Mcp);
+        let mcp = ConnectionEvidence::claimed("Some Agent", IntakeChannel::Mcp);
         let cli = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
         let from_mcp = HistoryItem::from(child(1).with_provenance(Some(mcp.attribution())));
         let from_cli = HistoryItem::from(child(1).with_provenance(Some(cli.attribution())));

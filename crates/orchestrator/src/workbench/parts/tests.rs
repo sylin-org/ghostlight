@@ -56,6 +56,7 @@ fn details() -> ConnectionDetails {
         reported_application: Some("claude-code".into()),
         channel: IntakeChannel::Mcp,
         explanation: "Declared by the client.".into(),
+        agent: Agent::of(Some("claude-code"), IntakeChannel::Mcp),
     }
 }
 
@@ -88,7 +89,7 @@ fn history_item(invocation: &str, check: PermissionCheck) -> HistoryItem {
         },
         channel: Some(IntakeChannel::Mcp),
         provenance: Some(details()),
-        agent: wearing_an_app_icon(Agent::of_evidence(Some(&details()))),
+        agent: wearing_an_app_icon(details().agent),
         browser: Some("Chrome".into()),
         complete: true,
         composition: Some(CompositionProgress {
@@ -211,7 +212,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
             started_at_ms: Some(12),
             phase: OperationPhase::Running,
             provenance: Some(details()),
-            agent: wearing_an_app_icon(Agent::of_evidence(Some(&details()))),
+            agent: wearing_an_app_icon(details().agent),
         }],
         browsers: vec![BrowserInstanceSummary {
             id: "browser_1".into(),
@@ -769,6 +770,36 @@ fn each_part_holds_exactly_the_keys_classified_for_its_audience() {
         );
         assert_eq!(shown(Part::Controls), controls_keys(), "{audience:?}");
     }
+}
+
+#[test]
+fn watchers_see_the_keys_they_saw_before() {
+    use crate::provenance::{Attribution, ConnectionEvidence, Source};
+    let connection = ConnectionEvidence::new(
+        Attribution {
+            source: Some(Source {
+                agent: Some("claude-desktop".into()),
+                image: "claude.exe".into(),
+            }),
+            ..Attribution::accepted(IntakeChannel::Mcp)
+        },
+        "claude-code",
+    );
+    let live = connection.details();
+    let recorded = connection.attribution().details();
+    assert_eq!(live.agent.id, "claude-code");
+    assert_eq!(recorded.agent, live.agent);
+    let (mut snapshot, _, _path) = populated();
+    snapshot.sessions[0].connections = vec![live.clone()];
+    snapshot.operations[0].provenance = Some(live.clone());
+    snapshot.history[0].provenance = Some(recorded.clone());
+    if let Some(step) = snapshot.history[0].steps[0].record.as_mut() {
+        step.provenance = Some(recorded);
+    }
+    let watcher = projection(Audience::Watch);
+    let shown = |part| key_paths(&watcher.part(part, &snapshot, setup_view));
+    assert_eq!(shown(Part::Connections), expected(&[CONNECTIONS_KEYS]));
+    assert_eq!(shown(Part::Activity), activity_keys(Audience::Watch));
 }
 
 #[test]

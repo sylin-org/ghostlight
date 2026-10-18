@@ -2,9 +2,10 @@
 //!
 //! The roster in [`crate::install`] is the catalog of agents Ghostlight can set up; the command
 //! line and an unknown agent are the catalog's two reserved entries. Wherever the window names an
-//! agent (a session, an operation and a history item from their connection evidence, an
-//! Integrations row) it carries one [`Agent`], built here or from a roster row through
-//! [`Agent::listed`], so every surface draws the same name and the same symbol. The page decides
+//! agent (a session, an operation and a history item, an Integrations row) it carries one
+//! [`Agent`], built here or from a roster row through [`Agent::listed`], so every surface draws the
+//! same name and the same symbol. The agent of work is named once, from its connection evidence,
+//! by [`crate::language::provenance::details`]. The page decides
 //! nothing about an agent's looks: it draws the [`Symbol`] it is given.
 //!
 //! A roster agent's symbol is one address, the agent's under [`ICON_DIRECTORY`], with the version
@@ -13,7 +14,8 @@
 //! packaged monogram tile. The page fetches every address the same way and decides nothing.
 //!
 //! An agent is projected for a person when a snapshot is built and is never persisted: the audit
-//! keeps only the channel and the connection identity.
+//! keeps the connection's evidence (its channel, the claimed catalog agent and the source), from
+//! which the agent is named again.
 
 pub mod image;
 
@@ -24,7 +26,6 @@ use self::image::{AgentImage, Monogram};
 use crate::install::icons::IconCache;
 use crate::intake::session::IntakeChannel;
 use crate::language::provenance::{claimed_name, COMMAND_LINE_AGENT, UNKNOWN_AGENT};
-use crate::provenance::ConnectionDetails;
 
 /// The id of the command line, the catalog's reserved entry for `ghostlight call` sessions. No
 /// roster row uses it.
@@ -213,16 +214,6 @@ impl Agent {
             },
         }
     }
-
-    /// The agent of the work `evidence` describes: [`Self::of`] its bounded claim and its channel,
-    /// so live evidence names the agent and durable evidence names only the command line. Work
-    /// that kept no evidence is the unknown agent's.
-    #[must_use]
-    pub fn of_evidence(evidence: Option<&ConnectionDetails>) -> Self {
-        evidence.map_or_else(Self::unknown, |evidence| {
-            Self::of(evidence.reported_application.as_deref(), evidence.channel)
-        })
-    }
 }
 
 /// Whether `name` is a reserved entry's name, ignoring case and space.
@@ -394,7 +385,7 @@ mod tests {
                 "{claimed:?}"
             );
             let evidence = ConnectionEvidence::claimed(claimed, IntakeChannel::Mcp).details();
-            assert_eq!(Agent::of_evidence(Some(&evidence)), Agent::unknown());
+            assert_eq!(evidence.agent, Agent::unknown());
             assert!(
                 evidence
                     .explanation
@@ -408,24 +399,6 @@ mod tests {
             Agent::command_line(),
             "only the command line's own channel names it"
         );
-    }
-
-    #[test]
-    fn work_is_its_evidence_s_agent_and_work_without_evidence_the_unknown_one() {
-        use crate::provenance::{Attribution, ConnectionEvidence};
-
-        let live = ConnectionEvidence::claimed("codex-mcp-client", IntakeChannel::Mcp);
-        assert_eq!(Agent::of_evidence(Some(&live.details())).id, "codex");
-        assert_eq!(
-            Agent::of_evidence(Some(&live.attribution().details())),
-            Agent::unknown(),
-            "durable evidence keeps no claimed name"
-        );
-        assert_eq!(
-            Agent::of_evidence(Some(&Attribution::legacy(IntakeChannel::Cli).details())),
-            Agent::command_line()
-        );
-        assert_eq!(Agent::of_evidence(None), Agent::unknown());
     }
 
     #[test]

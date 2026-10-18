@@ -946,6 +946,11 @@ struct AgentRow {
     /// a terminal tool wears its vendor's desktop app's icon. `None` shows the agent's monogram
     /// instead.
     icon_family: Option<&'static str>,
+    /// The catalog ids of the agents whose apps this host is known to run inside: Claude Code
+    /// inside Claude Desktop, a Cline extension inside its editor. A connection is said to be the
+    /// agent "in" an app only when this list names that app ([`runs_inside`]). Empty when the host
+    /// runs on its own or no host app is known with confidence.
+    runs_inside: &'static [&'static str],
 }
 
 /// Where every Cline host keeps its MCP settings below its own storage directory.
@@ -1054,6 +1059,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: CODEX_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "claude-code",
@@ -1071,6 +1077,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: Some("claude-desktop"),
+        runs_inside: &["claude-desktop"],
     },
     AgentRow {
         id: "claude-desktop",
@@ -1088,6 +1095,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: Some(CLAUDE_DESKTOP_PACKAGE),
         icons: CLAUDE_DESKTOP_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "cursor",
@@ -1105,6 +1113,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: CURSOR_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "vscode",
@@ -1122,6 +1131,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: VSCODE_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "windsurf",
@@ -1139,6 +1149,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: WINDSURF_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
     // Windsurf's current official distribution is named Devin and moved its user MCP
     // configuration. Keep the historical target above so either installed generation can be
@@ -1159,6 +1170,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "zed",
@@ -1182,6 +1194,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: ZED_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
     // ZCode's MCP registration lives in its shared CLI configuration under `mcp.servers`
     // (ADR-0141). No official download destination is pinned until one is verified.
@@ -1201,6 +1214,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "opencode",
@@ -1218,6 +1232,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "crush",
@@ -1240,6 +1255,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "copilot-cli",
@@ -1257,6 +1273,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "cline-cli",
@@ -1274,6 +1291,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "cline-vscode",
@@ -1298,6 +1316,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &["vscode"],
     },
     AgentRow {
         id: "cline-cursor",
@@ -1320,6 +1339,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &["cursor"],
     },
     AgentRow {
         id: "cline-windsurf",
@@ -1342,6 +1362,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &["windsurf"],
     },
     AgentRow {
         id: "kiro",
@@ -1359,6 +1380,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: KIRO_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "qwen-code",
@@ -1376,6 +1398,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "junie",
@@ -1393,6 +1416,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "kilo-code",
@@ -1410,6 +1434,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "goose",
@@ -1427,6 +1452,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "continue",
@@ -1444,6 +1470,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: &[],
         icon_family: None,
+        runs_inside: &[],
     },
     AgentRow {
         id: "antigravity",
@@ -1461,6 +1488,7 @@ const ROSTER: &[AgentRow] = &[
         own_package: None,
         icons: ANTIGRAVITY_ICONS,
         icon_family: None,
+        runs_inside: &[],
     },
 ];
 
@@ -1598,6 +1626,26 @@ pub fn agent_called(reported: &str) -> Option<Agent> {
         .iter()
         .find(|row| row.is_called(reported))
         .map(AgentRow::agent)
+}
+
+/// The catalog agent whose catalog id is `agent_id`, as the window names and shows it; none for an
+/// id outside the catalog.
+#[must_use]
+pub fn catalog_agent(agent_id: &str) -> Option<Agent> {
+    ROSTER
+        .iter()
+        .find(|row| row.agent_id == agent_id)
+        .map(AgentRow::agent)
+}
+
+/// Whether the catalog knows that the agent `agent_id` runs inside the app of the agent `host_id`
+/// on one of its hosts ([`AgentRow::runs_inside`]). False for any id outside the catalog.
+#[must_use]
+pub fn runs_inside(agent_id: &str, host_id: &str) -> bool {
+    ROSTER
+        .iter()
+        .filter(|row| row.agent_id == agent_id)
+        .any(|row| row.runs_inside.contains(&host_id))
 }
 
 /// The packaged monogram tile of the catalog agent `agent_id`; none for an id outside the catalog.
@@ -3336,6 +3384,23 @@ mod tests {
                 "cline-windsurf"
             ]
         );
+    }
+
+    #[test]
+    fn an_agent_runs_inside_only_the_catalog_apps_its_hosts_name() {
+        for row in ROSTER {
+            for host in row.runs_inside {
+                assert!(super::catalog_agent(host).is_some(), "{}: {host}", row.id);
+                assert_ne!(*host, row.agent_id, "{}", row.id);
+            }
+        }
+        assert!(super::runs_inside("claude-code", "claude-desktop"));
+        for editor in ["vscode", "cursor", "windsurf"] {
+            assert!(super::runs_inside("cline", editor), "{editor}");
+        }
+        assert!(!super::runs_inside("cline", "claude-desktop"));
+        assert!(!super::runs_inside("claude-desktop", "claude-code"));
+        assert!(!super::runs_inside("not-an-agent", "claude-desktop"));
     }
 
     #[test]

@@ -118,7 +118,8 @@ pub struct AuditRecord {
     /// Absent when the workspace was already gone by the time the record was written.
     #[serde(default)]
     pub channel: Option<IntakeChannel>,
-    /// Bounded original-connection evidence; claimed labels never enter this durable type.
+    /// Bounded original-connection evidence. A client's claimed label never enters this durable
+    /// type; only the catalog agent it names does ([`crate::provenance::Attribution::claimed_agent`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<crate::provenance::Attribution>,
     /// Product name, or family when it reports none, of the browser that received this work's

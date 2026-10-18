@@ -1802,7 +1802,8 @@ pub struct OperationSummary {
     pub phase: OperationPhase,
     /// Evidence captured for this operation at intake.
     pub provenance: Option<crate::provenance::ConnectionDetails>,
-    /// The operation's agent, from its evidence ([`crate::agent::Agent::of_evidence`]).
+    /// The operation's agent, as its connection details name it
+    /// ([`crate::provenance::ConnectionDetails::agent`]); the unknown agent when it kept none.
     pub agent: crate::agent::Agent,
 }
 
@@ -1820,7 +1821,12 @@ impl From<&OperationState> for OperationSummary {
             capability: value.capabilities.label(),
             started_at_ms: Some(value.started_at_ms),
             phase: value.phase,
-            agent: crate::agent::Agent::of_evidence(value.provenance.as_ref()),
+            agent: value
+                .provenance
+                .as_ref()
+                .map_or_else(crate::agent::Agent::unknown, |details| {
+                    details.agent.clone()
+                }),
             provenance: value.provenance.clone(),
         }
     }
@@ -1915,7 +1921,8 @@ pub struct HistoryItem {
     pub channel: Option<IntakeChannel>,
     /// Original connection evidence; claimed names are retained only in bounded live history.
     pub provenance: Option<crate::provenance::ConnectionDetails>,
-    /// The work's agent, from its evidence ([`crate::agent::Agent::of_evidence`]).
+    /// The work's agent, as its connection details name it
+    /// ([`crate::provenance::ConnectionDetails::agent`]); the unknown agent when it kept none.
     pub agent: crate::agent::Agent,
     /// Persistent browser family or product name that performed this work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1980,7 +1987,11 @@ impl From<AuditRecord> for HistoryItem {
             duration_ms: value.duration_ms,
             observed: value.observed,
             channel: value.channel,
-            agent: crate::agent::Agent::of_evidence(provenance.as_ref()),
+            agent: provenance
+                .as_ref()
+                .map_or_else(crate::agent::Agent::unknown, |details| {
+                    details.agent.clone()
+                }),
             provenance,
             browser: value.browser,
         }

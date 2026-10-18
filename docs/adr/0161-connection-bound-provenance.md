@@ -209,6 +209,8 @@ history receipts through the connection explanation:
 - The source is the claimed agent's own app: the caveat goes, and the sentence says where it was
   seen, "Started by Claude Desktop."
 - The claimed agent runs inside another agent's app: both, "Claude Code, in Claude Desktop."
+  (Amended by ADR-0202 Decision 14: only when the catalog knows the claimed agent runs inside that
+  app; otherwise both names are given without judging, as for a name the catalog does not know.)
 - The claim and the source do not line up (a name the catalog does not know, or a source that is
   no agent's app): both, without judging either, `"claude-code" is what the agent calls itself.
   Started by WindowsTerminal.exe.`
@@ -217,6 +219,11 @@ history receipts through the connection explanation:
   Ghostlight does not verify the scripts and instructions it runs."
 - History keeps no claim, so a recorded MCP action with a source says "Started by ..." and one
   without keeps the earlier explanation.
+  (Amended by ADR-0202 Decisions 14 and 14a: the record keeps the claimed agent's catalog id,
+  labelled a claim, never the client's words. One function in `language::provenance` names a
+  restored row as it names a live one: by the claimed agent, else the source's catalog agent, else
+  Unknown agent, so Claude Code work in Claude Desktop reads "Claude Code, in Claude Desktop."
+  after a restart too.)
 
 The watcher audience sees the same connection explanation it already saw; no part gains a key.
 
@@ -227,3 +234,7 @@ The durable attribution carries `source` (`agent` and `image`) beside `connectio
 cut to its file name and a value that is not a catalog id is dropped. Records without a source,
 and records from before, read unchanged. The SIEM guide documents the field, and the audit
 goldens show it.
+
+(Amended by ADR-0202 Decision 14a: the attribution also carries the optional `claimed_agent`, the
+catalog id a client's claim names, labelled a claim. A claim the catalog does not know is not
+kept. The SIEM guide and the audit goldens show it.)

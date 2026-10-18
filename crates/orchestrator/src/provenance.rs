@@ -9,6 +9,11 @@
 //! ([`crate::install::apps`]), else the first that is not a wrapper. No field a client writes takes
 //! part. Like the channel, it is provenance for display and history and never an input to
 //! governance.
+//!
+//! When the name a connection's client claims is a catalog agent's, the attribution also keeps that
+//! agent's catalog id as [`Attribution::claimed_agent`], so history names the agent after a restart
+//! as the live row did (ADR-0202 Decision 14a). It is a claim, closed and bounded; the client's own
+//! words stay in memory.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,6 +58,15 @@ pub struct Attribution {
     pub observed_at_ms: Option<u64>,
     /// Declared intake, never authority.
     pub channel: IntakeChannel,
+    /// The catalog id of the agent the connection's client claimed to be, when its claim names a
+    /// catalog agent on an MCP connection; absent for any other claim and on records written
+    /// before claims were kept. A claim, never verified, never identity and never authority.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_agent_id"
+    )]
+    pub claimed_agent: Option<String>,
     /// The app Ghostlight saw start the connection; absent when it could not be read and on
     /// records written before sources were kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,12 +158,20 @@ impl SourceReader {
 
 impl ConnectionEvidence {
     /// The one evidence of an accepted connection: its `attribution`, observed and never changed
-    /// afterwards, beside the bounded name its client `claim`ed, which stays memory-only.
+    /// afterwards, beside the bounded name its client `claim`ed, which stays memory-only. The
+    /// attribution keeps only the catalog id that claim names, if any
+    /// ([`crate::language::provenance::claimed_agent`]).
     #[must_use]
     pub fn new(attribution: Attribution, claim: &str) -> Self {
+        let reported_application = bounded_label(claim, REPORTED_APPLICATION_MAX_CHARS);
+        let claimed_agent =
+            crate::language::provenance::claimed_agent(&reported_application, attribution.channel);
         Self {
-            reported_application: bounded_label(claim, REPORTED_APPLICATION_MAX_CHARS),
-            attribution,
+            reported_application,
+            attribution: Attribution {
+                claimed_agent,
+                ..attribution
+            },
         }
     }
 
@@ -172,14 +194,11 @@ impl ConnectionEvidence {
         &self.reported_application
     }
 
-    /// Present the live connection with its separately identified, bounded application claim,
-    /// beside the source Ghostlight saw.
+    /// Present the live connection: its agent and the words that set its bounded application
+    /// claim beside the source Ghostlight saw.
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
-        crate::language::provenance::live_details(
-            &self.attribution,
-            crate::language::provenance::claimed_name(&self.reported_application),
-        )
+        crate::language::provenance::details(&self.attribution, Some(&self.reported_application))
     }
 }
 
@@ -199,6 +218,7 @@ impl Attribution {
                     .unwrap_or(u64::MAX),
             ),
             channel,
+            claimed_agent: None,
             source: None,
         }
     }
@@ -218,14 +238,16 @@ impl Attribution {
             connection_id: None,
             observed_at_ms: None,
             channel,
+            claimed_agent: None,
             source: None,
         }
     }
 
-    /// Present retained evidence without reconstructing or persisting an application claim.
+    /// Present retained evidence: its agent, named from the claimed catalog agent or the source as
+    /// a live connection's is, without reconstructing any application claim.
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
-        crate::language::provenance::details(self)
+        crate::language::provenance::details(self, None)
     }
 }
 
@@ -310,7 +332,7 @@ mod tests {
 
     /// The agent the window shows for a connection these details describe.
     fn agent_of(details: &ConnectionDetails) -> Agent {
-        Agent::of_evidence(Some(details))
+        details.agent.clone()
     }
 
     #[test]
@@ -364,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn a_live_connection_names_its_agent_and_history_names_only_the_command_line() {
+    fn a_live_connection_names_its_agent_and_history_names_the_catalog_agent_it_claimed() {
         let codex = ConnectionEvidence::claimed("codex-mcp-client", IntakeChannel::Mcp);
         assert_eq!(agent_of(&codex.details()).name, "Codex");
         assert_eq!(agent_of(&codex.details()).id, "codex");
@@ -372,10 +394,18 @@ mod tests {
             codex.details().reported_application.as_deref(),
             Some("codex-mcp-client")
         );
-        assert_eq!(agent_of(&codex.attribution().details()), Agent::unknown());
+        assert_eq!(codex.attribution().claimed_agent.as_deref(), Some("codex"));
+        assert_eq!(agent_of(&codex.attribution().details()).id, "codex");
+        assert_eq!(codex.attribution().details().reported_application, None);
         let unknown = ConnectionEvidence::claimed(" my agent ", IntakeChannel::Mcp);
         assert_eq!(agent_of(&unknown.details()).name, "my agent");
         assert_eq!(agent_of(&unknown.details()).id, "unknown:my agent");
+        assert_eq!(unknown.attribution().claimed_agent, None);
+        assert_eq!(
+            agent_of(&unknown.attribution().details()),
+            Agent::unknown(),
+            "a name the catalog does not know is never kept"
+        );
         let script = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
         assert_eq!(agent_of(&script.details()), Agent::command_line());
         assert_eq!(
@@ -384,6 +414,93 @@ mod tests {
         );
         let unnamed = ConnectionEvidence::claimed("", IntakeChannel::Mcp);
         assert_eq!(agent_of(&unnamed.details()), Agent::unknown());
+    }
+
+    /// The evidence of an MCP connection whose client claimed `claim`, started by `source`.
+    fn connected(claim: &str, source: Option<Source>) -> ConnectionEvidence {
+        ConnectionEvidence::new(
+            Attribution {
+                source,
+                ..Attribution::accepted(IntakeChannel::Mcp)
+            },
+            claim,
+        )
+    }
+
+    /// Claude Desktop's installed app, as a source.
+    fn claude_desktop() -> Option<Source> {
+        Some(Source {
+            agent: Some("claude-desktop".into()),
+            image: "claude.exe".into(),
+        })
+    }
+
+    /// `attribution` as it reads back from a record.
+    fn restored(attribution: &Attribution) -> Attribution {
+        serde_json::from_value(serde_json::to_value(attribution).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn restored_mcp_history_is_named_for_the_app_that_started_it() {
+        let code = connected("claude-code", claude_desktop());
+        let live = code.details();
+        let history = restored(code.attribution()).details();
+        assert_eq!(live.agent.id, "claude-code");
+        assert_eq!(
+            history.agent, live.agent,
+            "the same name live and after a restart"
+        );
+        assert_eq!(history.explanation, "Claude Code, in Claude Desktop.");
+        assert_eq!(history.explanation, live.explanation);
+
+        let unnamed = restored(connected("my agent", claude_desktop()).attribution()).details();
+        assert_eq!(unnamed.agent.id, "claude-desktop");
+        assert_eq!(unnamed.explanation, "Started by Claude Desktop.");
+    }
+
+    #[test]
+    fn restored_mcp_history_without_a_source_stays_unknown() {
+        let unseen = restored(connected("my agent", None).attribution()).details();
+        assert_eq!(unseen.agent, Agent::unknown());
+        let program = restored(
+            connected(
+                "my agent",
+                Some(Source {
+                    agent: None,
+                    image: "WindowsTerminal.exe".into(),
+                }),
+            )
+            .attribution(),
+        )
+        .details();
+        assert_eq!(program.agent, Agent::unknown());
+        assert_eq!(program.explanation, "Started by WindowsTerminal.exe.");
+        assert_eq!(
+            restored(&Attribution::legacy(IntakeChannel::Mcp))
+                .details()
+                .agent,
+            Agent::unknown()
+        );
+    }
+
+    #[test]
+    fn the_claimed_agent_is_kept_as_a_catalog_id_and_an_edited_one_is_dropped() {
+        let code = connected("claude-code", None);
+        let mut encoded = serde_json::to_value(code.attribution()).unwrap();
+        assert_eq!(encoded["claimed_agent"], "claude-code");
+        assert!(!encoded.to_string().contains("\"claude-code\" is"));
+        encoded["claimed_agent"] = "Not An Id!".into();
+        let edited: Attribution = serde_json::from_value(encoded).unwrap();
+        assert_eq!(edited.claimed_agent, None);
+        let unlisted = Attribution {
+            claimed_agent: Some("retired-agent".into()),
+            ..Attribution::accepted(IntakeChannel::Mcp)
+        };
+        assert_eq!(
+            unlisted.details().agent,
+            Agent::unknown(),
+            "an id the catalog no longer lists names nobody"
+        );
     }
 
     #[test]

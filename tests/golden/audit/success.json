@@ -39,6 +39,7 @@
     "connection_id": "connection_00000000000000000000000000000001",
     "observed_at_ms": 1790000000000,
     "channel": "mcp",
+    "claimed_agent": "claude-code",
     "source": {
       "agent": "claude-desktop",
       "image": "claude.exe"
