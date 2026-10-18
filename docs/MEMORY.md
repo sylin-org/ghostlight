@@ -83,7 +83,9 @@ the owner wants, and what this project learned the hard way.
   install, upgrade, restart, reboot and recover on them for project testing without asking each
   time. Preserve the baseline first, and record which candidate is installed before and after so
   evidence never comes from stale binaries. This never authorizes public releases or
-  founder-private access. How the 2026-09 campaign ran (lanes, escalation, evidence format) is in
+  founder-private access. The browser's own data (profiles, saved tab groups, bookmarks, settings)
+  stays the owner's: ask before changing it, even in a cleanup the owner asked for (owner,
+  2026-10-18). How the 2026-09 campaign ran (lanes, escalation, evidence format) is in
   [the fleet campaign](testing/fleet-acceptance-2026-09.md).
 - **Coordinated machines may commit and push as the owner.** The owner authorized provisioning
   the local Ghostlight Git credentials to the four dedicated machines. Use the owner's verified
