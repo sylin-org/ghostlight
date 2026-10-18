@@ -5,10 +5,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `pass`, `fail` (wi
 
 ## RESUME HERE
 
-L01 to L03 passed (L03 with a scope change: the owner directed on 2026-10-17 that acceptance
-uses the real installation and the real system browser, never a sandbox). Next: L04, the
-development install into the real `~/.ghostlight`, then `tests/linux/installed-journey.mjs`
-against it and the system Chromium.
+L01 to L04 passed (L03 with a scope change: the owner directed on 2026-10-17 that acceptance
+uses the real installation and the real system browser, never a sandbox; L04 with findings for
+the coordinator). The development build is installed in the real `~/.ghostlight` and the
+system Chromium's ordinary profile is connected. Next: L05, the window and the tray.
 
 ## Tasks
 
@@ -135,12 +135,60 @@ For the coordinator, seen while diagnosing (no product change made):
    read it.
 3. The installer reads and hashes the service image twice per install.
 
-### L04 Install the development channel (todo)
+### L04 Install the development channel (pass, with findings)
 
 `pwsh scripts/dev-loop.ps1 -Plan`, then `pwsh scripts/dev-loop.ps1`. Then `ghostlight status`,
 `ghostlight doctor`, `ghostlight --help`, `ghostlight call --help` (exit 0), and
 `ghostlight install --dry-run --client cline` (c11). With the Linux completions installed,
 `ghostlight install --client <Tab>` lists the agent and host ids.
+
+Result, 2026-10-17, into the real `~/.ghostlight` (release profile, `.target-dev-loop`).
+Installed: service 202f2972..., edge 78b3fa53..., `install.json` channel development, relay 4.
+
+- The plan listed the 1.x user-policy move, three swaps, the 13 `bin/v*` directories to retire
+  with their seven audit logs, and the four native-host and 18 agent registrations to rewrite.
+  The deploy did exactly that, started the service and its tray shell, and replaced the stale
+  `~/.local/bin/ghostlight` link. Cline (CLI) was left alone (finding 8).
+- `ghostlight status`: development channel, service up, workbench on 127.0.0.1:41002, window
+  closed with its icon in the tray. `doctor`: every program ready, four browsers registered,
+  17 agents connected, goose and Continue detected for copy setup, icons for Cursor and Zed
+  from their desktop entries. `--help` lists the agent and host ids; `call --help` exits 0.
+- c11: `--client cline --dry-run` gives one "Would install" line for each of the two detected
+  Cline hosts; with `--all-clients`, all four; `--client CODEX`, Codex alone; `--client nope`
+  refuses with the ids and exit 1. `man ghostlight` shows both id lines.
+- Completions: fish (this user's shell) and bash complete all 24 ids. zsh's `_ghostlight`
+  offers them only after `~/.local/share/zsh/site-functions` is added to `fpath`; CachyOS's zsh
+  does not search that directory (finding 6).
+- The system Chromium on its ordinary profile (`Default`), started the way this machine's
+  "Chromium with Ghostlight" Applications entry starts it (`--load-extension` with the repo's
+  `extension/`), connected on its own: "1 browser connected", readiness Ready.
+- `tests/linux/installed-journey.mjs --bin-dir ~/.ghostlight/bin --browser
+  /usr/lib/chromium/chromium --exercise-installed-stack` against that browser, four runs:
+  registration-reinstalled-with-browser-running and native-connector-crash-recovers pass every
+  time; the service-crash phase fails every time (finding 1), so the later phases did not run.
+
+Findings for the coordinator (no product change made):
+
+1. After the service is lost (SIGKILL), the MCP edge answers the first request with
+   `-32603 "Ghostlight restarted before this request finished."`, even a `tools/list` sent
+   after the loss; the next request works on a new service. Four of four journey runs. A probe
+   (initialize, list, kill, list): sent at once, failed one try in 0 ms and passed the other in
+   515 ms; sent after 1 s or 3 s, passed in a few ms. A request that arrives while the edge
+   reconnects is failed rather than held for the new service.
+2. and 3. The installer's "did not start within 30 s" and the service's silent start failure,
+   in L03.
+4. `install --dry-run` prints Rust variant names to people: "Would install Ghostlight for Cline
+   (CLI) (NeedsAttention)", "(Installed)", "(NotDetected)".
+5. `install --dry-run --client nope` prints the whole dry-run summary before it refuses; the
+   refusal could come first.
+6. The zsh completion lands where zsh does not look by default (above).
+7. 1.x leftovers the deploy neither removes nor names: `~/.ghostlight/adapters/v1.1.1`,
+   `~/.ghostlight/extension/v0.*` (three) and the man pages `ghostlight-browser-connector.1` and
+   `ghostlight-mcp-connector.1` in `~/.local/share/man/man1`.
+8. Cline (CLI)'s 0.5.7-era entry keeps its command under `transport.command`, naming a
+   `ghostlight-relay` that no longer exists. Ghostlight reads it as a foreign entry without a
+   usable command and leaves it ("needs attention"). This follows the foreign-entry rule; noted
+   in case such old Ghostlight entries should be recognized as Ghostlight's own.
 
 ### L05 The window and the tray (todo)
 
