@@ -983,7 +983,9 @@ fn a_launched_browser_that_timed_out_keeps_its_own_step_with_an_extension_or_a_f
         let refused = launch_without_extension(complete, present);
         assert_eq!(
             refused.next_steps,
-            vec!["Start the selected browser yourself, then repeat the call."]
+            vec![
+                "Ask the user to open a window of that browser with the Ghostlight extension installed, then repeat the call."
+            ]
         );
     }
 }

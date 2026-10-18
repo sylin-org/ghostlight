@@ -1234,7 +1234,8 @@ fn update_extension_then_repeat() -> String {
 }
 
 /// The one recovery step when the selected browser did not start or its adapter did not arrive.
-const START_BROWSER_YOURSELF: &str = "Start the selected browser yourself, then repeat the call.";
+/// It speaks to the model, which cannot open a browser for the person (ADR-0147 Decision 3).
+const ASK_FOR_THAT_BROWSER: &str = "Ask the user to open a window of that browser with the Ghostlight extension installed, then repeat the call.";
 
 /// Whether a refusal that sends the person to the browser also says where the extension comes
 /// from.
@@ -1720,9 +1721,9 @@ impl Refusal {
                         .into()
                 })],
                 BrowserRecoveryReason::HandshakeTimeout => vec![extension.step().unwrap_or_else(|| {
-                    START_BROWSER_YOURSELF.into()
+                    ASK_FOR_THAT_BROWSER.into()
                 })],
-                BrowserRecoveryReason::LaunchFailed => vec![START_BROWSER_YOURSELF.into()],
+                BrowserRecoveryReason::LaunchFailed => vec![ASK_FOR_THAT_BROWSER.into()],
             },
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
             Self::FilesUnreadable => vec![
@@ -4029,7 +4030,7 @@ Changes are \"unsaved\".".into()),
         };
         assert_eq!(
             timed_out(ExtensionAdvice::Plain).next_steps(),
-            vec!["Start the selected browser yourself, then repeat the call."]
+            vec!["Ask the user to open a window of that browser with the Ghostlight extension installed, then repeat the call."]
         );
         assert_eq!(
             timed_out(ExtensionAdvice::AddFromStore).next_steps(),
