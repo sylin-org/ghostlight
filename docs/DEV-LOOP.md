@@ -190,10 +190,10 @@ stay intact. To run it directly after building:
 pwsh -NoProfile -File tests/windows-desktop-journey.ps1
 ```
 
-Linux installed-browser, desktop, and package-consumer acceptance drivers live in
-[`tests/linux/`](../tests/linux/README.md). Its runner accepts per-environment exports for
-test areas, browser executables, candidate packages, and guest build tools. These opt-in
-journeys remain separate from the ordinary hardening gates; their generated state stays ignored.
+Linux checks against the real installation and the system browser live in
+[`tests/linux/`](../tests/linux/README.md). They never use a sandbox or a dedicated browser
+profile. These opt-in journeys remain separate from the ordinary hardening gates; their
+generated state stays ignored.
 
 ```powershell
 cargo fmt --all -- --check
