@@ -32,7 +32,7 @@ test("the popup draws each connected state with its own lantern", async () => {
     await settle();
     lights[control] = page.byId("pop").dataset.light;
   }
-  assert.deepEqual(lights, { active: "lit", held: "held", ended: "waiting" });
+  assert.deepEqual(lights, { active: "lit", held: "held", ended: "held" });
 });
 
 test("the popup's Open Ghostlight link sends show_ghostlight", async () => {

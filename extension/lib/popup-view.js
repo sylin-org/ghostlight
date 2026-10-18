@@ -13,7 +13,7 @@
   "use strict";
 
   // The popup's lantern: the setup page's lights, plus held, the waiting ghost with an amber ember
-  // that the window and the tray also show for Paused.
+  // that the window and the tray also show for Paused and for an ended session.
   const LIGHT = Object.freeze({ ...setup.LIGHT, HELD: "held" });
   // The runtime_control intents the popup sends. The orchestrator owns the state each one moves.
   const INTENT = Object.freeze({
@@ -136,7 +136,7 @@
       return view;
     }
     if (snapshot.control_state === CONTROL.ENDED) {
-      view.light = LIGHT.WAITING;
+      view.light = LIGHT.HELD;
       view.title = WORDS.ended.title;
       view.line = WORDS.ended.line;
       view.secondary = { label: WORDS.startSession, intent: INTENT.START_SESSION };

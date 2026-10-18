@@ -77,7 +77,7 @@ test("held offers a primary resume with the shortcut", () => {
 
 test("an ended session offers a new one and no end", () => {
   const view = popup.popupView(snapshot({ control_state: "ended" }), { shortcut: SHORTCUT });
-  assert.equal(view.light, LIGHT.WAITING);
+  assert.equal(view.light, LIGHT.HELD);
   assert.equal(view.title, "Session ended");
   assert.equal(view.line, "Agents can't use this browser until you start a new session.");
   assert.deepEqual(actions(view), {
@@ -88,10 +88,9 @@ test("an ended session offers a new one and no end", () => {
   });
 });
 
-test("ready, paused and ended show three different lanterns", () => {
+test("ready is lit, and paused and ended are held, as the window and the tray show them", () => {
   const lights = ["active", "held", "ended"].map((control) => popup.popupView(snapshot({ control_state: control })).light);
-  assert.deepEqual(lights, [LIGHT.LIT, LIGHT.HELD, LIGHT.WAITING]);
-  assert.equal(new Set(lights).size, 3);
+  assert.deepEqual(lights, [LIGHT.LIT, LIGHT.HELD, LIGHT.HELD]);
 });
 
 test("every connected state links to the Ghostlight window and no other state does", () => {
