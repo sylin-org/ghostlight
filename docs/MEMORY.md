@@ -407,6 +407,11 @@ the owner wants, and what this project learned the hard way.
   for its uses; and treat CI's other-system clippy as the first check of that code, pushing to
   `dev` early rather than calling a one-system gate complete. Cross-compiling the service for the
   other system needs that system's C toolchain (`ring`), which neither host has.
+- **A window layout change runs the history journey, headless, before it lands.**
+  `GHOSTLIGHT_TEST_HEADLESS=1 node tests/workbench-history-browser.mjs` starts only the fixture
+  preview server and its own Chromium with a throwaway profile, so it is safe on the owner's
+  machine. On 2026-10-18 a width change that every unit test accepted failed it on both CI runners
+  (Pause beside the tabs at 720px), because the lanes ran no browser journey.
 - **Cite unpushed work by its subject, not its hash.** A rebase onto the other session's pushes
   rewrites every local hash, and ledger lines that named them pointed at commits no branch holds.
 - **Agents share the owner's machine; their processes must end with their step.** On 2026-10-15 a coding agent ran `find / -maxdepth 6 -name <crate>` in Git Bash to locate a crate's source.
