@@ -1,36 +1,34 @@
 # Latest result
 
-## [0040] linux-1: L07 passes after five fixes; the model's answers about captures and recordings
+## [0044] linux-1 is done: L01 to L10 pass on test-01, with the fixes they needed
 
-linux-claude, on test-01, on the real installation with the system Chromium. Details:
-[the ledger](../docs/tasks/linux-1/LEDGER.md), L07.
+linux-claude, on test-01 (CachyOS, KDE Plasma 6.8 on Wayland), on the real installation and the
+system Chromium. The record is [the ledger](../docs/tasks/linux-1/LEDGER.md); each fix there was
+deployed and checked live.
 
-Passed: the popup in Ready, browsing, Paused, Session ended, Not connected, Recording and
-Release debugger states; the options page's connection card and switches; the setup page from
-waiting to connected; real agent work on every demo stage L07 names; `browser.startup` manual
-(names Chromium, starts nothing) and on_demand (starts the ordinary profile).
+Since [0040]:
 
-Fixed, each deployed and checked:
+- 5107be98 `fix(workbench)` (L09): an app icon whose plate sits in a transparent margin, like
+  Zed's, is its own plate and is served as cached (no more dark plate inside an off-white square).
+- e964e858 `fix(setup)` (L10): a whole `ghostlight uninstall` asks the running service to quit with
+  `uninstall` and says so; until now the service, the tray shell and the browser relay kept
+  running after it and nothing sent that goodbye. The home stays (ADR-0199 Decision 20).
+- 1024a994 `fix(workbench)` (L08): at the setup view's agent step a long agent list no longer
+  pushes the mascot and the steps below the fold; the window's `styles.css` keeps the companion
+  centered on the window (the extension kit is unchanged). This one was not claimed first; it
+  touched only that stylesheet.
 
-- efe54caf `fix(browser)`: a screenshot of a session tab its window does not show waited 8 s (or
-  30 s) for a frame Chromium never draws and told the model to raise the timeout. It is refused at
-  once as `tab_not_showing`, with the focus step. Adds `BrowserError::TabNotShowing` and
-  `Refusal::TabNotShowing`; captures first send `list_tabs` for that tab.
-- 5c4adb4d `fix(diagnostics)`: `diagnostics show` no longer runs the invocation id into the tool.
-- be54ad44 `fix(language)`: a stopped recording's status no longer says "Recording ... so far".
-- 6734f99b `fix(language)`: a recording save the page did not take (target not a file input) is
-  `recording_not_attached` and keeps the recording, instead of "could not be turned into a replay"
-  with advice to discard it. The adapter recognizes the extension's fixed reason
-  (`wire::PAGE_REFUSED_REPLAY`).
-- 7769fd97 `fix(browser)`: the browser the service starts on demand is reaped and has its own
-  process group (it was a `<defunct>` child of the service).
+For the owner, not changed (details in the ledger, "seen and left"):
 
-For the owner or the coordinator (not changed): on plain Chromium the extension reports no
-browser name, so the ADR-0149 last-browser record is never written for it; an upload calls a file
-input a "text field" because the page assets give it the textbox role.
+- L08: when the extension is in a profile but no browser is connected, the install's Next line
+  says "restart your agents, then ask one" while the window shows the browser step.
+- L07: on plain Chromium the extension names no browser, so no ADR-0149 last-browser record is
+  written; an upload calls a file input a "text field".
+- L10: 0.x and 1.x left `~/.local/share/ghostlight`, `~/.local/share/org.sylin.ghostlight` and an
+  emptied `~/.local/state/ghostlight`.
 
-Please pull before touching `translate/capture.rs`, `translate/records.rs`, `work/recording.rs`,
-`browser/recovery.rs` or the recording and capture refusals in `language/outcome.rs`. My claims
-on them end here.
+Machine: test-01 runs the development build at 1024a994 in a fresh `~/.ghostlight` with the
+owner's policy copied back; the home from before L10 is kept at `~/.ghostlight.l10-before`.
 
-Next: L08, setup on a fresh home.
+Still owed: the release candidate's pinned install on Linux (`get.sh` with `GHOSTLIGHT_VERSION`),
+once `v2.0.0-rc.1` is published.
