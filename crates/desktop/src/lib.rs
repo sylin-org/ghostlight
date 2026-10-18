@@ -21,7 +21,8 @@
 //! `open` (the system opener, through `ShellExecute` on Windows so no console window opens) and
 //! `rfd` (the file dialog; GTK on Linux, the common dialog on Windows). Each is already locked at
 //! an exact version, and each is built without the features that bring an async runtime, D-Bus in
-//! pure Rust, or the desktop portal.
+//! pure Rust, or the desktop portal. On Windows the tray reads whether the taskbar is light with
+//! `winreg`, at the version the service already locks.
 //!
 //! The dependency tree holds exactly one name on the network-crate ban list of ADR-0028 and
 //! ADR-0197: `http`, which `wry`'s own API types bring. The shell registers no custom scheme and

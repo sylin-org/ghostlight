@@ -1,7 +1,7 @@
 //! Build script of the window process.
 //!
 //! When the target is Windows and the build host can compile resources, it embeds the product icon
-//! and the version information (the description Task Manager and Explorer show) into
+//! at 16, 32, 48 and 128 pixels and the version information (the description Task Manager and Explorer show) into
 //! `ghostlight-desktop.exe`. On MSVC targets it also embeds the application manifest, which asks
 //! for Common Controls 6: the window's libraries import `TaskDialogIndirect`, which only that
 //! version has, so without the manifest Windows refuses to load the image. On every other host or
@@ -12,9 +12,15 @@ use std::fs;
 #[cfg(windows)]
 use std::path::{Path, PathBuf};
 
-/// The product icon the executable carries, relative to this crate.
+/// The product icon at each size the executable carries, smallest first, relative to this crate.
+/// Explorer, the Start menu and the taskbar each pick the size nearest their own.
 #[cfg(windows)]
-const ICON_PNG: &str = "../../extension/icons/icon128.png";
+const ICON_PNGS: [(u8, &str); 4] = [
+    (16, "../../extension/icons/icon16.png"),
+    (32, "../../extension/icons/icon32.png"),
+    (48, "../../extension/icons/icon48.png"),
+    (128, "../../extension/icons/icon128.png"),
+];
 
 /// The icon file name written into the build output directory.
 #[cfg(windows)]
@@ -36,13 +42,19 @@ const MANIFEST: &str = "manifest.xml";
 #[cfg(windows)]
 const TARGET_ENV_MSVC: &str = "msvc";
 
-/// The size of an ICO header with one directory entry; the PNG follows it.
+/// The size of an ICO file's header.
 #[cfg(windows)]
-const ICO_HEADER_BYTES: u32 = 22;
+const ICO_HEADER_BYTES: u32 = 6;
+
+/// The size of one entry of an ICO file's directory.
+#[cfg(windows)]
+const ICO_ENTRY_BYTES: u32 = 16;
 
 #[cfg(windows)]
 fn main() {
-    println!("cargo:rerun-if-changed={ICON_PNG}");
+    for (_, png) in ICON_PNGS {
+        println!("cargo:rerun-if-changed={png}");
+    }
     println!("cargo:rerun-if-changed={MANIFEST}");
     println!("cargo:rerun-if-changed=build.rs");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok(TARGET_WINDOWS) {
@@ -70,21 +82,32 @@ fn main() {
 #[cfg(not(windows))]
 fn main() {}
 
-/// Wraps the product PNG in a single-image ICO file and returns its path.
+/// Packs the product PNGs into one ICO file, one image per size, and returns its path.
 #[cfg(windows)]
 fn write_icon(out_dir: &Path) -> std::io::Result<PathBuf> {
-    let png = fs::read(ICON_PNG)?;
-    let length = u32::try_from(png.len()).expect("the Ghostlight icon fits an ICO entry");
-    let mut icon = Vec::with_capacity(ICO_HEADER_BYTES as usize + png.len());
+    let mut images = Vec::with_capacity(ICON_PNGS.len());
+    for (size, png) in ICON_PNGS {
+        images.push((size, fs::read(png)?));
+    }
+    let count = u16::try_from(images.len()).expect("the Ghostlight icon sizes fit an ICO");
+    let directory = ICO_HEADER_BYTES + ICO_ENTRY_BYTES * u32::from(count);
+    let mut icon = Vec::new();
     icon.extend_from_slice(&0_u16.to_le_bytes());
     icon.extend_from_slice(&1_u16.to_le_bytes());
-    icon.extend_from_slice(&1_u16.to_le_bytes());
-    icon.extend_from_slice(&[128, 128, 0, 0]);
-    icon.extend_from_slice(&1_u16.to_le_bytes());
-    icon.extend_from_slice(&32_u16.to_le_bytes());
-    icon.extend_from_slice(&length.to_le_bytes());
-    icon.extend_from_slice(&ICO_HEADER_BYTES.to_le_bytes());
-    icon.extend_from_slice(&png);
+    icon.extend_from_slice(&count.to_le_bytes());
+    let mut offset = directory;
+    for (size, png) in &images {
+        let length = u32::try_from(png.len()).expect("each Ghostlight icon fits an ICO entry");
+        icon.extend_from_slice(&[*size, *size, 0, 0]);
+        icon.extend_from_slice(&1_u16.to_le_bytes());
+        icon.extend_from_slice(&32_u16.to_le_bytes());
+        icon.extend_from_slice(&length.to_le_bytes());
+        icon.extend_from_slice(&offset.to_le_bytes());
+        offset += length;
+    }
+    for (_, png) in &images {
+        icon.extend_from_slice(png);
+    }
     let path = out_dir.join(ICON_FILE);
     fs::write(&path, icon)?;
     Ok(path)

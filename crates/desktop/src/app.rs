@@ -53,7 +53,7 @@ use crate::machine::{self, Answer, Effect, Image, Machine, Outside, Screen};
 use crate::native::{self, ThisComputer};
 use crate::session::{self, Session, ThisSession};
 use crate::states::{StateButton, StateScreen};
-use crate::tray::{Tray, TrayEvent, TrayModel};
+use crate::tray::{Taskbar, Tray, TrayEvent, TrayModel};
 use crate::webview::{prepare_profile, profile_directory, runtime_available};
 use crate::window::{
     self, Callbacks, Content, LifecycleEvent, ShellWindow, WindowAct, WindowError, WindowLifecycle,
@@ -244,6 +244,9 @@ enum ShellEvent {
     RendererLost,
     /// The machine's next try is due ([`Alarm`]).
     Wake,
+    /// The taskbar turned light (`true`) or dark.
+    #[cfg(windows)]
+    TaskbarLight(bool),
 }
 
 /// Wakes the event loop when the machine's next try is due.
@@ -361,6 +364,8 @@ struct Shell {
     window: Option<ShellWindow>,
     // Held so the icon stays in the notification area.
     tray: Option<Tray>,
+    /// The taskbar the icon is drawn for.
+    taskbar: Taskbar,
     /// The tray the current service described, whatever the screen.
     tray_model: Option<TrayModel>,
     workbench: Option<Workbench>,
@@ -473,7 +478,7 @@ impl Shell {
     /// that was started for the icon alone. A shell a person started goes on with its window.
     fn set_tray_model(&mut self, model: TrayModel) {
         if self.tray.is_none() && self.tray_host {
-            match Tray::build(&model) {
+            match Tray::build(&model, self.taskbar) {
                 Ok(tray) => self.tray = Some(tray),
                 Err(error) => {
                     eprintln!("ghostlight-desktop: {error}");
@@ -505,6 +510,19 @@ impl Shell {
             return;
         };
         if let Err(error) = tray.show(&shown) {
+            eprintln!("ghostlight-desktop: {error}");
+        }
+    }
+
+    /// Redraws the icon for a taskbar that turned light or dark, at the primary monitor's scale
+    /// as it is now.
+    #[cfg(windows)]
+    fn taskbar_changed(&mut self, light: bool, target: &EventLoopWindowTarget<ShellEvent>) {
+        self.taskbar = Taskbar::new(light, primary_scale(target));
+        let Some(tray) = &mut self.tray else {
+            return;
+        };
+        if let Err(error) = tray.set_taskbar(self.taskbar) {
             eprintln!("ghostlight-desktop: {error}");
         }
     }
@@ -800,6 +818,10 @@ impl Shell {
             }
             Event::UserEvent(ShellEvent::Pressed(button)) => self.pressed(button, target),
             Event::UserEvent(ShellEvent::SessionEnding) => self.exiting = true,
+            #[cfg(windows)]
+            Event::UserEvent(ShellEvent::TaskbarLight(light)) => {
+                self.taskbar_changed(light, target)
+            }
             #[cfg(target_os = "linux")]
             Event::UserEvent(ShellEvent::RendererLost) => {
                 self.apply(LifecycleEvent::RendererLost, target);
@@ -829,6 +851,13 @@ impl Shell {
             wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil)
         };
     }
+}
+
+/// The scale factor of the primary monitor, whose taskbar holds the icon; 100% when there is none.
+fn primary_scale(target: &EventLoopWindowTarget<ShellEvent>) -> f64 {
+    target
+        .primary_monitor()
+        .map_or(1.0, |monitor| monitor.scale_factor())
 }
 
 /// Runs the shell as `launch` says: opens the stream to the service, prepares the display, asks
@@ -862,6 +891,17 @@ pub fn run(launch: Launch) -> ExitCode {
     }
     let event_loop = EventLoopBuilder::<ShellEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let light = crate::tray::taskbar_is_light();
+    let taskbar = Taskbar::new(light, primary_scale(&event_loop));
+    #[cfg(windows)]
+    {
+        let taskbar_proxy = proxy.clone();
+        if let Err(error) = crate::tray::watch_taskbar(light, move |light| {
+            post(&taskbar_proxy, ShellEvent::TaskbarLight(light));
+        }) {
+            eprintln!("ghostlight-desktop: {error}");
+        }
+    }
     let ending = Mutex::new(proxy.clone());
     let listener = match session::listen(move || {
         if let Ok(proxy) = ending.lock() {
@@ -900,6 +940,7 @@ pub fn run(launch: Launch) -> ExitCode {
         lifecycle: WindowLifecycle::for_platform(),
         window: None,
         tray: None,
+        taskbar,
         tray_model: None,
         workbench: None,
         link: None,

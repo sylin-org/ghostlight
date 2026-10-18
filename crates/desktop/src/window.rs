@@ -30,7 +30,8 @@ use std::time::{Duration, Instant};
 
 use tao::dpi::{LogicalSize, PhysicalPosition};
 use tao::event_loop::EventLoopWindowTarget;
-use tao::window::{Icon, Window, WindowBuilder, WindowId};
+use tao::monitor::MonitorHandle;
+use tao::window::{Icon, Theme, Window, WindowBuilder, WindowId};
 use wry::{WebContext, WebView, WebViewBuilder};
 
 use crate::native::section_url;
@@ -41,11 +42,23 @@ use crate::webview;
 /// The window title, the product name.
 pub const WINDOW_TITLE: &str = "Ghostlight";
 
-/// The window's inner size in logical pixels, width then height.
+/// The window's inner size in logical pixels, width then height, on a monitor with room for it.
 pub const WINDOW_SIZE: (f64, f64) = (1180.0, 760.0);
 
 /// The smallest inner size the window can be resized to, in logical pixels.
-pub const WINDOW_MIN_SIZE: (f64, f64) = (880.0, 620.0);
+pub const WINDOW_MIN_SIZE: (f64, f64) = (720.0, 620.0);
+
+/// The theme of the window's frame. The page is dark whatever the system's app mode, so its title
+/// bar is too.
+pub const WINDOW_THEME: Theme = Theme::Dark;
+
+/// How much of a monitor's height, in logical pixels, a new window leaves for its caption and the
+/// taskbar: a 1280 by 720 screen (a 1920 by 1080 panel at 150%) opens the window 624 high.
+pub const SCREEN_ALLOWANCE: f64 = 96.0;
+
+/// How much of a monitor's height, in logical pixels, the taskbar takes at its bottom. A new window
+/// is centered in the rest.
+pub const TASKBAR_ALLOWANCE: f64 = 48.0;
 
 /// The Windows window class name, which journeys use to find the window.
 pub const WINDOW_CLASS: &str = "Ghostlight Window";
@@ -276,6 +289,42 @@ pub fn init_display() -> Result<(), WindowError> {
     Ok(())
 }
 
+/// The inner size a new window opens at on a monitor `monitor_height` logical pixels high:
+/// [`WINDOW_SIZE`], lowered so the window, its caption and the taskbar fit within the monitor
+/// with [`SCREEN_ALLOWANCE`], and never below [`WINDOW_MIN_SIZE`].
+pub fn fitted_size(monitor_height: f64) -> (f64, f64) {
+    let room = monitor_height - SCREEN_ALLOWANCE;
+    let height = if room.is_finite() {
+        room.clamp(WINDOW_MIN_SIZE.1, WINDOW_SIZE.1)
+    } else {
+        WINDOW_SIZE.1
+    };
+    (WINDOW_SIZE.0, height)
+}
+
+/// The part of a monitor `monitor_size` physical pixels large, at `scale_factor`, that a new window
+/// is centered in: the monitor without [`TASKBAR_ALLOWANCE`] at its bottom.
+pub fn placement_area(monitor_size: (u32, u32), scale_factor: f64) -> (u32, u32) {
+    let taskbar = (TASKBAR_ALLOWANCE * scale_factor).round();
+    let taskbar = if (0.0..f64::from(monitor_size.1)).contains(&taskbar) {
+        taskbar as u32
+    } else {
+        0
+    };
+    (monitor_size.0, monitor_size.1 - taskbar)
+}
+
+/// The window's builder at `inner_size` logical pixels: titled, dark-framed, held to
+/// [`WINDOW_MIN_SIZE`] and not yet visible.
+fn window_builder(inner_size: (f64, f64)) -> WindowBuilder {
+    WindowBuilder::new()
+        .with_title(WINDOW_TITLE)
+        .with_theme(Some(WINDOW_THEME))
+        .with_inner_size(LogicalSize::new(inner_size.0, inner_size.1))
+        .with_min_inner_size(LogicalSize::new(WINDOW_MIN_SIZE.0, WINDOW_MIN_SIZE.1))
+        .with_visible(false)
+}
+
 /// The top-left corner that centers a window of `window_size` on a monitor, in physical pixels.
 ///
 /// A window larger than the monitor is placed at the monitor's corner.
@@ -393,8 +442,9 @@ fn window_icon(rgba: Vec<u8>, width: u32, height: u32) -> Result<Icon, WindowErr
 }
 
 impl ShellWindow {
-    /// Builds the window, shows it centered on its monitor with `content` in it, and keeps
-    /// `profile` as the folder the webviews store web data in. Call on the event-loop thread.
+    /// Builds the window at the size that fits the primary monitor ([`fitted_size`]), shows it
+    /// centered above the taskbar of its monitor with `content` in it, and keeps `profile` as the
+    /// folder the webviews store web data in. Call on the event-loop thread.
     pub fn create<T: 'static>(
         target: &EventLoopWindowTarget<T>,
         profile: PathBuf,
@@ -402,12 +452,11 @@ impl ShellWindow {
         callbacks: Callbacks,
     ) -> Result<ShellWindow, WindowError> {
         let (rgba, width, height) = icon_image().map_err(native)?;
-        let builder = WindowBuilder::new()
-            .with_title(WINDOW_TITLE)
-            .with_inner_size(LogicalSize::new(WINDOW_SIZE.0, WINDOW_SIZE.1))
-            .with_min_inner_size(LogicalSize::new(WINDOW_MIN_SIZE.0, WINDOW_MIN_SIZE.1))
-            .with_window_icon(Some(window_icon(rgba, width, height)?))
-            .with_visible(false);
+        let inner_size = target
+            .primary_monitor()
+            .map_or(WINDOW_SIZE, |monitor| fitted_size(logical_height(&monitor)));
+        let builder =
+            window_builder(inner_size).with_window_icon(Some(window_icon(rgba, width, height)?));
         #[cfg(windows)]
         let builder = {
             use crate::tray::decode_rgba;
@@ -548,6 +597,11 @@ fn present_when_idle(window: &Window) {
     });
 }
 
+/// The height of `monitor` in logical pixels.
+fn logical_height(monitor: &MonitorHandle) -> f64 {
+    f64::from(monitor.size().height) / monitor.scale_factor()
+}
+
 fn center(window: &Window) {
     let Some(monitor) = window
         .current_monitor()
@@ -560,7 +614,7 @@ fn center(window: &Window) {
     let outer = window.outer_size();
     let (x, y) = centered_origin(
         (position.x, position.y),
-        (size.width, size.height),
+        placement_area((size.width, size.height), monitor.scale_factor()),
         (outer.width, outer.height),
     );
     window.set_outer_position(PhysicalPosition::new(x, y));
@@ -860,9 +914,52 @@ mod tests {
     fn the_window_constants_hold_the_product_sizes() {
         assert_eq!(WINDOW_TITLE, "Ghostlight");
         assert_eq!(WINDOW_SIZE, (1180.0, 760.0));
-        assert_eq!(WINDOW_MIN_SIZE, (880.0, 620.0));
+        assert_eq!(WINDOW_MIN_SIZE, (720.0, 620.0));
         assert_eq!(WINDOW_CLASS, "Ghostlight Window");
         assert_eq!(APPLICATION_ID, "org.sylin.ghostlight");
+    }
+
+    #[test]
+    fn the_frame_is_dark_whatever_the_system_mode() {
+        let builder = window_builder(WINDOW_SIZE);
+        assert_eq!(builder.window.preferred_theme, Some(Theme::Dark));
+        assert_eq!(WINDOW_THEME, Theme::Dark);
+        assert!(!builder.window.visible, "shown once its content is in");
+    }
+
+    #[test]
+    fn a_short_screen_lowers_the_window_to_fit_above_the_taskbar() {
+        // A 1920 by 1080 panel at 150% is 1280 by 720 logical pixels.
+        assert_eq!(fitted_size(1080.0 / 1.5), (1180.0, 624.0));
+        // 1366 by 768 at 100%.
+        assert_eq!(fitted_size(768.0), (1180.0, 672.0));
+        // A screen with room keeps the product size.
+        assert_eq!(fitted_size(1080.0), WINDOW_SIZE);
+        assert_eq!(fitted_size(1080.0 / 1.25), WINDOW_SIZE);
+    }
+
+    #[test]
+    fn the_fitted_window_is_never_below_the_minimum() {
+        assert_eq!(fitted_size(600.0), (1180.0, WINDOW_MIN_SIZE.1));
+        assert_eq!(fitted_size(0.0), (1180.0, WINDOW_MIN_SIZE.1));
+        assert_eq!(fitted_size(f64::NAN), WINDOW_SIZE);
+        assert_eq!(fitted_size(f64::INFINITY), WINDOW_SIZE);
+    }
+
+    #[test]
+    fn the_window_is_centered_above_the_taskbar() {
+        // 1920 by 1080 at 150%: the taskbar takes 72 physical pixels, and a 624 high window with
+        // its caption (about 1001 physical pixels) sits in the 1008 above it.
+        let area = placement_area((1920, 1080), 1.5);
+        assert_eq!(area, (1920, 1008));
+        assert_eq!(centered_origin((0, 0), area, (1770, 1001)), (75, 3));
+        assert_eq!(placement_area((1920, 1080), 1.0), (1920, 1032));
+        assert_eq!(
+            placement_area((800, 30), 1.0),
+            (800, 30),
+            "no room to spare"
+        );
+        assert_eq!(placement_area((800, 600), f64::NAN), (800, 600));
     }
 
     #[test]

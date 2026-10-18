@@ -5,9 +5,13 @@
 //! [`TrayEvent`]s. The shell owns no item of its own: which entries exist, what they say and
 //! whether they are enabled are all the service's decisions.
 //!
-//! The icon is the product icon, drawn at run time. A ready service shows the plain ghost; each
-//! other state adds a small filled dot in the lower right in the colour the window's band uses for
-//! that state ([`state_icon`]). No other artwork is shipped.
+//! The icon is the product icon, drawn at run time for the [`Taskbar`] it sits on. A ready service
+//! shows the plain ghost; each other state adds a small filled dot in the lower right in the colour
+//! the window's band uses for that state, ringed in the taskbar's ground ([`state_icon`]). The
+//! 16 pixel icon is drawn at the 16 pixel small-icon size and the 32 pixel icon at any larger one.
+//! On a light Windows taskbar the pale ghost would be a speck, so its body is inked in the window's
+//! night colour, and `watch_taskbar` notices when the taskbar turns light or dark. No other
+//! artwork is shipped.
 //!
 //! Thread rule: the tray is created and updated on the event-loop thread, after the loop has
 //! started (on Linux `tao` has then initialized GTK). [`install_events`] may run on any thread
@@ -16,11 +20,14 @@
 //! Linux reports no tray clicks (the indicator shows its menu itself), so on Linux the way to
 //! open the window must be a menu item of the model, never the icon click alone.
 //!
-//! [`TrayModel::validate`], [`icon_image`], [`state_icon`] and [`decode_rgba`] are pure and unit
-//! tested. [`Tray`] and [`install_events`] are thin glue over `tray-icon` and are checked live.
+//! [`TrayModel::validate`], [`Taskbar`], [`icon_image`], [`state_icon`] and [`decode_rgba`] are pure
+//! and unit tested. [`Tray`], [`install_events`], [`taskbar_is_light`] and `watch_taskbar` are
+//! thin glue over `tray-icon` and the registry and are checked live.
 
 use std::collections::HashSet;
 use std::sync::Arc;
+#[cfg(windows)]
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -49,15 +56,19 @@ pub const PAUSED_COLOUR: [u8; 3] = [0xfb, 0xbf, 0x24];
 /// The colour of the dot for a service that needs attention, the band's `--danger`.
 pub const ATTENTION_COLOUR: [u8; 3] = [0xf8, 0x71, 0x71];
 
-/// The colour of the thin ring that keeps the dot apart from the ghost, the window's night ground
-/// `--bg`.
-const RING_COLOUR: [u8; 3] = [0x0f, 0x0e, 0x12];
+/// The window's night ground `--bg`: the ground of a dark taskbar, so the ring around the dot
+/// there, and the ink of the ghost on a light taskbar.
+pub const NIGHT_COLOUR: [u8; 3] = [0x0f, 0x0e, 0x12];
+
+/// The ground of a light Windows taskbar, so the ring around the dot there.
+pub const LIGHT_GROUND: [u8; 3] = [0xf3, 0xf3, 0xf3];
 
 /// The centre of the dot in pixels of the 32 pixel icon, counted from the top left.
-const DOT_CENTRE: (f32, f32) = (24.5, 24.5);
+const DOT_CENTRE: (f32, f32) = (24.0, 24.0);
 
-/// The radius of the dot, in pixels of the 32 pixel icon.
-const DOT_RADIUS: f32 = 5.5;
+/// The radius of the dot, in pixels of the 32 pixel icon: 3 pixels on the 16 pixel icon, the
+/// least that still reads as a dot there.
+const DOT_RADIUS: f32 = 6.0;
 
 /// How much wider than the dot the ring is, in pixels.
 const RING_WIDTH: f32 = 1.5;
@@ -65,11 +76,37 @@ const RING_WIDTH: f32 = 1.5;
 /// The icon size the dot is drawn for. A larger icon scales the dot with it.
 const REFERENCE_SIZE: f32 = 32.0;
 
+/// The small-icon size of a taskbar at 100% scale, in pixels.
+const SMALL_ICON: u32 = 16;
+
+/// How light a pixel must be, on a scale of 0 to 255, to belong to the ghost's pale body. A
+/// darker pixel is a detail inside it, such as an eye.
+const BODY_LIGHTNESS: u32 = 128;
+
 /// The identity of the one tray icon.
 const TRAY_ID: &str = "ghostlight";
 
-/// The product icon, the same file the extension uses.
+/// The product icon at 32 pixels, the same file the extension uses.
 const ICON_PNG: &[u8] = include_bytes!("../../../extension/icons/icon32.png");
+
+/// The product icon at 16 pixels, drawn at the 16 pixel small-icon size.
+const ICON_16_PNG: &[u8] = include_bytes!("../../../extension/icons/icon16.png");
+
+/// Where Windows keeps whether the taskbar is light, below the current user.
+#[cfg(windows)]
+const PERSONALIZE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+
+/// The value that is 1 while the taskbar is light.
+#[cfg(windows)]
+const SYSTEM_USES_LIGHT_THEME: &str = "SystemUsesLightTheme";
+
+/// How often [`watch_taskbar`] looks whether the taskbar turned light or dark.
+#[cfg(windows)]
+const TASKBAR_CHECK: Duration = Duration::from_secs(2);
+
+/// The name of the thread that watches the taskbar.
+#[cfg(windows)]
+const TASKBAR_THREAD_NAME: &str = "ghostlight-desktop-taskbar";
 
 /// Why a tray model or the tray itself was refused.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -221,6 +258,56 @@ impl TrayModel {
     }
 }
 
+/// The taskbar the icon is drawn on: whether its ground is light and the size of a small icon on
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Taskbar {
+    /// Whether the taskbar is light (on Windows, `SystemUsesLightTheme` is 1).
+    pub light: bool,
+    /// The size of a small icon on it, in physical pixels.
+    pub small_icon: u32,
+}
+
+impl Taskbar {
+    /// The taskbar of a monitor at `scale_factor`, light when `light`. A scale that makes no
+    /// sense counts as 100%.
+    pub fn new(light: bool, scale_factor: f64) -> Taskbar {
+        let scaled = (f64::from(SMALL_ICON) * scale_factor).round();
+        let small_icon = if (1.0..=f64::from(u16::MAX)).contains(&scaled) {
+            scaled as u32
+        } else {
+            SMALL_ICON
+        };
+        Taskbar { light, small_icon }
+    }
+
+    /// The colour the taskbar is drawn in, so the ring that parts the dot from the ghost.
+    pub const fn ground(self) -> [u8; 3] {
+        if self.light {
+            LIGHT_GROUND
+        } else {
+            NIGHT_COLOUR
+        }
+    }
+
+    /// The product icon drawn at this taskbar's small-icon size: the 16 pixel icon at 16 pixels or
+    /// fewer, and the 32 pixel icon at any larger size, which Windows scales down to 24.
+    fn source(self) -> &'static [u8] {
+        if self.small_icon <= SMALL_ICON {
+            ICON_16_PNG
+        } else {
+            ICON_PNG
+        }
+    }
+}
+
+impl Default for Taskbar {
+    /// A dark taskbar at 100% scale, the look before anything is known.
+    fn default() -> Taskbar {
+        Taskbar::new(false, 1.0)
+    }
+}
+
 /// Decodes a PNG into 8-bit RGBA pixels, returning the pixels, the width and the height.
 pub fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), TrayError> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
@@ -238,23 +325,47 @@ pub fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), TrayError> {
     Ok((buffer, info.width, info.height))
 }
 
-/// The product icon as 8-bit RGBA pixels, width and height.
+/// The product icon at 32 pixels as 8-bit RGBA pixels, width and height.
 pub fn icon_image() -> Result<(Vec<u8>, u32, u32), TrayError> {
     decode_rgba(ICON_PNG)
 }
 
-/// The icon for `state`: the product icon, with a filled dot in the lower right for every state
-/// but ready. The ready icon is the product icon's own pixels.
-pub fn state_icon(state: TrayState) -> Result<(Vec<u8>, u32, u32), TrayError> {
-    let (mut rgba, width, height) = icon_image()?;
+/// The icon for `state` on `taskbar`: the product icon at the taskbar's size, its body inked on a
+/// light taskbar, with a filled dot in the lower right for every state but ready. The ready icon
+/// on a dark taskbar is the product icon's own pixels.
+pub fn state_icon(state: TrayState, taskbar: Taskbar) -> Result<(Vec<u8>, u32, u32), TrayError> {
+    let (mut rgba, width, height) = decode_rgba(taskbar.source())?;
+    if taskbar.light {
+        ink(&mut rgba, taskbar.ground());
+    }
     if let Some(colour) = state.dot() {
-        draw_dot(&mut rgba, width, height, colour);
+        draw_dot(&mut rgba, width, height, colour, taskbar.ground());
     }
     Ok((rgba, width, height))
 }
 
-/// Lay a ring and a dot over the lower right of `rgba`, with a soft edge one pixel wide.
-fn draw_dot(rgba: &mut [u8], width: u32, height: u32, colour: [u8; 3]) {
+/// Inks the ghost for a light taskbar: each pixel of its pale body takes [`NIGHT_COLOUR`], each
+/// darker detail inside it, such as an eye, takes `ground`, and every pixel keeps its opacity.
+fn ink(rgba: &mut [u8], ground: [u8; 3]) {
+    for pixel in rgba.chunks_exact_mut(4) {
+        if pixel[3] == 0 {
+            continue;
+        }
+        let lightness =
+            (2126 * u32::from(pixel[0]) + 7152 * u32::from(pixel[1]) + 722 * u32::from(pixel[2]))
+                / 10_000;
+        let colour = if lightness >= BODY_LIGHTNESS {
+            NIGHT_COLOUR
+        } else {
+            ground
+        };
+        pixel[..3].copy_from_slice(&colour);
+    }
+}
+
+/// Lay a ring in `ground` and a dot in `colour` over the lower right of `rgba`, with a soft edge
+/// one pixel wide.
+fn draw_dot(rgba: &mut [u8], width: u32, height: u32, colour: [u8; 3], ground: [u8; 3]) {
     let scale = width as f32 / REFERENCE_SIZE;
     let (centre_x, centre_y) = (DOT_CENTRE.0 * scale, DOT_CENTRE.1 * scale);
     let dot = DOT_RADIUS * scale;
@@ -265,7 +376,7 @@ fn draw_dot(rgba: &mut [u8], width: u32, height: u32, colour: [u8; 3]) {
                 ((x as f32 + 0.5 - centre_x).powi(2) + (y as f32 + 0.5 - centre_y).powi(2)).sqrt();
             let index = ((y * width + x) * 4) as usize;
             let pixel = &mut rgba[index..index + 4];
-            lay(pixel, RING_COLOUR, coverage(ring, distance));
+            lay(pixel, ground, coverage(ring, distance));
             lay(pixel, colour, coverage(dot, distance));
         }
     }
@@ -312,8 +423,8 @@ fn menu_for(model: &TrayModel) -> Result<Menu, TrayError> {
     Ok(menu)
 }
 
-fn icon_for(state: TrayState) -> Result<Icon, TrayError> {
-    let (rgba, width, height) = state_icon(state)?;
+fn icon_for(state: TrayState, taskbar: Taskbar) -> Result<Icon, TrayError> {
+    let (rgba, width, height) = state_icon(state, taskbar)?;
     Icon::from_rgba(rgba, width, height).map_err(|_| TrayError::Icon)
 }
 
@@ -322,17 +433,19 @@ pub struct Tray {
     icon: TrayIcon,
     /// What the icon shows now, so an unchanged model touches nothing.
     shown: TrayModel,
+    /// The taskbar the icon is drawn for.
+    taskbar: Taskbar,
 }
 
 impl Tray {
-    /// Validates the model and creates the tray icon with its menu. Call on the event-loop
-    /// thread after the loop has started.
-    pub fn build(model: &TrayModel) -> Result<Tray, TrayError> {
+    /// Validates the model and creates the tray icon with its menu, drawn for `taskbar`. Call on
+    /// the event-loop thread after the loop has started.
+    pub fn build(model: &TrayModel, taskbar: Taskbar) -> Result<Tray, TrayError> {
         model.validate()?;
         let icon = TrayIconBuilder::new()
             .with_id(TRAY_ID)
             .with_tooltip(&model.tooltip)
-            .with_icon(icon_for(model.state)?)
+            .with_icon(icon_for(model.state, taskbar)?)
             .with_menu(Box::new(menu_for(model)?))
             .with_menu_on_left_click(false)
             .build()
@@ -340,7 +453,20 @@ impl Tray {
         Ok(Tray {
             icon,
             shown: model.clone(),
+            taskbar,
         })
+    }
+
+    /// Redraws the icon for `taskbar`. The taskbar it is already drawn for changes nothing.
+    pub fn set_taskbar(&mut self, taskbar: Taskbar) -> Result<(), TrayError> {
+        if taskbar == self.taskbar {
+            return Ok(());
+        }
+        self.icon
+            .set_icon(Some(icon_for(self.shown.state, taskbar)?))
+            .map_err(native)?;
+        self.taskbar = taskbar;
+        Ok(())
     }
 
     /// Validates the model and replaces the icon, the menu and the tooltip with it. A model the
@@ -352,7 +478,7 @@ impl Tray {
         }
         if model.state != self.shown.state {
             self.icon
-                .set_icon(Some(icon_for(model.state)?))
+                .set_icon(Some(icon_for(model.state, self.taskbar)?))
                 .map_err(native)?;
         }
         self.icon.set_menu(Some(Box::new(menu_for(model)?)));
@@ -395,6 +521,43 @@ pub fn host_available() -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     true
+}
+
+/// Whether the taskbar is light: on Windows, whether `SystemUsesLightTheme` is 1 for the current
+/// user. A value that cannot be read, and every other system, count as dark.
+pub fn taskbar_is_light() -> bool {
+    #[cfg(windows)]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(PERSONALIZE_KEY)
+            .and_then(|key| key.get_value::<u32, _>(SYSTEM_USES_LIGHT_THEME))
+            .is_ok_and(|value| value == 1)
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+/// Calls `changed` with [`taskbar_is_light`] each time it turns from `light`, from a thread of its
+/// own, for as long as the process runs. Windows tells only top-level windows that the theme
+/// changed, and a shell with only its icon has none, so the thread looks every two seconds.
+#[cfg(windows)]
+pub fn watch_taskbar(light: bool, changed: impl Fn(bool) + Send + 'static) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name(TASKBAR_THREAD_NAME.to_owned())
+        .spawn(move || {
+            let mut light = light;
+            loop {
+                std::thread::sleep(TASKBAR_CHECK);
+                let now = taskbar_is_light();
+                if now != light {
+                    light = now;
+                    changed(now);
+                }
+            }
+        })
+        .map(drop)
 }
 
 /// What the user did to the tray.
@@ -549,10 +712,62 @@ mod tests {
         assert!(rgba.chunks(4).any(|pixel| pixel[3] != 0));
     }
 
+    /// The pixel at (`x`, `y`) of an RGBA image `width` pixels wide.
+    fn pixel_of(rgba: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
+        let at = (y * width + x) * 4;
+        [rgba[at], rgba[at + 1], rgba[at + 2], rgba[at + 3]]
+    }
+
     /// The pixel at (`x`, `y`) of a 32 pixel wide RGBA image.
     fn pixel(rgba: &[u8], x: usize, y: usize) -> [u8; 4] {
-        let at = (y * 32 + x) * 4;
-        [rgba[at], rgba[at + 1], rgba[at + 2], rgba[at + 3]]
+        pixel_of(rgba, 32, x, y)
+    }
+
+    /// A dark taskbar whose small icons are 32 pixels, which draws the 32 pixel icon.
+    const DARK_32: Taskbar = Taskbar {
+        light: false,
+        small_icon: 32,
+    };
+
+    /// A light taskbar whose small icons are 32 pixels.
+    const LIGHT_32: Taskbar = Taskbar {
+        light: true,
+        small_icon: 32,
+    };
+
+    /// A light taskbar at 100% scale, which draws the 16 pixel icon.
+    const LIGHT_16: Taskbar = Taskbar {
+        light: true,
+        small_icon: 16,
+    };
+
+    /// The states that add a dot, with the dot's colour.
+    const DOT_STATES: [(TrayState, [u8; 3]); 3] = [
+        (TrayState::Working, WORKING_COLOUR),
+        (TrayState::Paused, PAUSED_COLOUR),
+        (TrayState::Attention, ATTENTION_COLOUR),
+    ];
+
+    #[test]
+    fn the_small_icon_size_follows_the_scale() {
+        assert_eq!(Taskbar::new(false, 1.0).small_icon, 16);
+        assert_eq!(Taskbar::new(false, 1.25).small_icon, 20);
+        assert_eq!(Taskbar::new(true, 1.5).small_icon, 24);
+        assert_eq!(Taskbar::new(true, 2.0).small_icon, 32);
+        for nonsense in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(Taskbar::new(false, nonsense).small_icon, 16, "{nonsense}");
+        }
+        assert_eq!(Taskbar::default(), Taskbar::new(false, 1.0));
+    }
+
+    #[test]
+    fn the_16_pixel_icon_is_drawn_at_16_and_the_32_pixel_icon_at_24_and_32() {
+        for (scale, size) in [(1.0, 16), (1.25, 32), (1.5, 32), (2.0, 32)] {
+            let (rgba, width, height) =
+                state_icon(TrayState::Ready, Taskbar::new(false, scale)).unwrap();
+            assert_eq!((width, height), (size, size), "at {scale}");
+            assert_eq!(rgba.len(), (size * size * 4) as usize);
+        }
     }
 
     #[test]
@@ -565,7 +780,7 @@ mod tests {
             TrayState::Attention,
         ]
         .into_iter()
-        .map(|state| state_icon(state).unwrap().0)
+        .map(|state| state_icon(state, DARK_32).unwrap().0)
         .collect();
         assert_eq!(icons[0], plain, "ready is the original icon bytes");
         for (index, icon) in icons.iter().enumerate() {
@@ -574,17 +789,15 @@ mod tests {
                 assert_ne!(icon, other, "four distinct images");
             }
         }
+        let small = state_icon(TrayState::Ready, Taskbar::default()).unwrap().0;
+        assert_eq!(small, decode_rgba(ICON_16_PNG).unwrap().0);
     }
 
     #[test]
     fn the_dot_sits_in_the_lower_right_in_the_colour_of_the_state() {
         let plain = icon_image().unwrap().0;
-        for (state, colour) in [
-            (TrayState::Working, WORKING_COLOUR),
-            (TrayState::Paused, PAUSED_COLOUR),
-            (TrayState::Attention, ATTENTION_COLOUR),
-        ] {
-            let icon = state_icon(state).unwrap().0;
+        for (state, colour) in DOT_STATES {
+            let icon = state_icon(state, DARK_32).unwrap().0;
             assert_eq!(
                 pixel(&icon, 24, 24),
                 [colour[0], colour[1], colour[2], 255],
@@ -603,13 +816,84 @@ mod tests {
     }
 
     #[test]
+    fn the_dot_is_six_pixels_across_on_the_16_pixel_icon() {
+        for (state, colour) in DOT_STATES {
+            let icon = state_icon(state, Taskbar::default()).unwrap().0;
+            let full = [colour[0], colour[1], colour[2], 255];
+            for (x, y) in [(12, 12), (10, 12), (13, 12), (12, 10), (12, 13)] {
+                assert_eq!(pixel_of(&icon, 16, x, y), full, "{state:?} at ({x}, {y})");
+            }
+            // The pixels three from the centre are nearly all dot, under its one-pixel soft edge.
+            for (x, y) in [(9, 12), (14, 12), (12, 9), (12, 14)] {
+                let seen = pixel_of(&icon, 16, x, y);
+                for channel in 0..3 {
+                    assert!(
+                        seen[channel].abs_diff(colour[channel]) <= 16,
+                        "{state:?} at ({x}, {y}): {seen:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_ring_is_drawn_in_the_ground_of_the_taskbar() {
+        // (24, 17) lies a pixel outside the dot and inside its ring.
+        for (taskbar, ground) in [(DARK_32, NIGHT_COLOUR), (LIGHT_32, LIGHT_GROUND)] {
+            let icon = state_icon(TrayState::Working, taskbar).unwrap().0;
+            assert_eq!(
+                pixel(&icon, 24, 17),
+                [ground[0], ground[1], ground[2], 255],
+                "{taskbar:?}"
+            );
+            assert_eq!(taskbar.ground(), ground);
+        }
+    }
+
+    #[test]
+    fn a_light_taskbar_inks_the_body_and_keeps_every_opacity() {
+        for taskbar in [LIGHT_16, LIGHT_32] {
+            let plain = decode_rgba(taskbar.source()).unwrap().0;
+            let inked = state_icon(TrayState::Ready, taskbar).unwrap().0;
+            assert_eq!(inked.len(), plain.len());
+            let (mut body, mut details) = (0, 0);
+            for (before, after) in plain.chunks(4).zip(inked.chunks(4)) {
+                assert_eq!(before[3], after[3], "the opacity is kept");
+                if before[3] == 0 {
+                    assert_eq!(before, after, "a clear pixel stays clear");
+                } else if before[..3].iter().all(|channel| *channel >= 0xc0) {
+                    assert_eq!(after[..3], NIGHT_COLOUR, "a pale pixel takes the ink");
+                    body += 1;
+                } else if before[..3].iter().all(|channel| *channel < 0x40) {
+                    assert_eq!(after[..3], LIGHT_GROUND, "a dark detail takes the ground");
+                    details += 1;
+                }
+            }
+            assert!(
+                body > 0 && details > 0,
+                "{taskbar:?}: {body} body, {details} details"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dot_on_a_light_taskbar_lies_over_the_inked_ghost() {
+        let inked = state_icon(TrayState::Ready, LIGHT_32).unwrap().0;
+        for (state, colour) in DOT_STATES {
+            let icon = state_icon(state, LIGHT_32).unwrap().0;
+            assert_eq!(pixel(&icon, 24, 24), [colour[0], colour[1], colour[2], 255]);
+            assert_eq!(pixel(&icon, 12, 12), pixel(&inked, 12, 12), "{state:?}");
+        }
+    }
+
+    #[test]
     fn the_dot_colours_are_the_tokens_of_the_windows_stylesheet() {
         let styles = include_str!("../../orchestrator/ui/styles.css");
         for (token, colour) in [
             ("--a", WORKING_COLOUR),
             ("--held", PAUSED_COLOUR),
             ("--danger", ATTENTION_COLOUR),
-            ("--bg", RING_COLOUR),
+            ("--bg", NIGHT_COLOUR),
         ] {
             let declared = format!(
                 "{token}: #{:02x}{:02x}{:02x};",

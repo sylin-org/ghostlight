@@ -27,6 +27,7 @@ webkit2gtk = "=2.0.2"
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "=0.16.0", default-features = false, features = ["common-controls-v6"] }
+winreg = "=0.55.0"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0.11"
