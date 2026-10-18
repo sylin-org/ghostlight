@@ -166,10 +166,10 @@ mod tests {
 
     /// Durable evidence of a connection on `channel` that `source` started.
     fn started(channel: IntakeChannel, source: Option<Source>) -> Attribution {
-        crate::provenance::ConnectionEvidence::new("", channel)
-            .started_by(source)
-            .attribution()
-            .clone()
+        Attribution {
+            source,
+            ..Attribution::accepted(channel)
+        }
     }
 
     /// A source an agent's installed app is, or a program that is no agent's app.

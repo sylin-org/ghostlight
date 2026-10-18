@@ -186,7 +186,10 @@ removal of observed peer identity.
 ### One value on the connection
 
 - `Source { agent, image }` is decided once when an `mcp` stream opens, before anything the
-  client sends, and every connection evidence of that stream inherits it. `agent` is the catalog
+  client sends, and every connection evidence of that stream inherits it. (Amended by ADR-0202
+  Decision 3: it is decided once per connection, after the service has answered the opening and,
+  for a fresh session, `initialize`; nothing the client sends takes part, and the connection's
+  time is its accept time.) `agent` is the catalog
   id when an agent's app started it; `image` is the executable's file name, never a path, since
   paths carry the person's name. The source's channel is the connection's existing intake channel
   (`mcp` or `cli`), so the source does not repeat it. Browser, control and desktop streams carry

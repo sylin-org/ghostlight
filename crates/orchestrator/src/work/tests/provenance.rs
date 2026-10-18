@@ -8,7 +8,7 @@ use crate::work::PreparedInvocation;
 #[test]
 fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace_release() {
     let (executor, browser, store, _, audit) = fixture();
-    let first = Arc::new(ConnectionEvidence::new(
+    let first = Arc::new(ConnectionEvidence::claimed(
         "PRIVATE_FIRST_CLAIM",
         IntakeChannel::Mcp,
     ));
@@ -20,7 +20,7 @@ fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace
         .into_iter()
         .map(|tool| PreparedInvocation::new(tool, json!({}), None, Some(first.clone())))
         .collect();
-    let second = Arc::new(ConnectionEvidence::new(
+    let second = Arc::new(ConnectionEvidence::claimed(
         "PRIVATE_SECOND_CLAIM",
         IntakeChannel::Cli,
     ));

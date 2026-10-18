@@ -755,7 +755,7 @@ impl WorkspaceStore {
 
     #[cfg(test)]
     pub(crate) fn admit(&self, label: String, channel: IntakeChannel) -> WorkspaceId {
-        self.connect(Arc::new(ConnectionEvidence::new(&label, channel)), None)
+        self.connect(Arc::new(ConnectionEvidence::claimed(&label, channel)), None)
     }
 
     #[cfg(test)]
@@ -766,7 +766,7 @@ impl WorkspaceStore {
         marker: SessionMarker,
     ) -> WorkspaceId {
         self.connect(
-            Arc::new(ConnectionEvidence::new(&label, channel)),
+            Arc::new(ConnectionEvidence::claimed(&label, channel)),
             Some(marker),
         )
     }
@@ -2133,8 +2133,8 @@ mod tests {
         use crate::provenance::ConnectionEvidence;
         use std::sync::Arc;
         let store = WorkspaceStore::default();
-        let first = Arc::new(ConnectionEvidence::new("first", IntakeChannel::Mcp));
-        let second = Arc::new(ConnectionEvidence::new("second", IntakeChannel::Cli));
+        let first = Arc::new(ConnectionEvidence::claimed("first", IntakeChannel::Mcp));
+        let second = Arc::new(ConnectionEvidence::claimed("second", IntakeChannel::Cli));
         let owner = SessionMarker::Declared {
             key: "shared".into(),
         };

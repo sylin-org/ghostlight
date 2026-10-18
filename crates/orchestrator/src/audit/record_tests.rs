@@ -316,13 +316,15 @@ fn wire(value: impl serde::Serialize) -> String {
 /// Claude Desktop's installed app started.
 fn golden_connection() -> crate::provenance::ConnectionEvidence {
     crate::provenance::ConnectionEvidence::new(
+        crate::provenance::Attribution {
+            source: Some(crate::provenance::Source {
+                agent: Some("claude-desktop".into()),
+                image: "claude.exe".into(),
+            }),
+            ..crate::provenance::Attribution::accepted(crate::intake::session::IntakeChannel::Mcp)
+        },
         "golden client",
-        crate::intake::session::IntakeChannel::Mcp,
     )
-    .started_by(Some(crate::provenance::Source {
-        agent: Some("claude-desktop".into()),
-        image: "claude.exe".into(),
-    }))
 }
 
 /// An all-open snapshot, the decision for `url` and the evidence it left.

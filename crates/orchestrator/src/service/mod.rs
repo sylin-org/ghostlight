@@ -39,9 +39,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
-use crate::intake::session::{
-    IntakeChannel, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
-};
+use crate::intake::session::{ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition};
 use anyhow::{Context, Result};
 use ghostlight_relay::endpoint::{Connection, Endpoint, Listener};
 use ghostlight_relay::protocol::{
@@ -72,7 +70,7 @@ use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_
 use crate::language::outcome::DialogKind;
 use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
-use crate::provenance::{ConnectionEvidence, Source};
+use crate::provenance::{Attribution, ConnectionEvidence, SourceReader};
 use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
 use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
@@ -455,6 +453,7 @@ impl ServiceHost {
             presence,
             streams,
             layout,
+            sources: SourceReader::system(),
         });
         Ok(Self {
             workbench,
@@ -885,6 +884,8 @@ struct Intake {
     streams: Arc<Streams>,
     /// Where the installation keeps its files.
     layout: install::layout::Layout,
+    /// How each accepted `mcp` stream's source is read from its peer process.
+    sources: SourceReader,
 }
 
 impl Intake {
@@ -1214,8 +1215,11 @@ fn serve_control(connection: Connection, operation: Option<Control>, intake: &In
 /// Serve one MCP client session on an accepted `mcp` stream.
 ///
 /// The opening names the channel and, for the command line, the process that owns the session.
-/// The app that started the session is read once from the stream's peer process
-/// ([`Source::observe`]), before anything the client sends.
+/// Once the opening is answered, the connection's attribution is minted with the accept time. The
+/// app that started the session is read once from the stream's peer process when the session
+/// opens ([`LiveSession::open`]): right after the accept for a resumed session, and after the
+/// `initialize` answer is written for a fresh one. Neither answer waits on that read, and nothing
+/// the client sends takes part in it.
 /// A resume token continues an earlier session: its revision, client and owned tabs come back,
 /// and tabs the browser no longer has stay stale. Tabs of a browser that has not returned yet
 /// stay in the token and are bound when it does.
@@ -1242,7 +1246,6 @@ fn serve_mcp(
     };
     let channel = requested.channel.as_deref().unwrap_or(MCP_CHANNEL);
     let intake_channel = crate::intake::intake_channel(channel);
-    let source = Source::observe(connection.peer_process_id());
     let resumed = requested
         .resume
         .as_deref()
@@ -1254,15 +1257,15 @@ fn serve_mcp(
             state
         });
     listener::accept(&connection, &intake.accepted(Role::Mcp))?;
+    let accepted = Accepted {
+        attribution: Attribution::accepted(intake_channel),
+        peer: connection.peer_process_id(),
+        marker,
+    };
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
     let _enrolled = intake.quit.enroll(Arc::clone(&writer));
-    let opening = Opening {
-        channel: intake_channel,
-        marker,
-        source,
-    };
 
     let (wire, mut live) = match resumed {
         Some(state) => {
@@ -1271,7 +1274,7 @@ fn serve_mcp(
                 Arc::clone(&writer),
                 McpSession::resumed(state),
             ));
-            let live = LiveSession::open(intake, &wire, &opening)?;
+            let live = LiveSession::open(intake, &wire, &accepted)?;
             let unrestored = restore_tabs(
                 intake,
                 &live.workspace,
@@ -1295,15 +1298,21 @@ fn serve_mcp(
             let McpFrame::Message { line } = frame else {
                 continue;
             };
-            let steps = wire.accept(&line);
-            let opened = live.is_none() && wire.is_initialized();
-            if opened {
-                live = Some(LiveSession::open(intake, &wire, &opening)?);
-            }
-            for step in steps {
+            let mut opened = false;
+            // A fresh session opens once it is initialized and only after the lines written so
+            // far, so its `initialize` answer never waits on the session's source read.
+            let mut open_when_initialized = |live: &mut Option<LiveSession>| -> Result<()> {
+                if live.is_none() && wire.is_initialized() {
+                    *live = Some(LiveSession::open(intake, &wire, &accepted)?);
+                    opened = true;
+                }
+                Ok(())
+            };
+            for step in wire.accept(&line) {
                 match step {
                     Step::Reply(reply) => wire.send(&reply),
                     Step::Forward(request) => {
+                        open_when_initialized(&mut live)?;
                         if let Some(live) = &live {
                             if !live.handle(intake, &wire, request) {
                                 return Ok(());
@@ -1312,6 +1321,7 @@ fn serve_mcp(
                     }
                 }
             }
+            open_when_initialized(&mut live)?;
             if let (true, Some(live)) = (opened, &live) {
                 wire.publish_resume(&intake.workspaces, &live.workspace);
             }
@@ -1326,12 +1336,14 @@ fn serve_mcp(
     served
 }
 
-/// What an `mcp` opening said about its session.
-struct Opening {
-    channel: IntakeChannel,
+/// An accepted `mcp` stream: what the service knew of it when it answered the opening.
+struct Accepted {
+    /// The connection's identity, accept time and declared channel, still without its source.
+    attribution: Attribution,
+    /// The peer's process id, which the source is read from when the session opens.
+    peer: Option<u32>,
+    /// The session owner the opening declared, for the command line.
     marker: Option<SessionMarker>,
-    /// The app Ghostlight saw start the stream, which every connection the session opens keeps.
-    source: Option<Source>,
 }
 
 /// One session's engine and the stream its lines go out on.
@@ -1492,6 +1504,17 @@ impl AdvertisedCatalog {
     }
 }
 
+/// The diagnostics detail of a session that attached: its connection id, its channel and the file
+/// name of the app that started it, when one was seen. Never the client's claim (ADR-0161).
+fn attached(attribution: &Attribution) -> String {
+    let connection = attribution.connection_id.as_deref().unwrap_or_default();
+    let channel = attribution.channel.as_str();
+    match &attribution.source {
+        Some(source) => format!("{connection} via {channel} from {}", source.image),
+        None => format!("{connection} via {channel}"),
+    }
+}
+
 /// The workspace, queue and workers of a session that has been initialized.
 struct LiveSession {
     workspace: WorkspaceId,
@@ -1505,32 +1528,27 @@ struct LiveSession {
 
 impl LiveSession {
     /// Open the session's workspace and start its workers and its catalog watch.
-    fn open(intake: &Arc<Intake>, wire: &Arc<McpWire>, opening: &Opening) -> Result<Self> {
+    ///
+    /// This is where the connection's source is read, once, and its one evidence is built.
+    fn open(intake: &Arc<Intake>, wire: &Arc<McpWire>, accepted: &Accepted) -> Result<Self> {
         // Before opening anything, release workspaces whose owner is gone and close the tabs they
         // still hold. Sweeping here rather than on a timer keeps the cost proportional to use.
         reap_finished_sessions(&intake.workspaces, intake.browser_port.as_ref());
         // Evidence belongs to this connection. Workspace continuity never replaces it.
-        let connection = Arc::new(
-            ConnectionEvidence::new(&wire.client_label(), opening.channel)
-                .started_by(opening.source.clone()),
-        );
+        let attribution = accepted
+            .attribution
+            .clone()
+            .observed(accepted.peer, &intake.sources);
+        let connection = Arc::new(ConnectionEvidence::new(attribution, &wire.client_label()));
         let workspace = intake
             .workspaces
-            .connect(connection.clone(), opening.marker.clone());
+            .connect(connection.clone(), accepted.marker.clone());
         wire.bind_session(&workspace);
         intake.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
             ghostlight_bridge::diagnostics::Level::Info,
             None,
-            &format!(
-                "{} via {}",
-                connection
-                    .attribution()
-                    .connection_id
-                    .as_deref()
-                    .unwrap_or_default(),
-                opening.channel.as_str()
-            ),
+            &attached(connection.attribution()),
         );
         let queue = Arc::new(SessionQueue::new(
             intake.budget.clone(),
@@ -2115,7 +2133,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crate::intake::session::IntakeChannel;
-    use crate::provenance::{ConnectionEvidence, Source};
+    use crate::provenance::{Attribution, ConnectionEvidence, Source, SourceReader};
     use ghostlight_relay::endpoint::{pair, Connection, Endpoint, Listener};
     use ghostlight_relay::frame;
     use ghostlight_relay::protocol::{
@@ -2743,18 +2761,25 @@ mod tests {
 
     /// Serve the relay listener over a fake browser and publish it in `home`.
     fn serve_fake(home: &TestHome) -> Served {
-        serve(home, false)
+        serve(home, false, SourceReader::system())
+    }
+
+    /// Serve the relay listener over a fake browser, reading each session's source with
+    /// `sources`.
+    fn serve_reading(home: &TestHome, sources: SourceReader) -> Served {
+        serve(home, false, sources)
     }
 
     /// Serve the relay listener with the relay port as the session's browser port, so sessions
     /// meet browsers only as protocol-4 extensions attach, for their calls as well as their
     /// resumed tabs.
     fn serve_relayed(home: &TestHome) -> Served {
-        serve(home, true)
+        serve(home, true, SourceReader::system())
     }
 
-    /// Serve the relay listener in `home`; `relayed` puts the relay port behind the sessions.
-    fn serve(home: &TestHome, relayed: bool) -> Served {
+    /// Serve the relay listener in `home`; `relayed` puts the relay port behind the sessions, and
+    /// `sources` reads each session's source.
+    fn serve(home: &TestHome, relayed: bool, sources: SourceReader) -> Served {
         use crate::audit::{AuditRecorder, JsonlAuditSink};
         use crate::governance::GovernanceFacade;
         use crate::presentation::{BrowserPresentation, PresentationReactor};
@@ -2828,6 +2853,7 @@ mod tests {
             presence: Arc::new(super::Presence::new(Arc::new(Fake::default()).world())),
             streams: super::Streams::new(Arc::new(super::SystemClock), super::idle::IDLE_EXIT),
             layout: crate::install::layout::Layout::new(home.path()),
+            sources,
         });
         let listener = Arc::new(Listener::bind_first(home.path()).unwrap());
         let thread = super::spawn_listener(Arc::clone(&listener), intake.clone());
@@ -2983,10 +3009,15 @@ mod tests {
             observed.is_some(),
             "the test runner was started by a program that is not a wrapper"
         );
-        let expected = ConnectionEvidence::new("relay test", IntakeChannel::Mcp)
-            .started_by(observed)
-            .details()
-            .explanation;
+        let expected = ConnectionEvidence::new(
+            Attribution {
+                source: observed,
+                ..Attribution::accepted(IntakeChannel::Mcp)
+            },
+            "relay test",
+        )
+        .details()
+        .explanation;
 
         let mut socket = open_mcp(None);
         initialize(&mut socket);
@@ -3012,6 +3043,223 @@ mod tests {
                 "relay test"
             )),
             "a stream with no peer process keeps the caveat: {explanations:?}"
+        );
+    }
+
+    /// The executable a held source read names.
+    const HELD_SOURCE: &str = "held.exe";
+
+    /// How long a test waits between an accept and what follows it.
+    const PAUSE: Duration = Duration::from_millis(300);
+
+    /// A source read that waits until the test releases it, and counts the reads that began.
+    #[derive(Default)]
+    struct HeldRead {
+        released: std::sync::Mutex<bool>,
+        changed: std::sync::Condvar,
+        began: AtomicUsize,
+    }
+
+    impl HeldRead {
+        /// A reader that waits on this hold, then names [`HELD_SOURCE`].
+        fn reader(self: &Arc<Self>) -> SourceReader {
+            let held = Arc::clone(self);
+            SourceReader::with(move |_| {
+                held.began.fetch_add(1, Ordering::SeqCst);
+                let mut released = held.released.lock().unwrap();
+                while !*released {
+                    released = held.changed.wait(released).unwrap();
+                }
+                Some(Source {
+                    agent: None,
+                    image: HELD_SOURCE.into(),
+                })
+            })
+        }
+
+        /// How many reads have begun.
+        fn began(&self) -> usize {
+            self.began.load(Ordering::SeqCst)
+        }
+
+        /// Let every read finish.
+        fn release(&self) {
+            *self.released.lock().unwrap() = true;
+            self.changed.notify_all();
+        }
+    }
+
+    /// Releases a hold when a test ends, however it ends, so no session thread stays blocked.
+    struct Release(Arc<HeldRead>);
+
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.release();
+        }
+    }
+
+    /// Now, in milliseconds since the Unix epoch, as attribution is dated.
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .try_into()
+            .unwrap()
+    }
+
+    /// A resume token for a session that owned no tabs.
+    fn tabless_token() -> String {
+        ResumeState {
+            revision: "2025-06-18".into(),
+            client_label: "returning client".into(),
+            channel: String::new(),
+            session_key: None,
+            owned_tabs: Vec::new(),
+            recording: None,
+        }
+        .encode()
+    }
+
+    /// Call a tool on `socket` and return the accept time its audit line in `home` records.
+    fn recorded_accept_time(home: &TestHome, socket: &mut Connection) -> u64 {
+        send_line(
+            socket,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
+            }),
+        );
+        response(socket, 7);
+        let audit = home.path().join("audit.jsonl");
+        let accepted = || {
+            let lines = std::fs::read_to_string(&audit).ok()?;
+            lines.lines().find_map(|line| {
+                serde_json::from_str::<Value>(line).ok()?["provenance"]["observed_at_ms"].as_u64()
+            })
+        };
+        eventually(|| accepted().is_some());
+        accepted().unwrap()
+    }
+
+    #[test]
+    fn an_opening_is_answered_before_the_source_is_read() {
+        let home = TestHome::new("opening-before-source");
+        let held = Arc::new(HeldRead::default());
+        let _release = Release(Arc::clone(&held));
+        let served = serve_reading(&home, held.reader());
+
+        let mut socket = open_mcp(Some(tabless_token()));
+        eventually(|| held.began() == 1);
+        assert!(
+            served.intake.workspaces.summaries().is_empty(),
+            "the session opens only once its source is read"
+        );
+
+        held.release();
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        );
+        let (listed, _) = response(&mut socket, 2);
+        assert!(listed["result"]["tools"].is_array(), "{listed}");
+        assert_eq!(held.began(), 1, "the source is read once per connection");
+    }
+
+    #[test]
+    fn initialize_is_answered_before_the_source_is_read() {
+        let home = TestHome::new("initialize-before-source");
+        let held = Arc::new(HeldRead::default());
+        let _release = Release(Arc::clone(&held));
+        let served = serve_reading(&home, held.reader());
+
+        let mut socket = open_mcp(None);
+        thread::sleep(PAUSE);
+        assert_eq!(
+            held.began(),
+            0,
+            "a fresh session reads nothing at its opening"
+        );
+        let (initialized, _) = initialize(&mut socket);
+        assert_eq!(initialized["result"]["serverInfo"]["name"], "ghostlight");
+        eventually(|| held.began() == 1);
+        assert!(served.intake.workspaces.summaries().is_empty());
+
+        held.release();
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        );
+        let (listed, _) = response(&mut socket, 2);
+        assert!(listed["result"]["tools"].is_array(), "{listed}");
+        let summaries = served.intake.workspaces.summaries();
+        assert_eq!(summaries.len(), 1);
+        assert!(
+            summaries[0].connections[0]
+                .explanation
+                .contains(HELD_SOURCE),
+            "{:?}",
+            summaries[0].connections[0]
+        );
+        assert_eq!(held.began(), 1, "the source is read once per connection");
+    }
+
+    #[test]
+    fn a_fresh_session_is_dated_when_it_was_accepted() {
+        let home = TestHome::new("fresh-dated");
+        let _served = serve_fake(&home);
+        let before = now_ms();
+        let mut socket = open_mcp(None);
+        thread::sleep(PAUSE);
+        let paused = now_ms();
+        initialize(&mut socket);
+        let accepted = recorded_accept_time(&home, &mut socket);
+        assert!(
+            (before..paused).contains(&accepted),
+            "accepted at {accepted}, dialed at {before}, initialized at {paused}"
+        );
+    }
+
+    #[test]
+    fn a_resumed_session_is_dated_when_it_was_accepted() {
+        let home = TestHome::new("resumed-dated");
+        let held = Arc::new(HeldRead::default());
+        let _release = Release(Arc::clone(&held));
+        let _served = serve_reading(&home, held.reader());
+        let before = now_ms();
+        let mut socket = open_mcp(Some(tabless_token()));
+        eventually(|| held.began() == 1);
+        thread::sleep(PAUSE);
+        let released = now_ms();
+        held.release();
+        let accepted = recorded_accept_time(&home, &mut socket);
+        assert!(
+            (before..released).contains(&accepted),
+            "accepted at {accepted}, dialed at {before}, read at {released}"
+        );
+    }
+
+    #[test]
+    fn harness_attached_names_the_source_file_and_never_the_claim() {
+        let attribution = Attribution {
+            source: Some(Source {
+                agent: Some("claude-desktop".into()),
+                image: "claude.exe".into(),
+            }),
+            ..Attribution::accepted(IntakeChannel::Mcp)
+        };
+        let evidence = ConnectionEvidence::new(attribution.clone(), "PRIVATE_CLAIM");
+        let detail = super::attached(evidence.attribution());
+        let connection = attribution.connection_id.as_deref().unwrap();
+        assert_eq!(detail, format!("{connection} via mcp from claude.exe"));
+        assert!(!detail.contains("PRIVATE_CLAIM"));
+
+        let unseen = Attribution::accepted(IntakeChannel::Cli);
+        assert_eq!(
+            super::attached(&unseen),
+            format!("{} via cli", unseen.connection_id.as_deref().unwrap())
         );
     }
 
@@ -3486,11 +3734,8 @@ mod tests {
         host.publish_ready().unwrap();
         let mut socket = open_mcp(None);
         initialize(&mut socket);
-        assert_eq!(
-            host.workbench.snapshot().sessions.len(),
-            1,
-            "the probe session must exist before the connection ends"
-        );
+        // The session opens once its source is read, which follows the `initialize` answer.
+        eventually(|| host.workbench.snapshot().sessions.len() == 1);
 
         goodbye(&mut socket);
         drop(socket);

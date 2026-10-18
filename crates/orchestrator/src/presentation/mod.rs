@@ -484,7 +484,7 @@ mod tests {
 
         let store = WorkspaceStore::default();
         let workspace = store.connect(
-            Arc::new(ConnectionEvidence::new("client", IntakeChannel::Mcp)),
+            Arc::new(ConnectionEvidence::claimed("client", IntakeChannel::Mcp)),
             None,
         );
         store.pin_browser(workspace.as_str(), FAKE_BROWSER).unwrap();

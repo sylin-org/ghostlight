@@ -231,7 +231,7 @@ mod tests {
         use crate::provenance::ConnectionEvidence;
         use crate::workbench::WorkbenchProjection;
         let connection =
-            ConnectionEvidence::new("PRIVATE_REPORTED_APPLICATION", IntakeChannel::Mcp);
+            ConnectionEvidence::claimed("PRIVATE_REPORTED_APPLICATION", IntakeChannel::Mcp);
         let first = child(1).with_provenance(Some(connection.attribution()));
         let mut parent = first.clone();
         parent.step = None;
@@ -297,8 +297,8 @@ mod tests {
         use crate::intake::session::IntakeChannel;
         use crate::provenance::ConnectionEvidence;
 
-        let mcp = ConnectionEvidence::new("Claude Code", IntakeChannel::Mcp);
-        let cli = ConnectionEvidence::new("ghostlight call", IntakeChannel::Cli);
+        let mcp = ConnectionEvidence::claimed("Claude Code", IntakeChannel::Mcp);
+        let cli = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
         let from_mcp = HistoryItem::from(child(1).with_provenance(Some(mcp.attribution())));
         let from_cli = HistoryItem::from(child(1).with_provenance(Some(cli.attribution())));
         let mut unidentified = child(1);

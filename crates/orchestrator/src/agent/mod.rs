@@ -393,7 +393,7 @@ mod tests {
                 Symbol::Glyph(Glyph::CommandLine),
                 "{claimed:?}"
             );
-            let evidence = ConnectionEvidence::new(claimed, IntakeChannel::Mcp).details();
+            let evidence = ConnectionEvidence::claimed(claimed, IntakeChannel::Mcp).details();
             assert_eq!(Agent::of_evidence(Some(&evidence)), Agent::unknown());
             assert!(
                 evidence
@@ -414,7 +414,7 @@ mod tests {
     fn work_is_its_evidence_s_agent_and_work_without_evidence_the_unknown_one() {
         use crate::provenance::{Attribution, ConnectionEvidence};
 
-        let live = ConnectionEvidence::new("codex-mcp-client", IntakeChannel::Mcp);
+        let live = ConnectionEvidence::claimed("codex-mcp-client", IntakeChannel::Mcp);
         assert_eq!(Agent::of_evidence(Some(&live.details())).id, "codex");
         assert_eq!(
             Agent::of_evidence(Some(&live.attribution().details())),

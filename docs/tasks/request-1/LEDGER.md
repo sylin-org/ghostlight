@@ -16,7 +16,7 @@ the architecture sweep.
 
 | Slice | Lane | Status |
 | --- | --- | --- |
-| S1 source-after-the-opening | connection | todo |
+| S1 source-after-the-opening | connection | landed (this commit) |
 | S2 one-channel-word | connection | todo |
 | S3 one-agent-function (with Decision 14a) | connection | todo |
 | S4 workspace-opener | connection | todo |
@@ -29,3 +29,16 @@ the architecture sweep.
 | S11 channel-switches | governance | todo |
 
 ## Notes
+
+- S1: the source observation for a `cargo test` peer on this machine takes about 100 ms
+  per read: two runs of 10 reads had medians of 107 ms and 103 ms, the slowest 128 ms. It is
+  measured by the ignored test `provenance::tests::the_source_observation_time_on_this_machine`
+  (`cargo test -p ghostlight-service source_observation_time -- --ignored --nocapture`).
+- S1: `Attribution::observed` takes the reader beside the peer, `observed(peer, &SourceReader)`,
+  so the test intake injects a held read; the service's `SourceReader::system()` is
+  `Source::observe`. Tests keep the label-and-channel helper as the test-only
+  `ConnectionEvidence::claimed`, so `work/tests/provenance.rs` changes only its two constructor
+  names. `a_client_that_goes_away_badly_still_releases_its_session` now waits for its session to
+  open, since a fresh session opens after its `initialize` answer. `HARNESS_ATTACHED` reads
+  `<connection> via <channel> from <image>`, and without a source it is unchanged.
+  `tests/provenance-journey.mjs` is left to the coordinator's live checks.

@@ -1,13 +1,17 @@
 //! Connection evidence: a service-issued identity and channel, the app Ghostlight saw start the
 //! connection, and transient claims kept apart from durable attribution (ADR-0161).
 //!
-//! The [`Source`] of a connection is observed, never claimed: the service reads the ancestors of
-//! the connection's peer process from the operating system once, when the connection opens, and
-//! keeps the first that lies in a catalog agent's installed app ([`crate::install::apps`]), else
-//! the first that is not a wrapper. No field a client writes takes part. Like the channel, it is
-//! provenance for display and history and never an input to governance.
+//! A connection's [`Attribution`] is minted when the service accepts its opening, with the
+//! connection id, the accept time and the declared channel. Its [`Source`] is observed, never
+//! claimed: once per connection, after the service has answered the opening and, for a fresh
+//! session, `initialize`, the service reads the ancestors of the connection's peer process from
+//! the operating system and keeps the first that lies in a catalog agent's installed app
+//! ([`crate::install::apps`]), else the first that is not a wrapper. No field a client writes takes
+//! part. Like the channel, it is provenance for display and history and never an input to
+//! governance.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::install::apps::{is_wrapper, AppLocations, PATH_SEPARATORS};
@@ -58,8 +62,8 @@ pub struct Attribution {
 /// The app Ghostlight saw start a connection, from the operating system's facts about the
 /// connection's peer process.
 ///
-/// It is decided once, when the connection opens, and every request on the connection inherits
-/// it. It holds a file name and never a path, which would carry the person's name. Reading bounds
+/// It is decided once per connection ([`Attribution::observed`]), and every request on the
+/// connection inherits it. It holds a file name and never a path, which would carry the person's name. Reading bounds
 /// both fields again, so an edited record cannot widen them.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Source {
@@ -117,33 +121,43 @@ impl Source {
     }
 }
 
-impl ConnectionEvidence {
-    /// Capture a new connection with a fresh identity and time, and no source.
+/// How the service reads a connection's [`Source`] from its peer's process id: the operating
+/// system ([`Source::observe`]) in the service, and a stand-in in tests that hold or name the read.
+#[derive(Clone)]
+pub struct SourceReader(Arc<dyn Fn(Option<u32>) -> Option<Source> + Send + Sync>);
+
+impl SourceReader {
+    /// The reader that asks the operating system.
     #[must_use]
-    pub fn new(label: &str, channel: IntakeChannel) -> Self {
+    pub fn system() -> Self {
+        Self(Arc::new(Source::observe))
+    }
+
+    /// A reader that answers with `read`, for tests.
+    #[cfg(test)]
+    pub(crate) fn with(
+        read: impl Fn(Option<u32>) -> Option<Source> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(read))
+    }
+}
+
+impl ConnectionEvidence {
+    /// The one evidence of an accepted connection: its `attribution`, observed and never changed
+    /// afterwards, beside the bounded name its client `claim`ed, which stays memory-only.
+    #[must_use]
+    pub fn new(attribution: Attribution, claim: &str) -> Self {
         Self {
-            reported_application: bounded_label(label, REPORTED_APPLICATION_MAX_CHARS),
-            attribution: Attribution {
-                connection_id: Some(format!("{CONNECTION_ID_PREFIX}{}", Uuid::new_v4().simple())),
-                observed_at_ms: Some(
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis()
-                        .try_into()
-                        .unwrap_or(u64::MAX),
-                ),
-                channel,
-                source: None,
-            },
+            reported_application: bounded_label(claim, REPORTED_APPLICATION_MAX_CHARS),
+            attribution,
         }
     }
 
-    /// This evidence with the app Ghostlight saw start the connection.
-    #[must_use]
-    pub fn started_by(mut self, source: Option<Source>) -> Self {
-        self.attribution.source = source;
-        self
+    /// Evidence of a connection on `channel` accepted now, whose client claimed `claim`, and with
+    /// no source, for tests.
+    #[cfg(test)]
+    pub(crate) fn claimed(claim: &str, channel: IntakeChannel) -> Self {
+        Self::new(Attribution::accepted(channel), claim)
     }
 
     /// Borrow the durable evidence for this connection; it contains no caller-supplied label.
@@ -170,6 +184,33 @@ impl ConnectionEvidence {
 }
 
 impl Attribution {
+    /// The attribution of a connection on `channel` that the service accepts now: a fresh
+    /// connection id and the accept time, and no source yet.
+    #[must_use]
+    pub fn accepted(channel: IntakeChannel) -> Self {
+        Self {
+            connection_id: Some(format!("{CONNECTION_ID_PREFIX}{}", Uuid::new_v4().simple())),
+            observed_at_ms: Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
+            ),
+            channel,
+            source: None,
+        }
+    }
+
+    /// This attribution with the source `reader` finds above the connection's `peer` process,
+    /// read once. A failed read leaves the source unknown and never fails the connection.
+    #[must_use]
+    pub fn observed(mut self, peer: Option<u32>, reader: &SourceReader) -> Self {
+        self.source = (reader.0)(peer);
+        self
+    }
+
     /// Read history written before connection identities existed: only the channel is known.
     #[must_use]
     pub fn legacy(channel: IntakeChannel) -> Self {
@@ -274,7 +315,8 @@ mod tests {
 
     #[test]
     fn live_claim_and_durable_evidence_are_separate() {
-        let evidence = ConnectionEvidence::new("claimed application secret", IntakeChannel::Mcp);
+        let evidence =
+            ConnectionEvidence::claimed("claimed application secret", IntakeChannel::Mcp);
         let encoded = serde_json::to_value(evidence.attribution()).unwrap();
         assert!(!encoded.to_string().contains("claimed application secret"));
         let mut keys: Vec<_> = encoded.as_object().unwrap().keys().cloned().collect();
@@ -291,9 +333,9 @@ mod tests {
 
     #[test]
     fn every_connection_gets_fresh_evidence_even_for_the_same_claim() {
-        let first = ConnectionEvidence::new("application", IntakeChannel::Mcp);
+        let first = ConnectionEvidence::claimed("application", IntakeChannel::Mcp);
         let retained = first.attribution().clone();
-        let second = ConnectionEvidence::new("application", IntakeChannel::Mcp);
+        let second = ConnectionEvidence::claimed("application", IntakeChannel::Mcp);
         assert_ne!(retained.connection_id, second.attribution().connection_id);
         assert_eq!(retained, *first.attribution());
         assert!(retained.observed_at_ms.unwrap() > 0);
@@ -301,7 +343,7 @@ mod tests {
 
     #[test]
     fn claims_are_bounded_and_stripped_of_control_text() {
-        let evidence = ConnectionEvidence::new(
+        let evidence = ConnectionEvidence::claimed(
             &format!("\n\u{202e}{}\0", "x".repeat(150)),
             IntakeChannel::Cli,
         );
@@ -323,7 +365,7 @@ mod tests {
 
     #[test]
     fn a_live_connection_names_its_agent_and_history_names_only_the_command_line() {
-        let codex = ConnectionEvidence::new("codex-mcp-client", IntakeChannel::Mcp);
+        let codex = ConnectionEvidence::claimed("codex-mcp-client", IntakeChannel::Mcp);
         assert_eq!(agent_of(&codex.details()).name, "Codex");
         assert_eq!(agent_of(&codex.details()).id, "codex");
         assert_eq!(
@@ -331,23 +373,23 @@ mod tests {
             Some("codex-mcp-client")
         );
         assert_eq!(agent_of(&codex.attribution().details()), Agent::unknown());
-        let unknown = ConnectionEvidence::new(" my agent ", IntakeChannel::Mcp);
+        let unknown = ConnectionEvidence::claimed(" my agent ", IntakeChannel::Mcp);
         assert_eq!(agent_of(&unknown.details()).name, "my agent");
         assert_eq!(agent_of(&unknown.details()).id, "unknown:my agent");
-        let script = ConnectionEvidence::new("ghostlight call", IntakeChannel::Cli);
+        let script = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
         assert_eq!(agent_of(&script.details()), Agent::command_line());
         assert_eq!(
             agent_of(&script.attribution().details()),
             Agent::command_line()
         );
-        let unnamed = ConnectionEvidence::new("", IntakeChannel::Mcp);
+        let unnamed = ConnectionEvidence::claimed("", IntakeChannel::Mcp);
         assert_eq!(agent_of(&unnamed.details()), Agent::unknown());
     }
 
     #[test]
     fn a_client_that_reported_no_name_is_the_unknown_agent_and_claims_nothing() {
         for unnamed in ["", " \t ", crate::intake::mcp::DEFAULT_CLIENT_LABEL] {
-            let details = ConnectionEvidence::new(unnamed, IntakeChannel::Mcp).details();
+            let details = ConnectionEvidence::claimed(unnamed, IntakeChannel::Mcp).details();
             assert_eq!(agent_of(&details), Agent::unknown(), "{unnamed:?}");
             assert_eq!(details.reported_application, None, "{unnamed:?}");
             assert!(!details.explanation.contains('"'), "{unnamed:?}");
@@ -356,7 +398,8 @@ mod tests {
 
     #[test]
     fn an_agent_is_named_from_the_claim_the_card_shows() {
-        let details = ConnectionEvidence::new("Some\u{202e}Agent", IntakeChannel::Mcp).details();
+        let details =
+            ConnectionEvidence::claimed("Some\u{202e}Agent", IntakeChannel::Mcp).details();
         assert_eq!(agent_of(&details).name, "SomeAgent");
         assert_eq!(details.reported_application.as_deref(), Some("SomeAgent"));
     }
@@ -458,13 +501,42 @@ mod tests {
         assert_eq!(Source::observe(None), None);
     }
 
+    /// How long the source observation takes for a cargo test peer on this machine. It reads the
+    /// real process tree and the installed apps, so it stays out of the default run:
+    /// `cargo test -p ghostlight-service source_observation_time -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measures this machine; run on demand"]
+    fn the_source_observation_time_on_this_machine() {
+        const RUNS: usize = 10;
+        let peer = Some(std::process::id());
+        let mut spans: Vec<std::time::Duration> = (0..RUNS)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                assert!(Source::observe(peer).is_some());
+                start.elapsed()
+            })
+            .collect();
+        let first = spans[0];
+        spans.sort();
+        println!(
+            "source observation, {RUNS} runs: first {first:?}, median {:?}, slowest {:?}",
+            spans[RUNS / 2],
+            spans[RUNS - 1]
+        );
+    }
+
     #[test]
     fn a_source_is_kept_on_the_record_as_a_file_name_and_a_record_without_one_still_reads() {
-        let evidence =
-            ConnectionEvidence::new("claude-code", IntakeChannel::Mcp).started_by(Some(Source {
-                agent: Some("claude-desktop".into()),
-                image: "claude.exe".into(),
-            }));
+        let evidence = ConnectionEvidence::new(
+            Attribution {
+                source: Some(Source {
+                    agent: Some("claude-desktop".into()),
+                    image: "claude.exe".into(),
+                }),
+                ..Attribution::accepted(IntakeChannel::Mcp)
+            },
+            "claude-code",
+        );
         let encoded = serde_json::to_value(evidence.attribution()).unwrap();
         assert_eq!(
             encoded["source"],
@@ -500,7 +572,7 @@ mod tests {
 
     #[test]
     fn restored_evidence_rejects_arbitrary_connection_claims() {
-        let evidence = ConnectionEvidence::new("transient claim", IntakeChannel::Mcp);
+        let evidence = ConnectionEvidence::claimed("transient claim", IntakeChannel::Mcp);
         let mut invalid = serde_json::to_value(evidence.attribution()).unwrap();
         invalid["connection_id"] = "private supplied text".into();
         assert!(serde_json::from_value::<Attribution>(invalid).is_err());

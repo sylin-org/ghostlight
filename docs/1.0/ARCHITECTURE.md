@@ -369,11 +369,14 @@ its own evidence across queue waits, workspace sharing, composed children, prepa
 and refusal. The workspace lists active connections independently; closing one removes only its
 live details. Receipt storage receives a bounded attribution projection with no reported application
 text, while the bounded live human projection receives that claim separately. Restored history
-never borrows a current session's identity. When a connection opens, the service reads the
-ancestors of its peer process from the operating system and keeps the app it saw start the
-connection: the first ancestor that lies in a catalog agent's installed app, else the first that is
-not a shell, interpreter or other wrapper, as an agent id and an executable file name (ADR-0161,
-amendment of 2026-10-18). Nothing a client sends takes part. The window sets the client's claim
+never borrows a current session's identity. A connection's attribution is minted when the service
+answers its opening, so its time is the accept time. Once per connection, after that answer and,
+for a fresh session, after the `initialize` answer, the service reads the ancestors of its peer
+process from the operating system and keeps the app it saw start the connection: the first ancestor
+that lies in a catalog agent's installed app, else the first that is not a shell, interpreter or
+other wrapper, as an agent id and an executable file name (ADR-0161, amendment of 2026-10-18;
+ADR-0202 Decision 3). Neither answer waits on the read; the first request does. Nothing a client
+sends takes part. The window sets the client's claim
 beside that source, receipts keep the source, and provenance grants no authority. Audit lines with
 extra attribution fields still read; the extra fields are ignored.
 
