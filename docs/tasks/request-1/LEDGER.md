@@ -5,13 +5,25 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `landed` (with com
 
 ## RESUME HERE
 
-ADR-0202 is accepted (d788a9f4). The lanes start once rc-1's integration review is done
-(2026-10-18). Next after the batch: the coordinator's integration gate, the in-place deploy with
-its live checks (the edges under the Store Claude Desktop connect at once and the source
-observation's time is recorded; history keeps agent names across a service restart; a policy
-with `channels.mcp.enabled` false refuses an MCP request and lets `ghostlight call` through), and
-the architecture sweep.
+Every slice S1 to S11 has landed and the integration review passed with nothing blocking (full
+gate green at `fdc27f40`). Deployed in place on the owner's Windows machine on 2026-10-18 and
+checked live:
 
+- The agent reconnected at once after the deploy; the edges under the Store Claude Desktop open
+  without waiting on the source read (S1).
+- A live MCP call's audit line carries one id (the result's `invocation`), `channel: mcp`, the
+  accept time, `claimed_agent: claude-code` and `source: {agent: claude-desktop, image:
+  claude.exe}` (S1, S3, S5).
+- With a temporary user policy setting `channels.mcp.enabled` to false, an MCP call was refused
+  with "the user's Ghostlight policy turns off work from MCP agents" and a `ghostlight call` ran;
+  the policy was removed and MCP worked again (S11).
+- After a service restart, the restored latest action reads "Claude Code, in Claude Desktop." with
+  "Reported application: Not retained in history" (S3, Decision 14a).
+- A redeploy of the same commit swapped no edge (t07's second half).
+- The history journey passes headless on the integrated tree.
+
+Next: the push and CI, the release-candidate rehearsal on a green head, the visual re-walk and
+ux-2, then the architecture sweep.
 ## Slices
 
 | Slice | Lane | Status |
