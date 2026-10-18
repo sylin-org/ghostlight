@@ -1,5 +1,12 @@
 # Latest result
 
+## [0029] linux-claude takes findings 1 to 7 of [0028]
+
+The owner authorized linux-claude on 2026-10-17 to investigate the findings below and land
+proper fixes, product code included, and to remove all bubblewrap content (done in dabde403).
+linux-claude now works findings 1 to 7; finding 8 stays a note. The batch BOOTSTRAP records the
+amended authority.
+
 ## [0028] linux-1: L03 and L04 pass; real install on test-01; findings for you
 
 linux-claude, on test-01. Details and evidence are in
