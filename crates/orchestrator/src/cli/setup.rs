@@ -1700,8 +1700,8 @@ mod tests {
     }
 
     #[test]
-    fn an_extension_already_in_a_profile_goes_to_the_agent_step() {
-        use crate::language::setup::{ProfileFact, PROMPT};
+    fn an_extension_already_in_a_profile_asks_for_that_browser_as_the_window_does() {
+        use crate::language::setup::ProfileFact;
 
         let mut chrome = native_chrome();
         chrome.extension = Some(ProfileFact {
@@ -1712,7 +1712,7 @@ mod tests {
         let lines = lines_of(&two_agents_changed(), vec![chrome], false, false);
         assert_eq!(
             lines.last().unwrap(),
-            &format!("Next: restart Claude Code and Codex, then ask one: {PROMPT}")
+            "Next: open Chrome, where Ghostlight is already added."
         );
         assert!(!lines.iter().any(|line| line.contains("Chrome Web Store")));
     }

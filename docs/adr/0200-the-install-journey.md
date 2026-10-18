@@ -316,3 +316,18 @@ step re-decided what the client roster already says. Decision 9 now reads, for e
   "Found, set up by hand" and offers Copy setup, which copies the entry the Integrations page shows.
 - An entry an older Ghostlight wrote reads "Needs an update" and offers Update, the words and the
   act of the Integrations page.
+
+## Amendment (2026-10-18): the Next line is the step the window shows
+
+The owner asked that open questions be settled by who they delight. The install's Next line
+counted a profile that holds the extension as the browser step done and asked the person to
+restart their agents and ask one, while the window, which counts only a connected browser, still
+showed the browser step ("Added in your Work profile. Open Chromium to finish."). On Linux, whose
+default posture is manual, that first request then came back as an ask-the-user refusal (linux-1,
+L08).
+
+The terminal now follows the window: the browser step is done when a browser is connected. With
+the extension in a profile and no browser connected, the Next line reads "Next: open <browser>,
+where Ghostlight is already added." and the agents line keeps its restart note. The summary still
+never says "to finish", so a fresh install never reads as unfinished. A connected browser asks
+for the prompt as before.

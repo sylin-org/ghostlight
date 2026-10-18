@@ -934,11 +934,10 @@ pub fn install_lines(facts: &InstallFacts) -> Vec<String> {
         .filter(|agent| agent.has_entry)
         .map(|agent| agent.label.as_str())
         .collect();
-    let browser_added = facts
-        .browsers
-        .iter()
-        .any(|browser| browser.connected || browser.extension.is_some());
-    let restart_first = !facts.complete && !browser_added && !changed.is_empty();
+    // The browser step is done when a browser is connected, as in the window: a profile that
+    // holds the extension still has to be opened.
+    let connected = facts.browsers.iter().any(|browser| browser.connected);
+    let restart_first = !facts.complete && !connected && !changed.is_empty();
     if facts.agents.is_empty() {
         lines.push(format!(
             "No agents were found on this computer. Ghostlight's MCP server command: {}",
@@ -965,13 +964,16 @@ pub fn install_lines(facts: &InstallFacts) -> Vec<String> {
             ));
         }
     } else {
-        lines.push(next_line(facts, browser_added, &changed));
+        lines.push(next_line(facts, connected, &changed));
     }
     lines
 }
 
-fn next_line(facts: &InstallFacts, browser_added: bool, changed: &[&str]) -> String {
-    if browser_added {
+/// The one `Next:` line: the step the window shows. A connected browser asks for the prompt, a
+/// profile that holds the extension asks for that browser to be opened, and otherwise the person
+/// adds Ghostlight to the first native browser, or gets Chrome.
+fn next_line(facts: &InstallFacts, connected: bool, changed: &[&str]) -> String {
+    if connected {
         if changed.is_empty() {
             return format!("Next: ask your agent: {PROMPT}");
         }
@@ -979,6 +981,15 @@ fn next_line(facts: &InstallFacts, browser_added: bool, changed: &[&str]) -> Str
         return format!(
             "Next: restart {}, then ask {pronoun}: {PROMPT}",
             join_list(changed)
+        );
+    }
+    if let Some(browser) = ordered_browsers(&facts.browsers)
+        .into_iter()
+        .find(|browser| browser.extension.is_some())
+    {
+        return format!(
+            "Next: open {}, where Ghostlight is already added.",
+            browser.short
         );
     }
     match (first_native(&facts.browsers), facts.window_shown) {
@@ -1759,8 +1770,32 @@ mod tests {
     }
 
     #[test]
-    fn an_extension_in_a_profile_asks_for_the_prompt() {
+    fn an_extension_in_a_profile_asks_for_that_browser_as_the_window_does() {
         let browsers = vec![with_extension(chrome(BrowserForm::Native), None, 1)];
+        let lines = install_lines(&install(
+            browsers.clone(),
+            agents_with_entries(&[("Claude Code", true), ("Codex", true)]),
+        ));
+        assert_eq!(
+            lines[2],
+            "Agents: Claude Code and Codex (restart them before you ask)."
+        );
+        assert_eq!(
+            lines[3],
+            "Next: open Chrome, where Ghostlight is already added."
+        );
+        let mut quiet = install(browsers, agents_with_entries(&[("Codex", false)]));
+        quiet.window_shown = false;
+        assert_eq!(
+            install_lines(&quiet)[3],
+            "Next: open Chrome, where Ghostlight is already added.",
+            "with or without the window"
+        );
+    }
+
+    #[test]
+    fn a_connected_browser_asks_for_the_prompt() {
+        let browsers = vec![connected(chrome(BrowserForm::Native))];
         let changed = install_lines(&install(
             browsers.clone(),
             agents_with_entries(&[("Claude Code", true), ("Codex", true), ("Cursor", true)]),
