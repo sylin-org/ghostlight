@@ -10,7 +10,8 @@ uses the real installation and the real system browser, never a sandbox). The ow
 session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed and proven on the
 real install (see L04). The development build at ad43f65c is installed in the real
 `~/.ghostlight`, the system Chromium's ordinary profile is connected, and diagnostics are on.
-Next: L05, the window and the tray.
+L05 passed after six fixes in the shell, the service and the window (see L05). Next: L06,
+headless and SSH.
 
 ## Tasks
 
@@ -231,13 +232,63 @@ was checked there with the system Chromium:
    timeline merges them, `--component` filters them, a full one is rotated, and a filter no longer
    reports the components it left out as off.
 
-### L05 The window and the tray (todo)
+### L05 The window and the tray (pass, after fixes)
 
 From the Applications entry: the window opens once (a second launch brings the same window
 forward); At a glance shows the summary pill, Details opens the agents and browsers shelves and an
 agent's card; Integrations is the rail and pane; Settings works; the tray icon shows state and its
 menu works; closing the window shows the one-time notice; Quit in Settings asks and then quits.
 Owed: shell-m2.md m2-03 and m2-04 (Linux items).
+
+Result, 2026-10-17, on the real installation, KDE Plasma 6.8 on Wayland. The window was driven as
+a person would: the Applications entry (`gtk-launch`), clicks through a virtual pointer on
+`/dev/uinput`, the tray menu through StatusNotifierItem and dbusmenu, KWin's own window list,
+and screenshots. Every check passes after the fixes below; `tests/linux/installed/desktop-check.py`
+(aligned with 2.0 in d86463ca) passes its five phases.
+
+- One window: a second Applications launch, a burst of five and of eight `ghostlight open`, and
+  Open after minimize each leave one active window and one shell (the window is rebuilt on
+  Open, ADR-0120).
+- At a glance: the band (Ready, counts, Full control, Pause), the pill ("1 agent" to "1 browser")
+  with Details; Details opens the agents and browsers shelves; an agent's chip opens its card.
+  Integrations: the rail ("Needs a look": Cline (CLI); 17 connected) and the pane with Fix,
+  Locate and Copy setup. Settings: each section opens, Density takes effect at once.
+- Tray: the plain ghost while ready, the amber dot while paused; Pause and Resume swap which
+  is enabled, the window band and Settings follow, `doctor` says Paused. Open and Quit always.
+- Close: the first close sends one notice ("Ghostlight is still running") and writes
+  `state/tray-hint`; the second sends none.
+- Quit in Settings asks ("Quit now? Agents lose the browser until Ghostlight starts again.")
+  and quits: service and shell end within 1 s and the quit latch is set; the system Chromium
+  does not bring Ghostlight back in 15 s; the Applications entry does, and the browser
+  reconnects by itself within about 15 s.
+- m2-03: SIGTERM ends the shell in 105 ms, SIGHUP in 55 ms, no child left; presence brings the
+  tray back. m2-04: three launches in two minutes latch did_not_stay; `ghostlight open` clears
+  it.
+
+Defects found and fixed (each deployed and checked on the real install):
+
+1. da28f0f1: a shell with only its tray reconnected about 18 s after a lost service (tao's
+   WaitUntil is a plain wait on Linux), so presence launched a second shell, two tray icons
+   showed, and the window then opened by itself (3 of 5 crashes). The shell keeps its own clock;
+   it reconnects in about 0.5 s.
+2. f546c124: the tray icon's hover read `org.sylin.ghostlight`; it reads Ghostlight. (Linux keeps
+   the product name: tray-icon cannot set a tooltip there.)
+3. 17ec7571: status said "window is closed" over an open window and "shown" over a closed one
+   after a restart, and a duplicate tray launch made the holder show its window. The shell's
+   opening now says what it shows (`window` or `tray` in the relay channel), and the service
+   believes it.
+4. 240fcdeb: `ghostlight open` with no shell running (after the latch, for example) started a
+   shell that never showed a window and ignored every later open: the window was replaced the
+   moment it was built, and tao never reports a window dropped that early. The shell records the
+   end of the windows it drops, and a person's start answers the service's follow-up show.
+5. 0a09d95b: the band said "1 sessions - 1 browsers".
+6. 906bd254: the did_not_stay sentence asserted a missing WebKitGTK; it now names it as the
+   thing to check if the window ends again.
+
+Seen and left: a forced test that pauses the shell (SIGSTOP) with its window open and kills the
+service ends the shell, because its process group is orphaned with a stopped member and the
+kernel sends SIGHUP; a shell is never stopped in use. "Unknown agent" on restored history rows
+is by design. A Settings lag after a tray pause, seen once, did not reproduce.
 
 ### L06 Headless and SSH (todo)
 
