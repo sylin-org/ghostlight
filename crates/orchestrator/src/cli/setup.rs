@@ -309,9 +309,12 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
             .map(|()| collected);
     }
 
+    let harnesses = HarnessRegistry::discover();
+    if real_install && !options.no_clients {
+        harnesses.remove_stray_temporaries();
+    }
     // The scan only reads. A real install reads it even with `--no-clients`, so the summary can
     // name the agents that are here.
-    let harnesses = HarnessRegistry::discover();
     let summaries = harnesses.refresh()?;
     collected.mcp_command = summaries
         .first()

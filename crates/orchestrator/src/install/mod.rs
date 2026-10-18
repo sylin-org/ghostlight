@@ -35,6 +35,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, SystemTime};
 
 use ghostlight_relay::route::MCP_ARGUMENT;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
@@ -63,6 +64,14 @@ const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
 const CODEX_PACKAGE: &str = "OpenAI.Codex";
 /// File in the state directory recording where each MCP client's configuration was found.
 const HARNESS_LOCATIONS_FILE: &str = "harness-locations.json";
+/// How the name of the temporary file a configuration write creates beside the configuration
+/// begins; a simple UUID and [`TEMPORARY_SUFFIX`] follow.
+const TEMPORARY_PREFIX: &str = ".ghostlight-";
+/// How the name of a configuration write's temporary file ends.
+const TEMPORARY_SUFFIX: &str = ".tmp";
+/// The age past which a configuration write's temporary file is no write in flight but one an
+/// interrupted write left behind. A write takes milliseconds.
+const STRAY_TEMPORARY_AGE: Duration = Duration::from_secs(60);
 /// The Windows variable that names the person's home, read before `HOME`.
 const USER_PROFILE_VARIABLE: &str = "USERPROFILE";
 /// The variable that names the person's home where `USERPROFILE` is not set, and on Linux.
@@ -250,6 +259,36 @@ impl HarnessRegistry {
             failures,
             message,
         })
+    }
+
+    /// Remove the temporary files interrupted configuration writes left beside the
+    /// configurations Ghostlight writes: the file of every agent it can change from here and its
+    /// own location state. A temporary younger than [`STRAY_TEMPORARY_AGE`] may be a write in
+    /// flight and stays. Returns how many were removed; one that cannot be removed is left.
+    pub fn remove_stray_temporaries(&self) -> usize {
+        self.remove_stray_temporaries_at(SystemTime::now())
+    }
+
+    /// [`Self::remove_stray_temporaries`], judging each temporary's age at `now`.
+    fn remove_stray_temporaries_at(&self, now: SystemTime) -> usize {
+        let _action = lock(&self.inner.action);
+        let context = &self.inner.context;
+        let mut directories: Vec<PathBuf> = definitions(context)
+            .into_iter()
+            .filter(|definition| {
+                !matches!(definition.dialect, ConfigDialect::Manual(_))
+                    && context.private_to(definition).is_none()
+            })
+            .map(|definition| resolve_through_symlink(&definition.path).unwrap_or(definition.path))
+            .chain(std::iter::once(context.locations.clone()))
+            .filter_map(|path| path.parent().map(Path::to_path_buf))
+            .collect();
+        directories.sort();
+        directories.dedup();
+        directories
+            .iter()
+            .map(|directory| remove_stray_temporaries_in(directory, now))
+            .sum()
     }
 
     /// Return the closed official download destination of one host, by its harness id.
@@ -2770,6 +2809,64 @@ pub(crate) fn resolve_through_symlink(path: &Path) -> io::Result<PathBuf> {
     }
 }
 
+/// The temporary file a configuration write creates beside the configuration. It is removed when
+/// dropped unless it was renamed into place, so a write that fails at any step leaves none.
+struct Temporary {
+    path: PathBuf,
+    placed: bool,
+}
+
+impl Temporary {
+    /// A new temporary name in `directory`; no file is made.
+    fn beside(directory: &Path) -> Self {
+        Self {
+            path: directory.join(format!(
+                "{TEMPORARY_PREFIX}{}{TEMPORARY_SUFFIX}",
+                Uuid::new_v4().simple()
+            )),
+            placed: false,
+        }
+    }
+}
+
+impl Drop for Temporary {
+    fn drop(&mut self) {
+        if !self.placed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Whether `name` is the name of a configuration write's temporary file.
+fn is_write_temporary(name: &OsStr) -> bool {
+    name.to_str()
+        .and_then(|name| name.strip_prefix(TEMPORARY_PREFIX))
+        .and_then(|name| name.strip_suffix(TEMPORARY_SUFFIX))
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+/// Remove from `directory` each configuration write's temporary file that is at least
+/// [`STRAY_TEMPORARY_AGE`] old at `now`. Returns how many were removed.
+fn remove_stray_temporaries_in(directory: &Path, now: SystemTime) -> usize {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| is_write_temporary(&entry.file_name()))
+        .filter(|entry| {
+            entry
+                .metadata()
+                .ok()
+                .filter(fs::Metadata::is_file)
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age >= STRAY_TEMPORARY_AGE)
+        })
+        .filter(|entry| fs::remove_file(entry.path()).is_ok())
+        .count()
+}
+
 fn replace_with_backup(path: &Path, bytes: &[u8]) -> Result<(), HarnessError> {
     let path = &resolve_through_symlink(path).map_err(HarnessError::Write)?;
     let permissions = fs::metadata(path)
@@ -2779,31 +2876,31 @@ fn replace_with_backup(path: &Path, bytes: &[u8]) -> Result<(), HarnessError> {
         .parent()
         .ok_or_else(|| HarnessError::InvalidPath(path.to_path_buf()))?;
     fs::create_dir_all(parent).map_err(HarnessError::Write)?;
-    let temporary = parent.join(format!(".ghostlight-{}.tmp", Uuid::new_v4().simple()));
+    let mut temporary = Temporary::beside(parent);
     let backup = path.with_extension(format!(
         "{}.ghostlight-backup",
         path.extension().and_then(OsStr::to_str).unwrap_or("config")
     ));
     let mut options = OpenOptions::new();
     options.create_new(true).write(true);
-    let mut file = options.open(&temporary).map_err(HarnessError::Write)?;
+    let mut file = options.open(&temporary.path).map_err(HarnessError::Write)?;
     file.write_all(bytes).map_err(HarnessError::Write)?;
     if let Some(permissions) = permissions {
-        fs::set_permissions(&temporary, permissions).map_err(HarnessError::Write)?;
+        fs::set_permissions(&temporary.path, permissions).map_err(HarnessError::Write)?;
     }
     file.sync_all().map_err(HarnessError::Write)?;
+    drop(file);
     if path.exists() {
         fs::copy(path, &backup).map_err(HarnessError::Write)?;
     }
-    if let Err(error) = fs::rename(&temporary, path) {
-        if path.exists() {
-            fs::remove_file(path).map_err(HarnessError::Write)?;
-            fs::rename(&temporary, path).map_err(HarnessError::Write)?;
-        } else {
-            let _ = fs::remove_file(&temporary);
+    if let Err(error) = fs::rename(&temporary.path, path) {
+        if !path.exists() {
             return Err(HarnessError::Write(error));
         }
+        fs::remove_file(path).map_err(HarnessError::Write)?;
+        fs::rename(&temporary.path, path).map_err(HarnessError::Write)?;
     }
+    temporary.placed = true;
     Ok(())
 }
 
@@ -2916,12 +3013,12 @@ mod tests {
     use super::{
         agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
         edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots, inspect,
-        inspect_json, inspect_toml, json_entry_args, json_entry_command, jsonc_options,
-        manual_json_setup, mcp_command_line, packaged, replace_with_backup,
-        resolve_through_symlink, AppContainer, Attention, ClientName, ForeignCommand,
-        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
-        HarnessSummary, JsonDialect, Packages, PrivateView, RegistrationState, CLINE_SETTINGS,
-        EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
+        inspect_json, inspect_toml, is_write_temporary, json_entry_args, json_entry_command,
+        jsonc_options, manual_json_setup, mcp_command_line, packaged, remove_stray_temporaries_in,
+        replace_with_backup, resolve_through_symlink, AppContainer, Attention, ClientName,
+        ForeignCommand, HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots,
+        HarnessState, HarnessSummary, JsonDialect, Packages, PrivateView, RegistrationState,
+        CLINE_SETTINGS, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -2954,6 +3051,80 @@ mod tests {
             local_app_data: None,
             private_view: None,
         }
+    }
+
+    /// The names in `directory`, sorted.
+    fn names_in(directory: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_configuration_write_leaves_no_temporary_when_it_fails() {
+        let directory = temporary("write-fails");
+        // A directory where the configuration should be: the backup copy fails, after the
+        // temporary was written.
+        let path = directory.join("settings.json");
+        fs::create_dir_all(&path).unwrap();
+
+        assert!(replace_with_backup(&path, b"{}").is_err());
+        assert_eq!(names_in(&directory), ["settings.json"]);
+
+        let written = directory.join("other.json");
+        replace_with_backup(&written, b"{}").unwrap();
+        assert_eq!(names_in(&directory), ["other.json", "settings.json"]);
+    }
+
+    #[test]
+    fn only_a_configuration_write_temporary_is_recognised() {
+        use std::ffi::OsStr;
+
+        assert!(is_write_temporary(OsStr::new(
+            ".ghostlight-0123456789abcdef0123456789abcdef.tmp"
+        )));
+        for other in [
+            ".ghostlight-desktop-0123456789abcdef0123456789abcdef.tmp",
+            ".ghostlight-0123456789abcdef.tmp",
+            ".ghostlight-0123456789abcdef0123456789abcdef.json",
+            "ghostlight-0123456789abcdef0123456789abcdef.tmp",
+            "settings.json",
+        ] {
+            assert!(!is_write_temporary(OsStr::new(other)), "{other}");
+        }
+    }
+
+    #[test]
+    fn an_install_removes_the_temporaries_an_interrupted_write_left_beside_a_configuration() {
+        use std::time::{Duration, SystemTime};
+
+        let directory = temporary("stray-temporaries");
+        let context = context(&directory);
+        let claude = definition(&context, "claude-code").unwrap();
+        let settings = claude.path.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&settings).unwrap();
+        let stray = ".ghostlight-0123456789abcdef0123456789abcdef.tmp";
+        fs::write(settings.join(stray), b"{}").unwrap();
+        fs::write(settings.join("notes.tmp"), b"theirs").unwrap();
+
+        // Just written, it may be a write in flight.
+        assert_eq!(remove_stray_temporaries_in(&settings, SystemTime::now()), 0);
+        assert!(settings.join(stray).is_file());
+
+        let later = SystemTime::now() + Duration::from_secs(3600);
+        assert_eq!(remove_stray_temporaries_in(&settings, later), 1);
+        assert!(!settings.join(stray).exists());
+        assert!(settings.join("notes.tmp").is_file());
+
+        // The registry looks beside each configuration it can change.
+        fs::write(settings.join(stray), b"{}").unwrap();
+        let registry = HarnessRegistry::with_context(context);
+        assert_eq!(registry.remove_stray_temporaries(), 0);
+        assert_eq!(registry.remove_stray_temporaries_at(later), 1);
+        assert!(!settings.join(stray).exists());
     }
 
     #[test]

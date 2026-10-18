@@ -15,7 +15,7 @@ gate, the in-place deploy and the owner-held items below.
 | a1-get-ps1-reads-real-releases | frontdoor | landed (`fix(install): the Windows one-line installer reads a real release's checksums`) |
 | a2-uninstall-says-what-it-leaves | frontdoor | landed (`feat(uninstall): uninstall says what it removed and what it keeps`, `fix(uninstall): a partial uninstall and its dry run say what it really removes`) |
 | a3-private-views-are-named-not-blamed | frontdoor | landed (`fix(install): an app container is found by its effect, and its private view is named, not blamed`) |
-| a4-adaptive-small-promises | frontdoor | todo |
+| a4-adaptive-small-promises | frontdoor | landed (`fix(browser): a service inside an app container leaves browser startup to the person`, `fix(install): the install reads browser profiles only while setup is incomplete`, `fix(install): a Linux install names the full path when ghostlight is not on PATH`, `fix(doctor): doctor lists the window program`, `fix(install): a config write leaves no temporary file behind`) |
 | b1-no-tab-never-guesses | agent | landed: with several tabs a call that names none is refused and lists them; no per-caller marker exists (ADR-0198, amendment of 2026-10-18) |
 | b2-page-refusals-say-what-to-do | agent | landed: a hidden, disabled, read-only or non-text control is refused in plain words, says nothing was clicked or typed, and names one step that works (ADR-0198, amendment of 2026-10-18) |
 | c1-screen-readers-and-failures | window | landed (`fix(workbench): the window is calm for a screen reader, and a failure looks like one`): one status line says each settled action, at most one a second; failed and kept rows and the card say so in words; a destination that cannot be read says so in place, with Try again; both dialogs hold focus and give it back |
@@ -95,6 +95,21 @@ gate, the in-place deploy and the owner-held items below.
   the person to a regular terminal whose install found nothing to do. Now the row stays
   unjudged there: the install writes no registry value, keeps none private, does not fail on it,
   and names it with the same "cannot be checked from here" line.
+- a4 (install-8, docs-7, install-6, rel-8, trust-6, rel-12): on Linux an install whose
+  `~/.local/bin` is not on the PATH it ran with says so in one summary line with the link's full
+  path (`CommandPathActionResult::off_path`, worded in `language/environment.rs`); a new terminal
+  is not offered there, because it would not be true: shells add that directory at login, if at
+  all. Windows keeps "Open a new terminal" for a `Path` it just wrote. The README, the installation
+  guide and `llms-install.md` lead recovery with `ghostlight doctor` and keep `npx -y ghostlight
+  doctor` for npm installs. A service inside an app container leaves browser startup to the person
+  the way the no-display case does: the launch starts nothing and ends as the manual answer, and
+  `starts_on_request` names no browser there, so the window does not promise a start
+  (`Residence::detect`, ADR-0149 amendment of 2026-10-18). `finish_setup` scans the browser
+  profiles only while setup is incomplete, which is what docs/trust/data-flows.md says. Doctor
+  lists `ghostlight-desktop` among its binaries; a missing window program does not mark the
+  commands broken. The agent-config writer removes its `.ghostlight-<uuid>.tmp` on every failure,
+  and a real install (not `--no-clients`) removes such files older than a minute beside the
+  configurations it can change and its location state; a younger one may be a write in flight.
 - f1 (j-23, j-32, j-33, j-35, j-36): the popup's Paused shows a held lantern (the waiting ghost
   with a still amber ember) and an amber title, and Session ended shows the waiting lantern, so
   neither looks like Ready. The shortcut cap on the teal Resume button takes the button's dark ink
