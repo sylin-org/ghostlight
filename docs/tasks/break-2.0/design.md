@@ -122,9 +122,9 @@ them. The ground rules are the commit protocol in [BOOTSTRAP.md](BOOTSTRAP.md) a
 
 ## RESUME HERE
 
-Every slice through t05, t01 and t02 included, is on `dev` and pushed. t06-windows-1x-leftovers is
-on `dev` and not yet pushed. What remains: the owner's live looks (the e02, e03, f01 and t03 owed
-checks, and the Windows-only t04, t05 and t06 checks), and the browser lane's `history-browser` journey
+Every slice through t06, t01 and t02 included, is on `dev` and pushed. What remains: the owner's
+live looks (the e02, e03, f01 and t03 owed checks, and the Windows-only t04 and t05 checks; t06's
+was paid on 2026-10-18), and the browser lane's `history-browser` journey
 in CI (d08 note 1). The owed Linux checks of c00, c12, e01 and e02's Linux build were paid by
 linux-1 L02 at 17a0c060.
 
@@ -323,7 +323,10 @@ owner before anything is pushed.
   (only `EBWebView`, 38.8 MB) and the empty `C:\Users\Leo\AppData\Local\Ghostlight`, and says
   "Removed a folder Ghostlight 1.x left:" for each. `C:\ProgramData\Ghostlight` stays. The 2.0
   window still opens with its own data under the home. An install run inside Claude's container
-  before that removes neither and says nothing about them.
+  before that removes neither and says nothing about them. Paid on 2026-10-18: the dev-loop
+  install, outside the container, printed both "Removed a folder Ghostlight 1.x left:" lines,
+  both folders are gone, `C:ProgramDataGhostlight` was never present, and the 2.0 window's
+  data (`statedesktop-webview`) and its running shell came back untouched.
 - c12-agent-lists: CI's Linux test job passes `install::agent_list` (the table is built from
   placeholder roots, so it is the same on both systems; it ran here on Windows only). Paid by
   linux-1 L02 at 17a0c060: `install::agent_list` passed on Linux. On GitHub the
