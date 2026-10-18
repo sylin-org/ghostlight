@@ -26,7 +26,7 @@ none. The coordinate fact lives once in each `view` description: `x` and `y` are
 view's screenshot image, not CSS pixels. The governance phrases stay and are pinned by a test:
 "for this request", "admitted before the effect", "may cause an external effect", "needs write
 even for unsent drafts", and "screenshot image". The serialized `tools` array that `tools/list`
-returns has a size budget (31,600 characters, with caps on the five largest tools) that only
+returns has a size budget (31,800 characters, with caps on the five largest tools) that only
 ratchets down: a later change raises it by the measured size of a clause its new behavior needs.
 The implementation owns bounds and defaults as named constants shared by schema rendering and
 decoding. See [ADR-0198](../adr/0198-agent-experience.md).
