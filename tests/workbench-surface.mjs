@@ -1138,7 +1138,7 @@ function fakeService(kind, { served = true } = {}) {
     if (url.pathname === "/api/runtime") {
       const { intent } = JSON.parse(init.body);
       state.runtime = intent === "hold" ? "held" : "active";
-      state.note = intent === "hold" ? "Paused from a screen that is watching." : null;
+      state.note = intent === "hold" ? "Paused from a watching page or a local program." : null;
       const answer = reply(200, { accepted: true, runtime_state: state.runtime, message: "Paused." },
         { "ghostlight-seq": String(state.seq + 2) });
       Promise.resolve().then(() => {
@@ -1643,11 +1643,11 @@ const httpChecks = [
     JSON.stringify({ holdRequest, snapshots: [watchBeforeHold.snapshots, watchHeld.snapshotsAfter] })],
   ["while held, a watching page shows the state and its note where the wheel was, with the Continue line in the band",
     watchHeld.wheelHidden === true && watchHeld.state === false && watchHeld.word === "Paused"
-      && watchHeld.note === "Paused from a screen that is watching." && watchHeld.continueHidden === false
+      && watchHeld.note === "Paused from a watching page or a local program." && watchHeld.continueHidden === false
       && watchHeld.continueMarkup.includes("data-continue"),
     JSON.stringify(watchHeld)],
   ["while held, the sheet of a watching page says Paused and where it came from, and offers no Resume",
-    watchHeld.sheetRuntime === "Paused" && watchHeld.sheetNote === "Paused from a screen that is watching."
+    watchHeld.sheetRuntime === "Paused" && watchHeld.sheetNote === "Paused from a watching page or a local program."
       && watchHeld.sheetResume === true && watchHeld.sheetContinue === false,
     JSON.stringify(watchHeld)],
   ["the About card of a watching page sends nothing and opens the Home link in a new tab",

@@ -25,7 +25,7 @@ the architecture sweep.
 | S7 findings-per-frame | request | todo |
 | S8 flow-step-own-facts | request | todo |
 | S9 cancel-cause | request | todo |
-| S10 watcher-words | window | todo |
+| S10 watcher-words | window | landed (this commit) |
 | S11 channel-switches | governance | todo |
 
 ## Notes
@@ -42,3 +42,7 @@ the architecture sweep.
   open, since a fresh session opens after its `initialize` answer. `HARNESS_ATTACHED` reads
   `<connection> via <channel> from <image>`, and without a source it is unchanged.
   `tests/provenance-journey.mjs` is left to the coordinator's live checks.
+- S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
+  (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
+  what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed
+  for a watching page, and the fake service in `tests/workbench-surface.mjs` speaks the new words.

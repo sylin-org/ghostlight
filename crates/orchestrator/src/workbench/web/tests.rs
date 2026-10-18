@@ -1875,7 +1875,7 @@ fn an_act_answers_with_the_sequence_of_the_last_change_it_caused() {
 }
 
 #[test]
-fn a_pause_from_a_watching_screen_says_so_on_every_screen() {
+fn a_pause_from_a_watching_page_says_so_on_every_screen() {
     let fixture = Fixture::start();
     let mut window = Stream::open(fixture.port(), Some(&fixture.bearer()));
     window.hello();

@@ -1562,7 +1562,8 @@ impl WorkbenchChange {
 pub enum RuntimeSource {
     /// The Ghostlight window.
     Window,
-    /// A browser tab that only watches.
+    /// A loopback request without the window's key while watching is on: a watching page or any
+    /// local program, since nothing proves which.
     Watcher,
     /// The tray menu.
     Tray,

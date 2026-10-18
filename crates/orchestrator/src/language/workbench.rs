@@ -84,8 +84,9 @@ pub const COPIED_SETUP: &str = "Manual setup copied.";
 /// Why the runtime is held, when the pause came from the Ghostlight window.
 pub const PAUSED_IN_WINDOW: &str = "Paused in the Ghostlight window.";
 
-/// Why the runtime is held, when the pause came from a screen that is watching.
-pub const PAUSED_FROM_WATCHER: &str = "Paused from a screen that is watching.";
+/// Why the runtime is held, when the pause came over loopback without the window's key while
+/// watching is on: a watching page, or any local program, since nothing proves which.
+pub const PAUSED_FROM_WATCHER: &str = "Paused from a watching page or a local program.";
 
 /// Why the runtime is held, when the pause came from the tray.
 pub const PAUSED_FROM_TRAY: &str = "Paused from the tray.";
@@ -653,6 +654,22 @@ mod tests {
         ] {
             assert!(sentence.is_ascii(), "{sentence}");
             assert!(sentence.ends_with('.'), "{sentence}");
+        }
+    }
+
+    #[test]
+    fn a_pause_from_a_watching_page_names_no_screen() {
+        assert!(
+            !PAUSED_FROM_WATCHER.contains("screen"),
+            "{PAUSED_FROM_WATCHER}"
+        );
+        assert!(
+            PAUSED_FROM_WATCHER.contains("a watching page")
+                && PAUSED_FROM_WATCHER.contains("a local program"),
+            "{PAUSED_FROM_WATCHER}"
+        );
+        for own in [PAUSED_IN_WINDOW, PAUSED_FROM_TRAY, PAUSED_FROM_BROWSER] {
+            assert_ne!(own, PAUSED_FROM_WATCHER);
         }
     }
 
