@@ -25,6 +25,10 @@ use crate::language::agent_icon;
 use crate::language::deployment as deployment_words;
 use crate::language::workbench as words;
 
+/// How many of the first [`DoctorObservation`] binaries every command needs: the service and the
+/// edge.
+const COMMAND_EXECUTABLES: usize = 2;
+
 /// Everything `doctor` observed, gathered once.
 ///
 /// The text and JSON renderings read the same values, so a script and a person cannot be told
@@ -33,7 +37,11 @@ pub struct DoctorObservation {
     home: PathBuf,
     installed: Option<InstallRecord>,
     environment: crate::language::environment::Environment,
+    /// The installed executables, each with whether it is there: the service and the edge, which
+    /// every command needs, then the window program.
     binaries: Vec<(PathBuf, bool)>,
+    /// Whether the service and the edge are both there. A missing window program leaves every
+    /// command working, so it does not count.
     sibling_set_ready: bool,
     native_host: crate::install::native_host::NativeHostReport,
     command_path: crate::install::command_path::CommandPathReport,
@@ -52,18 +60,38 @@ pub struct DoctorObservation {
 
 impl DoctorObservation {
     /// The sentence that names the way back to a release, when the record says a development
-    /// build is installed and one of its executables is gone. No command works from such an
+    /// build is installed and the service or the edge is gone. No command works from such an
     /// installation, so this is the line a person needs.
     fn missing_development_executable(&self) -> Option<String> {
         let development = self
             .installed
             .as_ref()
             .is_some_and(|record| record.channel == Channel::Development);
-        let (missing, _) = self.binaries.iter().find(|(_, ready)| !ready)?;
+        let (missing, _) = self
+            .binaries
+            .iter()
+            .take(COMMAND_EXECUTABLES)
+            .find(|(_, ready)| !ready)?;
         development.then(|| {
             deployment_words::development_executable_missing(&missing.display().to_string())
         })
     }
+}
+
+/// The executables installed in `layout`'s `bin`, each with whether it is there: the service and
+/// the edge, then the window program.
+fn installed_binaries(layout: &Layout) -> Vec<(PathBuf, bool)> {
+    [
+        layout.service_executable(),
+        layout.edge(),
+        layout.desktop_executable(),
+    ]
+    .into_iter()
+    .map(|path| {
+        let ready = path.is_file();
+        (path, ready)
+    })
+    .collect()
 }
 
 /// Observe complete local system state for diagnostic reporting.
@@ -74,13 +102,11 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
     use crate::language::environment;
 
     let layout = Layout::current()?;
-    let mut sibling_set_ready = true;
-    let mut binaries = Vec::new();
-    for path in [layout.service_executable(), layout.edge()] {
-        let ready = path.is_file();
-        sibling_set_ready &= ready;
-        binaries.push((path, ready));
-    }
+    let binaries = installed_binaries(&layout);
+    let sibling_set_ready = binaries
+        .iter()
+        .take(COMMAND_EXECUTABLES)
+        .all(|(_, ready)| *ready);
     let runtime = observe_runtime()?;
     let readiness = if runtime.running() {
         crate::cli::client::readiness().ok()
@@ -318,7 +344,7 @@ pub fn readiness_line(readiness: &crate::workbench::ReadinessSummary) -> String 
 mod tests {
     use std::path::PathBuf;
 
-    use super::{doctor_document, readiness_line, DoctorObservation};
+    use super::{doctor_document, installed_binaries, readiness_line, DoctorObservation};
 
     /// An observation of a machine where the service answers and one retired connector runs.
     fn observation(strays: Vec<crate::install::deployment::StrayProcess>) -> DoctorObservation {
@@ -398,6 +424,29 @@ mod tests {
     }
 
     #[test]
+    fn the_binary_list_names_the_window_program() {
+        use crate::install::layout::{Layout, DESKTOP_EXECUTABLE_NAME};
+        use crate::scratch::Scratch;
+
+        let root = Scratch::named("doctor-binaries");
+        let layout = Layout::new(root.to_path_buf());
+        std::fs::create_dir_all(layout.bin()).unwrap();
+        std::fs::write(layout.service_executable(), b"service").unwrap();
+        std::fs::write(layout.edge(), b"edge").unwrap();
+
+        let binaries = installed_binaries(&layout);
+        assert_eq!(
+            binaries,
+            vec![
+                (layout.service_executable(), true),
+                (layout.edge(), true),
+                (layout.desktop_executable(), false),
+            ]
+        );
+        assert!(binaries[2].0.ends_with(DESKTOP_EXECUTABLE_NAME));
+    }
+
+    #[test]
     fn a_development_build_with_a_missing_executable_gets_the_way_back() {
         use crate::install::record::{Channel, InstallRecord};
 
@@ -405,6 +454,7 @@ mod tests {
         observed.binaries = vec![
             (PathBuf::from("bin/ghostlight-service"), false),
             (PathBuf::from("bin/ghostlight"), true),
+            (PathBuf::from("bin/ghostlight-desktop"), false),
         ];
         assert_eq!(observed.missing_development_executable(), None);
         observed.installed = Some(InstallRecord {
@@ -422,7 +472,11 @@ mod tests {
         assert!(line.contains("bin/ghostlight-service is missing"), "{line}");
         assert!(line.ends_with(&crate::language::deployment::restore_route()));
         observed.binaries[0].1 = true;
-        assert_eq!(observed.missing_development_executable(), None);
+        assert_eq!(
+            observed.missing_development_executable(),
+            None,
+            "every command works without the window program"
+        );
     }
 
     #[test]
