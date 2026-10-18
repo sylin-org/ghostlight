@@ -342,7 +342,7 @@ impl SystemRecoveryMechanism {
         ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
         let mut command = ordinary_browser_command(executable);
         command.envs(environment.values());
-        command.spawn().map(drop).map_err(|error| {
+        start_reaped(command).map(drop).map_err(|error| {
             MechanismError::Failed((
                 RecoveryFailure::LaunchFailed,
                 format!("{}: {error}", executable.display()),
@@ -382,13 +382,33 @@ fn ensure_live(deadline: Instant, cancelled: &AtomicBool) -> Result<(), Recovery
     }
 }
 
+/// The ordinary-profile command for `executable`: no arguments, null standard streams and, on
+/// Unix, a process group of its own, so a signal meant for the service's group never reaches the
+/// person's browser.
 fn ordinary_browser_command(executable: &Path) -> Command {
     let mut command = Command::new(executable);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
     command
+}
+
+/// Start `command` and collect its exit on a thread of its own, and return its process id. The
+/// browser, or a second start that only hands a window to the running browser and exits at
+/// once, never lingers as a zombie of the service.
+fn start_reaped(mut command: Command) -> std::io::Result<u32> {
+    let mut child = command.spawn()?;
+    let process_id = child.id();
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(process_id)
 }
 
 type RecoveryResult = Result<RecoveryDecision, RecoveryWaitError>;
@@ -2534,6 +2554,21 @@ mod tests {
         let command = ordinary_browser_command(Path::new("ordinary-browser"));
         assert_eq!(command.get_program(), Path::new("ordinary-browser"));
         assert_eq!(command.get_args().count(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_started_browser_that_exits_leaves_no_zombie() {
+        let process_id = start_reaped(ordinary_browser_command(Path::new("/bin/true"))).unwrap();
+        let stat = format!("/proc/{process_id}/stat");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while std::path::Path::new(&stat).exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{process_id} was never collected"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
