@@ -6,6 +6,7 @@
 //! every refusal a person can meet lives here, so the report says only what was observed and the
 //! way back from a development build is named the same way wherever it is needed.
 
+use crate::install::command_path::OwnedEntry;
 use crate::install::deployment::{EdgeReplacement, RESTORE_OPTION};
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
 use crate::install::{Attention, HarnessState, ALL_CLIENTS_OPTION};
@@ -31,15 +32,27 @@ pub fn leftover_removed(directory: &str) -> String {
     format!("Removed a folder Ghostlight 1.x left: {directory}")
 }
 
-/// What a whole uninstall says after the Ghostlight that was running stopped.
-pub const RUNNING_STOPPED: &str = "The running Ghostlight was stopped.";
-
 /// What a whole uninstall's dry run says while Ghostlight runs.
 pub const RUNNING_WOULD_STOP: &str = "Would stop the running Ghostlight.";
 
-/// What a whole uninstall says when the running Ghostlight did not stop in time.
-pub const RUNNING_DID_NOT_STOP: &str =
-    "The running Ghostlight did not stop in time; quit it from its icon, or sign out.";
+/// What an uninstall's dry run says of a browser whose Ghostlight registration it would remove.
+#[must_use]
+pub fn browser_would_remove(browser: &str) -> String {
+    format!("Would remove Ghostlight's connection to {browser}.")
+}
+
+/// What an uninstall's dry run says of the `ghostlight` command entry it would remove.
+#[must_use]
+pub fn command_entry_would_remove(entry: &OwnedEntry) -> String {
+    match entry {
+        OwnedEntry::UserPath(directory) => {
+            format!("Would remove {} from your PATH.", directory.display())
+        }
+        OwnedEntry::Link(link) => {
+            format!("Would remove the ghostlight command at {}.", link.display())
+        }
+    }
+}
 
 /// Which build an install put in `bin`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -426,12 +439,6 @@ pub fn platform_entry_would_update(entry: &str) -> String {
     format!("Would update the {entry}.")
 }
 
-/// A platform entry of this installation was removed.
-#[must_use]
-pub fn platform_entry_removed(entry: &str) -> String {
-    format!("Removed the {entry}.")
-}
-
 /// A platform entry a dry run would remove.
 #[must_use]
 pub fn platform_entry_would_remove(entry: &str) -> String {
@@ -493,6 +500,26 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn an_uninstall_dry_run_names_the_command_entry_it_would_remove() {
+        assert_eq!(
+            command_entry_would_remove(&OwnedEntry::UserPath(PathBuf::from(
+                r"C:\Users\Pat\.ghostlight\bin"
+            ))),
+            r"Would remove C:\Users\Pat\.ghostlight\bin from your PATH."
+        );
+        assert_eq!(
+            command_entry_would_remove(&OwnedEntry::Link(PathBuf::from(
+                "/home/pat/.local/bin/ghostlight"
+            ))),
+            "Would remove the ghostlight command at /home/pat/.local/bin/ghostlight."
+        );
+        assert_eq!(
+            browser_would_remove("Google Chrome"),
+            "Would remove Ghostlight's connection to Google Chrome."
+        );
+    }
 
     #[test]
     fn a_clients_settings_are_named_only_when_they_are_a_store_copy_or_have_another_copy() {
@@ -690,7 +717,8 @@ mod tests {
             removed_version_directory("d"),
             archived_version_audit("a"),
             kept_entry("m"),
-            platform_entry_removed("e"),
+            browser_would_remove("b"),
+            command_entry_would_remove(&OwnedEntry::Link("l".into())),
             platform_entry_would_remove("e"),
             platform_entry_kept("e"),
             removal_failed("f"),

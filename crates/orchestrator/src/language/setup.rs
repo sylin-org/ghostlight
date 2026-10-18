@@ -1,5 +1,5 @@
 //! The words of the install journey: what the window's setup view says at each stage, and what
-//! `ghostlight install` prints when it finishes.
+//! `ghostlight install` and `ghostlight uninstall` print when they finish.
 //!
 //! One pure module with no I/O, shaped like [`super::readiness`]: a closed vocabulary, a facts
 //! struct, a pure resolver and tests. The workbench reads the machine and calls [`compose`]; the
@@ -29,6 +29,14 @@
 //! that report mechanism print only in `--dry-run`: `platform_entry_updated`, `browsers_registered`,
 //! `removed_version_directory`, `archived_version_audit`, `client_rewritten` and the per-browser
 //! report.
+//!
+//! # What the uninstall prints
+//!
+//! A real uninstall prints [`uninstall_lines`] the same way: what it removed, whether the running
+//! Ghostlight stopped, and for a whole uninstall the home it kept and the extension the browser
+//! keeps. Beside it print only the lines that need a person: errors, registrations that need
+//! attention, and `platform_entry_kept`. What it would remove, the `Path` entry among it, prints
+//! only in `--dry-run`.
 
 use serde::{Deserialize, Serialize};
 
@@ -1010,6 +1018,88 @@ fn next_line(facts: &InstallFacts, connected: bool, changed: &[&str]) -> String 
     }
 }
 
+/// The first line of a whole uninstall.
+const UNINSTALLED: &str = "Ghostlight is uninstalled.";
+/// What an uninstall says when no agent or browser held Ghostlight's registration.
+const NOTHING_REMOVED: &str = "No agent or browser had Ghostlight to remove.";
+/// What a whole uninstall says after the Ghostlight that was running stopped.
+const RUNNING_STOPPED: &str = "The running Ghostlight was stopped.";
+/// What a whole uninstall says when the running Ghostlight did not stop in time.
+const RUNNING_DID_NOT_STOP: &str =
+    "The running Ghostlight did not stop in time; quit it from its icon, or sign out.";
+/// The last line of a whole uninstall: the extension is the browser's to remove.
+const EXTENSION_STAYS: &str =
+    "Ghostlight in Browser stays in your browser until you remove it from the browser's extensions page.";
+
+/// What became of the Ghostlight that was running when an uninstall finished.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RunningAfterUninstall {
+    /// Nothing was asked to stop: no Ghostlight ran, or the uninstall removed only part of it.
+    Unchanged,
+    /// The running Ghostlight stopped.
+    Stopped,
+    /// The running Ghostlight was asked to stop and was still running when the wait ended.
+    StillRunning,
+}
+
+/// What a real uninstall knows when it finishes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UninstallFacts {
+    /// Whether the uninstall removed Ghostlight as a whole, rather than from named browsers or
+    /// agents only.
+    pub whole: bool,
+    /// The agents Ghostlight's entry was removed from, by the names a person knows them by.
+    pub agents: Vec<String>,
+    /// The browsers whose connection to Ghostlight was removed, by name.
+    pub browsers: Vec<String>,
+    /// What became of the running Ghostlight.
+    pub running: RunningAfterUninstall,
+    /// The Ghostlight home the uninstall left in place, as a person types it.
+    pub home: String,
+}
+
+/// The whole success output of a real uninstall, one line per entry, in order: what was removed,
+/// whether the running Ghostlight stopped, and, for a whole uninstall, what stays and how to
+/// remove it. The lines never describe mechanism; `--dry-run` lists that.
+#[must_use]
+pub fn uninstall_lines(facts: &UninstallFacts) -> Vec<String> {
+    let mut lines = Vec::new();
+    if facts.whole {
+        lines.push(UNINSTALLED.to_owned());
+    }
+    if !facts.agents.is_empty() {
+        let names: Vec<&str> = facts.agents.iter().map(String::as_str).collect();
+        // A whole uninstall ends the running Ghostlight, and with it every agent's connection.
+        let note = if facts.whole {
+            String::new()
+        } else {
+            let target = if names.len() == 1 { "it" } else { "them" };
+            format!(" (restart {target} to unload Ghostlight's tools)")
+        };
+        lines.push(format!("Removed from agents: {}{note}.", join_list(&names)));
+    }
+    if !facts.browsers.is_empty() {
+        let names: Vec<&str> = facts.browsers.iter().map(String::as_str).collect();
+        lines.push(format!("Removed from browsers: {}.", join_list(&names)));
+    }
+    if facts.agents.is_empty() && facts.browsers.is_empty() {
+        lines.push(NOTHING_REMOVED.to_owned());
+    }
+    match facts.running {
+        RunningAfterUninstall::Unchanged => {}
+        RunningAfterUninstall::Stopped => lines.push(RUNNING_STOPPED.to_owned()),
+        RunningAfterUninstall::StillRunning => lines.push(RUNNING_DID_NOT_STOP.to_owned()),
+    }
+    if facts.whole {
+        lines.push(format!(
+            "Kept {}, with the Ghostlight programs, your audit history and your settings. Delete that folder to remove them too.",
+            facts.home
+        ));
+        lines.push(EXTENSION_STAYS.to_owned());
+    }
+    lines
+}
+
 /// Join names as a person says them: `A`, `A and B`, `A, B and C`.
 fn join_list(names: &[&str]) -> String {
     match names {
@@ -1941,6 +2031,69 @@ mod tests {
         assert!(STORE_LISTING_URL.ends_with(STORE_EXTENSION_ID));
     }
 
+    fn uninstall(agents: &[&str], browsers: &[&str]) -> UninstallFacts {
+        UninstallFacts {
+            whole: true,
+            agents: agents.iter().map(|&name| name.to_owned()).collect(),
+            browsers: browsers.iter().map(|&name| name.to_owned()).collect(),
+            running: RunningAfterUninstall::Stopped,
+            home: r"C:\Users\person\.ghostlight".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_whole_uninstall_says_what_it_removed_and_what_stays() {
+        assert_eq!(
+            uninstall_lines(&uninstall(
+                &["Claude Code", "Codex"],
+                &["Google Chrome", "Microsoft Edge"]
+            )),
+            [
+                "Ghostlight is uninstalled.",
+                "Removed from agents: Claude Code and Codex.",
+                "Removed from browsers: Google Chrome and Microsoft Edge.",
+                "The running Ghostlight was stopped.",
+                r"Kept C:\Users\person\.ghostlight, with the Ghostlight programs, your audit history and your settings. Delete that folder to remove them too.",
+                "Ghostlight in Browser stays in your browser until you remove it from the browser's extensions page.",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_uninstall_says_when_nothing_ran_or_nothing_stopped() {
+        let mut facts = uninstall(&[], &[]);
+        facts.running = RunningAfterUninstall::Unchanged;
+        let lines = uninstall_lines(&facts);
+        assert_eq!(lines[1], "No agent or browser had Ghostlight to remove.");
+        assert!(!lines.iter().any(|line| line.contains("running Ghostlight")));
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        facts.running = RunningAfterUninstall::StillRunning;
+        assert_eq!(
+            uninstall_lines(&facts)[2],
+            "The running Ghostlight did not stop in time; quit it from its icon, or sign out."
+        );
+    }
+
+    #[test]
+    fn a_partial_uninstall_names_only_what_it_removed() {
+        let mut facts = uninstall(&["Zed"], &[]);
+        facts.whole = false;
+        facts.running = RunningAfterUninstall::Unchanged;
+        assert_eq!(
+            uninstall_lines(&facts),
+            ["Removed from agents: Zed (restart it to unload Ghostlight's tools)."]
+        );
+        facts.agents = vec!["Zed".to_owned(), "Cursor".to_owned()];
+        facts.browsers = vec!["Brave".to_owned()];
+        assert_eq!(
+            uninstall_lines(&facts),
+            [
+                "Removed from agents: Zed and Cursor (restart them to unload Ghostlight's tools).",
+                "Removed from browsers: Brave.",
+            ]
+        );
+    }
+
     #[test]
     fn every_string_is_ascii() {
         let mut state = facts(
@@ -1986,6 +2139,18 @@ mod tests {
             assert!(json.is_ascii(), "{json}");
         }
         assert!(STEP_NAMES.iter().all(|name| name.is_ascii()));
+        let mut gone = uninstall(&["Alpha"], &["Beta"]);
+        for running in [
+            RunningAfterUninstall::Unchanged,
+            RunningAfterUninstall::Stopped,
+            RunningAfterUninstall::StillRunning,
+        ] {
+            gone.running = running;
+            for whole in [true, false] {
+                gone.whole = whole;
+                assert!(uninstall_lines(&gone).iter().all(|line| line.is_ascii()));
+            }
+        }
         assert!(STORE_LISTING_URL.is_ascii() && PROMPT.is_ascii() && TAGLINE.is_ascii());
     }
 }

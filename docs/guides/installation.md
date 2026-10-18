@@ -250,13 +250,13 @@ Check `ghostlight doctor` for the running service version; `ghostlight --version
 executable on disk and can differ until the old process has exited.
 
 On Windows an install writes the Start-menu shortcut and the installed-apps entry, as every
-deploy does, and says each one it changed. `ghostlight uninstall` removes both again, and says each one it
-removed. It removes the shortcut only when it starts a program in `~/.ghostlight/bin` or carries the
-Ghostlight application id, and the installed-apps entry only when its command or location points into
-`~/.ghostlight`; an entry that names anything else, such as one an older installer wrote, is left and
-named. An install also adds
-`~/.ghostlight/bin` to your user PATH and removes it again on uninstall. `ghostlight` works in terminals opened after the install; one that was already open
-needs to be reopened. The machine PATH is never changed.
+deploy does. `ghostlight uninstall` removes both again. It removes the shortcut only when it starts
+a program in `~/.ghostlight/bin` or carries the Ghostlight application id, and the installed-apps
+entry only when its command or location points into `~/.ghostlight`; an entry that names anything
+else, such as one an older installer wrote, is left and named. An install also adds
+`~/.ghostlight/bin` to your user PATH and removes it again on uninstall. `ghostlight` works in
+terminals opened after the install; one that was already open needs to be reopened. The machine
+PATH is never changed.
 
 On Windows the browsers' registration names one manifest, `~/.ghostlight/manifests/org.sylin.ghostlight.json`.
 Windows runs the processes of an MSIX-packaged app, Claude desktop and Codex among them, in that
@@ -266,8 +266,33 @@ the Start-menu shortcut and the installed-apps entry among them while they are o
 `~/.ghostlight/bin/ghostlight.exe install` once from a regular terminal to finish them. After that,
 installs from inside the container only rewrite the manifest.
 
-Before removing Ghostlight, run `ghostlight uninstall` or use **Integrations** to remove Ghostlight
-from each agent it was added to.
-Then remove the matching browser extension and use the operating system's package uninstall. A
-release package must remove only its own native-messaging registration and files; clean-machine
-verification of that behavior is required before publication.
+### Uninstall
+
+`ghostlight uninstall` removes what Ghostlight registered: its entry in each agent, its connection
+to each browser, the `ghostlight` command (the PATH entry on Windows; `~/.local/bin/ghostlight`,
+the manual page and the completions on Linux), and on Windows the Start-menu shortcut and the
+installed-apps entry. It stops the running Ghostlight, then says what it did:
+
+```text
+Ghostlight is uninstalled.
+Removed from agents: Claude Code and Codex.
+Removed from browsers: Google Chrome.
+The running Ghostlight was stopped.
+Kept C:\Users\you\.ghostlight, with the Ghostlight programs, your audit history and your settings. Delete that folder to remove them too.
+Ghostlight in Browser stays in your browser until you remove it from the browser's extensions page.
+```
+
+`ghostlight uninstall --dry-run` lists what it would remove, the PATH entry among it, and changes
+nothing. `--browser` and `--client` remove Ghostlight from only the browsers or agents you name, and
+leave it running.
+
+Uninstall keeps the Ghostlight home, `~/.ghostlight`: the executables, the audit history, your
+policy and your settings. To remove those too, delete the folder after the uninstall finishes:
+
+```text
+PowerShell:       Remove-Item -Recurse -Force "$HOME\.ghostlight"
+Linux:            rm -rf ~/.ghostlight
+```
+
+Then remove Ghostlight in Browser from each browser's extensions page (`chrome://extensions`,
+`edge://extensions`, `brave://extensions`).

@@ -10,6 +10,10 @@
 //! what changed prints only with `--dry-run`. While setup is incomplete the install also shows the
 //! Ghostlight window, so the next step is in front of the person (ADR-0200 Decisions 10 to 12).
 //!
+//! A real uninstall reads the same way: it prints [`crate::language::setup::uninstall_lines`],
+//! which name what it removed and what it kept, plus the lines that need a person. With
+//! `--dry-run` it lists what it would remove instead, the `Path` entry among it.
+//!
 //! Inside a Windows app container the registry and `AppData` writes reach only that app, so an
 //! install there leaves those registrations unwritten, says which, and names the one command that
 //! finishes them from a regular terminal (see `crate::install::container`).
@@ -32,7 +36,10 @@ use crate::install::{client_ids, setup_state, version_directories};
 use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::deployment as deployment_words;
 use crate::language::environment::{self, Environment};
-use crate::language::setup::{self as setup_words, BrowserFact, InstallAgent, InstallFacts};
+use crate::language::setup::{
+    self as setup_words, BrowserFact, InstallAgent, InstallFacts, RunningAfterUninstall,
+    UninstallFacts,
+};
 use crate::language::workbench as stray_words;
 use crate::service::lock::ServiceLock;
 
@@ -43,7 +50,7 @@ struct KeptPrivate {
     registrations: Vec<String>,
 }
 
-/// What a real install learned that its closing summary needs.
+/// What a real install or uninstall learned that its closing summary needs.
 #[derive(Default)]
 struct Collected {
     /// Whether the user `Path` was written, so a terminal that is already open lacks it.
@@ -52,19 +59,47 @@ struct Collected {
     agents: Vec<InstallAgent>,
     /// The command an agent starts to run Ghostlight's MCP server.
     mcp_command: String,
+    /// The browsers a real uninstall removed Ghostlight's connection from, by name.
+    removed_browsers: Vec<String>,
+    /// The agents a real uninstall removed Ghostlight's entry from, by name.
+    removed_agents: Vec<String>,
 }
 
 /// Run installation or uninstallation across detected browsers and MCP clients.
 ///
 /// An install that wrote its registrations also removes the 1.x version directories from `bin`,
-/// with the programs running from them already stopped.
+/// with the programs running from them already stopped. A whole uninstall ends the running
+/// Ghostlight, and a real uninstall then prints its summary.
 pub fn run_setup(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
-    run_setup_steps(install, options)?;
-    if install && !options.dry_run {
-        remove_version_directories(&Layout::current()?);
+    let collected = run_setup_steps(install, options)?;
+    let layout = Layout::current()?;
+    if install {
+        if !options.dry_run {
+            remove_version_directories(&layout);
+        }
+        return Ok(());
     }
-    if !install && stops_running(options) {
-        stop_running_for_uninstall(&Layout::current()?, options.dry_run);
+    let whole = stops_running(options);
+    if options.dry_run {
+        if whole && !ServiceLock::is_free(&layout.service_lock()) {
+            println!("{}", deployment_words::RUNNING_WOULD_STOP);
+        }
+        return Ok(());
+    }
+    let running = if whole {
+        stop_running_for_uninstall(&layout)
+    } else {
+        RunningAfterUninstall::Unchanged
+    };
+    let facts = UninstallFacts {
+        whole,
+        agents: collected.removed_agents,
+        browsers: collected.removed_browsers,
+        running,
+        home: layout.home().display().to_string(),
+    };
+    for line in setup_words::uninstall_lines(&facts) {
+        println!("{line}");
     }
     Ok(())
 }
@@ -83,15 +118,11 @@ fn stops_running(options: &SetupOptions) -> bool {
 
 /// End the running Ghostlight after a whole uninstall: the service sends the `uninstall` goodbye,
 /// on which the edges and the shell exit (ADR-0199 Decision 4). The answer to the quit only says
-/// the service heard; the free service lock says it has gone. Nothing runs, nothing is said.
-fn stop_running_for_uninstall(layout: &Layout, dry_run: bool) {
+/// the service heard; the free service lock says it has gone. When nothing runs, nothing changes.
+fn stop_running_for_uninstall(layout: &Layout) -> RunningAfterUninstall {
     let lock = layout.service_lock();
     if ServiceLock::is_free(&lock) {
-        return;
-    }
-    if dry_run {
-        println!("{}", deployment_words::RUNNING_WOULD_STOP);
-        return;
+        return RunningAfterUninstall::Unchanged;
     }
     let _ = crate::cli::client::control_at(
         layout.home(),
@@ -102,16 +133,15 @@ fn stop_running_for_uninstall(layout: &Layout, dry_run: bool) {
     let deadline = Instant::now() + UNINSTALL_QUIT_WAIT;
     while !ServiceLock::is_free(&lock) {
         if Instant::now() >= deadline {
-            println!("{}", deployment_words::RUNNING_DID_NOT_STOP);
-            return;
+            return RunningAfterUninstall::StillRunning;
         }
         std::thread::sleep(UNINSTALL_QUIT_POLL);
     }
-    println!("{}", deployment_words::RUNNING_STOPPED);
+    RunningAfterUninstall::Stopped
 }
 
-/// The registration steps of [`run_setup`].
-fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> {
+/// The registration steps of [`run_setup`], returning what the closing summary needs.
+fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Collected> {
     use crate::install::command_path::{CommandPath, CommandPathState, PATH_ENTRY_REGISTRATION};
     use crate::install::desktop_entry::{DesktopIntegration, DesktopIntegrationState};
     use crate::install::native_host::NativeHostRegistry;
@@ -145,6 +175,13 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
             if install { "install" } else { "uninstall" }
         );
         print_native_host_report(&initial_browser_report);
+        if !install {
+            for browser in &initial_browser_report.browsers {
+                if browser.state.owned() {
+                    println!("{}", deployment_words::browser_would_remove(&browser.name));
+                }
+            }
+        }
     } else if install {
         let result = match &install_browser_ids {
             None => native_hosts.install()?,
@@ -175,13 +212,22 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         } else {
             native_hosts.uninstall_selected(&options.browser_ids)?
         };
-        println!("Browser connection removed; changed: {}", result.changed);
-        print_native_host_report(&result.report);
+        collected.removed_browsers = removed_browsers(&initial_browser_report, &result.report);
+        for browser in &result.report.browsers {
+            if browser.state == NativeHostState::NeedsAttention {
+                println!("{}", browser_line(browser));
+            }
+        }
     }
 
     let command_path = CommandPath::discover();
     if options.dry_run {
-        print_command_path_report(&command_path.check()?);
+        match command_path.removable()? {
+            Some(entry) if !install => {
+                println!("{}", deployment_words::command_entry_would_remove(&entry));
+            }
+            _ => print_command_path_report(&command_path.check()?),
+        }
     } else {
         let result = if install {
             command_path.install()?
@@ -189,9 +235,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
             command_path.uninstall()?
         };
         let state = result.report.state;
-        if state == CommandPathState::NeedsAttention
-            || (!install && state != CommandPathState::NotApplicable)
-        {
+        if state == CommandPathState::NeedsAttention {
             print_command_path_report(&result.report);
         }
         if install && state == CommandPathState::PrivateView {
@@ -213,9 +257,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
             user_assets.uninstall()?
         };
         let state = result.report.state;
-        if state == UserAssetState::NeedsAttention
-            || (!install && state != UserAssetState::NotApplicable)
-        {
+        if state == UserAssetState::NeedsAttention {
             println!(
                 "Documentation: {} -- {}",
                 state.label(),
@@ -233,11 +275,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         } else {
             desktop.uninstall()?
         };
-        let state = result.report.state;
-        if state == DesktopIntegrationState::NeedsAttention {
-            print_desktop_integration_report(&result.report);
-        } else if !install && state != DesktopIntegrationState::NotApplicable {
-            println!("Applications entry removed; changed: {}", result.changed);
+        if result.report.state == DesktopIntegrationState::NeedsAttention {
             print_desktop_integration_report(&result.report);
         }
     }
@@ -249,12 +287,16 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
     }
 
     if real_install && !install_usable {
-        return conclude(install, options, install_usable, &kept_private, &collected);
+        return conclude(install, options, install_usable, &kept_private, &collected)
+            .map(|()| collected);
     }
 
     if options.no_clients && !real_install {
-        println!("MCP client configuration was left unchanged.");
-        return conclude(install, options, install_usable, &kept_private, &collected);
+        if options.dry_run {
+            println!("MCP client configuration was left unchanged.");
+        }
+        return conclude(install, options, install_usable, &kept_private, &collected)
+            .map(|()| collected);
     }
 
     // The scan only reads. A real install reads it even with `--no-clients`, so the summary can
@@ -285,7 +327,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         select_harnesses(&summaries, options, install)?
     };
     if selected.is_empty() {
-        if !real_install {
+        if options.dry_run {
             if attention_count == 0 {
                 println!("No MCP client configuration needs to change.");
             } else {
@@ -293,7 +335,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
             }
         }
         collected.agents = install_agents(&summaries, &[]);
-        return conclude(install, options, install_usable, &kept_private, &collected);
+        return conclude(install, options, install_usable, &kept_private, &collected)
+            .map(|()| collected);
     }
     let mut failures = Vec::new();
     let mut applied = Vec::new();
@@ -317,8 +360,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
         };
         match harnesses.apply(&summary.id, action) {
             Ok(result) => {
-                if !install {
-                    println!("{}", result.message);
+                if !install && result.changed {
+                    collected.removed_agents.push(result.summary.label.clone());
                 }
                 applied.push(result);
             }
@@ -336,7 +379,24 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
             failures.len()
         );
     }
-    Ok(())
+    Ok(collected)
+}
+
+/// The browsers whose Ghostlight registration was there `before` an uninstall and is gone `after`
+/// it, by name.
+fn removed_browsers(before: &NativeHostReport, after: &NativeHostReport) -> Vec<String> {
+    before
+        .browsers
+        .iter()
+        .filter(|browser| browser.state.owned())
+        .filter(|browser| {
+            after
+                .browsers
+                .iter()
+                .any(|now| now.id == browser.id && now.state == NativeHostState::Missing)
+        })
+        .map(|browser| browser.name.clone())
+        .collect()
 }
 
 /// The agents on this computer as an install left them: each one detected or just configured,
@@ -468,8 +528,8 @@ fn carry_windows_report(report: ReconcileReport, kept_private: &mut KeptPrivate)
 }
 
 /// Remove the Windows Start-menu shortcut and Uninstall key that are this installation's, saying
-/// each one removed, or, with `--dry-run`, each one that would be, and each one left because it
-/// names something else. A failure is reported and does not stop the rest of the uninstall.
+/// each one left because it names something else, and, with `--dry-run`, each one that would be
+/// removed. A failure is reported and does not stop the rest of the uninstall.
 ///
 /// Inside an app container a real `uninstall` has already been refused by the browser connection
 /// step, which comes first. A `--dry-run` uninstall does reach this, and prints nothing for the
@@ -491,17 +551,13 @@ fn remove_windows_entries(options: &SetupOptions) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// One line for each Windows entry removed, or with `dry_run` each that would be, and each kept.
+/// One line for each Windows entry kept, after, with `dry_run`, one for each that would be removed.
+/// What a real uninstall removed is in its summary's words, not named entry by entry.
 fn removal_lines(removal: &WindowsRemoval, dry_run: bool) -> Vec<String> {
-    let removed = if dry_run {
-        deployment_words::platform_entry_would_remove
-    } else {
-        deployment_words::platform_entry_removed
-    };
-    removal
-        .removed
+    let removed: &[String] = if dry_run { &removal.removed } else { &[] };
+    removed
         .iter()
-        .map(|entry| removed(entry))
+        .map(|entry| deployment_words::platform_entry_would_remove(entry))
         .chain(
             removal
                 .kept
@@ -1209,7 +1265,7 @@ mod tests {
     }
 
     #[test]
-    fn an_uninstall_says_each_entry_it_removed_and_each_it_kept() {
+    fn an_uninstall_names_each_entry_it_kept_and_its_dry_run_each_it_would_remove() {
         use super::removal_lines;
         use crate::install::reconcile::WindowsRemoval;
 
@@ -1218,18 +1274,37 @@ mod tests {
             kept: vec!["installed-apps entry".to_owned()],
             failures: Vec::new(),
         };
+        let kept = "Kept the installed-apps entry; it does not name this Ghostlight installation.";
+        assert_eq!(removal_lines(&removal, false), [kept]);
         assert_eq!(
-            removal_lines(&removal, false),
-            [
-                "Removed the Start-menu shortcut.",
-                "Kept the installed-apps entry; it does not name this Ghostlight installation."
-            ]
-        );
-        assert_eq!(
-            removal_lines(&removal, true)[0],
-            "Would remove the Start-menu shortcut."
+            removal_lines(&removal, true),
+            ["Would remove the Start-menu shortcut.", kept]
         );
         assert!(removal_lines(&WindowsRemoval::default(), false).is_empty());
+    }
+
+    #[test]
+    fn an_uninstall_names_the_browsers_whose_registration_it_removed() {
+        use super::removed_browsers;
+
+        let with_state = |id: &str, state| BrowserRegistration {
+            state,
+            ..browser(id, BrowserPackage::Native)
+        };
+        let before = browser_report(vec![
+            with_state("chrome", NativeHostState::Current),
+            with_state("edge", NativeHostState::OwnedElsewhere),
+            with_state("brave", NativeHostState::NeedsAttention),
+            with_state("chromium", NativeHostState::Missing),
+        ]);
+        let after = browser_report(vec![
+            with_state("chrome", NativeHostState::Missing),
+            with_state("edge", NativeHostState::Missing),
+            with_state("brave", NativeHostState::NeedsAttention),
+            with_state("chromium", NativeHostState::Missing),
+        ]);
+        assert_eq!(removed_browsers(&before, &after), ["chrome", "edge"]);
+        assert!(removed_browsers(&before, &before).is_empty());
     }
 
     #[test]
@@ -1654,6 +1729,7 @@ mod tests {
             path_written: false,
             agents: vec![agent("Claude Code", true, true), agent("Codex", true, true)],
             mcp_command: "/home/ghostlight mcp".into(),
+            ..Collected::default()
         }
     }
 

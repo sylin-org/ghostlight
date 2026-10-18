@@ -103,6 +103,15 @@ pub struct CommandPathActionResult {
     pub report: CommandPathReport,
 }
 
+/// The command entry an uninstall removes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OwnedEntry {
+    /// The installed `bin` directory on the per-user `Path`.
+    UserPath(PathBuf),
+    /// The `ghostlight` symlink in the user executable directory.
+    Link(PathBuf),
+}
+
 /// Product-owned per-user command entry.
 #[derive(Clone, Debug)]
 pub struct CommandPath {
@@ -137,6 +146,12 @@ impl CommandPath {
     /// Remove the owned entry, and only that.
     pub fn uninstall(&self) -> Result<CommandPathActionResult, CommandPathError> {
         apply_uninstall(&self.context)
+    }
+
+    /// The entry [`Self::uninstall`] would remove, or `None` when it would remove nothing.
+    /// Nothing is changed.
+    pub fn removable(&self) -> Result<Option<OwnedEntry>, CommandPathError> {
+        removable(&self.context)
     }
 }
 
@@ -403,15 +418,32 @@ fn apply_install(
     })
 }
 
+/// Whether an uninstall removes the entry `report` describes: one Ghostlight owns, and never from
+/// inside an app container, whose write no other app would see.
+fn removes(context: &CommandPathContext, report: &CommandPathReport) -> bool {
+    matches!(
+        report.state,
+        CommandPathState::Current | CommandPathState::Updatable
+    ) && context.container.is_none()
+}
+
+fn removable(context: &CommandPathContext) -> Result<Option<OwnedEntry>, CommandPathError> {
+    let report = inspect(context)?;
+    if !removes(context, &report) {
+        return Ok(None);
+    }
+    Ok(Some(if context.user_path.is_some() {
+        OwnedEntry::UserPath(report.link)
+    } else {
+        OwnedEntry::Link(report.link)
+    }))
+}
+
 fn apply_uninstall(
     context: &CommandPathContext,
 ) -> Result<CommandPathActionResult, CommandPathError> {
     let before = inspect(context)?;
-    if !matches!(
-        before.state,
-        CommandPathState::Current | CommandPathState::Updatable
-    ) || context.container.is_some()
-    {
+    if !removes(context, &before) {
         return Ok(unchanged(before));
     }
     if let (Some(store), Some(directory)) = (&context.user_path, context.bin_directory()) {
@@ -612,9 +644,14 @@ mod tests {
 
         assert!(!apply_install(&context).unwrap().changed);
 
+        assert_eq!(
+            removable(&context).unwrap(),
+            Some(OwnedEntry::Link(context.link()))
+        );
         let removed = apply_uninstall(&context).unwrap();
         assert!(removed.changed);
         assert_eq!(removed.report.state, CommandPathState::Missing);
+        assert_eq!(removable(&context).unwrap(), None);
         assert!(!apply_uninstall(&context).unwrap().changed);
     }
 
@@ -664,6 +701,7 @@ mod tests {
             CommandPathState::NeedsAttention
         );
         assert!(!apply_install(&context).unwrap().changed);
+        assert_eq!(removable(&context).unwrap(), None);
         assert!(!apply_uninstall(&context).unwrap().changed);
         assert_eq!(
             fs::read(context.link()).unwrap(),
@@ -845,6 +883,12 @@ mod tests {
                 true,
             );
             let context = windows(&store);
+            assert_eq!(
+                removable(&context).unwrap(),
+                Some(OwnedEntry::UserPath(PathBuf::from(
+                    r"C:\Users\person\.ghostlight\bin"
+                )))
+            );
             let removed = apply_uninstall(&context).unwrap();
             assert!(removed.changed);
             assert!(!removed.needs_new_terminal);
@@ -886,6 +930,7 @@ mod tests {
             let installed = apply_install(&context).unwrap();
             assert!(!installed.changed);
             assert_eq!(installed.report.state, CommandPathState::Current);
+            assert_eq!(removable(&context).unwrap(), None);
             let removed = apply_uninstall(&context).unwrap();
             assert!(!removed.changed);
             assert_eq!(store.writes.load(Ordering::SeqCst), 0);

@@ -13,7 +13,7 @@ gate, the in-place deploy and the owner-held items below.
 | Slice | Lane | Status |
 | --- | --- | --- |
 | a1-get-ps1-reads-real-releases | frontdoor | landed (`fix(install): the Windows one-line installer reads a real release's checksums`) |
-| a2-uninstall-says-what-it-leaves | frontdoor | todo |
+| a2-uninstall-says-what-it-leaves | frontdoor | landed (`feat(uninstall): uninstall says what it removed and what it keeps`) |
 | a3-private-views-are-named-not-blamed | frontdoor | todo |
 | a4-adaptive-small-promises | frontdoor | todo |
 | b1-no-tab-never-guesses | agent | landed: with several tabs a call that names none is refused and lists them; no per-caller marker exists (ADR-0198, amendment of 2026-10-18) |
@@ -66,6 +66,15 @@ gate, the in-place deploy and the owner-held items below.
   and, in CI on Windows, the real v1.3.14 SHA256SUMS. `get.sh` already saves with `curl -o` and
   reads the file; its test now serves a release-shaped file. `main`'s 1.x `scripts/get.ps1` has
   the same line (held for the owner above).
+- a2 (install-7, docs-9): a real `ghostlight uninstall` now prints one summary from
+  `language/setup.rs` (`uninstall_lines`, beside `install_lines`): the agents and browsers it
+  removed Ghostlight from, whether the running Ghostlight stopped, the home it kept and that
+  deleting it removes the programs, audit history and settings, and that Ghostlight in Browser
+  stays until removed from the browser. The per-registration report lines print only with
+  `--dry-run`, which now also names each browser connection and the PATH entry (or
+  `~/.local/bin/ghostlight`) it would remove, read from the same check the uninstall acts on
+  (`CommandPath::removable`). What uninstall removes did not change. The installation guide's
+  uninstall section says the same and how to delete the home.
 - f1 (j-23, j-32, j-33, j-35, j-36): the popup's Paused shows a held lantern (the waiting ghost
   with a still amber ember) and an amber title, and Session ended shows the waiting lantern, so
   neither looks like Ready. The shortcut cap on the teal Resume button takes the button's dark ink

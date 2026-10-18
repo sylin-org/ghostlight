@@ -79,6 +79,12 @@ impl NativeHostState {
             Self::NeedsAttention => "needs attention",
         }
     }
+
+    /// Whether the registration is one a Ghostlight manifest makes, which an uninstall removes.
+    #[must_use]
+    pub const fn owned(self) -> bool {
+        matches!(self, Self::Current | Self::Updatable | Self::OwnedElsewhere)
+    }
 }
 
 /// Read-only state for one supported browser.
