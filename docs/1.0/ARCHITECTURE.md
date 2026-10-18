@@ -510,6 +510,11 @@ capacity, which completes through the same path without running. Its deadline an
 span count from when the service received it, and a live row starts at that time, so a call that
 waited shows the same span live as in history.
 
+A request's cancellation keeps who cancelled it beside its flag, set once: the agent (its
+`notifications/cancelled`), the end of its session, or Ghostlight's quit, which the session's
+close tells apart. A cancelled call's sentence names that cause, and a cancellation the browser
+reported without one keeps the plain words.
+
 What a frame learns lives with the frame and is read once by its completion. A frame is the
 request's top-level operation or one flow step, each built by its own constructor from its own
 operation. Its findings are what the page showed, the browser that received its commands, its

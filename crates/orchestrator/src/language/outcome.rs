@@ -1397,6 +1397,20 @@ fn unconfirmed_next_steps(cause: CheckFailure) -> Vec<String> {
 /// Human-only status for an admitted job still waiting for earlier work.
 pub const WAITING_FOR_WORK: &str = "Waiting for earlier browser work";
 
+/// Who cancelled a call: the agent that sent it, or the end of its session or of Ghostlight.
+///
+/// A call's cancellation records its first cause and keeps it, so a later cancel never rewrites
+/// who stopped the call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CancelCause {
+    /// The agent cancelled the call (`notifications/cancelled`).
+    Client,
+    /// The agent's session ended while the call waited or ran: its connection closed.
+    SessionEnded,
+    /// Ghostlight quit while the call waited or ran.
+    Quit,
+}
+
 /// Why a browser job did not complete in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Refusal {
@@ -1405,7 +1419,7 @@ pub enum Refusal {
     /// Model-facing input did not match the catalog.
     InvalidRequest,
     /// Cancellation won before workspace admission.
-    CancelledBeforeStart,
+    CancelledBeforeStart { by: CancelCause },
     /// The invocation deadline expired before workspace admission.
     DeadlineBeforeStart,
     /// Configured authority blocked the job.
@@ -1474,8 +1488,11 @@ pub enum Refusal {
     },
     /// A required browser document could not be bound to current authority.
     DocumentUnavailable,
-    /// The caller cancelled after the job started but before any browser command was sent.
-    CancelledBeforeDispatch,
+    /// The job was cancelled after it started but before any browser command was sent.
+    ///
+    /// The cause is absent when the browser reported the cancellation and the call's own
+    /// cancellation was never requested.
+    CancelledBeforeDispatch { by: Option<CancelCause> },
     /// The browser this session works in could not take the call, so nothing was sent.
     BrowserUnavailable { reason: BrowserUnavailableReason },
     /// Ghostlight and the browser extension disagree about the bridge contract: a protocol,
@@ -1508,7 +1525,10 @@ pub enum Refusal {
     /// The connection was lost after dispatch, before a completion receipt.
     ConnectionLost,
     /// Cancellation arrived after dispatch, before a completion receipt.
-    CancelledAfterDispatch,
+    ///
+    /// The cause is absent when the browser reported the cancellation and the call's own
+    /// cancellation was never requested.
+    CancelledAfterDispatch { by: Option<CancelCause> },
     /// A dispatched effect cannot be determined.
     EffectUnknown,
     /// A denied new-tab landing has an unknown final state.
@@ -1552,7 +1572,13 @@ impl Refusal {
         match self {
             Self::Capacity => "The work queue is full. This request was not started.",
             Self::InvalidRequest => "The call does not match the Ghostlight catalog.",
-            Self::CancelledBeforeStart => "The browser job was cancelled before it started.",
+            Self::CancelledBeforeStart { by } => match by {
+                CancelCause::Client => "The agent cancelled the browser job before it started.",
+                CancelCause::SessionEnded => {
+                    "The agent's session ended before the browser job started."
+                }
+                CancelCause::Quit => "Ghostlight quit before the browser job started.",
+            },
             Self::DeadlineBeforeStart => {
                 "The browser job deadline expired while waiting for the workspace."
             }
@@ -1596,7 +1622,16 @@ impl Refusal {
                     "Sent, but the job ran out of time before the browser confirmed."
                 }
             }
-            Self::CancelledBeforeDispatch => "Cancelled before anything reached the browser.",
+            Self::CancelledBeforeDispatch { by } => match by {
+                None => "Cancelled before anything reached the browser.",
+                Some(CancelCause::Client) => {
+                    "The agent cancelled before anything reached the browser."
+                }
+                Some(CancelCause::SessionEnded) => {
+                    "The agent's session ended before anything reached the browser."
+                }
+                Some(CancelCause::Quit) => "Ghostlight quit before anything reached the browser.",
+            },
             Self::BrowserUnavailable { reason } => match reason {
                 BrowserUnavailableReason::NotAnswering => {
                     "The browser this session works in stopped answering. Nothing was sent."
@@ -1649,7 +1684,16 @@ impl Refusal {
                 }
             },
             Self::ConnectionLost => "Connection lost before the browser confirmed completion.",
-            Self::EffectUnknown | Self::CancelledAfterDispatch => "Sent, but the browser never confirmed what happened.",
+            Self::EffectUnknown | Self::CancelledAfterDispatch { by: None } => "Sent, but the browser never confirmed what happened.",
+            Self::CancelledAfterDispatch { by: Some(CancelCause::Client) } => {
+                "Sent, but the agent cancelled before the browser confirmed what happened."
+            }
+            Self::CancelledAfterDispatch { by: Some(CancelCause::SessionEnded) } => {
+                "Sent, but the agent's session ended before the browser confirmed what happened."
+            }
+            Self::CancelledAfterDispatch { by: Some(CancelCause::Quit) } => {
+                "Sent, but Ghostlight quit before the browser confirmed what happened."
+            }
             Self::LandingDeniedUnknown => {
                 "Blocked the landing, but the new tab's final state is unknown."
             }
@@ -1818,7 +1862,7 @@ impl Refusal {
                     .into(),
             ],
             Self::RecordingNotAttached => vec!["Save again with target set to a file input that takes images (browser_inspect lists inputs of type file), or with download true.".into()],
-            Self::EffectUnknown | Self::ConnectionLost | Self::CancelledAfterDispatch => vec![
+            Self::EffectUnknown | Self::ConnectionLost | Self::CancelledAfterDispatch { .. } => vec![
                 "If a JavaScript dialog may be open on the page, handle it with browser_dialog; handling checks the page directly."
                     .into(),
                 "Then observe the page with browser_read or browser_inspect to learn what happened."
@@ -2393,9 +2437,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-        CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Observed, Outcome, PolicyAuthor,
-        Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
+        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
+        CaptureKind, CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Observed, Outcome,
+        PolicyAuthor, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
         HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE, TARGET_LABEL_MAX_CHARS,
     };
     use crate::intake::session::IntakeChannel;
@@ -3295,8 +3339,22 @@ Changes are \"unsaved\".".into()),
                 "The call does not match the Ghostlight catalog.",
             ),
             (
-                Refusal::CancelledBeforeStart,
-                "The browser job was cancelled before it started.",
+                Refusal::CancelledBeforeStart {
+                    by: CancelCause::Client,
+                },
+                "The agent cancelled the browser job before it started.",
+            ),
+            (
+                Refusal::CancelledBeforeStart {
+                    by: CancelCause::SessionEnded,
+                },
+                "The agent's session ended before the browser job started.",
+            ),
+            (
+                Refusal::CancelledBeforeStart {
+                    by: CancelCause::Quit,
+                },
+                "Ghostlight quit before the browser job started.",
             ),
             (
                 Refusal::DeadlineBeforeStart,
@@ -3373,8 +3431,48 @@ Changes are \"unsaved\".".into()),
                 "Ghostlight and the browser extension do not agree on this request.",
             ),
             (
-                Refusal::CancelledBeforeDispatch,
+                Refusal::CancelledBeforeDispatch { by: None },
                 "Cancelled before anything reached the browser.",
+            ),
+            (
+                Refusal::CancelledBeforeDispatch {
+                    by: Some(CancelCause::Client),
+                },
+                "The agent cancelled before anything reached the browser.",
+            ),
+            (
+                Refusal::CancelledBeforeDispatch {
+                    by: Some(CancelCause::SessionEnded),
+                },
+                "The agent's session ended before anything reached the browser.",
+            ),
+            (
+                Refusal::CancelledBeforeDispatch {
+                    by: Some(CancelCause::Quit),
+                },
+                "Ghostlight quit before anything reached the browser.",
+            ),
+            (
+                Refusal::CancelledAfterDispatch { by: None },
+                "Sent, but the browser never confirmed what happened.",
+            ),
+            (
+                Refusal::CancelledAfterDispatch {
+                    by: Some(CancelCause::Client),
+                },
+                "Sent, but the agent cancelled before the browser confirmed what happened.",
+            ),
+            (
+                Refusal::CancelledAfterDispatch {
+                    by: Some(CancelCause::SessionEnded),
+                },
+                "Sent, but the agent's session ended before the browser confirmed what happened.",
+            ),
+            (
+                Refusal::CancelledAfterDispatch {
+                    by: Some(CancelCause::Quit),
+                },
+                "Sent, but Ghostlight quit before the browser confirmed what happened.",
             ),
             (
                 Refusal::EffectUnknown,
@@ -3488,7 +3586,11 @@ Changes are \"unsaved\".".into()),
             Refusal::LocalInterlock.next_steps(),
             vec!["The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."]
         );
-        assert!(Refusal::CancelledBeforeDispatch.next_steps().is_empty());
+        for by in [None, Some(CancelCause::Client), Some(CancelCause::Quit)] {
+            assert!(Refusal::CancelledBeforeDispatch { by }
+                .next_steps()
+                .is_empty());
+        }
         for (reason, step) in [
             (
                 BrowserUnavailableReason::NotAnswering,

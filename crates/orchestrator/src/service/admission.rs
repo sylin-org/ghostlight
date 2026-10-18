@@ -6,6 +6,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::lifetime::{Drain, InFlight};
+use crate::language::outcome::CancelCause;
 use crate::work::{InvocationId, PreparedInvocation};
 
 /// The most ordinary calls one session holds at once, the running one included.
@@ -192,9 +193,11 @@ impl SessionQueue {
         }
     }
 
+    /// The agent cancelled the request it named: queued, it completes as cancelled at once;
+    /// running, its dispatch stops.
     pub(super) fn cancel(&self, id: &InvocationId) {
         if let Some(active) = super::lock(&self.state).active.get(id) {
-            active.request.cancel();
+            active.request.cancel(CancelCause::Client);
         }
         self.advance_cancelled();
     }
@@ -222,11 +225,13 @@ impl SessionQueue {
             .collect()
     }
 
-    pub(super) fn stop(&self) {
+    /// Admit nothing more and cancel every admitted request for `cause`, the session's end or
+    /// Ghostlight's quit. Queued requests still drain through their workers as cancelled.
+    pub(super) fn stop(&self, cause: CancelCause) {
         let mut state = super::lock(&self.state);
         state.stopped = true;
         for active in state.active.values() {
-            active.request.cancel();
+            active.request.cancel(cause);
         }
         self.available.notify_all();
     }
@@ -382,7 +387,7 @@ mod tests {
         let other = SessionQueue::new(budget, Arc::default());
         assert_eq!(other.admit(request(false), 1), Err(Refused::Full));
         other.admit(request(true), 512).unwrap();
-        queue.stop();
+        queue.stop(CancelCause::SessionEnded);
         assert!(queue.next(false).unwrap().is_cancelled());
         queue.complete(&big.id);
         other.admit(request(false), 1024).unwrap();

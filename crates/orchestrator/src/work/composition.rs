@@ -470,7 +470,7 @@ mod tests {
         for cancelled in [true, false] {
             let token = super::super::CancellationToken::default();
             if cancelled {
-                token.cancel();
+                token.cancel(crate::language::outcome::CancelCause::Client);
             }
             let context = InvocationContext {
                 settlement_pending: &std::sync::atomic::AtomicBool::new(false),

@@ -96,7 +96,7 @@ fn policy_explain_remains_available_without_releasing_human_controls() {
 fn policy_explain_still_honors_cancellation_and_original_deadlines() {
     let (executor, browser, store, workspace, audit) = fixture();
     let cancellation = CancellationToken::default();
-    cancellation.cancel();
+    cancellation.cancel(crate::language::outcome::CancelCause::Client);
     let result = executor.execute(&workspace, "policy_explain", json!({}), &cancellation);
     assert_eq!(result.status, Status::Cancelled);
     assert_eq!(result.facts["reason"], "cancelled");
@@ -113,6 +113,18 @@ fn policy_explain_still_honors_cancellation_and_original_deadlines() {
     assert_eq!(result.facts["reason"], "deadline");
     assert!(browser.calls().is_empty());
     assert_eq!(audit.0.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn a_cancellation_keeps_its_first_cause() {
+    use crate::language::outcome::CancelCause;
+
+    let cancellation = CancellationToken::default();
+    assert_eq!(cancellation.cause(), None);
+    cancellation.cancel(CancelCause::Client);
+    cancellation.clone().cancel(CancelCause::SessionEnded);
+    assert!(cancellation.is_cancelled());
+    assert_eq!(cancellation.cause(), Some(CancelCause::Client));
 }
 
 /// Every change the window would hear, in order.

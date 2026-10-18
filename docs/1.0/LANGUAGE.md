@@ -243,9 +243,14 @@ unsafe to duplicate, has `repeat_safe: false` and does not suggest replay.
 
 Refusals say what is true, and their next steps suggest only what the caller can do:
 
-- A cancellation that wins before any browser command answers `Cancelled before anything reached
-  the browser.` with status `cancelled`, no effect, and no next step. It never says the browser
-  disconnected.
+- A cancellation says who cancelled: the agent, the end of the agent's session, or Ghostlight's
+  quit. One that wins before the call starts answers, for example, `The agent cancelled the
+  browser job before it started.`, and one that wins before any browser command answers `The
+  agent cancelled before anything reached the browser.`, `The agent's session ended before
+  anything reached the browser.` or `Ghostlight quit before anything reached the browser.`, each
+  with status `cancelled`, no effect, and no next step. A cancellation the browser reported
+  without one of these causes answers `Cancelled before anything reached the browser.` None of
+  them says the browser disconnected.
 - A browser that cannot take a call is waited for first when there is evidence it is coming
   back. A session that already works in a browser always waits for that browser. A session with
   no browser yet waits only while a connection is registered but initializing or silent, a

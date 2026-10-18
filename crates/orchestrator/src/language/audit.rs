@@ -178,7 +178,7 @@ impl Refusal {
     pub fn audit(&self) -> AuditProjection {
         let refusal = match self {
             Self::InvalidRequest => AuditRefusal::InvalidRequest,
-            Self::CancelledBeforeStart => AuditRefusal::CancelledBeforeStart,
+            Self::CancelledBeforeStart { .. } => AuditRefusal::CancelledBeforeStart,
             Self::DeadlineBeforeStart => AuditRefusal::DeadlineBeforeStart,
             Self::Capacity => AuditRefusal::Capacity,
             Self::AuthorityBlocked { reason, .. } => {
@@ -199,7 +199,7 @@ impl Refusal {
             Self::FieldValuesRejected { .. } => AuditRefusal::FieldValuesRejected,
             Self::FieldsReverted { .. } => AuditRefusal::FieldsReverted,
             Self::DocumentUnavailable => AuditRefusal::DocumentUnavailable,
-            Self::CancelledBeforeDispatch => AuditRefusal::CancelledBeforeDispatch,
+            Self::CancelledBeforeDispatch { .. } => AuditRefusal::CancelledBeforeDispatch,
             Self::BrowserUnavailable { reason } => {
                 AuditRefusal::BrowserUnavailable { cause: *reason }
             }
@@ -212,7 +212,7 @@ impl Refusal {
                 AuditRefusal::BrowserRecoveryFailed { cause: *reason }
             }
             Self::ConnectionLost => AuditRefusal::ConnectionLost,
-            Self::CancelledAfterDispatch => AuditRefusal::CancelledAfterDispatch,
+            Self::CancelledAfterDispatch { .. } => AuditRefusal::CancelledAfterDispatch,
             Self::EffectUnknown => AuditRefusal::EffectUnknown,
             Self::LandingDeniedUnknown => AuditRefusal::LandingDeniedUnknown,
             Self::WorkspaceUnusable { reason } => AuditRefusal::WorkspaceUnusable {

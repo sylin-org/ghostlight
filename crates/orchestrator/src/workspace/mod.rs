@@ -3402,7 +3402,7 @@ mod tests {
 
         // 2. Contention with cancellation:
         let cancelled = CancellationToken::default();
-        cancelled.cancel();
+        cancelled.cancel(crate::language::outcome::CancelCause::Client);
         let long_deadline = Instant::now() + Duration::from_secs(5);
         let aborted = store.acquire_until(&workspace, long_deadline, &cancelled);
         assert_eq!(aborted.err(), Some(WorkspaceError::Busy));

@@ -37,7 +37,7 @@ fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace
 
     for (index, prepared) in prepared.iter().enumerate() {
         if index == 0 {
-            prepared.cancel();
+            prepared.cancel(crate::language::outcome::CancelCause::Client);
         }
         let admission = if index == 1 {
             Admission::OverCapacity

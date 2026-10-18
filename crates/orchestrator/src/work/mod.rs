@@ -22,7 +22,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::browser::adapter::{
@@ -51,7 +51,7 @@ use crate::language::{
     audit::AuditProjection,
     field_problem::ControlRef,
     outcome::{
-        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason,
+        ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
         CheckFailure, ExtensionAdvice, Observed, Outcome, Refusal, StaleHelp, TargetRole,
         WorkspaceReason, CANDIDATE_TABS_FACT, RECOVERY_CANDIDATES_FACT, REPLACEMENT_FACT,
         STALE_FACT,
@@ -74,21 +74,37 @@ use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
 const STALE_CANDIDATES_MAX: usize = 3;
 
 /// Cloneable cancellation state forwarded from the MCP edge to physical dispatch.
+///
+/// It keeps who cancelled beside its flag. The cause is set before the flag, so whoever sees the
+/// flag can read the cause, and the first cause is kept.
 #[derive(Clone, Debug, Default)]
-pub struct CancellationToken(Arc<AtomicBool>);
+pub struct CancellationToken(Arc<Cancellation>);
+
+/// The shared state behind a [`CancellationToken`].
+#[derive(Debug, Default)]
+struct Cancellation {
+    flag: AtomicBool,
+    cause: OnceLock<CancelCause>,
+}
 
 impl CancellationToken {
-    /// Request cancellation.
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
+    /// Request cancellation for `cause`. A later cancel keeps the first cause.
+    pub fn cancel(&self, cause: CancelCause) {
+        let _ = self.0.cause.set(cause);
+        self.0.flag.store(true, Ordering::SeqCst);
     }
     /// Whether cancellation is currently requested.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.0.flag.load(Ordering::SeqCst)
+    }
+    /// Who cancelled, once cancellation is requested.
+    #[must_use]
+    pub fn cause(&self) -> Option<CancelCause> {
+        self.0.cause.get().copied()
     }
     fn flag(&self) -> &AtomicBool {
-        &self.0
+        &self.0.flag
     }
 }
 
@@ -175,9 +191,10 @@ impl PreparedInvocation {
             .is_ok_and(|operation| !operation_requires_workspace_lease(operation))
     }
 
-    /// Cancel this request: queued, it completes as cancelled; running, its dispatch stops.
-    pub(crate) fn cancel(&self) {
-        self.cancellation.cancel();
+    /// Cancel this request for `cause`: queued, it completes as cancelled; running, its
+    /// dispatch stops.
+    pub(crate) fn cancel(&self, cause: CancelCause) {
+        self.cancellation.cancel(cause);
     }
 
     /// Whether this request has been cancelled.
@@ -414,8 +431,8 @@ impl ApplicationExecutor {
             } else {
                 self.run_without_workspace_lease(&context, operation)
             }
-        } else if cancellation.is_cancelled() {
-            let refusal = Refusal::CancelledBeforeStart;
+        } else if let Some(by) = cancellation.cause() {
+            let refusal = Refusal::CancelledBeforeStart { by };
             let summary = refusal.summary();
             Terminal {
                 result: InvocationResult::new(
@@ -1936,7 +1953,9 @@ impl ApplicationExecutor {
                     json!({"reason":"browser_effect_unknown","phase":"after_dispatch"}),
                 ),
                 BrowserError::CancelledAfterDispatch => (
-                    Refusal::CancelledAfterDispatch,
+                    Refusal::CancelledAfterDispatch {
+                        by: context.cancellation.cause(),
+                    },
                     json!({"reason":"browser_effect_unknown","phase":"after_dispatch"}),
                 ),
                 _ => (
@@ -1974,9 +1993,12 @@ impl ApplicationExecutor {
         // arrives after the browser already received the request.
         let unavailable = |reason| (Status::Failed, Refusal::BrowserUnavailable { reason });
         let (status, refusal) = match &error {
-            BrowserError::CancelledBeforeDispatch => {
-                (Status::Cancelled, Refusal::CancelledBeforeDispatch)
-            }
+            BrowserError::CancelledBeforeDispatch => (
+                Status::Cancelled,
+                Refusal::CancelledBeforeDispatch {
+                    by: context.cancellation.cause(),
+                },
+            ),
             BrowserError::DisconnectedBeforeDispatch => {
                 unavailable(BrowserUnavailableReason::NotConnected)
             }

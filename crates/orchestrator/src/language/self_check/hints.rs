@@ -35,9 +35,9 @@ use crate::language::composition::{
 use crate::language::field_echo::HeldField;
 use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl, RejectedField};
 use crate::language::outcome::{
-    ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CaptureKind,
-    CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Outcome, PolicyAuthor, Refusal,
-    SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
+    ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
+    CaptureKind, CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, Outcome, PolicyAuthor,
+    Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
 };
 use crate::language::page_refusal::{PageGesture, PageRefusal};
 use crate::workspace::StaleReason;
@@ -392,7 +392,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
     match refusal {
         Refusal::Capacity => "Capacity",
         Refusal::InvalidRequest => "InvalidRequest",
-        Refusal::CancelledBeforeStart => "CancelledBeforeStart",
+        Refusal::CancelledBeforeStart { .. } => "CancelledBeforeStart",
         Refusal::DeadlineBeforeStart => "DeadlineBeforeStart",
         Refusal::AuthorityBlocked { .. } => "AuthorityBlocked",
         Refusal::ChannelOff { .. } => "ChannelOff",
@@ -406,7 +406,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::FieldValuesRejected { .. } => "FieldValuesRejected",
         Refusal::FieldsReverted { .. } => "FieldsReverted",
         Refusal::DocumentUnavailable => "DocumentUnavailable",
-        Refusal::CancelledBeforeDispatch => "CancelledBeforeDispatch",
+        Refusal::CancelledBeforeDispatch { .. } => "CancelledBeforeDispatch",
         Refusal::BrowserUnavailable { .. } => "BrowserUnavailable",
         Refusal::BrowserContract => "BrowserContract",
         Refusal::BrowserAmbiguous => "BrowserAmbiguous",
@@ -415,7 +415,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::BrowserStartupManual { .. } => "BrowserStartupManual",
         Refusal::BrowserRecoveryFailed { .. } => "BrowserRecoveryFailed",
         Refusal::ConnectionLost => "ConnectionLost",
-        Refusal::CancelledAfterDispatch => "CancelledAfterDispatch",
+        Refusal::CancelledAfterDispatch { .. } => "CancelledAfterDispatch",
         Refusal::EffectUnknown => "EffectUnknown",
         Refusal::LandingDeniedUnknown => "LandingDeniedUnknown",
         Refusal::WorkspaceUnusable { .. } => "WorkspaceUnusable",
@@ -944,7 +944,6 @@ fn refusal_samples() -> Vec<Refusal> {
     let mut samples = vec![
         Refusal::Capacity,
         Refusal::InvalidRequest,
-        Refusal::CancelledBeforeStart,
         Refusal::DeadlineBeforeStart,
         Refusal::ChannelOff {
             channel: IntakeChannel::Mcp,
@@ -969,7 +968,6 @@ fn refusal_samples() -> Vec<Refusal> {
             detail: "no such frame".into(),
         },
         Refusal::DocumentUnavailable,
-        Refusal::CancelledBeforeDispatch,
         Refusal::BrowserContract,
         Refusal::BrowserAmbiguous,
         Refusal::BrowserUnknown,
@@ -983,7 +981,6 @@ fn refusal_samples() -> Vec<Refusal> {
             extension: ExtensionAdvice::AddFromStore,
         },
         Refusal::ConnectionLost,
-        Refusal::CancelledAfterDispatch,
         Refusal::EffectUnknown,
         Refusal::LandingDeniedUnknown,
         Refusal::FilesUnreadable,
@@ -996,6 +993,22 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::RecordingExportFailed,
         Refusal::RecordingNotAttached,
     ];
+    for by in [
+        CancelCause::Client,
+        CancelCause::SessionEnded,
+        CancelCause::Quit,
+    ] {
+        samples.push(Refusal::CancelledBeforeStart { by });
+    }
+    for by in [
+        None,
+        Some(CancelCause::Client),
+        Some(CancelCause::SessionEnded),
+        Some(CancelCause::Quit),
+    ] {
+        samples.push(Refusal::CancelledBeforeDispatch { by });
+        samples.push(Refusal::CancelledAfterDispatch { by });
+    }
     for refusal in PageRefusal::ALL {
         samples.push(Refusal::PageRefused {
             refusal,

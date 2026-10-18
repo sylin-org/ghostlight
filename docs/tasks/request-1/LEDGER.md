@@ -24,7 +24,7 @@ the architecture sweep.
 | S6 request-owns-itself | request | landed (this commit) |
 | S7 findings-per-frame | request | landed (this commit) |
 | S8 flow-step-own-facts | request | landed (this commit) |
-| S9 cancel-cause | request | todo |
+| S9 cancel-cause | request | landed (this commit) |
 | S10 watcher-words | window | landed (this commit) |
 | S11 channel-switches | governance | landed (this commit) |
 
@@ -135,6 +135,19 @@ the architecture sweep.
   `pub(super)`, and proves the mark by refusing the handle's next use before any action. Each
   test failed before the change. The live browser journeys that run flows are left to the
   coordinator's live checks.
+- S9: the cause is `language::outcome::CancelCause` (`Client`, `SessionEnded`, `Quit`), kept in
+  a `OnceLock` beside the token's `AtomicBool`, set before the flag, and the first cause wins. The
+  queue's `stop` takes the cause, which `LiveSession::close` chooses. `CancelledBeforeStart`
+  carries a required cause; `CancelledBeforeDispatch` and `CancelledAfterDispatch` carry an
+  optional one, since the browser can report a cancellation the call's own token never asked for,
+  and without a cause they keep their words. The words name the agent's session, never "Session
+  ended", which is the person's Stop. The audit's `refusal_facts` keep their shape and the
+  sentence carries the cause, so no audit golden or the SIEM guide changes. A check cancelled
+  after its action (`CheckFailure::Cancelled`) and a flow's `StepCause::Cancelled` keep their
+  words: both are retained closed values, and a cause in them would change what history reads.
+  The three tests are service tests over a relay pair, the waiting calls held behind the test's
+  lease; the quit test begins a real quit with no grace and closes the connection after its
+  goodbye, as an edge does. `work::tests::control::a_cancellation_keeps_its_first_cause` is new.
 - S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed

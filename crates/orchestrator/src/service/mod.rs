@@ -68,7 +68,7 @@ use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, S
 use crate::language::catalog_for;
 use crate::language::environment::{ELEVATED_SERVICE, QUIT_HELD};
 use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
-use crate::language::outcome::DialogKind;
+use crate::language::outcome::{CancelCause, DialogKind};
 use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::{Attribution, ConnectionEvidence, SourceReader};
@@ -1672,9 +1672,16 @@ impl LiveSession {
     }
 
     /// Stop the workers, detach the connection, and release a workspace nobody owns.
+    ///
+    /// The work still admitted is cancelled because Ghostlight quit, while a quit drains, and
+    /// because the session ended otherwise.
     fn close(self, intake: &Intake) {
         self.watch_stop.store(true, Ordering::SeqCst);
-        self.queue.stop();
+        self.queue.stop(if intake.quit.drain.is_quitting() {
+            CancelCause::Quit
+        } else {
+            CancelCause::SessionEnded
+        });
         if let Some(watch) = self.watch {
             let _ = watch.join();
         }
@@ -3083,12 +3090,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_disconnect_cancels_queued_work_and_records_it_once() {
-        let home = TestHome::new("mcp-disconnect-queue");
-        let served = serve_fake(&home);
-        let (mut socket, lease) = open_held_session(&served, "disconnect-queue");
-        for id in 2..5 {
+    /// A declared session whose workspace the test holds, with the calls `ids` waiting for its
+    /// lease.
+    fn work_waiting(
+        served: &Served,
+        key: &str,
+        ids: std::ops::Range<u64>,
+    ) -> (Connection, crate::workspace::WorkspaceLease) {
+        let (mut socket, lease) = open_held_session(served, key);
+        for id in ids {
             send_list(&mut socket, id);
         }
         eventually(|| {
@@ -3100,6 +3110,74 @@ mod tests {
                 .iter()
                 .any(|operation| operation.phase == crate::workbench::OperationPhase::Waiting)
         });
+        (socket, lease)
+    }
+
+    /// Every audit line's summary, once `count` lines are written.
+    fn summaries_of(home: &TestHome, count: usize) -> Vec<Value> {
+        eventually(|| audit_lines(home).len() == count);
+        audit_lines(home)
+            .iter()
+            .map(|record| {
+                assert_eq!(record["status"], "cancelled", "{record}");
+                record["summary"].clone()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_client_cancel_is_recorded_as_cancelled_by_the_agent() {
+        let home = TestHome::new("mcp-client-cancel");
+        let served = serve_fake(&home);
+        let (mut socket, _lease) = work_waiting(&served, "client-cancel", 2..3);
+        send_line(
+            &mut socket,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": 2}
+            }),
+        );
+        assert_eq!(
+            summaries_of(&home, 1),
+            ["The agent cancelled the browser job before it started."]
+        );
+    }
+
+    #[test]
+    fn work_waiting_when_its_session_ends_says_the_session_ended() {
+        let home = TestHome::new("mcp-session-ends");
+        let served = serve_fake(&home);
+        let (socket, _lease) = work_waiting(&served, "session-ends", 2..4);
+        drop(socket);
+        assert_eq!(
+            summaries_of(&home, 2),
+            ["The agent's session ended before the browser job started."; 2]
+        );
+    }
+
+    #[test]
+    fn work_waiting_at_quit_says_ghostlight_quit() {
+        let home = TestHome::new("mcp-quit-waiting");
+        let served = serve_fake(&home);
+        let (socket, _lease) = work_waiting(&served, "quit-waiting", 2..4);
+        served.intake.quit.begin(QuitReason::Quit, Duration::ZERO);
+        served
+            .quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the quit finishes its drain");
+        drop(socket);
+        assert_eq!(
+            summaries_of(&home, 2),
+            ["Ghostlight quit before the browser job started."; 2]
+        );
+    }
+
+    #[test]
+    fn a_disconnect_cancels_queued_work_and_records_it_once() {
+        let home = TestHome::new("mcp-disconnect-queue");
+        let served = serve_fake(&home);
+        let (socket, lease) = work_waiting(&served, "disconnect-queue", 2..5);
         drop(socket);
         eventually(|| audit_lines(&home).len() == 3);
         drop(lease);
