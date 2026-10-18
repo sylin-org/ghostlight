@@ -5,7 +5,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `pass`, `fail` (wi
 
 ## RESUME HERE
 
-L01 and L02 passed. Next: L03, the journeys.
+L01 to L03 passed (L03 with a scope change: the owner directed on 2026-10-17 that acceptance
+uses the real installation and the real system browser, never a sandbox). Next: L04, the
+development install into the real `~/.ghostlight`, then `tests/linux/installed-journey.mjs`
+against it and the system Chromium.
 
 ## Tasks
 
@@ -70,13 +73,67 @@ Result, 2026-10-17, at 17a0c060, default `target/`: every command passed, no fai
   `node --test "tests/guards/*.test.mjs"`, runs both guard files: 10 pass. CI names the files one
   by one. Nothing in the product is wrong; the command in this task is.
 
-### L03 The journeys on Linux (todo)
+### L03 The journeys on Linux (pass, scope changed)
 
 Build into a fresh target directory and run the hardening suite's lanes
 (`node tests/hardening-suite.mjs --lane=process` and `--lane=browser`), pointing
 `GHOSTLIGHT_BIN_DIR` at the fresh build. Then `GHOSTLIGHT_TEST_LIVE_SYLIN=1 node
 tests/frame-browser-journey.mjs` (the live mode owed by iframe-fixture-composed), and the Linux
 installed drivers in `tests/linux/` as their README says. Record each journey's result.
+
+Result, 2026-10-17, built into `.target-lane-linux-1` from de1b74f0 (later commits changed only
+tests and docs). `GHOSTLIGHT_TEST_BROWSER` was Chrome for Testing 152.0.7977.82.
+
+- Process lane: passed, source unchanged during the run. build, journey-helpers,
+  shell-installer, edge-parent, fixed-installation, process, continuity, history-compatibility,
+  provenance, cli, cli-powershell and workbench all passed.
+- Browser lane: passed. browser-harness, script-browser, frame-browser, keyboard-browser and
+  history-browser all passed.
+- `GHOSTLIGHT_TEST_LIVE_SYLIN=1 node tests/frame-browser-journey.mjs`: 56 checks passed,
+  including the live sylin.org composed document read.
+- `node tests/linux/startup-recovery.mjs` (no display, four callers at once): passed, one
+  service, recovery 5.6 s.
+
+These lanes run isolated test homes and a throwaway browser profile. They are regression gates,
+not integration evidence.
+
+The `tests/linux/acceptance` drivers ran first, before the owner's direction below. 2.0 has no
+Linux tar.gz, so the archive they extract was a tar of a release build's three executables in
+one top directory. The area had to be short (`/run/user/1000/gl1`): under this checkout's path
+the test home's `run/relay.sock` passes the 108-byte socket path limit and the service exits.
+
+- `start.mjs` failed: bubblewrap's `--bind / /` mounts nodev, so `/dev/null` cannot be opened
+  inside it and the installer could not start the service. Fixed in the drivers (2de3e190, a
+  Linux-only test fix), then it passed.
+- `governance.mjs`: the embedded-pixel check sampled the frame's own input box on this machine's
+  fonts. Fixed in d4d628a7, then 15 of 15 phases passed.
+- `cold.mjs`: passed. The extension connected on its own 3.0 s after install with the worker
+  awake and 1.5 s with it stopped.
+- `managed/run.mjs` failed its first phase: MCP initialize was not held with an invalid signed
+  source. The service it talked to ran in the host mount namespace, not the sandbox, so it never
+  saw the sandbox's `/etc/ghostlight`, and a call succeeded. That is a sandbox artifact, not
+  evidence about managed policy.
+- `startup-check.py` was retired as superseded (71465b67). Not run: `plural.mjs` (no Brave),
+  `npm/native.mjs` (no published 2.0 package), the 1.x-shaped `no-tray/*` and
+  `portable-lifecycle.py`, and the guest build helpers.
+
+Owner direction, 2026-10-17, during this task: sandboxed versions are false integration tests;
+always use the real system browser. The driver results above are therefore not acceptance
+evidence. Acceptance runs on the real installation (L04) with the system Chromium and its
+ordinary profile; `tests/linux/installed-journey.mjs`, which uses the real registered native
+host and the running browser, runs after L04. Retiring the sandboxed drivers waits for the
+owner's explicit word: this session's permission check refused the deletion.
+
+For the coordinator, seen while diagnosing (no product change made):
+
+1. When the service cannot start, the installer says "did not start within 30 s", both when
+   the spawn failed at once (`/dev/null` EACCES) and when the service exited at once. It waits
+   the full 30 s either way and does not name the cause.
+2. A service whose start fails writes its fatal error only to stderr, which is null when it is
+   started detached. With diagnostics on, the log stops at `service starting`; the cause
+   (`bind the relay endpoint: path must be shorter than SUN_LEN`) appears nowhere a person can
+   read it.
+3. The installer reads and hashes the service image twice per install.
 
 ### L04 Install the development channel (todo)
 
