@@ -330,7 +330,9 @@ try {
   assert.equal(await evaluate(`document.querySelector('#hero-body').textContent.includes('Scrolled down.')`), true);
   for (const width of [1280, 720]) {
     await resize(width, 900);
-    assert.equal(await evaluate(`(() => { const pause=document.querySelector('#wheel'), tab=document.querySelector('[data-view="monitor"]'); return !!(pause.compareDocumentPosition(tab) & Node.DOCUMENT_POSITION_FOLLOWING) && pause.getBoundingClientRect().right <= tab.getBoundingClientRect().left; })()`), true);
+    // Pause comes first in reading order and never overlaps the tabs: beside them when they share
+    // the band, above them once the tabs take their own line below 900px.
+    assert.equal(await evaluate(`(() => { const pause=document.querySelector('#wheel'), tab=document.querySelector('[data-view="monitor"]'); const p=pause.getBoundingClientRect(), t=tab.getBoundingClientRect(); return !!(pause.compareDocumentPosition(tab) & Node.DOCUMENT_POSITION_FOLLOWING) && (p.right <= t.left || p.bottom <= t.top); })()`), true, `Pause precedes the tabs at ${width}px`);
     assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false);
     assert.equal(await evaluate(`(() => { const panel=document.querySelector('${detailPanel}'); panel.scrollIntoView({block:'center'}); const p=panel.getBoundingClientRect(), r=panel.closest('.row').getBoundingClientRect(); return p.height>100 && p.top>=r.top && p.bottom<=r.bottom; })()`), true, 'expanded panel must be visible within its row');
     await capture(`action-details-${width}`);
