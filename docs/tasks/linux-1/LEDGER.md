@@ -11,10 +11,11 @@ session fix what it finds; L04's findings 1 to 7 and a ninth are fixed, pushed a
 real install (see L04). L05 passed after six fixes in the shell, the service and the window, and
 L06 after three, L07 after five, L08, L09 and L10 after one each (see each). The batch is done.
 On 2026-10-18 the owner had the old leftovers deleted and the open questions settled by the
-user-delight test; see "Follow-up" below. The development build at dbd52fa6 runs in a fresh
-`~/.ghostlight` with the owner's policy (browser.startup on_demand), the system Chromium's
-ordinary profile is connected, and diagnostics are on. Owed: the release candidate's pinned
-install (L10), and the owner's decision on saved tab groups (Follow-up).
+user-delight test; see "Follow-up" below. The owner then unfroze the extension for saved tab
+groups, which is fixed, and two later findings are fixed too (Follow-up, "Resolved later"). The
+development build at 7abbdc39 runs in a fresh `~/.ghostlight` with the owner's policy
+(browser.startup on_demand), the system Chromium's ordinary profile is connected with the
+reloaded extension, and diagnostics are on. Owed: the release candidate's pinned install (L10).
 
 ## Tasks
 
@@ -529,5 +530,21 @@ Chromium 154 (`tabGroups`: get, query, update, move) cannot see or reopen one, s
 of the same agent creates a second. Any fix is in the frozen extension (ADR-0200 Decision 16); the
 best an extension can do is restore a recently closed group through `sessions`, which does not
 survive a browser restart. The existing duplicates are browser data, left for the owner.
+
+Resolved later on 2026-10-18:
+
+- The owner unfroze the extension for saved tab groups ("Unfreeze the extension. I want a proper
+  fix."). 0018941b (ADR-0201, ADR-0200 amendment of 2026-10-18): a tab preserve-tabs keeps after
+  its session ends leaves Ghostlight's group, so Chromium deletes the idle group instead of saving
+  it, and reuse adopts the kept tab back into its client's group. Live on Chromium 154 with the
+  real extension in a throwaway profile and the installed service: ten groups from sessions that
+  ended left no saved group, and one session live at browser close left one, the limit ADR-0201
+  records. The owner reloaded the extension in `chrome://extensions`. The old duplicate saved
+  groups stay the owner's.
+- f1096586: browser_navigate's `browser` description says it needs `new_tab` true, which the
+  decoder already required. Read back through the installed edge.
+- cf056c5f: CI rust (ubuntu-latest) had failed since cb37cdbf (L06) in
+  `no_browser_is_launched_while_the_session_is_ending`, which passed only on a host with a
+  display. The test's browser now has no executable, so it never reaches the display probe.
 
 ## Notes
