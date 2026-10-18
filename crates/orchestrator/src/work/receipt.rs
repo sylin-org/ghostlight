@@ -31,7 +31,7 @@ impl ApplicationExecutor {
             duration_ms,
             provenance,
         } = completion;
-        if let Some(coverage) = self.take_coverage(&terminal.result.invocation) {
+        if let Some(coverage) = self.take_coverage(terminal.result.invocation.as_str()) {
             terminal.result.summary =
                 language::coverage::qualify(&terminal.result.summary, &coverage);
             terminal.audit = terminal.audit.with_coverage(&coverage);
@@ -50,14 +50,14 @@ impl ApplicationExecutor {
                     && (terminal.audit.composition().is_none() || !terminal.decision.allowed) =>
             {
                 DomainEvent::WorkBlocked {
-                    invocation: terminal.result.invocation.clone(),
+                    invocation: terminal.result.invocation.to_string(),
                     workspace: workspace.as_str().into(),
                     physical_id: terminal.physical_id,
                     presentation: denial_presentation(tool, &terminal.result),
                 }
             }
             _ => DomainEvent::WorkCompleted {
-                invocation: terminal.result.invocation.clone(),
+                invocation: terminal.result.invocation.to_string(),
                 workspace: workspace.as_str().into(),
                 physical_id: terminal.physical_id,
             },
@@ -68,7 +68,7 @@ impl ApplicationExecutor {
             // A child finishes its own decoration without settling its parent's lifecycle
             // or showing a guardrail notice for every unsuccessful child in a composition.
             self.presentation.react(&DomainEvent::WorkCompleted {
-                invocation: terminal.result.invocation.clone(),
+                invocation: terminal.result.invocation.to_string(),
                 workspace: workspace.as_str().into(),
                 physical_id: terminal.physical_id,
             });
@@ -93,12 +93,12 @@ impl ApplicationExecutor {
             &format!("{tool} {status} {effect} {}ms", duration_ms),
         );
         let observed = self
-            .take_observation(&terminal.result.invocation)
+            .take_observation(terminal.result.invocation.as_str())
             .merged(terminal.observed.clone());
         // The record names a browser only when one received a command of this work.
-        let browser_label = self.take_reached(&terminal.result.invocation, step.is_some());
+        let browser_label = self.take_reached(terminal.result.invocation.as_str(), step.is_some());
         let mut record = AuditRecord::now(
-            &terminal.result.invocation,
+            terminal.result.invocation.as_str(),
             workspace.as_str(),
             tool,
             requirements,
@@ -114,7 +114,7 @@ impl ApplicationExecutor {
         .with_observation(observed)
         .with_browser(browser_label);
         record.step = step;
-        record.permissions = self.take_permissions(&terminal.result.invocation);
+        record.permissions = self.take_permissions(terminal.result.invocation.as_str());
         let storage = self.audit.record_with_provenance(&record, provenance);
         terminal.result.summary = if storage == language::audit_health::Storage::Saved {
             language::audit_health::qualify_children(
@@ -139,7 +139,7 @@ impl ApplicationExecutor {
         operation: &Operation,
         step: StepReceipt,
     ) -> Terminal {
-        let _ = self.take_permissions(context.invocation);
+        let _ = self.take_permissions(context.invocation.as_str());
         let started = Instant::now();
         let settlement_requested = language::settlement::enabled(operation);
         let settlement_pending = AtomicBool::new(settlement_requested);
@@ -180,7 +180,7 @@ impl ApplicationExecutor {
         step: StepReceipt,
     ) -> language::audit_health::Storage {
         let mut record = AuditRecord::now(
-            context.invocation,
+            context.invocation.as_str(),
             context.workspace.as_str(),
             language::audit::tool_name(tool),
             CapabilitySet::EMPTY,

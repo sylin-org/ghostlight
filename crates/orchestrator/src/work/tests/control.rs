@@ -103,7 +103,13 @@ fn policy_explain_still_honors_cancellation_and_original_deadlines() {
     let result = executor.execute(&workspace, "policy_explain", json!({}), None, &cancellation);
     assert_eq!(result.status, Status::Cancelled);
     assert_eq!(result.facts["reason"], "cancelled");
-    let mut expired = crate::work::PreparedInvocation::new("policy_explain", json!({}), None, None);
+    let mut expired = crate::work::PreparedInvocation::new(
+        crate::work::InvocationId::mint(),
+        "policy_explain",
+        json!({}),
+        None,
+        None,
+    );
     expired.deadline = Instant::now() - Duration::from_millis(1);
     let result =
         executor.execute_prepared(&workspace, &expired, &CancellationToken::default(), false);

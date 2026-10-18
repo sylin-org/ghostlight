@@ -3,7 +3,7 @@
 use super::*;
 use crate::intake::session::SessionMarker;
 use crate::provenance::ConnectionEvidence;
-use crate::work::PreparedInvocation;
+use crate::work::{InvocationId, PreparedInvocation};
 
 #[test]
 fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace_release() {
@@ -18,7 +18,15 @@ fn queued_refusals_keep_original_evidence_after_another_connection_and_workspace
     let workspace = store.connect(first.clone(), Some(marker.clone()));
     let prepared: Vec<_> = ["policy_explain", "policy_explain", "browser_invalid"]
         .into_iter()
-        .map(|tool| PreparedInvocation::new(tool, json!({}), None, Some(first.clone())))
+        .map(|tool| {
+            PreparedInvocation::new(
+                InvocationId::mint(),
+                tool,
+                json!({}),
+                None,
+                Some(first.clone()),
+            )
+        })
         .collect();
     let second = Arc::new(ConnectionEvidence::claimed(
         "PRIVATE_SECOND_CLAIM",

@@ -9,6 +9,8 @@ use ghostlight_relay::protocol::{CLI_CHANNEL, MCP_CHANNEL};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::work::InvocationId;
+
 /// Product metadata the service hands every client.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ServerProfile {
@@ -167,8 +169,8 @@ pub enum ServiceRequest {
     Catalog,
     /// Invoke a catalog tool with an opaque JSON input.
     Invoke {
-        /// Session-local correlation id.
-        id: String,
+        /// The request's id, minted by the intake for this call.
+        id: InvocationId,
         /// Catalog tool name.
         tool: String,
         /// Opaque input the executor validates.
@@ -178,8 +180,8 @@ pub enum ServiceRequest {
     },
     /// Cancel an active invocation.
     Cancel {
-        /// Correlation id given to `Invoke`.
-        id: String,
+        /// The id given to `Invoke`.
+        id: InvocationId,
     },
 }
 
@@ -200,8 +202,8 @@ pub enum ServiceResponse {
     },
     /// One finished invocation.
     Result {
-        /// Correlation id given to `Invoke`.
-        id: String,
+        /// The id given to `Invoke`.
+        id: InvocationId,
         /// Concise model-facing outcome the service wrote.
         text: String,
         /// The structured result envelope.
@@ -213,8 +215,8 @@ pub enum ServiceResponse {
     },
     /// A failure before or instead of an invocation.
     Error {
-        /// Correlation id, when the failure belongs to one invocation.
-        id: Option<String>,
+        /// The id given to `Invoke`, when the failure belongs to one invocation.
+        id: Option<InvocationId>,
         /// Stable reason code.
         code: String,
         /// Bounded detail in the service's words.

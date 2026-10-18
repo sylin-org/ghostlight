@@ -317,7 +317,7 @@ mod tests {
         let audit = refusal.map_or_else(|| Outcome::TabsListed { count: 0 }.audit(), |r| r.audit());
         Terminal {
             result: InvocationResult::new(
-                "child",
+                &super::super::InvocationId::mint(),
                 status,
                 effect,
                 Readiness::Complete,
@@ -477,7 +477,7 @@ mod tests {
                 settlement_requested: false,
                 provenance: None,
                 requirements: crate::governance::CapabilitySet::READ,
-                invocation: "parent",
+                invocation: &super::super::InvocationId::mint(),
                 workspace: &workspace,
                 requested_browser: None,
                 requested_tab: None,
@@ -550,7 +550,7 @@ mod tests {
             settlement_requested: false,
             provenance: None,
             requirements: crate::governance::CapabilitySet::READ,
-            invocation: "parent",
+            invocation: &super::super::InvocationId::mint(),
             workspace: &workspace,
             requested_browser: None,
             requested_tab: None,

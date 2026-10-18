@@ -4,6 +4,7 @@ use std::path::Path;
 use crate::intake::session::{
     ServiceContent, ServiceRequest, ServiceResponse, ToolAnnotations, ToolDefinition,
 };
+use crate::work::InvocationId;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use ghostlight_relay::protocol::{Failure, Templates};
@@ -55,7 +56,7 @@ fn ready_session() -> McpSession {
     session
 }
 
-fn invoke_id(steps: &[Step]) -> String {
+fn invoke_id(steps: &[Step]) -> InvocationId {
     match forwards(steps).as_slice() {
         [ServiceRequest::Invoke { id, .. }] => id.clone(),
         other => panic!("expected one invoke, got {other:?}"),
@@ -213,13 +214,13 @@ fn tool_results_in_a_batch_go_out_one_by_one() {
     let steps = session.accept(
         r#"[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser_read"}},{"jsonrpc":"2.0","id":2,"method":"ping"}]"#,
     );
-    let service_id = invoke_id(&steps);
+    let invocation = invoke_id(&steps);
     let reply = replies(steps);
     assert_eq!(reply.len(), 1);
     assert_eq!(reply[0].as_array().unwrap()[0]["id"], 2);
 
     let lines = session.render(ServiceResponse::Result {
-        id: service_id,
+        id: invocation,
         text: "Read the page.".into(),
         result: json!({"status": "succeeded"}),
         is_error: false,
@@ -239,9 +240,8 @@ fn string_and_numeric_ids_echo_with_their_type() {
         r#"{"jsonrpc":"2.0","id":"5","method":"tools/call","params":{"name":"browser_read","arguments":{}}}"#,
     ));
     assert_ne!(numeric, textual);
-    assert!(numeric.starts_with("mcp_"));
 
-    let render = |session: &mut McpSession, id: String| {
+    let render = |session: &mut McpSession, id: InvocationId| {
         session.render(ServiceResponse::Result {
             id,
             text: "Done.".into(),
@@ -269,7 +269,7 @@ fn tools_call_without_a_name_or_with_non_object_arguments_is_invalid_params() {
 }
 
 #[test]
-fn cancelled_maps_to_cancel_of_the_right_service_id() {
+fn cancelled_maps_to_cancel_of_the_right_invocation() {
     let mut session = ready_session();
     let first = invoke_id(&session.accept(
         r#"{"jsonrpc":"2.0","id":"a","method":"tools/call","params":{"name":"browser_read"}}"#,
@@ -289,6 +289,25 @@ fn cancelled_maps_to_cancel_of_the_right_service_id() {
         r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"7"}}"#,
     );
     assert!(unknown.is_empty());
+}
+
+#[test]
+fn a_running_client_id_is_refused_and_is_free_again_once_answered() {
+    let mut session = ready_session();
+    let line = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"browser_read"}}"#;
+    let first = invoke_id(&session.accept(line));
+    let steps = session.accept(line);
+    assert!(forwards(&steps).is_empty());
+    assert_eq!(replies(steps)[0]["error"]["code"], -32600);
+
+    session.render(ServiceResponse::Result {
+        id: first.clone(),
+        text: "Read the page.".into(),
+        result: json!({}),
+        is_error: false,
+        content: Vec::new(),
+    });
+    assert_ne!(invoke_id(&session.accept(line)), first);
 }
 
 #[test]

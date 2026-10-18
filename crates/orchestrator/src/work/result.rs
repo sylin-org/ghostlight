@@ -71,8 +71,8 @@ pub struct InvocationResult {
     /// Storage confirmation for this receipt, independent of browser effects.
     #[serde(default)]
     pub history_storage: crate::language::audit_health::Storage,
-    /// Opaque invocation correlation handle.
-    pub invocation: String,
+    /// The request's id, the one its audit line names.
+    pub invocation: super::InvocationId,
     /// Terminal product status.
     pub status: Status,
     /// Truthful physical effect class.
@@ -100,7 +100,7 @@ impl InvocationResult {
     )]
     #[must_use]
     pub fn new(
-        invocation: &str,
+        invocation: &super::InvocationId,
         status: Status,
         effect: Effect,
         readiness: Readiness,
@@ -112,7 +112,7 @@ impl InvocationResult {
         next_steps.truncate(2);
         Self {
             history_storage: crate::language::audit_health::Storage::Saved,
-            invocation: invocation.into(),
+            invocation: invocation.clone(),
             status,
             effect,
             readiness,
@@ -199,7 +199,7 @@ mod tests {
     fn gate_accepts_exactly_one_terminal_outcome() {
         let gate = CompletionGate::default();
         let result = InvocationResult::new(
-            "invocation_x",
+            &crate::work::InvocationId::mint(),
             Status::Succeeded,
             Effect::None,
             Readiness::NotApplicable,

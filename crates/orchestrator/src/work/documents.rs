@@ -194,7 +194,7 @@ impl ApplicationExecutor {
                 .coverage
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(previous) = retained.get(context.invocation) {
+            if let Some(previous) = retained.get(context.invocation.as_str()) {
                 coverage.include(previous);
             }
             retained.insert(context.invocation.into(), coverage.clone());

@@ -4,7 +4,7 @@
 //! what to do now: a [`Step::Reply`] line to write to the client, or a [`Step::Forward`] request
 //! for the session queue. [`McpSession::render`] turns the queue's answers back into MCP lines.
 //! The engine negotiates the protocol revision, echoes every client id with its JSON type, maps
-//! client ids to service ids for cancellation, and keeps the replies to one batch together.
+//! client ids to invocation ids for cancellation, and keeps the replies to one batch together.
 //!
 //! A tool result carries the envelope once, in `structuredContent`, as the lean model view with
 //! fields at their default omitted (ADR-0198 Decision 21); its text block is the service's summary
@@ -25,12 +25,12 @@ use ghostlight_relay::protocol::{Templates, DEFAULT_TEMPLATE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
-use uuid::Uuid;
 
 use super::server_profile;
 use crate::language::audit_health::Storage;
 use crate::language::intake::{EdgeFailure, ProtocolRefusal};
 use crate::work::result::{Effect, Readiness, Status};
+use crate::work::InvocationId;
 
 mod lean;
 
@@ -50,7 +50,6 @@ Result: ";
 pub const DISCOVERY_REVISION: &str = "2026-07-28";
 
 const JSONRPC_VERSION: &str = "2.0";
-const SERVICE_ID_PREFIX: &str = "mcp_";
 /// The label of a session whose client sent no name. The browser's tab group shows it; it names
 /// no agent ([`crate::language::provenance::claimed_name`]).
 pub const DEFAULT_CLIENT_LABEL: &str = "MCP client";
@@ -181,10 +180,10 @@ pub struct McpSession {
     phase: Phase,
     revision: Option<&'static str>,
     client_label: String,
-    /// Running tool calls: service id to the client's id.
-    calls: HashMap<String, Value>,
-    /// Running tool calls: the client's id, as JSON text, to the service id.
-    call_ids: HashMap<String, String>,
+    /// Running tool calls: the invocation id to the client's id.
+    calls: HashMap<InvocationId, Value>,
+    /// Running tool calls: the client's id, as JSON text, to the invocation id.
+    call_ids: HashMap<String, InvocationId>,
     catalog_waiters: VecDeque<CatalogWaiter>,
     batches: HashMap<u64, Batch>,
     next_batch: u64,
@@ -392,9 +391,9 @@ impl McpSession {
             method::CANCELLED => message
                 .pointer("/params/requestId")
                 .and_then(|request_id| self.call_ids.get(&id_key(request_id)))
-                .map(|service_id| {
+                .map(|invocation| {
                     Handled::forward(ServiceRequest::Cancel {
-                        id: service_id.clone(),
+                        id: invocation.clone(),
                     })
                 })
                 .unwrap_or_default(),
@@ -504,19 +503,19 @@ impl McpSession {
         if self.call_ids.contains_key(&key) {
             return Handled::reply(refusal(id, &ProtocolRefusal::DuplicateId));
         }
-        let service_id = format!("{SERVICE_ID_PREFIX}{}", Uuid::new_v4().simple());
-        self.call_ids.insert(key, service_id.clone());
-        self.calls.insert(service_id.clone(), id);
+        let invocation = InvocationId::mint();
+        self.call_ids.insert(key, invocation.clone());
+        self.calls.insert(invocation.clone(), id);
         Handled::forward(ServiceRequest::Invoke {
-            id: service_id,
+            id: invocation,
             tool: tool.into(),
             input,
             deadline_ms: None,
         })
     }
 
-    fn finish_call(&mut self, service_id: &str) -> Option<Value> {
-        let client_id = self.calls.remove(service_id)?;
+    fn finish_call(&mut self, invocation: &InvocationId) -> Option<Value> {
+        let client_id = self.calls.remove(invocation)?;
         self.call_ids.remove(&id_key(&client_id));
         Some(client_id)
     }

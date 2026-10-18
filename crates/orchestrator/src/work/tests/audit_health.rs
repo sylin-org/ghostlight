@@ -159,7 +159,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
         settlement_pending: &std::sync::atomic::AtomicBool::new(false),
         settlement_requested: false,
         provenance: None,
-        invocation: "queued",
+        invocation: &crate::work::InvocationId::mint(),
         workspace: &workspace,
         requested_browser: None,
         requested_tab: None,

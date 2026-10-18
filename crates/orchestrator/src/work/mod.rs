@@ -5,6 +5,7 @@ mod documents;
 mod flow;
 mod forms;
 mod interaction;
+mod invocation_id;
 mod item;
 mod navigation;
 mod pointer;
@@ -13,6 +14,8 @@ mod reading;
 mod receipt;
 mod recording;
 pub mod result;
+
+pub use invocation_id::InvocationId;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -31,7 +34,6 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde_json::{json, Value};
 use url::Url;
-use uuid::Uuid;
 
 use crate::browser::recovery::{
     BrowserRecovery, RecoveryDecision, RecoveryFailure, RecoveryWaitError,
@@ -91,7 +93,7 @@ impl CancellationToken {
 
 /// Decoded once at service intake; waiting consumes the original invocation deadline.
 pub(crate) struct PreparedInvocation {
-    pub(crate) invocation: String,
+    pub(crate) id: InvocationId,
     pub(crate) tool: String,
     provenance: Option<Arc<ConnectionEvidence>>,
     started: Instant,
@@ -117,6 +119,7 @@ impl PreparedInvocation {
 
     /// Decode and start the deadline before any queue wait.
     pub(crate) fn new(
+        id: InvocationId,
         tool: &str,
         input: Value,
         caller_deadline_ms: Option<u64>,
@@ -136,7 +139,7 @@ impl PreparedInvocation {
         let deadline_adjustable =
             caller_deadline_ms.is_none() && decoded.as_ref().is_ok_and(Operation::timeout_can_grow);
         Self {
-            invocation: format!("invocation_{}", Uuid::new_v4().simple()),
+            id,
             tool: tool.into(),
             provenance,
             started,
@@ -279,6 +282,7 @@ impl ApplicationExecutor {
         cancellation: &CancellationToken,
     ) -> InvocationResult {
         let prepared = PreparedInvocation::new(
+            InvocationId::mint(),
             tool,
             input,
             caller_deadline_ms,
@@ -304,7 +308,7 @@ impl ApplicationExecutor {
         };
         stage.waiting_reported = true;
         self.workbench.react(&DomainEvent::WorkWaiting {
-            invocation: prepared.invocation.clone(),
+            invocation: prepared.id.to_string(),
             workspace: workspace.as_str().into(),
             tool: prepared.tool.clone(),
             activity: operation_activity(operation),
@@ -324,7 +328,7 @@ impl ApplicationExecutor {
         cancellation: &CancellationToken,
         capacity_refused: bool,
     ) -> InvocationResult {
-        let invocation = prepared.invocation.clone();
+        let invocation = prepared.id.clone();
         let tool = prepared.tool.as_str();
         let started = prepared.started;
         let gate = CompletionGate::default();
@@ -432,7 +436,7 @@ impl ApplicationExecutor {
             stage.running_or_finished = true;
             drop(stage);
             self.emit(DomainEvent::WorkStarted {
-                invocation: invocation.clone(),
+                invocation: invocation.to_string(),
                 workspace: workspace.as_str().into(),
                 tool: tool.into(),
                 activity: operation_activity(operation),
@@ -882,7 +886,7 @@ impl ApplicationExecutor {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(
-                context.invocation.to_owned(),
+                context.invocation.to_string(),
                 StaleOffer {
                     candidates,
                     replacement,
@@ -1310,7 +1314,7 @@ impl ApplicationExecutor {
             outcome => outcome,
         };
         if let Ok(outcome) = &outcome {
-            self.observe(context.invocation, observed_from(outcome));
+            self.observe(context.invocation.as_str(), observed_from(outcome));
         }
         outcome
     }
@@ -1321,8 +1325,11 @@ impl ApplicationExecutor {
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
         let browser = self.admitted_browser(context)?;
-        self.presentation
-            .bind_command(context.workspace.as_str(), context.invocation, &command);
+        self.presentation.bind_command(
+            context.workspace.as_str(),
+            context.invocation.as_str(),
+            &command,
+        );
         let outcome = self.send(
             context,
             &browser,
@@ -2125,7 +2132,7 @@ impl ApplicationExecutor {
                 .and_then(|target| self.workspaces.target_owner(context.workspace, target)),
             _ => None,
         };
-        let offer = self.take_stale_offer(context.invocation);
+        let offer = self.take_stale_offer(context.invocation.as_str());
         let mut reason = match error {
             WorkspaceError::NotOwnedTab
             | WorkspaceError::NotOwnedTarget
@@ -2251,7 +2258,7 @@ struct InvocationContext<'a> {
     settlement_requested: bool,
     requirements: CapabilitySet,
     provenance: Option<&'a ConnectionEvidence>,
-    invocation: &'a str,
+    invocation: &'a InvocationId,
     workspace: &'a WorkspaceId,
     /// The browser this call named, when it named one.
     ///

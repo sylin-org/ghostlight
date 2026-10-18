@@ -72,7 +72,7 @@ use crate::language::outcome::DialogKind;
 use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::{Attribution, ConnectionEvidence, SourceReader};
-use crate::work::{ApplicationExecutor, CancellationToken, PreparedInvocation};
+use crate::work::{ApplicationExecutor, CancellationToken, InvocationId, PreparedInvocation};
 use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{
@@ -1626,7 +1626,7 @@ impl LiveSession {
                         &job.cancellation,
                         false,
                     );
-                    deliver_result(&wire, &job.id, result);
+                    deliver_result(&wire, result);
                     wire.publish_resume(&workspaces, &workspace);
                     queue.complete(&job.id);
                 }
@@ -1649,12 +1649,13 @@ impl LiveSession {
             } => {
                 // Bound retained payloads as well as queue count. Decoding occurs once at intake.
                 let bytes = serde_json::to_vec(&input).map_or(0, |input| input.len())
-                    + id.len()
+                    + id.as_str().len()
                     + tool.len()
                     + QUEUED_METADATA_BYTES;
                 let job = Job {
-                    id,
+                    id: id.clone(),
                     prepared: Arc::new(PreparedInvocation::new(
+                        id,
                         &tool,
                         input,
                         deadline_ms,
@@ -1678,7 +1679,7 @@ impl LiveSession {
                                 &job.cancellation,
                                 true,
                             );
-                            deliver_result(wire, &job.id, result);
+                            deliver_result(wire, result);
                             wire.publish_resume(&intake.workspaces, &self.workspace);
                         }
                         Err(_) => refuse_while_quitting(wire, job.id),
@@ -1814,7 +1815,7 @@ fn restore_returned_tabs(intake: &Intake, wire: &McpWire, workspace: &WorkspaceI
 }
 
 /// Answer an invocation that arrived after a quit began.
-fn refuse_while_quitting(wire: &McpWire, id: String) {
+fn refuse_while_quitting(wire: &McpWire, id: InvocationId) {
     wire.render(ServiceResponse::Error {
         id: Some(id),
         code: SHUTTING_DOWN_CODE.into(),
@@ -1970,15 +1971,15 @@ fn owner_alive(marker: &SessionMarker) -> bool {
         .is_some_and(|process| process.start_time() == *started_at)
 }
 
-/// Hand one finished invocation to the session as a result, or end the stream when the result
-/// cannot be encoded.
-fn deliver_result(wire: &McpWire, id: &str, mut result: crate::work::result::InvocationResult) {
+/// Hand one finished invocation to the session as a result for the request it names, or end the
+/// stream when the result cannot be encoded.
+fn deliver_result(wire: &McpWire, mut result: crate::work::result::InvocationResult) {
     let text = result.model_text();
     let is_error = result.is_error();
     let content = std::mem::take(&mut result.content);
     match serde_json::to_value(&result) {
         Ok(value) => wire.render(ServiceResponse::Result {
-            id: id.into(),
+            id: result.invocation,
             text,
             result: value,
             is_error,
@@ -2983,6 +2984,44 @@ mod tests {
 
         drop(socket);
         eventually(|| served.intake.workspaces.summaries().is_empty());
+    }
+
+    #[test]
+    fn the_result_a_client_receives_names_the_invocation_its_receipt_names() {
+        let home = TestHome::new("mcp-invocation");
+        let _served = serve_fake(&home);
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
+
+        let mut invocations = Vec::new();
+        for id in [2, 3] {
+            send_line(
+                &mut socket,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "tools/call",
+                    "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
+                }),
+            );
+            let (called, _) = response(&mut socket, id);
+            let invocation = called["result"]["structuredContent"]["invocation"].clone();
+            assert!(invocation.is_string(), "{called}");
+            invocations.push(invocation);
+        }
+        assert_ne!(invocations[0], invocations[1]);
+
+        let audit = home.path().join("audit.jsonl");
+        let recorded = || -> Vec<Value> {
+            std::fs::read_to_string(&audit)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .map(|record| record["invocation"].clone())
+                .collect()
+        };
+        eventually(|| recorded().len() == invocations.len());
+        assert_eq!(recorded(), invocations);
     }
 
     #[test]
