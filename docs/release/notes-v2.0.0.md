@@ -61,8 +61,9 @@ and 1.x installs move once.
   not adopt a tab on its own: `browser_tabs` lists tabs opened from a tab the session owns, and
   the model may adopt one explicitly under the same governance as navigation.
 - **A call with no tab never guesses.** With several tabs in a session, a call that names no tab
-  is refused before any browser work and lists the tabs with their handles. Subagents that share
-  one client's connection can no longer act in each other's tabs by leaving `tab` out.
+  is refused before any browser work and lists the tabs with their handles. A session with one tab
+  still uses it as the default, so the server instructions tell an agent that may share the session
+  to open its own tab with `browser_navigate` and `new_tab`, and to pass that tab on every call.
 - **Tab groups stay tidy.** When a session ends, the tabs Ghostlight keeps open leave the
   `Ghostlight - <client>` group, so Chromium deletes the idle group instead of saving it to your
   bookmarks bar. When the same client reuses one of those tabs, it goes back into the group. A

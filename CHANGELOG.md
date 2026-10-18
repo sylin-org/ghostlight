@@ -106,8 +106,9 @@ layout once, when you run the install again. The full release notes are in
 - With several tabs in a session, a call that names no tab is refused before any browser work
   with `ambiguous_tab`, and its `tabs` fact lists each tab with its handle, title and url. A call
   without a tab no longer lands in the tab another subagent sharing the same connection opened or
-  focused last. A session with one tab, and `browser_tabs` list, need no tab (ADR-0198 amendment
-  of 2026-10-18).
+  focused last. A session with one tab, and `browser_tabs` list, need no tab, so the server
+  instructions tell an agent that may share the session to open its own tab with `browser_navigate`
+  and `new_tab`, and to pass that tab on every call (ADR-0198 amendment of 2026-10-18).
 - A control the page refuses, because it is hidden, disabled, read-only or takes no text, is
   refused in Ghostlight's words: what was refused, that nothing was clicked or typed, and one step
   that works. The audit keeps `page_refused` with the page's code (ADR-0198 amendment of

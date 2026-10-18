@@ -180,9 +180,11 @@ loop in six short sentences and names only catalog tools:
 
 > Ghostlight controls the user's visible Chromium browser. Open or reuse a tab with
 > browser_navigate, or list this session's tabs with browser_tabs; omit tab when one tab is
-> unambiguous, and pass it when other agents may share the session. Read a page with browser_read, and get handles for its controls from browser_find or
-> browser_inspect, which also show what each form control accepts. Act with those handles, for example with browser_click or browser_fill_form;
-> timeout_ms bounds the whole call. Handles expire when the page navigates; a handle follows its
+> unambiguous, but when other agents may share the session, open your own tab with
+> browser_navigate new_tab:true and pass that tab on every call. Read a page with browser_read,
+> and get handles for its controls from browser_find or browser_inspect, which also show what
+> each form control accepts. Act with those handles, for example with browser_click or
+> browser_fill_form; timeout_ms bounds the whole call. Handles expire when the page navigates; a handle follows its
 > control through a re-render the page can prove, and a stale handle's refusal says why. Every
 > result states its effect and whether repeating it is safe.
 

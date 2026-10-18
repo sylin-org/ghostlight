@@ -462,8 +462,14 @@ same bound ADR-0161 puts on provenance.
 - A tab the call opened is the call's. `browser_navigate` with `new_tab` names its tab in its
   result. In a `browser_flow` that names no tab, a step that opens a tab makes it the tab of the
   later steps; after a second opens, the later steps mean the newer one.
-- The server instructions gain one clause: omit tab when one tab is unambiguous, "and pass it when
-  other agents may share the session". Decision 37's text carries the same clause when it lands.
+- The server instructions gain one clause: omit tab when one tab is unambiguous, "but when other
+  agents may share the session, open your own tab with browser_navigate new_tab:true and pass that
+  tab on every call". Decision 37's text carries the same clause when it lands.
+- A session's only tab is still the default. The first caller on a shared connection that omits
+  `tab` therefore acts in the one tab another agent opened before a second tab exists. The service
+  cannot tell those callers apart (see above), so the guard is the instructions: an agent that may
+  share the session opens its own tab first, and from then on the session holds several tabs and
+  every call that omits `tab` is refused.
 - This replaces the "sole active controlled tab" rule of ADR-0107 Decision 3. Which tabs a session
   may act on is unchanged, and every result still names its tab.
 
