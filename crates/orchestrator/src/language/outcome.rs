@@ -96,6 +96,9 @@ pub enum TargetRole {
     Slider,
     /// A numeric input, which the page reports as a spin button.
     NumberField,
+    /// A file input. The page reports it as a text field; only an upload, which knows it attached
+    /// files there, names it so.
+    FileField,
     Tab,
     MenuItem,
     Option,
@@ -141,6 +144,7 @@ impl TargetRole {
             Self::ListBox => "list box",
             Self::Slider => "slider",
             Self::NumberField => "number field",
+            Self::FileField => "file field",
             Self::Tab => "tab control",
             Self::MenuItem => "menu item",
             Self::Option => "option",
@@ -215,6 +219,14 @@ impl ActionSubject {
             },
             rebound: false,
         }
+    }
+
+    /// The same element as the file input an upload attached its files to, whatever role the page
+    /// reported for it.
+    #[must_use]
+    pub const fn file_field(mut self) -> Self {
+        self.role = TargetRole::FileField;
+        self
     }
 
     /// The closed role of the element.
@@ -2636,6 +2648,16 @@ mod tests {
                     subject: None,
                 },
                 "Uploaded 2 files to example.com.",
+            ),
+            (
+                Outcome::FilesUploaded {
+                    count: 1,
+                    host: Some("example.com".into()),
+                    subject: Some(
+                        ActionSubject::from_page("textbox", "Screenshot file", true).file_field(),
+                    ),
+                },
+                "Uploaded 1 file through the \"Screenshot file\" file field on example.com.",
             ),
             (
                 Outcome::ScriptEvaluated {

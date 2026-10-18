@@ -607,7 +607,16 @@ impl ApplicationExecutor {
                         count: uploaded_count,
                         host: observed_host(&selected.url),
                         subject: followed(
-                            action_subject(context, subject, target_role),
+                            action_subject(context, subject, target_role)
+                                .map(|subject| {
+                                    // Files are only ever attached to a file input; a drop names
+                                    // what is under the point.
+                                    if dropping {
+                                        subject
+                                    } else {
+                                        subject.file_field()
+                                    }
+                                }),
                             described_rebound,
                         ),
                     },
