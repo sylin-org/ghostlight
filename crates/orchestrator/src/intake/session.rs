@@ -5,6 +5,7 @@
 //! between processes is relay protocol 4. Only what a client or a durable record sees is
 //! serializable: tool definitions, the intake channel and the session marker.
 
+use ghostlight_relay::protocol::{CLI_CHANNEL, MCP_CHANNEL};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -85,12 +86,23 @@ pub enum IntakeChannel {
 }
 
 impl IntakeChannel {
-    /// Render the stable ASCII channel name.
+    /// The intake an `mcp` opening's channel word names. Only the command line's word is the
+    /// command line; an unknown word or none at all is an MCP client.
+    #[must_use]
+    pub fn of_opening(channel: Option<&str>) -> Self {
+        if channel == Some(CLI_CHANNEL) {
+            Self::Cli
+        } else {
+            Self::Mcp
+        }
+    }
+
+    /// Render the stable ASCII channel name, the word an opening on this channel sends.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Mcp => "mcp",
-            Self::Cli => "cli",
+            Self::Mcp => MCP_CHANNEL,
+            Self::Cli => CLI_CHANNEL,
         }
     }
 }
@@ -214,7 +226,15 @@ pub enum ServiceResponse {
 mod tests {
     use serde_json::json;
 
-    use super::{SessionMarker, ToolAnnotations, ToolDefinition};
+    use super::{IntakeChannel, SessionMarker, ToolAnnotations, ToolDefinition};
+
+    #[test]
+    fn each_intake_is_named_by_the_word_its_opening_sends_and_records() {
+        for channel in [IntakeChannel::Mcp, IntakeChannel::Cli] {
+            assert_eq!(IntakeChannel::of_opening(Some(channel.as_str())), channel);
+            assert_eq!(serde_json::to_value(channel).unwrap(), channel.as_str());
+        }
+    }
 
     #[test]
     fn tool_metadata_uses_standard_mcp_wire_names_and_omits_absent_fields() {

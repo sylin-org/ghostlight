@@ -151,7 +151,7 @@ pub(crate) fn rendered_result(
     use crate::intake::mcp::{McpSession, Step, LATEST_REVISION};
     use crate::intake::session::{ServiceRequest, ServiceResponse};
 
-    let mut session = McpSession::new("npm");
+    let mut session = McpSession::new();
     session.accept(
         &json!({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",

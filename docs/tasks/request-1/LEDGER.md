@@ -17,7 +17,7 @@ the architecture sweep.
 | Slice | Lane | Status |
 | --- | --- | --- |
 | S1 source-after-the-opening | connection | landed (this commit) |
-| S2 one-channel-word | connection | todo |
+| S2 one-channel-word | connection | landed (this commit) |
 | S3 one-agent-function (with Decision 14a) | connection | todo |
 | S4 workspace-opener | connection | todo |
 | S5 one-request-id | request | todo |
@@ -42,6 +42,17 @@ the architecture sweep.
   open, since a fresh session opens after its `initialize` answer. `HARNESS_ATTACHED` reads
   `<connection> via <channel> from <image>`, and without a source it is unchanged.
   `tests/provenance-journey.mjs` is left to the coordinator's live checks.
+- S2: `relay::protocol` names the words as `MCP_CHANNEL` and `CLI_CHANNEL`, and
+  `IntakeChannel::as_str` returns them, so the recorded name and the sent word are one word. The
+  ADR's one test `the_edge_and_the_command_line_send_the_opening_bytes_they_sent_before` is two,
+  one in each crate that builds an opening:
+  `forward::tests::the_edge_sends_the_opening_bytes_it_sent_before` and
+  `cli::client::tests::the_command_line_sends_the_opening_bytes_it_sent_before`. Each builder
+  became a small function (`forward::opening`, `client::mcp_opening`) so the test reads its bytes.
+  `McpSession::new` takes no channel and gains a `Default`. The service tests' opening helper sent
+  `npm` as the edge's channel and now sends `MCP_CHANNEL`; `npm` stays as the unknown word in
+  `an_opening_with_an_unknown_channel_is_an_mcp_client`. Added
+  `an_opening_on_the_command_line_channel_is_the_command_line` beside the two MCP cases.
 - S10: beyond `PAUSED_FROM_WATCHER`, the `RuntimeSource::Watcher` doc comment
   (`workbench/mod.rs`) said "A browser tab that only watches", the same over-claim, and now says
   what is true. The web test `a_pause_from_a_watching_screen_says_so_on_every_screen` is renamed

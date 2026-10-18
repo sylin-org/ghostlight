@@ -166,7 +166,7 @@ fn goodbye_in_looks_only_at_frames_with_the_fixed_prefix() {
 fn open_writes_the_opening_and_returns_the_reply() {
     let (client, mut service) = pair().unwrap();
     let mut opening = Opening::new(Role::Mcp, edge());
-    opening.channel = Some("mcp".to_owned());
+    opening.channel = Some(MCP_CHANNEL.to_owned());
     let expected = opening.clone();
     let server = thread::spawn(move || {
         let received: Opening = read_frame(&mut service).unwrap().unwrap();

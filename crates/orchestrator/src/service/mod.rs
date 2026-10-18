@@ -39,7 +39,9 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
-use crate::intake::session::{ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition};
+use crate::intake::session::{
+    IntakeChannel, ServiceRequest, ServiceResponse, SessionMarker, ToolDefinition,
+};
 use anyhow::{Context, Result};
 use ghostlight_relay::endpoint::{Connection, Endpoint, Listener};
 use ghostlight_relay::protocol::{
@@ -63,7 +65,6 @@ use crate::install::icons::{self, IconCache, IconPlaces};
 use crate::intake::desktop::{DesktopFrame, ShellView, TrayItemId, TrayModel};
 use crate::intake::listener::{self, control, Judgement};
 use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
-use crate::intake::MCP_CHANNEL;
 use crate::language::catalog_for;
 use crate::language::environment::{ELEVATED_SERVICE, QUIT_HELD};
 use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
@@ -1244,21 +1245,13 @@ fn serve_mcp(
             return Ok(());
         }
     };
-    let channel = requested.channel.as_deref().unwrap_or(MCP_CHANNEL);
-    let intake_channel = crate::intake::intake_channel(channel);
     let resumed = requested
         .resume
         .as_deref()
-        .and_then(|token| ResumeState::decode(token).ok())
-        .map(|mut state| {
-            if state.channel.is_empty() {
-                state.channel = channel.into();
-            }
-            state
-        });
+        .and_then(|token| ResumeState::decode(token).ok());
     listener::accept(&connection, &intake.accepted(Role::Mcp))?;
     let accepted = Accepted {
-        attribution: Attribution::accepted(intake_channel),
+        attribution: Attribution::accepted(IntakeChannel::of_opening(requested.channel.as_deref())),
         peer: connection.peer_process_id(),
         marker,
     };
@@ -1286,7 +1279,7 @@ fn serve_mcp(
             (wire, Some(live))
         }
         None => (
-            Arc::new(McpWire::new(Arc::clone(&writer), McpSession::new(channel))),
+            Arc::new(McpWire::new(Arc::clone(&writer), McpSession::new())),
             None,
         ),
     };
@@ -1378,10 +1371,6 @@ impl McpWire {
         lock(&self.session).client_label().to_owned()
     }
 
-    fn bind_session(&self, workspace: &WorkspaceId) {
-        lock(&self.session).bind_session(workspace.as_str());
-    }
-
     /// Write one MCP line to the client.
     fn send(&self, line: &Value) {
         let _ = self.writer.native(&McpFrame::Message {
@@ -1419,7 +1408,7 @@ impl McpWire {
             .cloned()
             .collect();
         owned_tabs.extend(unrestored);
-        let Some(state) = lock(&self.session).resume_state(owned_tabs, None) else {
+        let Some(state) = lock(&self.session).resume_state(owned_tabs) else {
             return;
         };
         let token = state.encode();
@@ -1543,7 +1532,6 @@ impl LiveSession {
         let workspace = intake
             .workspaces
             .connect(connection.clone(), accepted.marker.clone());
-        wire.bind_session(&workspace);
         intake.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
             ghostlight_bridge::diagnostics::Level::Info,
@@ -2706,9 +2694,6 @@ mod tests {
     /// The instance every test service reports.
     const TEST_INSTANCE: &str = "instance_test";
 
-    /// The MCP channel an edge names.
-    const CONNECTOR_CHANNEL: &str = "npm";
-
     /// How long a test waits for the service to answer.
     const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -2875,7 +2860,7 @@ mod tests {
     /// An `mcp` opening the way the MCP edge presents it.
     fn mcp_opening(resume: Option<String>) -> RelayOpening {
         let mut opening = opening(Role::Mcp);
-        opening.channel = Some(CONNECTOR_CHANNEL.into());
+        opening.channel = Some(protocol::MCP_CHANNEL.into());
         opening.resume = resume;
         opening
     }
@@ -3113,10 +3098,7 @@ mod tests {
         ResumeState {
             revision: "2025-06-18".into(),
             client_label: "returning client".into(),
-            channel: String::new(),
-            session_key: None,
             owned_tabs: Vec::new(),
-            recording: None,
         }
         .encode()
     }
@@ -3279,6 +3261,43 @@ mod tests {
         assert_eq!(initialized["result"]["serverInfo"]["name"], "ghostlight");
     }
 
+    /// The intake a session is attributed to when its `mcp` opening names `channel`.
+    fn intake_of_an_opening_naming(home: &str, channel: Option<&str>) -> IntakeChannel {
+        let home = TestHome::new(home);
+        let served = serve_fake(&home);
+        let mut opening = mcp_opening(None);
+        opening.channel = channel.map(str::to_owned);
+        let (mut socket, reply) = dial(&opening);
+        assert!(reply.accepted, "{reply:?}");
+        initialize(&mut socket);
+        eventually(|| served.intake.workspaces.summaries().len() == 1);
+        served.intake.workspaces.summaries()[0].connections[0].channel
+    }
+
+    #[test]
+    fn an_opening_with_an_unknown_channel_is_an_mcp_client() {
+        assert_eq!(
+            intake_of_an_opening_naming("unknown-channel", Some("npm")),
+            IntakeChannel::Mcp
+        );
+    }
+
+    #[test]
+    fn an_opening_with_no_channel_is_an_mcp_client() {
+        assert_eq!(
+            intake_of_an_opening_naming("no-channel", None),
+            IntakeChannel::Mcp
+        );
+    }
+
+    #[test]
+    fn an_opening_on_the_command_line_channel_is_the_command_line() {
+        assert_eq!(
+            intake_of_an_opening_naming("cli-channel", Some(protocol::CLI_CHANNEL)),
+            IntakeChannel::Cli
+        );
+    }
+
     #[test]
     fn only_an_mcp_stream_is_handed_the_failure_templates() {
         let home = TestHome::new("templates-only-for-mcp");
@@ -3398,8 +3417,6 @@ mod tests {
         let token = ResumeState {
             revision: "2025-06-18".into(),
             client_label: "returning client".into(),
-            channel: String::new(),
-            session_key: Some("workspace_earlier".into()),
             owned_tabs: vec![
                 OwnedTab {
                     browser_id: FAKE_BROWSER.into(),
@@ -3412,7 +3429,6 @@ mod tests {
                     handle: "tab_gone".into(),
                 },
             ],
-            recording: None,
         }
         .encode();
 
@@ -3425,7 +3441,6 @@ mod tests {
         let state = ResumeState::decode(&token).unwrap();
         assert_eq!(state.revision, "2025-06-18");
         assert_eq!(state.client_label, "returning client");
-        assert_eq!(state.channel, CONNECTOR_CHANNEL);
         assert_eq!(
             state.owned_tabs,
             vec![OwnedTab {
@@ -3472,10 +3487,7 @@ mod tests {
         ResumeState {
             revision: "2025-06-18".into(),
             client_label: "returning client".into(),
-            channel: String::new(),
-            session_key: Some("workspace_earlier".into()),
             owned_tabs: vec![returning_tab()],
-            recording: None,
         }
         .encode()
     }

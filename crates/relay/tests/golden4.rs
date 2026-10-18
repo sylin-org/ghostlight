@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use ghostlight_relay::endpoint::{fnv1a32, home_hash, Endpoint};
 use ghostlight_relay::protocol::{
     goodbye_frame, goodbye_in, Control, ControlResult, Edge, Failure, GoodbyeReason, McpFrame,
-    Opening, Program, QuitReason, RefusalCode, Reply, Role, StartReason, DEFAULT_TEMPLATE,
+    Opening, Program, QuitReason, RefusalCode, Reply, Role, StartReason, CLI_CHANNEL,
+    DEFAULT_TEMPLATE, MCP_CHANNEL,
 };
 use ghostlight_relay::{
     home, BACKOFF_FIRST, BACKOFF_MAX, HOLD_LIMIT, HOLD_LIMIT_BYTES, MAX_FRAME_BYTES,
@@ -104,12 +105,12 @@ fn opening_fixtures_round_trip() {
     assert_eq!(mcp.role, Role::Mcp);
     assert_eq!(mcp.edge, edge(Program::Edge));
     assert_eq!(mcp.reason, Some(StartReason::Agent));
-    assert_eq!(mcp.channel.as_deref(), Some("mcp"));
+    assert_eq!(mcp.channel.as_deref(), Some(MCP_CHANNEL));
     assert!(mcp.resume.is_some());
 
     let cli: Opening = assert_round_trip("opening.cli.json");
     assert_eq!(cli.role, Role::Mcp);
-    assert_eq!(cli.channel.as_deref(), Some("cli"));
+    assert_eq!(cli.channel.as_deref(), Some(CLI_CHANNEL));
     assert_eq!(cli.session.unwrap()["kind"], json!("process"));
     assert_eq!(cli.resume, None);
 

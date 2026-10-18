@@ -4,15 +4,15 @@ use std::path::Path;
 use crate::intake::session::{
     ServiceContent, ServiceRequest, ServiceResponse, ToolAnnotations, ToolDefinition,
 };
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use ghostlight_relay::protocol::{Failure, Templates};
 use serde_json::{json, Value};
 
 use super::{
     failure_templates, negotiate, McpSession, OwnedTab, ResumeError, ResumeState, Step,
-    LATEST_REVISION, SUPPORTED_REVISIONS,
+    LATEST_REVISION, RESUME_TOKEN_PREFIX, SUPPORTED_REVISIONS,
 };
-
-const CHANNEL: &str = "npm";
 
 fn initialize_line(id: Value, revision: &str) -> String {
     json!({
@@ -49,7 +49,7 @@ fn forwards(steps: &[Step]) -> Vec<ServiceRequest> {
 }
 
 fn ready_session() -> McpSession {
-    let mut session = McpSession::new(CHANNEL);
+    let mut session = McpSession::new();
     session.accept(&initialize_line(json!(1), LATEST_REVISION));
     session.accept(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
     session
@@ -76,7 +76,7 @@ fn tool(name: &str) -> ToolDefinition {
 
 #[test]
 fn negotiation_counteroffers_the_latest_revision_for_an_unknown_one() {
-    let mut session = McpSession::new(CHANNEL);
+    let mut session = McpSession::new();
     let reply = replies(session.accept(&initialize_line(json!(1), "future-revision")));
     let result = &reply[0]["result"];
     assert_eq!(result["protocolVersion"], LATEST_REVISION);
@@ -85,14 +85,13 @@ fn negotiation_counteroffers_the_latest_revision_for_an_unknown_one() {
     assert_eq!(result["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(result["instructions"], crate::language::SERVER_INSTRUCTIONS);
     assert_eq!(session.client_label(), "test client");
-    assert_eq!(session.revision(), Some(LATEST_REVISION));
 }
 
 #[test]
 fn negotiation_echoes_every_served_revision() {
     for requested in SUPPORTED_REVISIONS {
         assert_eq!(negotiate(requested), requested);
-        let mut session = McpSession::new(CHANNEL);
+        let mut session = McpSession::new();
         let reply = replies(session.accept(&initialize_line(json!(7), requested)));
         assert_eq!(reply[0]["result"]["protocolVersion"], requested);
     }
@@ -100,7 +99,7 @@ fn negotiation_echoes_every_served_revision() {
 
 #[test]
 fn discovery_then_initialize_serves_one_session() {
-    let mut session = McpSession::new(CHANNEL);
+    let mut session = McpSession::new();
     let discovery = json!({
         "jsonrpc": "2.0",
         "id": "d",
@@ -132,7 +131,7 @@ fn discovery_then_initialize_serves_one_session() {
 
 #[test]
 fn discovery_for_another_revision_is_invalid_params() {
-    let mut session = McpSession::new(CHANNEL);
+    let mut session = McpSession::new();
     let reply = replies(session.accept(
         r#"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-11-25","io.modelcontextprotocol/clientCapabilities":{}}}}"#,
     ));
@@ -141,7 +140,7 @@ fn discovery_for_another_revision_is_invalid_params() {
 
 #[test]
 fn a_request_before_initialize_is_refused_and_ping_is_answered() {
-    let mut session = McpSession::new(CHANNEL);
+    let mut session = McpSession::new();
     let steps = session.accept(r#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#);
     assert!(forwards(&steps).is_empty());
     let reply = replies(steps);
@@ -329,7 +328,7 @@ fn a_tool_result_carries_the_envelope_once_with_images_and_the_error_flag() {
 #[test]
 fn older_revisions_get_the_lean_json_in_the_text_block() {
     for revision in SUPPORTED_REVISIONS {
-        let mut session = McpSession::new(CHANNEL);
+        let mut session = McpSession::new();
         session.accept(&initialize_line(json!(1), revision));
         session.accept(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
         let id = invoke_id(&session.accept(
@@ -456,7 +455,7 @@ fn a_catalog_change_is_announced_only_once_initialized() {
         generation: 1,
         tools: Vec::new(),
     };
-    let mut session = McpSession::new(CHANNEL);
+    let mut session = McpSession::new();
     session.accept(&initialize_line(json!(1), LATEST_REVISION));
     assert!(session.render(changed()).is_empty());
     session.accept(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
@@ -524,17 +523,12 @@ fn failure_templates_have_the_relay_fixture_shape() {
 
 #[test]
 fn resume_state_round_trips_through_the_token() {
-    let mut session = ready_session();
-    session.bind_session("workspace_1");
-    let state = session
-        .resume_state(
-            vec![OwnedTab {
-                browser_id: "browser_a".into(),
-                tab_id: 42,
-                handle: "tab_1".into(),
-            }],
-            Some("recording_1".into()),
-        )
+    let state = ready_session()
+        .resume_state(vec![OwnedTab {
+            browser_id: "browser_a".into(),
+            tab_id: 42,
+            handle: "tab_1".into(),
+        }])
         .unwrap();
     let token = state.encode();
     assert!(token.is_ascii());
@@ -543,15 +537,16 @@ fn resume_state_round_trips_through_the_token() {
 
     let resumed = McpSession::resumed(decoded);
     assert!(resumed.is_initialized());
-    assert_eq!(resumed.revision(), Some(LATEST_REVISION));
     assert_eq!(resumed.client_label(), "test client");
-    assert_eq!(resumed.channel(), CHANNEL);
-    assert_eq!(resumed.session_key(), Some("workspace_1"));
+    assert_eq!(
+        resumed.resume_state(Vec::new()).unwrap().revision,
+        LATEST_REVISION
+    );
 }
 
 #[test]
 fn a_resumed_session_serves_requests_and_catalog_notices_at_once() {
-    let state = ready_session().resume_state(Vec::new(), None).unwrap();
+    let state = ready_session().resume_state(Vec::new()).unwrap();
     let mut resumed = McpSession::resumed(state);
     let steps = resumed.accept(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
     assert_eq!(forwards(&steps), vec![ServiceRequest::Catalog]);
@@ -568,9 +563,7 @@ fn a_resumed_session_serves_requests_and_catalog_notices_at_once() {
 
 #[test]
 fn a_session_before_initialize_has_no_resume_state() {
-    assert!(McpSession::new(CHANNEL)
-        .resume_state(Vec::new(), None)
-        .is_none());
+    assert!(McpSession::new().resume_state(Vec::new()).is_none());
 }
 
 /// A resume token an earlier build handed out. A published token keeps reading.
@@ -586,6 +579,47 @@ fn a_resume_token_an_earlier_build_handed_out_decodes() {
 }
 
 #[test]
+fn a_resume_token_written_with_the_retired_fields_still_resumes() {
+    let written = json!({
+        "revision": "2025-06-18",
+        "client_label": "returning client",
+        "channel": "cli",
+        "session_key": "workspace_earlier",
+        "owned_tabs": [{"browser_id": "browser_a", "tab_id": 42, "handle": "tab_1"}],
+        "recording": "recording_1"
+    });
+    let token = format!(
+        "{RESUME_TOKEN_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(written.to_string())
+    );
+    let state = ResumeState::decode(&token).expect("the token decodes");
+    assert_eq!(
+        state.owned_tabs,
+        vec![OwnedTab {
+            browser_id: "browser_a".into(),
+            tab_id: 42,
+            handle: "tab_1".into(),
+        }]
+    );
+
+    let mut resumed = McpSession::resumed(state);
+    assert!(resumed.is_initialized());
+    assert_eq!(resumed.client_label(), "returning client");
+    let steps = resumed.accept(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
+    assert_eq!(forwards(&steps), vec![ServiceRequest::Catalog]);
+
+    let rewritten = resumed.resume_state(Vec::new()).unwrap().encode();
+    let body = URL_SAFE_NO_PAD
+        .decode(rewritten.strip_prefix(RESUME_TOKEN_PREFIX).unwrap())
+        .unwrap();
+    let rewritten: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        rewritten,
+        json!({"revision": "2025-06-18", "client_label": "returning client", "owned_tabs": []})
+    );
+}
+
+#[test]
 fn a_malformed_token_is_rejected() {
     assert_eq!(ResumeState::decode("nope"), Err(ResumeError::Format));
     assert_eq!(ResumeState::decode("rs1.***"), Err(ResumeError::Encoding));
@@ -593,10 +627,7 @@ fn a_malformed_token_is_rejected() {
     let unsupported = ResumeState {
         revision: "1999-01-01".into(),
         client_label: "c".into(),
-        channel: CHANNEL.into(),
-        session_key: None,
         owned_tabs: Vec::new(),
-        recording: None,
     };
     assert_eq!(
         ResumeState::decode(&unsupported.encode()),

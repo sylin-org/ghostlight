@@ -47,16 +47,13 @@ use ghostlight_relay::frame;
 use ghostlight_relay::log::Event as LogEvent;
 use ghostlight_relay::protocol::{
     failure_response, Edge, Failure, GoodbyeReason, McpFrame, Opening, Program, Reply, Role,
-    StartReason, Templates,
+    StartReason, Templates, MCP_CHANNEL,
 };
 use ghostlight_relay::spawn::Backoff;
 use ghostlight_relay::{HOLD_LIMIT, MAX_FRAME_BYTES};
 use serde_json::{json, Value};
 
 use crate::hold::{HeldLine, Hold, Request};
-
-/// The channel this edge names in its opening.
-pub const CHANNEL: &str = "mcp";
 
 /// The JSON-RPC member names and values the edge reads or writes.
 mod rpc {
@@ -364,12 +361,7 @@ impl<W: Write> Forwarder<W> {
         let service = Arc::clone(&self.environment.service);
         let events = self.events.clone();
         let log = self.environment.log;
-        let mut opening = Opening::new(
-            Role::Mcp,
-            Edge::new(Program::Edge, env!("CARGO_PKG_VERSION").to_owned()),
-        );
-        opening.channel = Some(CHANNEL.to_owned());
-        opening.resume = self.resume.clone();
+        let opening = opening(self.resume.clone());
         thread::spawn(move || {
             let event = match service.connect(&opening) {
                 Ok((socket, reply)) if reply.accepted => Event::Connected(socket, reply.templates),
@@ -635,6 +627,18 @@ impl<W: Write> Forwarder<W> {
         self.output.write_all(b"\n")?;
         self.output.flush()
     }
+}
+
+/// The opening this edge sends: an `mcp` stream on the MCP channel, with the session's last
+/// resume token when it has one.
+fn opening(resume: Option<String>) -> Opening {
+    let mut opening = Opening::new(
+        Role::Mcp,
+        Edge::new(Program::Edge, env!("CARGO_PKG_VERSION").to_owned()),
+    );
+    opening.channel = Some(MCP_CHANNEL.to_owned());
+    opening.resume = resume;
+    opening
 }
 
 /// Start the service after a failed attempt, logging the outcome.

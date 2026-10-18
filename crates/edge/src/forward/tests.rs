@@ -491,7 +491,7 @@ fn held_lines_flush_in_order_after_an_opening_that_resumes() {
     for opening in &openings {
         assert_eq!(opening.relay, RELAY);
         assert_eq!(opening.role, Role::Mcp);
-        assert_eq!(opening.channel.as_deref(), Some(CHANNEL));
+        assert_eq!(opening.channel.as_deref(), Some(MCP_CHANNEL));
         assert_eq!(opening.edge.program, Program::Edge);
         assert_eq!(opening.edge.revision, RELAY);
         assert_eq!(opening.edge.build, env!("CARGO_PKG_VERSION"));
@@ -959,4 +959,23 @@ fn a_line_over_the_frame_bound_is_skipped_up_to_its_newline() {
         Some(InputLine::Line(line)) if line == b"last"
     ));
     assert!(read_line(&mut input, 4).unwrap().is_none());
+}
+
+#[test]
+fn the_edge_sends_the_opening_bytes_it_sent_before() {
+    let build = env!("CARGO_PKG_VERSION");
+    let fresh = serde_json::to_string(&opening(None)).unwrap();
+    assert_eq!(
+        fresh,
+        format!(
+            r#"{{"relay":4,"role":"mcp","edge":{{"program":"edge","revision":4,"build":"{build}"}},"channel":"mcp"}}"#
+        )
+    );
+    let resumed = serde_json::to_string(&opening(Some("rs1.token".to_owned()))).unwrap();
+    assert_eq!(
+        resumed,
+        format!(
+            r#"{{"relay":4,"role":"mcp","edge":{{"program":"edge","revision":4,"build":"{build}"}},"resume":"rs1.token","channel":"mcp"}}"#
+        )
+    );
 }

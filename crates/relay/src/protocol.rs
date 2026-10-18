@@ -12,7 +12,9 @@
 //! decodes to the `Unknown` variant of its enum, and a field this revision does not know is
 //! ignored. The service decides what to do with an `Unknown`. New behavior gets new names; a name
 //! is never removed or repurposed. The words themselves are authored by the service, never here:
-//! this module carries only the shapes.
+//! this module carries only the shapes, and the two channel words of an `mcp` opening
+//! ([`MCP_CHANNEL`] and [`CLI_CHANNEL`]), because two programs send them and the service reads
+//! them.
 //!
 //! The executable form of this module is `tests/golden/relay4`, and the prose form is
 //! `docs/design/relay-protocol-4.md`.
@@ -225,6 +227,12 @@ pub enum Control {
     Unknown,
 }
 
+/// The channel of an `mcp` opening from the MCP stdio edge, `ghostlight mcp`.
+pub const MCP_CHANNEL: &str = "mcp";
+
+/// The channel of an `mcp` opening from the Ghostlight command line, `ghostlight call`.
+pub const CLI_CHANNEL: &str = "cli";
+
 /// The first frame a peer sends on a relay connection.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Opening {
@@ -243,8 +251,8 @@ pub struct Opening {
     /// For a `browser` stream, the origin of the extension that opened the port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
-    /// For an `mcp` stream, how the client reached the edge (for example `cli`). For a `desktop`
-    /// stream, what the shell shows: `window` or `tray`.
+    /// For an `mcp` stream, how the client reached the service: [`MCP_CHANNEL`] or
+    /// [`CLI_CHANNEL`]. For a `desktop` stream, what the shell shows: `window` or `tray`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
     /// For an `mcp` stream, an opaque marker the peer uses to identify its session.

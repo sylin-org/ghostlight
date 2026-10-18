@@ -178,11 +178,9 @@ impl Handled {
 #[derive(Debug)]
 pub struct McpSession {
     server: ServerProfile,
-    channel: String,
     phase: Phase,
     revision: Option<&'static str>,
     client_label: String,
-    session_key: Option<String>,
     /// Running tool calls: service id to the client's id.
     calls: HashMap<String, Value>,
     /// Running tool calls: the client's id, as JSON text, to the service id.
@@ -192,17 +190,21 @@ pub struct McpSession {
     next_batch: u64,
 }
 
+impl Default for McpSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpSession {
-    /// A new session for a client that reached the MCP edge through `channel`.
+    /// A new session, waiting for its client's `initialize`.
     #[must_use]
-    pub fn new(channel: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         Self {
             server: server_profile(),
-            channel: channel.into(),
             phase: Phase::Fresh,
             revision: None,
             client_label: DEFAULT_CLIENT_LABEL.into(),
-            session_key: None,
             calls: HashMap::new(),
             call_ids: HashMap::new(),
             catalog_waiters: VecDeque::new(),
@@ -211,23 +213,16 @@ impl McpSession {
         }
     }
 
-    /// A session continued from a resume token: initialized, with its revision, client and key.
+    /// A session continued from a resume token: initialized, with its revision and client.
     #[must_use]
     pub fn resumed(state: ResumeState) -> Self {
-        let mut session = Self::new(state.channel);
+        let mut session = Self::new();
         session.phase = Phase::Ready;
         session.revision = Some(negotiate(&state.revision));
         if !state.client_label.is_empty() {
             session.client_label = bounded_label(&state.client_label);
         }
-        session.session_key = state.session_key;
         session
-    }
-
-    /// How the client reached the MCP edge.
-    #[must_use]
-    pub fn channel(&self) -> &str {
-        &self.channel
     }
 
     /// The client's own name, bounded, for attribution and presentation only.
@@ -236,43 +231,19 @@ impl McpSession {
         &self.client_label
     }
 
-    /// The negotiated MCP revision, once `initialize` has been answered.
-    #[must_use]
-    pub const fn revision(&self) -> Option<&'static str> {
-        self.revision
-    }
-
     /// Whether `initialize` has been answered, so requests are served.
     #[must_use]
     pub fn is_initialized(&self) -> bool {
         self.phase != Phase::Fresh
     }
 
-    /// The workspace session key this session is bound to, when it is bound.
-    #[must_use]
-    pub fn session_key(&self) -> Option<&str> {
-        self.session_key.as_deref()
-    }
-
-    /// Bind the session to the workspace session the service opened for it.
-    pub fn bind_session(&mut self, key: impl Into<String>) {
-        self.session_key = Some(key.into());
-    }
-
     /// What a later connection needs to continue this session, once it is initialized.
     #[must_use]
-    pub fn resume_state(
-        &self,
-        owned_tabs: Vec<OwnedTab>,
-        recording: Option<String>,
-    ) -> Option<ResumeState> {
+    pub fn resume_state(&self, owned_tabs: Vec<OwnedTab>) -> Option<ResumeState> {
         Some(ResumeState {
             revision: self.revision?.into(),
             client_label: self.client_label.clone(),
-            channel: self.channel.clone(),
-            session_key: self.session_key.clone(),
             owned_tabs,
-            recording,
         })
     }
 
@@ -586,7 +557,8 @@ pub struct OwnedTab {
 
 /// What a session needs to continue after a service restart (ADR-0197 Decision 12).
 ///
-/// It travels as an opaque token: the MCP edge keeps it and hands it back on reconnect.
+/// It travels as an opaque token: the MCP edge keeps it and hands it back on reconnect. The read is
+/// tolerant: a field this build does not know, such as one an earlier build wrote, is ignored.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ResumeState {
     /// The negotiated MCP revision.
@@ -594,18 +566,9 @@ pub struct ResumeState {
     /// The client's own name, for attribution and presentation only. A token may omit it.
     #[serde(default)]
     pub client_label: String,
-    /// How the client reached the MCP edge. A token may omit it; the opening names it too.
-    #[serde(default)]
-    pub channel: String,
-    /// The workspace session key, when the session was bound to one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_key: Option<String>,
     /// The tabs the session owned.
     #[serde(default)]
     pub owned_tabs: Vec<OwnedTab>,
-    /// The recording the session had running, if any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recording: Option<String>,
 }
 
 /// Why a resume token was not accepted.

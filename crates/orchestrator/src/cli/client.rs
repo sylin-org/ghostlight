@@ -13,7 +13,7 @@ use crate::intake::session::SessionMarker;
 use ghostlight_relay::endpoint::{ConnectError, Connection};
 use ghostlight_relay::frame::{self, FrameError};
 use ghostlight_relay::protocol::{
-    self, Control, ControlResult, Edge, McpFrame, Opening, Program, Role,
+    self, Control, ControlResult, Edge, McpFrame, Opening, Program, Role, CLI_CHANNEL,
 };
 use ghostlight_relay::{home, OPENING_DEADLINE};
 use serde_json::{json, Value};
@@ -21,7 +21,6 @@ use thiserror::Error;
 
 use crate::intake::listener::control;
 use crate::intake::mcp::{method, LATEST_REVISION};
-use crate::intake::CLI_CHANNEL;
 use crate::workbench::ReadinessSummary;
 
 /// The label controlled tabs are grouped under for scripted work.
@@ -64,6 +63,15 @@ impl From<FrameError> for ClientError {
 /// The program the command line presents itself as: a process of the service image.
 fn edge() -> Edge {
     Edge::new(Program::Service, env!("CARGO_PKG_VERSION").into())
+}
+
+/// The opening of a `ghostlight call` session: an `mcp` stream on the command line's channel,
+/// naming the session's owner when one was found.
+fn mcp_opening(session: Option<Value>) -> Opening {
+    let mut opening = Opening::new(Role::Mcp, edge());
+    opening.channel = Some(CLI_CHANNEL.into());
+    opening.session = session;
+    opening
 }
 
 /// Open `opening` on the service of `home`, insisting that the service accepts it.
@@ -181,10 +189,7 @@ impl McpClient {
             .map(serde_json::to_value)
             .transpose()
             .map_err(|error| ClientError::Unreadable(error.to_string()))?;
-        let mut opening = Opening::new(Role::Mcp, edge());
-        opening.channel = Some(CLI_CHANNEL.into());
-        opening.session = session;
-        let socket = open(&current_home()?, &opening)?;
+        let socket = open(&current_home()?, &mcp_opening(session))?;
         let mut client = Self { socket, next_id: 1 };
         client.request(
             method::INITIALIZE,
@@ -290,5 +295,30 @@ impl McpClient {
             },
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::mcp_opening;
+
+    #[test]
+    fn the_command_line_sends_the_opening_bytes_it_sent_before() {
+        let build = env!("CARGO_PKG_VERSION");
+        let session = json!({"kind": "process", "pid": 7, "started_at": 9, "name": "bash.exe"});
+        assert_eq!(
+            serde_json::to_string(&mcp_opening(Some(session))).unwrap(),
+            format!(
+                r#"{{"relay":4,"role":"mcp","edge":{{"program":"service","revision":4,"build":"{build}"}},"channel":"cli","session":{{"kind":"process","name":"bash.exe","pid":7,"started_at":9}}}}"#
+            )
+        );
+        assert_eq!(
+            serde_json::to_string(&mcp_opening(None)).unwrap(),
+            format!(
+                r#"{{"relay":4,"role":"mcp","edge":{{"program":"service","revision":4,"build":"{build}"}},"channel":"cli"}}"#
+            )
+        );
     }
 }
