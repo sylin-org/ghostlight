@@ -72,19 +72,24 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<()> 
     ghostlight_relay::home::home()?;
     // A real install says only what the summary says, and what needs a person.
     let real_install = install && !options.dry_run;
-    if real_install {
-        stop_older_installation_programs()?;
-    }
     let native_hosts = NativeHostRegistry::discover();
     let mut kept_private = KeptPrivate::default();
     let mut collected = Collected::default();
     let mut install_usable = false;
+    // Every browser and client the person named is checked before anything stops, changes or
+    // prints, so a mistyped id is refused at no cost. Both looks only read.
     let initial_browser_report = native_hosts.check()?;
     let install_browser_ids = if install {
         select_install_browsers(&initial_browser_report, options)?
     } else {
         None
     };
+    if !options.client_ids.is_empty() && !options.no_clients {
+        select_harnesses(&HarnessRegistry::discover().refresh()?, options, install)?;
+    }
+    if real_install {
+        stop_older_installation_programs()?;
+    }
     if options.dry_run {
         println!(
             "Ghostlight {} dry run -- no machine state will change.",
@@ -730,7 +735,6 @@ fn client_step(
             install,
         ));
     }
-
     ClientStep::Apply(if install {
         HarnessAction::Install
     } else {

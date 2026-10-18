@@ -7,7 +7,7 @@
 // workspace so handles from one line resolve on the next. Every process runs in a fresh test home;
 // nothing touches the real one.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { buildVersion, createHome, repository, startReason, until } from "./lib/home.mjs";
@@ -63,6 +63,14 @@ try {
   const dryRun = edge(["install", "--dry-run", "--no-clients"]);
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /no machine state will change/);
+  // A client id that names nothing is refused before the install changes anything.
+  const mistyped = edge(["install", "--client", "nope", "--no-open"]);
+  assert.notEqual(mistyped.status, 0, "a mistyped client id is refused");
+  assert.match(mistyped.stderr, /unknown MCP client 'nope'/);
+  assert.ok(!existsSync(home.nativeHostDir) || readdirSync(home.nativeHostDir).length === 0,
+    "no browser registration was written before the refusal");
+  assert.ok(!existsSync(join(home.area, "user", ".local")),
+    "no command link, completions or Applications entry was written before the refusal");
 
   const absent = edge(["status"]);
   assert.equal(absent.status, 0, absent.stderr);
