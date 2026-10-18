@@ -10,7 +10,7 @@
 //
 // Run with: node --test tests/workbench-settings.test.mjs
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 import { test } from "node:test";
@@ -2453,4 +2453,210 @@ test("a pane redrawn while the confirmation is open gives focus back to the redr
   shown.key("Escape");
   assert.equal(await asked, false);
   assert.equal(Element.focused, redrawn, "Cancel lands on the Remove the person sees, not the one the redraw replaced");
+});
+
+/* --------------------------- one legible type and colour --------------------------- */
+
+const SHEETS = Object.freeze({
+  "styles.css": rulesOf(readFileSync(join(ui, "styles.css"), "utf8")),
+  "kit/kit.css": rulesOf(readFileSync(join(ui, "kit", "kit.css"), "utf8"))
+});
+
+/** The tokens the kit keeps for strokes and borders (--muted) and for decoration (--faint). */
+const DECORATION = /var\(--(muted|faint)\)/;
+
+/** The px size a font or font-size declaration sets, or null when it names a token instead. */
+const pxOf = (value) => Number(/(?:^|\s)(\d+(?:\.\d+)?)px/.exec(value ?? "")?.[1] ?? NaN) || null;
+
+test("no word in the window is set in a token kept for strokes and decoration", () => {
+  for (const [file, rules] of Object.entries(SHEETS)) {
+    const offenders = rules.filter((rule) => DECORATION.test(rule.declarations.color ?? ""))
+      .map((rule) => rule.selectors.join(", "));
+    assert.deepEqual(offenders, [], `${file} sets text in --muted or --faint`);
+  }
+  // The two tokens keep their work as strokes, borders and decoration, so the rule above measures
+  // a real choice and not a palette that lost them.
+  const decorating = SHEETS["styles.css"].filter((rule) => Object.entries(rule.declarations)
+    .some(([property, value]) => property !== "color" && DECORATION.test(value)));
+  assert.ok(decorating.length > 0, "nothing draws in --muted or --faint any longer");
+
+  const root = naming(":root")[0].declarations;
+  const kitInk = /--ink-4:\s*(#[0-9a-f]{6})/.exec(readFileSync(join(ui, "..", "..", "..", "extension", "kit.css"), "utf8"))[1];
+  assert.equal(root["--ink-4"], kitInk, "the window's quietest text is the kit's");
+});
+
+test("the read capability keeps its quiet edge while its word reads in ink, and the settled clock reads", () => {
+  const read = naming(".cap-read")[0].declarations;
+  assert.equal(read["--cap"], "var(--cap-read)");
+  assert.equal(read["--cap-ink"], "var(--ink-3)");
+  assert.equal(naming(":root")[0].declarations["--cap-read"], "#52525b");
+  for (const capability of ["action", "write", "execute"]) {
+    assert.equal(naming(`.cap-${capability}`)[0].declarations["--cap-ink"], `var(--cap-${capability})`, capability);
+  }
+  for (const selector of [".row-cap", ".hero-tool .cap-label"]) {
+    assert.match(naming(selector).map((rule) => rule.declarations.color ?? "").join(" "), /var\(--cap-ink/, selector);
+  }
+  const clock = naming(".elapsed")[0].declarations;
+  assert.equal(clock.color, "var(--ink-4)");
+  assert.match(clock.font, /^400 /, "the settled stopwatch is not set in a hairline weight");
+});
+
+test("only a data tag, in capitals, is as small as 10px, and every other word is larger", () => {
+  // A monogram inside a 20px face and the sylin.org trading card, ported whole, are artwork.
+  const artwork = (selector) => selector === ".glance-face" || selector.startsWith(".tcg");
+  for (const [file, rules] of Object.entries(SHEETS)) {
+    for (const rule of rules) {
+      if (rule.selectors.every(artwork)) continue;
+      const size = pxOf(rule.declarations.font) ?? pxOf(rule.declarations["font-size"]);
+      if (size === null) continue;
+      const tag = rule.declarations["text-transform"] === "uppercase";
+      assert.ok(size >= (tag ? 10 : 10.5), `${file}: ${rule.selectors.join(", ")} is set at ${size}px`);
+    }
+  }
+});
+
+const EYEBROWS = [".kicker", ".queue-head", ".agents-group-head", ".about-group h2", ".about-facts dt"];
+const TAGS = [".cap-label", ".outcome", ".row-cap", ".agent-state", ".severity", ".hit-kind", ".cap-state",
+  ".rule-owner", ".rule-edit-hint", ".rule-detail dt"];
+
+test("a place is named by one eyebrow and a value by one data tag, on every tab", () => {
+  const voice = (selectors, font) => {
+    const rule = naming(selectors[0]).find((each) => each.declarations.font);
+    assert.ok(rule, `${selectors[0]} has no voice`);
+    assert.equal(rule.declarations.font, font);
+    assert.equal(rule.declarations["text-transform"], "uppercase");
+    assert.equal(rule.declarations.color, "var(--ink-4)");
+    for (const selector of selectors) {
+      assert.ok(rule.selectors.includes(selector), `${selector} speaks in a voice of its own`);
+      for (const other of naming(selector).filter((each) => each !== rule)) {
+        for (const property of ["font", "font-size", "font-family", "font-weight", "letter-spacing", "text-transform"]) {
+          assert.equal(other.declarations[property], undefined, `${selector} changes its ${property}`);
+        }
+      }
+    }
+    return rule;
+  };
+  const eyebrow = voice(EYEBROWS, "500 11.5px/1.4 var(--sans)");
+  assert.equal(eyebrow.declarations["letter-spacing"], ".18em");
+  const tag = voice(TAGS, "500 10px/1 var(--mono)");
+  assert.equal(tag.declarations["letter-spacing"], ".14em");
+
+  // Nothing else in the window speaks in capitals, and the setup view's eyebrow stays the kit's.
+  const capitals = SHEETS["styles.css"].filter((rule) => rule.declarations["text-transform"] === "uppercase"
+    && rule.selectors.join() !== eyebrow.selectors.join() && rule.selectors.join() !== tag.selectors.join()
+    && !rule.selectors.every((selector) => selector.startsWith(".tcg")));
+  assert.deepEqual(capitals.map((rule) => rule.selectors.join(", ")), []);
+  assert.deepEqual(SHEETS["styles.css"].filter((rule) => rule.selectors.some((selector) => selector.includes("gl-eyebrow"))), []);
+});
+
+test("every destination's title wears the one page title", () => {
+  const view = parsePage();
+  const titles = [...view.descendants()].filter((node) => node.tag === "h1" && node.closest("#main-content"));
+  assert.ok(titles.length >= 5, `saw ${titles.length} page titles`);
+  const title = naming(".page-heading h1").find((rule) => rule.declarations.font);
+  assert.equal(title.declarations.font, "300 25px/1.25 var(--sans)");
+  assert.equal(title.declarations.color, "var(--ink)");
+  for (const node of titles) {
+    const place = node.closest(".page-heading") ? ".page-heading h1" : node.closest(".about-copy") ? ".about-copy h1" : null;
+    assert.ok(place && title.selectors.includes(place), `the title #${node.id} has no page title`);
+  }
+  const resized = RULES.filter((rule) => rule !== title && rule.selectors.some((selector) => / h1$/.test(selector))
+    && ["font", "font-size", "font-weight", "letter-spacing"].some((property) => rule.declarations[property]));
+  assert.deepEqual(resized.map((rule) => rule.selectors.join(", ")), [], "a destination resizes its title");
+});
+
+/** The kit's layout containers: the page draws them in index.html, and only there. */
+const KIT_LAYOUT = ["settings", "settings-rail", "settings-body", "settings-section"];
+
+test("Policy's restrictions are a plain list, never the kit's Settings grid", () => {
+  const shown = drawing();
+  shown.view.policy({
+    headline: "Example Org sets the rules.", organization: null, capabilities: [], ceilings: [],
+    layers: [{
+      kind: "organization", title: "Example Org", rules: [], policy_name: "support", version: "3",
+      path: "/etc/ghostlight/policy.json", document: "{}",
+      settings: [
+        { key: "browser.startup", value: "\"manual\"" },
+        { key: "example.one", value: "false" },
+        { key: "example.two", value: "true" }
+      ]
+    }],
+    user_layer: { source: "managed", editable: false, path: null, blocked_reason: null }
+  });
+  assert.deepEqual(shown.failures, []);
+  const list = [...drawn(shown.el("policy-settings").innerHTML).root.descendants()].find((node) => node.tag === "ul");
+  assert.equal(list.children.length, 3);
+  assert.deepEqual([...list.classes], ["layer-settings"]);
+  for (const name of list.classes) {
+    for (const rule of naming(`.${name}`)) {
+      assert.notEqual(rule.declarations.display, "grid", `.${name} lays the list out as a grid`);
+      assert.equal(rule.declarations["grid-template-columns"], undefined, `.${name} lays the list out in columns`);
+    }
+  }
+  // The kit's Settings grid is a grid, and the window's sheet leaves it where its heading is.
+  assert.ok(naming(".settings").some((rule) => rule.declarations.display === "grid"));
+  assert.deepEqual(naming(".settings", SHEETS["styles.css"]), [], "styles.css restyles the kit's Settings");
+});
+
+test("the view draws none of the kit's layout containers", () => {
+  const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
+  const drawnClasses = [...source.matchAll(/class="([^"]*)"/g)].flatMap(([, names]) => names.split(/\s+/));
+  assert.ok(drawnClasses.length > 0, "the view draws no classes at all");
+  for (const name of KIT_LAYOUT) assert.equal(drawnClasses.includes(name), false, `view.js draws .${name}`);
+});
+
+test("a disclosure is quiet ink with the agents fold's chevron, and opens to ink", () => {
+  const shown = drawing();
+  shown.view.policy({
+    headline: "", organization: null, capabilities: [], ceilings: [],
+    layers: [{ kind: "organization", title: "Example Org", rules: [], settings: [], policy_name: "support", version: "3", path: null, document: "{}" }],
+    user_layer: { source: "managed", editable: false, path: null, blocked_reason: null }
+  });
+  const summary = [...drawn(shown.el("policy-documents").innerHTML).root.descendants()].find((node) => node.tag === "summary");
+  assert.ok(summary.classes.has("disclosure"));
+  assert.ok(summary.children.some((node) => node.tag === "svg"), "the disclosure has no chevron");
+
+  const source = readFileSync(join(ui, "lib", "view.js"), "utf8");
+  const summaries = [...source.matchAll(/<summary class="([^"]*)"/g)].map(([, names]) => names);
+  assert.equal(summaries.length, [...source.matchAll(/<summary/g)].length, "a summary is drawn with no class");
+  assert.deepEqual(summaries.filter((names) => names !== "disclosure" && names !== "glance-pill"), []);
+
+  const rest = naming(".disclosure")[0].declarations;
+  assert.equal(rest.color, "var(--ink-3)");
+  assert.equal(rest["font-size"], "12px");
+  assert.equal(naming("details[open] > .disclosure")[0].declarations.color, "var(--ink)");
+  assert.match(naming("details[open] > .disclosure svg")[0].declarations.transform, /rotate\(180deg\)/);
+});
+
+/** Every stylesheet, script and page under ui/, by its path below it. */
+function uiFiles(directory = ui, below = "") {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    const named = below ? `${below}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return uiFiles(path, named);
+    return /\.(css|js|html)$/.test(entry.name) ? [[named, readFileSync(path, "utf8")]] : [];
+  });
+}
+
+test("the page's sky blue never reaches the window, and nothing is coloured inline", () => {
+  const files = uiFiles();
+  assert.ok(files.some(([name]) => name === "lib/view.js"), "the walk missed the view");
+  for (const [name, text] of files) {
+    assert.equal(text.includes("--sky"), false, `${name} names --sky`);
+    // The window's policy allows no inline style, so one is dropped without a word.
+    assert.equal(/\sstyle\s*=/.test(text), false, `${name} carries an inline style`);
+  }
+  const orbs = [...parsePage().descendants()].filter((node) => node.classes.has("orb"));
+  assert.deepEqual(orbs.map((orb) => [...orb.classes].find((name) => name !== "orb")), ["orb-agent", "orb-trust"]);
+  assert.equal(naming(".tcg .orb-agent")[0].declarations.color, "var(--ok)");
+  assert.equal(naming(".tcg .orb-trust")[0].declarations.color, "var(--a)");
+});
+
+test("the mascot keeps its face in the agent pane: averaged below its size, crisp only at whole multiples", () => {
+  const sprite = readFileSync(join(ui, "..", "..", "..", "extension", "icons", "ghostlight-mascot.png"));
+  const native = sprite.readUInt32BE(16);
+  const ghost = naming(".agent-ghost")[0].declarations;
+  const drawnAt = pxOf(ghost.width);
+  const whole = drawnAt >= native && drawnAt % native === 0;
+  assert.ok(whole || ghost["image-rendering"] !== "pixelated", `${drawnAt}px from a ${native}px sprite drops rows of its face`);
 });

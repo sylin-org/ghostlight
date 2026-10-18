@@ -66,6 +66,9 @@
   /** The mascot the Integrations pane joins each agent to, served beside the page. */
   const MASCOT = "extension/ghostlight-mascot.png";
 
+  /** The chevron that marks a fold or a disclosure; it turns over once open. */
+  const CHEVRON = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>';
+
   /** The panels that hold data, each with the line that says why it holds none and its section. */
   const DATA_PANELS = Object.freeze([
     Object.freeze({ line: "closed-monitor", section: "view-monitor" }),
@@ -335,7 +338,7 @@
 
     function historyDetails(key, title, body, className = "permission-details") {
       return `<details class="${className}" data-history-details="${escapeHtml(key)}"${expandedHistory.has(key) ? " open" : ""}>`
-        + `<summary>${escapeHtml(title)}</summary>${body}</details>`;
+        + `<summary class="disclosure">${escapeHtml(title)}${CHEVRON}</summary>${body}</details>`;
     }
 
     function permissionMarkup(entry, key) {
@@ -1079,8 +1082,6 @@
         + `<span class="agent-entry-text"><span class="agent-entry-name">${escapeHtml(agent.label)}</span>${second}</span></button>`;
     }
 
-    const CHEVRON = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>';
-
     /** The one row every agent not on this computer folds into, which opens in place. */
     function foldMarkup(group) {
       const count = group.agents.length;
@@ -1481,7 +1482,7 @@
       const settings = layers.flatMap((layer) =>
         layer.settings.map((setting) => ({ ...setting, owner: layer.title, kind: layer.kind })));
       el["policy-settings"].innerHTML = settings.length
-        ? `<h2 class="subhead">Restrictions in force</h2><ul class="settings">`
+        ? `<h2 class="subhead">Restrictions in force</h2><ul class="layer-settings">`
           + settings.map((setting) => {
             let value = setting.value;
             try {
@@ -1500,8 +1501,8 @@
       el["policy-documents"].innerHTML = layers.map((layer) => {
         if (!layer.document) return "";
         const where = layer.path ? `<span class="doc-path">${escapeHtml(layer.path)}</span>` : "";
-        return `<details class="layer-doc"><summary>${escapeHtml(layer.title)}: `
-          + `${escapeHtml(layer.policy_name)} ${escapeHtml(layer.version)}</summary>`
+        return `<details class="layer-doc"><summary class="disclosure">${escapeHtml(layer.title)}: `
+          + `${escapeHtml(layer.policy_name)} ${escapeHtml(layer.version)}${CHEVRON}</summary>`
           + where + `<pre>${escapeHtml(layer.document)}</pre></details>`;
       }).join("");
     }

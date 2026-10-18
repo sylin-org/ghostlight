@@ -17,7 +17,7 @@
 .settings-rail { display: flex; flex-direction: column; gap: 2px; }
 .rail-entry {
   display: grid; width: 100%; gap: 2px; padding: 9px 12px; border-radius: 7px;
-  color: var(--muted); text-align: left;
+  color: var(--ink-4); text-align: left;
   transition: color .25s var(--calm), background .25s var(--calm);
 }
 .rail-entry:hover { color: var(--ink-2); background: rgba(255, 255, 255, .035); }
@@ -25,7 +25,7 @@
 .rail-label { font-size: 12.5px; }
 .rail-state {
   display: -webkit-box; overflow: hidden;
-  color: var(--muted); font: 400 10.5px/1.4 var(--mono);
+  color: var(--ink-4); font: 400 10.5px/1.4 var(--mono);
   -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
 }
 .rail-entry.active .rail-state { color: var(--ink-3); }
@@ -50,7 +50,7 @@
 .settings-label { color: var(--ink-2); font-size: 12.5px; }
 .settings-state { display: grid; min-width: 0; gap: 2px; }
 .settings-state b { color: var(--ink); font-size: 12.5px; font-weight: 400; }
-.settings-state small, .settings-detail { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; }
+.settings-state small, .settings-detail { overflow: hidden; color: var(--ink-4); font-size: 11px; text-overflow: ellipsis; }
 .settings-detail { font-family: var(--mono); user-select: text; word-break: break-all; white-space: normal; }
 .settings-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .settings-acts .ghost-button, .settings-acts .danger-button, .settings-acts .link-button { height: 28px; }

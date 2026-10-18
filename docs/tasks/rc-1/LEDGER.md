@@ -19,7 +19,7 @@ gate, the in-place deploy and the owner-held items below.
 | b1-no-tab-never-guesses | agent | landed: with several tabs a call that names none is refused and lists them; no per-caller marker exists (ADR-0198, amendment of 2026-10-18) |
 | b2-page-refusals-say-what-to-do | agent | landed: a hidden, disabled, read-only or non-text control is refused in plain words, says nothing was clicked or typed, and names one step that works (ADR-0198, amendment of 2026-10-18) |
 | c1-screen-readers-and-failures | window | landed (`fix(workbench): the window is calm for a screen reader, and a failure looks like one`): one status line says each settled action, at most one a second; failed and kept rows and the card say so in words; a destination that cannot be read says so in place, with Try again; both dialogs hold focus and give it back |
-| c2-one-legible-type-and-colour-system | window | todo |
+| c2-one-legible-type-and-colour-system | window | landed (`fix(workbench): one legible type and colour system on every tab`): every word is at least --ink-4 (5.6:1) and about 11px; one eyebrow, one data tag and one page title; Policy's restrictions no longer collide with the kit's Settings grid; summaries, the agent pane's mascot and the About orbs fixed |
 | c3-one-vocabulary-and-plain-status | window | todo |
 | c4-rows-and-widths | window | todo |
 | d1-native-frame-fits-the-person | native | landed (`feat(tray): the tooltip names the state and says when no browser is connected`, `feat(desktop): the frame and the tray fit a light-mode laptop`): the title bar is dark in light mode; a new window opens no taller than the primary monitor less 96 px (624 high on 1280x720), centered above the taskbar; the minimum width is 720; the Windows tray draws the 16 px ghost at 16 px and the 32 px one at 24 and 32, and Linux always draws the 32 px one for its host to size, inks it on a light taskbar (re-read every 2 s) and rings a 3 px dot in the taskbar's ground; the executable carries 16/32/48/128; the tooltip leads with the band's word and says "No browser connected" (ADR-0199 amendment of 2026-10-18). Owed: the light-mode 150% check under Before v2.0.0 |
@@ -87,3 +87,18 @@ gate, the in-place deploy and the owner-held items below.
   reach its setup view with no second copy to change. The popup foot's Settings link takes the same
   quiet ink as the new link beside it, so the foot rests in ink. `tests/pages.test.js` runs the
   popup and options scripts over a fake document. The freeze golden is regenerated from the new zip.
+- c2 (j-02, j-10, j-06, j-13, j-12, j-22; window-4): the window adds `--ink-4: #8a8a93`, the
+  kit's value, and sets every quiet word in it: inactive tabs, activity sentences, band facts, page
+  leads, durations, ages and the settled stopwatch (now weight 400). `--muted` and `--faint` stay for
+  strokes, borders and decoration, and a test fails on any `color` set in either in `styles.css` or
+  `kit/kit.css`. The read capability keeps its #52525b edge and its word reads in ink-3 (`--cap-ink`).
+  Two label voices remain: an eyebrow (500 11.5px sans, .18em, capitals, ink-4) for `.kicker`, the
+  queue head, the rail's group heads and About's labels, and a mono data tag (500 10px, .14em) for
+  capability, outcome, severity and rule tags; teal eyebrows stay in the setup view. Every
+  destination's title is 300 25px in ink. No word is under 10.5px except a 10px tag; the sylin.org
+  card and the face monogram are artwork. Policy's list is `.layer-settings`, so Settings starts
+  under its heading and the restrictions are a plain list; a test checks the view draws none of the
+  kit's layout containers. Every disclosure is a quiet 12px ink-3 line with the agents fold's
+  chevron and turns to ink when open; `--sky` is gone from `ui/` and a test keeps it gone. The
+  50px mascot is averaged rather than pixelated. The About orbs take their green and teal from
+  classes, and a test finds no inline `style` anywhere in `ui/`.
