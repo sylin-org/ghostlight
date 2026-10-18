@@ -70,7 +70,6 @@ by the runner.
 | `acceptance/plural.mjs` | Chromium, Brave, second profile, draft retention, reload, and pinned-browser recovery; requires the shared context plus an already connected Brave and `$AREA/brave.json` containing its exact `pid`. Enable the source adapter in both browsers and the second ordinary Chromium profile first. |
 | `acceptance/cold.mjs` | Extension-first install with awake/stopped worker; creates a fresh test home and XDG state per case from the portable archive. |
 | `acceptance/managed/run.mjs` | Signed managed-policy admission/cache/restart/rollback in a disposable `/etc/ghostlight` mount; creates a fresh test home from the portable archive and kills the service to prove the restart. |
-| `acceptance/startup-check.py` | Missing-display failure followed by valid Open; extracts the portable archive under `$AREA/startup`. |
 | `acceptance/no-tray/check.py` | Start `$AREA/no-tray/bin/ghostlight` on a private session bus; write its context and keep the bus alive until `$AREA/no-tray/stop` exists. Extract siblings there first and create its XDG directories. |
 | `acceptance/no-tray/desktop-check.py` | KWin lifecycle, exact descendant renderer failure, and Applications launch using the private-bus context. |
 | `acceptance/no-tray/desktop_atspi_driver.py` | Diagnostic accessibility tree probe; lack of a usable tree is not a passing accessibility result. |
