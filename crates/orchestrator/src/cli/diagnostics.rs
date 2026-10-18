@@ -260,7 +260,7 @@ fn run_show(
             .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
             .to_offset(offset);
         println!(
-            "{:02}-{:02} {:02}:{:02}:{:02}.{:03} {:<17} {:5} {:28} {}{}",
+            "{:02}-{:02} {:02}:{:02}:{:02}.{:03} {:<17} {:5} {:28} {}",
             moment.month() as u8,
             moment.day(),
             moment.hour(),
@@ -279,14 +279,16 @@ fn run_show(
                 .get("event")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("?"),
-            record
-                .get("op")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(""),
-            record
-                .get("detail")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(""),
+            op_and_detail(
+                record
+                    .get("op")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
+                record
+                    .get("detail")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
+            ),
         );
     }
     if malformed > 0 {
@@ -316,6 +318,16 @@ fn run_show(
 }
 
 /// Parse a window like `30s`, `10m`, `2h`, or `1d` into milliseconds.
+/// The end of a shown line: the operation, then the detail, with a space between when there are
+/// both. An invocation id and a tool name must not read as one word.
+fn op_and_detail(op: &str, detail: &str) -> String {
+    if op.is_empty() || detail.is_empty() {
+        format!("{op}{detail}")
+    } else {
+        format!("{op} {detail}")
+    }
+}
+
 fn parse_window(text: &str) -> anyhow::Result<u128> {
     let digits: String = text
         .chars()
@@ -336,4 +348,19 @@ fn parse_window(text: &str) -> anyhow::Result<u128> {
         other => bail!("unknown --last unit {other}; use s, m, h, or d"),
     };
     Ok(value * seconds * 1000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::op_and_detail;
+
+    #[test]
+    fn the_operation_and_its_detail_read_as_two_words() {
+        assert_eq!(
+            op_and_detail("invocation_1", "browser_tabs succeeded none 2ms"),
+            "invocation_1 browser_tabs succeeded none 2ms"
+        );
+        assert_eq!(op_and_detail("", "session_end"), "session_end");
+        assert_eq!(op_and_detail("invocation_1", ""), "invocation_1");
+    }
 }
