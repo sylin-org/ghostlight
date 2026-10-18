@@ -30,7 +30,15 @@ foreach ($asset in $release.assets) {
 if (-not $assets.ContainsKey("SHA256SUMS")) {
     throw "Release $tag has no SHA256SUMS asset."
 }
-$sumLines = (Invoke-WebRequest -Uri $assets["SHA256SUMS"] -UseBasicParsing).Content -split "`n"
+# GitHub serves SHA256SUMS as application/octet-stream, so a response's Content is bytes in both
+# Windows PowerShell 5.1 and PowerShell 7; the file is read as text only once it is saved.
+$sumsFile = Join-Path ([System.IO.Path]::GetTempPath()) "ghostlight-sums-$([Guid]::NewGuid().ToString('N'))"
+try {
+    Invoke-WebRequest -Uri $assets["SHA256SUMS"] -OutFile $sumsFile -UseBasicParsing
+    $sumLines = [System.IO.File]::ReadAllLines($sumsFile)
+} finally {
+    Remove-Item -LiteralPath $sumsFile -Force -ErrorAction SilentlyContinue
+}
 
 if ([string]::IsNullOrWhiteSpace($env:USERPROFILE) -or -not [System.IO.Path]::IsPathRooted($env:USERPROFILE)) {
     throw "Ghostlight cannot locate this user's home directory."
