@@ -362,7 +362,7 @@ fn navigate_schema() -> Value {
                         "browser",
                         handle(
                             "browser_",
-                            "From browser_tabs list. Omit to use the browser the user attended last.",
+                            "Only with new_tab true. From browser_tabs list. Omit to use the browser the user attended last.",
                         ),
                     ),
                 ],

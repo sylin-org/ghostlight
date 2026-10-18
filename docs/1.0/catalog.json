@@ -72,7 +72,7 @@
           "type": "string"
         },
         "browser": {
-          "description": "From browser_tabs list. Omit to use the browser the user attended last.",
+          "description": "Only with new_tab true. From browser_tabs list. Omit to use the browser the user attended last.",
           "maxLength": 160,
           "pattern": "^browser_.+$",
           "type": "string"
