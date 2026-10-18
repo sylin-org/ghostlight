@@ -12,6 +12,7 @@
 
 use std::env;
 use std::fs;
+use std::path::Path;
 
 /// The pinned marker that identifies a WSL kernel, matched case-insensitively.
 const WSL_KERNEL_MARKER: &str = "microsoft";
@@ -24,6 +25,18 @@ pub const ELEVATED_SERVICE: &str = "Ghostlight does not run with administrator r
 /// What an install says after it put the command on the Windows `Path`: a terminal that was open
 /// before keeps the `Path` it started with.
 pub const OPEN_NEW_TERMINAL: &str = "Open a new terminal to use ghostlight.";
+
+/// What an install says when it put the `ghostlight` command at `command`, in a directory that is
+/// not on the `PATH` it ran with: typing `ghostlight` there finds nothing, and the full path works.
+#[must_use]
+pub fn run_by_full_path(command: &Path) -> String {
+    let directory = command.parent().unwrap_or(command);
+    format!(
+        "This terminal's PATH does not include {}, so run ghostlight by its full path: {}",
+        directory.display(),
+        command.display()
+    )
+}
 
 /// What the service records when a browser or recovery start finds that the person quit
 /// Ghostlight, and so does not bring it back.

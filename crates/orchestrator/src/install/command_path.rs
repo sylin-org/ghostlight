@@ -7,8 +7,9 @@
 //! On Unix this owns one symlink at `~/.local/bin/ghostlight`, the de facto user executable
 //! directory that modern distributions already place on PATH. Shell startup files are never
 //! edited: rewriting a person's `.bashrc` to fix PATH is exactly the kind of uninvited change this
-//! product does not make. When the directory is not on PATH, the install output still names the
-//! absolute path, so the terminal route works either way.
+//! product does not make. When the directory is not on the PATH the install runs with, the install
+//! result carries the link's full path ([`CommandPathActionResult::off_path`]) and the summary names
+//! it, so the terminal route works either way.
 //!
 //! Ownership is conservative. A symlink whose target is named `ghostlight` is ours to update or
 //! remove. Anything else -- a regular file, a directory, a symlink pointing somewhere else -- is
@@ -35,6 +36,9 @@ use super::user_path::{self, PathValue, UserPathStore};
 
 /// The command name a person types.
 const COMMAND_NAME: &str = "ghostlight";
+
+/// The variable that holds the directories a shell finds commands in.
+const SEARCH_PATH_VARIABLE: &str = "PATH";
 
 /// What an install calls the command's `Path` entry when an app container kept it private.
 pub const PATH_ENTRY_REGISTRATION: &str = "PATH entry";
@@ -99,6 +103,11 @@ pub struct CommandPathActionResult {
     pub changed: bool,
     /// Whether a terminal that is already open still lacks the change. A new terminal has it.
     pub needs_new_terminal: bool,
+    /// The link's full path after an install, when its directory is not on the `PATH` this process
+    /// runs with: typing `ghostlight` in that terminal finds nothing, and the full path works.
+    /// Only the Unix link is judged; the Windows `Path` entry says so with
+    /// [`Self::needs_new_terminal`].
+    pub off_path: Option<PathBuf>,
     /// State observed after the action.
     pub report: CommandPathReport,
 }
@@ -166,6 +175,8 @@ struct CommandPathContext {
     profile: Option<PathBuf>,
     /// The app container this process runs in, when there is one.
     container: Option<AppContainer>,
+    /// The directories this process finds commands in, from its `PATH`.
+    search_path: Vec<PathBuf>,
 }
 
 impl CommandPathContext {
@@ -180,6 +191,9 @@ impl CommandPathContext {
             user_path: system_user_path(),
             profile: env::var_os(PROFILE_VARIABLE).map(PathBuf::from),
             container: residence.container().cloned(),
+            search_path: env::var_os(SEARCH_PATH_VARIABLE)
+                .map(|value| env::split_paths(&value).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -374,11 +388,42 @@ fn unchanged(report: CommandPathReport) -> CommandPathActionResult {
     CommandPathActionResult {
         changed: false,
         needs_new_terminal: false,
+        off_path: None,
         report,
     }
 }
 
+/// The full path of the link `report` describes, when it is in place and its directory is not on
+/// the `PATH` this process runs with.
+fn off_path(context: &CommandPathContext, report: &CommandPathReport) -> Option<PathBuf> {
+    if context.user_path.is_some() || report.state != CommandPathState::Current {
+        return None;
+    }
+    let directory = report.link.parent()?;
+    (!on_search_path(&context.search_path, directory)).then(|| report.link.clone())
+}
+
+/// Whether some entry of `search_path` names `directory`, as written or once both are resolved.
+fn on_search_path(search_path: &[PathBuf], directory: &Path) -> bool {
+    let resolved = fs::canonicalize(directory).ok();
+    search_path.iter().any(|entry| {
+        entry == directory
+            || resolved
+                .as_ref()
+                .is_some_and(|resolved| fs::canonicalize(entry).ok().as_ref() == Some(resolved))
+    })
+}
+
 fn apply_install(
+    context: &CommandPathContext,
+) -> Result<CommandPathActionResult, CommandPathError> {
+    let mut result = install_entry(context)?;
+    result.off_path = off_path(context, &result.report);
+    Ok(result)
+}
+
+/// Create or update the entry, without judging the `PATH` it is found by.
+fn install_entry(
     context: &CommandPathContext,
 ) -> Result<CommandPathActionResult, CommandPathError> {
     let before = inspect(context)?;
@@ -396,6 +441,7 @@ fn apply_install(
         return Ok(CommandPathActionResult {
             changed: true,
             needs_new_terminal: true,
+            off_path: None,
             report: inspect(context)?,
         });
     }
@@ -414,6 +460,7 @@ fn apply_install(
     Ok(CommandPathActionResult {
         changed: true,
         needs_new_terminal: false,
+        off_path: None,
         report: inspect(context)?,
     })
 }
@@ -454,6 +501,7 @@ fn apply_uninstall(
     Ok(CommandPathActionResult {
         changed: true,
         needs_new_terminal: false,
+        off_path: None,
         report: inspect(context)?,
     })
 }
@@ -588,6 +636,7 @@ mod tests {
             user_path: None,
             profile: None,
             container: None,
+            search_path: Vec::new(),
         };
         (root, context)
     }
@@ -601,6 +650,7 @@ mod tests {
             user_path: None,
             profile: None,
             container: None,
+            search_path: Vec::new(),
         };
         let report = inspect(&context).unwrap();
         assert_eq!(report.state, CommandPathState::NotApplicable);
@@ -653,6 +703,42 @@ mod tests {
         assert_eq!(removed.report.state, CommandPathState::Missing);
         assert_eq!(removable(&context).unwrap(), None);
         assert!(!apply_uninstall(&context).unwrap().changed);
+    }
+
+    #[test]
+    fn a_link_whose_directory_is_off_the_path_is_named_by_its_full_path() {
+        if !cfg!(unix) {
+            return;
+        }
+        let (_root, mut context) = context("off-path");
+        fs::create_dir_all(context.executable.parent().unwrap()).unwrap();
+        fs::write(&context.executable, b"ghostlight").unwrap();
+        context.search_path = vec![PathBuf::from("/usr/bin")];
+
+        let first = apply_install(&context).unwrap();
+        assert_eq!(first.report.state, CommandPathState::Current);
+        assert_eq!(first.off_path, Some(context.link()));
+        // An install that finds the link already in place says it again.
+        assert_eq!(
+            apply_install(&context).unwrap().off_path,
+            Some(context.link())
+        );
+
+        context.search_path.push(context.bin_home.clone());
+        assert_eq!(apply_install(&context).unwrap().off_path, None);
+    }
+
+    #[test]
+    fn a_path_entry_names_a_directory_as_written_or_once_resolved() {
+        let (root, _context) = context("search-path");
+        let directory = root.join(".local/bin");
+        fs::create_dir_all(&directory).unwrap();
+
+        assert!(!on_search_path(&[], &directory));
+        assert!(on_search_path(std::slice::from_ref(&directory), &directory));
+        let with_dots = root.join(".local/../.local/bin");
+        assert!(on_search_path(&[with_dots], &directory));
+        assert!(!on_search_path(&[root.join(".local")], &directory));
     }
 
     #[test]
@@ -799,6 +885,7 @@ mod tests {
                 user_path: Some(store.clone()),
                 profile: Some(PathBuf::from(PROFILE)),
                 container: None,
+                search_path: Vec::new(),
             }
         }
 

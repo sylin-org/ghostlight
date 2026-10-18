@@ -39,9 +39,11 @@
 //! attention, and `platform_entry_kept`. What it would remove, the `Path` entry among it, prints
 //! only in `--dry-run`.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
-use super::environment::{Environment, OPEN_NEW_TERMINAL};
+use super::environment::{run_by_full_path, Environment, OPEN_NEW_TERMINAL};
 
 /// The Chrome Web Store listing of the Ghostlight extension.
 pub const STORE_LISTING_URL: &str = "https://chromewebstore.google.com/detail/ghostlight-in-browser/lejccfmoeogmhemakeknjjdhkfkgncdl";
@@ -905,6 +907,9 @@ pub struct InstallFacts {
     pub environment: Environment,
     /// Whether this install wrote the user `Path`, so an open terminal does not have it yet.
     pub path_written: bool,
+    /// The `ghostlight` command's full path, when its directory is not on the `PATH` the install
+    /// ran with, so typing `ghostlight` in that terminal finds nothing.
+    pub command_off_path: Option<PathBuf>,
     /// The agents that are on this computer.
     pub agents: Vec<InstallAgent>,
     /// The command an agent starts to run Ghostlight's MCP server.
@@ -930,6 +935,9 @@ pub fn install_lines(facts: &InstallFacts) -> Vec<String> {
     }
     if facts.path_written {
         lines.push(OPEN_NEW_TERMINAL.to_owned());
+    }
+    if let Some(command) = &facts.command_off_path {
+        lines.push(run_by_full_path(command));
     }
     let changed: Vec<&str> = facts
         .agents
@@ -1791,6 +1799,7 @@ mod tests {
             version: "2.0.0".to_owned(),
             environment: Environment::Windows,
             path_written: false,
+            command_off_path: None,
             agents,
             mcp_command: "ghostlight mcp".to_owned(),
             browsers,
@@ -1972,6 +1981,19 @@ mod tests {
         facts.path_written = true;
         let lines = install_lines(&facts);
         assert_eq!(lines[2], OPEN_NEW_TERMINAL);
+    }
+
+    #[test]
+    fn a_command_off_the_path_is_named_by_its_full_path() {
+        let mut facts = install(vec![chrome(BrowserForm::Native)], vec![]);
+        facts.environment = Environment::LinuxGnome;
+        facts.command_off_path = Some(PathBuf::from("/home/p/.local/bin/ghostlight"));
+        let lines = install_lines(&facts);
+        assert_eq!(
+            lines[2],
+            "This terminal's PATH does not include /home/p/.local/bin, so run ghostlight by its full path: /home/p/.local/bin/ghostlight"
+        );
+        assert_eq!(next_lines(&lines).len(), 1);
     }
 
     #[test]

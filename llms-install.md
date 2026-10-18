@@ -33,8 +33,9 @@ This guide describes Ghostlight 2.0. The release published today is named in the
 
 If the user does not see the window (`--no-open`, a remote or automated install), they can open
 Ghostlight from the Start menu or Applications, or run `ghostlight open`, to see the setup steps.
-Use `npx -y ghostlight doctor` only if the connection needs recovery. It is not a required second
-installation command.
+Use `ghostlight doctor` only if the connection needs recovery. It is not a required second
+installation command. After an npm install, `npx -y ghostlight doctor` runs the same check. If the
+install said its directory is not on the PATH, run the full path it named.
 
 Ghostlight sets up every agent in its catalog. The
 [installation guide](docs/guides/installation.md#agents-ghostlight-sets-up) lists each one with its

@@ -57,8 +57,10 @@ is no other restart step. "Skip for now" in the window's setup view goes to the 
 tray's Open brings the setup steps back until setup is done. A browser tab that watches Ghostlight
 shows the ordinary workbench.
 
-`npx -y ghostlight doctor` is recovery when something does not connect. It is not another
-required setup step, and `ghostlight doctor --fix` opens no window.
+`ghostlight doctor` is recovery when something does not connect. It is not another required setup
+step, and `ghostlight doctor --fix` opens no window. After an npm install, `npx -y ghostlight
+doctor` runs the same check. On Linux the command is a link in `~/.local/bin`; when that directory
+is not on the PATH the install ran with, the install names the full path to run instead.
 
 After setup there is no startup ritual. Launching the registered MCP client or Chromium
 demand-starts Ghostlight if it is absent. The service starts the window's tray whenever the desktop

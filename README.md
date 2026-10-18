@@ -107,8 +107,11 @@ opened, or a tab in another client's group.
 If a step needs attention, run:
 
 ```sh
-npx -y ghostlight doctor
+ghostlight doctor
 ```
+
+If you installed with npm and `ghostlight` is not on your PATH, `npx -y ghostlight doctor` runs the
+same check.
 
 `doctor` checks the client entry, local service, browser connection, and extension, then names the
 next action. The [installation guide](docs/guides/installation.md) covers targeted clients, source

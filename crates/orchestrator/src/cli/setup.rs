@@ -18,6 +18,7 @@
 //! install there leaves those registrations unwritten, says which, and names the one command that
 //! finishes them from a regular terminal (see `crate::install::container`).
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use ghostlight_relay::protocol::{Control, QuitReason};
@@ -55,6 +56,9 @@ struct KeptPrivate {
 struct Collected {
     /// Whether the user `Path` was written, so a terminal that is already open lacks it.
     path_written: bool,
+    /// The `ghostlight` command's full path, when its directory is not on the `PATH` the install
+    /// ran with.
+    command_off_path: Option<PathBuf>,
     /// The agents on this computer as the install left them.
     agents: Vec<InstallAgent>,
     /// The command an agent starts to run Ghostlight's MCP server.
@@ -251,6 +255,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
                 .push(PATH_ENTRY_REGISTRATION.to_owned());
         }
         collected.path_written = result.needs_new_terminal;
+        collected.command_off_path = result.off_path.clone();
         collected.command_removed = !install && result.changed;
     }
 
@@ -782,6 +787,7 @@ fn install_facts(
         version,
         environment,
         path_written: collected.path_written,
+        command_off_path: collected.command_off_path.clone(),
         agents: collected.agents.clone(),
         mcp_command: collected.mcp_command.clone(),
         browsers: if setup_complete {
@@ -1914,6 +1920,20 @@ mod tests {
             false,
         );
         assert_eq!(facts.browsers, vec![native_chrome()]);
+    }
+
+    #[test]
+    fn a_command_off_the_path_is_named_by_its_full_path() {
+        use crate::language::environment::run_by_full_path;
+
+        let command = PathBuf::from("/home/p/.local/bin/ghostlight");
+        let collected = Collected {
+            command_off_path: Some(command.clone()),
+            ..two_agents_changed()
+        };
+        let lines = lines_of(&collected, vec![native_chrome()], false, true);
+        assert_eq!(lines[2], run_by_full_path(&command));
+        assert!(!lines.iter().any(|line| line.contains("new terminal")));
     }
 
     #[test]
