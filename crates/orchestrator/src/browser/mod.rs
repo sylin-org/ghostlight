@@ -31,6 +31,9 @@ const AVAILABILITY_POLL: Duration = Duration::from_millis(40);
 // A product name is a label a person reads next to a browser they already recognize, not a
 // place for an adapter to write prose.
 const BROWSER_NAME_MAX_CHARS: usize = 40;
+// A protocol-4 extension names the most specific brand among the browser's user-agent brands and
+// leaves out the generic Chromium brand, so a browser that reports no name calls itself Chromium.
+const UNBRANDED_BROWSER_NAME: &str = "Chromium";
 const MAX_BROWSER_CONNECTIONS: usize = 16;
 // Every browser identity an adapter mints starts with this prefix.
 const BROWSER_ID_PREFIX: &str = "browser_";
@@ -1186,10 +1189,12 @@ fn retire(previous: &Connection) {
     previous.line.writer.close();
 }
 
-/// Validate the optional bounded product name an adapter reports for itself.
+/// Validate the bounded product name an adapter reports for itself. A browser that reports none
+/// is Chromium ([`UNBRANDED_BROWSER_NAME`]), so its connection is named and remembered like any
+/// other browser's.
 fn validated_browser_name(name: Option<String>) -> Result<Option<String>, BrowserError> {
     let Some(name) = name else {
-        return Ok(None);
+        return Ok(Some(UNBRANDED_BROWSER_NAME.to_owned()));
     };
     let acceptable = !name.trim().is_empty()
         && name.chars().count() <= BROWSER_NAME_MAX_CHARS

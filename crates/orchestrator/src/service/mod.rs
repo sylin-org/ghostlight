@@ -5487,6 +5487,38 @@ mod tests {
     }
 
     #[test]
+    fn a_browser_that_reports_no_name_is_remembered_as_chromium() {
+        use crate::browser::adapter::chromium::protocol4::fake::FakeExtension;
+        use crate::browser::adapter::chromium::protocol4::fake::Reply as FakeReply;
+        use crate::browser::BrowserPort as _;
+
+        let home = TestHome::new("last-browser-unnamed");
+        let host = ServiceHost::start(home.path()).unwrap();
+        let (service, extension) = pair().unwrap();
+        // Plain Chromium's brands are all generic, so its extension reports no name.
+        let mut hello = FakeExtension::hello("browser_plain");
+        hello.as_object_mut().unwrap().remove("browser_name");
+        let fake = FakeExtension::connect(
+            extension,
+            &hello,
+            Box::new(|correlation, _| {
+                FakeReply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))
+            }),
+        );
+        host.browser.attach(service).unwrap();
+        assert_eq!(
+            host.browser.last_connected_browser().as_deref(),
+            Some("chromium")
+        );
+        assert_eq!(
+            host.browser.browsers()[0].name.as_deref(),
+            Some("Chromium"),
+            "the model reads a name, not null"
+        );
+        fake.close();
+    }
+
+    #[test]
     fn a_start_that_arrives_while_the_service_is_leaving_on_idle_waits_for_it_and_serves() {
         let idling = idling_host("idle-exit-race", &Arc::default());
         idling.leaves_past_the_limit("the idle service asks the process to exit");

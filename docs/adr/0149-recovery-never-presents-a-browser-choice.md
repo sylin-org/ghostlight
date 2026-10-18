@@ -174,3 +174,15 @@ executable, an unreadable runtime directory, or a spawn the system refuses.
 
 Additional acceptance evidence: a unit test pins both flights with no display, and the batch
 checks a call over SSH on the real installation.
+
+## Amendment 2026-10-18: a browser that reports no name is Chromium
+
+The record of the browser that last connected is written only for a reported name that maps to
+one supported browser. The protocol-4 extension reports the most specific brand among the
+browser's user-agent brands and leaves out the generic Chromium brand, so plain Chromium reports
+no name at all: on a Linux machine with Chromium, nothing was ever remembered, a session's browser
+had no installed id to start again, and the model read the browser's name as null (linux-1, L07).
+
+A connection that reports no name is now named Chromium, which is what such a browser calls
+itself. It is remembered as `chromium`, a session in it can have Chromium started again, and the
+model reads "Chromium". A reported name that maps to no supported browser still writes nothing.
