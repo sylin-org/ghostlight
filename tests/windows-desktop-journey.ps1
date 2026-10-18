@@ -283,8 +283,10 @@ function Stop-OwnedProcess([Diagnostics.Process] $Child) {
 }
 
 # Starts the edge with held input and a verb, waits for its session listener, delivers the
-# end-session sequence and requires a prompt, successful exit.
-function Assert-EdgeShutdown([string[]] $Arguments, [string] $Label) {
+# end-session sequence and requires a prompt, successful exit. With -AwaitService the edge has
+# started its service before the session ends: a start refuses once the session is ending, so
+# ending it first would race the start the next step relies on.
+function Assert-EdgeShutdown([string[]] $Arguments, [string] $Label, [switch] $AwaitService) {
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $edgeImage
     foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
@@ -297,6 +299,7 @@ function Assert-EdgeShutdown([string[]] $Arguments, [string] $Label) {
     $edge.StartInfo = $info
     if (-not $edge.Start()) { throw "Could not start the edge for $Label." }
     $edgeChildren.Add($edge)
+    if ($AwaitService) { $null = Wait-ServiceRunning }
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     $listenerReady = $false
@@ -348,8 +351,8 @@ try {
     Assert-EdgeShutdown @('chrome-extension://abcdefghijklmnopabcdefghijklmnop/') 'browser'
     # A browser relay starts the service only after the extension's hello.
     if (@(Get-ImageProcesses $serviceImage).Count) { throw 'A browser edge with no hello started a service.' }
-    Assert-EdgeShutdown @('mcp') 'mcp'
     # The MCP relay starts the service at its own start, an agent start (ADR-0199 Decision 10).
+    Assert-EdgeShutdown @('mcp') 'mcp' -AwaitService
     $null = Wait-ServiceRunning
     $agentService = Wait-SingleService
     # End that session so round 1 races a cold start; the service says goodbye to any shell.
