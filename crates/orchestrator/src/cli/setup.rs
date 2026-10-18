@@ -724,13 +724,13 @@ fn client_step(
         }
     }
     if dry_run {
-        return ClientStep::Say(format!(
-            "Would {} Ghostlight for {} ({:?}).",
-            if install { "install" } else { "remove" },
-            summary.label,
-            summary.state
+        return ClientStep::Say(deployment_words::client_would(
+            &summary.label,
+            summary.state,
+            install,
         ));
     }
+
     ClientStep::Apply(if install {
         HarnessAction::Install
     } else {

@@ -8,7 +8,7 @@
 
 use crate::install::deployment::RESTORE_OPTION;
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
-use crate::install::ALL_CLIENTS_OPTION;
+use crate::install::{HarnessState, ALL_CLIENTS_OPTION};
 
 /// Where the get scripts are published.
 const GET_SCRIPT_ROOT: &str = "https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts";
@@ -214,6 +214,31 @@ pub fn browsers_registered(browsers: &[String]) -> String {
     format!("Browser connection registered for {}.", browsers.join(", "))
 }
 
+/// What a dry run would do for `client`, whose entry is in `state`: install it when `install`,
+/// otherwise remove it. It says what the real run would change, and that nothing would when
+/// nothing would.
+#[must_use]
+pub fn client_would(client: &str, state: HarnessState, install: bool) -> String {
+    match (install, state) {
+        (true, HarnessState::NotDetected | HarnessState::Available) => {
+            format!("Would install Ghostlight for {client}.")
+        }
+        (true, HarnessState::Updatable) => format!("Would update Ghostlight's entry for {client}."),
+        (true, HarnessState::Installed) => {
+            format!("{client} already has the current Ghostlight entry; nothing would change.")
+        }
+        (_, HarnessState::NeedsAttention) => format!(
+            "Would leave {client} as it is: the entry under Ghostlight's name is not Ghostlight's."
+        ),
+        (false, HarnessState::Installed | HarnessState::Updatable) => {
+            format!("Would remove Ghostlight from {client}.")
+        }
+        (false, HarnessState::NotDetected | HarnessState::Available) => {
+            format!("{client} has no Ghostlight entry; nothing would change.")
+        }
+    }
+}
+
 /// A client's Ghostlight entry now starts the installed edge.
 #[must_use]
 pub fn client_rewritten(client: &str) -> String {
@@ -407,6 +432,46 @@ mod tests {
     }
 
     #[test]
+    fn a_dry_run_says_what_each_state_would_become_in_plain_words() {
+        use HarnessState::{Available, Installed, NeedsAttention, NotDetected, Updatable};
+
+        let would = |state, install| client_would("Cline (CLI)", state, install);
+        assert_eq!(
+            would(Available, true),
+            "Would install Ghostlight for Cline (CLI)."
+        );
+        assert_eq!(
+            would(NotDetected, true),
+            "Would install Ghostlight for Cline (CLI)."
+        );
+        assert_eq!(
+            would(Updatable, true),
+            "Would update Ghostlight's entry for Cline (CLI)."
+        );
+        assert!(would(Installed, true).ends_with("nothing would change."));
+        assert!(would(NeedsAttention, true).starts_with("Would leave Cline (CLI) as it is"));
+        assert_eq!(
+            would(Installed, false),
+            "Would remove Ghostlight from Cline (CLI)."
+        );
+        assert_eq!(
+            would(Updatable, false),
+            "Would remove Ghostlight from Cline (CLI)."
+        );
+        assert!(would(Available, false).ends_with("nothing would change."));
+        assert!(would(NeedsAttention, false).starts_with("Would leave Cline (CLI) as it is"));
+        for state in [Available, NotDetected, Updatable, Installed, NeedsAttention] {
+            for install in [true, false] {
+                let sentence = would(state, install);
+                assert!(
+                    !sentence.contains(&format!("{state:?}")),
+                    "no internal name: {sentence}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_sentence_is_ascii() {
         let sentences = [
             restore_route(),
@@ -417,6 +482,7 @@ mod tests {
             payload_in_place("d"),
             payload_other_build("d"),
             service_did_not_start("bin", 30),
+            client_would("c", HarnessState::NeedsAttention, true),
             service_could_not_start("bin", "r"),
             service_stopped_because("bin", "r"),
             service_stopped("bin"),
