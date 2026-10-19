@@ -146,7 +146,10 @@
             # the install summary in this console.
             & $service install
             if ($LASTEXITCODE -ne 0) {
-                throw "Ghostlight installation did not complete. Run 'ghostlight doctor' in a new terminal for details."
+                # The ghostlight command may not exist yet, so the same downloaded service, which
+                # reads the same home, reports what it finds before its temporary directory goes.
+                & $service doctor
+                throw "Ghostlight installation did not complete."
             }
         }
     }

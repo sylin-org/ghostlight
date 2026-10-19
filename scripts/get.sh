@@ -154,7 +154,10 @@ else
   # The same verified service hands `install` to the copy it just installed, which prints the
   # install summary in this console.
   if ! "$service" install; then
-    echo "ghostlight: installation did not complete. Run 'ghostlight doctor' in a new terminal for details." >&2
+    # The ghostlight command may not exist yet, so the same downloaded service, which reads the
+    # same home, reports what it finds before its temporary directory goes.
+    "$service" doctor || true
+    echo "ghostlight: installation did not complete" >&2
     exit 1
   fi
 fi

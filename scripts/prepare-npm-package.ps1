@@ -77,6 +77,9 @@ Copy-Item -LiteralPath (Join-Path $packageSource "package.json") -Destination $s
 Copy-Item -LiteralPath (Join-Path $packageSource "README.md") -Destination $stagedPackage
 Copy-Item -LiteralPath (Join-Path $packageSource "bin") -Destination $stagedPackage -Recurse
 Copy-Item -LiteralPath (Join-Path $packageSource "test") -Destination $stagedPackage -Recurse
+# The launcher test reads the version vectors one level above the package, as it does in the source
+# tree. They sit beside the staged package, so npm pack never includes them.
+Copy-Item -LiteralPath (Join-Path $repo "packaging/version-order.json") -Destination $OutputDirectory
 foreach ($legalFile in @(
     [ordered]@{ source = "LICENSE"; destination = "LICENSE" },
     [ordered]@{ source = "docs/licenses/MIT.txt"; destination = "MIT.txt" },

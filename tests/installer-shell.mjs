@@ -23,7 +23,8 @@ echo "edge: $*" >> "$INSTALLER_COMMANDS"
 exit 1
 `,
   // The service installs every image from the directory it runs in. It records which copy ran each
-  // command, and its install says so in the console it runs in.
+  // command, and its install and doctor say so in the console they run in. Its install fails when
+  // INSTALLER_INSTALL_FAILS is set, and its doctor always reports a problem.
   "ghostlight-service": `#!/bin/sh
 copy=downloaded
 [ "$(dirname "$0")" = "$HOME/.ghostlight/bin" ] && copy=installed
@@ -36,6 +37,11 @@ if [ "$1" = deployment ] && [ "$2" = install ]; then
 elif [ "$1" = install ]; then
   echo "fixture service: $*"
   echo "$copy service: $*" >> "$INSTALLER_COMMANDS"
+  [ -z "\${INSTALLER_INSTALL_FAILS:-}" ] || exit 3
+elif [ "$1" = doctor ]; then
+  echo "fixture service: $*"
+  echo "$copy service: $*" >> "$INSTALLER_COMMANDS"
+  exit 1
 else
   exit 1
 fi
@@ -92,16 +98,18 @@ const shimCheck = spawnSync(process.execPath, ["--check", join(shims, "curl")], 
 assert.equal(shimCheck.status, 0, `curl shim does not parse: ${shimCheck.stderr}`);
 // Provenance verification is optional. Keep this fixture offline even on machines with gh.
 writeFileSync(join(shims, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
-function run(label, changes = {}, version, arguments_ = []) {
+function run(label, changes = {}, version, arguments_ = [], settings = {}) {
   const directory = join(area, label), userDirectory = join(directory, "user");
   mkdirSync(userDirectory, { recursive: true });
   const fixture = join(directory, "fixture.json"), requests = join(directory, "requests.txt"), commands = join(directory, "commands.txt");
   writeFileSync(fixture, JSON.stringify({ latest: "https://github.com/sylin-org/ghostlight/releases/tag/v1.2.3", tags: ["v1.2.3", "v2.0.0-rc.1"], sums, bodies, ...changes }));
   const environment = { ...process.env, HOME: userDirectory, PATH: `${shims}:${process.env.PATH}`,
     INSTALLER_FIXTURE: fixture, INSTALLER_REQUESTS: requests, INSTALLER_COMMANDS: commands };
+  delete environment.INSTALLER_INSTALL_FAILS;
   delete environment.GHOSTLIGHT_VERSION;
   delete environment.GHOSTLIGHT_NO_REGISTER;
   if (version) environment.GHOSTLIGHT_VERSION = version;
+  Object.assign(environment, settings);
   const result = spawnSync("sh", [join(root, "scripts/get.sh"), ...arguments_], { env: environment, encoding: "utf8", timeout: 15000 });
   assert.equal(result.error, undefined);
   writeFileSync(join(directory, "output.log"), result.stdout + result.stderr);
@@ -124,6 +132,15 @@ for (const name of names) {
 assert.deepEqual(success.commands, ["downloaded service: deployment install", "downloaded service: install"],
   "the downloaded service installs, then runs install itself");
 assert.match(success.stdout, /fixture service: install/, "the output of ghostlight install reaches the person's console");
+// A failed install leaves no ghostlight command to name, so the downloaded service's doctor reports
+// what it found and the script says only that installation did not complete.
+const unfinished = run("install-fails", {}, undefined, [], { INSTALLER_INSTALL_FAILS: "1" });
+assert.notEqual(unfinished.status, 0);
+assert.deepEqual(unfinished.commands,
+  ["downloaded service: deployment install", "downloaded service: install", "downloaded service: doctor"],
+  "a failed install runs the downloaded service's doctor");
+assert.match(unfinished.stdout, /fixture service: doctor/, "the doctor's report reaches the person's console");
+assert.equal(unfinished.stderr.trim(), "ghostlight: installation did not complete");
 const restored = run("restore", {}, undefined, ["--restore"]);
 assert.equal(restored.status, 0, restored.stderr);
 assert.deepEqual(restored.commands, ["downloaded service: deployment install --restore", "downloaded service: install"]);
@@ -178,4 +195,4 @@ for (const damaged of names) {
   assert.equal(existsSync(join(corrupt.userDirectory, ".ghostlight/bin")), false, `a corrupt ${damaged} installs nothing`);
   assert.deepEqual(corrupt.commands, [], "a corrupt download runs nothing");
 }
-console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, restore, invalid release, absent, unreachable or malformed requested version, checksum refusal\nEvidence: ${area}`);
+console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, a failed install reported by the downloaded doctor, restore, invalid release, absent, unreachable or malformed requested version, checksum refusal\nEvidence: ${area}`);

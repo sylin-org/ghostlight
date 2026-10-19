@@ -225,13 +225,24 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   The entry rule finds the installed service is the same image and forwards to it, so the summary
   still prints in the person's console; over a development build it forwards as the edge did. The
   `~/.ghostlight/bin` literal went, and with it `get.ps1`'s `USERPROFILE` check: the service decides
-  where the home is. So the `GHOSTLIGHT_NO_REGISTER` sentence names no directory, and the failure
-  line says "Run 'ghostlight doctor' in a new terminal", where the installed command is on `PATH`.
-  Within the slice's Deletes.
+  where the home is. So the `GHOSTLIGHT_NO_REGISTER` sentence names no directory. When `install`
+  fails, the `ghostlight` command may not exist yet (`install` creates it late, and on Linux
+  `~/.local/bin` may not be on `PATH`), so the script runs the same downloaded service's `doctor`,
+  which runs from anywhere and reads the same home, before the temporary directory goes, and then
+  says only that installation did not complete. Within the slice's Deletes.
+- I8, the npm staging: `scripts/prepare-npm-package.ps1` copies `packaging/version-order.json`
+  beside the staged `package/`, where the staged launcher test finds it at the same relative path
+  as in the source tree and `npm pack` never includes it. Shown by staging fixture artifacts with
+  the script: the staged test passes and the tarball holds only the package's listed files.
 - I8, the journeys (core's, named cross-lane): `tests/installer-shell.mjs`'s fixture service
   records which copy ran each command, the journey expects the downloaded service's
-  `deployment install` and then its `install`, and the fixture edge now fails if it is run.
-  `tests/installer-powershell.ps1` checks the `GHOSTLIGHT_NO_REGISTER` sentence. Neither ran here:
+  `deployment install` and then its `install`, and the fixture edge now fails if it is run. A case
+  whose fixture `install` fails expects the downloaded service's `doctor` to run and the one
+  sentence "ghostlight: installation did not complete"; a Windows copy of that journey (Git Bash,
+  shims for `uname`) passed here and failed on the earlier `get.sh`. `tests/installer-powershell.ps1`
+  checks the `GHOSTLIGHT_NO_REGISTER` sentence; its fixture runs the real built images with
+  registration off, so it cannot fail `install` without writing the machine's registrations, and
+  `get.ps1`'s failure branch, which mirrors `get.sh`'s, is owed a live check. Neither ran here:
   the first is Linux-only and the second starts its own service. The coordinator runs
   `node tests/installer-shell.mjs` on Linux and `pwsh -NoProfile -File tests/installer-powershell.ps1`
   on Windows from a fresh build in `GHOSTLIGHT_BIN_DIR`, and `get.ps1` and `get.sh` once on a test
