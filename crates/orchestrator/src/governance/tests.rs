@@ -1180,30 +1180,112 @@ fn pause_prevents_the_next_browser_effect_and_resume_restores_it() {
     assert!(facade.runtime_decision().allowed);
 }
 
-/// Stop is terminal and idempotent, and a resume cannot undo it.
+/// Stop is terminal and idempotent, and neither a resume, a pause nor a toggle can undo it.
 ///
 /// Only an explicit new session leaves the ended state, so a model that retries after the stop
 /// directive gets the same refusal rather than quietly resuming the work a person interrupted.
 #[test]
-fn stop_is_terminal_and_idempotent() {
+fn stop_is_still_terminal() {
     let facade = GovernanceFacade::new(None, None);
     assert_eq!(
         facade.apply_runtime_intent(RuntimeControlIntent::EndSession),
         RuntimeControlState::Ended
     );
     assert_eq!(facade.runtime_decision().reason, ReasonCode::SessionEnded);
-    assert_eq!(
-        facade.apply_runtime_intent(RuntimeControlIntent::EndSession),
-        RuntimeControlState::Ended
-    );
-    assert_eq!(
-        facade.apply_runtime_intent(RuntimeControlIntent::Resume),
-        RuntimeControlState::Ended,
-        "a resume must not undo a stop"
-    );
+    for intent in [
+        RuntimeControlIntent::EndSession,
+        RuntimeControlIntent::Resume,
+        RuntimeControlIntent::Hold,
+        RuntimeControlIntent::ToggleHold,
+    ] {
+        assert_eq!(
+            facade.apply_runtime_intent(intent),
+            RuntimeControlState::Ended,
+            "{intent:?} must not undo a stop"
+        );
+    }
     assert_eq!(
         facade.apply_runtime_intent(RuntimeControlIntent::StartSession),
         RuntimeControlState::Active
+    );
+}
+
+/// An ended session offers only a new session, so no surface reading the table offers a Resume
+/// that does nothing.
+#[test]
+fn ended_offers_only_start_session() {
+    assert_eq!(
+        super::offers(RuntimeControlState::Ended),
+        [RuntimeControlIntent::StartSession]
+    );
+    assert_eq!(
+        super::offers(RuntimeControlState::Active),
+        [RuntimeControlIntent::Hold, RuntimeControlIntent::EndSession]
+    );
+    assert_eq!(
+        super::offers(RuntimeControlState::Held),
+        [
+            RuntimeControlIntent::Resume,
+            RuntimeControlIntent::EndSession
+        ]
+    );
+}
+
+/// From every state, an intent changes the state only when the state offers its act.
+///
+/// A toggle is the one request that is not an act: it asks for Hold while active and for Resume
+/// otherwise, and the table then decides. So a new session never quietly resumes a pause.
+#[test]
+fn every_state_changes_only_through_an_act_it_offers() {
+    let states = [
+        RuntimeControlState::Active,
+        RuntimeControlState::Held,
+        RuntimeControlState::Ended,
+    ];
+    let intents = [
+        RuntimeControlIntent::ToggleHold,
+        RuntimeControlIntent::Hold,
+        RuntimeControlIntent::Resume,
+        RuntimeControlIntent::EndSession,
+        RuntimeControlIntent::StartSession,
+    ];
+    for state in states {
+        for intent in intents {
+            let controls = super::RuntimeControls::default();
+            match state {
+                RuntimeControlState::Active => controls.resume(),
+                RuntimeControlState::Held => controls.hold(),
+                RuntimeControlState::Ended => controls.end_session(),
+            }
+            let act = match (intent, state) {
+                (RuntimeControlIntent::ToggleHold, RuntimeControlState::Active) => {
+                    RuntimeControlIntent::Hold
+                }
+                (RuntimeControlIntent::ToggleHold, _) => RuntimeControlIntent::Resume,
+                (act, _) => act,
+            };
+            let expected = if super::offers(state).contains(&act) {
+                match act {
+                    RuntimeControlIntent::Hold => RuntimeControlState::Held,
+                    RuntimeControlIntent::EndSession => RuntimeControlState::Ended,
+                    _ => RuntimeControlState::Active,
+                }
+            } else {
+                state
+            };
+            assert_eq!(
+                controls.apply_intent(intent),
+                expected,
+                "{intent:?} from {state:?}"
+            );
+        }
+    }
+    let held = super::RuntimeControls::default();
+    held.hold();
+    assert_eq!(
+        held.apply_intent(RuntimeControlIntent::StartSession),
+        RuntimeControlState::Held,
+        "a new session is not a resume"
     );
 }
 

@@ -948,22 +948,29 @@ impl RuntimeControls {
     }
 
     /// Apply one local human control intent and return the resulting state.
+    ///
+    /// A toggle asks for Hold while active and for Resume otherwise. The act then changes the
+    /// state only when [`offers`] names it for the state it meets; any other request leaves the
+    /// state as it was. The state is read and changed under the observer lock, so two intents
+    /// that race decide one after the other and a Resume never undoes an End session it lost to.
     pub fn apply_intent(&self, intent: RuntimeControlIntent) -> RuntimeControlState {
-        match intent {
-            RuntimeControlIntent::ToggleHold => {
-                if self.state() == RuntimeControlState::Active {
-                    self.hold();
-                } else if self.state() == RuntimeControlState::Held {
-                    self.resume();
-                }
+        let observer = self.lock_observer();
+        let state = self.state();
+        let act = match intent {
+            RuntimeControlIntent::ToggleHold if state == RuntimeControlState::Active => {
+                RuntimeControlIntent::Hold
             }
-            RuntimeControlIntent::Hold if self.state() != RuntimeControlState::Ended => self.hold(),
-            RuntimeControlIntent::Resume if self.state() != RuntimeControlState::Ended => {
-                self.resume()
-            }
-            RuntimeControlIntent::EndSession => self.end_session(),
-            RuntimeControlIntent::StartSession => self.resume(),
-            RuntimeControlIntent::Hold | RuntimeControlIntent::Resume => {}
+            RuntimeControlIntent::ToggleHold => RuntimeControlIntent::Resume,
+            act => act,
+        };
+        if offers(state).contains(&act) {
+            let next = match act {
+                RuntimeControlIntent::Hold => RUNTIME_HOLD,
+                RuntimeControlIntent::EndSession => RUNTIME_END,
+                RuntimeControlIntent::Resume | RuntimeControlIntent::StartSession => RUNTIME_ACTIVE,
+                RuntimeControlIntent::ToggleHold => return state,
+            };
+            self.store(observer.as_ref(), next);
         }
         self.state()
     }
@@ -981,21 +988,51 @@ impl RuntimeControls {
         self.transition(RUNTIME_ACTIVE);
     }
 
-    /// Store `next` and tell the observer when it differs from the state before.
-    ///
-    /// The observer lock is held across the store and the notice, so two changes reach the
-    /// observer in the order they were made.
+    /// Move to `next` under the observer lock.
     fn transition(&self, next: u8) {
-        let observer = self
-            .observer
+        let observer = self.lock_observer();
+        self.store(observer.as_ref(), next);
+    }
+
+    /// Lock the observer slot.
+    ///
+    /// The lock is held across a store and its notice, so two changes reach the observer in the
+    /// order they were made.
+    fn lock_observer(&self) -> std::sync::MutexGuard<'_, Option<ControlObserver>> {
+        self.observer
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Store `next` and tell `observer` when it differs from the state before. The caller holds
+    /// the observer lock.
+    fn store(&self, observer: Option<&ControlObserver>, next: u8) {
         let previous = self.state.swap(next, Ordering::SeqCst);
         if previous != next {
-            if let Some(observer) = observer.as_ref() {
+            if let Some(observer) = observer {
                 observer(self.state());
             }
         }
+    }
+}
+
+/// The acts a person can take on browser work in `state`, in the order a surface shows them.
+///
+/// This is the one table of which runtime act each state accepts: [`RuntimeControls::apply_intent`]
+/// changes the state only through an act it names. An ended session accepts only a new session,
+/// so neither Resume nor a toggle undoes End session. [`RuntimeControlIntent::ToggleHold`] is
+/// never offered: it is a request that becomes Hold or Resume by the state it meets.
+#[must_use]
+pub const fn offers(state: RuntimeControlState) -> &'static [RuntimeControlIntent] {
+    match state {
+        RuntimeControlState::Active => {
+            &[RuntimeControlIntent::Hold, RuntimeControlIntent::EndSession]
+        }
+        RuntimeControlState::Held => &[
+            RuntimeControlIntent::Resume,
+            RuntimeControlIntent::EndSession,
+        ],
+        RuntimeControlState::Ended => &[RuntimeControlIntent::StartSession],
     }
 }
 
