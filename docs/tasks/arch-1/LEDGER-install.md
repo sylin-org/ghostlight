@@ -386,3 +386,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   existing callers (install, managed policy, migration backup) now run the effective check.
   Limits: deny entries are not subtracted, so the answer can overstate but never understate. No
   golden or journey changes; `linux.txt` is unaffected (the code is Windows-only).
+  Review fix: an owner always holds the right to rewrite the list, so `others_can_read` now also
+  reads the file's owner and answers yes for any owner but the current user and SYSTEM (or none),
+  before the entries. Making a file another principal owns needs the restore privilege, so
+  `a_file_another_principal_owns_is_open` proves the decision on the owner and grants directly,
+  including an Administrators-owned file whose list grants only the user and SYSTEM.

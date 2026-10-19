@@ -47,10 +47,11 @@ pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::F
     private_file::create(path)
 }
 
-/// Whether the access list of the file at `path` lets anyone other than the current user and
-/// SYSTEM read its contents, or rewrite the list or take ownership so they could. A file with no
-/// access list answers true, as does a granting entry whose trustee cannot be read; deny entries
-/// are not subtracted, so the answer never understates who can read.
+/// Whether anyone other than the current user and SYSTEM can read the contents of the file at
+/// `path`: its owner, who may always rewrite the access list, or anyone the list lets read the
+/// contents, or rewrite the list or take ownership so they could. A file with no access list
+/// answers true, as does a missing owner or a granting entry whose trustee cannot be read; deny
+/// entries are not subtracted, so the answer never understates who can read.
 #[cfg(target_os = "windows")]
 pub fn others_can_read(path: &std::path::Path) -> std::io::Result<bool> {
     private_file::others_can_read(path)

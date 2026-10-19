@@ -1,6 +1,6 @@
 //! Owner-private files: creating a new file whose protected access list admits only this user and
 //! SYSTEM from the moment it exists, so nothing written to it is ever open to anyone else, and
-//! asking whether a file's access list lets anyone else read it.
+//! asking whether a file's owner or access list lets anyone else read it.
 
 use std::ffi::c_void;
 use std::fs::File;
@@ -21,6 +21,8 @@ const CREATE_NEW: u32 = 1;
 const FILE_ATTRIBUTE_NORMAL: u32 = 0x0000_0080;
 /// `SE_OBJECT_TYPE` value for a file or directory.
 const SE_FILE_OBJECT: u32 = 1;
+/// `SECURITY_INFORMATION` flag selecting the owner.
+const OWNER_SECURITY_INFORMATION: u32 = 0x0000_0001;
 /// `SECURITY_INFORMATION` flag selecting the discretionary access list.
 const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
 /// The SID of the operating system's own account, SYSTEM.
@@ -149,24 +151,27 @@ fn create_with(path: &Path, sddl: &str) -> io::Result<File> {
     Ok(unsafe { File::from_raw_handle(handle) })
 }
 
-/// Whether the access list of the file at `path` lets a trustee other than this user and SYSTEM
-/// read the file's contents, or rewrite the list or take ownership so it could. A file with no
-/// access list grants everyone everything and answers true; so does a granting entry whose
-/// trustee this cannot read. Deny entries are not subtracted, so the answer never understates.
+/// Whether a trustee other than this user and SYSTEM can read the contents of the file at
+/// `path`: its owner, who may always rewrite the access list, or a trustee the list grants a right
+/// that reads the contents or rewrites the list or the ownership so it could. A file with no
+/// access list grants everyone everything and answers true; so does a missing owner or a
+/// granting entry whose trustee this cannot read. Deny entries are not subtracted, so the answer
+/// never understates.
 pub(super) fn others_can_read(path: &Path) -> io::Result<bool> {
     let user = ProcessToken::current()?.user_sid()?;
     let name = wide_path(path)?;
+    let mut owner = null_mut();
     let mut dacl: *mut Acl = null_mut();
     let mut raw_descriptor = null_mut();
     // SAFETY: name is NUL-terminated and live for the call; the out-pointers are writable, and
-    // the unused ones are null, which the call allows. The returned dacl points into the
-    // descriptor, which the guard below frees only after the last read of the list.
+    // the unused ones are null, which the call allows. The returned owner and dacl point into
+    // the descriptor, which the guard below frees only after their last read.
     let status = unsafe {
         GetNamedSecurityInfoW(
             name.as_ptr(),
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            null_mut(),
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
             null_mut(),
             &mut dacl,
             null_mut(),
@@ -177,9 +182,12 @@ pub(super) fn others_can_read(path: &Path) -> io::Result<bool> {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
     let _descriptor = LocalMemory(raw_descriptor);
-    if dacl.is_null() {
+    if owner.is_null() || dacl.is_null() {
         return Ok(true);
     }
+    // SAFETY: owner is non-null and points at the owner's SID inside the live descriptor.
+    let owner = unsafe { sid_text(owner) }?;
+    let mut grants = Vec::new();
     // SAFETY: dacl is non-null and points at the ACL header inside the live descriptor.
     let count = unsafe { (*dacl).count };
     for index in 0..u32::from(count) {
@@ -212,11 +220,20 @@ pub(super) fn others_can_read(path: &Path) -> io::Result<bool> {
         };
         // SAFETY: as above, the trustee's SID starts at SID_OFFSET inside the live entry.
         let trustee = unsafe { sid_text(bytes.add(SID_OFFSET).cast()) }?;
-        if mask & READ_REACHING_RIGHTS != 0 && trustee != user && trustee != SYSTEM_SID {
-            return Ok(true);
-        }
+        grants.push((mask, trustee));
     }
-    Ok(false)
+    Ok(open_to_others(&user, &owner, &grants))
+}
+
+/// Whether a file owned by `owner` whose access list grants each `(mask, trustee)` in `grants`
+/// lets a trustee other than `user` and SYSTEM read it. An owner always holds the right to rewrite
+/// the list, so any other owner answers true whatever the list says.
+fn open_to_others(user: &str, owner: &str, grants: &[(u32, String)]) -> bool {
+    let other = |sid: &str| sid != user && sid != SYSTEM_SID;
+    other(owner)
+        || grants
+            .iter()
+            .any(|(mask, trustee)| mask & READ_REACHING_RIGHTS != 0 && other(trustee))
 }
 
 /// `path` as a NUL-terminated wide string for a Win32 call; a path holding a NUL is refused.
@@ -234,7 +251,7 @@ fn wide_path(path: &Path) -> io::Result<Vec<u16>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{create, create_with, others_can_read};
+    use super::{create, create_with, open_to_others, others_can_read, SYSTEM_SID};
     use crate::scratch::Scratch;
     use crate::token::ProcessToken;
 
@@ -264,5 +281,19 @@ mod tests {
         let unlisted = scratch.join("unlisted");
         drop(create_with(&unlisted, &format!("O:{sid}D:NO_ACCESS_CONTROL")).unwrap());
         assert!(others_can_read(&unlisted).unwrap(), "a file with no list");
+    }
+
+    /// A file owned by anyone but this user and SYSTEM is open, because its owner can always
+    /// rewrite the list, even when the list itself grants only this user and SYSTEM. Making such
+    /// a file for real needs the restore privilege, so this asks the decision directly.
+    #[test]
+    fn a_file_another_principal_owns_is_open() {
+        let user = "S-1-5-21-1-2-3-1001";
+        let full = 0x001F_01FF;
+        let owner_only = [(full, user.to_owned()), (full, SYSTEM_SID.to_owned())];
+        assert!(!open_to_others(user, user, &owner_only));
+        assert!(!open_to_others(user, SYSTEM_SID, &owner_only));
+        assert!(open_to_others(user, "S-1-5-32-544", &owner_only));
+        assert!(open_to_others(user, "S-1-5-21-1-2-3-1002", &[]));
     }
 }
