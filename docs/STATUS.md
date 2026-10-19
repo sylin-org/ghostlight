@@ -91,8 +91,11 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   [ADR-0203](adr/0203-one-owner-for-each-fact.md), one owner for each fact. An architecture sweep
   of the 2.0 tree confirmed 102 findings of re-derived, duplicated and singleton facts; the ADR
   turns them into thirteen decisions and seven lanes. The most serious: after a browser restart a
-  remembered tab id could name one of the person's own tabs. Slices gated candidate land before
-  the release candidate; the rest land when ready.
+  remembered tab id could name one of the person's own tabs. Every slice gated candidate has
+  landed, integrated with the full gate green, and so has a follow-up of eight (one Ghostlight
+  toolset per agent process, so the Claude Code plugin works with or without the installer's
+  entry). Deployed and checked live on 2026-10-19 (62bfa224). The 16 slices gated none are
+  deferred until after 2.0, at the owner's request to spend only on real value.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
@@ -124,9 +127,10 @@ before approval.
 
 ## CI
 
-The last green run is 39213827086 on `dev` a669b5e9 (2026-10-19): every job, including the Rust,
-extension and page-asset gates, supply chain, and every process and real-browser journey on Linux
-and Windows. It carries ux-2 and ADR-0203's documents; arch-1's code lands after it.
+The last green run is 39278943156 on `dev` eb038961 (2026-10-19): every job, including the Rust,
+extension and page-asset gates, and every process and real-browser journey on Linux and Windows.
+It carries arch-1 (ADR-0203) integrated. Since the CI review of 2026-10-19 a newer push no longer
+cancels a run in progress, and cargo audit runs daily (audit.yml) and in the release workflow.
 
 ## Release checklist
 
@@ -135,8 +139,8 @@ the owner. The ledgers keep the detail; this is what still gates the release.
 
 Before the release candidate's bundle:
 
-- Coordinator: arch-1's candidate slices (ADR-0203), each lane deployed in place and pushed with
-  a green CI run, then the owner's try-list on the deployed build.
+- linux-claude: linux-2 Part 2 on CachyOS, from the release workflow's bundle (the go was sent on
+  62bfa224).
 - Coordinator: one MCPB install in Claude Desktop from the rehearsed unit, on a clean Windows test
   machine. The rehearsal, the candidate check and `winget validate` passed on 26e48ad0.
 - Coordinator: a Windows Chrome and Edge check of the extension: a session end with preserve-tabs
