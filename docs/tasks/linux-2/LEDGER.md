@@ -187,6 +187,23 @@ while it waits. The first release run on the go head is L2-11's.
 
 ## Notes
 
+**F1 on the go head, 2026-10-19 (for L2-12).** On the go head deployed in place, in the isolated
+Claude Code home of L2-04 with the plugin (now `npx -y ghostlight@2`, run by the stand-in that
+starts this repository's 2.0 launcher) and the installer's entry, and the local Messages API
+stand-in: `/mcp` listed `ghostlight` with 23 tools and `plugin:ghostlight:ghostlight` with "no
+tools". One turn per step offered the model 23 Ghostlight tools, never 46: with both entries
+connected, after the service was replaced (`scripts/dev-loop.ps1`), after a policy change, and after
+the policy was restored byte for byte. After `/mcp` disabled `ghostlight`, the plugin's server sent
+`tools/list_changed` and the next turn offered its 23. Found on the way, for windows-claude: after a
+service replace, a session whose client has not listed tools again is never sent
+`tools/list_changed`. `AdvertisedCatalog` starts empty in the new service, and nothing is compared
+until the client asks for a catalog, which a client that already listed with the previous service
+does not do. Measured with a plain MCP client on the installed edge: dropping `execute` from the
+policy sent `list_changed` within 8 s to a fresh session and to a resumed one that had listed again,
+and sent nothing to a resumed one that had not, although its catalog is then 22 tools. So the
+policy step of F1 never reached Claude Code, and a tool that a policy change or a newer service
+adds does not reach a running agent until it restarts.
+
 **CachyOS check, 2026-10-19.** The development build at e9646471 was deployed on test-01 (it had
 run 7abbdc39); `ghostlight doctor` reads Ready, with Chromium registered and every agent
 connected. A first real task (`browser_navigate` to the demo desk) failed: "The Ghostlight adapter
