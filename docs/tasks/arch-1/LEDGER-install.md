@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b and I4 have landed. ux-2 has closed, so I5, I6, I8, I10, I12 and I13 can
+I1, I3, I7, I9a, I9b, I4 and I5 have landed. ux-2 has closed, so I6, I8, I10, I12 and I13 can
 start, and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
 registers) and the live check on a test machine.
 
@@ -23,7 +23,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | see Notes | landed (this commit) |
 | I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | held for the owner | todo (held for the owner's question 1) |
 | I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
-| I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | - | todo |
+| I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | see Notes | landed (this commit) |
 | I2 | fix(install): one atomic replace and one same-location rule | none | I1 | - | todo |
 | I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | - | todo |
 | I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys | todo |
@@ -110,3 +110,35 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   (`ui/lib/view.js`, `actsOf`, `agent.state === "installed"`), so it hides a Remove the service now
   offers for an updatable one. That file is surface's and the slice's Changes do not name it; the
   coordinator decides whether a surface slice drops that test.
+- I5, the state: every launcher entry is shown as `needs_attention`, with its own cause
+  (`Attention::Launcher`), detail, evidence and dry-run line, and Fix offered. The window has no
+  state between connected and needs attention that the reconcile, the setup of detected clients
+  and Uninstall all leave alone, and a new `HarnessState` would cross into surface's window. So
+  the unpinned entry is never current, as Decision 10.3 says, and shares the 1.x entry's state;
+  only its words differ ("npm chooses the version at each launch"). Not a changed decision.
+- I5, a third pin: an entry pinned to 2.0 or later (`LauncherPin::Pinned`) is not current either:
+  its detail says Ghostlight cannot ask npm what that runs. The ADR names only the unpinned and
+  the 1.x cases. Within Decision 10.3.
+- I5, what is the launcher: `npx` (or `npx.cmd`, through `cmd /c` or not) with only quiet options
+  (`-y`, `--yes`, `-q`, `--quiet`), then `ghostlight` or `ghostlight@<spec>`, then nothing or
+  `mcp`. A spec with a character no version, range or tag uses (a URL, a path) is not the
+  launcher and stays foreign, so the evidence can name the package and its version without
+  disclosing anything else. Codex's TOML is read the same way.
+- I5, the refusals: an explicit install or uninstall that meets the launcher now refuses with
+  `HarnessError::LauncherEntry` (its words in `language/deployment.rs`), not the foreign-entry
+  refusal, and Fix over it says it now starts the installed Ghostlight instead of the npm
+  launcher. The launcher is not an owned entry (Decision 10.2), so Uninstall leaves it. Within the
+  slice's Deletes.
+- I5, the Fix test: `explicit_fix_replaces_only_the_foreign_entry_and_keeps_a_backup` seeded the
+  npm launcher as its foreign entry; it now seeds another program, and the launcher's Fix is
+  proved in `a_launcher_pinned_to_1x_needs_attention`. Extra proofs:
+  `a_launcher_pinned_to_2x_is_never_current`, `only_ghostlights_own_package_through_npx_is_the_launcher`,
+  `a_codex_launcher_entry_is_the_launcher_too` and, in `language/deployment.rs`,
+  `a_launcher_entry_is_said_as_ghostlights_and_never_as_current`. The reconcile test
+  (`an_owned_client_entry_is_rewritten_and_an_npx_entry_is_left_alone`) is unchanged and passes.
+- I5, for surface: the window words a `needs_attention` agent with evidence itself
+  (`ui/lib/words.js`, "Something Ghostlight did not write sits where its entry belongs"), so for
+  the launcher it shows that line beside the service's evidence. That file is surface's; S5, which
+  moves the window's words into `language/`, can word the launcher from `detail`.
+- I5 changes no golden (no writer or native seed holds a launcher entry) and needs no journey.
+  `linux.txt` is unaffected.

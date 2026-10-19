@@ -6,10 +6,14 @@
 //! every refusal a person can meet lives here, so the report says only what was observed and the
 //! way back from a development build is named the same way wherever it is needed.
 
+use std::path::Path;
+
 use crate::install::command_path::OwnedEntry;
 use crate::install::deployment::{EdgeReplacement, RESTORE_OPTION};
 use crate::install::migration::{FlatpakPart, FlatpakResult, FlatpakStep};
-use crate::install::{Attention, HarnessState, ALL_CLIENTS_OPTION};
+use crate::install::{
+    Attention, HarnessState, LauncherPin, NpmLauncher, ALL_CLIENTS_OPTION, FIRST_LAUNCHER_MAJOR,
+};
 
 /// Where the get scripts are published.
 const GET_SCRIPT_ROOT: &str = "https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts";
@@ -327,6 +331,13 @@ fn settings_copies(owner: &str, copies: &[String]) -> String {
 /// Without a known cause the line names none.
 fn client_would_be_left(client: &str, attention: Option<Attention>) -> String {
     match attention {
+        Some(Attention::Launcher(LauncherPin::Earlier)) => format!(
+            "Would leave {client} as it is: its entry starts Ghostlight's npm launcher pinned to \
+             a release before {FIRST_LAUNCHER_MAJOR}.0."
+        ),
+        Some(Attention::Launcher(LauncherPin::Unpinned | LauncherPin::Pinned)) => {
+            format!("Would leave {client} as it is: its entry starts Ghostlight's npm launcher.")
+        }
         Some(Attention::ForeignEntry) => format!(
             "Would leave {client} as it is: the entry under Ghostlight's name is not Ghostlight's."
         ),
@@ -338,6 +349,53 @@ fn client_would_be_left(client: &str, attention: Option<Attention>) -> String {
         }
         None => format!("Would leave {client} as it is."),
     }
+}
+
+/// Why an install or an uninstall left an entry that starts Ghostlight's npm launcher.
+pub const LAUNCHER_ENTRY_LEFT: &str = "the `ghostlight` entry starts Ghostlight's npm launcher; \
+                                       Ghostlight left it as it is, and Fix points it at the \
+                                       installed Ghostlight";
+
+/// What a client's entry that starts Ghostlight's npm `launcher` is. Ghostlight cannot ask npm
+/// what the launcher runs (ADR-0028), so the entry is never said to be current.
+#[must_use]
+pub fn launcher_detail(launcher: &NpmLauncher) -> String {
+    let package = &launcher.package;
+    match launcher.pin {
+        LauncherPin::Unpinned => "This entry starts Ghostlight's npm launcher, and npm chooses \
+                                  the version at each launch, so Ghostlight cannot say it is \
+                                  current. It was left as it is."
+            .into(),
+        LauncherPin::Earlier => format!(
+            "This entry starts Ghostlight's npm launcher pinned to {package}, a release before \
+             {FIRST_LAUNCHER_MAJOR}.0 that cannot work with this Ghostlight. It was left as it is."
+        ),
+        LauncherPin::Pinned => format!(
+            "This entry starts Ghostlight's npm launcher pinned to {package}. Ghostlight cannot \
+             ask npm what that runs, so it cannot say it is current. It was left as it is."
+        ),
+    }
+}
+
+/// What inspection found where Ghostlight's entry belongs when it is the npm `launcher`, beside
+/// the installed `edge` Ghostlight maintains there.
+#[must_use]
+pub fn launcher_evidence(launcher: &NpmLauncher, edge: &Path) -> String {
+    format!(
+        "Found Ghostlight's npm launcher, `npx {}`, where Ghostlight's entry belongs; Ghostlight \
+         maintains `{}` there and changed nothing.",
+        launcher.package,
+        edge.display()
+    )
+}
+
+/// Fix pointed `client`'s npm launcher entry at the installed Ghostlight.
+#[must_use]
+pub fn launcher_fixed(client: &str) -> String {
+    format!(
+        "{client} now starts the installed Ghostlight instead of the npm launcher. Restart or \
+         reconnect it to load the tools."
+    )
 }
 
 /// A client's Ghostlight entry now starts the installed edge.
@@ -643,6 +701,15 @@ mod tests {
                 Some(Attention::Unreadable),
                 "Would leave Kiro as it is: its settings file could not be read.",
             ),
+            (
+                Some(Attention::Launcher(LauncherPin::Unpinned)),
+                "Would leave Kiro as it is: its entry starts Ghostlight's npm launcher.",
+            ),
+            (
+                Some(Attention::Launcher(LauncherPin::Earlier)),
+                "Would leave Kiro as it is: its entry starts Ghostlight's npm launcher pinned to \
+                 a release before 2.0.",
+            ),
             (None, "Would leave Kiro as it is."),
         ];
         for (attention, line) in cases {
@@ -697,6 +764,30 @@ mod tests {
         );
     }
 
+    fn launcher(pin: LauncherPin) -> NpmLauncher {
+        NpmLauncher {
+            pin,
+            package: "ghostlight@1.3.5".into(),
+        }
+    }
+
+    #[test]
+    fn a_launcher_entry_is_said_as_ghostlights_and_never_as_current() {
+        for pin in [
+            LauncherPin::Unpinned,
+            LauncherPin::Earlier,
+            LauncherPin::Pinned,
+        ] {
+            let detail = launcher_detail(&launcher(pin));
+            assert!(detail.starts_with("This entry starts Ghostlight's npm launcher"));
+            assert!(!detail.contains("foreign"), "{detail}");
+        }
+        assert!(launcher_detail(&launcher(LauncherPin::Unpinned))
+            .contains("npm chooses the version at each launch"));
+        assert!(launcher_detail(&launcher(LauncherPin::Earlier))
+            .contains("pinned to ghostlight@1.3.5, a release before 2.0"));
+    }
+
     #[test]
     fn every_sentence_is_ascii() {
         let sentences = [
@@ -722,7 +813,19 @@ mod tests {
             platform_entry_would_remove("e"),
             platform_entry_kept("e"),
             removal_failed("f"),
+            LAUNCHER_ENTRY_LEFT.to_owned(),
+            launcher_evidence(&launcher(LauncherPin::Unpinned), Path::new("e")),
+            launcher_fixed("c"),
         ];
-        assert!(sentences.iter().all(|sentence| sentence.is_ascii()));
+        let details = [
+            LauncherPin::Unpinned,
+            LauncherPin::Earlier,
+            LauncherPin::Pinned,
+        ]
+        .map(|pin| launcher_detail(&launcher(pin)));
+        assert!(sentences
+            .iter()
+            .chain(&details)
+            .all(|sentence| sentence.is_ascii()));
     }
 }

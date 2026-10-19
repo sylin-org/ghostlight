@@ -5,8 +5,8 @@
 //! client entries start it with `mcp`, the command link names it, and the other platform entries
 //! (the Linux desktop entry; the Windows Start-menu shortcut and Uninstall key) name the service
 //! image `bin/ghostlight-service`. Reconciling is idempotent: what is current is left alone. A native-host
-//! manifest that names another path is reclaimed; a client entry Ghostlight does not own, such
-//! as an `npx` launcher, is reported and left as it is.
+//! manifest that names another path is reclaimed. A client entry Ghostlight does not own, and one
+//! that starts Ghostlight's npm launcher, is reported and left as it is; only Fix changes it.
 //!
 //! Inside a Windows app container the registry and `AppData` writes reach only that app, so the
 //! reconcile writes the manifest (below the home, which is shared) and leaves every registration
@@ -42,7 +42,8 @@ pub struct PendingRegistration {
     pub state: String,
 }
 
-/// A client entry under Ghostlight's name that the reconcile did not change.
+/// A client entry under Ghostlight's name that the reconcile did not change: one Ghostlight does
+/// not own, or one that starts Ghostlight's npm launcher.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct UnchangedEntry {
     /// The client's name.
@@ -58,7 +59,7 @@ pub struct ReconcileReport {
     pub browsers: Vec<String>,
     /// Clients whose Ghostlight entry was rewritten to start the installed edge.
     pub clients_rewritten: Vec<String>,
-    /// Client entries under Ghostlight's name that Ghostlight does not own.
+    /// Client entries under Ghostlight's name that the reconcile leaves to a person.
     pub clients_unchanged: Vec<UnchangedEntry>,
     /// Platform entries that were written, in plain words.
     pub platform: Vec<String>,
@@ -324,7 +325,8 @@ fn reconcile_native_hosts(hosts: &NativeHostRegistry, report: &mut ReconcileRepo
 }
 
 /// Rewrite the owned client entries that start something else, and report the entries under
-/// Ghostlight's name that Ghostlight does not own.
+/// Ghostlight's name that need a person: one Ghostlight does not own, or Ghostlight's npm
+/// launcher.
 fn reconcile_clients(clients: &HarnessRegistry, report: &mut ReconcileReport) {
     let summaries = match clients.refresh() {
         Ok(summaries) => summaries,

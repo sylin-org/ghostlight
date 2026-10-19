@@ -436,6 +436,9 @@ impl HarnessState {
 /// said as itself, never as another (ADR-0135).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Attention {
+    /// Ghostlight's own npm launcher sits under Ghostlight's name, asking npm for the version
+    /// its pin names.
+    Launcher(LauncherPin),
     /// An entry Ghostlight does not own sits under Ghostlight's name.
     ForeignEntry,
     /// The configuration file could not be parsed.
@@ -467,10 +470,11 @@ pub struct HarnessSummary {
     /// Optional precomposed proof behind a blocked state, authored by the orchestrator
     /// (ADR-0135).
     ///
-    /// Present only for a foreign entry: it names the program found where Ghostlight's entry
-    /// belongs and its argument count, never its arguments (ADR-0135 as narrowed by the
-    /// ADR-0199 amendment of 2026-10-15). The surface renders it verbatim and authors no
-    /// words of its own.
+    /// Present only for a foreign entry or Ghostlight's npm launcher. For a foreign entry it names
+    /// the program found where Ghostlight's entry belongs and its argument count, never its
+    /// arguments (ADR-0135 as narrowed by the ADR-0199 amendment of 2026-10-15). For the
+    /// launcher it names the package and the version the entry asks npm for. The surface renders
+    /// it verbatim and authors no words of its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
     /// Why the target needs attention, present exactly when `state` is
@@ -1755,12 +1759,15 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         Ok(RegistrationState::Missing) => HarnessState::NotDetected,
         Ok(RegistrationState::Current) => HarnessState::Installed,
         Ok(RegistrationState::Updatable | RegistrationState::Retired) => HarnessState::Updatable,
-        Ok(RegistrationState::Foreign(_)) | Err(_) => HarnessState::NeedsAttention,
+        Ok(RegistrationState::Launcher(_) | RegistrationState::Foreign(_)) | Err(_) => {
+            HarnessState::NeedsAttention
+        }
     };
     // The blocked causes are named from what the inspection actually saw, never conflated
     // (ADR-0135). The evidence line carries the specifics beside the claim.
     let mut detail: String = match (&registration, private) {
         (_, Some(container)) if !manual => words::client_kept_private(&container.app),
+        (Ok(RegistrationState::Launcher(launcher)), _) => words::launcher_detail(launcher),
         (Ok(RegistrationState::Foreign(_)), _) => {
             "A foreign entry holds this target's Ghostlight registration; it was left untouched."
                 .into()
@@ -1789,6 +1796,9 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         },
     };
     let evidence: Option<String> = match &registration {
+        Ok(RegistrationState::Launcher(launcher)) => {
+            Some(words::launcher_evidence(launcher, &context.edge))
+        }
         Ok(RegistrationState::Foreign(found_command)) => Some(match found_command {
             Some(found) => format!(
                 "Found another program, `{}` with {}, where Ghostlight's entry belongs; \
@@ -1809,10 +1819,15 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         detail.push_str(" A previously located path is missing; the normal location is shown.");
     }
     let changeable = private.is_none();
-    let can_fix =
-        changeable && edge_ready && matches!(registration, Ok(RegistrationState::Foreign(_)));
+    let can_fix = changeable
+        && edge_ready
+        && matches!(
+            registration,
+            Ok(RegistrationState::Launcher(_) | RegistrationState::Foreign(_))
+        );
     let owned_copies = owned_other_copies(context, definition);
     let attention = match &registration {
+        Ok(RegistrationState::Launcher(launcher)) => Some(Attention::Launcher(launcher.pin)),
         Ok(RegistrationState::Foreign(_)) => Some(Attention::ForeignEntry),
         Err(HarnessError::Malformed(_)) => Some(Attention::Malformed),
         Err(_) => Some(Attention::Unreadable),
@@ -1878,6 +1893,10 @@ enum RegistrationState {
     Updatable,
     /// An owned entry starts `ghostlight-mcp-connector`, a program this release does not install.
     Retired,
+    /// The entry starts Ghostlight's own npm launcher. Ghostlight did not write it and cannot ask
+    /// npm what it runs (ADR-0028), so it is never current, and only Fix changes it (ADR-0203
+    /// Decision 10.3).
+    Launcher(NpmLauncher),
     /// An entry sits under Ghostlight's key that Ghostlight does not own. The payload names
     /// the program found there, when one could be read (ADR-0135); never its arguments.
     Foreign(Option<ForeignCommand>),
@@ -1912,6 +1931,134 @@ impl ForeignCommand {
             program,
             arguments: args.map_or(0, <[&str]>::len) + extra_words,
         })
+    }
+}
+
+/// The program that runs an npm package.
+const NPX_PROGRAM: &str = "npx";
+
+/// The Windows command interpreter some clients start `npx` through, and its switch that runs the
+/// command after it.
+const WINDOWS_SHELL: (&str, &str) = ("cmd", "/c");
+
+/// The `npx` options a launcher entry may carry before the package. They answer npm's own
+/// prompts and choose nothing.
+const NPX_QUIET_OPTIONS: [&str; 4] = ["-y", "--yes", "-q", "--quiet"];
+
+/// The npm package Ghostlight's launcher is published as.
+const NPM_PACKAGE: &str = "ghostlight";
+
+/// The npm tag for whichever version npm serves as the newest.
+const NPM_LATEST_TAG: &str = "latest";
+
+/// The characters besides letters and digits a version, range or tag after `ghostlight@` is
+/// written with. A spec with any other character, such as a URL or a path, is not the launcher.
+const NPM_SPEC_MARKS: &str = ".-+^~=*<>";
+
+/// The first major release whose npm launcher starts a Ghostlight that works with this one: 2.0
+/// changed the relay and the extension's protocol.
+pub const FIRST_LAUNCHER_MAJOR: u64 = 2;
+
+/// Which version Ghostlight's npm launcher entry asks npm for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LauncherPin {
+    /// No version, the `latest` tag or another name npm resolves: npm chooses the version at each
+    /// launch.
+    Unpinned,
+    /// A release before 2.0, such as 1.x, whose launcher starts a Ghostlight that cannot work
+    /// with this one.
+    Earlier,
+    /// A 2.0 or later version or range.
+    Pinned,
+}
+
+impl LauncherPin {
+    /// The pin the package `spec` after `ghostlight@` names, or none.
+    fn of(spec: Option<&str>) -> Self {
+        let Some(spec) = spec.filter(|spec| !spec.is_empty() && *spec != NPM_LATEST_TAG) else {
+            return Self::Unpinned;
+        };
+        let version = spec.trim_start_matches(['^', '~', '=', 'v']);
+        let major: String = version.chars().take_while(char::is_ascii_digit).collect();
+        match major.parse::<u64>() {
+            Ok(major) if major < FIRST_LAUNCHER_MAJOR => Self::Earlier,
+            Ok(_) => Self::Pinned,
+            Err(_) => Self::Unpinned,
+        }
+    }
+}
+
+/// Ghostlight's own npm launcher as an entry starts it: `npx` with only quiet options, the
+/// `ghostlight` package, and no command or `mcp`, through `cmd /c` or not.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NpmLauncher {
+    /// Which version the entry asks npm for.
+    pub pin: LauncherPin,
+    /// The package as the entry names it, `ghostlight` or `ghostlight@<version>`, bounded for
+    /// disclosure.
+    pub package: String,
+}
+
+impl NpmLauncher {
+    /// The launcher an entry starting `command` with `args` names, or none when it starts anything
+    /// else. A command that names an existing file is that program whole; any other command is
+    /// read as a whole command line.
+    fn from_entry(command: &str, args: Option<&[&str]>) -> Option<Self> {
+        let mut words: Vec<&str> = if Path::new(command).is_file() {
+            vec![command]
+        } else {
+            command.split_whitespace().collect()
+        };
+        words.extend(args.unwrap_or_default().iter().copied());
+        let mut words = words.into_iter().peekable();
+        if words
+            .peek()
+            .is_some_and(|word| command_name(word, WINDOWS_SHELL.0))
+        {
+            words.next();
+            if !words
+                .next()
+                .is_some_and(|word| word.eq_ignore_ascii_case(WINDOWS_SHELL.1))
+            {
+                return None;
+            }
+        }
+        if !words
+            .next()
+            .is_some_and(|word| command_name(word, NPX_PROGRAM))
+        {
+            return None;
+        }
+        let package = words.find(|word| !NPX_QUIET_OPTIONS.contains(word))?;
+        let spec = match package.strip_prefix(NPM_PACKAGE)? {
+            "" => None,
+            rest => Some(rest.strip_prefix('@')?),
+        };
+        if spec.is_some_and(|spec| {
+            !spec
+                .chars()
+                .all(|mark| mark.is_ascii_alphanumeric() || NPM_SPEC_MARKS.contains(mark))
+        }) {
+            return None;
+        }
+        let rest: Vec<&str> = words.collect();
+        if !(rest.is_empty() || rest == [MCP_ARGUMENT]) {
+            return None;
+        }
+        Some(Self {
+            pin: LauncherPin::of(spec),
+            package: bounded_disclosure(package)?,
+        })
+    }
+}
+
+/// The refusal of an install or an uninstall that finds an entry Ghostlight does not own under its
+/// key, starting `command` with `args` when it names a command: Ghostlight's npm launcher is said
+/// as itself, anything else as foreign.
+fn unowned_entry_refusal(command: Option<&str>, args: Option<&[&str]>) -> HarnessError {
+    match command.and_then(|command| NpmLauncher::from_entry(command, args)) {
+        Some(_) => HarnessError::LauncherEntry,
+        None => HarnessError::ForeignEntry,
     }
 }
 
@@ -2245,6 +2392,10 @@ fn apply_fix(
     if !context.edge.is_file() {
         return Err(HarnessError::EdgeMissing);
     }
+    let launcher = matches!(
+        registration_state(context, definition),
+        Ok(RegistrationState::Launcher(_))
+    );
     let changed = match definition.dialect {
         ConfigDialect::CodexToml => fix_toml(context, &definition.path)?,
         ConfigDialect::Manual(_) => return Err(manual_refusal(definition)),
@@ -2258,10 +2409,14 @@ fn apply_fix(
     let summary = inspect(context, definition);
     Ok(HarnessActionResult {
         changed,
-        message: format!(
-            "Ghostlight replaced the incorrect entry for {}. Restart or reconnect it to load the tools.",
-            summary.label
-        ),
+        message: if launcher {
+            words::launcher_fixed(&summary.label)
+        } else {
+            format!(
+                "Ghostlight replaced the incorrect entry for {}. Restart or reconnect it to load the tools.",
+                summary.label
+            )
+        },
         summary,
     })
 }
@@ -2339,7 +2494,10 @@ fn edit_json_with(
     if let Some(entry) = current {
         let foreign = !json_entry_owned(entry, dialect, edge, context.windows);
         if foreign && !intent.replaces_foreign() {
-            return Err(HarnessError::ForeignEntry);
+            return Err(unowned_entry_refusal(
+                json_entry_command(entry, dialect),
+                json_entry_args(entry, dialect).as_deref(),
+            ));
         }
         if !foreign && intent.replaces_foreign() {
             return Err(HarnessError::NotFixable);
@@ -2418,7 +2576,7 @@ fn edit_toml_with(
         let args = toml_entry_args(entry);
         let foreign = !command_owned(command, args.as_deref(), edge, context.windows);
         if foreign && !intent.replaces_foreign() {
-            return Err(HarnessError::ForeignEntry);
+            return Err(unowned_entry_refusal(Some(command), args.as_deref()));
         }
         if !foreign && intent.replaces_foreign() {
             return Err(HarnessError::NotFixable);
@@ -2796,7 +2954,10 @@ fn command_registration_state(
     windows: bool,
 ) -> RegistrationState {
     if !command_owned(command, args, edge, windows) {
-        return RegistrationState::Foreign(ForeignCommand::from_entry(command, args));
+        return NpmLauncher::from_entry(command, args).map_or_else(
+            || RegistrationState::Foreign(ForeignCommand::from_entry(command, args)),
+            RegistrationState::Launcher,
+        );
     }
     let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
     let expected = fs::canonicalize(edge).unwrap_or_else(|_| edge.to_path_buf());
@@ -3166,6 +3327,9 @@ pub enum HarnessError {
     /// A foreign server uses Ghostlight's registration name.
     #[error("a foreign `ghostlight` entry is present; Ghostlight left it untouched")]
     ForeignEntry,
+    /// Ghostlight's npm launcher holds Ghostlight's registration name; only Fix changes it.
+    #[error("{}", words::LAUNCHER_ENTRY_LEFT)]
+    LauncherEntry,
     /// The explicit fix no longer points at one foreign entry.
     #[error(
         "the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations"
@@ -3206,9 +3370,9 @@ mod tests {
         mcp_command_line, packaged, remove_stray_temporaries_in, replace_with_backup,
         resolve_through_symlink, AppContainer, Attention, ClientName, ForeignCommand,
         HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
-        HarnessSummary, JsonDialect, Packages, PrivateView, RegistrationState, CLINE_SETTINGS,
-        EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME,
-        ROSTER, SERVER_NAME,
+        HarnessSummary, JsonDialect, LauncherPin, NpmLauncher, Packages, PrivateView,
+        RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, MCP_ARGUMENT,
+        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -4452,7 +4616,7 @@ mod tests {
   "keep": true,
   "mcpServers": {
     "sibling": {"command": "keep-me"},
-    "ghostlight": {"command": "npx", "args": ["-y", "ghostlight"]}
+    "ghostlight": {"command": "other-server", "args": ["--port", "9"]}
   }
 }
 "#;
@@ -4500,6 +4664,192 @@ mod tests {
             Err(HarnessError::NotFixable)
         ));
         assert_eq!(fs::read_to_string(&path).unwrap(), unchanged);
+    }
+
+    /// A registry over `context` whose Cline CLI settings hold `entry` under Ghostlight's key, and
+    /// the path of that file.
+    fn cline_with_entry(context: &HarnessContext, entry: &Value) -> (HarnessRegistry, PathBuf) {
+        let path = context
+            .home
+            .join(".cline/data/settings/cline_mcp_settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&json!({"mcpServers": {"ghostlight": entry}})).unwrap(),
+        )
+        .unwrap();
+        (HarnessRegistry::with_context(context.clone()), path)
+    }
+
+    fn cline_summary(registry: &HarnessRegistry) -> HarnessSummary {
+        registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "cline-cli")
+            .expect("Cline CLI stays in the closed roster")
+    }
+
+    #[test]
+    fn an_unpinned_npx_ghostlight_entry_says_npm_chooses_the_version() {
+        let directory = temporary("launcher-unpinned");
+        let context = context(&directory);
+        for entry in [
+            json!({"command": "npx", "args": ["-y", "ghostlight"]}),
+            json!({"command": "npx", "args": ["--yes", "ghostlight@latest", "mcp"]}),
+            json!({"command": "cmd", "args": ["/c", "npx", "-y", "ghostlight"]}),
+            json!({"command": "npx -y ghostlight"}),
+        ] {
+            let (registry, path) = cline_with_entry(&context, &entry);
+            let before = fs::read(&path).unwrap();
+            let summary = cline_summary(&registry);
+            assert_eq!(summary.state, HarnessState::NeedsAttention, "{entry}");
+            assert_eq!(
+                summary.attention,
+                Some(Attention::Launcher(LauncherPin::Unpinned)),
+                "{entry}"
+            );
+            assert!(
+                summary
+                    .detail
+                    .contains("npm chooses the version at each launch"),
+                "{}",
+                summary.detail
+            );
+            assert!(!summary.detail.contains("foreign"), "{}", summary.detail);
+            let evidence = summary.evidence.clone().expect("the launcher is named");
+            assert!(evidence.contains("npm launcher"), "{evidence}");
+            assert!(!evidence.contains("another program"), "{evidence}");
+            assert!(summary.can_fix && !summary.can_install && !summary.can_uninstall);
+            assert!(matches!(
+                registry.apply("cline-cli", HarnessAction::Install),
+                Err(HarnessError::LauncherEntry)
+            ));
+            assert_eq!(fs::read(&path).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn a_launcher_pinned_to_1x_needs_attention() {
+        let directory = temporary("launcher-pinned-1x");
+        let context = context(&directory);
+        let (registry, path) = cline_with_entry(
+            &context,
+            &json!({"command": "npx", "args": ["-y", "ghostlight@1.3.5"]}),
+        );
+        let before = fs::read(&path).unwrap();
+        let summary = cline_summary(&registry);
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        assert_eq!(
+            summary.attention,
+            Some(Attention::Launcher(LauncherPin::Earlier))
+        );
+        assert!(
+            summary.detail.contains("pinned to ghostlight@1.3.5")
+                && summary.detail.contains("before 2.0"),
+            "{}",
+            summary.detail
+        );
+        assert!(summary
+            .evidence
+            .as_deref()
+            .is_some_and(|evidence| evidence.contains("`npx ghostlight@1.3.5`")));
+        for action in [HarnessAction::Install, HarnessAction::Uninstall] {
+            assert!(matches!(
+                registry.apply("cline-cli", action),
+                Err(HarnessError::LauncherEntry)
+            ));
+        }
+        assert_eq!(fs::read(&path).unwrap(), before);
+
+        let fixed = registry.apply("cline-cli", HarnessAction::Fix).unwrap();
+        assert!(fixed.changed);
+        assert_eq!(fixed.summary.state, HarnessState::Installed);
+        assert!(
+            fixed.message.contains("instead of the npm launcher"),
+            "{}",
+            fixed.message
+        );
+    }
+
+    #[test]
+    fn a_launcher_pinned_to_2x_is_never_current() {
+        let directory = temporary("launcher-pinned-2x");
+        let context = context(&directory);
+        let (registry, _) = cline_with_entry(
+            &context,
+            &json!({"command": "npx", "args": ["-y", "ghostlight@2.0.0"]}),
+        );
+        let summary = cline_summary(&registry);
+        assert_eq!(summary.state, HarnessState::NeedsAttention);
+        assert_eq!(
+            summary.attention,
+            Some(Attention::Launcher(LauncherPin::Pinned))
+        );
+        assert!(
+            summary.detail.contains("cannot say it is current"),
+            "{}",
+            summary.detail
+        );
+    }
+
+    #[test]
+    fn only_ghostlights_own_package_through_npx_is_the_launcher() {
+        let launcher = |command: &str, args: &[&str]| NpmLauncher::from_entry(command, Some(args));
+        for (command, args) in [
+            ("npx", &["-y", "ghostlight", "install"][..]),
+            ("npx", &["-y", "@scope/server-x"][..]),
+            ("npx", &["-y", "ghostlight-other"][..]),
+            ("npx", &["-y", "ghostlight@https://example.test/x.tgz"][..]),
+            ("npx", &["--registry", "r", "ghostlight"][..]),
+            ("cmd", &["/k", "npx", "ghostlight"][..]),
+            ("node", &["ghostlight"][..]),
+            ("npx", &[][..]),
+        ] {
+            assert_eq!(launcher(command, args), None, "{command} {args:?}");
+        }
+        assert_eq!(
+            launcher("npx.cmd", &["-y", "ghostlight@^1.2"]),
+            Some(NpmLauncher {
+                pin: LauncherPin::Earlier,
+                package: "ghostlight@^1.2".into(),
+            })
+        );
+        for (spec, pin) in [
+            (None, LauncherPin::Unpinned),
+            (Some(""), LauncherPin::Unpinned),
+            (Some("latest"), LauncherPin::Unpinned),
+            (Some("next"), LauncherPin::Unpinned),
+            (Some("1.3.5"), LauncherPin::Earlier),
+            (Some("~1"), LauncherPin::Earlier),
+            (Some("0.9.0"), LauncherPin::Earlier),
+            (Some("2.0.0"), LauncherPin::Pinned),
+            (Some("2.0.0-rc.1"), LauncherPin::Pinned),
+            (Some("^2"), LauncherPin::Pinned),
+        ] {
+            assert_eq!(LauncherPin::of(spec), pin, "{spec:?}");
+        }
+    }
+
+    #[test]
+    fn a_codex_launcher_entry_is_the_launcher_too() {
+        let directory = temporary("launcher-codex");
+        let context = context(&directory);
+        let source =
+            "[mcp_servers.ghostlight]\ncommand = \"npx\"\nargs = [\"-y\", \"ghostlight@1.3.5\"]\n";
+        assert!(matches!(
+            inspect_toml(source, &context).unwrap(),
+            RegistrationState::Launcher(NpmLauncher {
+                pin: LauncherPin::Earlier,
+                ..
+            })
+        ));
+        let path = directory.join("config.toml");
+        fs::write(&path, source).unwrap();
+        assert!(matches!(
+            edit_toml(&context, &path, true),
+            Err(HarnessError::LauncherEntry)
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
     }
 
     #[test]
