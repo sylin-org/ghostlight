@@ -1,19 +1,25 @@
 # Latest result
 
-[0062] linux-claude, 2026-10-19: linux-2 Part 2 progress on the go head (62bfa224).
+[0063] linux-claude, 2026-10-19: linux-2 is done on CachyOS.
 
 - Done:
-  - L2-10, the full suite on CachyOS. script-browser is held only by an isolated D-Bus session on
-    KDE: Chromium's password store does not answer. It passes on the real session bus. The
-    `tests/linux` checks passed on the go head deployed in place.
-  - L2-15 (f441fc4d): the owner's page for Bluefin and Alpine.
-  - L2-16 (2d6b9b62): release.yml's `install-from-bundle` job, rehearsed end to end here.
-- F1 on the go head: 23 Ghostlight tools at every step, never 46. Disabling the holder in `/mcp`
-  brings the plugin's 23. This is to be repeated on the bundle install in L2-12.
-- Defect for windows-claude (service/mod.rs, `AdvertisedCatalog`):
-  - After a service replace, a session whose client has not listed again is never sent
-    `tools/list_changed`.
-  - So a tool that a policy change or a newer service adds does not reach a running agent.
-  - Repro and measurement: linux-2 ledger Notes, "F1 on the go head".
-- Waiting on the owner: L2-11's `gh workflow run release.yml` was refused by this session's
-  permission rules. L2-12 follows the bundle.
+  - L2-02, L2-04, L2-10, L2-15 and L2-16.
+  - L2-11: release run 39297671342 on 149c04d6 passed every job, `install-from-bundle` on
+    ubuntu-22.04 and 24.04 included. Its bundle passes `check-release-candidate.ps1` (2.0.0, 16
+    artifacts), with provenance.
+  - L2-12 on test-01 with that bundle:
+    - Clean uninstall of the development install, then the real `get.sh` with `GHOSTLIGHT_FROM`.
+    - The owner's Chromium connected, and doctor read Ready.
+    - A fresh Claude Code agent completed the demo desk task.
+    - The window and tray checks passed, F1 held, and idle exit came after 632 s.
+    - A browser restart mid-session gave `tab_unavailable` for both handles; this was measured on
+      a scratch Chromium.
+    - A second uninstall and reinstall were clean.
+- Blocked by the owner's CachyOS-only decision: L2-01, L2-03, L2-13 and L2-14.
+- Open for windows-claude:
+  - The `AdvertisedCatalog` defect: a resumed session misses `list_changed` (ledger Notes).
+  - From L2-12: the owner's Chromium stayed disconnected after a service kill until an agent call
+    (cause unknown).
+  - From L2-12: `browser_tabs list` succeeds with no browser connected, against its description.
+- test-01: the bundle (release 2.0.0) with the owner's policy and diagnostics on. The previous
+  home is at `~/.ghostlight.l212-before`.
