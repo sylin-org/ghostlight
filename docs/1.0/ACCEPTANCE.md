@@ -385,13 +385,15 @@ workbench shows waiting becoming running once.
     and a claimless client that Claude Code started does not reuse a Claude Code tab. Chrome's
     tab 5 and Edge's tab 5 are different tabs, and a workspace refusal found after the browser
     opened a tab reports an applied effect (ADR-0196 Decision 9).
-26. After a browser restart that gives a person's tab the id of an agent's tab, the agent's handle
-    reaches nothing: list, read, screenshot and navigate say the handle names no open tab, and a
-    release with preserve-tabs off closes nothing. A worker or native-host restart in the same
-    browser run keeps the agent's tab bound even when its page routed itself, and a port restart
-    keeps a tab whose page is unchanged. A resumed session's tabs are confirmed by id and page
-    before their first use, and a token written before a browser restart restores nothing
-    (ADR-0203 Decision 1).
+26. After a browser restart that gives a person's tab at another address the id of an agent's tab,
+    nothing reaches the old id. Read and screenshot say the handle names no open tab, list leaves
+    the tab out, navigate reopens the page in a fresh tab under the same handle, and a release
+    with preserve-tabs off closes nothing. A worker or native-host restart in the same browser run
+    keeps the agent's tab bound even when its page routed itself, and a port restart keeps a tab
+    whose page is unchanged. A resumed session's tabs are confirmed by id and page before their
+    first use, and a token written before a browser restart restores nothing when its tab now
+    shows another page. A person's tab that gets the same id and shows the same address, such as a
+    restored copy of the agent's page, is bound (ADR-0203 Decision 1).
 27. A replace keeps a live session's tabs bound, grouped and resumable. A quit, an uninstall or an
     unknown reason releases every session's tabs and hands each stream a token with no tabs, and a
     command-line session's tabs are released at every service end. A call during a quit gets a

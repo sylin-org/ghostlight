@@ -250,9 +250,9 @@ The service owns the tray model and the shell draws it. The model is a state (re
 or attention, from the same readiness the band shows; a service with no browser connected looks
 ready), a tooltip (the band's word for the state, then the sentence that counts connections, and "No
 browser connected" when none is) and four entries: Open and Quit always, Pause while work is active,
-and Resume, enabled only while work is paused, which reads Start a new session once the session
-ended. Each entry is enabled exactly when the runtime state offers its act (`governance::offers`),
-the table the band and Settings read too. The first workbench frame carries it and a `tray_model`
+and a fourth entry that is enabled as Resume while work is paused and as Start a new session once
+the session ended, and disabled while work is active. Each entry is enabled exactly when the
+runtime state offers its act (`governance::offers`), the table the band and Settings read too. The first workbench frame carries it and a `tray_model`
 frame follows each change. The shell draws the state as a small dot at run time. On a dark taskbar
 the dot goes over the original icon bytes. On a light Windows taskbar it goes over the light-taskbar
 mascot in `crates/desktop/assets`: the same art without its sparkles, on a soft outline in the
