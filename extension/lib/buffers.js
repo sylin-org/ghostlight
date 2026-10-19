@@ -570,15 +570,14 @@
     }
 
     /**
-     * Takes a top-frame `webNavigation.onBeforeNavigate` event. A tab whose diagnostics are bound
-     * starts a fresh ring for the new document and keeps its Runtime and Network capture on, so the
-     * navigation itself stays observable.
+     * Takes a top-frame `webNavigation.onBeforeNavigate` event. A tab with diagnostics capture,
+     * bound or not, starts a fresh ring for the new document and keeps its Runtime and Network
+     * capture on, so the navigation itself stays observable. Its binding, if any, ends with the
+     * document it named.
      */
     function beforeNavigate(tabId) {
-      if (bindings.delete(tabId)) {
-        diagnostics.forget(tabId);
-        diagnostics.enable(tabId);
-      }
+      bindings.delete(tabId);
+      if (diagnostics.forget(tabId)) diagnostics.enable(tabId);
     }
 
     /**

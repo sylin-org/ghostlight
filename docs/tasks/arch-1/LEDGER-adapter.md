@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-A1 to A4 have landed. A2's top-frame ring reset waits on a package-lane fix (see Notes). The
-lane has no open slice.
+A1 to A4 have landed, and so has the package-lane fix A2's top-frame ring reset waited on (see
+Notes). The lane has no open slice.
 
 ## Slices
 
@@ -66,7 +66,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   if there is one. Its proof is an unbound read in `worker.test.js` or `buffers.test.js`: a
   subframe navigation keeps the entries and a top-frame navigation clears them. It changes a
   packaged file, so that commit regenerates the package record (ADR-0200 Decision 16). Recorded in
-  LEDGER-package.md; A2's candidate gate holds until it lands.
+  LEDGER-package.md, where it has landed, so A2's candidate gate no longer waits.
 - A3, `Reach` goes whole, not only `Reach::Open`: with one variant left it only forwarded to the
   scope. `reach()` in `translate/mod.rs` turns the dispatch's optional scope into the scope a
   content command needs, or `BrowserError::Protocol` before anything is sent, and every content

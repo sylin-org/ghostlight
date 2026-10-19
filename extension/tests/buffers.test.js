@@ -226,6 +226,18 @@ test("a navigation on a bound tab starts a fresh ring and keeps capture on", asy
   assert.equal(rig.diagnostics.isEnabled(TAB), true);
 });
 
+test("a navigation on an unbound tab starts a fresh ring and keeps capture on", async () => {
+  const rig = await managed();
+  await execute(rig.buffers.diagnostics, readArgs());
+  rig.diagnostics.consoleAPICalled(TAB, { type: "log", args: [{ type: "string", value: "old page" }] });
+  rig.buffers.beforeNavigate(TAB);
+  assert.equal(rig.diagnostics.isEnabled(TAB), true);
+  rig.diagnostics.consoleAPICalled(TAB, { type: "log", args: [{ type: "string", value: "new page" }] });
+  const result = await execute(rig.buffers.diagnostics, readArgs());
+  assert.deepEqual(result.ok.entries.map((entry) => entry.text), ["new page"]);
+  assert.equal(methods(rig.chrome, "Runtime.disable").length, 0);
+});
+
 test("a read checks its guard and answers document_changed without reading", async () => {
   const rig = await managed();
   const stale = guardOf([{ frame_id: TOP, loader_id: "another", url: URL }]);

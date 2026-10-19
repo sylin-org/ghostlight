@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-B2 and B1 have landed. The lane is done; B1 rides in the same candidate as C21, or neither does.
-Open before the candidate: the top-frame diagnostics ring reset for unbound tabs (see Notes).
+B2 and B1 have landed, and so has the top-frame diagnostics ring reset for unbound tabs (see
+Notes). The lane is done; B1 rides in the same candidate as C21, or neither does.
 
 ## Slices
 
@@ -52,8 +52,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   crash or restart while an agent holds tabs should leave no debugging bar on them once the new
   service answers, and a worker restart against the same service should keep them bound.
   `tests/golden/agents/native/linux.txt` is unchanged.
-- Open, from A2's review: a top-frame navigation must start a fresh diagnostics ring for an
-  unbound tab too. A2 sends a binding only when the scope watches documents, so in the default
+- Landed (this commit), from A2's review: a top-frame navigation must start a fresh diagnostics
+  ring for an unbound tab too. A2 sends a binding only when the scope watches documents, so in the default
   all-open mode no tab is bound, and `beforeNavigate` in `lib/buffers.js`, which resets only when
   it deletes a binding, keeps the prior page's console and network entries. Decision 6.3 keeps the
   top-frame reset for every tab. The fix: a top-frame `beforeNavigate` forgets and re-enables the
@@ -61,7 +61,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   Prove it with an unbound read in `worker.test.js` or `buffers.test.js`: a subframe navigation
   keeps the entries and a top-frame navigation clears them. It changes a packaged file, so the
   same commit regenerates `tests/golden/extension-2.0.0.files.sha256` (ADR-0200 Decision 16). A2's
-  candidate gate waits for it; see LEDGER-adapter.md.
+  candidate gate waited for it; see LEDGER-adapter.md. The proof is in both places: the worker's
+  navigation test runs bound and unbound, and `buffers.test.js` pins the unbound reset.
 - B1, the life: `state.js` holds `LIFE_KEY` (`ghostlight.life`) and `newLife`, beside the browser
   id's key and minter, and the life reads `life_` plus 32 hex digits. `initializeLocalState` reads it
   with the rest of session storage and mints it only when none is there. A failed write of a fresh

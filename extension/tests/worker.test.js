@@ -564,24 +564,26 @@ test("an outdated extension says so and stops restarting the host", async () => 
   } finally { worker.dispose(); }
 });
 
-test("a subframe navigation keeps the diagnostics ring", async () => {
-  const worker = await connected();
-  try {
-    const read = (correlation) => worker.request(correlation, "diagnostics", {
-      op: "read", tab_id: TAB, source: "console", detail: "all", limit: 50, binding: "binding_a"
-    });
-    const texts = (correlation) => worker.receipts().find((entry) => entry.correlation === correlation).ok.entries.map((entry) => entry.text);
-    await read("p4_read_1");
-    worker.chrome.debugger.emit({ tabId: TAB }, "Runtime.consoleAPICalled", { type: "log", args: [{ type: "string", value: "kept" }] });
-    worker.chrome.webNavigation.onBeforeNavigate.emit({ tabId: TAB, frameId: 7 });
-    await read("p4_read_2");
-    assert.deepEqual(texts("p4_read_2"), ["kept"]);
+for (const binding of [undefined, "binding_a"]) {
+  test(`a subframe navigation keeps the diagnostics ring and a top-frame one starts afresh (${binding ? "bound" : "unbound"})`, async () => {
+    const worker = await connected();
+    try {
+      const read = (correlation) => worker.request(correlation, "diagnostics", {
+        op: "read", tab_id: TAB, source: "console", detail: "all", limit: 50, ...(binding ? { binding } : {})
+      });
+      const texts = (correlation) => worker.receipts().find((entry) => entry.correlation === correlation).ok.entries.map((entry) => entry.text);
+      await read("p4_read_1");
+      worker.chrome.debugger.emit({ tabId: TAB }, "Runtime.consoleAPICalled", { type: "log", args: [{ type: "string", value: "kept" }] });
+      worker.chrome.webNavigation.onBeforeNavigate.emit({ tabId: TAB, frameId: 7 });
+      await read("p4_read_2");
+      assert.deepEqual(texts("p4_read_2"), ["kept"]);
 
-    worker.chrome.webNavigation.onBeforeNavigate.emit({ tabId: TAB, frameId: 0 });
-    await read("p4_read_3");
-    assert.deepEqual(texts("p4_read_3"), [], "a navigation of the page itself starts a fresh ring");
-  } finally { worker.dispose(); }
-});
+      worker.chrome.webNavigation.onBeforeNavigate.emit({ tabId: TAB, frameId: 0 });
+      await read("p4_read_3");
+      assert.deepEqual(texts("p4_read_3"), [], "a navigation of the page itself starts a fresh ring");
+    } finally { worker.dispose(); }
+  });
+}
 
 test("each request is answered exactly once", async () => {
   const worker = await boot();
