@@ -6,9 +6,9 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-Opened by D0. Nothing has started. I1, I7, I9a and I9b can start at once. I3, I4, I6 and I10 wait
-for ux-2 (`install/mod.rs`). I11 is held for the owner's question 1 (what the plugin registers) and
-the live check on a test machine.
+I1 has landed. ux-2 has closed, so I3, I7, I9a, I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
+and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
+registers) and the live check on a test machine.
 
 ## Slices
 
@@ -16,7 +16,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
-| I1 | fix(install): one owner-private creator for secrets and records | candidate | none | - | todo |
+| I1 | fix(install): one owner-private creator for secrets and records | candidate | none | see Notes | landed (this commit) |
 | I3 | fix(install): Ghostlight owns the command, and the client keeps its own keys | candidate | ux-2 closes (`install/mod.rs`) | - | todo |
 | I7 | fix(deployment): a same-version install restores a missing shell | candidate | none | - | todo |
 | I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | - | todo |
@@ -30,3 +30,15 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs` | todo |
 | I12 | refactor(diagnostics): one spelling of the edge's logs, and no name nobody writes | none | none | - | todo |
 | I13 | refactor(win-peer): one token module for its two callers | none | none | - | todo |
+
+## Notes
+
+- I1, harness locations: they are written through `record::atomic_replace`, not the client-config
+  writer, so every write is owner-only and the file gets no `.ghostlight-backup` copy beside it.
+  On Windows that copy would take the directory's access. A locations file written before this
+  commit becomes owner-only at its next write, as `install.json` does; nothing is re-protected at
+  start. Not a changed decision.
+- I1, the Windows proof: the orchestrator forbids `unsafe`, so the tests read the access list with
+  the system's `icacls /save` and the user's SID with `whoami /user`. win-peer gains no new call.
+- I1, for C19b: `install::record::create_private` is now public, for the audit sink's new log.
+- I1 changes no golden and needs no journey. `linux.txt` is unaffected.

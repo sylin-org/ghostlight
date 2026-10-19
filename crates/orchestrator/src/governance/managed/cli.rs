@@ -1,6 +1,6 @@
 //! Customer-facing key, signing, and publication commands for managed policy.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -9,6 +9,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use super::{bundle, crypto, encode_hex, manifest, validate_bootstrap, Bootstrap};
+use crate::install::record::create_private;
 
 const ED25519_SEED_FILE: &str = "policy-ed25519.seed";
 const MLDSA_SEED_FILE: &str = "policy-mldsa65.seed";
@@ -224,13 +225,13 @@ fn keygen(directory: &Path, ed25519_only: bool, out: &mut impl Write) -> Result<
     let mut ed25519 = Zeroizing::new([0_u8; 32]);
     getrandom::getrandom(&mut *ed25519)
         .map_err(|error| anyhow!("generate Ed25519 seed: {error}"))?;
-    write_private(&ed25519_path, &*ed25519)?;
+    write_seed(&ed25519_path, &*ed25519)?;
     writeln!(out, "Created {}", ed25519_path.display())?;
     if !ed25519_only {
         let mut mldsa = Zeroizing::new([0_u8; 32]);
         getrandom::getrandom(&mut *mldsa)
             .map_err(|error| anyhow!("generate ML-DSA-65 seed: {error}"))?;
-        write_private(&mldsa_path, &*mldsa)?;
+        write_seed(&mldsa_path, &*mldsa)?;
         writeln!(out, "Created {}", mldsa_path.display())?;
     }
     writeln!(out, "Keep these private seed files offline. Use 'ghostlight policy pubkey' to print the public bootstrap keys.")?;
@@ -393,18 +394,11 @@ fn read_seed(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     Ok(Zeroizing::new(seed))
 }
 
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
+/// Write a new seed file that only the current user can read. An existing file is refused.
+fn write_seed(path: &Path, seed: &[u8]) -> Result<()> {
+    let mut file = create_private(path)
         .with_context(|| format!("create private seed {} without overwriting", path.display()))?;
-    file.write_all(bytes)?;
+    file.write_all(seed)?;
     file.sync_all()?;
     Ok(())
 }
@@ -426,8 +420,27 @@ fn usage() -> &'static str {
 mod tests {
     use std::fs;
 
-    use super::{parse, run, Command};
+    use super::{parse, run, Command, ED25519_SEED_FILE, MLDSA_SEED_FILE};
+    use crate::install::record::assert_owner_only;
     use crate::scratch::Scratch;
+
+    #[test]
+    fn keygen_seeds_are_readable_only_by_the_user() {
+        let root = Scratch::named("policy-keygen");
+        let keys = root.join("keys");
+        let keygen = Command::Keygen {
+            directory: keys.clone(),
+            ed25519_only: false,
+        };
+        run(&keygen, &mut Vec::new()).unwrap();
+        for name in [ED25519_SEED_FILE, MLDSA_SEED_FILE] {
+            let seed = keys.join(name);
+            assert_eq!(fs::read(&seed).unwrap().len(), 32, "{name}");
+            assert_owner_only(&seed);
+        }
+        let again = run(&keygen, &mut Vec::new()).unwrap_err();
+        assert!(again.to_string().contains("never overwrites"), "{again}");
+    }
 
     #[test]
     fn command_parser_requires_explicit_signing_inputs() {

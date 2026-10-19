@@ -6,6 +6,12 @@
 //! answers whether to install, do nothing, repair or refuse (ADR-0197 Decision 14). Every
 //! installer write goes through [`atomic_replace`], so a reader sees the old file or the new one,
 //! never a partial one.
+//!
+//! [`create_private`] is the one creator for a file Ghostlight makes that holds a secret or a
+//! record about the person (ADR-0203 Decision 11.1). On Windows the file is created with a
+//! protected access list that grants the current user and SYSTEM full access and inherits nothing
+//! from its directory, so a broad grant on the directory never reaches it. On Unix it is created
+//! with mode 0600. A file that already exists keeps the access it has.
 
 use std::cmp::Ordering;
 use std::fs::{self, File};
@@ -322,19 +328,76 @@ fn create_like(path: &Path, existing: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-/// Create a new file only the current user can read.
-#[cfg(windows)]
-fn create_private(path: &Path) -> io::Result<File> {
-    ghostlight_win_peer::create_private_file(path)
-}
-
-/// Create a new file only the current user can read.
-#[cfg(not(windows))]
-fn create_private(path: &Path) -> io::Result<File> {
+/// Create a new file at `path`, open for writing, that only the current user can read.
+///
+/// On Windows the file gets a protected access list for the current user and SYSTEM, applied at
+/// creation and inheriting nothing from the directory; on Unix it gets mode 0600. An existing
+/// path, a link included, is refused with [`io::ErrorKind::AlreadyExists`], so this never
+/// overwrites. The parent directory must exist. The caller writes the bytes and syncs them.
+pub fn create_private(path: &Path) -> io::Result<File> {
+    #[cfg(windows)]
+    return ghostlight_win_peer::create_private_file(path);
+    #[cfg(not(windows))]
     private::file_options()
         .create_new(true)
         .write(true)
         .open(path)
+}
+
+/// Assert that only the current user can read the file at `path`: on Windows its access list is
+/// protected and grants the current user and SYSTEM alone, on Unix its mode is 0600.
+#[cfg(test)]
+pub(crate) fn assert_owner_only(path: &Path) {
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            windows_access_list(path),
+            format!("D:P(A;;FA;;;{})(A;;FA;;;SY)", windows_user_sid()),
+            "{}",
+            path.display()
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{}", path.display());
+    }
+}
+
+/// The access list of the file at `path` in the system's descriptor language, as `icacls`
+/// saves it.
+#[cfg(all(test, windows))]
+fn windows_access_list(path: &Path) -> String {
+    let saved = crate::scratch::Scratch::file("saved.acl");
+    let status = std::process::Command::new("icacls")
+        .arg(path)
+        .arg("/save")
+        .arg(saved.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "icacls could not read {}", path.display());
+    let units: Vec<u16> = fs::read(saved.path())
+        .unwrap()
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    let text = String::from_utf16(&units).unwrap();
+    text.lines().nth(1).unwrap_or_default().trim().to_owned()
+}
+
+/// The security identifier of the user running the tests, as `whoami` prints it.
+#[cfg(all(test, windows))]
+fn windows_user_sid() -> String {
+    let output = std::process::Command::new("whoami")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "whoami could not name the user");
+    let text = String::from_utf8_lossy(&output.stdout);
+    let sid = text.trim().rsplit(',').next().unwrap_or_default();
+    sid.trim_matches('"').to_owned()
 }
 
 #[cfg(test)]

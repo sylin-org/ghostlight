@@ -2803,13 +2803,15 @@ fn read_location_overrides(context: &HarnessContext) -> Result<LocationOverrides
     }
 }
 
+/// Write the located paths owner-only: they are a record about the person, not the client's file,
+/// so they take Ghostlight's own private replace and no backup copy beside them.
 fn write_location_overrides(
     context: &HarnessContext,
     overrides: &LocationOverrides,
 ) -> Result<(), HarnessError> {
     let bytes = serde_json::to_vec_pretty(overrides)
         .map_err(|error| HarnessError::MalformedLocationState(error.to_string()))?;
-    replace_with_backup(&context.locations, &bytes)
+    record::atomic_replace(&context.locations, &bytes).map_err(HarnessError::Write)
 }
 
 fn validate_located_config(path: &Path, dialect: ConfigDialect) -> Result<(), HarnessError> {
@@ -3054,6 +3056,7 @@ mod tests {
     use serde_json::Value;
 
     use crate::agent::Symbol;
+    use crate::install::record::assert_owner_only;
     use crate::scratch::Scratch;
 
     use jsonc_parser::parse_to_serde_value;
@@ -3066,7 +3069,8 @@ mod tests {
         replace_with_backup, resolve_through_symlink, AppContainer, Attention, ClientName,
         ForeignCommand, HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots,
         HarnessState, HarnessSummary, JsonDialect, Packages, PrivateView, RegistrationState,
-        CLINE_SETTINGS, EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
+        CLINE_SETTINGS, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, RETIRED_MCP_CONNECTOR_NAME,
+        ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -3615,6 +3619,24 @@ mod tests {
             registry.download_url("not-a-harness"),
             Err(HarnessError::UnknownHarness(_))
         ));
+    }
+
+    #[test]
+    fn harness_locations_are_owner_only() {
+        let directory = temporary("locations-private");
+        let context = context(&directory);
+        let registry = HarnessRegistry::with_context(context.clone());
+        let located = directory.join("portable/kilo.jsonc");
+        fs::create_dir_all(located.parent().unwrap()).unwrap();
+        fs::write(&located, "{}\n").unwrap();
+        registry.locate("kilo-code", &located).unwrap();
+        assert_owner_only(&context.locations);
+        registry.locate("kilo-code", &located).unwrap();
+        assert_owner_only(&context.locations);
+        assert_eq!(
+            names_in(context.locations.parent().unwrap()),
+            [HARNESS_LOCATIONS_FILE]
+        );
     }
 
     #[test]
