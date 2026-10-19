@@ -751,7 +751,8 @@ The owner can reverse any item at validation. B1 carries package item 1. B2 carr
    host twice a second. If reversed, a frozen 2.0 extension that meets a later protocol tells the
    person to update the wrong side.
 4. **The diagnostics ring reset only on a top-frame navigation (B2): yes.** An iframe reload no
-   longer clears a tab's console and network history.
+   longer clears a tab's console and network history. If reversed, an iframe reload still clears
+   them.
 5. **The notice's agent: no.** Nothing new for a person: once C13 makes the group title right, the
    popup's title parse names the agent the window names. The popup keeps its title parse.
 6. **The replay's page code: no.** Nothing in 2.0: both sides ship together and the sentence is

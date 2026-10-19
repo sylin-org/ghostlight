@@ -127,5 +127,5 @@ the ADR's "Considered and not taken". Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md)
 ## Unplaced
 
 None. Every finding has a decision, a slice, or a "Considered and not taken" entry. One decision
-builds nothing: package item 6 was declined, so the replay sentence across the adapter boundary
-stays pinned for 2.0.
+builds nothing: package item 6 was declined, so X-06's replay sentence across the adapter boundary
+stays pinned for 2.0, and V-03's replay part points here.

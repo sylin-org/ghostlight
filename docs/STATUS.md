@@ -82,9 +82,16 @@ The three ledgers below are the record of what is done; read the RESUME HERE blo
   [ADR-0202](adr/0202-what-a-request-carries.md), what a request carries. Every request now
   carries one id from intake to audit, its observed source and declared channel, and its own
   findings. The channel switches are back in policy. Deployed and checked live.
-- **ux-2** ([LEDGER](tasks/ux-2/LEDGER.md)): opened 2026-10-18. The designer and the specialist
-  walked the deployed build again; 25 of 49 items were confirmed. This batch carries the rest and
-  what the walk found, under the owner's rule that teal means live. It lands before rc.1.
+- **ux-2** ([LEDGER](tasks/ux-2/LEDGER.md)): opened 2026-10-18, closed 2026-10-19. The designer
+  and the specialist walked the deployed build again; this batch carried what was still open and
+  what the walk found, under the owner's rule that teal means live. Deployed and checked live; the
+  owner validates it.
+- **arch-1** ([BOOTSTRAP](tasks/arch-1/BOOTSTRAP.md)): opened 2026-10-19.
+  [ADR-0203](adr/0203-one-owner-for-each-fact.md), one owner for each fact. An architecture sweep
+  of the 2.0 tree confirmed 102 findings of re-derived, duplicated and singleton facts; the ADR
+  turns them into thirteen decisions and seven lanes. The most serious: after a browser restart a
+  remembered tab id could name one of the person's own tabs. Slices gated candidate land before
+  the release candidate; the rest land when ready.
 
 The earlier lane ledgers in that folder (`service.md`, `extension.md`, `connectors.md`,
 `switch.md`) keep their lanes' record; the switch's remaining slices continue in the seams ledger.
@@ -125,8 +132,10 @@ the owner. The ledgers keep the detail; this is what still gates the release.
 
 Before rc.1:
 
-- Coordinator: ux-2, then its in-place deploy on the owner's machine and a green CI run on the
-  pushed head.
+- Coordinator: arch-1's candidate slices (ADR-0203), each lane deployed in place and pushed with
+  a green CI run, then the owner's try-list on the deployed build.
+- Owner: ADR-0203's two questions: what the Claude Code plugin registers, and when the candidate
+  is tagged.
 - Coordinator: one MCPB install in Claude Desktop from the rehearsed unit, on a clean Windows test
   machine. The rehearsal, the candidate check and `winget validate` passed on 26e48ad0.
 - Coordinator: a Windows Chrome and Edge check of the extension: a session end with preserve-tabs

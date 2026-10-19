@@ -16,6 +16,6 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
-| D0 | docs(adr): one owner for each fact | candidate | none (commit 2: ux-2 closes) | - | part landed: commit 1 (this commit); commit 2 after ux-2 closes |
+| D0 | docs(adr): one owner for each fact | candidate | none (commit 2: ux-2 closes) | - | landed (3729f9a1 and this commit) |
 | D1 | docs(release): the release candidate names the plugin, and LANGUAGE names where a selector works | candidate | D0; ux-2 closes (`docs/1.0/LANGUAGE.md`) | - | todo |
 | D2 | docs(contracts): the contracts state what landed | as the code it follows | each landed slice; ux-2 closes (`docs/1.0/`) | - | todo |

@@ -62,9 +62,8 @@ Edits the ADR already names as cross-lane: C16 (`protocol4/link.rs`, `workbench/
 ## Rules
 
 **ux-2 first, by file.** A slice that edits a file any ux-2 commit touched starts after ux-2's
-ledger closes (u7, the j-32 tooltip, the integration gate and the push). ux-2 is still landing, so
-re-run `git log --format= --name-only 3764c0a0..HEAD | sort -u` before you start a slice. At
-`0fc62c90` ux-2 had touched:
+ledger closes (u7, the j-32 tooltip, the integration gate and the push). ux-2 closed on
+2026-10-19 at `7cf3b39e`, so this rule is met for every slice. At `0fc62c90` ux-2 had touched:
 
 - core: `events.rs`, `provenance.rs`, `presentation/mod.rs`, `service/mod.rs`,
   `language/audit.rs`, `language/channel_switch.rs`, `language/history.rs`, `language/mod.rs`,

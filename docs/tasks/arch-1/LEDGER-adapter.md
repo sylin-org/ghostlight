@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-Opened by D0. Nothing has started. A1 and A2 can start at once; A4 waits for ux-2 because it
-regenerates `assets.sha256`.
+Opened by D0. Nothing has started. ux-2 has closed, so every slice can start in the ADR's order:
+A1, A2, A3, then A4.
 
 ## Slices
 
