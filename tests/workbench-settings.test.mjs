@@ -1073,6 +1073,9 @@ function countsOf(sessions, browsers) {
   };
 }
 
+/** The organization as the service names one that no policy names (workbench `OrganizationView`). */
+const UNNAMED_ORGANIZATION = Object.freeze({ identity: null, title: "Your organization", in_sentence: "your organization" });
+
 /** A snapshot answer from a service with one client, one browser and one settled read. */
 function snapshotAnswer({ history = [settledRead()], sessions, service = { version: "2.0.0", started_at_ms: 1, runtime_state: "active" } } = {}) {
   const connected = sessions ?? [{ id: "w1", agent: namedAgent("Codex"), channel: "mcp", tab_count: 1, running_operations: 0 }];
@@ -1088,7 +1091,8 @@ function snapshotAnswer({ history = [settledRead()], sessions, service = { versi
         audit_notice: "",
         configuration: {
           policy: { tone: "applied", detail: "Your rules apply." },
-          managed_policy: { configured: false, contacts: [] }
+          managed_policy: { configured: false },
+          organization: UNNAMED_ORGANIZATION
         }
       },
       connections: { sessions: connected, browsers, counts: countsOf(connected, browsers) },
@@ -2134,34 +2138,83 @@ test("the hero names the command line once", () => {
   assert.ok(!/via|cli/.test(meta), meta);
 });
 
-test("a managed policy's passport shows every signed fact", () => {
-  const shown = drawing();
-  shown.view.policy({
-    headline: "Example Org sets the rules.",
-    organization: null,
+/** The organization as the service names one whose policy gives a name and somewhere to ask. */
+const EXAMPLE_ORG = Object.freeze({
+  identity: {
+    name: "Example Org",
+    statement: "Support work only.",
+    url: "https://example.test/policy",
+    contacts: [{ kind: "email", label: "Service desk", value: "desk@example.test" }]
+  },
+  title: "Example Org",
+  in_sentence: "Example Org"
+});
+
+/** A compiled policy that `organization` sets, with a signed passport. */
+function managedPolicy(organization) {
+  return {
+    headline: `${organization.title} sets the rules.`,
+    organization,
     capabilities: [],
     ceilings: [],
     layers: [],
     user_layer: { source: "managed", editable: false, path: null, blocked_reason: null },
     passport: {
       configured: true,
-      organization: "Example Org",
-      rationale: "Support work only.",
-      contacts: [{ kind: "email", label: "Service desk", value: "desk@example.test" }],
       sequence: 42,
       freshness: "fresh",
       source_class: "https",
       last_success_ms: 1_700_000_000_000
     }
-  });
+  };
+}
+
+/** The text of the drawn organization card. */
+function cardText(shown) {
+  return drawn(shown.el("policy-organization").innerHTML).root.children.map((node) => node.textContent).join(" ");
+}
+
+test("a managed policy's passport shows every signed fact", () => {
+  const shown = drawing();
+  shown.view.policy(managedPolicy(EXAMPLE_ORG));
   assert.deepEqual(shown.failures, []);
-  const card = shown.el("policy-organization");
-  assert.equal(card.hidden, false);
-  const text = drawn(card.innerHTML).root.children.map((node) => node.textContent).join(" ");
-  for (const fact of ["Example Org", "Support work only.", "Service desk", "desk@example.test", "fresh",
-    "verified sequence 42", "from an HTTPS source", "last checked"]) {
+  assert.equal(shown.el("policy-organization").hidden, false);
+  const text = cardText(shown);
+  for (const fact of ["Example Org", "Support work only.", "https://example.test/policy", "Service desk",
+    "desk@example.test", "fresh", "verified sequence 42", "from an HTTPS source", "last checked"]) {
     assert.ok(text.includes(fact), `the passport does not show ${fact}: ${text}`);
   }
+});
+
+test("the refusal row and the card name one organization, in the service's words", () => {
+  const refusal = (shown) => {
+    shown.view.hero(Entries.entryFromRecord(settledRead({ invocation: "refused-1", tool: "browser_execute",
+      capability: "execute", allowed: false, reason: "denied_by_policy", status: "blocked", outcome: "refused",
+      policy_tier: "managed", grant_id: "support-sites", denial_id: "deny-1", summary: "Refused." }), null), false);
+    return drawn(shown.el("hero-body").innerHTML).wearing("hero-refusal")[0].textContent;
+  };
+  const named = drawing();
+  named.view.collections(Transport.flatten({
+    ...snapshotAnswer(),
+    parts: { ...snapshotAnswer().parts, status: { ...snapshotAnswer().parts.status,
+      configuration: { ...snapshotAnswer().parts.status.configuration, organization: EXAMPLE_ORG } } }
+  }), new Set());
+  named.view.policy(managedPolicy(EXAMPLE_ORG));
+  assert.deepEqual(named.failures, []);
+  const said = refusal(named);
+  assert.ok(said.startsWith("Refused by Example Org, rule support-sites."), said);
+  assert.ok(said.includes("Service desk: desk@example.test"), said);
+  assert.ok(cardText(named).includes("Example Org"));
+
+  // An organization that names itself nowhere is named by the service's words, on both.
+  const unnamed = drawing();
+  unnamed.view.collections(Transport.flatten(snapshotAnswer()), new Set());
+  unnamed.view.policy(managedPolicy(UNNAMED_ORGANIZATION));
+  assert.deepEqual(unnamed.failures, []);
+  assert.ok(refusal(unnamed).startsWith("Refused by your organization, rule support-sites."), refusal(unnamed));
+  assert.equal(drawn(unnamed.el("policy-organization").innerHTML).root.children[0].textContent, "Your organization");
+  const view = readFileSync(join(ui, "lib", "view.js"), "utf8");
+  assert.doesNotMatch(view, /[Yy]our organization/, "the page names no organization of its own");
 });
 
 // WorkbenchDestination in workbench/mod.rs, less get_chrome, which only the setup view offers. The

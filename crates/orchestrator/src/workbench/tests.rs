@@ -436,6 +436,79 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
     assert!(facade.preview_user_policy("not a policy").is_err());
 }
 
+#[test]
+fn a_draft_that_turns_mcp_off_previews_every_mcp_action_refused() {
+    use crate::intake::session::IntakeChannel;
+
+    let projection = WorkbenchProjection::default();
+    let audit = AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone());
+    // A line that kept no channel arrived on the default one, MCP, as simulate reads it.
+    for (invocation, tool, channel) in [
+        ("i1", "browser_read", Some(IntakeChannel::Mcp)),
+        ("i2", "browser_click", Some(IntakeChannel::Mcp)),
+        ("i3", "browser_read", Some(IntakeChannel::Cli)),
+        ("i4", "browser_click", None),
+    ] {
+        let mut record = AuditRecord::now(
+            invocation,
+            "workspace_1",
+            tool,
+            CapabilitySet::one(Capability::Read),
+            "authority",
+            Decision::permitted(),
+            "succeeded",
+            "applied",
+            &crate::language::outcome::Outcome::ScriptEvaluated {
+                host: None,
+                empty_object: crate::language::outcome::EmptyObject::Absent,
+            }
+            .audit(),
+            1,
+        )
+        .with_observation(Observed {
+            host: Some("example.com".into()),
+            ..Observed::default()
+        });
+        record.channel = channel;
+        audit.record(&record);
+    }
+    let facade = WorkbenchFacade::new(
+        projection,
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None),
+        Arc::new(crate::browser::RelayBrowserPort::new(
+            "epoch".into(),
+            crate::browser::adapter::chromium::protocol4::assets::page_assets(),
+        )),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+
+    // Every site and every capability is allowed: only the channel switch can refuse.
+    let preview = facade
+        .preview_user_policy(
+            r#"{"schema":4,"name":"no agents","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}],"config":[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"}]}"#,
+        )
+        .unwrap();
+    assert_eq!(preview.considered, 4);
+    assert_eq!(preview.refused_total, 3, "{preview:?}");
+    let refused = |tool: &str| {
+        preview
+            .refused
+            .iter()
+            .find(|entry| entry.tool == tool)
+            .map_or(0, |entry| entry.count)
+    };
+    assert_eq!(refused("browser_click"), 2, "{preview:?}");
+    assert_eq!(
+        refused("browser_read"),
+        1,
+        "the command line's read stays allowed: {preview:?}"
+    );
+    assert!(preview
+        .summary
+        .contains("If these rules had been applied, 3 of the last 4 recorded actions"));
+}
+
 /// A browser port whose connection and control publication a test chooses.
 ///
 /// Browser work panics: a runtime control changes authority state and never dispatches or

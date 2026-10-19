@@ -284,6 +284,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
                 last_success_ms: Some(1),
                 last_attempt_ms: Some(2),
             },
+            organization: OrganizationView::of(Some(&example_org())),
             policy: governance.policy_chip(),
         },
         controls: ControlsPart::of(&ControlsFacts {
@@ -352,18 +353,23 @@ const STATUS_KEYS: &[&str] = &[
     "configuration",
     "configuration.managed_policy",
     "configuration.managed_policy.configured",
-    "configuration.managed_policy.contacts",
-    "configuration.managed_policy.contacts[].kind",
-    "configuration.managed_policy.contacts[].label",
-    "configuration.managed_policy.contacts[].value",
     "configuration.managed_policy.freshness",
     "configuration.managed_policy.last_attempt_ms",
     "configuration.managed_policy.last_success_ms",
-    "configuration.managed_policy.organization",
-    "configuration.managed_policy.rationale",
     "configuration.managed_policy.sequence",
     "configuration.managed_policy.source_class",
     "configuration.managed_policy.verified",
+    "configuration.organization",
+    "configuration.organization.identity",
+    "configuration.organization.identity.contacts",
+    "configuration.organization.identity.contacts[].kind",
+    "configuration.organization.identity.contacts[].label",
+    "configuration.organization.identity.contacts[].value",
+    "configuration.organization.identity.name",
+    "configuration.organization.identity.statement",
+    "configuration.organization.identity.url",
+    "configuration.organization.in_sentence",
+    "configuration.organization.title",
     "configuration.policy",
     "configuration.policy.detail",
     "configuration.policy.situation",
@@ -610,21 +616,21 @@ const POLICY_KEYS: &[&str] = &[
     "layers[].title",
     "layers[].version",
     "organization",
-    "organization.contacts",
-    "organization.contacts[].kind",
-    "organization.contacts[].label",
-    "organization.contacts[].value",
-    "organization.name",
-    "organization.statement",
-    "organization.url",
+    "organization.identity",
+    "organization.identity.contacts",
+    "organization.identity.contacts[].kind",
+    "organization.identity.contacts[].label",
+    "organization.identity.contacts[].value",
+    "organization.identity.name",
+    "organization.identity.statement",
+    "organization.identity.url",
+    "organization.in_sentence",
+    "organization.title",
     "passport",
     "passport.configured",
-    "passport.contacts",
     "passport.freshness",
     "passport.last_attempt_ms",
     "passport.last_success_ms",
-    "passport.organization",
-    "passport.rationale",
     "passport.sequence",
     "passport.source_class",
     "passport.verified",
@@ -729,9 +735,9 @@ fn activity_keys(audience: Audience) -> BTreeSet<String> {
     keys
 }
 
-fn authority(path: &Path) -> EffectiveAuthority {
-    let mut authority = GovernanceFacade::new(Some(path.to_owned())).effective_authority();
-    authority.organization = Some(crate::governance::effective::OrganizationIdentity {
+/// The organization the fixtures name, with every fact an identity can carry.
+fn example_org() -> OrganizationIdentity {
+    OrganizationIdentity {
         name: Some("Example Org".into()),
         statement: Some("Because.".into()),
         url: Some("https://example.org/".into()),
@@ -740,7 +746,12 @@ fn authority(path: &Path) -> EffectiveAuthority {
             value: "it@example.org".into(),
             label: Some("IT".into()),
         }],
-    });
+    }
+}
+
+fn authority(path: &Path) -> EffectiveAuthority {
+    let mut authority = GovernanceFacade::new(Some(path.to_owned())).effective_authority();
+    authority.organization = Some(example_org());
     authority
 }
 
@@ -870,6 +881,48 @@ fn the_policy_holds_exactly_the_keys_classified_for_its_audience() {
         key_paths(&projection(Audience::Watch).policy(&authority)),
         expected(&[POLICY_KEYS, POLICY_WATCH_ONLY])
     );
+}
+
+#[test]
+fn the_refusal_row_and_the_card_name_one_organization() {
+    let (snapshot, _, path) = populated();
+    let authority = authority(&path);
+    for audience in [Audience::Control, Audience::Watch] {
+        let projection = projection(audience);
+        // The refusal row reads the status part's organization, and the card the policy's.
+        let row = projection.part(Part::Status, &snapshot, setup_view)["configuration"]
+            ["organization"]
+            .clone();
+        let card = projection.policy(&authority)["organization"].clone();
+        assert_eq!(row, card, "{audience:?}");
+        assert_eq!(row["title"], "Example Org");
+        assert_eq!(row["in_sentence"], "Example Org");
+        assert_eq!(row["identity"]["contacts"][0]["value"], "it@example.org");
+        // The passport says where the policy came from, never who the organization is again.
+        let status = projection.part(Part::Status, &snapshot, setup_view);
+        let policy = projection.policy(&authority);
+        for passport in [
+            &status["configuration"]["managed_policy"],
+            &policy["passport"],
+        ] {
+            for repeated in PASSPORT_NAMING {
+                assert!(passport.get(repeated).is_none(), "{audience:?}: {repeated}");
+            }
+        }
+    }
+    // An organization that names itself nowhere is named in the service's words, whether its
+    // policy says nothing about it or only how to reach it.
+    let unnamed = OrganizationIdentity {
+        name: None,
+        ..example_org()
+    };
+    for view in [
+        OrganizationView::of(None),
+        OrganizationView::of(Some(&unnamed)),
+    ] {
+        assert_eq!(view.title, "Your organization");
+        assert_eq!(view.in_sentence, "your organization");
+    }
 }
 
 #[test]

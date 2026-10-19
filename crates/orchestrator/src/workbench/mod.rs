@@ -942,6 +942,7 @@ impl WorkbenchFacade {
                 managed_authority_active: authority.managed_authority_active,
                 managed_authority_valid: authority.managed_authority_valid,
                 managed_policy: status.configuration.managed_policy,
+                organization: status.configuration.organization,
                 policy: status.configuration.policy,
             },
             service: status.service,
@@ -1161,7 +1162,9 @@ impl WorkbenchFacade {
     ///
     /// Recorded work only. This states what would have happened to actions this machine already
     /// took; it is deliberately worded as history rather than as a promise about work that has not
-    /// happened yet (ADR-0122 Decision 7).
+    /// happened yet (ADR-0122 Decision 7). Each action is replayed the way `ghostlight policy
+    /// simulate` replays an audit line ([`crate::governance::AuthoritySnapshot::replay`]): the
+    /// channel it arrived on first, then what it needed on the host it observed.
     pub fn preview_user_policy(&self, document: &str) -> Result<PolicyPreview, String> {
         let candidate = self
             .governance
@@ -1173,9 +1176,10 @@ impl WorkbenchFacade {
         let considered = history.iter().filter(|item| item.allowed).count();
         let mut refused: Vec<PreviewRefusal> = Vec::new();
         for item in history.iter().filter(|item| item.allowed) {
-            let decision = item.observed.host.as_deref().map_or_else(
-                || snapshot.authorize_requirements(item.requirements),
-                |host| snapshot.authorize_landing(item.requirements, &format!("https://{host}")),
+            let decision = snapshot.replay(
+                item.channel,
+                item.requirements,
+                item.observed.host.as_deref(),
             );
             if decision.allowed {
                 continue;
@@ -2085,6 +2089,8 @@ pub struct ConfigurationSummary {
     pub managed_authority_valid: bool,
     /// Signed managed-policy provenance suitable for the Policy Passport.
     pub managed_policy: ManagedPolicyPassport,
+    /// The organization the policy in force names, as the window names it.
+    pub organization: parts::OrganizationView,
     /// The band chip, authored by the orchestrator so the surface renders rather than derives it.
     pub policy: PolicyChip,
 }

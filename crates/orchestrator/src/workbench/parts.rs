@@ -22,11 +22,14 @@ use super::{
 };
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use crate::diagnostics::DiagnosticsReport;
-use crate::governance::effective::{EffectiveAuthority, LayerKind, PolicyChip};
+use crate::governance::effective::{
+    EffectiveAuthority, LayerKind, OrganizationIdentity, PolicyChip,
+};
 use crate::governance::{offers, ManagedPolicyPassport};
 use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::audit_health::AuditHealth;
 use crate::language::coverage::HumanCoverage;
+use crate::language::policy as policy_words;
 use crate::language::setup::SetupView;
 use crate::language::workbench::{self as words, ConnectionCounts};
 
@@ -40,6 +43,12 @@ pub const USER_HOME_VARIABLE: &str = "HOME";
 
 /// The setting key of the person's list of sites agents must never touch.
 pub const SACRED_DOMAINS_KEY: &str = "content.security.sacred_domains";
+
+/// What a passport repeats about the organization: its name, its explanation and its contacts.
+///
+/// The window names the organization from the one identity its publication resolved
+/// ([`OrganizationView`]), so a passport the window is sent carries only its provenance.
+const PASSPORT_NAMING: &[&str] = &["organization", "rationale", "contacts"];
 
 /// The etag of a policy that has no user layer.
 pub const NO_POLICY_ETAG: &str = "none";
@@ -164,8 +173,39 @@ pub struct StatusPart {
 pub struct StatusConfiguration {
     /// The band chip, authored by the orchestrator.
     pub policy: PolicyChip,
-    /// Signed managed-policy provenance.
+    /// Signed managed-policy provenance: whether a source is configured, and how fresh it is.
     pub managed_policy: ManagedPolicyPassport,
+    /// The organization the policy in force names, which a refusal row names as who decided.
+    pub organization: OrganizationView,
+}
+
+/// The organization the policy in force names, as every screen of the window names it.
+///
+/// It is the one identity the publication resolved (ADR-0203 Decision 7.4), with the two ways the
+/// window says it, so the organization card, the refusal row and the Policy page's settings name
+/// one organization, and no screen supplies a name of its own for one that gives none.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct OrganizationView {
+    /// The identity, when the publication names anything about the organization.
+    pub identity: Option<OrganizationIdentity>,
+    /// The name that heads a card or starts a sentence: the organization's own, or the plain
+    /// words for one that names itself nowhere.
+    pub title: String,
+    /// The same name inside a sentence.
+    pub in_sentence: String,
+}
+
+impl OrganizationView {
+    /// How the window names `identity`.
+    #[must_use]
+    pub fn of(identity: Option<&OrganizationIdentity>) -> Self {
+        let name = identity.and_then(|identity| identity.name.as_deref());
+        Self {
+            identity: identity.cloned(),
+            title: policy_words::organization_title(name),
+            in_sentence: policy_words::who(&[LayerKind::Organization], name),
+        }
+    }
 }
 
 impl StatusPart {
@@ -180,6 +220,7 @@ impl StatusPart {
             configuration: StatusConfiguration {
                 policy: snapshot.configuration.policy.clone(),
                 managed_policy: snapshot.configuration.managed_policy.clone(),
+                organization: snapshot.configuration.organization.clone(),
             },
             runtime_note: snapshot.runtime_note.clone(),
         }
@@ -715,10 +756,15 @@ impl Projection {
         }
     }
 
-    /// The status part, as this audience sees it. Every audience sees all of it.
+    /// The status part, as this audience sees it. Every audience sees all of it, less what the
+    /// passport repeats about the organization ([`PASSPORT_NAMING`]).
     #[must_use]
     pub fn status(&self, status: &StatusPart) -> Value {
-        to_value(status)
+        let mut value = to_value(status);
+        if let Some(passport) = value.pointer_mut("/configuration/managed_policy") {
+            remove(passport, PASSPORT_NAMING);
+        }
+        value
     }
 
     /// The connections part, as this audience sees it. Every audience sees all of it.
@@ -825,7 +871,9 @@ impl Projection {
 
     /// The compiled policy, as this audience sees it. Control also gets the etag of the user
     /// layer, which the policy write routes check; a watcher never writes and is not given a
-    /// value it could test guesses about the withheld never-touch list against.
+    /// value it could test guesses about the withheld never-touch list against. The organization
+    /// is sent as the window names it ([`OrganizationView`]), the same value the status part
+    /// carries, and the passport without what it repeats about it ([`PASSPORT_NAMING`]).
     #[must_use]
     pub fn policy(&self, authority: &EffectiveAuthority) -> Value {
         let mut value = to_value(authority);
@@ -854,6 +902,10 @@ impl Projection {
         });
         if let Some(path) = value.pointer_mut("/user_layer/path") {
             self.rewrite_path(path);
+        }
+        value["organization"] = to_value(&OrganizationView::of(authority.organization.as_ref()));
+        if let Some(passport) = value.get_mut("passport") {
+            remove(passport, PASSPORT_NAMING);
         }
         if self.watching() {
             Self::count_never_touch_ceilings(&mut value, &never_touch);

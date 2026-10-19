@@ -509,6 +509,18 @@ const setupEverythingWasActionable = !setupEverythingButton.disabled
 await elementHandlers.get("setup-integrations:click")({ currentTarget: setupEverythingButton });
 const policy = nodes.get("policy-state");
 
+// The organization as the service names it, in the status part and the compiled policy alike.
+const EXAMPLE_ORG = {
+  identity: {
+    name: "Example Org",
+    statement: "Ask the service desk for an exception.",
+    url: "https://example.test/policy",
+    contacts: [{ kind: "email", value: "security@example.test", label: "Security team" }]
+  },
+  title: "Example Org",
+  in_sentence: "Example Org"
+};
+
 // The Policy destination, drawn from a compiled view exactly as the orchestrator hands it over.
 // Nothing here is computed by the window, so the assertions below are about rendering fidelity:
 // the sentence, the decider on every line, the boundaries that survive an all-open machine, and
@@ -516,12 +528,7 @@ const policy = nodes.get("policy-state");
 const compiled = (editable) => ({
   situation: "layered",
   headline: "Example Org sets the rules, and you have narrowed them further.",
-  organization: {
-    name: "Example Org",
-    statement: "Ask the service desk for an exception.",
-    url: "https://example.test/policy",
-    contacts: [{ kind: "email", value: "security@example.test", label: "Security team" }]
-  },
+  organization: EXAMPLE_ORG,
   capabilities: [
     { capability: "read", label: "Look at pages", covers: "Read page text.", state: "some_allowed", detail: "Refused everywhere except the sites Example Org allowed.", decided_by: ["organization"] },
     { capability: "action", label: "Click and type", covers: "Click and type.", state: "available", detail: "Available on ordinary websites. Nothing narrows it.", decided_by: [] },
@@ -553,7 +560,7 @@ const compiled = (editable) => ({
     blocked_reason: editable ? null : "Example Org does not allow rules to be set on this machine."
   },
   browser_startup: { value: "on_demand", decided_by: "organization", organization_ceiling: "on_demand" },
-  passport: { configured: false, contacts: [] }
+  passport: { configured: false }
 });
 
 // A second view over the same stub document. The booted surface holds its own instance; this one
@@ -685,10 +692,8 @@ const fixWasManaged = managedHarnesses.some((call) =>
 view.collections(withCounts({
   sessions: [], browsers: [], harnesses: [], diagnostics: [], history: [], service: { version: "1.0.0" },
   configuration: {
-    managed_policy: {
-      configured: true, organization: "Example Org",
-      contacts: [{ kind: "email", value: "security@example.test", label: "Security team" }]
-    }
+    managed_policy: { configured: true },
+    organization: EXAMPLE_ORG
   }
 }), new Set());
 view.hero({

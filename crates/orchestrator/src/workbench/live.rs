@@ -28,8 +28,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
 use super::parts::{
-    self, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, StatusConfiguration,
-    StatusPart, ViewingFacts,
+    self, ConnectionsPart, ControlsFacts, ControlsPart, HintedPart, OrganizationView,
+    StatusConfiguration, StatusPart, ViewingFacts,
 };
 use super::setup::{self, SetupInputs, SetupMachine, ThisComputer};
 use super::{
@@ -398,6 +398,7 @@ impl Live {
             configuration: StatusConfiguration {
                 policy: gathered.policy.clone(),
                 managed_policy: gathered.authority.managed_policy.clone(),
+                organization: OrganizationView::of(gathered.enforced.organization()),
             },
             runtime_note: gathered.runtime_note.clone(),
         }

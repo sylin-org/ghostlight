@@ -344,6 +344,18 @@ const startsWhenAsked = (browser) => `Starts ${browser} when an agent asks.`;
 /** What a waiting operation's activity says (`language::outcome::WAITING_FOR_WORK`). */
 const WAITING_FOR_WORK = "Waiting for earlier browser work";
 
+// The organization as the service names it, in the status part and the compiled policy alike.
+const northwind = {
+  identity: {
+    name: "Northwind",
+    statement: "Browser work stays inside approved support sites.",
+    url: "https://northwind.example/browser-policy",
+    contacts: [{ kind: "email", value: "security@northwind.example", label: "Security team" }]
+  },
+  title: "Northwind",
+  in_sentence: "Northwind"
+};
+
 const snapshot = {
   seq: 0,
   generated_at_ms: FIXTURE_EPOCH,
@@ -399,6 +411,7 @@ const snapshot = {
     managed_authority_active: false,
     managed_authority_valid: true,
     managed_policy: { configured: false },
+    organization: northwind,
     policy: {
       situation: "layered",
       detail: "Northwind sets the rules, and you have narrowed them further.",
@@ -412,12 +425,7 @@ const snapshot = {
 const policyView = {
   situation: "layered",
   headline: "Northwind sets the rules, and you have narrowed them further.",
-  organization: {
-    name: "Northwind",
-    statement: "Browser work stays inside approved support sites.",
-    url: "https://northwind.example/browser-policy",
-    contacts: [{ kind: "email", value: "security@northwind.example", label: "Security team" }]
-  },
+  organization: northwind,
   capabilities: [
     { capability: "read", label: "Look at pages", covers: "Read page text, take screenshots, scroll, and find things on a page.", state: "some_allowed", detail: "Refused everywhere except the sites Northwind allowed.", decided_by: ["organization"] },
     { capability: "action", label: "Click and type", covers: "Click, type, press keys, drag, and move through history.", state: "some_allowed", detail: "Refused everywhere except the sites Northwind and you allowed.", decided_by: ["organization", "user"] },
@@ -455,8 +463,6 @@ const policyView = {
   },
   passport: {
     configured: true, verified: true, freshness: "fresh", sequence: 7,
-    organization: "Northwind", rationale: "Browser work stays inside approved support sites.",
-    contacts: [{ kind: "email", value: "security@northwind.example", label: "Security team" }],
     source_class: "https", last_success_ms: ago(240000), last_attempt_ms: ago(240000)
   }
 };

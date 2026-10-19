@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-S1 and S2 landed. Next: S8 and S7, which can start now; S4a waits for P3 and P4.
+S1, S2 and S4a landed. Next: S8 and S7, which can start now.
 
 ## Slices
 
@@ -16,7 +16,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | --- | --- | --- | --- | --- | --- |
 | S1 | fix(tray): every surface offers the acts the runtime state accepts | candidate | P10 | - | landed (37554eab) |
 | S2 | fix(workbench): history rows and counts say what the service decided | candidate | C12a | see Notes | landed (this commit) |
-| S4a | fix(workbench): the Policy page previews and names what governance decides | candidate | P3, P4 | - | todo |
+| S4a | fix(workbench): the Policy page previews and names what governance decides | candidate | P3, P4 | see Notes | landed (this commit) |
 | S8 | fix(window): a window that cannot be built says so | none | ux-2 closes | - | todo |
 | S6 | fix(setup): setup starts browsers the way recovery does, and marks the right host in use | none | C3c, C13 | - | todo |
 | S3 | refactor(workbench): every part comes from one gather | none | P5, I6, C2 | - | todo |
@@ -67,3 +67,28 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   fakes now carry `counts` on the connections part and `outcome` on their records, as the service
   does. Nothing else in those files changes. No golden changed, and no journey needs a test
   machine.
+- S4a, the preview: `preview_user_policy` replays each recorded action through
+  `AuthoritySnapshot::replay` with the action's own channel, as simulate does, so a line that kept
+  no channel is MCP work. No departure.
+- S4a, the name: the card and the refusal row draw the publication's one identity, the snapshot's
+  `organization()`, which is the compiled view's `organization`. The window gets it as
+  `OrganizationView`: the identity plus the two ways the window says it, `title` ("Your
+  organization" when nothing names it) and `in_sentence` ("your organization"), both from
+  `language::policy`. The policy route sends it in place of the view's `organization`, and the
+  status part carries the same value, because the refusal row is drawn on the activity page and
+  the policy is read only when its page opens. The six literals were four "Your organization" and
+  two "your organization"; the settings, the browser-startup row and the capability boxes read
+  `title` too.
+- S4a, beyond the ADR's Deletes (same finding G-07): the passport the window is sent no longer
+  carries `organization`, `rationale` or `contacts`, which only repeated the identity once P4 named
+  the passport from it. The status file keeps them. The card reads the passport for provenance
+  only.
+- S4a, proofs: `a_draft_that_turns_mcp_off_previews_every_mcp_action_refused` in
+  `workbench/tests.rs`; `the_refusal_row_and_the_card_name_one_organization` in
+  `workbench/parts/tests.rs`; the page test "the refusal row and the card name one organization,
+  in the service's words", which also holds that `view.js` names no organization of its own. The
+  part key lists in `parts/tests.rs` follow the new shape.
+- S4a, cross-lane: core's `tests/workbench-surface.mjs` and `tests/workbench-preview-server.mjs`
+  fakes carry the organization as the service names it, in the status part and the policy, and
+  passports without the naming. Nothing else in those files changes. No golden changed, and no
+  journey needs a test machine.

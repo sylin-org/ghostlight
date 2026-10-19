@@ -520,10 +520,10 @@
     function refusalMarkup(entry) {
       if (!entry.policyTier && !entry.grantId && !entry.denialId) return "";
       const managed = entry.policyTier === "managed";
-      const who = managed ? (passportName() ?? "your organization") : "your own rules";
+      const who = managed ? lastOrganization?.in_sentence : "your own rules";
       const parts = [`Refused by ${who}`];
       if (entry.grantId) parts.push(`rule ${entry.grantId}`);
-      const contacts = managed ? passportContacts() : [];
+      const contacts = managed ? lastOrganization?.identity?.contacts ?? [] : [];
       const ask = contacts.length
         ? ` Ask ${contacts.map((contact) => `${contact.label || words(contact.kind)}: ${contact.value}`).join(", ")}.`
         : "";
@@ -532,10 +532,11 @@
         + `<button class="link-button" type="button" data-view="policy">See the policy</button></p>`;
     }
 
-    /* The passport the last snapshot carried, so a refusal can name who to ask without a fetch. */
-    let passport = null;
-    const passportName = () => passport?.organization ?? null;
-    const passportContacts = () => passport?.contacts ?? [];
+    /*
+     * The organization the last snapshot named, as the service names it, so a refusal can name
+     * who decided and who to ask without a fetch.
+     */
+    let lastOrganization = null;
 
     /** How long work unsettled has taken so far. */
     const elapsedSoFar = (entry) => duration(Math.max(0, now() - (entry.startedAt ?? now())));
@@ -1678,16 +1679,19 @@
       return view.layers.some((layer) => layer.kind === "user");
     }
 
+    /**
+     * The organization whose policy is in force, in its own words, and where its signed policy
+     * came from. The service names it; a passport only says how fresh that policy is.
+     */
     function organizationCard(organization, passport) {
       const card = el["policy-organization"];
-      if (!organization && !passport?.configured) {
+      const identity = organization?.identity;
+      if (!identity && !passport?.configured) {
         card.hidden = true;
         card.innerHTML = "";
         return;
       }
-      const name = organization?.name || passport?.organization || "Your organization";
-      const statement = organization?.statement || passport?.rationale;
-      const contacts = (organization?.contacts?.length ? organization.contacts : passport?.contacts || [])
+      const contacts = (identity?.contacts ?? [])
         .map((contact) => `<li><span>${escapeHtml(contact.label || words(contact.kind))}</span>${escapeHtml(contact.value)}</li>`)
         .join("");
       const provenance = [];
@@ -1702,9 +1706,9 @@
         }
       }
       card.hidden = false;
-      card.innerHTML = `<h2>${escapeHtml(name)}</h2>`
-        + (statement ? `<p class="org-statement">${escapeHtml(statement)}</p>` : "")
-        + (organization?.url ? `<p class="org-url">${escapeHtml(organization.url)}</p>` : "")
+      card.innerHTML = `<h2>${escapeHtml(organization?.title ?? "")}</h2>`
+        + (identity?.statement ? `<p class="org-statement">${escapeHtml(identity.statement)}</p>` : "")
+        + (identity?.url ? `<p class="org-url">${escapeHtml(identity.url)}</p>` : "")
         + (contacts ? `<ul class="org-contacts">${contacts}</ul>` : "")
         + (provenance.length ? `<p class="org-provenance">${escapeHtml(provenance.join(", "))}.</p>` : "");
     }
@@ -1891,9 +1895,7 @@
     function choiceRow(item) {
       if (item.key !== "browser.startup") return authoredChoiceRow(item);
       const ceiling = applied?.browser_startup?.organization_ceiling;
-      const forcedBy = ceiling === "manual"
-        ? applied?.organization?.name ?? "Your organization"
-        : null;
+      const forcedBy = ceiling === "manual" ? applied?.organization?.title : null;
       const selected = forcedBy
         ? "manual"
         : draft.settings.startup ?? applied?.browser_startup?.value ?? "manual";
@@ -1921,7 +1923,7 @@
       const selected = item.choices[Math.max(minimum, item.choices.findIndex((choice) => choice.value === desired))];
       const options = item.choices.map((choice, index) => `<option value="${escapeHtml(choice.value)}"${choice === selected ? " selected" : ""}${index < minimum ? " disabled" : ""}>${escapeHtml(choice.label)}</option>`).join("");
       const source = authority?.[item.source ?? `${item.field}_source`];
-      const author = source === "organization" ? applied?.organization?.name ?? "Your organization" : source === "user" ? "Your rules" : "Ghostlight default";
+      const author = source === "organization" ? applied?.organization?.title : source === "user" ? "Your rules" : "Ghostlight default";
       return `<div class="setting-row"><div class="setting-body"><label class="setting-name">${escapeHtml(item.name)}`
         + `<select class="setting-choice" data-setting-choice="${escapeHtml(item.key)}"`
         + `${can(ACT.applyPolicy) ? "" : " disabled"}>${options}</select></label>`
@@ -1932,7 +1934,7 @@
       const organization = applied?.layers?.find((layer) => layer.kind === "organization");
       const setting = organization?.settings.find((entry) => entry.key === key);
       if (setting?.value !== "false") return null;
-      return applied?.organization?.name ?? organization?.title ?? "Your organization";
+      return applied?.organization?.title;
     }
 
     function refreshSacred() {
@@ -2001,8 +2003,7 @@
       const line = applied?.capabilities?.find((entry) => entry.capability === capability);
       if (!line || line.state !== "unavailable") return null;
       if (!line.decided_by?.includes("organization")) return null;
-      const name = applied?.organization?.name;
-      return name ? `${name} does not allow this` : "your organization does not allow this";
+      return `${applied?.organization?.title} does not allow this`;
     }
 
     /**
@@ -2357,7 +2358,7 @@
         el["audit-health"].textContent = snapshot.audit_notice ?? "";
         el["audit-health"].hidden = !snapshot.audit_notice;
       });
-      passport = snapshot.configuration?.managed_policy ?? null;
+      lastOrganization = snapshot.configuration?.organization ?? null;
       connections(snapshot);
       const product = {
         version: access?.product?.version ?? snapshot.service?.version,
