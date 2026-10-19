@@ -127,6 +127,16 @@ real installation and browser, not what a person gets from the release.
    - The `status` result carries the question but not the default answer. Neither the click's
      sentence nor the refusal's next step points an agent at `status` before it answers, so the
      agent accepted without reading the question.
+   - **Fixed in `5bcaff42`** (ADR-0200, amendment of 2026-10-19): `accept` with no text answers a
+     prompt with its default. On test-03, after the extension was reloaded in the owner's
+     Chromium, `ghostlight call` gave these readouts:
+     - `accept`: the bell says: "hello from the desk";
+     - `respond` with `""`: the bell rings silently;
+     - `respond` with "Ada": the bell says: "Ada";
+     - `dismiss`: the bell was dismissed without an answer.
+   - A fresh agent run after the fix read the question and chose `respond` with an empty string,
+     so it did not exercise `accept`. The language half (pointing an agent at `status`) stays
+     with windows-claude.
 2. **The installed journey runs the browser binary directly to read its version.** A browser that
    starts only through its launcher's environment fails that probe before any phase. This
    Chromium needs its launcher's `LD_LIBRARY_PATH`.
@@ -138,14 +148,17 @@ real installation and browser, not what a person gets from the release.
    OpenRC, so the check cannot run here. The window was checked through KWin's window runner
    instead.
 4. **The browser edge was replaced once, 21 s after Chromium first connected.** The diagnostics
-   show `browser_gone`, then a new edge 0.25 s later. The cause is not known; the extension may
-   have been reloaded in `chrome://extensions`.
+   show `browser_gone`, then a new edge 0.25 s later. The cause is not known for certain. A
+   deliberate extension reload later showed the same pattern (`browser_gone`, a new edge 0.27 s
+   later), which fits a reload in `chrome://extensions`.
 
 ## State left on test-03
 
 - The development build of `a7f33da7` serves from `~/.ghostlight/bin`, with diagnostics on.
 - Codex, Claude Code and OpenCode name the installed edge.
-- The fleet worktree is detached at `a7f33da7`; its `codex/fleet-test-03` branch is unchanged.
+- The fleet worktree is detached at `5bcaff42`, so the profile loads the fixed extension; its
+  `codex/fleet-test-03` branch is unchanged.
 - The September 1.3.5 images are still in `~/ghostlight-fleet/test-03/installed/`, but nothing
   names or runs them.
-- Two demo-desk tabs stay open in Chromium, because Preserve Ghostlight tabs is on.
+- The demo-desk tabs these runs opened stay open in Chromium, because Preserve Ghostlight tabs is
+  on.
