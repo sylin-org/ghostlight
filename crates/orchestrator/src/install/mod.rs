@@ -422,6 +422,14 @@ impl HarnessState {
     pub const fn takes_install(self) -> bool {
         matches!(self, Self::NotDetected | Self::Available | Self::Updatable)
     }
+
+    /// Whether the configuration itself holds an entry Ghostlight owns, current or not, which an
+    /// uninstall removes. Inspection shows every owned registration (current, updatable or
+    /// retired) as one of these states and nothing else as them.
+    #[must_use]
+    pub const fn holds_owned_entry(self) -> bool {
+        matches!(self, Self::Installed | Self::Updatable)
+    }
 }
 
 /// What inspection saw that put a target in [`HarnessState::NeedsAttention`]. Each cause is
@@ -474,8 +482,8 @@ pub struct HarnessSummary {
     pub can_install: bool,
     /// Whether an explicit fix can replace a foreign entry under Ghostlight's key.
     pub can_fix: bool,
-    /// Whether an owned registration can be removed: Ghostlight's entry in `config_path`, or one an
-    /// earlier install left in another copy of the agent's settings.
+    /// Whether an owned registration, current or not, can be removed: Ghostlight's entry in
+    /// `config_path`, or one an earlier install left in another copy of the agent's settings.
     pub can_uninstall: bool,
     /// Whether this host has a closed official download destination on this platform.
     pub can_download: bool,
@@ -529,6 +537,15 @@ pub enum ClientName {
 }
 
 impl HarnessSummary {
+    /// Whether an uninstall finds an entry Ghostlight owns here, current or not: in the
+    /// configuration itself or in another copy of the agent's settings. `can_uninstall` is this
+    /// where the configuration may be changed from this process; a run that may not change it
+    /// reads this to say what it leaves.
+    #[must_use]
+    pub fn has_entry_to_remove(&self) -> bool {
+        self.state.holds_owned_entry() || !self.owned_copies.is_empty()
+    }
+
     /// How the `--client` value `id` names this host, ignoring case: by its harness id, by its
     /// agent's catalog id, or not at all. A harness id that is also its agent's id names the host.
     #[must_use]
@@ -1801,7 +1818,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         Err(_) => Some(Attention::Unreadable),
         Ok(_) => None,
     };
-    HarnessSummary {
+    let mut summary = HarnessSummary {
         id: definition.id.into(),
         product_id: definition.product_id.into(),
         name: definition.name.into(),
@@ -1814,7 +1831,7 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         attention,
         can_install: changeable && edge_ready && !manual && state.takes_install(),
         can_fix,
-        can_uninstall: changeable && (state == HarnessState::Installed || !owned_copies.is_empty()),
+        can_uninstall: false,
         can_download: definition.download_url.is_some(),
         download_url: definition.download_url.map(str::to_owned),
         can_locate: true,
@@ -1837,7 +1854,9 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
                 mcp_command_line(&context.edge)
             )
         }),
-    }
+    };
+    summary.can_uninstall = changeable && summary.has_entry_to_remove();
+    summary
 }
 
 fn product_config_parent_exists(context: &HarnessContext, path: &Path) -> bool {
@@ -3181,14 +3200,15 @@ mod tests {
 
     use super::{
         agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
-        edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots, inspect,
-        inspect_json, inspect_toml, is_write_temporary, json_entry_args, json_entry_command,
-        json_entry_defaults, jsonc_options, manual_json_setup, mcp_command_line, packaged,
-        remove_stray_temporaries_in, replace_with_backup, resolve_through_symlink, AppContainer,
-        Attention, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
-        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, Packages,
-        PrivateView, RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE,
-        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
+        edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots,
+        holds_owned_entry, inspect, inspect_json, inspect_toml, is_write_temporary,
+        json_entry_args, json_entry_command, json_entry_defaults, jsonc_options, manual_json_setup,
+        mcp_command_line, packaged, remove_stray_temporaries_in, replace_with_backup,
+        resolve_through_symlink, AppContainer, Attention, ClientName, ForeignCommand,
+        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
+        HarnessSummary, JsonDialect, Packages, PrivateView, RegistrationState, CLINE_SETTINGS,
+        EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME,
+        ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -5639,6 +5659,101 @@ mod tests {
         assert_eq!(fs::read_to_string(&private).unwrap(), PERSON_SETTINGS);
         assert!(!removed.summary.can_uninstall);
         assert!(removed.summary.owned_copies.is_empty());
+    }
+
+    #[test]
+    fn a_whole_uninstall_removes_a_stale_owned_entry_and_names_it() {
+        let directory = temporary("whole-uninstall-stale");
+        let context = context(&directory);
+        let claude = definition(&context, "claude-code").unwrap();
+        fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
+        let older = directory
+            .join("older")
+            .join(context.edge.file_name().unwrap());
+        fs::write(
+            &claude.path,
+            format!(
+                "{{\"mcpServers\": {{\"{SERVER_NAME}\": {{\"command\": {}, \"args\": [\"{MCP_ARGUMENT}\"]}}}}}}",
+                serde_json::to_string(&older.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+        let registry = HarnessRegistry::with_context(context);
+        let stale = registry
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == "claude-code")
+            .unwrap();
+        assert_eq!(stale.state, HarnessState::Updatable);
+        assert!(stale.can_uninstall, "a stale owned entry is one to remove");
+        assert_eq!(
+            crate::language::deployment::client_would_remove(
+                &stale.label,
+                stale.state,
+                stale.attention,
+                &stale.owned_copies
+            ),
+            format!("Would remove Ghostlight from {}.", stale.label)
+        );
+
+        // A whole uninstall, naming no client, selects it and takes the entry out.
+        let selected = crate::cli::setup::select_harnesses(
+            &registry.summaries(),
+            &crate::cli::parse::SetupOptions::default(),
+            false,
+        )
+        .unwrap();
+        assert!(selected.iter().any(|summary| summary.id == "claude-code"));
+        let removed = registry
+            .apply("claude-code", HarnessAction::Uninstall)
+            .unwrap();
+        assert!(removed.changed);
+        assert!(
+            removed
+                .message
+                .starts_with(&format!("Ghostlight was removed from {}.", stale.label)),
+            "{}",
+            removed.message
+        );
+        assert!(!has_entry(&claude.path));
+        assert!(!removed.summary.can_uninstall);
+    }
+
+    #[test]
+    fn every_owned_registration_is_shown_as_a_state_that_holds_an_owned_entry() {
+        let directory = temporary("owned-states");
+        let context = context(&directory);
+        let claude = definition(&context, "claude-code").unwrap();
+        fs::create_dir_all(claude.path.parent().unwrap()).unwrap();
+        let entry = |command: &Path, arguments: &str| {
+            format!(
+                "{{\"mcpServers\": {{\"{SERVER_NAME}\": {{\"command\": {}, \"args\": [{arguments}]}}}}}}",
+                serde_json::to_string(&command.to_string_lossy()).unwrap()
+            )
+        };
+        let mcp = format!("\"{MCP_ARGUMENT}\"");
+        let older = directory
+            .join("older")
+            .join(context.edge.file_name().unwrap());
+        let retired = directory.join("older").join(RETIRED_MCP_CONNECTOR_NAME);
+        let seeds = [
+            (entry(&context.edge, &mcp), true),
+            (entry(&older, &mcp), true),
+            (entry(&retired, ""), true),
+            (entry(Path::new("alien-agent"), ""), false),
+            ("{\"mcpServers\": {".to_owned(), false),
+            ("{}".to_owned(), false),
+        ];
+        for (text, owned) in seeds {
+            fs::write(&claude.path, &text).unwrap();
+            let state = inspect(&context, &claude).state;
+            assert_eq!(
+                holds_owned_entry(&context, &claude, &claude.path),
+                owned,
+                "{text}"
+            );
+            assert_eq!(state.holds_owned_entry(), owned, "{text}: {state:?}");
+        }
     }
 
     #[test]

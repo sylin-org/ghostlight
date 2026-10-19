@@ -327,7 +327,7 @@ seed <root>/Pat Doe/AppData/Roaming/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no
@@ -399,7 +399,7 @@ seed <root>/Pat Doe/AppData/Roaming/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no
@@ -471,7 +471,7 @@ seed <root>/Pat Doe/AppData/Roaming/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no
@@ -547,7 +547,7 @@ seed <root>/Pat Doe/AppData/Roaming/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no
@@ -1053,7 +1053,7 @@ seed <root>/Pat Doe/.config/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no
@@ -1125,7 +1125,7 @@ seed <root>/Pat Doe/.config/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no
@@ -1197,7 +1197,7 @@ seed <root>/Pat Doe/.config/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no
@@ -1273,7 +1273,7 @@ seed <root>/Pat Doe/.config/kilo/kilo.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://kilo.ai/
 copy only: no
 private view: no

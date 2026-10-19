@@ -971,7 +971,7 @@ fn left_private(summary: &crate::install::HarnessSummary, install: bool) -> bool
         && if install {
             summary.state.takes_install()
         } else {
-            summary.state == HarnessState::Installed
+            summary.has_entry_to_remove()
         }
 }
 
@@ -1504,10 +1504,11 @@ mod tests {
             ids(select_harnesses(&summaries, &every, true).unwrap()),
             ["cursor", "claude-desktop", "zed", "vscode"]
         );
-        // A removal selects the private client that has Ghostlight's entry, so it can say so.
+        // A removal selects each private client that holds Ghostlight's entry, current or not, so
+        // it can say so.
         assert_eq!(
             ids(select_harnesses(&summaries, &options, false).unwrap()),
-            ["windsurf"]
+            ["zed", "windsurf"]
         );
     }
 

@@ -293,7 +293,7 @@ pub fn client_would_remove(
     attention: Option<Attention>,
     owned_copies: &[String],
 ) -> String {
-    let here = matches!(state, HarnessState::Installed | HarnessState::Updatable);
+    let here = state.holds_owned_entry();
     match (here, owned_copies.is_empty()) {
         (true, true) => format!("Would remove Ghostlight from {client}."),
         (true, false) => format!(

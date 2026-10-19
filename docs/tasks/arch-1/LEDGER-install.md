@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a and I9b have landed. ux-2 has closed, so I4, I5, I6, I8, I10, I12 and I13 can start,
-and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
+I1, I3, I7, I9a, I9b and I4 have landed. ux-2 has closed, so I5, I6, I8, I10, I12 and I13 can
+start, and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
 registers) and the live check on a test machine.
 
 ## Slices
@@ -22,7 +22,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | see Notes | landed (this commit) |
 | I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | see Notes | landed (this commit) |
 | I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | held for the owner | todo (held for the owner's question 1) |
-| I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | - | todo |
+| I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | - | todo |
 | I2 | fix(install): one atomic replace and one same-location rule | none | I1 | - | todo |
 | I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | - | todo |
@@ -95,3 +95,18 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   (`name:`, `description:`) is not a hint, so C20 reads the body after it.
 - I9b changes no code, golden or journey, and no plugin version (D1's RELEASE.md step bumps it).
   `linux.txt` is unaffected.
+- I4, the one rule: `HarnessState::holds_owned_entry` (installed or updatable, the states inspection
+  shows every current, updatable or retired registration as) and `HarnessSummary::has_entry_to_remove`
+  (that, or an owned other copy). `can_uninstall` is the second where the configuration may be
+  changed, and `left_private` reads it for a removal. The dry run's `client_would_remove` read its
+  own installed-or-updatable test; it now reads the same method. Within the slice.
+- I4, an extra proof: `every_owned_registration_is_shown_as_a_state_that_holds_an_owned_entry` ties
+  the state rule to `holds_owned_entry`'s reading of a file.
+- I4, the writer golden (`GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1`): 169 `offers:` lines in 21 dialects
+  gain uninstall, every one under `state: updatable` (the stale, legacy relay, retired and
+  owned-with-the-client's-keys seeds). The native goldens seed no Ghostlight entry, so `linux.txt`
+  is unaffected. No journey is needed.
+- I4, for surface: the window still shows Remove only for an installed client
+  (`ui/lib/view.js`, `actsOf`, `agent.state === "installed"`), so it hides a Remove the service now
+  offers for an updatable one. That file is surface's and the slice's Changes do not name it; the
+  coordinator decides whether a surface slice drops that test.

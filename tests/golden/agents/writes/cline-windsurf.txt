@@ -322,7 +322,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
@@ -393,7 +393,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
@@ -464,7 +464,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
@@ -539,7 +539,7 @@ seed <root>/Pat Doe/AppData/Roaming/Windsurf/User/globalStorage/saoudrizwan.clau
 -- inspect
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
@@ -1037,7 +1037,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
@@ -1108,7 +1108,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
@@ -1179,7 +1179,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no
@@ -1254,7 +1254,7 @@ seed <root>/Pat Doe/.config/Windsurf/User/globalStorage/saoudrizwan.claude-dev/s
 -- inspect
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
-offers: install, download, locate
+offers: install, uninstall, download, locate
 download: https://docs.cline.bot/getting-started/installing-cline
 copy only: no
 private view: no

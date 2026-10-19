@@ -345,7 +345,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
@@ -423,7 +423,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
@@ -501,7 +501,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
@@ -583,7 +583,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
@@ -1115,7 +1115,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
@@ -1193,7 +1193,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
@@ -1271,7 +1271,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: Ghostlight's saved registration needs an update.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
@@ -1353,7 +1353,7 @@ seed <root>/Pat Doe/.zcode/cli/config.json:
 -- inspect
 state: updatable (connected, needs an update)
 detail: This entry starts ghostlight-mcp-connector, which Ghostlight no longer installs. Set up points it at ghostlight mcp.
-offers: install, locate
+offers: install, uninstall, locate
 copy only: no
 private view: no
 config path: <root>/Pat Doe/.zcode/cli/config.json
