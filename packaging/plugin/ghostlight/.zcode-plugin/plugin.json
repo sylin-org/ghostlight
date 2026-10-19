@@ -10,7 +10,7 @@
   "mcpServers": {
     "ghostlight": {
       "command": "npx",
-      "args": ["-y", "ghostlight"],
+      "args": ["-y", "ghostlight@2"],
       "timeoutMs": 120000,
       "env": {}
     }

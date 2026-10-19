@@ -195,7 +195,17 @@ if ($claudeServer.command -ne $zcodeServer.command) {
 }
 if (($claudeServer.args -join "`n") -ne ($zcodeServer.args -join "`n")) {
     throw "Plugin manifests disagree on the MCP server arguments"
-}foreach ($catalogPath in @(".claude-plugin/marketplace.json", "marketplace.json")) {
+}
+# The plugin asks npm for this tree's major, so it never starts an older major over this install
+# and never jumps to a newer one.
+$npmPackage = Get-Content -LiteralPath (Join-Path $repo "packaging/npm/package.json") -Raw |
+    ConvertFrom-Json
+$pluginPackage = "$($npmPackage.name)@$(($npmPackage.version -split '\.')[0])"
+if ($claudeServer.command -ne "npx" -or
+    (($claudeServer.args -join "`n") -ne (@("-y", $pluginPackage) -join "`n"))) {
+    throw "The plugin's MCP server must be npx -y $pluginPackage"
+}
+foreach ($catalogPath in @(".claude-plugin/marketplace.json", "marketplace.json")) {
     $catalog = Get-Content -LiteralPath (Join-Path $repo $catalogPath) -Raw | ConvertFrom-Json
     $entries = @($catalog.plugins | Where-Object { $_.name -eq "ghostlight" })
     if ($entries.Count -ne 1) {

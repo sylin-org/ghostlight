@@ -19,8 +19,10 @@ one-address marketplace in both ecosystems:
 
 ## What first run does
 
-The plugin's MCP server is `npx -y ghostlight` with no arguments. That is the npm launcher:
-it ensures the three checksum-verified Ghostlight executables (`ghostlight`, `ghostlight-service`
+The plugin's MCP server is `npx -y ghostlight@2` with no further arguments. That is the npm
+launcher of Ghostlight 2, the newest 2.x release on npm, so the plugin never starts a 1.x
+Ghostlight over a 2.0 install and never moves to another major by itself. The launcher
+ensures the three checksum-verified Ghostlight executables (`ghostlight`, `ghostlight-service`
 and `ghostlight-desktop`) exist under `~/.ghostlight/bin/`, downloading them from the official
 GitHub release only, then hands its inherited stdio to `ghostlight mcp`. Requirements: Node.js 18
 or newer. The launcher's download and verification progress goes to stderr and never enters the
@@ -34,7 +36,7 @@ extension, an agent's browser call that finds no browser connected says in its a
 extension comes from. Ghostlight
 started by an agent shows only its tray icon and opens no window. Ghostlight is local by
 construction: no telemetry, no activation service, no hidden network dependency. At each launch,
-`npx` asks the npm registry which `ghostlight` package to run, and the launcher downloads the
+`npx` asks the npm registry which 2.x `ghostlight` package to run, and the launcher downloads the
 programs from the GitHub release only when the installed set needs them. The npm launcher row of
 [the data flows](../../../docs/trust/data-flows.md) names each case in which it downloads.
 
@@ -42,9 +44,13 @@ programs from the GitHub release only when the installed set needs them. The npm
 
 - ZCode reads `timeoutMs` per server; Claude Code does not, and configures timeouts globally.
 - Claude Code on native Windows may need the command wrapped as
-  `cmd /c npx -y ghostlight` depending on version; ZCode spawns `npx` directly.
-- If Ghostlight is also registered through the installer, Claude Code holds two registrations
-  named `ghostlight`. Which of them it starts, and whether it starts both, has not been verified.
+  `cmd /c npx -y ghostlight@2` depending on version; ZCode spawns `npx` directly.
+- The plugin, `ghostlight install`, or both: each way gives the agent one Ghostlight and one set
+  of tools. With both, Claude Code starts both servers (measured on Claude Code 2.1.303).
+  Ghostlight sees that the two connections come from the same agent process and offers its tools
+  on the first one only. The other offers no tools, and its server instructions say Ghostlight is
+  already connected to this agent. When the connection holding the tools ends, the other one
+  takes them over and tells the agent its tool list changed.
 
 ## Versioning
 

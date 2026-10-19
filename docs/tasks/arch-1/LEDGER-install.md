@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b, I4, I5, I2, I6, I8, I10, I12 and I13 have landed. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
-a test machine.
+Every arch-1 slice has landed; I11 landed with follow-up F2 after the owner's answer to question 1. The
+follow-up slices of 2026-10-19 are recorded under Notes, Follow-up (2026-10-19).
 
 ## Slices
 
@@ -20,7 +20,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I7 | fix(deployment): a same-version install restores a missing shell | candidate | none | see Notes | landed (this commit) |
 | I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | see Notes | landed (this commit) |
 | I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | see Notes | landed (this commit) |
-| I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | held for the owner | todo (held for the owner's question 1) |
+| I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | owner's answer 2026-10-19; see Notes, Follow-up | landed (F2, this commit) |
 | I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | see Notes | landed (this commit) |
 | I2 | fix(install): one atomic replace and one same-location rule | none | I1 | see Notes | landed (this commit) |
@@ -324,3 +324,16 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   ADR-0160; `create_private_file`'s doc and `private_file`'s comments no longer speak of a
   runtime token file. No caller outside win-peer changed. It changes no golden and needs no
   journey. `linux.txt` is unaffected; the module is Windows-only and Linux compiles none of it.
+
+### Follow-up (2026-10-19)
+
+- F2 (lands I11), the owner's answer to question 1: the plugin must "work regardless", so plugin
+  only, installer only, or both give one working Ghostlight and one set of tools. The plugin keeps
+  its server and asks npm for Ghostlight 2 (`npx -y ghostlight@2` in both manifests), so it never
+  starts 1.x over a 2.0 install and never jumps a major. The marketplaces serve `main`, which
+  advances only at the cutover, so nothing public changes before then. The live check is
+  linux-2's L2-04 (Claude Code 2.1.303: both servers start); the one toolset is core's F1, which
+  the README's client note now describes in place of "not verified". The integrity script proves
+  the pin: the plugin's server must be `npx -y <npm package>@<its major>`, read from
+  `packaging/npm/package.json`. The plugin version is unchanged; RELEASE.md's plugin step raises
+  it before the candidate commit. No code, golden or journey changes; `linux.txt` is unaffected.
