@@ -452,7 +452,7 @@ impl Sink {
             "started_ms": unix_ms(),
         });
         if let Some((_, file)) = state.open.as_mut() {
-            let _ = writeln!(file, "{}", header);
+            let _ = append_line(file, &header);
         }
         Self::write_record(
             sink,
@@ -482,10 +482,7 @@ impl Sink {
             "detail": clip(detail),
         });
         if let Some((_, file)) = state.open.as_mut() {
-            if writeln!(file, "{}", record)
-                .and_then(|()| file.flush())
-                .is_err()
-            {
+            if append_line(file, &record).is_err() {
                 state.open = None;
                 state.disabled = true;
                 eprintln!("Ghostlight diagnostics disabled for this process: write failed");
@@ -518,6 +515,14 @@ impl fmt::Debug for Sink {
             .field("run_id", &self.run_id)
             .finish_non_exhaustive()
     }
+}
+
+/// Append `value` to `file` as one JSONL line in a single write, so the line reaches the file
+/// whole or not at all, also when the process exits while another thread is appending.
+fn append_line(file: &mut File, value: &serde_json::Value) -> io::Result<()> {
+    let mut line = value.to_string();
+    line.push('\n');
+    file.write_all(line.as_bytes())
 }
 
 /// The edge's logs. The edge writes one file per role, `<component>.jsonl`, and stops writing it
@@ -1134,5 +1139,87 @@ mod tests {
             None,
         );
         assert_eq!(sink.activation().layer(), "off");
+    }
+
+    /// The variable that tells [`an_exiting_writer_appends_until_it_exits`] which directory to
+    /// write into. Without it that test does nothing.
+    const EXITING_WRITER_VARIABLE: &str = "GHOSTLIGHT_TEST_EXITING_WRITER_DIR";
+    /// The full name of the test that stands in for a process exiting while it appends.
+    const EXITING_WRITER_TEST: &str =
+        "diagnostics::tests::an_exiting_writer_appends_until_it_exits";
+    /// How many processes the exit test starts; each exit lands at a different point.
+    const EXITING_WRITER_RUNS: usize = 6;
+    /// How long a stand-in appends before it exits.
+    const EXITING_WRITER_LIFETIME: Duration = Duration::from_millis(60);
+
+    /// The stand-in the exit test starts: this test binary, told to run only this test. A normal
+    /// run skips it. With [`EXITING_WRITER_VARIABLE`] set, several threads append records as
+    /// fast as they can and the process exits while they do.
+    #[test]
+    #[ignore = "a stand-in process for the exit test, started by it"]
+    fn an_exiting_writer_appends_until_it_exits() {
+        let Some(directory) = std::env::var_os(EXITING_WRITER_VARIABLE).map(PathBuf::from) else {
+            return;
+        };
+        let sink = Sink::birth_with(
+            Component::Orchestrator,
+            "9.9.9-test",
+            &directory,
+            Some(directory.clone()),
+            &OsMarkerWatcher,
+            None,
+        );
+        let detail = "a \"quoted\" \\ detail ".repeat(MAX_DETAIL_BYTES / 20);
+        for _ in 0..4 {
+            let sink = Arc::clone(&sink);
+            let detail = detail.clone();
+            thread::spawn(move || loop {
+                sink.emit(event::OPERATION_COMPLETED, Level::Info, Some("op"), &detail);
+            });
+        }
+        thread::sleep(EXITING_WRITER_LIFETIME);
+        std::process::exit(0);
+    }
+
+    #[test]
+    fn every_record_reaches_the_file_whole_when_the_process_exits_mid_append() {
+        let root = temp_root("exit");
+        for run in 0..EXITING_WRITER_RUNS {
+            let directory = root.join(format!("run-{run}"));
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "--test-threads=1",
+                    EXITING_WRITER_TEST,
+                ])
+                .env(EXITING_WRITER_VARIABLE, &directory)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("the stand-in starts");
+            assert!(status.success(), "{status}");
+            let logs: Vec<PathBuf> = fs::read_dir(&directory)
+                .expect("the stand-in wrote its directory")
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.extension()
+                        .is_some_and(|extension| extension == "jsonl")
+                })
+                .collect();
+            assert_eq!(logs.len(), 1, "{logs:?}");
+            let content = fs::read_to_string(&logs[0]).expect("log");
+            assert!(content.lines().count() > 2, "the stand-in appended records");
+            assert!(
+                content.ends_with('\n'),
+                "run {run} ends in a cut-off record"
+            );
+            for line in content.lines() {
+                serde_json::from_str::<serde_json::Value>(line)
+                    .unwrap_or_else(|error| panic!("run {run}: {error}: {line}"));
+            }
+        }
     }
 }

@@ -603,3 +603,12 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `a_resumed_session_tells_its_seating_whether_it_stood_by` in `intake/mcp/tests.rs`. No golden
   changed. For the coordinator, on the same test machine: with both entries, replace the service,
   then change the policy; the model still has 23 Ghostlight tools.
+- F5, a diagnostics record reaches the file whole or not at all: landed (this commit). The
+  service's sink in `crates/bridge/src/diagnostics.rs` wrote each record through `writeln!`, which
+  hands a `serde_json::Value` to the file in many small writes, so a process that exits while
+  another thread appends left a cut-off last record (linux-claude, linux-2 LEDGER Notes). The
+  header and every record now go out as one line in one write. Proves:
+  `every_record_reaches_the_file_whole_when_the_process_exits_mid_append`, which starts this test
+  binary six times as a stand-in that appends from four threads and exits mid-append, and reads
+  every line back as JSON; it failed on the first run before the fix. The edge's log already
+  writes one buffer per line, so `crates/relay` is unchanged. No golden or journey changed.
