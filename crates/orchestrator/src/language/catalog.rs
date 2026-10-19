@@ -50,7 +50,7 @@ pub fn catalog() -> Vec<ToolDefinition> {
         tool(
             "browser_tabs",
             "Browser tabs",
-            "List, focus, or close this session's tabs. List reads the live browser, refuses when none is connected, and returns fresh tab handles.",
+            "List, focus, or close this session's tabs. List gives fresh handles from the live browser; with no tab yet it needs none and names those connected.",
             tabs_schema(),
             Hints::browser_action(true),
         ),

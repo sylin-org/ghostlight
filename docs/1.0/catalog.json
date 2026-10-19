@@ -1,7 +1,7 @@
 [
   {
     "name": "browser_tabs",
-    "description": "List, focus, or close this session's tabs. List reads the live browser, refuses when none is connected, and returns fresh tab handles.",
+    "description": "List, focus, or close this session's tabs. List gives fresh handles from the live browser; with no tab yet it needs none and names those connected.",
     "inputSchema": {
       "additionalProperties": false,
       "examples": [
