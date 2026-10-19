@@ -292,9 +292,11 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   belongs to another Ghostlight session (Claude Code).", naming the owner's agent from its opener's
   `ConnectionEvidence::details()`, as the window does, and no one for the unknown agent. The
   `owner_workspace` fact carries the same name; C13 reads the name once at workspace open.
-- C7, the flow: a step whose arguments name a target or view handle (`target`, `root`, `view`,
-  `submit_target`, `source_target`, `destination_target`, a fill field's `target`) gets no flow
-  tab. The catalog's flow sentence ("a step's own tab wins") is unchanged, because the ADR counts
+- C7, the flow: a step whose every tab-scoped part is a target or view handle (`target`, `root`,
+  `view`, `submit_target`, `source_target`, `destination_target`, a fill field's `target`) gets no
+  flow tab. A selector names no tab, so a step with one keeps the flow tab, a fill whose
+  `submit_target` or other fields are handles included; a handle among them on another tab is then
+  refused as `handle_on_other_tab`. The catalog's flow sentence ("a step's own tab wins") is unchanged, because the ADR counts
   one changed catalog phrase.
 - C7, proofs: `a_target_from_another_of_this_sessions_tabs_names_that_tab`,
   `a_fill_across_two_tabs_says_a_fill_works_in_one_tab` and

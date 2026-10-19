@@ -1666,8 +1666,9 @@ const TAB_NAMING_HANDLES: &[&str] = &[
     "destination_target",
 ];
 
-/// Whether a step's arguments name a handle that belongs to one tab: a target or view handle,
-/// or a fill field's target.
+/// Whether every tab-scoped part of a step's arguments is a handle that names its own tab: a
+/// target or view handle, or a fill field's target. A selector names no tab, so a step with one,
+/// such as a fill whose other fields or submit_target are handles, still works in the flow's tab.
 fn names_its_tab(input: &Value) -> bool {
     let named = |value: &Value, field: &str| {
         value
@@ -1675,15 +1676,25 @@ fn names_its_tab(input: &Value) -> bool {
             .and_then(Value::as_str)
             .is_some_and(|handle| !handle.is_empty())
     };
+    let selects = |value: &Value| {
+        value
+            .get("selector")
+            .is_some_and(|selector| !selector.is_null())
+    };
+    let fields = input
+        .get("fields")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if selects(input) || fields.iter().any(selects) {
+        return false;
+    }
     TAB_NAMING_HANDLES.iter().any(|field| named(input, field))
-        || input
-            .get("fields")
-            .and_then(Value::as_array)
-            .is_some_and(|fields| fields.iter().any(|field| named(field, "target")))
+        || fields.iter().any(|field| named(field, "target"))
 }
 
-/// Decode an ordinary flow child, inheriting the batch tab only for tab-scoped work whose
-/// handles name no tab of their own: a target or view handle already says which tab it is in.
+/// Decode an ordinary flow child, inheriting the batch tab for tab-scoped work unless every
+/// tab-scoped part of it is a target or view handle, which already says which tab it is in.
 pub(crate) fn decode_flow_step(
     tool: &str,
     mut input: Value,
@@ -2838,6 +2849,22 @@ mod tests {
             panic!("fill")
         };
         assert_eq!(fill.tab.as_deref(), Some("tab_batch"));
+        // A selector names no tab, so a fill that has one keeps the flow's tab even when its
+        // submit_target or another field is a handle.
+        for mixed in [
+            json!({"fields":[{"selector":{"name":"Email"},"value":"a"}],"submit_target":"target_submit"}),
+            json!({"fields":[
+                {"selector":{"name":"Email"},"value":"a"},
+                {"target":"target_other","value":"b"}
+            ]}),
+        ] {
+            let Operation::FillForm(fill) =
+                decode_flow_step("browser_fill_form", mixed.clone(), tab).unwrap()
+            else {
+                panic!("fill")
+            };
+            assert_eq!(fill.tab.as_deref(), Some("tab_batch"), "{mixed}");
+        }
         let Operation::TypeText(typed) = decode_flow_step(
             "browser_type_text",
             json!({"focused":true,"text":"target_lookalike"}),
