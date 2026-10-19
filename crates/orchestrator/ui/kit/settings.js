@@ -38,13 +38,6 @@
     end_session: "controls-end"
   });
 
-  /** The runtime acts that make sense in each runtime state. */
-  const RUNTIME_OFFERS = Object.freeze({
-    active: Object.freeze(["hold", "end_session"]),
-    held: Object.freeze(["resume", "end_session"]),
-    ended: Object.freeze(["start_session"])
-  });
-
   /** The token the service gives the Ghostlight window's own context. */
   const CONTEXT_CONTROL = "control";
 
@@ -165,7 +158,9 @@
       say("controls-runtime-label", runtime.label);
       say("controls-runtime-word", runtime.word);
       say("controls-runtime-note", runtime.note);
-      const offered = RUNTIME_OFFERS[runtime.state] ?? [];
+      // The service names the acts the state accepts; a button shows when its act is one of them
+      // and this screen may do it.
+      const offered = runtime.offers ?? [];
       for (const [act, id] of Object.entries(RUNTIME_BUTTONS)) {
         show(id, offered.includes(act) && Boolean(runtime.acts[act]?.available));
       }

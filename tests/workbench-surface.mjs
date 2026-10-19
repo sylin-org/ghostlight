@@ -90,6 +90,8 @@ const SHEET_PRIVATE = "Watching is off: only this window shows Ghostlight.";
 const SHEET_WATCHED = "Others on this computer can watch this view in a browser.";
 const SHEET_WATCHER = "Anyone on this computer can open this view. Changes are made in the Ghostlight window.";
 const SHEET_NOT_SERVED = "Ghostlight is not serving a watch view on this computer.";
+/** The acts each runtime state accepts, in the order governance::offers names them. */
+const OFFERS = Object.freeze({ active: ["hold", "end_session"], held: ["resume", "end_session"], ended: ["start_session"] });
 const controlsPart = ({
   context = "control", watch = true, runtime = "active", note = null, layer = "marker", served = true
 } = {}) => {
@@ -99,7 +101,7 @@ const controlsPart = ({
   return {
     runtime: {
       label: "Browser work", state: runtime,
-      word: { active: "Running", held: "Paused", ended: "Session ended" }[runtime], note,
+      word: { active: "Running", held: "Paused", ended: "Session ended" }[runtime], note, offers: OFFERS[runtime],
       acts: { hold: act(true), resume: act(), start_session: act(), end_session: act() }
     },
     viewing: served ? {
@@ -427,8 +429,9 @@ const sheetAfterBoot = {
   errors: [...reported]
 };
 
-// The orchestrator pushes a changed status. The band, the wheel and the sentence behind the word
-// change with no snapshot asked for, and a hint about a part nobody is looking at asks for nothing.
+// The orchestrator pushes a changed status and the controls part that offers the state's acts. The
+// band, the wheel and the sentence behind the word change with no snapshot asked for, and a hint
+// about a part nobody is looking at asks for nothing.
 const snapshotRequests = () => invoked.filter((cmd) => cmd === "workbench_snapshot").length;
 const statusPush = (seq, runtime, note) => ({
   seq,
@@ -452,15 +455,20 @@ const statusPush = (seq, runtime, note) => ({
 const requestsBeforePush = snapshotRequests();
 const seqBeforePush = snapshots;
 const wordBeforePush = nodes.get("state-word").textContent;
+const controlsPush = (seq, runtime, note) => ({
+  seq, change: { kind: "controls_changed", controls: controlsPart({ runtime, note }) }
+});
 await pushed(statusPush(seqBeforePush + 1, "held", "Paused from the tray."));
+await pushed(controlsPush(seqBeforePush + 2, "held", "Paused from the tray."));
 const wordAfterPush = nodes.get("state-word").textContent;
 const wordTitleAfterPush = nodes.get("state-word").title;
 const wheelAfterPush = nodes.get("wheel").dataset.intent;
 const requestsAfterPush = snapshotRequests();
-await pushed(statusPush(seqBeforePush + 2, "active", null));
+await pushed(statusPush(seqBeforePush + 3, "active", null));
+await pushed(controlsPush(seqBeforePush + 4, "active", null));
 const titleAfterResume = nodes.get("state-word").title;
-await pushed({ seq: seqBeforePush + 3, change: { kind: "part_changed", part: "integrations", etag: "tag-1" } });
-await pushed({ seq: seqBeforePush + 4, change: { kind: "part_changed", part: "policy", etag: "tag-2" } });
+await pushed({ seq: seqBeforePush + 5, change: { kind: "part_changed", part: "integrations", etag: "tag-1" } });
+await pushed({ seq: seqBeforePush + 6, change: { kind: "part_changed", part: "policy", etag: "tag-2" } });
 await new Promise((r) => setTimeout(r, 0));
 const requestsAfterHints = snapshotRequests();
 const policyReadsAfterHints = invoked.filter((cmd) => cmd === "workbench_policy").length;
@@ -1859,7 +1867,7 @@ const checks = [
   ["the Status page draws no process diagnostics, which moved to Settings",
     !nodes.get("diagnostic-grid").innerHTML.includes("Process diagnostics"),
     nodes.get("diagnostic-grid").innerHTML],
-  ["a pushed status changes the word, the sentence behind it and the wheel with no snapshot",
+  ["a pushed status and controls part change the word, the sentence behind it and the wheel with no snapshot",
     wordBeforePush === "Ready" && wordAfterPush === "Paused"
       && wordTitleAfterPush === "Paused from the tray."
       && wheelAfterPush === "resume" && requestsAfterPush === requestsBeforePush
@@ -2012,7 +2020,9 @@ const checks = [
     (() => {
       const wheel = nodes.get("wheel");
       const readiness = { state: "ready", word: "Ready", detail: "Connected.", tone: "quiet" };
-      const snapshot = (invites) => ({ sessions: [], browsers: [], history: [], readiness: { ...readiness, ...invites } });
+      const snapshot = (invites) => ({
+        sessions: [], browsers: [], history: [], readiness: { ...readiness, ...invites }, controls: controlsPart()
+      });
       view.band({ connected: true, snapshot: snapshot({}), runtime: "active", running: 0 });
       const withheld = wheel.disabled;
       view.band({ connected: true, snapshot: snapshot({ invites_control: true }), runtime: "active", running: 0 });
@@ -2025,21 +2035,21 @@ const checks = [
       // The orchestrator offers runtime control whenever it answers, because a pause is its own
       // state rather than something a browser holds. Only an unreachable authority disables it.
       const wheel = nodes.get("wheel");
-      const notConnected = {
-        sessions: [], browsers: [], history: [],
+      const notConnected = (runtime) => ({
+        sessions: [], browsers: [], history: [], controls: controlsPart({ runtime }),
         readiness: { state: "not_connected", word: "Not connected", detail: "No browser.", tone: "offline", invites_control: true }
-      };
-      view.band({ connected: true, snapshot: notConnected, runtime: "active", running: 0 });
+      });
+      view.band({ connected: true, snapshot: notConnected("active"), runtime: "active", running: 0 });
       const pause = { disabled: wheel.disabled, intent: wheel.dataset.intent };
-      view.band({ connected: true, snapshot: notConnected, runtime: "held", running: 0 });
+      view.band({ connected: true, snapshot: notConnected("held"), runtime: "held", running: 0 });
       const resume = { disabled: wheel.disabled, intent: wheel.dataset.intent };
       // A failed resync marks the window disconnected but keeps the last snapshot, whose readiness
       // still invites control. The lost connection must win over that stale answer.
-      view.band({ connected: false, snapshot: notConnected, runtime: "held", running: 0 });
+      view.band({ connected: false, snapshot: notConnected("held"), runtime: "held", running: 0 });
       const lost = wheel.disabled;
       view.band({ connected: false, snapshot: null, runtime: "held", running: 0 });
       const neverReached = wheel.disabled;
-      view.band({ connected: true, snapshot: notConnected, runtime: "held", running: 0 });
+      view.band({ connected: true, snapshot: notConnected("held"), runtime: "held", running: 0 });
       const regained = !wheel.disabled;
       return !pause.disabled && pause.intent === "hold"
         && !resume.disabled && resume.intent === "resume"

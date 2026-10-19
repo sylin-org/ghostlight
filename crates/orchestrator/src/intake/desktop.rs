@@ -31,6 +31,7 @@ use ghostlight_relay::protocol::GoodbyeReason;
 use serde::{Deserialize, Serialize};
 
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
+use crate::governance::offers;
 use crate::language::readiness::Readiness;
 use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::workbench::PageAddress;
@@ -395,15 +396,15 @@ pub struct TrayModel {
 impl TrayModel {
     /// The tray for a service in `readiness` with `runtime` control and `counts` connected.
     ///
-    /// Open and Quit can always be chosen. Pause can be chosen while browser work is active, and
-    /// Resume while it is paused; once the session ended, that entry starts a new one.
+    /// Open and Quit can always be chosen. A runtime entry can be chosen only when the act it asks
+    /// for is one [`offers`] names for `runtime`: Pause while browser work is active, Resume while
+    /// it is paused, and Start a new session once the session ended.
     #[must_use]
     pub fn of(
         readiness: Readiness,
         runtime: RuntimeControlState,
         counts: ConnectionCounts,
     ) -> Self {
-        let active = runtime == RuntimeControlState::Active;
         Self {
             tooltip: words::tray_tooltip(readiness, counts),
             items: TrayItemId::ALL
@@ -411,10 +412,9 @@ impl TrayModel {
                 .map(|id| TrayItem {
                     id,
                     label: id.label(runtime).to_owned(),
-                    enabled: match id {
-                        TrayItemId::Open | TrayItemId::Quit => true,
-                        TrayItemId::Hold => active,
-                        TrayItemId::Resume => !active,
+                    enabled: match id.intent(runtime) {
+                        Some(intent) => offers(runtime).contains(&intent),
+                        None => true,
                     },
                 })
                 .collect(),
@@ -676,12 +676,9 @@ mod tests {
     }
 
     #[test]
-    fn an_ended_tray_offers_a_new_session_but_not_pause() {
-        let tray = TrayModel::of(
-            Readiness::SessionEnded,
-            RuntimeControlState::Ended,
-            golden_counts(),
-        );
+    fn an_ended_session_offers_no_resume_in_the_tray() {
+        let runtime = RuntimeControlState::Ended;
+        let tray = TrayModel::of(Readiness::SessionEnded, runtime, golden_counts());
         assert_eq!(tray.state, TrayState::Paused);
         assert_eq!(
             listed(&tray),
@@ -692,11 +689,37 @@ mod tests {
                 ("quit", "Quit Ghostlight", true),
             ]
         );
+        let asked: Vec<_> = tray
+            .items
+            .iter()
+            .filter(|item| item.enabled)
+            .filter_map(|item| item.id.intent(runtime))
+            .collect();
         assert_eq!(
-            TrayItemId::Resume.intent(RuntimeControlState::Ended),
-            Some(RuntimeControlIntent::StartSession),
-            "the entry does what it says: a resume would leave an ended session ended"
+            asked,
+            [RuntimeControlIntent::StartSession],
+            "an ended session accepts only a new session; a Resume would leave it ended"
         );
+    }
+
+    #[test]
+    fn a_runtime_entry_can_be_chosen_exactly_when_the_state_offers_its_act() {
+        for runtime in [
+            RuntimeControlState::Active,
+            RuntimeControlState::Held,
+            RuntimeControlState::Ended,
+        ] {
+            let tray = TrayModel::of(Readiness::Ready, runtime, golden_counts());
+            for item in &tray.items {
+                if let Some(intent) = item.id.intent(runtime) {
+                    assert_eq!(
+                        item.enabled,
+                        offers(runtime).contains(&intent),
+                        "{runtime:?} {intent:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

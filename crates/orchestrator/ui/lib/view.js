@@ -33,6 +33,17 @@
 
   const TOAST_MS = 4200;
 
+  /** What the band's wheel says for each act it can do, in the words of the tray and Settings. */
+  const WHEEL_WORDS = Object.freeze({
+    [ACT.hold]: SETTINGS.pause,
+    [ACT.resume]: SETTINGS.resume,
+    [ACT.startSession]: SETTINGS.startSession
+  });
+
+  /** The wheel's two faces: pause while it would pause, play while it would let agents work. */
+  const PAUSE_ICON = '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+  const PLAY_ICON = '<path d="M7 4.5 19 12 7 19.5z"/>';
+
   /**
    * The fewest milliseconds between two sentences the live region says, so a burst of quick actions
    * reaches a screen reader as its latest action, not as a stream.
@@ -877,24 +888,25 @@
         el["policy-state"].setAttribute("aria-label", `Open Policy. ${policy.detail}`);
       }
 
-      // The orchestrator offers runtime control in every readiness state, browser or not. What it
-      // cannot say is that this window lost it: the last snapshot outlives the connection, so a lost
-      // authority disables the wheel here rather than letting a stale answer keep it enabled.
-      const paused = facts.runtime !== "active";
-      const intent = facts.runtime === "ended" ? ACT.startSession : paused ? ACT.resume : ACT.hold;
+      // The wheel does the first act the service offers in this state, from the controls part, so
+      // it never offers what the state would refuse. The orchestrator offers runtime control in
+      // every readiness state, browser or not. What it cannot say is that this window lost it: the
+      // last snapshot outlives the connection, so a lost authority disables the wheel here rather
+      // than letting a stale answer keep it enabled.
+      const intent = facts.snapshot?.controls?.runtime?.offers?.[0] ?? null;
       el.wheel.disabled = lost || facts.connected === false || !(facts.snapshot?.readiness?.invites_control ?? false);
-      el.wheel.dataset.intent = intent;
-      el["wheel-label"].textContent = facts.runtime === "ended" ? SETTINGS.startSession : paused ? SETTINGS.resume : SETTINGS.pause;
-      el["wheel-icon"].innerHTML = paused
-        ? '<path d="M7 4.5 19 12 7 19.5z"/>'
-        : '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+      el.wheel.dataset.intent = intent ?? "";
+      el["wheel-label"].textContent = WHEEL_WORDS[intent] ?? "";
+      el["wheel-icon"].innerHTML = intent === ACT.hold ? PAUSE_ICON : PLAY_ICON;
 
       // A screen that cannot press the wheel shows the state in its place, and where to change it.
-      const offered = can(intent);
+      // Until the service has named an act, the band shows neither.
+      const offered = intent !== null && can(intent);
+      const withheld = intent !== null && !offered;
       el.wheel.hidden = !offered;
-      el["wheel-state"].hidden = offered;
-      el["band-continue"].hidden = offered;
-      if (!offered) {
+      el["wheel-state"].hidden = !withheld;
+      el["band-continue"].hidden = !withheld;
+      if (withheld) {
         el["wheel-state-word"].textContent = readiness ? readiness.word : "";
         el["wheel-state-note"].textContent = facts.snapshot?.runtime_note ?? "";
         el["band-continue"].innerHTML = continueMarkup(whyNot(intent));

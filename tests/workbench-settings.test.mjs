@@ -33,6 +33,9 @@ const PRIVATE = "Watching is off: only this window shows Ghostlight.";
 const WATCHER = "Anyone on this computer can open this view. Changes are made in the Ghostlight window.";
 const SECTIONS = ["screen", "sharing", "browser-work", "notifications", "diagnostics"];
 
+/** The acts each runtime state accepts, in the order governance::offers names them. */
+const OFFERS = Object.freeze({ active: ["hold", "end_session"], held: ["resume", "end_session"], ended: ["start_session"] });
+
 /** The part as the service shapes it: the window may do every act, a watcher may only pause. */
 function part({ context = "control", watch = true, runtime = "active", layer = "marker", url = "http://127.0.0.1:41234/" } = {}) {
   const control = context === "control";
@@ -42,7 +45,7 @@ function part({ context = "control", watch = true, runtime = "active", layer = "
   return {
     runtime: {
       label: "Browser work", state: runtime, word: { active: "Running", held: "Paused", ended: "Session ended" }[runtime],
-      note: runtime === "held" ? "Paused from the tray." : null,
+      note: runtime === "held" ? "Paused from the tray." : null, offers: OFFERS[runtime],
       acts: { hold: act(true), resume: act(), start_session: act(), end_session: act() }
     },
     viewing: {
@@ -669,6 +672,19 @@ test("each runtime state offers the acts that make sense in it", () => {
   assert.deepEqual(runtimeShowing(shown), ["controls-resume", "controls-end"]);
   shown.settings.render(part({ runtime: "ended" }));
   assert.deepEqual(runtimeShowing(shown), ["controls-start"]);
+});
+
+test("Settings shows only the runtime acts the controls part offers, never its own table's", () => {
+  const shown = kit();
+  // The page keeps no table of which act a state accepts: what the service offers is what shows.
+  const ended = part({ runtime: "ended" });
+  shown.settings.render({ ...ended, runtime: { ...ended.runtime, offers: ["resume", "start_session"] } });
+  assert.deepEqual(runtimeShowing(shown), ["controls-resume", "controls-start"]);
+  shown.settings.render({ ...ended, runtime: { ...ended.runtime, offers: [] } });
+  assert.deepEqual(runtimeShowing(shown), []);
+  // An offered act this screen may not do stays hidden.
+  shown.settings.render(part({ context: "watch", runtime: "active" }));
+  assert.deepEqual(runtimeShowing(shown), ["controls-hold"]);
 });
 
 test("a switch that is off offers Turn on", async () => {
@@ -3347,15 +3363,40 @@ test("the band, the pill and About count one thing, the agents At a glance group
   assert.equal(about.includes("Sessions"), false);
 });
 
+/** The glance's snapshot with the controls part the service publishes for `runtime`. */
+const inState = (snapshot, runtime) => ({ ...snapshot, controls: part({ runtime }) });
+
 test("the band's wheel says Pause agents, Resume agents and Start a new session, the words of the tray and the toolbar", () => {
   const shown = glance();
-  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0 });
+  shown.view.band({ connected: true, snapshot: inState(shown.snapshot, "active"), runtime: "active", running: 0 });
   assert.equal(shown.el("wheel-label").textContent, "Pause agents");
-  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "held", running: 0 });
+  shown.view.band({ connected: true, snapshot: inState(shown.snapshot, "held"), runtime: "held", running: 0 });
   assert.equal(shown.el("wheel-label").textContent, "Resume agents");
-  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "ended", running: 0 });
+  shown.view.band({ connected: true, snapshot: inState(shown.snapshot, "ended"), runtime: "ended", running: 0 });
   assert.equal(shown.el("wheel-label").textContent, "Start a new session");
   assert.equal(said(kit(), "controls-resume"), "Resume agents");
+});
+
+test("the band's wheel does the first act the controls part offers, and offers no Resume once the session ended", () => {
+  const shown = glance();
+  const wheel = shown.el("wheel");
+  for (const [runtime, intent] of [["active", "hold"], ["held", "resume"], ["ended", "start_session"]]) {
+    shown.view.band({ connected: true, snapshot: inState(shown.snapshot, runtime), runtime, running: 0 });
+    assert.equal(wheel.dataset.intent, intent, runtime);
+    assert.equal(wheel.hidden, false, runtime);
+  }
+  // The wheel reads the part, not the runtime word beside it: an ended session's part offers a new
+  // session, never the Resume a paused one would.
+  shown.view.band({ connected: true, snapshot: inState(shown.snapshot, "ended"), runtime: "held", running: 0 });
+  assert.equal(wheel.dataset.intent, "start_session");
+  assert.equal(shown.el("wheel-label").textContent, "Start a new session");
+  // Before the service has named an act, the band shows neither the wheel nor a way on.
+  const unnamed = inState(shown.snapshot, "active");
+  delete unnamed.controls;
+  shown.view.band({ connected: true, snapshot: unnamed, runtime: "active", running: 0 });
+  assert.equal(wheel.hidden, true);
+  assert.equal(shown.el("wheel-state").hidden, true);
+  assert.equal(shown.el("band-continue").hidden, true);
 });
 
 test("Status asks whether Ghostlight is working", () => {

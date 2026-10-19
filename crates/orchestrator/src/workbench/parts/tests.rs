@@ -665,6 +665,7 @@ fn controls_keys() -> BTreeSet<String> {
         "runtime.acts",
         "runtime.label",
         "runtime.note",
+        "runtime.offers",
         "runtime.state",
         "runtime.word",
         "service",
@@ -1092,6 +1093,33 @@ fn the_window_may_do_every_act_of_the_controls_part_and_a_watcher_only_pauses() 
     );
     assert_eq!(watcher["you"]["context"], "watch");
     assert_eq!(watcher["you"]["sentence"], words::SENTENCE_WATCH);
+}
+
+#[test]
+fn the_controls_part_offers_the_acts_the_runtime_state_accepts() {
+    for (state, offered) in [
+        (RuntimeControlState::Active, json!(["hold", "end_session"])),
+        (RuntimeControlState::Held, json!(["resume", "end_session"])),
+        (RuntimeControlState::Ended, json!(["start_session"])),
+    ] {
+        let part = ControlsPart::of(&ControlsFacts {
+            runtime_state: state,
+            runtime_note: None,
+            viewing: ViewingFacts::NotServed,
+            diagnostics: &DiagnosticsReport {
+                layer: "off",
+                directory: None,
+                used_bytes: 0,
+            },
+            counts: ConnectionCounts::default(),
+            user_home: None,
+        });
+        assert_eq!(part.runtime.offers, crate::governance::offers(state));
+        // A watcher is offered the same acts; only whether its context may do each differs.
+        for seen in [&part, &part.seen_by(WebContext::Watch)] {
+            assert_eq!(json!(seen)["runtime"]["offers"], offered, "{state:?}");
+        }
+    }
 }
 
 #[test]

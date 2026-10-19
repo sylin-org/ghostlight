@@ -197,10 +197,13 @@ const setupFixture = {
 
 const setupStates = { retired: setupFixture, ...stagesOfSetup };
 
+// The acts each runtime state accepts, in the order governance::offers names them.
+const OFFERS = Object.freeze({ active: ["hold", "end_session"], held: ["resume", "end_session"], ended: ["start_session"] });
+
 // The controls part Settings is drawn from, as the window sees it: every act available, watching on.
 const controlsFixture = {
   runtime: {
-    label: "Browser work", state: "active", word: "Running", note: null,
+    label: "Browser work", state: "active", word: "Running", note: null, offers: OFFERS.active,
     acts: Object.fromEntries(["hold", "resume", "start_session", "end_session"].map((act) => [act, { available: true, why_not: null }]))
   },
   viewing: {
@@ -550,6 +553,7 @@ const withRuntime = (flat, state) => {
   changed.configuration.runtime_state = state;
   changed.controls.runtime.state = state;
   changed.controls.runtime.word = RUNTIME_WORD[state];
+  changed.controls.runtime.offers = OFFERS[state];
   return changed;
 };
 
@@ -772,6 +776,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
     const controls = preview.controls;
     controls.runtime.state = preview.service.runtime_state;
     controls.runtime.word = { active: "Running", held: "Paused", ended: "Session ended" }[controls.runtime.state];
+    controls.runtime.offers = OFFERS[controls.runtime.state];
     controls.viewing.word = controls.viewing.watch
       ? "On: anyone on this computer can open this view"
       : "Off: only this window shows Ghostlight";

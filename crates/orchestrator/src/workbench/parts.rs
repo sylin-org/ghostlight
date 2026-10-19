@@ -20,10 +20,10 @@ use super::{
     BrowserInstanceSummary, DiagnosticItem, HistoryItem, OperationSummary, ReadinessSummary,
     ServiceSummary, SessionSummary, WorkbenchChange, WorkbenchEvent, WorkbenchSnapshot,
 };
-use crate::browser::adapter::RuntimeControlState;
+use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use crate::diagnostics::DiagnosticsReport;
 use crate::governance::effective::{EffectiveAuthority, LayerKind, PolicyChip};
-use crate::governance::ManagedPolicyPassport;
+use crate::governance::{offers, ManagedPolicyPassport};
 use crate::install::{HarnessActionResult, HarnessState, HarnessSummary};
 use crate::language::audit_health::AuditHealth;
 use crate::language::coverage::HumanCoverage;
@@ -317,6 +317,10 @@ pub struct RuntimeControls {
     pub word: &'static str,
     /// Where a pause came from, while agents are paused.
     pub note: Option<String>,
+    /// The acts the state accepts, in the order a surface shows them, as [`offers`] names them.
+    /// A screen shows an act only when it is offered here and `acts` lets its context do it; the
+    /// band's wheel does the first.
+    pub offers: &'static [RuntimeControlIntent],
     /// What the context may do.
     pub acts: RuntimeActs,
 }
@@ -469,6 +473,7 @@ impl ControlsPart {
                     RuntimeControlState::Ended => words::CONTROLS_RUNTIME_ENDED,
                 },
                 note: facts.runtime_note.map(str::to_owned),
+                offers: offers(facts.runtime_state),
                 acts: RuntimeActs {
                     hold: unavailable.clone(),
                     resume: unavailable.clone(),
