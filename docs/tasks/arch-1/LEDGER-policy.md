@@ -15,8 +15,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
 | P10 | feat(governance): the runtime state names the acts it accepts | candidate | ux-2 closes | - | landed (570528ad, 4476fda8) |
-| P1 | fix(governance): one evaluator says whether a capability can be used anywhere | candidate | ux-2 closes | see Notes | landed (this commit) |
-| P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | - | todo |
+| P1 | fix(governance): one evaluator says whether a capability can be used anywhere | candidate | ux-2 closes | see Notes | landed (3373e274, this commit) |
+| P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | todo |
 | P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | - | todo |
 | P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | - | todo |
 | P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | - | todo |
@@ -40,7 +40,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   under each suffix, and that label alone; the label has no dot and is renumbered until no probe it
   builds is an exact pattern. A probe a ceiling refuses counts neither as admitted nor as narrowed
   by a layer, so a never-touch host stays a ceiling line and does not turn "Available" into "Some
-  blocked" (P2 credits its layer). Three departures in shape, none in decision: `could_admit` asks
+  blocked". A never-touch probe still keeps each layer's own answer and the first layer whose list
+  matched, so a layer whose only sites are never-touch is not counted as allowing it nowhere, and
+  layers whose only shared sites are never-touch are not called disjoint. That line reads "Not
+  available. The only sites X allow it on are marked never-touch by Y." and credits Y (review fix:
+  the line had blamed the layer that allowed it). To know Y, each `PolicyLayer` now keeps its own
+  never-touch list, so the layer-dropping flatten in `assemble` that P2 names is already deleted;
+  P2 still credits the layer on the landing refusal itself. Three departures in shape, none in decision: `could_admit` asks
   the same probes and stops at the first admitted one instead of computing the whole reach, which
   is equal by construction and pinned by the agreement test; an unavailable line now names a layer
   that admits the capability nowhere on its own, not the first decider, which could be a layer

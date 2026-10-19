@@ -553,24 +553,49 @@ fn capability_line(
         CapabilityState::Unavailable if reach.disjoint() => {
             format!("Not available. The sites {who} allow do not overlap.")
         }
-        CapabilityState::Unavailable => {
-            let kind = reach
-                .nowhere
-                .first()
-                .map_or(LayerKind::Ghostlight, |tier| layer_kind(*tier));
-            // "you does not allow it" is what a template gets you. Whoever refused is named in
-            // their own grammar, because a person reading why they were stopped deserves a
-            // sentence rather than a substitution.
-            let refusal = match kind {
-                LayerKind::User => "You do not allow it anywhere.".to_owned(),
-                LayerKind::Ghostlight => "Ghostlight does not allow it anywhere.".to_owned(),
-                LayerKind::Organization => format!(
-                    "{} does not allow it anywhere.",
-                    named.as_deref().unwrap_or("Your organization")
-                ),
-            };
-            format!("Not available. {refusal}")
-        }
+        CapabilityState::Unavailable => match (reach.nowhere.first(), &reach.never_touched) {
+            // Every layer allows it somewhere, but only on never-touch hosts, so the never-touch
+            // list is what refuses it: its author is named and credited.
+            (None, Some(never)) => {
+                let names = |tiers: &[AuthorityTier]| {
+                    tiers
+                        .iter()
+                        .map(|tier| word(layer_kind(*tier)))
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                };
+                let allow = match never.allowed_by.as_slice() {
+                    [AuthorityTier::Managed] => "allows",
+                    _ => "allow",
+                };
+                for tier in &never.marked_by {
+                    if !decided_by.contains(&layer_kind(*tier)) {
+                        decided_by.push(layer_kind(*tier));
+                    }
+                }
+                decided_by.sort_by_key(|kind| *kind != LayerKind::Organization);
+                format!(
+                    "Not available. The only sites {} {allow} it on are marked never-touch by {}.",
+                    names(&never.allowed_by),
+                    names(&never.marked_by)
+                )
+            }
+            (nowhere, _) => {
+                let kind = nowhere.map_or(LayerKind::Ghostlight, |tier| layer_kind(*tier));
+                // "you does not allow it" is what a template gets you. Whoever refused is named
+                // in their own grammar, because a person reading why they were stopped deserves
+                // a sentence rather than a substitution.
+                let refusal = match kind {
+                    LayerKind::User => "You do not allow it anywhere.".to_owned(),
+                    LayerKind::Ghostlight => "Ghostlight does not allow it anywhere.".to_owned(),
+                    LayerKind::Organization => format!(
+                        "{} does not allow it anywhere.",
+                        named.as_deref().unwrap_or("Your organization")
+                    ),
+                };
+                format!("Not available. {refusal}")
+            }
+        },
     };
     // A switch narrows who may do it rather than where: said on every line something can still
     // use, and its layer named among the deciders.
@@ -802,7 +827,7 @@ mod tests {
     ) -> Inputs<'a> {
         let snapshot = snapshot(organization, user);
         Inputs {
-            sacred_hosts: snapshot.sacred_hosts().to_vec(),
+            sacred_hosts: snapshot.sacred_hosts(),
             snapshot,
             organization,
             user,
@@ -1181,27 +1206,47 @@ mod tests {
 
     #[test]
     fn a_grant_reaching_only_never_touch_hosts_advertises_nothing() {
-        for (organization, user) in [
+        let cases = [
+            // The user allows only hosts the user marked never-touch.
             (
                 None,
                 r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"bank","hosts":{"allow":["bank.example","*.vault.example"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["bank.example","*.vault.example"],"level":"mandatory"}]}"#,
+                "Not available. The only sites you allow it on are marked never-touch by you.",
+                vec![LayerKind::User],
             ),
+            // The organization allows every host and marks the only hosts the user allows
+            // never-touch: the user's rule is not what refuses it.
             (
                 Some(
                     r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["*.bank.example"],"level":"mandatory"}]}"#,
                 ),
                 r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"bank","hosts":{"allow":["*.bank.example"]},"allowed":["read"]}]}"#,
+                "Not available. The only sites you allow it on are marked never-touch by your organization.",
+                vec![LayerKind::Organization, LayerKind::User],
             ),
-        ] {
+            // Each layer allows a site of its own, and the one site they share is never-touch,
+            // so their sites do overlap.
+            (
+                Some(
+                    r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"some","hosts":{"allow":["a.example","bank.example"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["bank.example"],"level":"mandatory"}]}"#,
+                ),
+                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"some","hosts":{"allow":["b.example","bank.example"]},"allowed":["read"]}]}"#,
+                "Not available. The only sites Northwind and you allow it on are marked never-touch by Northwind.",
+                vec![LayerKind::Organization, LayerKind::User],
+            ),
+        ];
+        for (organization, user, detail, decided_by) in cases {
             let organization = organization.map(policy);
             let user = policy(user);
             let snapshot = snapshot(organization.as_ref(), Some(&user));
-            assert!(!snapshot.could_admit(CapabilitySet::READ), "{}", user.name);
+            assert!(!snapshot.could_admit(CapabilitySet::READ), "{detail}");
             assert!(!catalog_for(&snapshot)
                 .iter()
                 .any(|tool| tool.name == "browser_read"));
-            let view = compile(&inputs(organization.as_ref(), Some(&user)));
-            assert_eq!(view.capabilities[0].state, CapabilityState::Unavailable);
+            let read = &compile(&inputs(organization.as_ref(), Some(&user))).capabilities[0];
+            assert_eq!(read.state, CapabilityState::Unavailable);
+            assert_eq!(read.detail, detail);
+            assert_eq!(read.decided_by, decided_by, "{detail}");
         }
     }
 

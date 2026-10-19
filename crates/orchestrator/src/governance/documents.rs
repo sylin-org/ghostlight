@@ -7,13 +7,13 @@ impl AuthoritySnapshot {
     #[must_use]
     pub fn permits_any_document(&self, requirements: super::CapabilitySet) -> bool {
         self.valid
-            && self.sacred_hosts.is_empty()
             && self.layers.iter().all(|layer| {
-                layer.manifest.grants.iter().any(|grant| {
-                    grant.hosts.allow.iter().any(|host| host == "*")
-                        && grant.hosts.deny.is_empty()
-                        && requirements.is_subset_of(grant.allowed_set())
-                })
+                layer.never_touch.is_empty()
+                    && layer.manifest.grants.iter().any(|grant| {
+                        grant.hosts.allow.iter().any(|host| host == "*")
+                            && grant.hosts.deny.is_empty()
+                            && requirements.is_subset_of(grant.allowed_set())
+                    })
             })
     }
 }

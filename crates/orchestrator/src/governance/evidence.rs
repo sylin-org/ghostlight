@@ -28,7 +28,7 @@ mod tests {
             .as_ref()
             .clone();
         for tier in [AuthorityTier::Managed, AuthorityTier::User] {
-            snapshot.layers.push(PolicyLayer { tier, manifest: manifest::parse(r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap() });
+            snapshot.layers.push(PolicyLayer::new(tier, manifest::parse(r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["example.com"]},"allowed":["read"]},{"id":"write","hosts":{"allow":["example.com"]},"allowed":["write"]},{"id":"combined","hosts":{"allow":["example.com"]},"allowed":["read","write"]}]}"#, "test").unwrap()));
         }
         let requirements = CapabilitySet::READ.union(CapabilitySet::WRITE);
         let (decision, evidence) = snapshot.authorize_with_evidence(
@@ -70,14 +70,14 @@ mod tests {
             crate::language::history::permission(&open, IntakeChannel::Mcp, None),
             "Allowed without configured policy."
         );
-        snapshot.layers.push(PolicyLayer {
-            tier: AuthorityTier::User,
-            manifest: manifest::parse(
+        snapshot.layers.push(PolicyLayer::new(
+            AuthorityTier::User,
+            manifest::parse(
                 r#"{"schema":4,"name":"test","version":"1","grants":[]}"#,
                 "test",
             )
             .unwrap(),
-        });
+        ));
         let (decision, refused) =
             snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
         assert!(!decision.allowed);

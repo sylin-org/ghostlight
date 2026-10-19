@@ -394,7 +394,6 @@ pub struct AuthoritySnapshot {
     tab_close_allowed: bool,
     tab_close_source: Option<u16>,
     preserve_target_names: bool,
-    sacred_hosts: Vec<String>,
     valid: bool,
     own_origin: OwnOrigin,
 }
@@ -462,6 +461,22 @@ impl AuthorityTier {
 struct PolicyLayer {
     tier: AuthorityTier,
     manifest: manifest::Manifest,
+    /// The destinations this layer marks never-touch.
+    never_touch: Vec<String>,
+}
+
+impl PolicyLayer {
+    /// The layer `manifest` authors at `tier`, with the never-touch list its settings hold.
+    fn new(tier: AuthorityTier, manifest: manifest::Manifest) -> Self {
+        let never_touch = manifest
+            .string_array_setting("content.security.sacred_domains")
+            .unwrap_or_default();
+        Self {
+            tier,
+            manifest,
+            never_touch,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -555,10 +570,25 @@ impl AuthoritySnapshot {
         &self.id
     }
 
-    /// Destinations policy marked never-touch, for the boundaries a person is shown.
+    /// Destinations policy marked never-touch, for the boundaries a person is shown, in
+    /// authority order.
     #[must_use]
-    pub fn sacred_hosts(&self) -> &[String] {
-        &self.sacred_hosts
+    pub fn sacred_hosts(&self) -> Vec<String> {
+        self.layers
+            .iter()
+            .flat_map(|layer| layer.never_touch.iter().cloned())
+            .collect()
+    }
+
+    /// The index of the first layer whose never-touch list matches `url`'s host.
+    fn never_touch_author(&self, url: &Url) -> Option<usize> {
+        let host = url.host_str()?.to_ascii_lowercase();
+        self.layers.iter().position(|layer| {
+            layer
+                .never_touch
+                .iter()
+                .any(|pattern| host_matches(&host, pattern))
+        })
     }
 
     /// Decide a capability at its final boundary.
@@ -643,7 +673,7 @@ impl AuthoritySnapshot {
             return (Decision::deny(ReasonCode::HostDenied), vec![]);
         };
         if !matches!(parsed.scheme(), "http" | "https")
-            || protected_by_policy(&parsed, &self.sacred_hosts)
+            || self.never_touch_author(&parsed).is_some()
         {
             return (Decision::deny(ReasonCode::ProtectedHost), vec![]);
         }
@@ -690,11 +720,14 @@ impl AuthoritySnapshot {
     /// Each probe host goes through the same decision a landing does, never-touch hosts and the
     /// window's own origin included, so the answer is the enforced one. The probe set stands for
     /// every host the snapshot's patterns tell apart ([`ProbeSet`]), which makes the answer exact.
+    /// A never-touch host admits nothing, but each layer's own answer there is kept, so a refusal
+    /// that only a never-touch list causes is told apart from a layer that allows nothing.
     fn reach(&self, requirements: CapabilitySet) -> Reach {
         let mut reach = Reach {
             state: effective::CapabilityState::Unavailable,
             narrowed_by: Vec::new(),
             nowhere: Vec::new(),
+            never_touched: None,
         };
         if !self.valid {
             return reach;
@@ -704,6 +737,7 @@ impl AuthoritySnapshot {
         let mut refused = false;
         let mut narrowed = vec![false; self.layers.len()];
         let mut somewhere = vec![false; self.layers.len()];
+        let mut untouchable = Vec::new();
         for host in probes.hosts() {
             match self.probe(requirements, &host) {
                 ProbeAnswer::Admitted => {
@@ -717,8 +751,18 @@ impl AuthoritySnapshot {
                         somewhere[index] |= admits;
                     }
                 }
+                ProbeAnswer::NeverTouch(untouched) => untouchable.push(untouched),
                 ProbeAnswer::Beyond => {}
             }
+        }
+        // The layers that admit it on their own on a never-touch host and on no other host.
+        let only_untouchable: Vec<usize> = (0..self.layers.len())
+            .filter(|&index| {
+                !somewhere[index] && untouchable.iter().any(|untouched| untouched.alone[index])
+            })
+            .collect();
+        if !admitted {
+            reach.never_touched = self.never_touched(&untouchable, &only_untouchable);
         }
         reach.state = if !admitted {
             effective::CapabilityState::Unavailable
@@ -733,11 +777,57 @@ impl AuthoritySnapshot {
             if narrowed[index] {
                 reach.narrowed_by.push(layer.tier);
             }
-            if !somewhere[index] {
+            if !somewhere[index] && !only_untouchable.contains(&index) {
                 reach.nowhere.push(layer.tier);
             }
         }
         reach
+    }
+
+    /// Which layers' sites are all never-touch, and who marked them, when nothing is admitted.
+    ///
+    /// When some layers admit it only on never-touch hosts (`only_untouchable`), they are named
+    /// with the authors of the never-touch hosts they admit. Otherwise, when some never-touch host
+    /// is admitted by every layer, the layers' only shared sites are never-touch, so every layer
+    /// is named with the authors of those hosts.
+    fn never_touched(
+        &self,
+        untouchable: &[Untouched],
+        only_untouchable: &[usize],
+    ) -> Option<NeverTouched> {
+        let (allowed_by, kept): (Vec<usize>, Vec<&Untouched>) = if only_untouchable.is_empty() {
+            (
+                (0..self.layers.len()).collect(),
+                untouchable
+                    .iter()
+                    .filter(|untouched| untouched.alone.iter().all(|admits| *admits))
+                    .collect(),
+            )
+        } else {
+            (
+                only_untouchable.to_vec(),
+                untouchable
+                    .iter()
+                    .filter(|untouched| {
+                        only_untouchable.iter().any(|&index| untouched.alone[index])
+                    })
+                    .collect(),
+            )
+        };
+        if kept.is_empty() {
+            return None;
+        }
+        let marked: BTreeSet<usize> = kept.iter().map(|untouched| untouched.author).collect();
+        Some(NeverTouched {
+            allowed_by: allowed_by
+                .into_iter()
+                .map(|index| self.layers[index].tier)
+                .collect(),
+            marked_by: marked
+                .into_iter()
+                .map(|index| self.layers[index].tier)
+                .collect(),
+        })
     }
 
     /// Whether the layer of `tier` admits `requirements` on some host `within` allows and no
@@ -754,7 +844,7 @@ impl AuthoritySnapshot {
                 && match self.probe(requirements, &host) {
                     ProbeAnswer::Admitted => true,
                     ProbeAnswer::Refused(alone) => alone[index],
-                    ProbeAnswer::Beyond => false,
+                    ProbeAnswer::NeverTouch(_) | ProbeAnswer::Beyond => false,
                 }
         }))
     }
@@ -767,18 +857,34 @@ impl AuthoritySnapshot {
                 .iter()
                 .flat_map(|layer| &layer.manifest.grants)
                 .flat_map(|grant| grant.hosts.allow.iter().chain(&grant.hosts.deny))
-                .chain(&self.sacred_hosts)
+                .chain(self.layers.iter().flat_map(|layer| &layer.never_touch))
                 .map(String::as_str),
         )
     }
 
     /// Decide `requirements` on one probe host, as a landing there would be decided.
     fn probe(&self, requirements: CapabilitySet, host: &str) -> ProbeAnswer {
-        let (decision, outcomes) = self.decide_landing(requirements, &format!("https://{host}/"));
+        let url = format!("https://{host}/");
+        let (decision, outcomes) = self.decide_landing(requirements, &url);
         if decision.allowed {
             ProbeAnswer::Admitted
         } else if outcomes.is_empty() {
-            ProbeAnswer::Beyond
+            // A valid snapshot refuses an https probe before its layers only for a never-touch
+            // host or the window's own origin, and checks never-touch first.
+            let author = Url::parse(&url)
+                .ok()
+                .filter(|_| self.valid)
+                .and_then(|parsed| self.never_touch_author(&parsed));
+            author.map_or(ProbeAnswer::Beyond, |author| {
+                ProbeAnswer::NeverTouch(Untouched {
+                    alone: self
+                        .layers
+                        .iter()
+                        .map(|layer| decide_for_host(layer, requirements, host).denial.is_none())
+                        .collect(),
+                    author,
+                })
+            })
         } else {
             ProbeAnswer::Refused(
                 outcomes
@@ -837,18 +943,40 @@ struct Reach {
     state: effective::CapabilityState,
     /// The layers that refuse it on some host no ceiling refuses, in authority order.
     narrowed_by: Vec<AuthorityTier>,
-    /// The layers that admit it on no host even on their own, in authority order.
+    /// The layers that admit it on no host even on their own, never-touch hosts included, in
+    /// authority order.
     nowhere: Vec<AuthorityTier>,
+    /// When nothing admits it, the never-touch hosts that keep it off, if any.
+    never_touched: Option<NeverTouched>,
 }
 
 impl Reach {
     /// Whether every layer admits it somewhere on its own while no host is admitted by all of
-    /// them: each layer allows it, but on different sites.
+    /// them, never-touch hosts included: each layer allows it, but on different sites.
     fn disjoint(&self) -> bool {
         self.state == effective::CapabilityState::Unavailable
             && self.nowhere.is_empty()
+            && self.never_touched.is_none()
             && self.narrowed_by.len() > 1
     }
+}
+
+/// Layers whose only sites for a requirement set are marked never-touch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NeverTouched {
+    /// The layers whose sites, on their own or shared, are all never-touch, in authority order.
+    allowed_by: Vec<AuthorityTier>,
+    /// The layers whose never-touch lists hold those sites, in authority order.
+    marked_by: Vec<AuthorityTier>,
+}
+
+/// How the layers would decide one never-touch probe host if its never-touch entry were gone.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Untouched {
+    /// Whether each layer, on its own, admits it there.
+    alone: Vec<bool>,
+    /// The index of the first layer whose never-touch list matches the host.
+    author: usize,
 }
 
 /// How the snapshot decided one probe host.
@@ -856,7 +984,9 @@ impl Reach {
 enum ProbeAnswer {
     /// Every layer admits it.
     Admitted,
-    /// A boundary before the layers refuses it: a ceiling, or an address no page can have.
+    /// A layer's never-touch list refuses it.
+    NeverTouch(Untouched),
+    /// Another boundary before the layers refuses it: a ceiling, or an address no page can have.
     Beyond,
     /// The layers refuse it. Each entry says whether that layer, on its own, admits it.
     Refused(Vec<bool>),
@@ -1061,15 +1191,6 @@ fn denial_bytes(manifest_hash: &str, grant_id: &str, rule: PolicyRule) -> [u8; 4
     [digest[0], digest[1], digest[2], digest[3]]
 }
 
-fn protected_by_policy(url: &Url, sacred_hosts: &[String]) -> bool {
-    url.host_str().is_some_and(|host| {
-        let host = host.to_ascii_lowercase();
-        sacred_hosts
-            .iter()
-            .any(|pattern| host_matches(&host, pattern))
-    })
-}
-
 /// Receives the runtime control state each time it changes, once per change.
 pub type ControlObserver = Arc<dyn Fn(RuntimeControlState) + Send + Sync>;
 
@@ -1269,7 +1390,7 @@ impl Published {
             user,
             valid,
             channels_off,
-            sacred_hosts: snapshot.sacred_hosts().to_vec(),
+            sacred_hosts: snapshot.sacred_hosts(),
             organization_source: sources.managed.path.as_ref().map_or_else(
                 || organization.map(|_| passport_source(&passport)),
                 |path| Some(path.display().to_string()),
@@ -1969,7 +2090,6 @@ fn assemble(
     let mut tab_close_allowed = true;
     let mut tab_close_source = None;
     let mut preserve_target_names = true;
-    let mut sacred_hosts = Vec::new();
     for (policy, tier) in sources {
         let Some(policy) = policy else { continue };
         let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
@@ -1980,13 +2100,7 @@ fn assemble(
         if policy.boolean_setting("privacy.preserve_target_names") == Some(false) {
             preserve_target_names = false;
         }
-        if let Some(patterns) = policy.string_array_setting("content.security.sacred_domains") {
-            sacred_hosts.extend(patterns);
-        }
-        layers.push(PolicyLayer {
-            tier,
-            manifest: policy,
-        });
+        layers.push(PolicyLayer::new(tier, policy));
     }
     let id = authority_id(&layers, valid);
 
@@ -1997,7 +2111,6 @@ fn assemble(
         tab_close_allowed,
         tab_close_source,
         preserve_target_names,
-        sacred_hosts,
         valid,
         own_origin: own_origin.clone(),
     }
