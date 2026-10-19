@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b, I4, I5 and I2 have landed. ux-2 has closed, so I6, I8, I10, I12 and I13
+I1, I3, I7, I9a, I9b, I4, I5, I2 and I6 have landed. ux-2 has closed, so I8, I10, I12 and I13
 can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
 a test machine.
 
@@ -25,7 +25,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | see Notes | landed (this commit) |
 | I2 | fix(install): one atomic replace and one same-location rule | none | I1 | see Notes | landed (this commit) |
-| I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | - | todo |
+| I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys | todo |
 | I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs` | todo |
 | I12 | refactor(diagnostics): one spelling of the edge's logs, and no name nobody writes | none | none | - | todo |
@@ -188,3 +188,26 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   backup, and a link refused or followed. The native host's link test was renamed
   `a_registration_file_is_written_through_a_link` and goes through the system writer.
 - I2 changes no golden and needs no journey. `linux.txt` is unaffected.
+- I6, the lock: `refresh` takes the action lock and calls the private `scan`, which `apply`,
+  `setup_detected` and `locate` call under the lock they already hold. `refresh` keeps its
+  `Result`, though it never fails, because the window's `refresh_harnesses` reads it; changing it
+  would cross into surface's file for no behaviour. `apply` finds its definition through
+  `definition`, the one lookup by id.
+- I6, the re-symbol call: `HarnessRegistry::resymbol` gives every cached row its agent's symbol as
+  the icon cache now has it, under the action lock, and reads no client file. S3 makes the window's
+  `icons_changed` (`workbench/mod.rs`, surface's) call it; until then an icon change rescans, now
+  under the lock.
+- I6, the commands: `ghostlight install` and `uninstall` build the client registry once, at the
+  first need (the check of named `--client` ids, else the client step), and read its roster; only
+  each act reads the clients again. The client step is now `cli::setup::run_client_steps`, so the
+  proof can drive it over an isolated registry. Stray temporaries are now removed after that one
+  read, not before it; inspection never reads them. `doctor` reads the roster its registry built.
+- I6, `Registrations`: the client registry is built at the first `pending` or `reconcile`, so
+  `install`'s and `uninstall`'s Windows-entry calls read no client file. A deployment still reads
+  the clients twice, at the plan's `pending` and at the reconcile after `bin` changed; both are
+  their own moment. Not a changed decision.
+- I6, the proofs: `a_background_scan_never_overwrites_an_acts_result` holds the action lock as an
+  act does and shows a background `refresh` waits for it, then stores the act's result.
+  `one_install_scans_once_plus_once_per_write` counts scans through a test-only counter: one when
+  the registry is built, then one for each of three writes.
+- I6 changes no golden and needs no journey. `linux.txt` is unaffected.

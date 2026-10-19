@@ -127,7 +127,7 @@ pub fn observe_doctor() -> anyhow::Result<DoctorObservation> {
         command_path: crate::install::command_path::CommandPath::discover().check()?,
         user_assets: crate::install::user_assets::UserAssets::discover().check()?,
         desktop: DesktopIntegration::discover().check()?,
-        harnesses: HarnessRegistry::discover().refresh()?,
+        harnesses: HarnessRegistry::discover().summaries(),
         icons: IconCache::open(layout.icons(), IconPlaces::system(), None).agents(),
         runtime,
         strays,

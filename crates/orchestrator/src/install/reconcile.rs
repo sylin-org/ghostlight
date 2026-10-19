@@ -14,6 +14,7 @@
 
 use std::env;
 use std::io;
+use std::sync::OnceLock;
 
 use ghostlight_relay::home::TEST_HOME_VARIABLE;
 use serde::Serialize;
@@ -100,9 +101,14 @@ pub struct WindowsRemoval {
 
 /// The registrations of this user that name the installation, and which of them the installer
 /// may change.
+///
+/// The client registry is built, and the clients' configurations read, only when
+/// [`Self::pending`] or [`Self::reconcile`] first needs them, so the Windows entries' own calls
+/// read none.
 pub struct Registrations {
     native_hosts: Option<NativeHostRegistry>,
-    clients: Option<HarnessRegistry>,
+    /// The client registry, once built; `None` where no client entry may be reconciled.
+    clients: Option<OnceLock<HarnessRegistry>>,
     platform_entries: bool,
     residence: Residence,
 }
@@ -118,7 +124,7 @@ impl Registrations {
         let test_home = env::var_os(TEST_HOME_VARIABLE).is_some();
         Self {
             native_hosts: native_hosts_allowed().then(NativeHostRegistry::discover),
-            clients: (!test_home).then(HarnessRegistry::discover),
+            clients: (!test_home).then(OnceLock::new),
             platform_entries: !test_home,
             residence: Residence::detect(),
         }
@@ -130,7 +136,7 @@ impl Registrations {
     pub(crate) fn isolated(native_hosts: NativeHostRegistry, clients: HarnessRegistry) -> Self {
         Self {
             native_hosts: Some(native_hosts),
-            clients: Some(clients),
+            clients: Some(OnceLock::from(clients)),
             platform_entries: false,
             residence: Residence::Regular,
         }
@@ -141,6 +147,13 @@ impl Registrations {
     pub(crate) fn inside(mut self, container: AppContainer) -> Self {
         self.residence = Residence::AppContainer(container);
         self
+    }
+
+    /// The client registry, built at its first use; none where no client entry may be reconciled.
+    fn clients(&self) -> Option<&HarnessRegistry> {
+        self.clients
+            .as_ref()
+            .map(|clients| clients.get_or_init(HarnessRegistry::discover))
     }
 
     /// The registrations a reconcile would write now. Nothing is changed.
@@ -171,7 +184,7 @@ impl Registrations {
                     }),
             );
         }
-        if let Some(clients) = &self.clients {
+        if let Some(clients) = self.clients() {
             pending.extend(
                 clients
                     .summaries()
@@ -196,7 +209,7 @@ impl Registrations {
         if let Some(hosts) = &self.native_hosts {
             reconcile_native_hosts(hosts, &mut report);
         }
-        if let Some(clients) = &self.clients {
+        if let Some(clients) = self.clients() {
             reconcile_clients(clients, &mut report);
         }
         if self.platform_entries {

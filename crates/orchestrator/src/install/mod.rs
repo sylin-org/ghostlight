@@ -99,6 +99,10 @@ const CODEX_DESKTOP_ENVIRONMENT: &[&str] = &[
 ];
 
 /// Cached, explicit registry of supported development harness integrations.
+///
+/// The cached roster is written only under the action lock: every act scans under the lock it
+/// holds, and [`Self::refresh`] waits for it, so a scan that began before an act's write can never
+/// store its older roster over the act's result.
 #[derive(Clone)]
 pub struct HarnessRegistry {
     inner: Arc<RegistryInner>,
@@ -107,7 +111,11 @@ pub struct HarnessRegistry {
 struct RegistryInner {
     context: HarnessContext,
     summaries: Mutex<Vec<HarnessSummary>>,
+    /// Held by every act and every scan, and always taken before `summaries`.
     action: Mutex<()>,
+    /// How many scans this registry has run, for the tests that count them.
+    #[cfg(test)]
+    scans: std::sync::atomic::AtomicUsize,
 }
 
 impl HarnessRegistry {
@@ -123,6 +131,8 @@ impl HarnessRegistry {
                 context,
                 summaries: Mutex::new(Vec::new()),
                 action: Mutex::new(()),
+                #[cfg(test)]
+                scans: std::sync::atomic::AtomicUsize::new(0),
             }),
         };
         let _ = registry.refresh();
@@ -160,13 +170,47 @@ impl HarnessRegistry {
     }
 
     /// Re-check every supported harness without changing its configuration.
+    ///
+    /// It waits for an act in progress, so the roster it stores is never older than an act's.
     pub fn refresh(&self) -> Result<Vec<HarnessSummary>, HarnessError> {
+        let _action = lock(&self.inner.action);
+        Ok(self.scan())
+    }
+
+    /// Give every cached row the symbol its agent wears now, after the agents' icons changed,
+    /// without reading any client configuration again. Returns the roster as it now stands.
+    ///
+    /// It waits for an act or scan in progress, so a scan that read the older icons never stores
+    /// them over this.
+    pub fn resymbol(&self) -> Vec<HarnessSummary> {
+        let _action = lock(&self.inner.action);
+        let mut summaries = lock(&self.inner.summaries);
+        for summary in summaries.iter_mut() {
+            if let Some(agent) = catalog_agent(&summary.agent.id) {
+                summary.agent = agent;
+            }
+        }
+        summaries.clone()
+    }
+
+    /// Inspect every supported harness and store the roster. The caller holds the action lock.
+    fn scan(&self) -> Vec<HarnessSummary> {
+        #[cfg(test)]
+        self.inner
+            .scans
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let summaries: Vec<HarnessSummary> = definitions(&self.inner.context)
             .into_iter()
             .map(|definition| inspect(&self.inner.context, &definition))
             .collect();
         *lock(&self.inner.summaries) = summaries.clone();
-        Ok(summaries)
+        summaries
+    }
+
+    /// How many scans this registry has run.
+    #[cfg(test)]
+    pub(crate) fn scans(&self) -> usize {
+        self.inner.scans.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Apply one explicit check, install, fix, or uninstall action.
@@ -176,10 +220,7 @@ impl HarnessRegistry {
         action: HarnessAction,
     ) -> Result<HarnessActionResult, HarnessError> {
         let _action = lock(&self.inner.action);
-        let definition = definitions(&self.inner.context)
-            .into_iter()
-            .find(|definition| definition.id == id)
-            .ok_or_else(|| HarnessError::UnknownHarness(id.into()))?;
+        let definition = definition(&self.inner.context, id)?;
         let result = match action {
             HarnessAction::Check => HarnessActionResult {
                 changed: false,
@@ -193,7 +234,7 @@ impl HarnessRegistry {
             HarnessAction::Fix => apply_fix(&self.inner.context, &definition)?,
             HarnessAction::Uninstall => apply_uninstall(&self.inner.context, &definition)?,
         };
-        let _ = self.refresh();
+        self.scan();
         Ok(result)
     }
 
@@ -206,7 +247,7 @@ impl HarnessRegistry {
     /// ready; the result names the failures and the refreshed roster carries their evidence.
     pub fn setup_detected(&self) -> Result<HarnessSetupResult, HarnessError> {
         let _action = lock(&self.inner.action);
-        let initial = self.refresh()?;
+        let initial = self.scan();
         let states: BTreeMap<&str, HarnessState> = initial
             .iter()
             .map(|summary| (summary.id.as_str(), summary.state))
@@ -247,7 +288,7 @@ impl HarnessRegistry {
             }
         }
 
-        let summaries = self.refresh()?;
+        let summaries = self.scan();
         let needs_attention = summaries
             .iter()
             .filter(|summary| summary.state == HarnessState::NeedsAttention)
@@ -324,7 +365,7 @@ impl HarnessRegistry {
             return Err(HarnessError::LocatedPathInvalid(path.to_path_buf()));
         }
         write_location_overrides(&self.inner.context, &overrides)?;
-        let summaries = self.refresh()?;
+        let summaries = self.scan();
         let summary = summaries
             .into_iter()
             .find(|summary| summary.id == id)
@@ -4074,6 +4115,47 @@ mod tests {
         ))
         .unwrap();
         assert!(vscode.contains("ghostlight"));
+    }
+
+    #[test]
+    fn a_background_scan_never_overwrites_an_acts_result() {
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let directory = temporary("background-scan");
+        let context = context(&directory);
+        fs::create_dir_all(context.home.join(".cline/data/settings")).unwrap();
+        let registry = HarnessRegistry::with_context(context.clone());
+        let state = |registry: &HarnessRegistry| {
+            registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "cline-cli")
+                .unwrap()
+                .state
+        };
+        assert_eq!(state(&registry), HarnessState::Available);
+
+        // An act is under way: it holds the action lock while it writes and scans.
+        let act = super::lock(&registry.inner.action);
+        let (finished, scanned) = mpsc::channel();
+        let background = registry.clone();
+        let scan = thread::spawn(move || {
+            background.refresh().unwrap();
+            finished.send(()).unwrap();
+        });
+        assert!(
+            scanned.recv_timeout(Duration::from_millis(200)).is_err(),
+            "a background scan waits for the act in progress"
+        );
+        super::apply_install(&context, &definition(&context, "cline-cli").unwrap()).unwrap();
+        registry.scan();
+        drop(act);
+
+        scanned.recv().unwrap();
+        scan.join().unwrap();
+        assert_eq!(state(&registry), HarnessState::Installed);
     }
 
     #[test]

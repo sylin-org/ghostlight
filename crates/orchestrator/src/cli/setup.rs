@@ -34,7 +34,9 @@ use crate::install::reconcile::{
 };
 use crate::install::record::InstallRecord;
 use crate::install::{client_ids, setup_state, version_directories};
-use crate::install::{HarnessAction, HarnessActionResult, HarnessState, HarnessSummary};
+use crate::install::{
+    HarnessAction, HarnessActionResult, HarnessRegistry, HarnessState, HarnessSummary,
+};
 use crate::language::deployment as deployment_words;
 use crate::language::environment::{self, Environment};
 use crate::language::setup::{
@@ -155,7 +157,6 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
     use crate::install::desktop_entry::{DesktopIntegration, DesktopIntegrationState};
     use crate::install::native_host::NativeHostRegistry;
     use crate::install::user_assets::{UserAssetState, UserAssets};
-    use crate::install::HarnessRegistry;
 
     ghostlight_relay::home::home()?;
     // A real install says only what the summary says, and what needs a person.
@@ -164,6 +165,9 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
     let mut kept_private = KeptPrivate::default();
     let mut collected = Collected::default();
     let mut install_usable = false;
+    // The one look at the clients this command takes, built when it is first needed. Only an
+    // act reads them again.
+    let mut harnesses: Option<HarnessRegistry> = None;
     // Every browser and client the person named is checked before anything stops, changes or
     // prints, so a mistyped id is refused at no cost. Both looks only read.
     let initial_browser_report = native_hosts.check()?;
@@ -173,7 +177,8 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         None
     };
     if !options.client_ids.is_empty() && !options.no_clients {
-        select_harnesses(&HarnessRegistry::discover().refresh()?, options, install)?;
+        let harnesses = harnesses.get_or_insert_with(HarnessRegistry::discover);
+        select_harnesses(&harnesses.summaries(), options, install)?;
     }
     if real_install {
         stop_older_installation_programs()?;
@@ -309,13 +314,41 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
             .map(|()| collected);
     }
 
-    let harnesses = HarnessRegistry::discover();
+    let harnesses = harnesses.unwrap_or_else(HarnessRegistry::discover);
+    let failures = run_client_steps(
+        &harnesses,
+        install,
+        options,
+        &mut kept_private,
+        &mut collected,
+    )?;
+    conclude(install, options, install_usable, &kept_private, &collected)?;
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "Ghostlight could not update {} MCP client integration(s)",
+            failures.len()
+        );
+    }
+    Ok(collected)
+}
+
+/// The client steps of a run over `harnesses`, returning the labels of the clients it could not
+/// change. They read the roster `harnesses` holds; only each act they apply reads the clients
+/// again. With `--dry-run` each step says what it would do instead.
+fn run_client_steps(
+    harnesses: &HarnessRegistry,
+    install: bool,
+    options: &SetupOptions,
+    kept_private: &mut KeptPrivate,
+    collected: &mut Collected,
+) -> anyhow::Result<Vec<String>> {
+    let real_install = install && !options.dry_run;
     if real_install && !options.no_clients {
         harnesses.remove_stray_temporaries();
     }
-    // The scan only reads. A real install reads it even with `--no-clients`, so the summary can
-    // name the agents that are here.
-    let summaries = harnesses.refresh()?;
+    // A real install reads the roster even with `--no-clients`, so the summary can name the
+    // agents that are here.
+    let summaries = harnesses.summaries();
     collected.mcp_command = summaries
         .first()
         .map(|summary| summary.connector_command.clone())
@@ -348,8 +381,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
             }
         }
         collected.agents = install_agents(&summaries, &[]);
-        return conclude(install, options, install_usable, &kept_private, &collected)
-            .map(|()| collected);
+        return Ok(Vec::new());
     }
     let mut failures = Vec::new();
     let mut applied = Vec::new();
@@ -385,14 +417,7 @@ fn run_setup_steps(install: bool, options: &SetupOptions) -> anyhow::Result<Coll
         }
     }
     collected.agents = install_agents(&summaries, &applied);
-    conclude(install, options, install_usable, &kept_private, &collected)?;
-    if !failures.is_empty() {
-        anyhow::bail!(
-            "Ghostlight could not update {} MCP client integration(s)",
-            failures.len()
-        );
-    }
-    Ok(collected)
+    Ok(failures)
 }
 
 /// The browsers a real uninstall would remove Ghostlight's connection from, by name: each one
@@ -1720,6 +1745,57 @@ mod tests {
         assert_eq!(
             said(&malformed),
             "Would leave Claude Desktop as it is: its settings file could not be parsed."
+        );
+    }
+
+    #[test]
+    fn one_install_scans_once_plus_once_per_write() {
+        use std::fs;
+
+        use crate::install::HarnessRegistry;
+        use crate::scratch::Scratch;
+
+        let directory = Scratch::named("setup-scans");
+        let edge = directory.join("ghostlight");
+        fs::write(&edge, b"test").unwrap();
+        fs::create_dir_all(directory.join("clients/home/.cline/data/settings")).unwrap();
+        fs::create_dir_all(
+            directory
+                .join("clients/config/Code/User/globalStorage/saoudrizwan.claude-dev/settings"),
+        )
+        .unwrap();
+        let harnesses =
+            HarnessRegistry::isolated(&directory.join("clients"), &edge, &directory.join("state"));
+        assert_eq!(
+            harnesses.scans(),
+            1,
+            "building the registry is the one look"
+        );
+
+        let mut kept_private = super::KeptPrivate::default();
+        let mut collected = Collected::default();
+        let failures = super::run_client_steps(
+            &harnesses,
+            true,
+            &SetupOptions::default(),
+            &mut kept_private,
+            &mut collected,
+        )
+        .unwrap();
+
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(
+            collected.agents,
+            [
+                agent("Visual Studio Code", true, true),
+                agent("Cline (CLI)", true, true),
+                agent("Cline (Visual Studio Code)", true, true),
+            ]
+        );
+        assert_eq!(
+            harnesses.scans(),
+            1 + 3,
+            "each of the three writes reads the clients once"
         );
     }
 
