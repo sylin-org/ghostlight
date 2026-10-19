@@ -48,7 +48,7 @@ says what reaches the page, not every branch the renderer has.
 | Navigate pill | `navigate` completion | "arrived at this destination" | top-centre pill: a small sky right arrow (shaft and head), drawn as SVG, then the host and path (58 characters at most), 1600ms |
 | Keycap | each `key` start | "a key was pressed" | one unlabelled glowing keycap in a bottom-centre lozenge, 1250ms; it never names the key |
 | Screenshot frame | `screenshot` completion | "this page was captured" | a brief flash, then a frame that shrinks into the bottom-right corner, 1500ms, with the camera medallion |
-| Zoom frame | `zoom` completion | "the agent changed this tab's zoom" | a frame converging onto the middle of the viewport (its central 60 percent), 1150ms |
+| Zoom frame | `zoom` completion (set zoom or window resize) | "the agent changed this tab's zoom or resized its window" | a frame converging onto the middle of the viewport (its central 60 percent), 1150ms |
 | Signature medallion | `script`, `type`, `wait` and `find` start; `screenshot` completion | "the agent is doing this kind of work" | one 58px rounded tile fixed top-right, on the near-black ground with a sky stroke: a turning workwheel with three particles, a pulsing keyboard, three waiting lights, a searching lens, or a camera; a white glint when its invocation completes |
 | Caption | any activity, opt-in | names the activity ("Clicking", "Reading page") | bottom-centre pill, 1500ms; off by default |
 | Denial ribbon | one enforced denial | "a guardrail held; here is why" | centred ribbon on the near-black ground with a red shield badge, a title and one line of detail; replaced by the next denial, gone after five seconds |
