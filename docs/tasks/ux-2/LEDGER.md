@@ -199,6 +199,10 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   for a word and a clock, so the clock beside the word is on the running card only, in ink-3.
   The band says "0 running, 2 waiting", and while paused with nothing running "2 held". The
   phase words and the count rule live in words.js (PHASE, PHASE_WORD, workCounts).
+- u2 (n-d-01), integration pass: the band's state and the tray icon that follows it count only
+  running work too. live.rs gave readiness `working` for any unsettled operation, so a call that
+  only waited showed a teal "Working" beside "0 running, 1 waiting". `working` is now true only
+  while an operation runs, the contract `ReadinessFacts.working` already stated.
 - u2 (j-25): the dwell is 600ms (SWAP_DWELL_MS in view.js). A burst skips both the card's swap
   and the row's landing drop, and a plain settle holds the live look for the dwell; a refusal or
   a failure shows at once.

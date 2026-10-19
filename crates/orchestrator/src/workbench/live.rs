@@ -348,7 +348,9 @@ impl Live {
             session_ended: runtime_state == RuntimeControlState::Ended,
             paused: runtime_state == RuntimeControlState::Held,
             authority_invalid: !authority.authority_valid,
-            working: !operations.is_empty(),
+            working: operations
+                .iter()
+                .any(|operation| operation.phase == OperationPhase::Running),
             channels_off: enforced.channels_off(),
             agents_on_mcp: agents_on(IntakeChannel::Mcp),
             agents_on_cli: agents_on(IntakeChannel::Cli),

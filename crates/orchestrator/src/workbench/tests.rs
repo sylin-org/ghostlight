@@ -897,6 +897,50 @@ fn a_pause_says_where_it_came_from_and_a_repeat_says_nothing_new() {
 }
 
 #[test]
+fn work_that_only_waits_leaves_the_band_ready() {
+    use crate::language::readiness::Readiness;
+
+    let projection = WorkbenchProjection::default();
+    let facade = WorkbenchFacade::new(
+        projection.clone(),
+        crate::workspace::WorkspaceStore::default(),
+        GovernanceFacade::new(None, None),
+        ControlledBrowser::new(true, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    for invocation in ["invocation_1", "invocation_2"] {
+        projection.react(&DomainEvent::WorkWaiting {
+            provenance: crate::provenance::ConnectionEvidence::claimed(
+                "test",
+                crate::intake::session::IntakeChannel::Mcp,
+            )
+            .details(),
+            invocation: invocation.into(),
+            workspace: "workspace_1".into(),
+            tool: "browser_read".into(),
+            activity: PresentationActivity::Read,
+            capabilities: Capability::Read.into(),
+            received_at_ms: crate::audit::unix_ms(),
+        });
+    }
+    let snapshot = facade.snapshot();
+    let phases: Vec<super::OperationPhase> = snapshot
+        .operations
+        .iter()
+        .map(|operation| operation.phase)
+        .collect();
+    assert_eq!(
+        phases,
+        [
+            super::OperationPhase::Waiting,
+            super::OperationPhase::Waiting
+        ],
+        "0 running, 2 waiting"
+    );
+    assert_eq!(snapshot.readiness.state, Readiness::Ready);
+}
+
+#[test]
 fn work_and_saving_health_refresh_the_status_and_connections_without_a_pull() {
     let projection = WorkbenchProjection::default();
     let facade = WorkbenchFacade::new(
