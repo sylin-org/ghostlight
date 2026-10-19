@@ -9,6 +9,10 @@
 //! one being installed, compared without case, without a trailing backslash, without surrounding
 //! quotes and after `%NAME%` references are expanded. Every other entry is kept byte for byte and
 //! in order, empty segments included.
+//!
+//! The same key holds the person's other variables, which every program they start receives. The
+//! registry also reads one of them ([`Registry::variable`]) for a long-lived process whose own
+//! environment came from whichever program started it.
 
 use std::fmt::Debug;
 use std::io;
@@ -26,7 +30,7 @@ const PROFILE_VARIABLE: &str = "USERPROFILE";
 /// Where the per-user `Path` lives, for messages.
 pub const LOCATION: &str = r"HKEY_CURRENT_USER\Environment\Path";
 
-/// A stored per-user `Path`.
+/// A value stored in the per-user environment, such as the `Path`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathValue {
     /// The entries, separated by semicolons.
@@ -175,7 +179,7 @@ pub fn remove(
     })
 }
 
-/// The per-user `Path` in the registry.
+/// The per-user environment in the registry, which holds the `Path`.
 #[cfg(windows)]
 #[derive(Debug)]
 pub struct Registry;
@@ -195,8 +199,14 @@ mod registry {
     /// The value that holds the user's `Path`.
     const PATH_VALUE: &str = "Path";
 
-    impl UserPathStore for Registry {
-        fn read(&self) -> io::Result<Option<PathValue>> {
+    impl Registry {
+        /// The per-user variable `name` as stored, or `None` when the user has none. A value
+        /// that is not a string is refused.
+        ///
+        /// # Errors
+        ///
+        /// Fails when the key or the value cannot be read, or the value is not a string.
+        pub fn variable(&self, name: &str) -> io::Result<Option<PathValue>> {
             let key = match RegKey::predef(HKEY_CURRENT_USER)
                 .open_subkey_with_flags(ENVIRONMENT_KEY, KEY_READ)
             {
@@ -204,11 +214,17 @@ mod registry {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
                 Err(error) => return Err(error),
             };
-            match key.get_raw_value(PATH_VALUE) {
+            match key.get_raw_value(name) {
                 Ok(raw) => decode(&raw).map(Some),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
                 Err(error) => Err(error),
             }
+        }
+    }
+
+    impl UserPathStore for Registry {
+        fn read(&self) -> io::Result<Option<PathValue>> {
+            self.variable(PATH_VALUE)
         }
 
         fn write(&self, value: &PathValue) -> io::Result<()> {

@@ -341,10 +341,18 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   servers from `.claude.json` in `CLAUDE_CONFIG_DIR` when that is set and not empty, else in the
   home (read from the installed Claude Code itself, not a table). The installer wrote only the
   home file, so a person with `CLAUDE_CONFIG_DIR` set never saw the entry. The roster now reads
-  the variable from the environment of the process that looks, the same way Codex's
-  `CODEX_HOME` is read (ADR-0117), so setup, inspection and uninstall all use the file Claude
-  Code reads. Proof: `claude_code_is_set_up_and_removed_in_the_file_claude_code_reads` sets up,
-  finds and removes the entry in each location and never writes the other. The guide's agent
-  table regenerates. No result, catalog or writer golden changes; `linux.txt` is unaffected (its
-  context sets no variable). Not handled: Claude Code's legacy `.config.json`, which it prefers
-  when that file exists and is not empty. No journey needed.
+  the variable from the environment of the process that looks, else, on Windows, from the
+  person's stored environment (`HKEY_CURRENT_USER\Environment`). The fallback is for the
+  workbench: the long-lived service keeps the environment of whatever first started it, which
+  may be a client that filters its child's environment, so without it the window would set up
+  and remove the home file. Proof: `claude_code_is_set_up_and_removed_in_the_file_claude_code_reads`
+  sets up, finds and removes the entry in each location and never writes the other, and
+  `claude_code_directory_comes_from_the_process_else_the_person` proves the process value wins,
+  the stored one fills in (expanded when it holds references) and an empty one counts as none.
+  The guide's agent table regenerates. No result, catalog or writer golden changes; `linux.txt`
+  is unaffected (its context sets no variable). Limits: on Linux a variable set only in a shell
+  startup file is invisible to a service its shell did not start, so there the workbench uses
+  the home unless its starter passed the variable on (`ghostlight setup` and `doctor` run in the
+  person's shell and see it); a machine-wide Windows value is not read; Claude Code's legacy
+  `.config.json`, which it prefers when that file exists and is not empty, is not handled. No
+  journey needed.

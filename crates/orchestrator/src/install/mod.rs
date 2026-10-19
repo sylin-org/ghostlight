@@ -30,7 +30,7 @@ mod writer_golden;
 
 use std::collections::BTreeMap;
 use std::env;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -693,8 +693,9 @@ struct HarnessContext {
     config: PathBuf,
     roaming: PathBuf,
     codex_config: PathBuf,
-    /// The directory [`CLAUDE_CONFIG_VARIABLE`] names, when it is set and not empty: Claude Code
-    /// reads its [`CLAUDE_CODE_FILE`] there in place of the home.
+    /// The directory [`CLAUDE_CONFIG_VARIABLE`] names, when this process or the person's stored
+    /// environment sets it ([`claude_config_dir`]): Claude Code reads its [`CLAUDE_CODE_FILE`]
+    /// there in place of the home.
     claude_config_dir: Option<PathBuf>,
     /// The file [`CRUSH_CONFIG_VARIABLE`] names, when it is set: Crush reads it in place of its
     /// default file.
@@ -791,9 +792,11 @@ impl HarnessContext {
             config: roots.config,
             roaming: roots.roaming,
             codex_config: roots.codex_config,
-            claude_config_dir: env::var_os(CLAUDE_CONFIG_VARIABLE)
-                .filter(|directory| !directory.is_empty())
-                .map(PathBuf::from),
+            claude_config_dir: claude_config_dir(
+                env::var_os(CLAUDE_CONFIG_VARIABLE),
+                stored_variable(CLAUDE_CONFIG_VARIABLE),
+                &|name| env::var(name).ok(),
+            ),
             crush_config: env::var_os(CRUSH_CONFIG_VARIABLE).map(PathBuf::from),
             edge,
             path_entries,
@@ -816,6 +819,44 @@ impl HarnessContext {
             _ => Packages::none(),
         }
     }
+}
+
+/// Claude Code's own directory: the value of [`CLAUDE_CONFIG_VARIABLE`] in this process's
+/// environment, else the one stored in the person's environment, expanded when it holds
+/// references. A value that is empty counts as none, as it does for Claude Code.
+///
+/// The stored value is what every program the person starts receives. It matters to the
+/// long-lived service, whose own environment is whatever its first starter passed on, which may
+/// be a client that filters its child's environment.
+fn claude_config_dir(
+    process: Option<OsString>,
+    stored: Option<user_path::PathValue>,
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> Option<PathBuf> {
+    if let Some(directory) = process.filter(|directory| !directory.is_empty()) {
+        return Some(PathBuf::from(directory));
+    }
+    let stored = stored?;
+    let text = if stored.expandable {
+        user_path::expand(&stored.text, lookup)
+    } else {
+        stored.text
+    };
+    (!text.is_empty()).then(|| PathBuf::from(text))
+}
+
+/// The variable `name` as the person's environment stores it, in the per-user registry. A value
+/// that cannot be read counts as none.
+#[cfg(windows)]
+fn stored_variable(name: &str) -> Option<user_path::PathValue> {
+    user_path::Registry.variable(name).ok().flatten()
+}
+
+/// The variable `name` as the person's environment stores it: nowhere a process can read on
+/// this system, where it lives in the person's shell startup files.
+#[cfg(not(windows))]
+fn stored_variable(_name: &str) -> Option<user_path::PathValue> {
+    None
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3873,6 +3914,55 @@ mod tests {
             assert!(removed.changed, "{named}");
             assert!(!has_entry(&read), "{named}");
             assert!(!unread.exists(), "{named}");
+        }
+    }
+
+    /// A service started without `CLAUDE_CONFIG_DIR` still finds the directory the person's
+    /// environment names, so the workbench sets up and removes the entry Claude Code reads.
+    #[test]
+    fn claude_code_directory_comes_from_the_process_else_the_person() {
+        use std::ffi::OsString;
+
+        use super::{claude_config_dir, user_path, USER_PROFILE_VARIABLE};
+
+        let lookup = |name: &str| (name == USER_PROFILE_VARIABLE).then(|| r"C:\Users\a".to_owned());
+        let stored = |text: &str, expandable| {
+            Some(user_path::PathValue {
+                text: text.to_owned(),
+                expandable,
+            })
+        };
+
+        assert_eq!(
+            claude_config_dir(
+                Some(OsString::from(r"D:\process")),
+                stored(r"D:\person", false),
+                &lookup
+            ),
+            Some(PathBuf::from(r"D:\process"))
+        );
+        for unset in [None, Some(OsString::new())] {
+            assert_eq!(
+                claude_config_dir(
+                    unset.clone(),
+                    stored(r"%USERPROFILE%\claude", true),
+                    &lookup
+                ),
+                Some(PathBuf::from(r"C:\Users\a\claude"))
+            );
+            assert_eq!(
+                claude_config_dir(
+                    unset.clone(),
+                    stored(r"%USERPROFILE%\claude", false),
+                    &lookup
+                ),
+                Some(PathBuf::from(r"%USERPROFILE%\claude"))
+            );
+            assert_eq!(
+                claude_config_dir(unset.clone(), stored("", true), &lookup),
+                None
+            );
+            assert_eq!(claude_config_dir(unset, None, &lookup), None);
         }
     }
 
