@@ -20,4 +20,4 @@
   - The `AdvertisedCatalog` defect: a resumed session misses `list_changed` (ledger Notes).
   - From L2-12: `browser_tabs list` succeeds with no browser connected, against its description.
 - test-01: the bundle (release 2.0.0) with the owner's policy and diagnostics on. The previous
-  home is at `~/.ghostlight.l212-before`.
+  home was removed at the owner's request.
