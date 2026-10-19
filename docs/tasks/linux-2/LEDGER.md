@@ -122,7 +122,7 @@ never sees the entry.
 | Task | What | Status |
 | --- | --- | --- |
 | L2-10 | The full gate and every journey on the go head | done |
-| L2-11 | The release workflow's bundle, built and verified | todo |
+| L2-11 | The release workflow's bundle, built and verified | done |
 | L2-12 | A clean install from the bundle, and real use | todo |
 | L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
 | L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
@@ -148,6 +148,15 @@ itself.
 
 **L2-11.** Dispatch the release workflow on the go head, download the bundle, and run
 `scripts/check-release-candidate.ps1` (with `pwsh`) on it.
+
+Result, 2026-10-19, done. Run 39297671342 of `release.yml` on 149c04d6 (the go head plus tests,
+docs and coordination; CI 39296552280 green on it, 11 of 11) passed every job, the new
+`install-from-bundle` on ubuntu-22.04 and ubuntu-24.04 included: each printed "PASS release
+install" after "Ghostlight is uninstalled.". The `release-candidate` artifact, downloaded to
+`.tmp/release-candidate-39297671342`, passes `scripts/check-release-candidate.ps1`: "Release
+candidate verified: version 2.0.0, source 149c04d67b27f68f211137f6b6976d788dcca4ed, 16 artifacts."
+`sha256sum -c` binds all 16 and `gh attestation verify` accepts the Linux service image. This is
+the bundle the owner's page for Bluefin and Alpine names.
 
 **L2-12.** Remove this machine's development install, then install from the bundle with the
 real `get.sh` and L2-02's local source. Then: the extension from the bundle (unpacked, the store
