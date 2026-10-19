@@ -1994,16 +1994,16 @@ test("a flow takes the most consequential capability its steps used, and never s
   assert.equal(Words.capabilityClass(running), "cap-read");
 });
 
-test("work recorded before agent names were kept says Earlier session and why, never a workspace id", () => {
+test("earlier work that kept no agent says Earlier session and that no name was kept, never a workspace id", () => {
   const workspace = "workspace_0123456789abcdef825";
   const earlier = {
-    id: "earlier", name: "Earlier session", symbol: { glyph: "unknown" }, note: "Recorded before Ghostlight kept agent names."
+    id: "earlier", name: "Earlier session", symbol: { glyph: "unknown" }, note: "Recorded in an earlier session. Ghostlight kept no agent name for it."
   };
   const { cell, cells, text } = rowOf(settledRead({ invocation: "earlier-1", workspace, agent: earlier, provenance: {
     connection_id: "connection_old", reported_application: null, channel: "mcp", explanation: ""
   } }));
   assert.equal(cell("row-client").textContent, "Earlier session");
-  assert.equal(cell("row-client").attributes.title, "Recorded before Ghostlight kept agent names.");
+  assert.equal(cell("row-client").attributes.title, "Recorded in an earlier session. Ghostlight kept no agent name for it.");
   assert.ok(!text.includes("workspace_"), `a raw id is printed in the row: ${text}`);
   assert.ok(![...cells.root.descendants()].some((node) => node.attributes?.title === workspace), "no hover holds the workspace id");
   assert.equal(cells.wearing("connection-explanation").length, 0, "no caveat about a name the card does not show");

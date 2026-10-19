@@ -727,10 +727,16 @@ workbench shows waiting becoming running once.
   only the closed one. Action details remain associated with their original connection.
 - Raw reported application names remain in bounded live human details only. Serialized audit and
   enabled service and edge diagnostics exclude unique claim sentinels. Durable history retains
-  bounded evidence after restart; history written before connection identities existed says so.
-- Human details show the reported application, the connection, its channel and its source when
-  known, with one sentence that says what the connection does and does not establish. Details are
-  quiet by default, escape claims, preserve expansion/focus on refresh, and fit a narrow workbench.
+  bounded evidence after restart. Command-line history written before connection identities
+  existed says so.
+- An action's details name its agent once, with one sentence that says what the connection does
+  and does not establish. They quote the client's own words only where those say more than the
+  agent's name, show the intake only for the command line, and keep the connection id behind
+  Copy id. Work read back from an earlier run whose record kept neither a claimed agent nor a
+  source reads "Earlier session", with a hover that says no agent name was kept, and carries no
+  caveat about a name it does not show. A live client that sent no name reads "Unknown agent".
+  Details are quiet by default, escape claims, preserve expansion/focus on refresh, and fit a
+  narrow workbench.
 
 The source is display and history evidence only. No signature or hash verifier and no identity
 admission is added.

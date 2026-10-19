@@ -154,13 +154,13 @@ const harnesses = [
 ];
 
 /**
- * The command line, an agent nothing names, and the earlier session of work recorded before agent
- * names were kept: the catalog's reserved entries.
+ * The command line, an agent nothing names, and the earlier session of work read back from an
+ * earlier run whose record kept no agent: the catalog's reserved entries.
  */
 const COMMAND_LINE_AGENT = { id: "command_line", name: "Command line", symbol: { glyph: "command_line" } };
 const UNKNOWN_AGENT = { id: "unknown", name: "Unknown agent", symbol: { glyph: "unknown" } };
 const EARLIER_AGENT = {
-  id: "earlier", name: "Earlier session", symbol: { glyph: "unknown" }, note: "Recorded before Ghostlight kept agent names."
+  id: "earlier", name: "Earlier session", symbol: { glyph: "unknown" }, note: "Recorded in an earlier session. Ghostlight kept no agent name for it."
 };
 
 /**
@@ -622,7 +622,16 @@ const pageSnapshot = ({ stage, noBrowsers, connected, capped, scene }) => [
   counted
 ].filter(Boolean).reduce((flat, change) => change(flat), { ...snapshot, setup: setupStates[stage === "done" ? "agent" : stage] });
 
-const fixtureFor = (choice) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(pageSnapshot(choice))};
+/**
+ * The page's fixture script for the query parameters `choice` holds. What a session's live
+ * connection says is composed here, where the provenance rules live, and handed to the page by
+ * session id, so work the page settles carries the same evidence as the snapshot's.
+ */
+const fixtureFor = (choice) => {
+  const page = pageSnapshot(choice);
+  const details = Object.fromEntries(page.sessions.map((session) => [session.id, liveDetails(session)]));
+  return `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify(page)};
+window.__GHOSTLIGHT_DETAILS__ = ${JSON.stringify(details)};
 window.__GHOSTLIGHT_SETUP_STATES__ = ${JSON.stringify(setupStates)};
 window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(choice.stage)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
@@ -763,7 +772,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
         observed: blocked ? {} : spec.observed,
         // The record carries the intake and the evidence of the session that ran it, as the service's do.
         channel: session.channel,
-        ...liveDetails(session)
+        ...JSON.parse(JSON.stringify(window.__GHOSTLIGHT_DETAILS__[session.id]))
       };
       publish({ kind: "operation_settled", record });
       publishLive();
@@ -972,6 +981,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
   }
   window.__GHOSTLIGHT_PUBLISH__ = publish;
 })();`;
+};
 
 const types = {
   ".css": "text/css", ".js": "text/javascript", ".png": "image/png"

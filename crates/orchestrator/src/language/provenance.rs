@@ -41,12 +41,15 @@ pub fn claimed_name(reported: &str) -> Option<&str> {
 /// source says no agent's app started it ([`crate::agent::Agent::unknown`]).
 pub const UNKNOWN_AGENT: &str = "Unknown agent";
 
-/// The name of a recorded action that kept neither a claimed agent nor a source
-/// ([`crate::agent::Agent::earlier`]): work from before Ghostlight kept agent names.
+/// The name of an action read back from an earlier service run whose record kept neither a
+/// claimed agent nor a source ([`crate::agent::Agent::earlier`]).
 pub const EARLIER_SESSION: &str = "Earlier session";
 
-/// What the window says on hover beside [`EARLIER_SESSION`].
-pub const EARLIER_SESSION_NOTE: &str = "Recorded before Ghostlight kept agent names.";
+/// What the window says on hover beside [`EARLIER_SESSION`]. It says only what the record shows:
+/// a record written before agent names were kept and one whose client claimed a name the catalog
+/// does not know, with no source read, look the same.
+pub const EARLIER_SESSION_NOTE: &str =
+    "Recorded in an earlier session. Ghostlight kept no agent name for it.";
 
 /// Details for local human surfaces only; a live caller claim must never become audit content.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -112,9 +115,9 @@ impl Relation {
 ///
 /// The agent is the command line's on the command line. On an MCP connection the claim names it:
 /// the live claim, else the catalog agent the record kept as claimed. Without a claim the source's
-/// catalog agent names it. Without either it is the unknown agent, except for a record that kept
-/// neither a claimed agent nor a source, which is the earlier session's: work recorded before
-/// Ghostlight kept names.
+/// catalog agent names it. Without either it is the unknown agent, except for a record read back
+/// from an earlier run that kept neither a claimed agent nor a source, which is the earlier
+/// session's.
 ///
 /// The explanation of an MCP connection follows how that agent stands to the source. When the
 /// source is the agent's own app, the sentence says where it was seen. When the catalog knows the
@@ -352,6 +355,31 @@ mod tests {
             details(&unseen, Some("Unknown agent")).explanation,
             claimed_name_explanation("Unknown agent"),
             "a reserved name names no agent, so it is still said"
+        );
+    }
+
+    #[test]
+    fn earlier_work_that_kept_no_agent_says_only_what_its_record_shows() {
+        let unlisted = crate::provenance::ConnectionEvidence::new(
+            Attribution::accepted(IntakeChannel::Mcp),
+            "my agent",
+        );
+        assert_eq!(unlisted.details().agent.name, "my agent");
+        let restored = unlisted.attribution().details();
+        assert_eq!(
+            restored.agent,
+            Agent::earlier(),
+            "a new record whose name the catalog does not know, with no source, keeps no agent"
+        );
+        assert_eq!(
+            restored.agent,
+            Attribution::legacy(IntakeChannel::Mcp).details().agent
+        );
+        let note = restored.agent.note.unwrap_or_default();
+        assert_eq!(note, EARLIER_SESSION_NOTE);
+        assert!(
+            !note.contains("before"),
+            "the record does not show when it was written: {note}"
         );
     }
 

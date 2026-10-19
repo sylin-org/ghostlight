@@ -383,9 +383,9 @@ beside that source. Receipts keep the source and, when the claim names a catalog
 agent's catalog id as a labelled claim, never the client's words. One function in
 `language::provenance` names the agent and composes the explanation, live and from history alike:
 the claim names the agent, else the source's catalog agent, else Unknown agent, and "X, in Y." is
-said only when the catalog knows X runs inside Y (ADR-0202 Decisions 14 and 14a). A record that
-kept neither a claimed agent nor a source reads "Earlier session", work from before Ghostlight kept
-agent names. A client's own words are quoted only where they say more than the agent's name. Provenance
+said only when the catalog knows X runs inside Y (ADR-0202 Decisions 14 and 14a). A record read
+back from an earlier run that kept neither a claimed agent nor a source reads "Earlier session",
+and its hover says only that no agent name was kept. A client's own words are quoted only where they say more than the agent's name. Provenance
 grants no authority. Its channel decides one thing: a policy's channel switch refuses every request
 on a channel it turns off (ADR-0202 Decision 22a). Audit lines with
 extra attribution fields still read; the extra fields are ignored.

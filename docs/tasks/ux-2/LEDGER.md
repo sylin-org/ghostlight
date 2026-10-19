@@ -310,11 +310,19 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   (workbench/parts.rs, outside the lane's list and owned by no other lane).
 - u6 (window-7): the earlier session is a reserved agent (`Agent::earlier`, id `earlier`) with a
   hover the service words, `Agent.note`; the page shows any agent's note on hover and never a
-  workspace id. It names a record that kept neither a claimed agent nor a source. A record whose
-  client claimed a name the catalog does not know, and whose source could not be read, also reads
-  "Earlier session": nothing on such a record tells it apart from an old one. A record with a
-  source, or with a claimed id the catalog no longer lists, stays "Unknown agent", as does a live
+  workspace id. It names a record read back from an earlier run that kept neither a claimed agent
+  nor a source. A record whose client claimed a name the catalog does not know, and whose source
+  could not be read, looks the same as one written before names were kept, so the agreed hover
+  "Recorded before Ghostlight kept agent names." would be false for it. The hover says only what
+  the record shows: "Recorded in an earlier session. Ghostlight kept no agent name for it." Telling
+  the two apart would take a new receipt field for one hover, which no person needs. A record with
+  a source, or with a claimed id the catalog no longer lists, stays "Unknown agent", as does a live
   client that sent no name. An agent nothing named gets no caveat, so its explanation is empty.
+  docs/1.0/ACCEPTANCE.md's connection provenance bullets say these card rules.
+- u6 fixup: the preview's scripted work settles again. The page's fixture borrowed a server-side
+  helper; the server now composes each session's connection details into the fixture
+  (`__GHOSTLIGHT_DETAILS__`), and tests/workbench-preview.test.mjs runs the working page's
+  fixture until one action settles with no error.
 - u6 (window-3): the card names the agent once, in its meta line. The connection disclosure holds
   the service's sentence, "Came through the command line." for the command line, and Copy id;
   Reported application, Intake and the printed id are gone, and a connection with nothing to say

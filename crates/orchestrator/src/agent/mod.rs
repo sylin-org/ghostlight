@@ -36,8 +36,8 @@ pub const COMMAND_LINE_ID: &str = "command_line";
 /// The id of an agent nothing names, the catalog's second reserved entry. No roster row uses it.
 pub const UNKNOWN_ID: &str = "unknown";
 
-/// The id of the earlier session, the catalog's reserved entry for recorded work that kept no
-/// agent ([`Agent::earlier`]). No roster row uses it.
+/// The id of the earlier session, the catalog's reserved entry for work from an earlier run whose
+/// record kept no agent ([`Agent::earlier`]). No roster row uses it.
 pub const EARLIER_ID: &str = "earlier";
 
 /// What joins [`UNKNOWN_ID`] to the name an agent Ghostlight does not know reported, in that
@@ -195,8 +195,8 @@ impl Agent {
         }
     }
 
-    /// The agent of recorded work that kept neither a claimed agent nor a source: work from
-    /// before Ghostlight kept agent names, with the unknown glyph and a hover that says so.
+    /// The agent of work read back from an earlier run whose record kept neither a claimed agent
+    /// nor a source, with the unknown glyph and a hover that says no name was kept.
     #[must_use]
     pub fn earlier() -> Self {
         Self {
