@@ -1070,7 +1070,7 @@ impl WorkbenchFacade {
                 RUNTIME_SETTING_ID,
                 words::CONTROLS_RUNTIME_LABEL,
                 runtime.to_owned(),
-                SearchDestination::Settings,
+                SearchDestination::BrowserWork,
             ));
         }
         for diagnostic in &snapshot.diagnostics {
@@ -2377,8 +2377,10 @@ pub enum SearchDestination {
     Checkup,
     /// The rules that apply here, on the Policy page.
     Configuration,
-    /// Settings, where the runtime controls live.
+    /// Settings, as the person last left it.
     Settings,
+    /// The browser-work section of Settings, which shows the runtime control.
+    BrowserWork,
     /// Supported harness registrations.
     Install,
 }

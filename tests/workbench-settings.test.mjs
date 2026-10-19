@@ -140,8 +140,14 @@ class Element {
     this.append(...nodes);
   }
 
+  /** Leave the tree. As in a browser, focus held inside what leaves falls back to the body. */
   remove() {
     if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this);
+    if (Element.focused && this.contains(Element.focused)) Element.focused = null;
+  }
+
+  get lastElementChild() {
+    return this.children.at(-1) ?? null;
   }
 
   contains(node) {
@@ -459,9 +465,12 @@ test("the closed list of addresses names every destination, every section and th
   assert.deepEqual(Words.parseAddress("setup"), { view: "setup", section: null });
   assert.equal(new Set(Words.ADDRESSES).size, Words.ADDRESSES.length);
   // A search destination is the service's word for a hit, never an address.
-  for (const destination of Object.keys(Words.SEARCH_VIEWS)) {
+  // Each opens an address: the page, and the section of Settings, that shows what the hit found.
+  for (const [destination, address] of Object.entries(Words.SEARCH_ADDRESSES)) {
     if (!Object.keys(Words.VIEWS).includes(destination)) assert.equal(Words.parseAddress(destination), null, destination);
+    assert.notEqual(Words.parseAddress(address), null, address);
   }
+  assert.deepEqual(Words.parseAddress(Words.SEARCH_ADDRESSES.browser_work), { view: "settings", section: "browser-work" });
 });
 
 test("an address reads with or without its hash, and anything else is not one", () => {
@@ -2875,6 +2884,11 @@ test("a search hit says what it found in words: its kind, its second line with t
   // Every kind of hit the service words (workbench SearchKind) has a word of its own here.
   assert.deepEqual(Object.keys(Words.HIT_KIND).sort(),
     ["browser", "configuration", "destination", "diagnostic", "history", "installation", "operation", "session"]);
+  // Work in flight is worded with its phase on the second line, so its chip claims none.
+  // The service's phase words: waiting, running, held, blocked, finished (workbench OperationPhase).
+  for (const phase of ["waiting", "running", "held", "blocked", "finished"]) {
+    assert.notEqual(Words.HIT_KIND.operation.toLowerCase(), phase, phase);
+  }
 
   shown.view.searchResults([]);
   assert.equal(drawn(shown.el("palette-results").innerHTML).wearing("palette-empty")[0].textContent, Words.SEARCH_FOUND_NOTHING);
@@ -2900,6 +2914,22 @@ test("search is offered beside the list, and a list too long to show whole ends 
   shown.view.rebuildFeed(full.slice(0, 3));
   assert.equal(end().hidden, true, "a list that is not full is the whole of what this view shows");
   assert.ok(naming(".queue-more").some((rule) => rule.declarations.color === "var(--ink-4)"), "the line is quiet");
+});
+
+test("the line that ends a full list keeps focus while work arrives at the top", () => {
+  const shown = focusable();
+  const full = Array.from({ length: Words.FEED_LIMIT }, (_, index) => Entries.entryFromRecord(settledRead({ invocation: `r${index}` }), null));
+  shown.view.rebuildFeed(full);
+  shown.view.band({ connected: true, snapshot: { ...Transport.flatten(snapshotAnswer()), history: Array.from({ length: 410 }, () => settledRead()) },
+    runtime: "active", running: 0 });
+  const end = shown.el("queue").children.at(-1);
+  assert.ok(end.classes.has("queue-more"));
+  end.focus();
+  const arriving = Entries.entryFromRecord(settledRead({ invocation: "arriving" }), null);
+  shown.view.promote(arriving, full[0], [arriving, ...full]);
+  assert.equal(Element.focused, end, "a row arriving above does not take the person's place");
+  assert.equal(shown.el("queue").children.at(-1), end);
+  assert.equal(shown.el("queue").children.filter((child) => child === end).length, 1);
 });
 
 test("a hit for an action the list holds opens that row's details and gives its button focus", () => {

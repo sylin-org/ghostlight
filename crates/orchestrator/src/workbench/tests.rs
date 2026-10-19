@@ -2631,7 +2631,7 @@ fn a_session_hit_says_its_card_line_and_an_operation_names_no_workspace() {
 }
 
 #[test]
-fn the_search_offers_settings_for_browser_work() {
+fn the_search_offers_the_browser_work_section_for_browser_work() {
     use crate::language::workbench as words;
 
     let facade = facade_over(
@@ -2645,7 +2645,13 @@ fn the_search_offers_settings_for_browser_work() {
         .expect("the browser-work setting is found by its label");
     assert_eq!(hit.title, words::CONTROLS_RUNTIME_LABEL);
     assert_eq!(hit.detail, words::CONTROLS_RUNTIME_ACTIVE);
-    assert_eq!(hit.view, super::SearchDestination::Settings);
+    assert_eq!(hit.view, super::SearchDestination::BrowserWork);
+    // The window opens the section that shows the setting, not Settings as it was left.
+    let word = serde_json::to_value(hit.view).expect("a destination is a word");
+    assert_eq!(word, "browser_work");
+    assert!(
+        include_str!("../../ui/lib/words.js").contains(r#"browser_work: "settings/browser-work""#)
+    );
 }
 
 #[test]

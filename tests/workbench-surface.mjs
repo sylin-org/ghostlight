@@ -1462,6 +1462,13 @@ controlling.clickOn("[data-view]", { dataset: { view: "about" } });
 controlling.clickOn("[data-view]", { dataset: { view: "settings" } });
 const afterTab = where(controlling);
 
+// A search hit opens where what it found is shown: the browser-work setting opens its section of
+// Settings, wherever Settings was left.
+controlling.clickOn("[data-settings-section]", { dataset: { settingsSection: "screen" } });
+controlling.clickOn("[data-view]", { dataset: { view: "about" } });
+controlling.clickOn("[data-search-view]", { dataset: { searchView: "browser_work", searchId: "runtime-control" } });
+const afterBrowserWorkHit = where(controlling);
+
 // The rules: the tag the page read is the tag a write quotes, and a stale refusal keeps the draft.
 controlling.clickOn("[data-view]", { dataset: { view: "policy" } });
 await controlling.settle();
@@ -1713,6 +1720,10 @@ const httpChecks = [
       && afterRail.pushed.length === 0 && afterTab.view === "settings" && afterTab.hash === "#settings/browser-work"
       && afterTab.pushed.length === 0,
     JSON.stringify({ afterRail, afterTab })],
+  ["the browser-work hit opens the section of Settings that shows the setting",
+    afterBrowserWorkHit.view === "settings" && afterBrowserWorkHit.section === "browser-work"
+      && afterBrowserWorkHit.hash === "#settings/browser-work" && afterBrowserWorkHit.pushed.length === 0,
+    JSON.stringify(afterBrowserWorkHit)],
   ["Turn off in Settings is one keyed PUT, waited for as a change; the rail, the sentence and the chip follow",
     viewingRequest?.method === "PUT" && viewingRequest.body === '{"watch":false}'
       && viewingRequest.headers.Authorization === "Bearer key-1" && viewingRequest.credentials === "omit"

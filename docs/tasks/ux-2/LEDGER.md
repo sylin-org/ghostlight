@@ -368,10 +368,11 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   outcome, newest first. Its second line is the agent and the browser from the service, and the
   window adds the age with the row's own clock, so the age agrees with the list. Failed, Unknown,
   Kept or Blocked comes as a wire word (`outcome`) the window words with its row's OUTCOME_WORD,
-  at the hit's right, in the row's colour. The kind chip reads Page, Running, Session, Action,
-  Browser, Check, Setting or Agent instead of the raw kind. Beyond the item: Policy and Settings are
-  offered as pages, the browser-work hit opens Settings (a new `settings` destination) instead of
-  Policy, a browser hit says "Connected, 2 tabs" instead of "Connected browser adapter 2.0.0", and
+  at the hit's right, in the row's colour. The kind chip reads Page, Work, Session, Action,
+  Browser, Check, Setting or Agent instead of the raw kind; work in flight says its phase on the
+  second line, so its chip claims none. Beyond the item: Policy and Settings are offered as pages,
+  the browser-work hit opens Settings > Browser work (a new `browser_work` destination, which the
+  window's SEARCH_ADDRESSES maps to `settings/browser-work`) instead of Policy, a browser hit says "Connected, 2 tabs" instead of "Connected browser adapter 2.0.0", and
   a hit for an action the list holds opens that row's details and gives it focus. The session line
   and the agent-state words are composed in Rust for the hits and in words.js for the cards; tests
   pin both to the same words.
@@ -379,7 +380,8 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   trimmed the service's history to the list's length. It now keeps up to HISTORY_HELD (500, the
   service's HISTORY_LIMIT, pinned by a Rust test), so the band and "Search all 410 (Ctrl+K)" say
   what search reaches. The end line shows only while the list is full and the service holds more
-  than it shows.
+  than it shows. It is moved back to the end only after a rebuild, so a keyboard user on it keeps
+  focus while rows arrive above it.
 - u7 (j-31): the page's 48-unit gear and 40-unit lens are scaled onto the window's 24-unit box
   (ring r6, hub r1.6, eight spokes; lens r6.3 with a 5.4-unit handle), so the item's r12 and 9px
   are the page's own units. The lens moves as the page's does while running (--beat-lens 1250ms);

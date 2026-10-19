@@ -762,9 +762,9 @@
       el["queue-count"].textContent = rows ? `${rows} ${rows === 1 ? "action" : "actions"}` : "";
       el["clear-monitor"].disabled = !feed.some((entry) => !isUnsettled(entry));
       listed = { full: feed.length >= FEED_LIMIT, settled: feed.filter((entry) => !isUnsettled(entry)).length };
-      // Rows arrive at the top and a rebuild empties the list, so the end is put back last.
-      queueMore.remove();
-      el.queue.append(queueMore);
+      // Rows arrive at the top, so the end stays last and keeps focus; a rebuild empties the list,
+      // and only then is it put back.
+      if (el.queue.lastElementChild !== queueMore) el.queue.append(queueMore);
       paintQueueMore();
     }
 
