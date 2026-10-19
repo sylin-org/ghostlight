@@ -5,8 +5,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `done` (with commi
 
 ## RESUME HERE
 
-Opened 2026-10-19 by windows-claude. Part 1 starts now. Part 2 starts when windows-claude's
-message says the head is ready (arch-1 integrated, deployed on Windows and pushed).
+Opened 2026-10-19 by windows-claude. Part 1 started the same day. The owner then narrowed this
+machine's part to CachyOS (Notes, "Scope, 2026-10-19"): L2-01 and L2-03 are out of this batch,
+and the owner validates the other Linux environments. Part 2 starts when windows-claude's message
+says the head is ready (arch-1 integrated, deployed on Windows and pushed).
 
 ## Files this batch owns
 
@@ -19,9 +21,9 @@ message says the head is ready (arch-1 integrated, deployed on Windows and pushe
 
 | Task | What | Status |
 | --- | --- | --- |
-| L2-01 | Alpine (musl) gets a working Ghostlight from the release | todo |
+| L2-01 | Alpine (musl) gets a working Ghostlight from the release | blocked: owner, CachyOS only |
 | L2-02 | The install scripts install from a local release bundle | todo |
-| L2-03 | Bluefin readiness: Flatpak browsers, SELinux, read-only /usr | todo |
+| L2-03 | Bluefin readiness: Flatpak browsers, SELinux, read-only /usr | blocked: owner, CachyOS only |
 | L2-04 | What Claude Code does with the plugin and the installer's entry together | todo |
 
 **L2-01.** The release builds `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` only. On
@@ -67,8 +69,8 @@ installer and service side of "works regardless" from them.
 | L2-10 | The full gate and every journey on the go head | todo |
 | L2-11 | The release workflow's bundle, built and verified | todo |
 | L2-12 | A clean install from the bundle, and real use | todo |
-| L2-13 | The same with a Flathub browser | todo |
-| L2-14 | Alpine from the bundle | todo |
+| L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
+| L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
 | L2-15 | The owner's steps for Bluefin and Alpine | todo |
 
 **L2-11.** Dispatch the release workflow on the go head, download the bundle, and run
@@ -84,3 +86,13 @@ demo stages from an agent, the window and the tray, idle exit, a restart of the 
 where to get the bundle, the install command, what to try, and what each result means.
 
 ## Notes
+
+**Scope, 2026-10-19.** The owner, while Part 1 started: "you shouldn't try to install
+dependencies, I think - just make sure Ghostlight is working for this OS specifically. I'll deploy
+ghostlight on different Linux environments, and validate against that." Asked whether the release
+workflow should still build musl images on CI for Alpine, the owner chose "CachyOS only". So
+nothing is installed on this machine (no podman, Flatpak or Alpine root), and L2-01, L2-03, L2-13
+and L2-14 are out of this batch. Known and unchanged: the release's Linux images are
+`x86_64-unknown-linux-gnu` only, and they cannot start on Alpine, whose musl system has no
+`/lib64/ld-linux-x86-64.so.2` (test-03, September). L2-15's page still gives the owner's steps
+for the other environments.
