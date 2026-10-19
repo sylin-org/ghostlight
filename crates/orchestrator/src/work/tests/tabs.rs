@@ -5,7 +5,9 @@
 //! a released session of the same agent left open is ever reused, and the adapter is always told
 //! not to choose. The agent is the one the opener's claim names (ADR-0203 Decision 9), and the tab
 //! group is titled for the agent the window names. A held tab refuses reading and acting, and only a navigation to an allowed page
-//! or a close may select it (ADR-0203 Decision 2.4).
+//! or a close may select it (ADR-0203 Decision 2.4). Closing a tab needs Action on its host, a
+//! held tab's close and the undoing of a refused landing need only the tab-close setting, and a
+//! listing names a tab on a refused host by its host alone (Decision 7.6).
 
 use super::*;
 use crate::provenance::{Attribution, ConnectionEvidence, Source};
@@ -1094,6 +1096,189 @@ fn a_held_tab_can_be_closed() {
         Some(BrowserCommand::CloseTab { tab_id: 7, .. })
     ));
     assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+}
+
+/// A policy document granting `allowed` on example.com and nothing else, with the tab-close
+/// setting at `allow_close`.
+fn example_com_with(allowed: &[&str], allow_close: bool) -> serde_json::Value {
+    json!({"schema":4,"name":"test authority","version":"1",
+        "grants":[{"id":"example","hosts":{"allow":["example.com"]},"allowed":allowed}],
+        "config":[{"key":"browser.tabs.allow_close","value":allow_close,"level":"mandatory"}]})
+}
+
+#[test]
+fn closing_a_tab_needs_action_on_its_host() {
+    let policy = TestPolicy::new();
+    policy.publish(
+        &json!({"schema":4,"name":"test authority","version":"1","grants":[
+            {"id":"example","hosts":{"allow":["example.com"]},"allowed":["read","action"]},
+            {"id":"elsewhere","hosts":{"allow":["elsewhere.test"]},"allowed":["read"]}
+        ]}),
+    );
+    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(policy.facade());
+    let acting = open_at(&executor, &browser, &workspace, 7, "https://example.com/");
+    let reading = open_at(
+        &executor,
+        &browser,
+        &workspace,
+        8,
+        "https://elsewhere.test/",
+    );
+
+    let before = browser.calls().len();
+    let refused = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"close","tab":reading}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(refused.status, Status::Blocked, "{}", refused.summary);
+    assert_eq!(refused.effect, Effect::None);
+    assert_eq!(
+        refused.facts["reason"], "capability_denied",
+        "{}",
+        refused.facts
+    );
+    assert_eq!(browser.calls().len(), before, "nothing reached the browser");
+    assert_eq!(workspaces.tab_bindings(workspace.as_str()).len(), 2);
+
+    browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
+    let closed = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"close","tab":acting}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(closed.status, Status::Succeeded, "{}", closed.summary);
+    assert!(matches!(
+        browser.calls().last(),
+        Some(BrowserCommand::CloseTab { tab_id: 7, .. })
+    ));
+}
+
+#[test]
+fn a_denied_landing_is_closed_under_a_read_only_policy_when_the_setting_allows() {
+    let policy = TestPolicy::new();
+    policy.publish(&example_com_with(&["read"], true));
+    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(policy.facade());
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://elsewhere.test/"),
+        committed_urls: vec![
+            "https://example.com/".into(),
+            "https://elsewhere.test/".into(),
+        ],
+    }));
+    browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
+    let landed = navigate(&executor, &workspace, "https://example.com/");
+    assert_eq!(landed.status, Status::Blocked, "{}", landed.summary);
+    assert_eq!(landed.effect, Effect::None);
+    assert_eq!(landed.facts["compensated"], true);
+    assert!(landed.repeat_safe);
+    assert!(matches!(
+        browser.calls().last(),
+        Some(BrowserCommand::CloseTab { tab_id: 7, .. })
+    ));
+    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+}
+
+#[test]
+fn a_held_tab_is_closed_under_the_setting_alone() {
+    for allow_close in [true, false] {
+        // No grant admits Action anywhere, and the held page's host is refused everything.
+        let policy = TestPolicy::new();
+        policy.publish(&example_com_with(&["read"], allow_close));
+        let (executor, browser, workspaces, workspace, _) =
+            fixture_with_governance(policy.facade());
+        let (handle, _) = held_tab(&executor, &browser, &workspace);
+
+        let before = browser.calls().len();
+        if allow_close {
+            browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
+        }
+        let closed = executor.execute(
+            &workspace,
+            "browser_tabs",
+            json!({"action":"close","tab":handle}),
+            &CancellationToken::default(),
+        );
+        if allow_close {
+            assert_eq!(closed.status, Status::Succeeded, "{}", closed.summary);
+            assert_eq!(closed.facts["closed"], true);
+            assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+        } else {
+            assert_eq!(closed.status, Status::Blocked, "{}", closed.summary);
+            assert_eq!(closed.facts["reason"], "tab_close_denied");
+            assert_eq!(closed.effect, Effect::None);
+            assert_eq!(browser.calls().len(), before, "nothing reached the browser");
+            assert_eq!(workspaces.tab_bindings(workspace.as_str()).len(), 1);
+        }
+    }
+}
+
+#[test]
+fn listing_withholds_title_and_url_of_a_tab_on_a_refused_host_and_names_the_host() {
+    let policy = example_com_only();
+    let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
+    let (held, landed) = held_tab(&executor, &browser, &workspace);
+    let allowed = open_at(&executor, &browser, &workspace, 8, "https://example.com/");
+
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![
+            PhysicalTab {
+                tab_id: 7,
+                title: "Private ledger".into(),
+                url: "https://elsewhere.test/accounts/secret".into(),
+                active: false,
+                readiness: BrowserReadiness::Complete,
+            },
+            PhysicalTab {
+                tab_id: 8,
+                title: "Example Domain".into(),
+                url: "https://example.com/".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            },
+        ],
+    }));
+    let listed = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"list"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    let rows = listed.facts["tabs"].as_array().unwrap();
+    let row = |handle: &str| {
+        rows.iter()
+            .find(|row| row["tab"] == handle)
+            .cloned()
+            .unwrap_or_else(|| panic!("{handle} is listed: {rows:?}"))
+    };
+    assert_eq!(
+        row(&held),
+        json!({
+            "tab":held,
+            "host":"elsewhere.test",
+            "reason":landed.facts["reason"],
+            "active":false,
+            "readiness":"complete"
+        })
+    );
+    assert_eq!(
+        row(&allowed),
+        json!({
+            "tab":allowed,
+            "title":"Example Domain",
+            "url":"https://example.com/",
+            "active":true,
+            "readiness":"complete"
+        })
+    );
+    let line = serde_json::to_string(audit.0.lock().unwrap().last().unwrap()).unwrap();
+    for text in [listed.summary.as_str(), &listed.facts.to_string(), &line] {
+        assert!(!text.contains("Private ledger"), "{text}");
+        assert!(!text.contains("secret"), "{text}");
+    }
 }
 
 #[test]

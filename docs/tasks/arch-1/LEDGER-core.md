@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6, C7, C13 and C9 have landed, and C22 landed with C13. C10a is next. ux-2
-has closed, so every slice whose "After" is met can start.
+C1, C2, C3a, C4, C5, C6, C7, C13, C9 and C10a have landed, and C22 landed with C13. C10b is
+next. ux-2 has closed, so every slice whose "After" is met can start.
 
 ## Slices
 
@@ -23,8 +23,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | see Notes | landed (5122ae5a, review fixup) |
 | C7 | fix(language): a workspace refusal says what is true | candidate | C6 | see Notes | landed (8f2241c0, e2d6b413) |
 | C13 | fix(provenance): the opener is named once | candidate | C7 | see Notes | landed (c78d4bd3) |
-| C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | see Notes | landed (this commit) |
-| C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | - | todo |
+| C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | see Notes | landed (565293f6) |
+| C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | see Notes | landed (this commit) |
 | C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | - | todo |
 | C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | - | todo |
 | C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | - | todo |
@@ -40,7 +40,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C19b | feat(audit): the record names the browser | none | I1 | - | todo |
 | C19c | refactor(work): the completion path's leftovers go | none | ux-2 closes | - | todo |
 | C20 | test(language): the plugin skill names only catalog tools and fields | none | I9b | - | todo |
-| C22 | refactor(intake): the "MCP client" placeholder goes | none | C13 | cross-lane `agent/mod.rs`, `workbench/tests.rs`; see Notes | landed (with C13, this commit) |
+| C22 | refactor(intake): the "MCP client" placeholder goes | none | C13 | cross-lane `agent/mod.rs`, `workbench/tests.rs`; see Notes | landed (with C13, c78d4bd3) |
 
 ## Notes
 
@@ -370,3 +370,24 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `a_download_save_that_outlives_its_deadline_is_unknown_and_not_repeat_safe` (A2's work-level
   proof) and `no_embedded_host_reaches_the_permission_trace_from_a_targeted_read` (A1's) in
   `work/tests/protocol4.rs`. No catalog, result or audit golden changed. No journey is needed.
+- C10a, a tab already gone: the ADR does not name it. Its close has no page to check Action on, so
+  the person's runtime controls and the tab-close setting decide it, as for a held tab; the setting
+  still refuses it with "this session may not close tabs", which stays true for a gone tab.
+- C10a, runtime controls: a held tab's close asks the person's runtime controls before the setting,
+  so a paused session gets the pause's answer. Compensation asks the setting alone; a pause still
+  stops its close at the browser seam, which keeps the tab as retained, as before.
+- C10a, the refused close: Action refused on the tab's host keeps the existing capability sentence
+  and records the page's host as observed. The setting's evidence carries that host too, and none
+  for a held tab or compensation.
+- C10a, the listing: a row for a tab on a refused host keeps `tab`, `active` and `readiness`, names
+  `host` (null when the address has none, such as an ungoverned blank tab) and gives the refusal's
+  `reason` code, with no `title` or `url`. The check is the snapshot's `authorize_landing(Read,
+  url)` on the live address and adds no evidence to the frame. The listing's own admission stays
+  the host-free Read check, and `TabsListed` still counts every bound tab it names.
+- C10a, the false comment: `authorize`'s doc no longer says `list_tabs` is the only host-free
+  caller; it says what `url: None` decides.
+- C10a, proofs: `closing_a_tab_needs_action_on_its_host`,
+  `a_denied_landing_is_closed_under_a_read_only_policy_when_the_setting_allows`,
+  `a_held_tab_is_closed_under_the_setting_alone` and
+  `listing_withholds_title_and_url_of_a_tab_on_a_refused_host_and_names_the_host` in
+  `work/tests/tabs.rs`. No catalog, result or audit golden changed. No journey is needed.

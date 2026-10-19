@@ -47,9 +47,11 @@ impl ApplicationExecutor {
         }
         // Listing is a current read of real state: the tabs come from the live browser through
         // a dispatching query, and only this workspace's bound tabs are named -- the person's
-        // unbound tabs stay private. A browser on its way back, such as an idle MV3 worker that
-        // suspended its relay, gets the same bounded wait at the browser seam that every other
-        // crossing gets, before the same policy-owned recovery. A session that holds no tab
+        // unbound tabs stay private. A bound tab on a page the policy refuses Read on is named by
+        // its host alone: its title and address are withheld, as the held-tab refusal does. A
+        // browser on its way back, such as an idle MV3 worker that suspended its relay, gets the
+        // same bounded wait at the browser seam that every other crossing gets, before the same
+        // policy-owned recovery. A session that holds no tab
         // already knows its answer, so it asks no browser: it never waits, starts one or binds
         // one, and the browser it names can still be chosen for its first tab.
         let empty = lease.tabs().is_ok_and(|tabs| tabs.is_empty());
@@ -70,13 +72,26 @@ impl ApplicationExecutor {
                         let current = live
                             .iter()
                             .find(|physical| physical.tab_id == tab.physical_id)?;
-                        Some(json!({
-                            "tab":tab.handle.as_str(),
-                            "title":current.title,
-                            "url":current.url,
-                            "active":current.active,
-                            "readiness":readiness(current.readiness),
-                        }))
+                        let shown = context
+                            .snapshot
+                            .authorize_landing(Capability::Read, &current.url);
+                        Some(if shown.allowed {
+                            json!({
+                                "tab":tab.handle.as_str(),
+                                "title":current.title,
+                                "url":current.url,
+                                "active":current.active,
+                                "readiness":readiness(current.readiness),
+                            })
+                        } else {
+                            json!({
+                                "tab":tab.handle.as_str(),
+                                "host":observed_host(&current.url),
+                                "reason":shown.reason.as_str(),
+                                "active":current.active,
+                                "readiness":readiness(current.readiness),
+                            })
+                        })
                     })
                     .collect();
                 let outcome = Outcome::TabsListed { count: facts.len() };
@@ -665,7 +680,7 @@ impl ApplicationExecutor {
             Ok(tab) => tab,
             // Closing what is already gone is the desired state achieved, not an error.
             Err(WorkspaceError::StaleTab) => {
-                let decision = self.authorize_tab_close(context);
+                let decision = self.authorize_tab_close(context, None);
                 if !decision.allowed {
                     return self.blocked(
                         context,
@@ -695,15 +710,18 @@ impl ApplicationExecutor {
             }
             Err(error) => return self.workspace_failure(context, error),
         };
-        let decision = self.authorize_tab_close(context);
+        // A held tab's page was refused, so its close is decided by the tab-close setting alone.
+        let page = selected.hold.is_none().then_some(selected.url.as_str());
+        let decision = self.authorize_tab_close(context, page);
         if !decision.allowed {
-            return self.blocked(
+            return self.blocked_at(
                 context,
                 decision,
                 Some(selected.physical_id),
                 Effect::None,
                 true,
                 json!({"tab":selected.handle.as_str(),"reason":decision.reason.as_str()}),
+                page,
             );
         }
         match self.dispatch(

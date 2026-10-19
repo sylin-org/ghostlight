@@ -1257,15 +1257,15 @@ impl ApplicationExecutor {
     }
 
     /// Authorize one operation against its real destination whenever it names one.
-    /// `url: None` means this operation has no tab in play at all -- `list_tabs` is the only
-    /// caller, since listing needs no destination to check. Every operation that names a tab
-    /// must pass `Some(&tab.url)`, the tab's raw string as tracked right now, **even when that
-    /// string is empty** because the tab's first landing has not been governed yet. An empty
-    /// or otherwise unparseable
-    /// string falls straight through to `authorize_landing`, which denies it as `HostDenied` --
-    /// there is no host-blind fallback. A tab whose destination is not yet known is treated as
-    /// denied, never as having no destination; otherwise the operator's host allowlist would be
-    /// bypassed for exactly the tabs it exists to cover.
+    /// `url: None` decides the requirements with no host, for work that acts on no page, such as
+    /// a listing, a flow or a recording's status; with no requirements it asks only the person's
+    /// runtime controls. Every operation that acts on a tab's page must pass `Some(&tab.url)`,
+    /// the tab's raw string as tracked right now, **even when that string is empty** because the
+    /// tab's first landing has not been governed yet. An empty or otherwise unparseable string
+    /// falls straight through to `authorize_landing`, which denies it as `HostDenied` -- there is
+    /// no host-blind fallback. A tab whose destination is not yet known is treated as denied,
+    /// never as having no destination; otherwise the operator's host allowlist would be bypassed
+    /// for exactly the tabs it exists to cover.
     fn authorize(
         &self,
         context: &InvocationContext<'_>,
@@ -1320,22 +1320,44 @@ impl ApplicationExecutor {
         decision
     }
 
-    fn authorize_tab_close(&self, context: &InvocationContext<'_>) -> Decision {
-        let action = self.authorize(context, Capability::Action, None);
-        if !action.allowed {
-            return action;
+    /// Admit the model's close of a tab (ADR-0203 Decision 7.6).
+    ///
+    /// `page` is the address the close takes the tab away from, and the close needs Action on its
+    /// host, then the tab-close setting. It is none for a held tab, whose close undoes
+    /// Ghostlight's refused landing (Decision 2.4), and for a tab already gone, which the close
+    /// cannot touch: the setting alone decides those, after the person's runtime controls.
+    fn authorize_tab_close(&self, context: &InvocationContext<'_>, page: Option<&str>) -> Decision {
+        let admitted = match page {
+            Some(url) => self.authorize(context, Capability::Action, Some(url)),
+            None => self.authorize(context, CapabilitySet::EMPTY, None),
+        };
+        if !admitted.allowed {
+            return admitted;
         }
-        let close = context.snapshot.authorize_tab_close();
+        let close = self.authorize_close_setting(context, page);
         if close.allowed {
-            action
+            admitted
         } else {
-            context.findings.permit(context.snapshot.decision_evidence(
-                CapabilitySet::ACTION,
-                None,
-                close,
-            ));
             close
         }
+    }
+
+    /// Decide the tab-close setting alone, keeping its evidence when it refuses. Undoing
+    /// Ghostlight's own refused landing asks only this (ADR-0203 Decision 2.4).
+    fn authorize_close_setting(
+        &self,
+        context: &InvocationContext<'_>,
+        page: Option<&str>,
+    ) -> Decision {
+        let close = context.snapshot.authorize_tab_close();
+        if !close.allowed {
+            context.findings.permit(context.snapshot.decision_evidence(
+                CapabilitySet::ACTION,
+                page,
+                close,
+            ));
+        }
+        close
     }
 
     /// The one browser seam.
@@ -1626,7 +1648,7 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         tab: &SelectedTab,
     ) -> CloseCompensation {
-        if !self.authorize_tab_close(context).allowed {
+        if !self.authorize_close_setting(context, None).allowed {
             return CloseCompensation::Retained;
         }
         let cancelled = AtomicBool::new(false);
