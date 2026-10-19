@@ -42,6 +42,7 @@ and commit-safety rules add to AGENTS.md and take precedence for that batch.
 
 | Batch | Opened | Note |
 | --- | --- | --- |
+| [linux-2](linux-2/BOOTSTRAP.md) | 2026-10-19 | The Linux part of the 2.0 release, by linux-claude on the owner's CachyOS machine: Alpine (musl) images in the release, installing from a local release bundle, Bluefin readiness, the Claude Code plugin facts, then the full test from the release workflow's bundle and the owner's steps for Bluefin and Alpine. One ledger. |
 | [arch-1](arch-1/BOOTSTRAP.md) | 2026-10-19 | ADR-0203, one owner for each fact: the architecture sweep's 102 confirmed findings as thirteen decisions, in seven lanes (docs, core, adapter, policy, surface, install, package). Candidate slices before the release candidate. One ledger per lane, and findings.md maps every finding. |
 | [ux-2](ux-2/BOOTSTRAP.md) | 2026-10-18 | The visual re-walk of the deployed rc-1 and request-1 build: everything still partial, not done or newly found, ranked by what a person notices, under the owner's rule that teal means live. A sequential window lane beside native, extension, outcome and docs lanes. One ledger. |
 | [request-1](request-1/BOOTSTRAP.md) | 2026-10-18 | ADR-0202, what a request carries: the request as the one in-memory boundary object across the domains, one id from intake to audit, per-frame findings, the observed source and declared channel on every request, and the channel switches back. Four lanes, slices S1 to S11 of the ADR's rebuild plan. One ledger. |
