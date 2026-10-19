@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
+use super::locator::Locator;
 use super::tree::{document_id, FrameTree};
 use super::wire::{CallAnswer, DocumentGuard, FrameRef, GuardDoc, WorldCall};
 use super::world::{self, AssetErrorCode, EffectClass, Message, ScopeClass};
@@ -131,28 +132,6 @@ impl Scope {
         })
     }
 
-    /// The scope of work the authority sent without one: every addressable document of the
-    /// tree, no subjects, no preparation budget and no recording watch.
-    #[must_use]
-    pub fn open(tree: FrameTree) -> Self {
-        let allowed = tree
-            .real_documents()
-            .filter(|document| document.supported)
-            .map(|document| document.doc.clone())
-            .collect();
-        Self {
-            tree,
-            allowed,
-            subjects: Vec::new(),
-            input_subjects: Vec::new(),
-            strict: false,
-            watch: false,
-            settle_until: Instant::now(),
-            settle_requested: false,
-            observation: Observation::default(),
-        }
-    }
-
     /// The tree the scope was admitted against.
     #[must_use]
     pub const fn tree(&self) -> &FrameTree {
@@ -195,31 +174,33 @@ impl Scope {
     }
 
     /// The documents content may be read from, in tree order with the top first.
-    pub fn content_docs(&self) -> impl Iterator<Item = &FrameRef> {
+    #[must_use]
+    pub fn content_docs(&self) -> Vec<FrameRef> {
         self.tree
             .real_documents()
             .map(|document| &document.doc)
             .filter(|doc| self.allowed.contains(*doc))
+            .cloned()
+            .collect()
     }
 
-    /// The document an encoded locator belongs to. The locator must be present.
-    ///
-    /// # Errors
-    ///
-    /// Returns the plain failure for an absent or malformed locator.
-    #[cfg(test)]
-    pub fn doc_of(&self, locator: Option<&str>) -> Result<FrameRef, BrowserError> {
-        super::locator::Locator::decode(locator.unwrap_or_default()).map(|locator| locator.doc)
-    }
-
-    /// The document an encoded locator belongs to, or the top when there is none.
+    /// The document an encoded locator names, with its local part, or the top document when
+    /// there is no locator.
     ///
     /// # Errors
     ///
     /// Returns the plain failure for a malformed locator.
-    #[cfg(test)]
-    pub fn doc_or_top(&self, locator: Option<&str>) -> Result<FrameRef, BrowserError> {
-        locator.map_or_else(|| Ok(self.top()), |locator| self.doc_of(Some(locator)))
+    pub fn target(
+        &self,
+        locator: Option<&str>,
+    ) -> Result<(FrameRef, Option<String>), BrowserError> {
+        match locator {
+            Some(locator) => {
+                let target = Locator::decode(locator)?;
+                Ok((target.doc, Some(target.local)))
+            }
+            None => Ok((self.top(), None)),
+        }
     }
 
     /// Plan one world call. Every call goes through here, so nothing reaches a document the

@@ -388,17 +388,6 @@ fn a_modified_point_click_holds_its_modifiers() {
 }
 
 #[test]
-fn a_point_without_a_scope_is_clicked_unguarded() {
-    let (port, fake) = exact();
-    call(&port, click_at(OVER_G)).unwrap();
-    assert_eq!(
-        primitives_seen(&fake),
-        ["view", "frames", "call", "input", "list_tabs"]
-    );
-    assert!(inputs_seen(&fake)[0].guard.is_none());
-}
-
-#[test]
 fn a_stale_view_refuses_the_point_before_anything_is_sent() {
     let moved = json!({"visual_page_x": 0, "visual_page_y": 0, "visual_css_width": 800,
         "visual_css_height": 600, "content_css_width": 800, "content_css_height": 2000,
@@ -941,7 +930,11 @@ fn exports_seen(fake: &FakeExtension) -> Vec<wire::RecordingOp> {
 #[test]
 fn a_recording_exported_into_a_page_carries_its_attach_call_and_guard() {
     let (port, fake) = exact();
-    call(&port, BrowserCommand::StartRecording { tab_id: 12 }).unwrap();
+    call(
+        &port,
+        scoped(all_open(), BrowserCommand::StartRecording { tab_id: 12 }),
+    )
+    .unwrap();
     let (_, result) =
         unwrap_scoped(call(&port, scoped(all_open(), export_to("C:c1:locator_a1_4"))).unwrap());
     assert!(matches!(
@@ -994,7 +987,11 @@ fn a_document_change_during_a_page_export_is_a_navigated_target() {
             _ => FakeExtension::ok(correlation, Value::Null),
         })
     }));
-    call(&port, BrowserCommand::StartRecording { tab_id: 12 }).unwrap();
+    call(
+        &port,
+        scoped(all_open(), BrowserCommand::StartRecording { tab_id: 12 }),
+    )
+    .unwrap();
     assert_eq!(
         call(&port, scoped(all_open(), export_to("C:c1:locator_a1_4"))),
         Err(BrowserError::stale(StaleReason::Navigated))
@@ -1004,25 +1001,14 @@ fn a_document_change_during_a_page_export_is_a_navigated_target() {
 #[test]
 fn a_recording_is_never_exported_into_a_document_the_scope_leaves_out() {
     let (port, fake) = exact();
-    call(&port, BrowserCommand::StartRecording { tab_id: 12 }).unwrap();
+    call(
+        &port,
+        scoped(all_open(), BrowserCommand::StartRecording { tab_id: 12 }),
+    )
+    .unwrap();
     assert_eq!(
         call(&port, scoped(without_c(), export_to("C:c1:locator_a1_4"))),
         Err(BrowserError::DocumentUnavailable)
     );
     assert!(exports_seen(&fake).is_empty());
-}
-
-#[test]
-fn a_recording_exported_into_a_page_without_a_scope_carries_no_guard() {
-    let (port, fake) = exact();
-    call(&port, BrowserCommand::StartRecording { tab_id: 12 }).unwrap();
-    call(&port, export_to("C:c1:locator_a1_4")).unwrap();
-    let exports = exports_seen(&fake);
-    assert!(matches!(
-        &exports[0],
-        wire::RecordingOp::Export {
-            destination: wire::RecordingTarget::Page { guard: None, .. },
-            ..
-        }
-    ));
 }

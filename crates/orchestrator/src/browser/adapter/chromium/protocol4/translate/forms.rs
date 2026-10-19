@@ -26,7 +26,7 @@ use super::super::locator::Locator;
 use super::super::scope::{PlannedCall, Scope};
 use super::super::wire::{CallAnswer, CallMode, DocumentGuard, FrameRef};
 use super::super::world::{self, FieldKind, FillPlan, FillVerified, Submitted};
-use super::{input_for, reach, send_input, settled, value, OnDialog, Reach};
+use super::{input_for, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{BrowserOutcome, FieldNow, PhysicalField};
 use crate::browser::BrowserError;
 
@@ -154,7 +154,7 @@ pub fn field_kinds(
 /// effect for any failure once a field was edited.
 pub fn fill(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: Fill<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
     let budget = Instant::now() + Duration::from_millis(request.timeout_ms);
@@ -168,7 +168,7 @@ pub fn fill(
         return Err(BrowserError::Primitive(ORPHAN_SUBMIT.into()));
     }
     let tab_id = request.tab_id;
-    let mut reach = reach(l, scope, tab_id)?;
+
     let prepare = groups
         .iter()
         .map(|group| {
@@ -176,18 +176,18 @@ pub fn fill(
                 .as_ref()
                 .filter(|target| target.doc == group.doc)
                 .map(|target| target.local.as_str());
-            reach.get().call(
+            scope.call(
                 &group.doc,
                 world::prepare_fill(&group.fields, credentials, submit_local),
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let guard = reach.guard();
+    let guard = Some(scope.guard());
     // Preparing edits nothing and every call carries the same remaining settle budget, so the
     // documents prepare together: in sequence their waits would add up past that budget.
     let plans = send(
         l,
-        &mut reach,
+        scope,
         Batch {
             tab_id,
             plans: &prepare,
@@ -208,20 +208,17 @@ pub fn fill(
         for (field, kind) in group.fields.iter().zip(kinds) {
             require_budget(l, budget)?;
             match kind {
-                FieldKind::Local => run.push(
-                    reach
-                        .get()
-                        .call(&group.doc, world::fill_local(field, credentials))?,
-                ),
+                FieldKind::Local => {
+                    run.push(scope.call(&group.doc, world::fill_local(field, credentials))?)
+                }
                 FieldKind::BrowserText => {
-                    flush(l, &mut reach, tab_id, &mut run, budget)?;
+                    flush(l, scope, tab_id, &mut run, budget)?;
                     if !input_admitted {
-                        reach.admit_input(&group.doc)?;
+                        scope.admit_input_subject(&group.doc)?;
                         input_admitted = true;
                     }
-                    let focus = reach
-                        .get()
-                        .call(&group.doc, world::focus_text_field(field, credentials))?;
+                    let focus =
+                        scope.call(&group.doc, world::focus_text_field(field, credentials))?;
                     let text = field
                         .value
                         .text()
@@ -231,7 +228,7 @@ pub fn fill(
                         tab_id,
                         Some(focus),
                         keys::replace_text(&text),
-                        reach.guard(),
+                        Some(scope.guard()),
                         0,
                     )
                     .within(remaining_ms(budget));
@@ -240,13 +237,13 @@ pub fn fill(
             }
             filled += 1;
         }
-        flush(l, &mut reach, tab_id, &mut run, budget)?;
+        flush(l, scope, tab_id, &mut run, budget)?;
     }
     let limit = FILL_RETAINED_LIMIT_MS.min(remaining_ms(budget));
     let verify = groups
         .iter()
         .map(|group| {
-            reach.get().call(
+            scope.call(
                 &group.doc,
                 world::verify_fill_retained(&group.fields, credentials, limit),
             )
@@ -254,7 +251,7 @@ pub fn fill(
         .collect::<Result<Vec<_>, _>>()?;
     let retained = send(
         l,
-        &mut reach,
+        scope,
         Batch {
             tab_id,
             plans: &verify,
@@ -276,13 +273,13 @@ pub fn fill(
                 .iter()
                 .find(|group| group.doc == target.doc)
                 .map_or(&[][..], |group| group.fields.as_slice());
-            let plan = reach.get().call(
+            let plan = scope.call(
                 &target.doc,
                 world::submit_fill(fields, &target.local, credentials),
             )?;
             let answers = send(
                 l,
-                &mut reach,
+                scope,
                 Batch {
                     tab_id,
                     plans: &[plan],
@@ -374,7 +371,7 @@ struct Batch<'p> {
 }
 
 /// Send one `call` bounded by the fill's budget. No calls sends nothing and answers nothing.
-fn send(l: &mut Link<'_>, reach: &mut Reach<'_>, call: Batch<'_>) -> Result<Answers, BrowserError> {
+fn send(l: &mut Link<'_>, scope: &mut Scope, call: Batch<'_>) -> Result<Answers, BrowserError> {
     if call.plans.is_empty() {
         return Ok(Vec::new());
     }
@@ -385,23 +382,23 @@ fn send(l: &mut Link<'_>, reach: &mut Reach<'_>, call: Batch<'_>) -> Result<Answ
         call.guard,
         call.settle_ms,
         remaining_ms(call.budget),
-        Some(reach.scope()),
+        Some(&mut *scope),
     )
 }
 
 /// Fill the fields gathered in `run` in one sequence, and empty it.
 fn flush(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     run: &mut Vec<PlannedCall>,
     budget: Instant,
 ) -> Result<(), BrowserError> {
     let plans = std::mem::take(run);
-    let guard = reach.guard();
+    let guard = Some(scope.guard());
     let answers = send(
         l,
-        reach,
+        scope,
         Batch {
             tab_id,
             plans: &plans,

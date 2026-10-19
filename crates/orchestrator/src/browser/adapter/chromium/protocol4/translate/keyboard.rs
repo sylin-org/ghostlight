@@ -17,7 +17,7 @@ use super::super::scope::Scope;
 use super::super::wire::{CallMode, InputStep};
 use super::super::world::{self, Focused, Typed, Uploaded};
 use super::read::{all, focus_candidates, one, plan_each};
-use super::{input_for, reach, send_input, settled, value, OnDialog};
+use super::{input_for, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{BrowserOutcome, PhysicalFile};
 use crate::browser::BrowserError;
 
@@ -44,12 +44,12 @@ pub struct TypeText<'a> {
 /// unknown effect for any failure after.
 pub fn type_text(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: TypeText<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
     let target = Locator::decode(request.locator)?;
-    let mut reach = reach(l, scope, request.tab_id)?;
-    let plan = reach.get().call(
+
+    let plan = scope.call(
         &target.doc,
         world::type_text(
             &target.local,
@@ -58,7 +58,7 @@ pub fn type_text(
             request.allow_credentials,
         ),
     )?;
-    let answers = one(l, &mut reach, request.tab_id, plan)?;
+    let answers = one(l, scope, request.tab_id, plan)?;
     let typed: Typed = settled(l, &answers[0])?;
     Ok(BrowserOutcome::Typed {
         tab: l.tab(request.tab_id)?.into(),
@@ -93,15 +93,14 @@ pub struct TypeFocused<'a> {
 /// unknown effect for any failure after the control was cleared or typed into.
 pub fn type_focused(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: TypeFocused<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, request.tab_id)?;
-    let candidates = focus_candidates(&reach);
-    let plans = plan_each(&reach, &candidates, |_| {
+    let candidates = focus_candidates(scope);
+    let plans = plan_each(scope, &candidates, |_| {
         world::verify_focused_text(request.allow_credentials)
     })?;
-    let answers = all(l, &mut reach, request.tab_id, &plans, true)?;
+    let answers = all(l, scope, request.tab_id, &plans, true)?;
     let mut refusal = None;
     let mut holder = None;
     for (doc, answer) in candidates.iter().zip(&answers) {
@@ -118,13 +117,11 @@ pub fn type_focused(
     let Some(holder) = holder else {
         return Err(refusal.unwrap_or(BrowserError::DocumentUnavailable));
     };
-    reach.admit_input(&holder)?;
+    scope.admit_input_subject(&holder)?;
     if request.clear_first {
         let plans = [
-            reach
-                .get()
-                .call(&holder, world::clear_focused(request.allow_credentials))?,
-            reach.get().call(
+            scope.call(&holder, world::clear_focused(request.allow_credentials))?,
+            scope.call(
                 &holder,
                 world::verify_focused_text(request.allow_credentials),
             )?,
@@ -137,13 +134,13 @@ pub fn type_focused(
             None,
             0,
             budget,
-            Some(reach.scope()),
+            Some(&mut *scope),
         )?;
         for answer in &cleared {
             settled::<Value>(l, answer)?;
         }
     }
-    let precondition = reach.get().call(
+    let precondition = scope.call(
         &holder,
         world::verify_focused_text(request.allow_credentials),
     )?;
@@ -154,7 +151,7 @@ pub fn type_focused(
         vec![InputStep::InsertText {
             text: request.text.to_owned(),
         }],
-        reach.guard(),
+        Some(scope.guard()),
         0,
     );
     send_input(l, input, OnDialog::EffectUnknown)?;
@@ -191,33 +188,32 @@ pub struct PressKey<'a> {
 /// for any failure after the first key event.
 pub fn press_key(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: PressKey<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, request.tab_id)?;
     let (document, precondition) = match request.locator {
         Some(locator) => {
             let target = Locator::decode(locator)?;
-            let plan = reach.get().call(&target.doc, world::focus(&target.local))?;
+            let plan = scope.call(&target.doc, world::focus(&target.local))?;
             (Some(target.doc), Some(plan))
         }
-        None => match reach.get().subjects().first() {
+        None => match scope.subjects().first() {
             Some(subject) => {
-                let plan = reach.get().call(subject, world::require_focused())?;
+                let plan = scope.call(subject, world::require_focused())?;
                 (Some(subject.clone()), Some(plan))
             }
             None => (None, None),
         },
     };
     if let Some(document) = &document {
-        reach.admit_input(document)?;
+        scope.admit_input_subject(document)?;
     }
     let input = input_for(
         l,
         request.tab_id,
         precondition,
         keys::press(request.key, keys::modifier_mask(request.modifiers)),
-        reach.guard(),
+        Some(scope.guard()),
         0,
     );
     let answered = send_input(l, input, OnDialog::EffectUnknown)?;
@@ -241,17 +237,15 @@ pub fn press_key(
 /// an unknown effect for any failure after.
 pub fn upload_files(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     locator: &str,
     files: &[PhysicalFile],
 ) -> Result<BrowserOutcome, BrowserError> {
     let target = Locator::decode(locator)?;
-    let mut reach = reach(l, scope, tab_id)?;
-    let plan = reach
-        .get()
-        .call(&target.doc, world::upload_files(&target.local, files))?;
-    let answers = one(l, &mut reach, tab_id, plan)?;
+
+    let plan = scope.call(&target.doc, world::upload_files(&target.local, files))?;
+    let answers = one(l, scope, tab_id, plan)?;
     let uploaded: Uploaded = settled(l, &answers[0])?;
     Ok(BrowserOutcome::FilesUploaded {
         tab_id,

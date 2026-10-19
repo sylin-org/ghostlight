@@ -3,7 +3,7 @@
 //! Each submodule owns one family of work. A function there sends the primitives its work
 //! needs through the [`Link`] and turns their outcomes into the one
 //! [`BrowserOutcome`](crate::browser::adapter::BrowserOutcome) the rest of the service reads.
-//! This module holds what the families share: the documents a unit of work may reach, the
+//! This module holds what the families share: the scope every content command needs, the
 //! reading of one world call's answer, the sending of input and the reading of how it ended, and
 //! the routing of a point to the document it lands in.
 
@@ -24,7 +24,6 @@ use serde_json::Value;
 
 use super::geometry::{self, RouteStep, MAX_ROUTE_DEPTH};
 use super::link::Link;
-use super::locator::Locator;
 use super::scope::{PlannedCall, Scope};
 use super::tree::FrameTree;
 use super::wire::{
@@ -35,6 +34,8 @@ use super::world::{self, AssetDetail, EffectClass, Hit, OwnerProbe};
 use crate::browser::adapter::PhysicalActionSubject;
 use crate::browser::BrowserError;
 
+/// The protocol failure of a content command sent without a document scope.
+const UNSCOPED_CONTENT: &str = "content command sent without a document scope";
 /// The failure of a point that cannot be placed in exactly one document.
 const UNRESOLVED_POINT: &str = "point has no current document subject";
 /// The failure of a world call the extension skipped because an earlier one failed.
@@ -48,104 +49,14 @@ const INPUT_INCOMPLETE: &str = "input stopped before its last step";
 /// The protocol failure of input whose precondition went unanswered.
 const PRECONDITION_UNANSWERED: &str = "input did not answer its precondition";
 
-/// The documents one unit of work may reach.
-pub enum Reach<'s> {
-    /// The scope the authority admitted. Its guard rides on the work's primitives.
-    Admitted(&'s mut Scope),
-    /// Every addressable document of the tab, for work sent without a scope. Nothing guards it.
-    Open(Box<Scope>),
-}
-
-impl Reach<'_> {
-    /// The scope, to plan calls with.
-    #[must_use]
-    pub fn get(&self) -> &Scope {
-        match self {
-            Self::Admitted(scope) => scope,
-            Self::Open(scope) => scope,
-        }
-    }
-
-    /// The scope, to record answers in.
-    pub fn scope(&mut self) -> &mut Scope {
-        match self {
-            Self::Admitted(scope) => scope,
-            Self::Open(scope) => scope,
-        }
-    }
-
-    /// The currency check for the work's primitives: the admitted scope's guard, or none.
-    #[must_use]
-    pub fn guard(&self) -> Option<DocumentGuard> {
-        match self {
-            Self::Admitted(scope) => Some(scope.guard()),
-            Self::Open(_) => None,
-        }
-    }
-
-    /// Admit the document input will reach as a subject of the scope, so the guard that rides
-    /// on the input pins it.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`BrowserError::DocumentUnavailable`] when the scope does not allow the document.
-    pub fn admit_input(&mut self, doc: &FrameRef) -> Result<(), BrowserError> {
-        self.scope().admit_input_subject(doc)
-    }
-
-    /// Whether a point must be placed in its document before input is sent to it. Only an
-    /// admitted scope that leaves some document unreadable needs it; work sent without a scope
-    /// has no document policy to keep.
-    #[must_use]
-    pub fn point_check_needed(&self) -> bool {
-        match self {
-            Self::Admitted(scope) => scope.needs_point_check(),
-            Self::Open(_) => false,
-        }
-    }
-
-    /// The document an encoded locator names, with its local part, or the top document when
-    /// there is no locator.
-    ///
-    /// # Errors
-    ///
-    /// Returns the plain failure for a malformed locator.
-    pub fn target(
-        &self,
-        locator: Option<&str>,
-    ) -> Result<(FrameRef, Option<String>), BrowserError> {
-        match locator {
-            Some(locator) => {
-                let target = Locator::decode(locator)?;
-                Ok((target.doc, Some(target.local)))
-            }
-            None => Ok((self.get().top(), None)),
-        }
-    }
-
-    /// The documents content may be read from, in tree order with the top first.
-    #[must_use]
-    pub fn content_docs(&self) -> Vec<FrameRef> {
-        self.get().content_docs().cloned().collect()
-    }
-}
-
-/// The documents a unit of work reaches: the admitted scope when there is one, and otherwise
-/// every addressable document one frame inventory reports.
+/// The scope a content command runs in. Every content command reaches the page only through the
+/// documents the authority admitted, so one sent without a scope is a malformed request.
 ///
 /// # Errors
 ///
-/// Returns the failure of the `frames` primitive, and [`BrowserError::DocumentUnavailable`]
-/// for an inventory that is not one tree.
-pub fn reach<'s>(
-    l: &mut Link<'_>,
-    scope: Option<&'s mut Scope>,
-    tab_id: u64,
-) -> Result<Reach<'s>, BrowserError> {
-    match scope {
-        Some(scope) => Ok(Reach::Admitted(scope)),
-        None => Ok(Reach::Open(Box::new(Scope::open(frame_tree(l, tab_id)?)))),
-    }
+/// Returns [`BrowserError::Protocol`] when there is no scope, before anything is sent.
+pub fn reach(scope: Option<&mut Scope>) -> Result<&mut Scope, BrowserError> {
+    scope.ok_or_else(|| BrowserError::Protocol(UNSCOPED_CONTENT.into()))
 }
 
 /// The tab's frame tree, from one `frames` primitive.

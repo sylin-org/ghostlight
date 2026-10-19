@@ -51,12 +51,12 @@ const RETURN_WORD: &str = "return";
 /// when the script threw.
 pub fn evaluate(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &Scope,
     tab_id: u64,
     script: &str,
     max_result_chars: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let guard = scope.as_deref().map(Scope::guard);
+    let guard = Some(scope.guard());
     let request = |script: &str, timeout_ms: u64| EvaluateMain {
         tab_id,
         script: script.to_owned(),

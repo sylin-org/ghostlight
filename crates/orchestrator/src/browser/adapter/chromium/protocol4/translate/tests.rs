@@ -13,7 +13,7 @@ use crate::browser::adapter::documents::{
 };
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, DiagnosticDetail, DiagnosticSource,
-    PhysicalPoint,
+    PhysicalPoint, RecordingDestination,
 };
 use crate::browser::{BrowserError, BrowserPort, RelayBrowserPort};
 use crate::workspace::StaleReason;
@@ -744,6 +744,70 @@ fn nested_document_execution_is_a_protocol_failure_and_sends_nothing() {
             Err(BrowserError::Protocol(
                 "nested document execution is invalid".into()
             ))
+        );
+    }
+    assert!(fake.wait(|_| true).requests.is_empty());
+}
+
+/// Work reaches a page's content only inside the documents the authority admitted. A content
+/// command sent bare is a malformed request: it fails before any primitive, even the frame
+/// inventory, is sent.
+#[test]
+fn a_content_command_without_a_scope_is_a_protocol_error() {
+    let (port, fake) = port(inventory(), Box::new(|_| vec![]));
+    let locator = "C:c1:locator_a1_1";
+    for bare in [
+        BrowserCommand::ReadText {
+            tab_id: 12,
+            locator: None,
+            max_chars: 10,
+        },
+        BrowserCommand::Find {
+            tab_id: 12,
+            text: "Save".into(),
+            kind: "all".into(),
+            max_results: 5,
+        },
+        wait("load_ready"),
+        BrowserCommand::Activate {
+            tab_id: 12,
+            locator: locator.into(),
+            button: "left".into(),
+            click_count: 1,
+        },
+        BrowserCommand::TypeText {
+            tab_id: 12,
+            locator: locator.into(),
+            text: "hello".into(),
+            clear_first: false,
+            allow_credentials: false,
+        },
+        BrowserCommand::Fill {
+            tab_id: 12,
+            fields: vec![],
+            submit_locator: None,
+            timeout_ms: 1_000,
+            allow_credentials: false,
+        },
+        BrowserCommand::EvaluateScript {
+            tab_id: 12,
+            script: "1".into(),
+            max_result_chars: 10,
+        },
+        read_console(),
+        BrowserCommand::StartRecording { tab_id: 12 },
+        BrowserCommand::ExportRecording {
+            destination: RecordingDestination::Target {
+                tab_id: 12,
+                locator: locator.into(),
+                file_name: "flow.gif".into(),
+            },
+            max_output_bytes: 4096,
+        },
+    ] {
+        assert_eq!(
+            call(&port, bare),
+            Err(BrowserError::Protocol(super::UNSCOPED_CONTENT.into()))
         );
     }
     assert!(fake.wait(|_| true).requests.is_empty());

@@ -977,8 +977,6 @@ impl BrowserCommand {
 /// Per-call facts about a target listing, carried beside its items.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Listing {
-    /// The page's forms index, one content-free entry per form.
-    pub forms: Vec<serde_json::Value>,
     /// What the listing left out of its items, by key.
     pub left_out: LeftOut,
     /// Whether a document of the tab has an open modal dialog.

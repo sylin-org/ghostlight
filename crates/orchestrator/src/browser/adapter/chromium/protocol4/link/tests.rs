@@ -12,6 +12,7 @@ use super::super::scope::PlannedCall;
 use super::super::translate::tabs::group_key;
 use super::super::{wire, world};
 use super::{Answers, FocusTab, Frames, Line, Link, Spec, View, WorldCalls};
+use crate::browser::adapter::documents::{DocumentScope, PhysicalDocument};
 use crate::browser::adapter::{
     BrowserCommand, BrowserOutcome, BrowserReadiness, ClickShape, PhysicalTab,
     PresentationActivity, PresentationKind, PresentationSignal, RecordingDestination,
@@ -59,6 +60,30 @@ fn call(port: &RelayBrowserPort, command: BrowserCommand) -> Result<BrowserOutco
         Instant::now() + PATIENCE,
         &cancelled,
     )
+}
+
+/// Start a recording of `tab_id` as work sends it: inside a scope that admits the tab's one
+/// document. Answers the start's own outcome.
+fn start_recording(port: &RelayBrowserPort, tab_id: u64) -> Result<BrowserOutcome, BrowserError> {
+    let scope = DocumentScope {
+        documents: vec![PhysicalDocument {
+            id: "T.t1".into(),
+            url: "https://example.com/".into(),
+            parent: None,
+            supported: true,
+        }],
+        allowed: vec!["T.t1".into()],
+        subjects: vec![],
+        watch_changes: false,
+        strict_tree: false,
+        settle_ms: 0,
+        settle_requested: true,
+    };
+    let primitive = Box::new(BrowserCommand::StartRecording { tab_id });
+    match call(port, BrowserCommand::InDocuments { scope, primitive })? {
+        BrowserOutcome::InDocuments { result, .. } => Ok(*result),
+        other => panic!("a scoped outcome, not {other:?}"),
+    }
 }
 
 fn tab(url: &str) -> Value {
@@ -880,18 +905,18 @@ fn a_second_recording_is_held_until_the_first_is_finished() {
 
     // The tab it is capturing answers with the recording it already has.
     assert!(matches!(
-        call(&port, BrowserCommand::StartRecording { tab_id: 12 }),
+        start_recording(&port, 12),
         Ok(BrowserOutcome::RecordingStarted { existing: true, .. })
     ));
     // Another tab is held: nothing is started.
     assert_eq!(
-        call(&port, BrowserCommand::StartRecording { tab_id: 13 }),
+        start_recording(&port, 13),
         Ok(BrowserOutcome::RecordingHeld)
     );
     // A stopped recording is held too, until it is saved or discarded.
     *next.lock().unwrap() = answer(json!({"result": "status", "summary": summary()}));
     assert_eq!(
-        call(&port, BrowserCommand::StartRecording { tab_id: 12 }),
+        start_recording(&port, 12),
         Ok(BrowserOutcome::RecordingHeld)
     );
     assert_eq!(index.id(WORKSPACE).as_deref(), Some("recording_1"));
@@ -930,7 +955,7 @@ fn a_saved_recording_is_replaced_by_the_next_start_and_an_unsaved_one_is_not() {
 
     // Stopped and never saved: held.
     assert_eq!(
-        call(&port, BrowserCommand::StartRecording { tab_id: 13 }),
+        start_recording(&port, 13),
         Ok(BrowserOutcome::RecordingHeld)
     );
     // A save delivers it; it can be saved again.
@@ -950,7 +975,7 @@ fn a_saved_recording_is_replaced_by_the_next_start_and_an_unsaved_one_is_not() {
     }
     // The next start, on another tab, discards the saved recording and begins a new one.
     assert!(matches!(
-        call(&port, BrowserCommand::StartRecording { tab_id: 13 }),
+        start_recording(&port, 13),
         Ok(BrowserOutcome::RecordingStarted {
             existing: false,
             ..
@@ -986,7 +1011,7 @@ fn a_held_recording_the_extension_lost_is_forgotten_and_the_start_goes_ahead() {
     index.learn(WORKSPACE, "recording_1");
 
     assert!(matches!(
-        call(&port, BrowserCommand::StartRecording { tab_id: 12 }),
+        start_recording(&port, 12),
         Ok(BrowserOutcome::RecordingStarted {
             existing: false,
             ..

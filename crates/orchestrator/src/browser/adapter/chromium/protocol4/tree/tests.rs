@@ -157,19 +157,6 @@ fn a_placeholder_document_is_unsupported_whatever_the_list_says() {
 }
 
 #[test]
-fn ancestors_run_from_the_nearest_to_the_top() {
-    let tree = FrameTree::from_inventory(&nested_inventory()).unwrap();
-    assert_eq!(
-        tree.ancestors(&doc("A1", "x1")),
-        [&doc("A", "a1"), &doc("T", "t1")]
-    );
-    assert!(tree.ancestors(&doc("T", "t1")).is_empty());
-    assert!(tree.ancestors(&doc("A1", "stale")).is_empty());
-    assert_eq!(tree.parent(&doc("B", "b1")), Some(&doc("T", "t1")));
-    assert_eq!(tree.parent(&doc("T", "t1")), None);
-}
-
-#[test]
 fn children_are_the_real_documents_one_level_down() {
     let tree =
         FrameTree::from_inventory(&inventory(nested_inventory().frames, &["https://h.test/"]))

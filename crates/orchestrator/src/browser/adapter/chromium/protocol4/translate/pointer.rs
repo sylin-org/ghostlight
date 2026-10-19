@@ -18,7 +18,7 @@ use super::super::locator::Locator;
 use super::super::scope::Scope;
 use super::super::wire::{CallMode, FrameRef, InputStep, Point};
 use super::super::world::{self, Message, OwnerBox, Prepared, ScrollOffset, Scrolled};
-use super::{input_for, reach, route_and_admit, send_input, settled, value, OnDialog, Reach};
+use super::{input_for, route_and_admit, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{BrowserOutcome, PhysicalActionSubject};
 use crate::browser::BrowserError;
 
@@ -71,15 +71,15 @@ struct Aim {
 /// scrolling, so any failure is a plain one.
 fn aim(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     locator: &str,
     prepare: impl FnOnce(&str) -> Message,
 ) -> Result<Aim, BrowserError> {
     let target = Locator::decode(locator)?;
-    let mut plans = vec![reach.get().call(&target.doc, prepare(&target.local))?];
-    plans.extend(reach.get().tree().chain(&target.doc)?);
-    let guard = reach.guard();
+    let mut plans = vec![scope.call(&target.doc, prepare(&target.local))?];
+    plans.extend(scope.tree().chain(&target.doc)?);
+    let guard = Some(scope.guard());
     let budget = l.budget_ms();
     let answers = l.call(
         tab_id,
@@ -88,7 +88,7 @@ fn aim(
         guard,
         0,
         budget,
-        Some(reach.scope()),
+        Some(&mut *scope),
     )?;
     let prepared: Prepared = value(&answers[0])?;
     let boxes = answers[1..]
@@ -112,14 +112,14 @@ fn aim(
 /// input.
 fn admit_aim(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     aim: &Aim,
 ) -> Result<(), BrowserError> {
-    if reach.point_check_needed() {
-        route_and_admit(l, reach.scope(), tab_id, aim.point)?;
+    if scope.needs_point_check() {
+        route_and_admit(l, scope, tab_id, aim.point)?;
     }
-    reach.admit_input(&aim.doc)
+    scope.admit_input_subject(&aim.doc)
 }
 
 /// Click a located target.
@@ -134,19 +134,25 @@ fn admit_aim(
 /// failure of the input, which is an unknown effect once the click began.
 pub fn activate(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     click: Click<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, click.tab_id)?;
-    let aim = aim(l, &mut reach, click.tab_id, click.locator, world::activate)?;
-    admit_aim(l, &mut reach, click.tab_id, &aim)?;
+    let aim = aim(l, scope, click.tab_id, click.locator, world::activate)?;
+    admit_aim(l, scope, click.tab_id, &aim)?;
     let steps = keys::click(
         aim.point,
         keys::mouse_button(click.button),
         click.click_count,
         keys::modifier_mask(click.modifiers),
     );
-    let input = input_for(l, click.tab_id, None, steps, reach.guard(), CLICK_SETTLE_MS);
+    let input = input_for(
+        l,
+        click.tab_id,
+        None,
+        steps,
+        Some(scope.guard()),
+        CLICK_SETTLE_MS,
+    );
     send_input(l, input, OnDialog::Succeeded)?;
     Ok(BrowserOutcome::Activated {
         tab: l.tab(click.tab_id)?.into(),
@@ -162,14 +168,20 @@ pub fn activate(
 /// Returns what [`activate`] returns for the same target.
 pub fn hover(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     locator: &str,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, tab_id)?;
-    let aim = aim(l, &mut reach, tab_id, locator, world::hover)?;
-    admit_aim(l, &mut reach, tab_id, &aim)?;
-    let input = input_for(l, tab_id, None, keys::hover(aim.point), reach.guard(), 0);
+    let aim = aim(l, scope, tab_id, locator, world::hover)?;
+    admit_aim(l, scope, tab_id, &aim)?;
+    let input = input_for(
+        l,
+        tab_id,
+        None,
+        keys::hover(aim.point),
+        Some(scope.guard()),
+        0,
+    );
     send_input(l, input, OnDialog::Succeeded)?;
     Ok(BrowserOutcome::Hovered {
         tab_id,
@@ -200,21 +212,20 @@ pub struct Scroll<'a> {
 /// Returns the failure of the `call` primitive and the document's own failure.
 pub fn scroll(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: Scroll<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, request.tab_id)?;
-    let top = reach.get().top();
-    let (doc, local) = reach.target(request.locator)?;
-    let mut plans = vec![reach.get().call(
+    let top = scope.top();
+    let (doc, local) = scope.target(request.locator)?;
+    let mut plans = vec![scope.call(
         &doc,
         world::scroll(local.as_deref(), request.direction, request.amount),
     )?];
     let nested = doc != top;
     if nested {
-        plans.push(reach.get().call(&top, world::scroll_offset())?);
+        plans.push(scope.call(&top, world::scroll_offset())?);
     }
-    let guard = reach.guard();
+    let guard = Some(scope.guard());
     let budget = l.budget_ms();
     let answers = l.call(
         request.tab_id,
@@ -223,7 +234,7 @@ pub fn scroll(
         guard,
         0,
         budget,
-        Some(reach.scope()),
+        Some(&mut *scope),
     )?;
     let scrolled: Scrolled = settled(l, &answers[0])?;
     let (x, y) = if nested {
@@ -265,29 +276,24 @@ pub struct Drag<'a> {
 /// input, which is an unknown effect once the pointer pressed.
 pub fn drag(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: Drag<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
     let source = Locator::decode(request.source)?;
     let destination = Locator::decode(request.destination)?;
-    let mut reach = reach(l, scope, request.tab_id)?;
-    let source_chain = reach.get().tree().chain(&source.doc)?;
-    let destination_chain = reach.get().tree().chain(&destination.doc)?;
+    let source_chain = scope.tree().chain(&source.doc)?;
+    let destination_chain = scope.tree().chain(&destination.doc)?;
     let source_end = DRAG_FIXED_CALLS + source_chain.len();
     let destination_end = source_end + destination_chain.len();
     let mut plans = vec![
-        reach
-            .get()
-            .call(&destination.doc, world::hover(&destination.local))?,
-        reach.get().call(&source.doc, world::hover(&source.local))?,
-        reach.get().call(&source.doc, world::box_(&source.local))?,
-        reach
-            .get()
-            .call(&destination.doc, world::box_(&destination.local))?,
+        scope.call(&destination.doc, world::hover(&destination.local))?,
+        scope.call(&source.doc, world::hover(&source.local))?,
+        scope.call(&source.doc, world::box_(&source.local))?,
+        scope.call(&destination.doc, world::box_(&destination.local))?,
     ];
     plans.extend(source_chain);
     plans.extend(destination_chain);
-    let guard = reach.guard();
+    let guard = Some(scope.guard());
     let budget = l.budget_ms();
     let answers = l.call(
         request.tab_id,
@@ -296,7 +302,7 @@ pub fn drag(
         guard,
         0,
         budget,
-        Some(reach.scope()),
+        Some(&mut *scope),
     )?;
     for answer in &answers[..DRAG_PREPARATIONS] {
         value::<Value>(answer)?;
@@ -315,11 +321,11 @@ pub fn drag(
     };
     let start = from.rectangle.center() + geometry::offset(&boxes(DRAG_FIXED_CALLS..source_end)?);
     let end = onto.rectangle.center() + geometry::offset(&boxes(source_end..destination_end)?);
-    reach.admit_input(&source.doc)?;
-    reach.admit_input(&destination.doc)?;
+    scope.admit_input_subject(&source.doc)?;
+    scope.admit_input_subject(&destination.doc)?;
     dragged(
         l,
-        &reach,
+        scope,
         request.tab_id,
         (start, end),
         (Some(from.subject), Some(onto.subject)),
@@ -340,7 +346,7 @@ pub(super) type DragSubjects = (Option<PhysicalActionSubject>, Option<PhysicalAc
 /// Returns the failure of the input, and a plain failure when the browser no longer has the tab.
 pub(super) fn dragged(
     l: &mut Link<'_>,
-    reach: &Reach<'_>,
+    scope: &Scope,
     tab_id: u64,
     (start, end): (Point, Point),
     (source_subject, destination_subject): DragSubjects,
@@ -349,7 +355,7 @@ pub(super) fn dragged(
         path: keys::drag_path(start, end, DRAG_STEPS),
         modifiers: 0,
     }];
-    let input = input_for(l, tab_id, None, steps, reach.guard(), 0);
+    let input = input_for(l, tab_id, None, steps, Some(scope.guard()), 0);
     send_input(l, input, OnDialog::EffectUnknown)?;
     Ok(BrowserOutcome::Dragged {
         tab: l.tab(tab_id)?.into(),

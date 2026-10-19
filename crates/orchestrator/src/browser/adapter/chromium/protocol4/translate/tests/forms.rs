@@ -607,24 +607,17 @@ fn a_spent_budget_after_an_edit_leaves_the_effect_unknown() {
 
 #[test]
 fn a_submit_outside_the_fields_documents_is_refused_before_anything_is_sent() {
-    for scoped_fill in [true, false] {
-        let (port, fake) = rig(answer);
-        let command = fill(
-            vec![field("T:t1:locator_a1_1", LOCAL_VALUE)],
-            Some("D:d1:locator_a1_9"),
-            10_000,
-        );
-        let command = if scoped_fill {
-            scoped(all_open(), command)
-        } else {
-            command
-        };
-        assert_eq!(
-            call(&port, command).unwrap_err(),
-            BrowserError::Primitive("submit control is not contained in the resolved form".into())
-        );
-        assert!(fake.wait(|_| true).requests.is_empty());
-    }
+    let (port, fake) = rig(answer);
+    let command = fill(
+        vec![field("T:t1:locator_a1_1", LOCAL_VALUE)],
+        Some("D:d1:locator_a1_9"),
+        10_000,
+    );
+    assert_eq!(
+        call(&port, scoped(all_open(), command)).unwrap_err(),
+        BrowserError::Primitive("submit control is not contained in the resolved form".into())
+    );
+    assert!(fake.wait(|_| true).requests.is_empty());
 }
 
 #[test]
@@ -633,7 +626,10 @@ fn malformed_locators_are_plain_failures_before_anything_is_sent() {
     assert_eq!(
         call(
             &port,
-            fill(vec![field("locator_a1_1", LOCAL_VALUE)], None, 10_000)
+            scoped(
+                all_open(),
+                fill(vec![field("locator_a1_1", LOCAL_VALUE)], None, 10_000)
+            )
         )
         .unwrap_err(),
         BrowserError::Primitive("field target is not frame-scoped".into())
@@ -641,10 +637,13 @@ fn malformed_locators_are_plain_failures_before_anything_is_sent() {
     assert_eq!(
         call(
             &port,
-            fill(
-                vec![field("T:t1:locator_a1_1", LOCAL_VALUE)],
-                Some("locator_a1_9"),
-                10_000
+            scoped(
+                all_open(),
+                fill(
+                    vec![field("T:t1:locator_a1_1", LOCAL_VALUE)],
+                    Some("locator_a1_9"),
+                    10_000
+                )
             )
         )
         .unwrap_err(),

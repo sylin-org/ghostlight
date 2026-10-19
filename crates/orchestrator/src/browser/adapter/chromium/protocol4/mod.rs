@@ -35,7 +35,7 @@ use self::translate::observe::{self, Subjects, Wait};
 use self::translate::pointer::{Click, Drag, Scroll};
 use self::translate::points::{PointClick, PointDrag, PointDrop, PointWheel, ViewPoint};
 use self::translate::records::{self, DiagnosticsRead, PageExport};
-use self::translate::{capture, keyboard, pointer, points, present, read, script, tabs};
+use self::translate::{capture, keyboard, pointer, points, present, reach, read, script, tabs};
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, RecordingDestination};
 use crate::browser::BrowserError;
 
@@ -87,7 +87,7 @@ fn nested() -> BrowserError {
     BrowserError::Protocol(NESTED_DOCUMENTS.into())
 }
 
-/// Carry one unit of work, inside the admitted scope when there is one.
+/// Carry one unit of work. A content command runs only inside the scope the authority admitted.
 #[expect(
     clippy::too_many_lines,
     reason = "one arm per unit of work keeps the whole vocabulary in one exhaustive match"
@@ -152,30 +152,30 @@ fn translate(
             tab_id,
             locator,
             max_chars,
-        } => read::read_text(l, scope, tab_id, locator.as_deref(), max_chars),
+        } => read::read_text(l, reach(scope)?, tab_id, locator.as_deref(), max_chars),
         BrowserCommand::Inspect {
             tab_id,
             kind,
             max_items,
-        } => read::inspect(l, scope, tab_id, &kind, max_items),
+        } => read::inspect(l, reach(scope)?, tab_id, &kind, max_items),
         BrowserCommand::ReadDocument {
             tab_id,
             mode,
             max_chars,
-        } => read::read_document(l, scope, tab_id, &mode, max_chars),
+        } => read::read_document(l, reach(scope)?, tab_id, &mode, max_chars),
         BrowserCommand::InspectTree {
             tab_id,
             locator,
             max_depth,
-        } => read::inspect_tree(l, scope, tab_id, locator.as_deref(), max_depth),
+        } => read::inspect_tree(l, reach(scope)?, tab_id, locator.as_deref(), max_depth),
         BrowserCommand::Find {
             tab_id,
             text,
             kind,
             max_results,
-        } => read::find(l, scope, tab_id, &text, &kind, max_results),
+        } => read::find(l, reach(scope)?, tab_id, &text, &kind, max_results),
         BrowserCommand::DescribeTargets { tab_id, locators } => {
-            read::describe_targets(l, scope, tab_id, &locators)
+            read::describe_targets(l, reach(scope)?, tab_id, &locators)
         }
         BrowserCommand::QuerySemantic {
             tab_id,
@@ -185,7 +185,7 @@ fn translate(
             form_scope,
         } => read::query_semantic(
             l,
-            scope,
+            reach(scope)?,
             tab_id,
             &read::Semantic {
                 name: &name,
@@ -194,7 +194,9 @@ fn translate(
                 form_scope,
             },
         ),
-        BrowserCommand::DescribeFocused { tab_id } => read::describe_focused(l, scope, tab_id),
+        BrowserCommand::DescribeFocused { tab_id } => {
+            read::describe_focused(l, reach(scope)?, tab_id)
+        }
         BrowserCommand::Observe {
             tab_id,
             condition,
@@ -203,7 +205,7 @@ fn translate(
             timeout_ms,
         } => observe::observe(
             l,
-            scope,
+            reach(scope)?,
             tab_id,
             Wait {
                 condition: &condition,
@@ -233,7 +235,7 @@ fn translate(
             limit,
         } => records::read_diagnostics(
             l,
-            scope.as_deref(),
+            reach(scope)?,
             DiagnosticsRead {
                 tab_id,
                 source,
@@ -244,7 +246,7 @@ fn translate(
             },
         ),
         BrowserCommand::ClearDiagnostics { tab_ids } => records::clear_diagnostics(l, tab_ids),
-        BrowserCommand::StartRecording { tab_id } => records::start(l, scope.as_deref(), tab_id),
+        BrowserCommand::StartRecording { tab_id } => records::start(l, reach(scope)?, tab_id),
         BrowserCommand::StatusRecording => records::status(l),
         BrowserCommand::StopRecording => records::stop(l),
         BrowserCommand::ExportRecording {
@@ -269,7 +271,7 @@ fn translate(
             max_output_bytes,
         } => records::export_to_page(
             l,
-            scope.as_deref(),
+            reach(scope)?,
             PageExport {
                 tab_id,
                 locator: &locator,
@@ -298,7 +300,7 @@ fn translate(
             click_count,
         } => pointer::activate(
             l,
-            scope,
+            reach(scope)?,
             Click {
                 tab_id,
                 locator: &locator,
@@ -315,7 +317,7 @@ fn translate(
             modifiers,
         } => pointer::activate(
             l,
-            scope,
+            reach(scope)?,
             Click {
                 tab_id,
                 locator: &locator,
@@ -324,7 +326,9 @@ fn translate(
                 modifiers: &modifiers,
             },
         ),
-        BrowserCommand::Hover { tab_id, locator } => pointer::hover(l, scope, tab_id, &locator),
+        BrowserCommand::Hover { tab_id, locator } => {
+            pointer::hover(l, reach(scope)?, tab_id, &locator)
+        }
         BrowserCommand::Scroll {
             tab_id,
             locator,
@@ -332,7 +336,7 @@ fn translate(
             amount,
         } => pointer::scroll(
             l,
-            scope,
+            reach(scope)?,
             Scroll {
                 tab_id,
                 locator: locator.as_deref(),
@@ -348,7 +352,7 @@ fn translate(
             allow_credentials,
         } => keyboard::type_text(
             l,
-            scope,
+            reach(scope)?,
             TypeText {
                 tab_id,
                 locator: &locator,
@@ -364,7 +368,7 @@ fn translate(
             allow_credentials,
         } => keyboard::type_focused(
             l,
-            scope,
+            reach(scope)?,
             TypeFocused {
                 tab_id,
                 text: &text,
@@ -379,7 +383,7 @@ fn translate(
             modifiers,
         } => keyboard::press_key(
             l,
-            scope,
+            reach(scope)?,
             PressKey {
                 tab_id,
                 locator: locator.as_deref(),
@@ -391,7 +395,7 @@ fn translate(
             tab_id,
             locator,
             files,
-        } => keyboard::upload_files(l, scope, tab_id, &locator, &files),
+        } => keyboard::upload_files(l, reach(scope)?, tab_id, &locator, &files),
         BrowserCommand::Fill {
             tab_id,
             fields,
@@ -400,7 +404,7 @@ fn translate(
             allow_credentials,
         } => forms::fill(
             l,
-            scope,
+            reach(scope)?,
             Fill {
                 tab_id,
                 fields: &fields,
@@ -413,7 +417,7 @@ fn translate(
             tab_id,
             script,
             max_result_chars,
-        } => script::evaluate(l, scope, tab_id, &script, max_result_chars),
+        } => script::evaluate(l, reach(scope)?, tab_id, &script, max_result_chars),
         BrowserCommand::ActivatePoint {
             tab_id,
             point,
@@ -422,7 +426,7 @@ fn translate(
             click_count,
         } => points::activate(
             l,
-            scope,
+            reach(scope)?,
             PointClick {
                 at: ViewPoint {
                     tab_id,
@@ -443,7 +447,7 @@ fn translate(
             modifiers,
         } => points::activate(
             l,
-            scope,
+            reach(scope)?,
             PointClick {
                 at: ViewPoint {
                     tab_id,
@@ -463,7 +467,7 @@ fn translate(
             ticks,
         } => points::wheel(
             l,
-            scope,
+            reach(scope)?,
             PointWheel {
                 at: ViewPoint {
                     tab_id,
@@ -480,7 +484,7 @@ fn translate(
             expected_viewport,
         } => points::hover(
             l,
-            scope,
+            reach(scope)?,
             ViewPoint {
                 tab_id,
                 point,
@@ -493,7 +497,7 @@ fn translate(
             destination_locator,
         } => pointer::drag(
             l,
-            scope,
+            reach(scope)?,
             Drag {
                 tab_id,
                 source: &source_locator,
@@ -507,7 +511,7 @@ fn translate(
             expected_viewport,
         } => points::drag(
             l,
-            scope,
+            reach(scope)?,
             PointDrag {
                 tab_id,
                 start,
@@ -522,7 +526,7 @@ fn translate(
             file,
         } => points::drop_file(
             l,
-            scope,
+            reach(scope)?,
             PointDrop {
                 at: ViewPoint {
                     tab_id,

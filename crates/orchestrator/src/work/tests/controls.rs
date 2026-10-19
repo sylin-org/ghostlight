@@ -147,7 +147,6 @@ fn cut_listing(left_out: LeftOut, modal_open: bool) -> BrowserOutcome {
         listing: Listing {
             left_out,
             modal_open,
-            ..Listing::default()
         },
     }
 }

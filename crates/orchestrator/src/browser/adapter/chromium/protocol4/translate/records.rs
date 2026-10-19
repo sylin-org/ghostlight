@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 
 use super::super::link::Link;
 use super::super::locator::Locator;
-use super::super::scope::{PlannedCall, Scope};
+use super::super::scope::Scope;
 use super::super::wire;
 use super::super::world;
 use crate::browser::adapter::{BrowserOutcome, DiagnosticDetail, DiagnosticSource};
@@ -58,7 +58,7 @@ pub struct DiagnosticsRead {
 /// cannot read.
 pub fn read_diagnostics(
     l: &mut Link<'_>,
-    scope: Option<&Scope>,
+    scope: &Scope,
     read: DiagnosticsRead,
 ) -> Result<BrowserOutcome, BrowserError> {
     let facts = l.send(wire::DiagnosticsOp::Read {
@@ -68,8 +68,8 @@ pub fn read_diagnostics(
         match_text: read.match_text,
         after: read.after,
         limit: read.limit,
-        binding: scope.filter(|scope| scope.watches()).map(binding),
-        guard: scope.map(Scope::guard),
+        binding: scope.watches().then(|| binding(scope)),
+        guard: Some(scope.guard()),
     })?;
     let entries = facts
         .entries
@@ -113,11 +113,7 @@ pub fn binding(scope: &Scope) -> String {
 /// # Errors
 ///
 /// Returns the primitive's failure.
-pub fn start(
-    l: &mut Link<'_>,
-    scope: Option<&Scope>,
-    tab_id: u64,
-) -> Result<BrowserOutcome, BrowserError> {
+pub fn start(l: &mut Link<'_>, scope: &Scope, tab_id: u64) -> Result<BrowserOutcome, BrowserError> {
     if let Some(held) = l.recordings().id(l.workspace()) {
         match l.send(wire::RecordingOp::Status {
             recording_id: held.clone(),
@@ -147,7 +143,7 @@ pub fn start(
     }
     let facts = l.send(wire::RecordingOp::Start {
         tab_id,
-        watch: scope.and_then(Scope::watch),
+        watch: scope.watch(),
     })?;
     recorded(l, facts)
 }
@@ -225,22 +221,21 @@ pub struct PageExport<'a> {
 /// failure.
 pub fn export_to_page(
     l: &mut Link<'_>,
-    scope: Option<&Scope>,
+    scope: &Scope,
     page: PageExport<'_>,
     max_output_bytes: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
     let target = Locator::decode(page.locator)?;
-    let message = world::attach_file(&target.local, page.file_name);
-    let plan = match scope {
-        Some(scope) => scope.call(&target.doc, message)?,
-        None => PlannedCall::unscoped(&target.doc, message),
-    };
+    let plan = scope.call(
+        &target.doc,
+        world::attach_file(&target.local, page.file_name),
+    )?;
     export(
         l,
         wire::RecordingTarget::Page {
             tab_id: page.tab_id,
             call: plan.call,
-            guard: scope.map(Scope::guard),
+            guard: Some(scope.guard()),
         },
         max_output_bytes,
     )

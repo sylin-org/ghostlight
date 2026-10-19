@@ -227,23 +227,6 @@ fn require_coordinate(value: f64, name: &'static str) -> Result<f64, GeometryErr
     }
 }
 
-/// The scale a clip of the given CSS size is captured at: as large as the side and pixel limits
-/// allow, never below the budget's floor, and never above one unless the budget magnifies.
-///
-/// # Errors
-///
-/// Returns [`GeometryError::NotPositive`] for a width or height that is not above zero.
-pub fn output_scale(width: f64, height: f64, budget: &CaptureBudget) -> Result<f64, GeometryError> {
-    let width = require_extent(width, "width")?;
-    let height = require_extent(height, "height")?;
-    let side = f64::from(budget.max_side);
-    let fit = (side / width)
-        .min(side / height)
-        .min((f64::from(budget.max_pixels) / (width * height)).sqrt());
-    let wanted = if budget.magnify { fit } else { fit.min(1.0) };
-    Ok(wanted.max(budget.min_scale))
-}
-
 /// The capture clip for a region of the page.
 ///
 /// # Errors

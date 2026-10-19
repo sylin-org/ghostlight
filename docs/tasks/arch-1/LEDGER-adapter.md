@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-A1 and A2 have landed. A2's top-frame ring reset waits on a package-lane fix (see Notes). A3 is
-next, then A4. ux-2 has closed, so every slice can start.
+A1, A2 and A3 have landed. A2's top-frame ring reset waits on a package-lane fix (see Notes). A4
+is next. ux-2 has closed, so every slice can start.
 
 ## Slices
 
@@ -16,8 +16,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
 | A1 | fix(adapter): an embedded document's change is stale, and a targeted read reports the tab | candidate | none | see Notes | landed (fa3bcb02 and a9d40c83) |
-| A2 | fix(adapter): a Downloads save carries effect, and diagnostics bind only when asked | candidate | none | see Notes | landed (this commit) |
-| A3 | refactor(adapter): no content command runs without a scope | none | none | - | todo |
+| A2 | fix(adapter): a Downloads save carries effect, and diagnostics bind only when asked | candidate | none | see Notes | landed (a0dfc56b) |
+| A3 | refactor(adapter): no content command runs without a scope | none | none | see Notes | landed (this commit) |
 | A4 | refactor(adapter): the authority's budgets reach the adapter as values | none | ux-2 closes (`assets.sha256`) | cross-lane work's `DOCUMENT_TREE_NODE_LIMIT` | todo |
 
 ## Notes
@@ -67,3 +67,28 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   subframe navigation keeps the entries and a top-frame navigation clears them. It changes a
   packaged file, so that commit regenerates the package record (ADR-0200 Decision 16). Recorded in
   LEDGER-package.md; A2's candidate gate holds until it lands.
+- A3, `Reach` goes whole, not only `Reach::Open`: with one variant left it only forwarded to the
+  scope. `reach()` in `translate/mod.rs` turns the dispatch's optional scope into the scope a
+  content command needs, or `BrowserError::Protocol` before anything is sent, and every content
+  translator takes `&mut Scope` (the diagnostics and recording translators `&Scope`), not only
+  `script::evaluate` and the recordings. `Reach::target` becomes `Scope::target`, which replaces
+  the test-only `doc_of` and `doc_or_top`.
+- A3, `PlannedCall::unscoped` stays for the calls no scope covers: metadata (a route's hit point,
+  a description's focus probe) and a screenshot's target measurement. Work scopes no screenshot,
+  so a screenshot is not a content command, and its locator is the agent's own handle. The one
+  content-command use, a page export sent without a scope, is gone.
+- A3, `EffectClass::Prepare` goes: no rule reads it, because the link counts only `Effect`. Its
+  messages are `Read`, whose doc now says it covers positioning a target for an action.
+- A3, `Listing.forms` goes, so core's `work/tests/controls.rs` drops its `..Listing::default()`,
+  which clippy reads as a needless update. That is the only cross-lane edit.
+- A3, tests: eight tests sent content work bare, not six. The fill tests
+  `a_submit_outside_the_fields_documents_is_refused_before_anything_is_sent` and
+  `malformed_locators_are_plain_failures_before_anything_is_sent`, the three recording-start tests
+  in `protocol4/link/tests.rs` (through a `start_recording` helper) and three page-export tests in
+  `translate/tests/points.rs` now run inside an all-open scope. Removed as pinning unguarded
+  behavior: `a_point_without_a_scope_is_clicked_unguarded`,
+  `a_recording_exported_into_a_page_without_a_scope_carries_no_guard`, and the unscoped tails of
+  the key-press and script tests in `translate/tests/interaction.rs`. The tests of the deleted
+  `FrameTree::ancestors` and `geometry::output_scale` go with them. The proof is
+  `a_content_command_without_a_scope_is_a_protocol_error` in `protocol4/translate/tests.rs`. No
+  journey is needed.

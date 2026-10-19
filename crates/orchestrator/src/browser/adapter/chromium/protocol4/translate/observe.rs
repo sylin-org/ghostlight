@@ -16,7 +16,7 @@ use super::super::scope::{PlannedCall, Scope};
 use super::super::tree::{document_id, FrameTree};
 use super::super::wire::{CallMode, FrameRef, Point};
 use super::super::world::{self, FocusProbe, Observed};
-use super::{reach, route, value, Reach};
+use super::{route, value};
 use crate::browser::adapter::documents::DocumentInventory;
 use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalPoint};
 use crate::browser::BrowserError;
@@ -189,20 +189,19 @@ pub struct Wait<'a> {
 /// `call` primitive, and a single document's own failure.
 pub fn observe(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     wait: Wait<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, tab_id)?;
     let budget = wait.timeout_ms.saturating_add(CALL_MARGIN_MS);
     let (doc, local) = match wait.condition {
-        condition::VISUAL_SETTLE => reach.target(wait.locator)?,
-        condition::LOAD_READY | condition::URL_CONTAINS => reach.target(None)?,
+        condition::VISUAL_SETTLE => scope.target(wait.locator)?,
+        condition::LOAD_READY | condition::URL_CONTAINS => scope.target(None)?,
         condition::TARGET_PRESENT | condition::TARGET_ABSENT => {
-            reach.target(Some(wait.locator.unwrap_or_default()))?
+            scope.target(Some(wait.locator.unwrap_or_default()))?
         }
         condition::TEXT_PRESENT | condition::TEXT_ABSENT => {
-            return observe_text(l, &mut reach, tab_id, wait, budget)
+            return observe_text(l, scope, tab_id, wait, budget)
         }
         other => {
             return Err(BrowserError::Primitive(format!(
@@ -210,7 +209,7 @@ pub fn observe(
             )))
         }
     };
-    let plan = reach.get().call(
+    let plan = scope.call(
         &doc,
         world::observe(
             wait.condition,
@@ -220,7 +219,7 @@ pub fn observe(
             false,
         ),
     )?;
-    let guard = reach.guard();
+    let guard = Some(scope.guard());
     let answers = l.call(
         tab_id,
         &[plan],
@@ -228,7 +227,7 @@ pub fn observe(
         guard,
         0,
         budget,
-        Some(reach.scope()),
+        Some(&mut *scope),
     )?;
     let observed: Observed = value(&answers[0])?;
     Ok(BrowserOutcome::Observed {
@@ -242,20 +241,20 @@ pub fn observe(
 /// Wait for text to appear in some readable document, or to be gone from all of them.
 fn observe_text(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     wait: Wait<'_>,
     budget: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
     let presence = wait.condition == condition::TEXT_PRESENT;
-    let docs = reach.content_docs();
+    let docs = scope.content_docs();
     if docs.is_empty() {
         return Err(BrowserError::DocumentUnavailable);
     }
     let plans = docs
         .iter()
         .map(|doc| {
-            reach.get().call(
+            scope.call(
                 doc,
                 world::observe(wait.condition, wait.value, None, wait.timeout_ms, presence),
             )
@@ -267,8 +266,8 @@ fn observe_text(
         CallMode::Parallel
     };
     let started = Instant::now();
-    let guard = reach.guard();
-    let answers = l.call(tab_id, &plans, mode, guard, 0, budget, Some(reach.scope()))?;
+    let guard = Some(scope.guard());
+    let answers = l.call(tab_id, &plans, mode, guard, 0, budget, Some(&mut *scope))?;
     let observed: Vec<Option<Observed>> = answers.iter().map(|answer| value(answer).ok()).collect();
     let satisfied = if presence {
         observed.iter().flatten().any(|answer| answer.satisfied)
@@ -287,7 +286,7 @@ fn observe_text(
         tab_id,
         satisfied,
         elapsed_ms,
-        readiness: top_readiness(l, reach, tab_id)?,
+        readiness: top_readiness(l, scope, tab_id)?,
     })
 }
 
@@ -298,11 +297,11 @@ fn observe_text(
 /// Returns the failure of the `call` primitive.
 fn top_readiness(
     l: &mut Link<'_>,
-    reach: &Reach<'_>,
+    scope: &Scope,
     tab_id: u64,
 ) -> Result<BrowserReadiness, BrowserError> {
-    let top = reach.get().top();
-    let Ok(plan) = reach.get().call(
+    let top = scope.top();
+    let Ok(plan) = scope.call(
         &top,
         world::observe(condition::LOAD_READY, None, None, 0, false),
     ) else {

@@ -16,7 +16,7 @@ use super::super::wire::{CallMode, Point};
 use super::super::world::{self, Uploaded, ViewportPoint};
 use super::pointer::{dragged, CLICK_SETTLE_MS};
 use super::read::one;
-use super::{input_for, reach, route_and_admit, send_input, settled, value, OnDialog, Reach};
+use super::{input_for, route_and_admit, send_input, settled, value, OnDialog};
 use crate::browser::adapter::{
     BrowserOutcome, PhysicalActionSubject, PhysicalFile, PhysicalPoint, ViewportGeometry,
 };
@@ -114,15 +114,13 @@ fn confirm_view(
 /// place the point.
 fn scroll_to(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     point: PhysicalPoint,
 ) -> Result<ViewportPoint, BrowserError> {
-    let top = reach.get().top();
-    let plan = reach
-        .get()
-        .call(&top, world::scroll_point(point.x, point.y))?;
-    let answers = one(l, reach, tab_id, plan)?;
+    let top = scope.top();
+    let plan = scope.call(&top, world::scroll_point(point.x, point.y))?;
+    let answers = one(l, scope, tab_id, plan)?;
     value(&answers[0])
 }
 
@@ -134,13 +132,13 @@ fn scroll_to(
 /// Returns what [`route_and_admit`] returns.
 fn subject_at(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     placed: ViewportPoint,
 ) -> Result<Aim, BrowserError> {
     let at = placed.at();
-    let subject = if reach.point_check_needed() {
-        route_and_admit(l, reach.scope(), tab_id, at)?.subject
+    let subject = if scope.needs_point_check() {
+        route_and_admit(l, scope, tab_id, at)?.subject
     } else {
         placed.subject
     };
@@ -153,16 +151,10 @@ fn subject_at(
 ///
 /// Returns the plain failure of a view that moved, of a point the scope refuses and of one the
 /// page cannot place. Nothing has been sent as input.
-fn aim<'s>(
-    l: &mut Link<'_>,
-    scope: Option<&'s mut Scope>,
-    view: ViewPoint<'_>,
-) -> Result<(Reach<'s>, Aim), BrowserError> {
+fn aim(l: &mut Link<'_>, scope: &mut Scope, view: ViewPoint<'_>) -> Result<Aim, BrowserError> {
     confirm_view(l, view.tab_id, view.expected)?;
-    let mut reach = reach(l, scope, view.tab_id)?;
-    let placed = scroll_to(l, &mut reach, view.tab_id, view.point)?;
-    let aim = subject_at(l, &mut reach, view.tab_id, placed)?;
-    Ok((reach, aim))
+    let placed = scroll_to(l, scope, view.tab_id, view.point)?;
+    subject_at(l, scope, view.tab_id, placed)
 }
 
 /// Click at a page point.
@@ -175,10 +167,10 @@ fn aim<'s>(
 /// unknown effect once the click began.
 pub fn activate(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     click: PointClick<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let (reach, aim) = aim(l, scope, click.at)?;
+    let aim = aim(l, scope, click.at)?;
     let steps = keys::click(
         aim.at,
         keys::mouse_button(click.button),
@@ -190,7 +182,7 @@ pub fn activate(
         click.at.tab_id,
         None,
         steps,
-        reach.guard(),
+        Some(scope.guard()),
         CLICK_SETTLE_MS,
     );
     send_input(l, input, OnDialog::Succeeded)?;
@@ -208,11 +200,18 @@ pub fn activate(
 /// Returns what [`activate`] returns for the same point.
 pub fn hover(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     view: ViewPoint<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let (reach, aim) = aim(l, scope, view)?;
-    let input = input_for(l, view.tab_id, None, keys::hover(aim.at), reach.guard(), 0);
+    let aim = aim(l, scope, view)?;
+    let input = input_for(
+        l,
+        view.tab_id,
+        None,
+        keys::hover(aim.at),
+        Some(scope.guard()),
+        0,
+    );
     send_input(l, input, OnDialog::Succeeded)?;
     Ok(BrowserOutcome::Hovered {
         tab_id: view.tab_id,
@@ -229,10 +228,10 @@ pub fn hover(
 /// Returns what [`activate`] returns for the same point.
 pub fn wheel(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     wheel: PointWheel<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let (reach, aim) = aim(l, scope, wheel.at)?;
+    let aim = aim(l, scope, wheel.at)?;
     let steps = keys::wheel(
         aim.at,
         WheelDirection::from_name(wheel.direction),
@@ -243,7 +242,7 @@ pub fn wheel(
         wheel.at.tab_id,
         None,
         steps,
-        reach.guard(),
+        Some(scope.guard()),
         WHEEL_SETTLE_MS,
     );
     send_input(l, input, OnDialog::Succeeded)?;
@@ -269,21 +268,16 @@ pub fn wheel(
 /// pressed.
 pub fn drag(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: PointDrag<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
     confirm_view(l, request.tab_id, request.expected)?;
-    let mut reach = reach(l, scope, request.tab_id)?;
-    let top = reach.get().top();
+    let top = scope.top();
     let plans = [request.start, request.end]
-        .map(|point| {
-            reach
-                .get()
-                .call(&top, world::viewport_point(point.x, point.y))
-        })
+        .map(|point| scope.call(&top, world::viewport_point(point.x, point.y)))
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
-    let guard = reach.guard();
+    let guard = Some(scope.guard());
     let budget = l.budget_ms();
     let answers = l.call(
         request.tab_id,
@@ -292,15 +286,15 @@ pub fn drag(
         guard,
         0,
         budget,
-        Some(reach.scope()),
+        Some(&mut *scope),
     )?;
     let start: ViewportPoint = value(&answers[0])?;
     let end: ViewportPoint = value(&answers[1])?;
-    let from = subject_at(l, &mut reach, request.tab_id, start)?;
-    let onto = subject_at(l, &mut reach, request.tab_id, end)?;
+    let from = subject_at(l, scope, request.tab_id, start)?;
+    let onto = subject_at(l, scope, request.tab_id, end)?;
     dragged(
         l,
-        &reach,
+        scope,
         request.tab_id,
         (from.at, onto.at),
         (from.subject, onto.subject),
@@ -318,15 +312,14 @@ pub fn drag(
 /// effect once it was delivered.
 pub fn drop_file(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     request: PointDrop<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
     let view = request.at;
     confirm_view(l, view.tab_id, view.expected)?;
-    let mut reach = reach(l, scope, view.tab_id)?;
-    let placed = scroll_to(l, &mut reach, view.tab_id, view.point)?;
-    let routed = route_and_admit(l, reach.scope(), view.tab_id, placed.at())?;
-    let plan = reach.get().call(
+    let placed = scroll_to(l, scope, view.tab_id, view.point)?;
+    let routed = route_and_admit(l, scope, view.tab_id, placed.at())?;
+    let plan = scope.call(
         &routed.doc,
         world::drop_files(
             routed.local.x,
@@ -334,7 +327,7 @@ pub fn drop_file(
             std::slice::from_ref(request.file),
         ),
     )?;
-    let answers = one(l, &mut reach, view.tab_id, plan)?;
+    let answers = one(l, scope, view.tab_id, plan)?;
     let uploaded: Uploaded = settled(l, &answers[0])?;
     Ok(BrowserOutcome::FilesUploaded {
         tab_id: view.tab_id,

@@ -438,7 +438,7 @@ fn a_governed_page_needs_point_routing_and_an_open_one_does_not() {
 fn content_documents_are_the_allowed_ones_in_tree_order() {
     let scope = Scope::admit(&scope_of(nested_documents(), &["B.b1", "T.t1", "A1.x1"])).unwrap();
     assert_eq!(
-        scope.content_docs().cloned().collect::<Vec<_>>(),
+        scope.content_docs(),
         [doc("T", "t1"), doc("A1", "x1"), doc("B", "b1")]
     );
     assert_eq!(scope.top(), doc("T", "t1"));
@@ -448,17 +448,14 @@ fn content_documents_are_the_allowed_ones_in_tree_order() {
 fn a_locator_names_its_document_and_without_one_the_top_is_used() {
     let scope = Scope::admit(&scope_of(two_documents(), &["T.t1"])).unwrap();
     assert_eq!(
-        scope.doc_of(Some("C:c1:locator_a1b2c3d4_2")),
-        Ok(doc("C", "c1"))
+        scope.target(Some("C:c1:locator_a1b2c3d4_2")),
+        Ok((doc("C", "c1"), Some("locator_a1b2c3d4_2".to_owned())))
     );
+    assert_eq!(scope.target(None), Ok((doc("T", "t1"), None)));
     assert_eq!(
-        scope.doc_or_top(Some("C:c1:locator_a1b2c3d4_2")),
-        Ok(doc("C", "c1"))
+        scope.target(Some("locator_3")),
+        Err(BrowserError::stale(StaleReason::Unknown))
     );
-    assert_eq!(scope.doc_or_top(None), Ok(doc("T", "t1")));
-    let stale = Err(BrowserError::stale(StaleReason::Unknown));
-    assert_eq!(scope.doc_of(None), stale);
-    assert_eq!(scope.doc_or_top(Some("locator_3")), stale);
 }
 
 #[test]

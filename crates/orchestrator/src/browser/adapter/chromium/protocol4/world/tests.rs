@@ -91,14 +91,14 @@ fn every_kind_has_one_constructor_and_the_classes_of_its_table_row() {
             Read,
             false,
         ),
-        (activate("l"), kind::ACTIVATE, Content, Prepare, false),
-        (hover("l"), kind::HOVER, Content, Prepare, false),
-        (focus("l"), kind::FOCUS, Content, Prepare, false),
+        (activate("l"), kind::ACTIVATE, Content, Read, false),
+        (hover("l"), kind::HOVER, Content, Read, false),
+        (focus("l"), kind::FOCUS, Content, Read, false),
         (
             scroll_point(1.0, 2.0),
             kind::SCROLL_POINT,
             Content,
-            Prepare,
+            Read,
             false,
         ),
         (

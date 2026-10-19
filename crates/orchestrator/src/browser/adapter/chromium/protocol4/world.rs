@@ -24,7 +24,7 @@ use crate::language::area::LeftOut;
 use crate::language::field_problem::FieldProblems;
 use crate::language::page_refusal::PageRefusal;
 use crate::workspace::StaleReason;
-use EffectClass::{Effect, Prepare, Read};
+use EffectClass::{Effect, Read};
 use ScopeClass::{Content, Metadata};
 
 /// A coordinate as the page reads it: a whole number stays a whole number, so a message built
@@ -154,10 +154,9 @@ pub enum ScopeClass {
 /// What a message can have changed in the page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EffectClass {
-    /// Changes nothing.
+    /// Is not the action: reads the page, or only positions it for one, such as scrolling a
+    /// target into view or focusing it.
     Read,
-    /// Positions the page for an action without being the action.
-    Prepare,
     /// Is the action or part of it.
     Effect,
 }
@@ -406,24 +405,19 @@ pub fn observe(
 /// Scroll a target into view and report its rectangle and subject, ready for a click.
 #[must_use]
 pub fn activate(locator: &str) -> Message {
-    Message::new(
-        kind::ACTIVATE,
-        Content,
-        Prepare,
-        json!({"locator": locator}),
-    )
+    Message::new(kind::ACTIVATE, Content, Read, json!({"locator": locator}))
 }
 
 /// Scroll a target into view and report its rectangle and subject, ready for a hover.
 #[must_use]
 pub fn hover(locator: &str) -> Message {
-    Message::new(kind::HOVER, Content, Prepare, json!({"locator": locator}))
+    Message::new(kind::HOVER, Content, Read, json!({"locator": locator}))
 }
 
 /// Scroll a target into view and focus it.
 #[must_use]
 pub fn focus(locator: &str) -> Message {
-    Message::new(kind::FOCUS, Content, Prepare, json!({"locator": locator}))
+    Message::new(kind::FOCUS, Content, Read, json!({"locator": locator}))
 }
 
 /// Scroll a page point into view and report it in viewport coordinates.
@@ -432,7 +426,7 @@ pub fn scroll_point(x: f64, y: f64) -> Message {
     Message::new(
         kind::SCROLL_POINT,
         Content,
-        Prepare,
+        Read,
         json!({"x": coordinate(x), "y": coordinate(y)}),
     )
 }

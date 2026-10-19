@@ -539,9 +539,6 @@ fn a_key_press_without_a_locator_requires_the_bound_subject_to_hold_the_focus() 
         inputs_seen(&fake)[0].precondition.is_none(),
         "a scope that bound no subject presses into whatever holds the focus"
     );
-    let (port, fake) = rig(page(), finished);
-    call(&port, press(None, "Tab", &[])).unwrap();
-    assert!(inputs_seen(&fake)[0].precondition.is_none());
 }
 
 #[test]
@@ -1030,12 +1027,6 @@ fn a_script_runs_in_the_main_world_with_the_scope_guard() {
     assert_eq!(evaluated[0].max_result_chars, 100);
     assert_eq!(evaluated[0].settle_ms, 100);
     assert!(evaluated[0].guard.is_some());
-
-    call(&port, evaluate("6 * 7")).unwrap();
-    assert!(
-        evaluated_seen(&fake)[1].guard.is_none(),
-        "work sent without a scope carries no guard"
-    );
 }
 
 /// The scripts the extension was asked to evaluate, in order.

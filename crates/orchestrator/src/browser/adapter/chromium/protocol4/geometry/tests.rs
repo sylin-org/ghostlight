@@ -75,52 +75,6 @@ fn probe(hit: bool, left: f64, top: f64) -> Option<OwnerProbe> {
 }
 
 #[test]
-fn ordinary_captures_shrink_when_needed_but_never_magnify() {
-    let budget = ordinary_budget();
-    assert_eq!(output_scale(400.0, 300.0, &budget), Ok(1.0));
-    assert_eq!(output_scale(5000.0, 5000.0, &budget), Ok(0.4));
-}
-
-#[test]
-fn region_captures_spend_the_full_bounded_output_budget_on_magnification() {
-    let budget = region_budget();
-    let scale = output_scale(400.0, 300.0, &budget).expect("a scale");
-    assert!(scale > 1.0);
-    assert!(400.0 * scale <= f64::from(MAX_SIDE));
-    assert!(300.0 * scale <= f64::from(MAX_SIDE));
-    assert!(400.0 * 300.0 * scale * scale <= f64::from(MAX_PIXELS) + 1.0);
-}
-
-#[test]
-fn a_huge_clip_never_scales_below_the_floor() {
-    let scale = output_scale(1.0e9, 1.0e9, &ordinary_budget()).expect("a scale");
-    assert_eq!(scale, MIN_SCALE);
-}
-
-#[test]
-fn a_tall_clip_is_bound_by_its_longest_side() {
-    let scale = output_scale(100.0, 24_000.0, &ordinary_budget()).expect("a scale");
-    assert!((scale - 0.1).abs() < 1.0e-12);
-}
-
-#[test]
-fn an_empty_or_unmeasured_clip_has_no_scale() {
-    let budget = ordinary_budget();
-    assert_eq!(
-        output_scale(0.0, 10.0, &budget),
-        Err(GeometryError::NotPositive("width"))
-    );
-    assert_eq!(
-        output_scale(10.0, f64::NAN, &budget),
-        Err(GeometryError::NotPositive("height"))
-    );
-    assert_eq!(
-        output_scale(-1.0, 10.0, &budget),
-        Err(GeometryError::NotPositive("width"))
-    );
-}
-
-#[test]
 fn the_budgets_carry_todays_limits() {
     let ordinary = ordinary_budget();
     assert_eq!(ordinary.max_side, 2400);

@@ -360,25 +360,6 @@ impl FrameTree {
         u16::try_from(count).unwrap_or(u16::MAX)
     }
 
-    /// The document that embeds this one.
-    #[must_use]
-    pub fn parent(&self, doc: &FrameRef) -> Option<&FrameRef> {
-        let parent = self.nodes[self.index_of(doc)?].parent?;
-        self.real_at(parent).map(|document| &document.doc)
-    }
-
-    /// Every document that embeds this one, nearest first, ending at the top.
-    #[must_use]
-    pub fn ancestors(&self, doc: &FrameRef) -> Vec<&FrameRef> {
-        let mut ancestors = Vec::new();
-        let mut current = doc;
-        while let Some(parent) = self.parent(current) {
-            ancestors.push(parent);
-            current = parent;
-        }
-        ancestors
-    }
-
     /// The real documents this one embeds directly, in tree order.
     #[must_use]
     pub fn children(&self, doc: &FrameRef) -> Vec<&FrameRef> {

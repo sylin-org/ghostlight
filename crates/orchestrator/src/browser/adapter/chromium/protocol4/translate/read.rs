@@ -12,7 +12,7 @@ use super::super::merge::{self, DocumentTargets};
 use super::super::scope::{PlannedCall, Scope};
 use super::super::wire::{CallMode, FrameRef};
 use super::super::world::{self, Article, Message, Targets, Text, TreeValue};
-use super::{reach, value, Reach};
+use super::value;
 use crate::browser::adapter::{BrowserOutcome, Listing, ObservedTarget};
 use crate::browser::BrowserError;
 
@@ -40,19 +40,16 @@ pub mod mode {
 /// Returns the failure of the read, including the document's own.
 pub fn read_text(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     locator: Option<&str>,
     max_chars: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, tab_id)?;
-    let (doc, local) = reach.target(locator)?;
-    let plan = reach
-        .get()
-        .call(&doc, world::read_text(local.as_deref(), None, max_chars))?;
-    let answers = one(l, &mut reach, tab_id, plan)?;
+    let (doc, local) = scope.target(locator)?;
+    let plan = scope.call(&doc, world::read_text(local.as_deref(), None, max_chars))?;
+    let answers = one(l, scope, tab_id, plan)?;
     let text: Text = value(&answers[0])?;
-    let tree = reach.get().tree();
+    let tree = scope.tree();
     let (title, url) = if doc == *tree.top() {
         (text.title, text.url)
     } else {
@@ -74,7 +71,7 @@ pub fn read_text(
 /// Returns the failure of the `call` primitive.
 pub fn inspect(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     kind: &str,
     max_items: usize,
@@ -95,7 +92,7 @@ pub fn inspect(
 /// Returns the failure of the `call` primitive.
 pub fn find(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     text: &str,
     kind: &str,
@@ -131,7 +128,7 @@ pub struct Semantic<'a> {
 /// Returns the failure of the `call` primitive.
 pub fn query_semantic(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     selector: &Semantic<'_>,
 ) -> Result<BrowserOutcome, BrowserError> {
@@ -152,15 +149,14 @@ pub fn query_semantic(
 /// Ask every readable document for targets with one message, and fold what they found.
 fn targets(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     message: &Message,
     maximum: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, tab_id)?;
-    let docs = reach.content_docs();
-    let plans = plan_each(&reach, &docs, |_| message.clone())?;
-    let answers = all(l, &mut reach, tab_id, &plans, true)?;
+    let docs = scope.content_docs();
+    let plans = plan_each(scope, &docs, |_| message.clone())?;
+    let answers = all(l, scope, tab_id, &plans, true)?;
     let found = docs.iter().zip(&answers).filter_map(|(doc, answer)| {
         value::<Targets>(answer).ok().map(|found| DocumentTargets {
             targets: rescope(doc, found.targets),
@@ -172,7 +168,7 @@ fn targets(
     });
     let merged = merge::targets(found, maximum);
     if merged.over {
-        reach.scope().limit();
+        scope.limit();
     }
     Ok(BrowserOutcome::Targets {
         tab_id,
@@ -180,7 +176,6 @@ fn targets(
         listing: Listing {
             left_out: merged.left_out,
             modal_open: merged.modal_open,
-            ..Listing::default()
         },
     })
 }
@@ -196,21 +191,18 @@ fn targets(
 /// Returns the failure of a `call` primitive.
 pub fn read_document(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     read_mode: &str,
     max_chars: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, tab_id)?;
-    let docs = reach.content_docs();
-    let top = reach.get().top();
+    let docs = scope.content_docs();
+    let top = scope.top();
     let top_readable = docs.first() == Some(&top);
     let mut top_answer: Option<Text> = None;
     if read_mode == mode::ARTICLE && top_readable {
-        let plan = reach
-            .get()
-            .call(&top, world::read_text(None, Some(mode::ARTICLE), max_chars))?;
-        let answers = one(l, &mut reach, tab_id, plan)?;
+        let plan = scope.call(&top, world::read_text(None, Some(mode::ARTICLE), max_chars))?;
+        let answers = one(l, scope, tab_id, plan)?;
         if let Ok(article) = value::<Article>(&answers[0]) {
             if article.article_found {
                 return Ok(article.into_text(tab_id));
@@ -226,11 +218,11 @@ pub fn read_document(
     let Some((first, rest)) = docs.split_first() else {
         return Err(BrowserError::DocumentUnavailable);
     };
-    let plan = reach.get().call(
+    let plan = scope.call(
         first,
         world::read_text(None, Some(mode::VISIBLE), max_chars),
     )?;
-    let answers = one(l, &mut reach, tab_id, plan)?;
+    let answers = one(l, scope, tab_id, plan)?;
     let first_text = value::<Text>(&answers[0]).ok();
     if top_readable && first_text.is_some() {
         top_answer.clone_from(&first_text);
@@ -239,8 +231,8 @@ pub fn read_document(
     let remaining = merge::remaining_after(sections.iter().map(Option::as_ref), max_chars);
     if remaining > 0 && !rest.is_empty() {
         let message = world::read_text(None, Some(mode::VISIBLE), remaining);
-        let plans = plan_each(&reach, rest, |_| message.clone())?;
-        let answers = all(l, &mut reach, tab_id, &plans, false)?;
+        let plans = plan_each(scope, rest, |_| message.clone())?;
+        let answers = all(l, scope, tab_id, &plans, false)?;
         sections.extend(answers.iter().map(|answer| value::<Text>(answer).ok()));
     }
     let skipped = remaining == 0 && !rest.is_empty();
@@ -263,29 +255,26 @@ pub fn read_document(
 /// Returns the failure of a `call` primitive, and a targeted document's own failure.
 pub fn inspect_tree(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     locator: Option<&str>,
     max_depth: usize,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, tab_id)?;
     if let Some(locator) = locator {
         let target = Locator::decode(locator)?;
-        let plan = reach.get().call(
+        let plan = scope.call(
             &target.doc,
             world::inspect_tree(Some(&target.local), max_depth, TREE_NODE_LIMIT),
         )?;
-        let answers = one(l, &mut reach, tab_id, plan)?;
+        let answers = one(l, scope, tab_id, plan)?;
         let tree: TreeValue = value(&answers[0])?;
         return document_tree(tab_id, Some(tree.tree), tree.truncated);
     }
-    let docs = reach.content_docs();
-    let top = reach.get().top();
+    let docs = scope.content_docs();
+    let top = scope.top();
     let (root, children) = if docs.first() == Some(&top) {
-        let plan = reach
-            .get()
-            .call(&top, world::inspect_tree(None, max_depth, TREE_NODE_LIMIT))?;
-        let answers = one(l, &mut reach, tab_id, plan)?;
+        let plan = scope.call(&top, world::inspect_tree(None, max_depth, TREE_NODE_LIMIT))?;
+        let answers = one(l, scope, tab_id, plan)?;
         (value::<TreeValue>(&answers[0]).ok(), &docs[1..])
     } else {
         (None, docs.as_slice())
@@ -294,9 +283,9 @@ pub fn inspect_tree(
     let mut subtrees = Vec::new();
     if let (Some(plan), false) = (plan, children.is_empty()) {
         let message = world::inspect_tree(None, plan.max_depth, plan.max_nodes);
-        let plans = plan_each(&reach, children, |_| message.clone())?;
+        let plans = plan_each(scope, children, |_| message.clone())?;
         let first = root.is_none();
-        let answers = all(l, &mut reach, tab_id, &plans, first)?;
+        let answers = all(l, scope, tab_id, &plans, first)?;
         subtrees.extend(answers.iter().filter_map(|answer| value(answer).ok()));
     }
     let unread = plan.is_none() && !children.is_empty();
@@ -325,7 +314,7 @@ fn document_tree(
 /// Returns the plain failure of a malformed locator, and any document's own failure.
 pub fn describe_targets(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
     locators: &[String],
 ) -> Result<BrowserOutcome, BrowserError> {
@@ -344,12 +333,11 @@ pub fn describe_targets(
             rebound: false,
         });
     }
-    let mut reach = reach(l, scope, tab_id)?;
     let plans = groups
         .iter()
-        .map(|(doc, locals)| reach.get().call(doc, world::describe(locals)))
+        .map(|(doc, locals)| scope.call(doc, world::describe(locals)))
         .collect::<Result<Vec<_>, _>>()?;
-    let answers = all(l, &mut reach, tab_id, &plans, true)?;
+    let answers = all(l, scope, tab_id, &plans, true)?;
     let mut targets: Vec<ObservedTarget> = Vec::new();
     for ((doc, _), answer) in groups.iter().zip(&answers) {
         targets.extend(rescope(doc, value::<Targets>(answer)?.targets));
@@ -371,13 +359,12 @@ pub fn describe_targets(
 /// document holds a focused control.
 pub fn describe_focused(
     l: &mut Link<'_>,
-    scope: Option<&mut Scope>,
+    scope: &mut Scope,
     tab_id: u64,
 ) -> Result<BrowserOutcome, BrowserError> {
-    let mut reach = reach(l, scope, tab_id)?;
-    let docs = focus_candidates(&reach);
-    let plans = plan_each(&reach, &docs, |_| world::describe_focused())?;
-    let answers = all(l, &mut reach, tab_id, &plans, true)?;
+    let docs = focus_candidates(scope);
+    let plans = plan_each(scope, &docs, |_| world::describe_focused())?;
+    let answers = all(l, scope, tab_id, &plans, true)?;
     let mut failure = None;
     for (doc, answer) in docs.iter().zip(&answers) {
         match value::<Targets>(answer) {
@@ -398,11 +385,11 @@ pub fn describe_focused(
 
 /// The documents that may hold the page's focus: the request's subject documents that are
 /// readable, or every readable document when the request bound none.
-pub(super) fn focus_candidates(reach: &Reach<'_>) -> Vec<FrameRef> {
-    let readable = reach.content_docs();
+pub(super) fn focus_candidates(scope: &Scope) -> Vec<FrameRef> {
+    let readable = scope.content_docs();
     let subjects: Vec<FrameRef> = readable
         .iter()
-        .filter(|doc| reach.get().subjects().contains(doc))
+        .filter(|doc| scope.subjects().contains(doc))
         .cloned()
         .collect();
     if subjects.is_empty() {
@@ -414,23 +401,23 @@ pub(super) fn focus_candidates(reach: &Reach<'_>) -> Vec<FrameRef> {
 
 /// Plan one message for each document. Every call goes through the scope.
 pub(super) fn plan_each(
-    reach: &Reach<'_>,
+    scope: &Scope,
     docs: &[FrameRef],
     message: impl Fn(&FrameRef) -> Message,
 ) -> Result<Vec<PlannedCall>, BrowserError> {
     docs.iter()
-        .map(|doc| reach.get().call(doc, message(doc)))
+        .map(|doc| scope.call(doc, message(doc)))
         .collect()
 }
 
 /// Send one planned call with the scope's guard, as the first primitive of a command.
 pub(super) fn one(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     plan: PlannedCall,
 ) -> Result<super::super::link::Answers, BrowserError> {
-    let guard = reach.guard();
+    let guard = Some(scope.guard());
     let budget = l.budget_ms();
     l.call(
         tab_id,
@@ -439,7 +426,7 @@ pub(super) fn one(
         guard,
         0,
         budget,
-        Some(reach.scope()),
+        Some(&mut *scope),
     )
 }
 
@@ -447,7 +434,7 @@ pub(super) fn one(
 /// readable document.
 pub(super) fn all(
     l: &mut Link<'_>,
-    reach: &mut Reach<'_>,
+    scope: &mut Scope,
     tab_id: u64,
     plans: &[PlannedCall],
     guarded: bool,
@@ -455,7 +442,7 @@ pub(super) fn all(
     if plans.is_empty() {
         return Err(BrowserError::DocumentUnavailable);
     }
-    let guard = if guarded { reach.guard() } else { None };
+    let guard = if guarded { Some(scope.guard()) } else { None };
     let budget = l.budget_ms();
     l.call(
         tab_id,
@@ -464,6 +451,6 @@ pub(super) fn all(
         guard,
         0,
         budget,
-        Some(reach.scope()),
+        Some(&mut *scope),
     )
 }
