@@ -540,7 +540,9 @@ fn windows_access_list(path: &Path) -> String {
     text.lines().nth(1).unwrap_or_default().trim().to_owned()
 }
 
-/// The security identifier of the user running the tests, as `whoami` prints it.
+/// The user running the tests, as an access list in SDDL names them: the security identifier
+/// `whoami` prints, or its SDDL alias. SDDL writes a machine's built-in Administrator (relative
+/// id 500) as `LA` and its built-in Guest (501) as `LG`; a CI runner is often the Administrator.
 #[cfg(all(test, windows))]
 fn windows_user_sid() -> String {
     let output = std::process::Command::new("whoami")
@@ -550,13 +552,34 @@ fn windows_user_sid() -> String {
     assert!(output.status.success(), "whoami could not name the user");
     let text = String::from_utf8_lossy(&output.stdout);
     let sid = text.trim().rsplit(',').next().unwrap_or_default();
-    sid.trim_matches('"').to_owned()
+    sddl_trustee(sid.trim_matches('"'))
+}
+
+/// `sid` as SDDL writes it in an access list: the alias for a machine account SDDL abbreviates,
+/// otherwise the identifier itself.
+#[cfg(all(test, windows))]
+fn sddl_trustee(sid: &str) -> String {
+    const MACHINE_ACCOUNT: &str = "S-1-5-21-";
+    match sid.rsplit_once('-') {
+        Some((_, "500")) if sid.starts_with(MACHINE_ACCOUNT) => "LA".to_owned(),
+        Some((_, "501")) if sid.starts_with(MACHINE_ACCOUNT) => "LG".to_owned(),
+        _ => sid.to_owned(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+
+    #[cfg(windows)]
+    #[test]
+    fn an_access_list_names_the_builtin_accounts_by_their_sddl_alias() {
+        assert_eq!(sddl_trustee("S-1-5-21-1-2-3-500"), "LA");
+        assert_eq!(sddl_trustee("S-1-5-21-1-2-3-501"), "LG");
+        assert_eq!(sddl_trustee("S-1-5-21-1-2-3-1001"), "S-1-5-21-1-2-3-1001");
+        assert_eq!(sddl_trustee("S-1-5-18-500"), "S-1-5-18-500");
+    }
 
     fn record(version: &str, sha: &str) -> InstallRecord {
         InstallRecord {
