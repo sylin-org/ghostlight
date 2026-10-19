@@ -9,7 +9,7 @@ use crate::browser::adapter::{
     ViewportGeometry,
 };
 
-use crate::governance::Decision;
+use crate::governance::{CapabilitySet, Decision};
 use crate::intake::session::SessionMarker;
 use crate::language::outcome::{DialogKind, TargetRole};
 use crate::provenance::{ConnectionDetails, ConnectionEvidence};
@@ -365,13 +365,22 @@ pub struct SelectedTab {
 ///
 /// A tab is held from the moment governance refuses the page it landed on or was found on, until
 /// a landing the service sees clears it or the tab is closed. Every refusal on the held tab names
-/// this host and records this decision, so the hold is never mistaken for the person's Pause.
+/// the refused page's host and records the refusal's reason, so the hold is never mistaken for
+/// the person's Pause.
+///
+/// `denial` carries its policy attribution as indices into the authority that decided it, so it
+/// is true only under that authority: a refusal under another one decides `url` again. The
+/// address stays in memory and is never audited.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TabHold {
     /// The decision that refused the page.
     pub denial: Decision,
-    /// The host of the refused page, when its address has one.
-    pub host: Option<String>,
+    /// The id of the authority snapshot that made `denial`.
+    pub authority: String,
+    /// What the refused landing required.
+    pub requirements: CapabilitySet,
+    /// The address of the refused page.
+    pub url: String,
 }
 
 /// Immutable current target facts used at a browser-effect boundary.
@@ -2975,7 +2984,9 @@ mod tests {
                     denial: crate::governance::Decision::refused(
                         crate::governance::ReasonCode::HostDenied,
                     ),
-                    host: None,
+                    authority: "authority_test".into(),
+                    requirements: crate::governance::CapabilitySet::READ,
+                    url: "https://elsewhere.test/".into(),
                 },
             )
             .unwrap();

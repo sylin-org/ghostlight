@@ -633,16 +633,11 @@ impl ApplicationExecutor {
         outcome: Outcome,
         mut facts: Value,
     ) -> Terminal {
+        let landing_requirements = landing_requirements.into();
         let landing = self.authorize_commits(context, landing_requirements, physical, commits);
         if !landing.allowed {
-            return self.hold(
-                context,
-                lease,
-                selected,
-                landing,
-                &physical.url,
-                Effect::Applied,
-            );
+            let hold = context.hold_of(landing, landing_requirements, &physical.url);
+            return self.hold(context, lease, selected, hold, Effect::Applied);
         }
         let change = DocumentChange::between(&selected.url, physical, commits);
         let resulting = match change {
@@ -703,22 +698,19 @@ impl ApplicationExecutor {
     ///
     /// Every path that finds its tab on a refused page comes here, a read as well as an action,
     /// so the hold always shows. The tab then refuses reading and acting until a navigation
-    /// lands it on an allowed page or it is closed (ADR-0203 Decision 2.4). The hold keeps
-    /// `landing`, the refusal of the page at `url`, so every later refusal on the tab names that
-    /// host and records that decision (Decision 5.5). `effect` is what the call already did.
+    /// lands it on an allowed page or it is closed (ADR-0203 Decision 2.4). The hold keeps the
+    /// refusal, so every later refusal on the tab names the refused host and records its reason
+    /// (Decision 5.5). `effect` is what the call already did.
     fn hold(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         tab: &SelectedTab,
-        landing: Decision,
-        url: &str,
+        hold: TabHold,
         effect: Effect,
     ) -> Terminal {
-        let hold = TabHold {
-            denial: landing,
-            host: observed_host(url),
-        };
+        let landing = hold.denial;
+        let url = hold.url.clone();
         let _ = lease.hold_tab(&tab.handle, hold);
         self.emit(DomainEvent::HoldEntered {
             invocation: context.invocation.into(),
@@ -732,7 +724,7 @@ impl ApplicationExecutor {
             effect,
             false,
             json!({"tab":tab.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
-            Some(url),
+            Some(&url),
         )
     }
 
@@ -2152,7 +2144,9 @@ impl ApplicationExecutor {
         let offer = context.findings.take_offer();
         // A held tab repeats the refusal of the page that held it, never a pause.
         let held = match &error {
-            WorkspaceError::Held(hold) => Some(hold.denial),
+            WorkspaceError::Held(hold) => {
+                Some((self.held_decision(context, hold), observed_host(&hold.url)))
+            }
             _ => None,
         };
         let mut reason = match error {
@@ -2166,8 +2160,11 @@ impl ApplicationExecutor {
         if let WorkspaceReason::StaleTarget { reason, help } = &mut reason {
             *help = stale_help(context, *reason, offer.as_ref(), acted_on);
         }
-        let refusal = Refusal::WorkspaceUnusable {
-            reason: reason.clone(),
+        let refusal = match &held {
+            Some((_, host)) => Refusal::TabHeld { host: host.clone() },
+            None => Refusal::WorkspaceUnusable {
+                reason: reason.clone(),
+            },
         };
         let summary = refusal.summary();
         let status = if held.is_some() {
@@ -2175,6 +2172,7 @@ impl ApplicationExecutor {
         } else {
             Status::Failed
         };
+        let held = held.map(|(denial, _)| denial);
         let mut facts = json!({"reason":reason.as_fact()});
         if let Some(denial) = held {
             facts = with_denial_facts(denial, facts);
@@ -2218,6 +2216,24 @@ impl ApplicationExecutor {
             physical_id: acted_on,
             observed: refusal.observed(),
             audit: refusal.audit(),
+        }
+    }
+
+    /// The decision a refusal on a tab under `hold` records (ADR-0203 Decision 5.5).
+    ///
+    /// The hold's own decision names its policy layer and grant by index into the authority that
+    /// made it, so it is recorded only under that authority. Under another, the held page is
+    /// decided again. When that authority admits the page, the tab is still held until it leaves
+    /// it (Decision 2.4), and the record keeps the hold's reason with no policy attribution.
+    fn held_decision(&self, context: &InvocationContext<'_>, hold: &TabHold) -> Decision {
+        if hold.authority == context.snapshot.id() {
+            return hold.denial;
+        }
+        let current = self.authorize_landing(context, hold.requirements, &hold.url);
+        if current.allowed {
+            Decision::refused(hold.denial.reason)
+        } else {
+            current
         }
     }
 
@@ -2399,6 +2415,22 @@ impl<'a> InvocationContext<'a> {
             gesture: PageGesture::of(operation),
             findings: &frame.findings,
             ..*self
+        }
+    }
+
+    /// The hold a refusal of the page at `url` puts on its tab: `landing`, decided by this
+    /// frame's authority snapshot for `requirements`.
+    fn hold_of(
+        &self,
+        landing: Decision,
+        requirements: impl Into<CapabilitySet>,
+        url: &str,
+    ) -> TabHold {
+        TabHold {
+            denial: landing,
+            authority: self.snapshot.id().into(),
+            requirements: requirements.into(),
+            url: url.into(),
         }
     }
 }
@@ -3330,8 +3362,8 @@ mod tests {
 
     /// A real, isolated policy source that tests may edit between invocations.
     ///
-    /// An edit through `set` is published to every facade the source gave out, as the refresher
-    /// would after a hand edit.
+    /// An edit through `set` or `publish` is published to every facade the source gave out, as
+    /// the refresher would after a hand edit.
     struct TestPolicy(Scratch, Mutex<Vec<GovernanceFacade>>);
 
     impl TestPolicy {
@@ -3349,25 +3381,38 @@ mod tests {
 
         fn set(&self, capabilities: serde_json::Value) {
             write_policy(&self.0, &capabilities);
+            self.refresh();
+        }
+
+        /// Replace the whole policy document with `document`.
+        fn publish(&self, document: &serde_json::Value) {
+            write_document(&self.0, document);
+            self.refresh();
+        }
+
+        fn refresh(&self) {
             for facade in self.1.lock().unwrap().iter() {
                 facade.refresh_tick();
             }
         }
     }
 
-    /// Write the test authority granting `capabilities`, moving the modified time forward so the
-    /// refresher sees the edit however fast the test runs.
+    /// Write the test authority granting `capabilities`.
     fn write_policy(path: &Path, capabilities: &serde_json::Value) {
-        let before = fs::metadata(path).and_then(|metadata| metadata.modified());
-        fs::write(
+        write_document(
             path,
-            serde_json::to_vec(&json!({
+            &json!({
                 "schema":4,"name":"test authority","version":"1",
                 "grants":[{"id":"test","hosts":{"allow":["*"]},"allowed":capabilities}]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+            }),
+        );
+    }
+
+    /// Write a policy document, moving the modified time forward so the refresher sees the edit
+    /// however fast the test runs.
+    fn write_document(path: &Path, document: &serde_json::Value) {
+        let before = fs::metadata(path).and_then(|metadata| metadata.modified());
+        fs::write(path, serde_json::to_vec(document).unwrap()).unwrap();
         if let Ok(before) = before {
             fs::File::options()
                 .write(true)

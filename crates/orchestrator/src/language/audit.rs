@@ -244,7 +244,7 @@ impl WorkspaceReason {
             | Self::TabUnavailable
             | Self::StaleTarget { .. }
             | Self::StaleView
-            | Self::TabHeld { .. }
+            | Self::TabHeld
             | Self::WorkspaceBusy
             | Self::WorkspaceClosed => self.clone(),
         }
@@ -313,7 +313,8 @@ impl Refusal {
             | Self::RecordingUnavailable
             | Self::RecordingHeld
             | Self::RecordingExportFailed
-            | Self::RecordingNotAttached => self.clone(),
+            | Self::RecordingNotAttached
+            | Self::TabHeld { .. } => self.clone(),
         }
     }
 
@@ -408,6 +409,9 @@ impl Refusal {
             Self::LandingDeniedUnknown => AuditRefusal::LandingDeniedUnknown,
             Self::WorkspaceUnusable { reason } => AuditRefusal::WorkspaceUnusable {
                 cause: reason.clone(),
+            },
+            Self::TabHeld { .. } => AuditRefusal::WorkspaceUnusable {
+                cause: WorkspaceReason::TabHeld,
             },
             Self::FilesUnreadable => AuditRefusal::FilesUnreadable,
             Self::CaptureTooLarge => AuditRefusal::CaptureTooLarge,
@@ -658,6 +662,25 @@ mod tests {
         assert_eq!(
             serde_json::to_value(refusal.audit().refusal()).unwrap(),
             serde_json::json!({"reason":"browser_primitive_failed"})
+        );
+    }
+
+    #[test]
+    fn a_held_tab_keeps_the_audit_cause_word_and_reads_back() {
+        let facts = serde_json::json!({"reason":"workspace_unusable","cause":"tab_held"});
+        for host in [Some("elsewhere.test".to_owned()), None] {
+            let refusal = Refusal::TabHeld { host };
+            assert_eq!(
+                serde_json::to_value(refusal.audit().refusal()).unwrap(),
+                facts
+            );
+        }
+        let read: AuditRefusal = serde_json::from_value(facts).unwrap();
+        assert_eq!(
+            read,
+            AuditRefusal::WorkspaceUnusable {
+                cause: WorkspaceReason::TabHeld
+            }
         );
     }
 

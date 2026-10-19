@@ -19,8 +19,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | see Notes | landed (7bd0bf20) |
 | C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | see Notes | landed (ec15bacb, journey fixup) |
 | C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits; see Notes | landed (e4f353ab, 1d10bf74, review fixup) |
-| C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | see Notes | landed (this commit) |
-| C6 | fix(language): a held tab is described truthfully | candidate | C2 | see Notes | landed (this commit) |
+| C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | see Notes | landed (9beb7976) |
+| C6 | fix(language): a held tab is described truthfully | candidate | C2 | see Notes | landed (5122ae5a, review fixup) |
 | C7 | fix(language): a workspace refusal says what is true | candidate | C6 | - | todo |
 | C13 | fix(provenance): the opener is named once | candidate | C7 | - | todo |
 | C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | - | todo |
@@ -235,16 +235,21 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   machine.
   D2: ARCHITECTURE's service end (the order, owned workspaces released at every end, the quit's
   token without tabs) and LANGUAGE's resume after a quit.
-- C6, the hold: `TabState` keeps a `TabHold`, the landing's whole `Decision` (its reason and policy
-  attribution) and the refused host. `WorkspaceError::Held` carries it, so `WorkspaceError` is no
-  longer `Copy`. The executor's `hold` helper also returns the refused landing's result, so the
-  four landing paths share one.
-- C6, what the refusal records: the decision is the landing's, so the audit row has its reason,
-  rule and denial id, and the result's facts carry the same `denial_id` and `policy_rule`. The
-  audit's observed host is the refused host, and the retained summary names it, as an
-  `AuthorityBlocked` summary does. The serialized cause becomes `{"tab_held":{}}`: the host is
-  skipped, like a stale target's help. A line written earlier with `"tab_held"` reads with no
-  refusal facts, as any unknown facts do.
+- C6, the hold: `TabState` keeps a `TabHold`: the landing's `Decision` (its reason and policy
+  attribution), the id of the authority snapshot that made it, the landing's requirements and the
+  refused URL. The URL stays in memory and is never audited. `WorkspaceError::Held` carries it, so
+  `WorkspaceError` is no longer `Copy`. The executor's `hold` helper also returns the refused
+  landing's result, so the four landing paths share one.
+- C6, what the refusal records: under the authority that held the tab, the landing's decision, so
+  the audit row has its reason, rule, denial id, tier and grant, and the result's facts carry the
+  same `denial_id` and `policy_rule`. A decision's attribution is indices into the snapshot that
+  made it, so under a republished authority the refusal decides the held URL again and records
+  that decision. When the new authority admits the URL, the tab stays held (Decision 2.4) and the
+  record keeps the hold's reason with no attribution. The audit's observed host is the refused
+  host, and the retained summary names it, as an `AuthorityBlocked` summary does.
+- C6, the audit cause: the model-side refusal is `Refusal::TabHeld { host }`, and it audits as
+  `{"reason":"workspace_unusable","cause":"tab_held"}`, the bare word audit v2 already writes.
+  `WorkspaceReason::TabHeld` stays a unit variant.
 - C6, a notice: the decision is no longer `RuntimeHold`, so a call refused on a held tab outside a
   flow shows the ordinary guardrail notice, as any policy refusal does. The hold itself still
   shows its own notice once, when it is taken.
@@ -252,13 +257,16 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   not use, so Ghostlight will not read or act on it there." with one step naming `browser_navigate`
   and `browser_tabs` close. The person's notice reads "Ghostlight stopped on this page", from the
   new `language/presentation.rs`, which C18 extends to the whole table.
-- C6, a residual: the hold keeps the decision taken under the snapshot of its landing. If the policy
-  is republished while the tab is held, the tab stays held, and the audit names the tier and grant
-  that the decision's layer index has in the current snapshot.
 - C6, proofs: `a_held_tab_refusal_names_the_refused_host_and_the_calls_that_clear_it`,
   `a_held_tab_is_audited_with_its_landing_denial_not_a_pause` and
   `a_flow_step_on_a_held_tab_is_blocked_by_policy` (the flow goes on to its second step, which a
-  pause would stop) in `work/tests/tabs.rs`. The catalog golden (`docs/1.0/catalog.json`) changed
-  only in `user_authorized_credentials`'s "Pause or End session"; no result golden changed. No
-  journey is needed. D2: LANGUAGE's held-tab entry (the host, the two calls out, and a flow step
-  blocked by policy, not paused).
+  pause would stop) and
+  `a_held_tab_refused_under_a_republished_policy_credits_the_policy_that_refused_it` (grants
+  reordered, then the page admitted) in `work/tests/tabs.rs`;
+  `a_held_tab_keeps_the_audit_cause_word_and_reads_back` in `language/audit.rs`. The catalog
+  golden (`docs/1.0/catalog.json`) changed only in `user_authorized_credentials`'s "Pause or End
+  session"; no result golden or audit golden changed. No journey is needed. D2: LANGUAGE's
+  held-tab entry (the host, the two calls out, and a flow step blocked by policy, not paused).
+- C6, a cross-lane accident: install's `e97d4618` committed `language/outcome.rs` whole, with
+  core's unfinished held-tab hunks in it, so `e97d4618` alone does not build. Install's `77290406`
+  took them back out, and C6's review fixup commits them with their dependents.

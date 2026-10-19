@@ -495,14 +495,8 @@ impl ApplicationExecutor {
                 let landing =
                     self.authorize_commits(context, Capability::Read, &tab, &committed_urls);
                 if !landing.allowed {
-                    return self.hold(
-                        context,
-                        lease,
-                        &selected,
-                        landing,
-                        &tab.url,
-                        Effect::Applied,
-                    );
+                    let hold = context.hold_of(landing, Capability::Read, &tab.url);
+                    return self.hold(context, lease, &selected, hold, Effect::Applied);
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
                     Ok(tab) => tab,
@@ -623,7 +617,8 @@ impl ApplicationExecutor {
                 let landing =
                     self.authorize_commits(context, Capability::Action, &tab, &committed_urls);
                 if !landing.allowed {
-                    return self.hold(context, lease, selected, landing, &tab.url, Effect::Applied);
+                    let hold = context.hold_of(landing, Capability::Action, &tab.url);
+                    return self.hold(context, lease, selected, hold, Effect::Applied);
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
                     Ok(tab) => tab,

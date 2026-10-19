@@ -419,6 +419,7 @@ fn refusal_variant(refusal: &Refusal) -> &'static str {
         Refusal::EffectUnknown => "EffectUnknown",
         Refusal::LandingDeniedUnknown => "LandingDeniedUnknown",
         Refusal::WorkspaceUnusable { .. } => "WorkspaceUnusable",
+        Refusal::TabHeld { .. } => "TabHeld",
         Refusal::FilesUnreadable => "FilesUnreadable",
         Refusal::CaptureTooLarge => "CaptureTooLarge",
         Refusal::TabNotShowing => "TabNotShowing",
@@ -463,6 +464,7 @@ const REFUSAL_VARIANTS: &[&str] = &[
     "EffectUnknown",
     "LandingDeniedUnknown",
     "WorkspaceUnusable",
+    "TabHeld",
     "FilesUnreadable",
     "CaptureTooLarge",
     "TabNotShowing",
@@ -559,10 +561,7 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
         WorkspaceReason::AmbiguousTab,
         WorkspaceReason::TabUnavailable,
         WorkspaceReason::StaleView,
-        WorkspaceReason::TabHeld {
-            host: Some("elsewhere.test".into()),
-        },
-        WorkspaceReason::TabHeld { host: None },
+        WorkspaceReason::TabHeld,
         WorkspaceReason::WorkspaceBusy,
         WorkspaceReason::OwnershipMismatch {
             owner: Some("Claude Code".into()),
@@ -608,7 +607,7 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
             | WorkspaceReason::TabUnavailable
             | WorkspaceReason::StaleTarget { .. }
             | WorkspaceReason::StaleView
-            | WorkspaceReason::TabHeld { .. }
+            | WorkspaceReason::TabHeld
             | WorkspaceReason::WorkspaceBusy
             | WorkspaceReason::OwnershipMismatch { .. }
             | WorkspaceReason::WorkspaceClosed => {}
@@ -1005,6 +1004,10 @@ fn refusal_samples() -> Vec<Refusal> {
         Refusal::RecordingHeld,
         Refusal::RecordingExportFailed,
         Refusal::RecordingNotAttached,
+        Refusal::TabHeld {
+            host: Some("elsewhere.test".into()),
+        },
+        Refusal::TabHeld { host: None },
     ];
     for by in [
         CancelCause::Client,

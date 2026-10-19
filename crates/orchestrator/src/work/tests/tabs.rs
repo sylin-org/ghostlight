@@ -959,3 +959,86 @@ fn a_flow_step_on_a_held_tab_is_blocked_by_policy() {
         "nothing reached the held tab"
     );
 }
+
+/// A policy whose grant `keep-out` refuses elsewhere.test and whose grant `example` admits
+/// example.com, listed in `order`. `admit` lifts the refusal.
+fn keep_out_policy(order: [&str; 2], admit: bool) -> serde_json::Value {
+    let deny: &[&str] = if admit { &[] } else { &["elsewhere.test"] };
+    let grant = |id: &str| match id {
+        "example" => json!({"id":"example","hosts":{"allow":["example.com"]},
+            "allowed":["read","action","write","execute"]}),
+        _ => json!({"id":"keep-out","hosts":{"allow":["*"],"deny":deny},"allowed":["read"]}),
+    };
+    json!({"schema":4,"name":"test authority","version":"1",
+        "grants":[grant(order[0]), grant(order[1])]})
+}
+
+#[test]
+fn a_held_tab_refused_under_a_republished_policy_credits_the_policy_that_refused_it() {
+    let policy = TestPolicy::new();
+    policy.publish(&keep_out_policy(["example", "keep-out"], false));
+    let facade = policy.facade();
+    let (executor, browser, _, workspace, audit) = fixture_with_governance(facade.clone());
+    let (handle, landed) = held_tab(&executor, &browser, &workspace);
+    let record_of = |invocation: String| {
+        audit
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|record| record.invocation == invocation)
+            .cloned()
+            .expect("every call is audited")
+    };
+    let read_held = || {
+        let refused = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({"tab":handle}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(refused.status, Status::Blocked, "{}", refused.summary);
+        assert_eq!(refused.facts["reason"], "tab_held");
+        (record_of(refused.invocation.to_string()), refused)
+    };
+    let landing = record_of(landed.invocation.to_string());
+    assert_eq!(landing.policy_tier.as_deref(), Some("user"));
+    assert_eq!(landing.grant_id.as_deref(), Some("keep-out"));
+
+    // Reordered grants put `example` where `keep-out` was. The refusal still credits `keep-out`,
+    // with the denial id the current authority gives.
+    policy.publish(&keep_out_policy(["keep-out", "example"], false));
+    let (held, refused) = read_held();
+    let current = facade.snapshot();
+    let denial = current.authorize_landing(
+        crate::governance::Capability::Read,
+        "https://elsewhere.test/",
+    );
+    assert_ne!(held.authority, landing.authority);
+    assert_eq!(held.authority, current.id());
+    assert_eq!(held.reason, landing.reason);
+    assert_eq!(held.policy_tier.as_deref(), Some("user"));
+    assert_eq!(held.grant_id.as_deref(), Some("keep-out"));
+    assert_eq!(held.denial_id, denial.denial_id());
+    assert_ne!(held.denial_id, landing.denial_id);
+    assert_eq!(
+        refused.facts["denial_id"].as_str(),
+        denial.denial_id().as_deref()
+    );
+
+    // A policy that now admits the page leaves the tab held until it leaves it, and the record
+    // keeps the hold's reason with no policy attribution.
+    policy.publish(&keep_out_policy(["keep-out", "example"], true));
+    let (held, refused) = read_held();
+    assert!(!held.allowed);
+    assert_eq!(held.reason, landing.reason);
+    assert_eq!(held.policy_tier, None);
+    assert_eq!(held.grant_id, None);
+    assert_eq!(held.denial_id, None);
+    assert_eq!(held.policy_rule, None);
+    assert!(
+        refused.facts.get("denial_id").is_none(),
+        "{:?}",
+        refused.facts
+    );
+}
