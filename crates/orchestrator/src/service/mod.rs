@@ -1542,8 +1542,9 @@ impl McpWire {
         lock(&self.session).is_initialized()
     }
 
-    fn client_label(&self) -> String {
-        lock(&self.session).client_label().to_owned()
+    /// The name the session's client claimed, if any.
+    fn claim(&self) -> Option<String> {
+        lock(&self.session).claim().map(str::to_owned)
     }
 
     /// The workspace of the session, once it opened.
@@ -1740,7 +1741,10 @@ impl LiveSession {
             .attribution
             .clone()
             .observed(accepted.peer, &intake.sources);
-        let connection = Arc::new(ConnectionEvidence::new(attribution, &wire.client_label()));
+        let connection = Arc::new(ConnectionEvidence::new(
+            attribution,
+            wire.claim().as_deref(),
+        ));
         let workspace = intake
             .workspaces
             .connect(connection.clone(), accepted.marker.clone());
@@ -2445,7 +2449,7 @@ mod tests {
         assert!(!bytes.contains("secret"));
     }
 
-    /// The client label of the session whose tabs the release cleanup tests leave behind.
+    /// The name the client of the session whose tabs the release cleanup tests leave behind claims.
     const RELEASED_CLIENT: &str = "released";
 
     /// Admit a workspace in the fake browser, land one example.com tab per id, and release it.
@@ -2489,8 +2493,11 @@ mod tests {
 
     /// The tab a later session of the same client opening example.com would reuse, if any.
     fn reusable_example_tab(workspaces: &crate::workspace::WorkspaceStore) -> Option<u64> {
+        let key = ConnectionEvidence::claimed(RELEASED_CLIENT, IntakeChannel::Mcp)
+            .reuse_key()
+            .expect("the claim names an agent");
         workspaces
-            .claim_released(FAKE_BROWSER, RELEASED_CLIENT, "https://example.com/")
+            .claim_released(FAKE_BROWSER, &key, "https://example.com/")
             .map(|released| released.physical_id)
     }
 
@@ -3163,7 +3170,7 @@ mod tests {
         let state =
             ResumeState::decode(resumed.first().expect("a resume token after initialize")).unwrap();
         assert_eq!(state.revision, "2025-06-18");
-        assert_eq!(state.client_label, "relay test");
+        assert_eq!(state.claim.as_deref(), Some("relay test"));
 
         send_line(
             &mut socket,
@@ -3426,7 +3433,7 @@ mod tests {
                 source: observed,
                 ..Attribution::accepted(IntakeChannel::Mcp)
             },
-            "relay test",
+            Some("relay test"),
         )
         .details()
         .explanation;
@@ -3450,10 +3457,12 @@ mod tests {
             .iter()
             .map(|summary| summary.connections[0].explanation.clone())
             .collect();
-        let unseen =
-            ConnectionEvidence::new(Attribution::accepted(IntakeChannel::Mcp), "relay test")
-                .details()
-                .explanation;
+        let unseen = ConnectionEvidence::new(
+            Attribution::accepted(IntakeChannel::Mcp),
+            Some("relay test"),
+        )
+        .details()
+        .explanation;
         assert!(
             explanations.contains(&unseen),
             "a stream with no peer process keeps the caveat: {explanations:?}"
@@ -3526,7 +3535,7 @@ mod tests {
     fn tabless_token() -> String {
         ResumeState {
             revision: "2025-06-18".into(),
-            client_label: "returning client".into(),
+            claim: Some("returning client".into()),
             owned_tabs: Vec::new(),
         }
         .encode()
@@ -3661,7 +3670,7 @@ mod tests {
             }),
             ..Attribution::accepted(IntakeChannel::Mcp)
         };
-        let evidence = ConnectionEvidence::new(attribution.clone(), "PRIVATE_CLAIM");
+        let evidence = ConnectionEvidence::new(attribution.clone(), Some("PRIVATE_CLAIM"));
         let detail = super::attached(evidence.attribution());
         let connection = attribution.connection_id.as_deref().unwrap();
         assert_eq!(detail, format!("{connection} via mcp from claude.exe"));
@@ -3874,7 +3883,7 @@ mod tests {
         };
         let token = ResumeState {
             revision: "2025-06-18".into(),
-            client_label: "returning client".into(),
+            claim: Some("returning client".into()),
             owned_tabs: vec![kept.clone(), gone.clone()],
         }
         .encode();
@@ -3883,7 +3892,7 @@ mod tests {
         let mut socket = open_mcp(Some(token));
         let state = next_resume(&mut socket);
         assert_eq!(state.revision, "2025-06-18");
-        assert_eq!(state.client_label, "returning client");
+        assert_eq!(state.claim.as_deref(), Some("returning client"));
         assert_eq!(
             state.owned_tabs,
             vec![gone, kept.clone()],
@@ -3956,7 +3965,7 @@ mod tests {
     fn token_with(tab: crate::intake::mcp::OwnedTab) -> String {
         ResumeState {
             revision: "2025-06-18".into(),
-            client_label: "returning client".into(),
+            claim: Some("returning client".into()),
             owned_tabs: vec![tab],
         }
         .encode()

@@ -217,8 +217,10 @@ mod tests {
 
     #[test]
     fn operation_lines_name_the_connection() {
-        let evidence =
-            ConnectionEvidence::new(Attribution::accepted(IntakeChannel::Mcp), "PRIVATE_CLAIM");
+        let evidence = ConnectionEvidence::new(
+            Attribution::accepted(IntakeChannel::Mcp),
+            Some("PRIVATE_CLAIM"),
+        );
         let attribution = evidence.attribution();
         let connection = attribution.connection_id.as_deref().unwrap();
         let line = operation_line("browser_read", "succeeded", "none", 12, attribution);

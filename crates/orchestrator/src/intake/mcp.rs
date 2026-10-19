@@ -29,6 +29,7 @@ use thiserror::Error;
 use super::server_profile;
 use crate::language::audit_health::Storage;
 use crate::language::intake::{EdgeFailure, ProtocolRefusal};
+use crate::provenance::bounded_claim;
 use crate::work::result::{Effect, Readiness, Status};
 use crate::work::InvocationId;
 
@@ -50,10 +51,6 @@ Result: ";
 pub const DISCOVERY_REVISION: &str = "2026-07-28";
 
 const JSONRPC_VERSION: &str = "2.0";
-/// The label of a session whose client sent no name. The browser's tab group shows it; it names
-/// no agent ([`crate::language::provenance::claimed_name`]).
-pub const DEFAULT_CLIENT_LABEL: &str = "MCP client";
-const MAX_CLIENT_LABEL_CHARS: usize = 100;
 const RESUME_TOKEN_PREFIX: &str = "rs1.";
 const MAX_RESUME_TOKEN_BYTES: usize = 64 * 1024;
 
@@ -179,7 +176,8 @@ pub struct McpSession {
     server: ServerProfile,
     phase: Phase,
     revision: Option<&'static str>,
-    client_label: String,
+    /// The name the client claimed for itself, bounded ([`bounded_claim`]); none when it sent none.
+    claim: Option<String>,
     /// Running tool calls: the invocation id to the client's id.
     calls: HashMap<InvocationId, Value>,
     /// Running tool calls: the client's id, as JSON text, to the invocation id.
@@ -203,7 +201,7 @@ impl McpSession {
             server: server_profile(),
             phase: Phase::Fresh,
             revision: None,
-            client_label: DEFAULT_CLIENT_LABEL.into(),
+            claim: None,
             calls: HashMap::new(),
             call_ids: HashMap::new(),
             catalog_waiters: VecDeque::new(),
@@ -218,16 +216,15 @@ impl McpSession {
         let mut session = Self::new();
         session.phase = Phase::Ready;
         session.revision = Some(negotiate(&state.revision));
-        if !state.client_label.is_empty() {
-            session.client_label = bounded_label(&state.client_label);
-        }
+        session.claim = state.claim.as_deref().and_then(bounded_claim);
         session
     }
 
-    /// The client's own name, bounded, for attribution and presentation only.
+    /// The name the client claimed for itself, bounded, for attribution and presentation only;
+    /// none when it claimed none.
     #[must_use]
-    pub fn client_label(&self) -> &str {
-        &self.client_label
+    pub fn claim(&self) -> Option<&str> {
+        self.claim.as_deref()
     }
 
     /// Whether `initialize` has been answered, so requests are served.
@@ -241,7 +238,7 @@ impl McpSession {
     pub fn resume_state(&self, owned_tabs: Vec<OwnedTab>) -> Option<ResumeState> {
         Some(ResumeState {
             revision: self.revision?.into(),
-            client_label: self.client_label.clone(),
+            claim: self.claim.clone(),
             owned_tabs,
         })
     }
@@ -436,7 +433,7 @@ impl McpSession {
                 .pointer(discovery::CLIENT_NAME)
                 .and_then(Value::as_str)
             {
-                self.client_label = bounded_label(name);
+                self.claim = bounded_claim(name);
             }
         }
         let mut meta = Map::new();
@@ -473,7 +470,7 @@ impl McpSession {
             .pointer("/params/clientInfo/name")
             .and_then(Value::as_str)
         {
-            self.client_label = bounded_label(name);
+            self.claim = bounded_claim(name);
         }
         self.revision = Some(revision);
         self.phase = Phase::Initialized;
@@ -566,9 +563,14 @@ pub struct OwnedTab {
 pub struct ResumeState {
     /// The negotiated MCP revision.
     pub revision: String,
-    /// The client's own name, for attribution and presentation only. A token may omit it.
-    #[serde(default)]
-    pub client_label: String,
+    /// The name the client claimed for itself, for attribution and presentation only; omitted
+    /// when it claimed none. Read bounded, as the session reads it ([`bounded_claim`]).
+    #[serde(
+        default,
+        rename = "client_label",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub claim: Option<String>,
     /// The tabs the session owned.
     #[serde(default)]
     pub owned_tabs: Vec<OwnedTab>,
@@ -765,10 +767,6 @@ fn rpc_error(id: Value, error_code: i64, why: &ProtocolRefusal) -> Value {
 /// A client id as JSON text, so `1` and `"1"` stay different ids.
 fn id_key(id: &Value) -> String {
     serde_json::to_string(id).unwrap_or_default()
-}
-
-fn bounded_label(label: &str) -> String {
-    label.chars().take(MAX_CLIENT_LABEL_CHARS).collect()
 }
 
 #[cfg(test)]

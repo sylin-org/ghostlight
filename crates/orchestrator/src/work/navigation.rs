@@ -7,12 +7,13 @@ use crate::browser::BrowserError;
 use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet, Decision};
 use crate::language::outcome::{Outcome, Refusal};
+use crate::language::provenance::group_title;
 use crate::language::ReusePolicy;
-use crate::workspace::{SelectedTab, WorkspaceError, WorkspaceLease};
+use crate::workspace::{Opener, SelectedTab, WorkspaceError, WorkspaceLease};
 
 use super::{
-    bounded, observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect,
-    InvocationContext, InvocationResult, Readiness, Status, Terminal,
+    observed_host, readiness, ApplicationExecutor, CloseCompensation, Effect, InvocationContext,
+    InvocationResult, Readiness, Status, Terminal,
 };
 
 /// How the governed tab came to exist, which the receipt reports truthfully (ADR-0137).
@@ -20,21 +21,11 @@ use super::{
 enum OpenedTabKind {
     /// Created fresh by this open.
     Created,
-    /// Reused: a same-host tab Ghostlight opened and a released session of the same client left
+    /// Reused: a same-host tab Ghostlight opened and a released session of the same agent left
     /// open (ADR-0196 Decision 9).
     Adopted,
     /// Recreated fresh under a recovered stale handle.
     Recovered,
-}
-
-/// The browser group every controlled tab of one client sits in: `Ghostlight - <opener claim>`,
-/// the name the client that opened the workspace claimed.
-///
-/// The title depends on that claim alone (ADR-0066), so every session of one client shares one
-/// group, and a later connection to the same workspace renames nothing. A tab the person kept after its session ended has left that group (ADR-0201), and
-/// default reuse puts it back under this title.
-fn group_title(opener_claim: &str) -> String {
-    format!("Ghostlight - {}", bounded(opener_claim, 80))
 }
 
 impl ApplicationExecutor {
@@ -186,8 +177,8 @@ impl ApplicationExecutor {
                 Some(url),
             );
         }
-        let opener_claim = match self.workspaces.opener_claim(context.workspace) {
-            Ok(label) => label,
+        let opener = match self.workspaces.opener(context.workspace) {
+            Ok(opener) => opener,
             Err(error) => return self.workspace_failure(context, error),
         };
         // The open chooses its browser before it opens, so the tab it opens binds the session to
@@ -198,7 +189,7 @@ impl ApplicationExecutor {
         };
         if reuse == ReusePolicy::Domain {
             if let Some(terminal) =
-                self.reuse_released_tab(context, lease, decision, &browser, &opener_claim, url)
+                self.reuse_released_tab(context, lease, decision, &browser, &opener, url)
             {
                 return terminal;
             }
@@ -209,7 +200,7 @@ impl ApplicationExecutor {
             // adapter always creates.
             BrowserCommand::OpenTab {
                 url: url.into(),
-                group_title: group_title(&opener_claim),
+                group_title: group_title(&opener.agent),
                 focus_window: holds_no_tab(lease),
             },
         ) {
@@ -235,29 +226,31 @@ impl ApplicationExecutor {
         )
     }
 
-    /// Reuse a tab Ghostlight opened and a released session of the same client left open, when
+    /// Reuse a tab Ghostlight opened and a released session of the same agent left open, when
     /// one fits this open.
     ///
     /// The service makes the whole choice and sends the adapter an exact tab id (ADR-0196
     /// Decision 9). Candidates come only from the released pool, in `browser`, the one this open
     /// chose, on the requested host, so a tab the person opened is never one. They were also
-    /// released by a session whose opener claimed this session's `opener_claim`, so a client
-    /// reuses only its own tabs. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts it
-    /// back in this client's group as it loads the page. A candidate is used only while the live
-    /// browser still shows it at its release address, the rule every remembered tab follows, so a
-    /// restarted browser that handed its id to another tab never gives that tab away. One that
-    /// closed or moved on is dropped and the next is tried. Returns None when nothing fits, and
-    /// the open then creates a fresh tab.
+    /// released by a session with this session's reuse key, so a client reuses only the tabs its
+    /// own sessions kept (ADR-0201 Decision 2), and a session whose `opener` has no key reuses
+    /// nothing. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts
+    /// it back in the group of this session's opener as it loads the page. A candidate is used
+    /// only while the live browser still shows it at its release address, the rule every
+    /// remembered tab follows, so a restarted browser that handed its id to another tab never
+    /// gives that tab away. One that closed or moved on is dropped and the next is tried. Returns
+    /// None when nothing fits, and the open then creates a fresh tab.
     fn reuse_released_tab(
         &self,
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         decision: Decision,
         browser: &str,
-        opener_claim: &str,
+        opener: &Opener,
         url: &str,
     ) -> Option<Terminal> {
-        let mut candidate = self.workspaces.claim_released(browser, opener_claim, url)?;
+        let reuse_key = opener.reuse_key.as_deref()?;
+        let mut candidate = self.workspaces.claim_released(browser, reuse_key, url)?;
         let live = match self.dispatch(context, BrowserCommand::ListTabs) {
             Ok(BrowserOutcome::Tabs { tabs }) => tabs,
             Ok(_) => return Some(self.protocol_failure(context, decision, None)),
@@ -267,7 +260,7 @@ impl ApplicationExecutor {
             if let Some(tab) = candidate.confirmed_in(&live) {
                 break tab.clone();
             }
-            candidate = self.workspaces.claim_released(browser, opener_claim, url)?;
+            candidate = self.workspaces.claim_released(browser, reuse_key, url)?;
         };
         let focus_window = holds_no_tab(lease);
         let controlled = match lease.add_tab(browser, &released) {
@@ -282,7 +275,7 @@ impl ApplicationExecutor {
                 BrowserCommand::AdoptTab {
                     tab_id: released.tab_id,
                     url: url.into(),
-                    group_title: group_title(opener_claim),
+                    group_title: group_title(&opener.agent),
                     focus_window,
                 },
             ) {
@@ -409,8 +402,8 @@ impl ApplicationExecutor {
             // through the governed open path under the same handle, and say so plainly.
             Err(WorkspaceError::StaleTab) if requested_tab.is_some() => {
                 let handle = requested_tab.expect("guarded above");
-                let opener_claim = match self.workspaces.opener_claim(context.workspace) {
-                    Ok(label) => label,
+                let opener = match self.workspaces.opener(context.workspace) {
+                    Ok(opener) => opener,
                     Err(error) => return self.workspace_failure(context, error),
                 };
                 let decision = self.authorize(context, Capability::Read, Some(url));
@@ -435,7 +428,7 @@ impl ApplicationExecutor {
                     context,
                     BrowserCommand::OpenTab {
                         url: url.into(),
-                        group_title: group_title(&opener_claim),
+                        group_title: group_title(&opener.agent),
                         focus_window: holds_no_tab(lease),
                     },
                 ) {

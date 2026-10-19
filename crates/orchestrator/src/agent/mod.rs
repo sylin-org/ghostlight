@@ -380,12 +380,7 @@ mod tests {
             assert_eq!(agent.name, "Command line");
             assert_eq!(agent.symbol, Symbol::Glyph(Glyph::CommandLine));
         }
-        for unnamed in [
-            None,
-            Some(""),
-            Some("   "),
-            Some(crate::intake::mcp::DEFAULT_CLIENT_LABEL),
-        ] {
+        for unnamed in [None, Some(""), Some("   ")] {
             let agent = Agent::of(unnamed, IntakeChannel::Mcp);
             assert_eq!(agent, Agent::unknown(), "{unnamed:?}");
             assert_eq!(agent.name, "Unknown agent");

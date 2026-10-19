@@ -211,6 +211,29 @@ impl WorkspaceSummary {
     }
 }
 
+/// How the client that opened a workspace names it, read once when the workspace opened
+/// (ADR-0203 Decision 9). Presentation and a courtesy between clients, never authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Opener {
+    /// The opener's agent, as the window names it ([`ConnectionEvidence::details`]). It is the one
+    /// name for the workspace's tab group, its session card and a refusal that names it as
+    /// another session.
+    pub agent: Agent,
+    /// The key of the kept tabs the workspace may reuse and leaves for reuse
+    /// ([`ConnectionEvidence::reuse_key`]); none when its opener's claim names no agent.
+    pub reuse_key: Option<String>,
+}
+
+impl Opener {
+    /// How `connection` names a workspace it opens.
+    fn of(connection: &ConnectionEvidence) -> Self {
+        Self {
+            agent: connection.details().agent,
+            reuse_key: connection.reuse_key(),
+        }
+    }
+}
+
 /// Opaque admitted MCP workspace handle.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct WorkspaceId(String);
@@ -438,7 +461,7 @@ pub struct ReleasedTabs {
 }
 
 /// One tab a released workspace left open, claimed by the next open on its host from a session of
-/// the same client.
+/// the same agent.
 ///
 /// Only Ghostlight's own released tabs become these. A tab the person opened never does, so
 /// default reuse cannot take it over (ADR-0196 Decision 9).
@@ -753,9 +776,11 @@ struct WorkspaceState {
     ///
     /// It names the workspace for its whole life: its session card, its tab group and the released
     /// tabs it may reuse. A command-line workspace outlives its connections (ADR-0106), so it cannot
-    /// be named from the current ones, and a group is named for the client that opened it
+    /// be named from the current ones, and a group is named for the agent that opened it
     /// (ADR-0066). A later connection joins `connections` and renames nothing.
     opener: Arc<ConnectionEvidence>,
+    /// How the opener names this workspace, read once when it opened.
+    named: Opener,
     connections: HashMap<String, Arc<ConnectionEvidence>>,
     /// What owns this workspace, when it outlives the connection that opened it (ADR-0106).
     session: Option<SessionMarker>,
@@ -862,7 +887,7 @@ struct AggregateState {
     ///
     /// This is the only pool default reuse adopts from. A tab enters it at release but can be
     /// claimed only after its release close answered that the person's preserve-tabs setting kept
-    /// it open, and only by a session of the client that released it. An entry leaves it when the
+    /// it open, and only by a session of the agent that released it. An entry leaves it when the
     /// tab closes, when any page commits in it (the person or the page took it back), when a
     /// workspace takes it, and when its release close did anything but keep it. A browser that
     /// reconnects may have restarted and handed its ids out again, so a claimed tab is reused only
@@ -875,13 +900,12 @@ struct AggregateState {
 struct PooledTab {
     /// The governed URL the tab held when its workspace released it.
     url: String,
-    /// The name the opener of the workspace that released the tab claimed.
+    /// The reuse key of the workspace that released the tab ([`Opener::reuse_key`]).
     ///
-    /// Every controlled tab sits in the browser group named for its workspace opener's claim, and
-    /// a reused tab is navigated where it is, never regrouped. So only a session of the same
-    /// client may claim it; any other session would control a tab shown under another client's
-    /// group (ADR-0066).
-    opener_claim: String,
+    /// Only a session with the same key may claim it: a client reuses only the tabs its own
+    /// sessions kept (ADR-0201 Decision 2), as a courtesy between clients and never authority.
+    /// The adopt puts the tab back in the claiming session's own group.
+    reuse_key: String,
     /// Whether the release close answered that the browser keeps the tab open.
     ///
     /// Until it does, the browser may still bind the tab to the dead workspace, and that pending
@@ -904,11 +928,14 @@ impl AggregateState {
     ///
     /// None of them is reusable yet: only a cleanup answer that the browser kept a tab open
     /// (`settle_released`) offers it to the next open on its host from a session of the same
-    /// client. A held tab sits on a destination governance refused, a tab with no governed URL
+    /// agent. A held tab sits on a destination governance refused, a tab with no governed URL
     /// never landed, and a pending binding may name a tab the person opened, so none of them is
-    /// recorded at all.
+    /// recorded at all. Nor is any tab of a workspace with no reuse key, which no one may reuse.
     fn remember_released(&mut self, workspace: &WorkspaceState) {
-        let Some(browser) = workspace.browser.as_ref() else {
+        let (Some(browser), Some(reuse_key)) = (
+            workspace.browser.as_ref(),
+            workspace.named.reuse_key.as_ref(),
+        ) else {
             return;
         };
         let tabs: Vec<_> = workspace
@@ -920,7 +947,7 @@ impl AggregateState {
                     tab.physical_id,
                     PooledTab {
                         url: tab.url.clone(),
-                        opener_claim: workspace.opener.reported_application().into(),
+                        reuse_key: reuse_key.clone(),
                         kept_open: false,
                     },
                 )
@@ -1138,6 +1165,7 @@ impl WorkspaceStore {
         aggregate.workspaces.insert(
             id.clone(),
             WorkspaceState {
+                named: Opener::of(&connection),
                 opener: Arc::clone(&connection),
                 connections: HashMap::from([(connection_id, connection)]),
                 session,
@@ -1241,7 +1269,7 @@ impl WorkspaceStore {
     /// Release an MCP workspace and return the physical tabs it owned.
     ///
     /// The tabs wait in the released pool for their cleanup. A tab becomes reusable by the next
-    /// open on its host from a session of the same client only once `settle_released` reports
+    /// open on its host from a session of the same agent only once `settle_released` reports
     /// that the browser kept it open (the person's preserve-tabs choice).
     pub fn release(&self, workspace: &WorkspaceId) -> ReleasedTabs {
         self.lock().release(workspace)
@@ -1307,24 +1335,19 @@ impl WorkspaceStore {
         }
     }
 
-    /// Take the released tab an open of `url` in `browser` by a session whose opener claimed
-    /// `opener_claim` should reuse, if there is one.
+    /// Take the released tab an open of `url` in `browser` by a session whose reuse key is
+    /// `reuse_key` ([`Opener::reuse_key`]) should reuse, if there is one.
     ///
-    /// Candidates are tabs Ghostlight opened, a released workspace whose opener made the same
-    /// claim left behind, and the browser kept open when that workspace's cleanup asked to close them, in
-    /// this browser, on the same host and port. The label must match because a reused tab stays in
-    /// the group it already sits in, and that group is named for the client that released it. An
-    /// exact URL wins, then the lowest tab id. The claim removes the tab from the pool under the
-    /// aggregate lock, so two sessions can never claim the same tab, and leaves another client's
-    /// tabs in the pool. The caller still confirms it in the live browser before using it
+    /// Candidates are tabs Ghostlight opened, a released workspace with the same key left behind,
+    /// and the browser kept open when that workspace's cleanup asked to close them, in this
+    /// browser, on the same host and port. The key must match because a client reuses only the
+    /// tabs its own sessions kept (ADR-0201 Decision 2), a courtesy between clients. An exact URL
+    /// wins, then the lowest tab id. The claim removes the tab from the pool under the aggregate
+    /// lock, so two sessions can never claim the same tab, and leaves another agent's tabs in the
+    /// pool. The caller still confirms it in the live browser before using it
     /// ([`ReleasedTab::confirmed_in`]).
     #[must_use]
-    pub fn claim_released(
-        &self,
-        browser: &str,
-        opener_claim: &str,
-        url: &str,
-    ) -> Option<ReleasedTab> {
+    pub fn claim_released(&self, browser: &str, reuse_key: &str, url: &str) -> Option<ReleasedTab> {
         let site = reusable_site(url)?;
         let mut state = self.lock();
         let claimed = state
@@ -1333,7 +1356,7 @@ impl WorkspaceStore {
             .iter()
             .filter(|(_, released)| {
                 released.kept_open
-                    && released.opener_claim == opener_claim
+                    && released.reuse_key == reuse_key
                     && reusable_site(&released.url).as_ref() == Some(&site)
             })
             .min_by_key(|(physical_id, released)| (released.url != url, **physical_id))
@@ -1466,13 +1489,13 @@ impl WorkspaceStore {
         Ok(tabs)
     }
 
-    /// The name the client that opened a workspace claimed, which titles its tab group and picks
-    /// the released tabs it may reuse. Presentation only, never routing or authority.
-    pub fn opener_claim(&self, workspace: &WorkspaceId) -> Result<String, WorkspaceError> {
+    /// How the client that opened a workspace names it: the agent that titles its tab group and
+    /// the key of the released tabs it may reuse. Presentation only, never routing or authority.
+    pub fn opener(&self, workspace: &WorkspaceId) -> Result<Opener, WorkspaceError> {
         self.lock()
             .workspaces
             .get(workspace)
-            .map(|state| state.opener.reported_application().to_owned())
+            .map(|state| state.named.clone())
             .ok_or(WorkspaceError::UnknownWorkspace)
     }
 
@@ -1568,7 +1591,7 @@ impl WorkspaceStore {
     }
 
     /// Name the other workspace that holds a handle by its opener's agent, the way the window
-    /// names it ([`crate::language::provenance::details`]).
+    /// names it ([`Opener::agent`]).
     ///
     /// A workspace id is an internal key. No tool takes one, so naming it would only tell the
     /// caller where another session lives (ADR-0196 Decision 8). An owner whose agent nothing
@@ -1583,7 +1606,7 @@ impl WorkspaceStore {
             .workspaces
             .iter()
             .find(|(id, workspace)| *id != current && holds(workspace))
-            .map(|(_, workspace)| workspace.opener.details().agent)
+            .map(|(_, workspace)| workspace.named.agent.clone())
             .filter(|agent| *agent != Agent::unknown())
             .map(|agent| agent.name)
     }
@@ -1994,15 +2017,15 @@ impl WorkspaceLease {
         }
     }
 
-    /// The client label of another admitted workspace that owns the requested tab handle, if it
-    /// has one.
+    /// The agent of another admitted workspace that owns the requested tab handle, as the window
+    /// names it ([`WorkspaceStore::tab_owner`]).
     #[must_use]
     pub fn tab_owner(&self, requested: &str) -> Option<String> {
         self.store.tab_owner(&self.workspace, requested)
     }
 
-    /// The client label of another admitted workspace that owns the requested target handle, if
-    /// it has one.
+    /// The agent of another admitted workspace that owns the requested target handle, as the
+    /// window names it ([`WorkspaceStore::target_owner`]).
     #[must_use]
     pub fn target_owner(&self, requested: &str) -> Option<String> {
         self.store.target_owner(&self.workspace, requested)
@@ -2748,7 +2771,9 @@ mod tests {
         assert_eq!(summary.opener, opener.details());
         assert_eq!(summary.opener.agent.name, "Claude Code");
         assert_eq!(summary.connections.len(), 2);
-        assert_eq!(store.opener_claim(&workspace).unwrap(), "claude-code");
+        let named = store.opener(&workspace).unwrap();
+        assert_eq!(named.agent, opener.details().agent);
+        assert_eq!(named.reuse_key.as_deref(), Some("claude-code"));
 
         // The opener names the workspace after it leaves, as long as the workspace lives.
         store.disconnect(
@@ -2758,7 +2783,7 @@ mod tests {
         let summary = &store.summaries()[0];
         assert_eq!(summary.connections, vec![later.details()]);
         assert_eq!(summary.opener, opener.details());
-        assert_eq!(store.opener_claim(&workspace).unwrap(), "claude-code");
+        assert_eq!(store.opener(&workspace).unwrap(), named);
     }
 
     #[test]
@@ -2827,8 +2852,15 @@ mod tests {
         assert!(!store.is_owned(&owned));
     }
 
-    /// The client label the pool tests release and claim under unless a test names another.
+    /// The name the client of the pool tests claims unless a test names another.
     const TEST_CLIENT: &str = "test";
+
+    /// The reuse key of a session whose MCP client claims `client`.
+    fn key_of(client: &str) -> String {
+        crate::provenance::ConnectionEvidence::claimed(client, IntakeChannel::Mcp)
+            .reuse_key()
+            .expect("the claim names an agent")
+    }
 
     /// Admit a workspace of `TEST_CLIENT` in `browser` and land one tab per `(id, url)` in it.
     fn workspace_with_tabs(
@@ -2859,13 +2891,13 @@ mod tests {
 
     /// The tab a `TEST_CLIENT` session opening `url` in `browser` claims, if any.
     fn claimed(store: &WorkspaceStore, browser: &str, url: &str) -> Option<u64> {
-        claimed_by(store, browser, TEST_CLIENT, url)
+        claimed_by(store, browser, &key_of(TEST_CLIENT), url)
     }
 
-    /// The tab a session of `client` opening `url` in `browser` claims, if any.
-    fn claimed_by(store: &WorkspaceStore, browser: &str, client: &str, url: &str) -> Option<u64> {
+    /// The tab a session whose reuse key is `key` claims when it opens `url` in `browser`, if any.
+    fn claimed_by(store: &WorkspaceStore, browser: &str, key: &str, url: &str) -> Option<u64> {
         store
-            .claim_released(browser, client, url)
+            .claim_released(browser, key, url)
             .map(|released| released.physical_id)
     }
 
@@ -2930,7 +2962,7 @@ mod tests {
         );
         assert_eq!(claimed(&store, TEST_BROWSER, "file:///C:/a"), None);
         assert_eq!(
-            store.claim_released(TEST_BROWSER, TEST_CLIENT, "https://example.com/a"),
+            store.claim_released(TEST_BROWSER, &key_of(TEST_CLIENT), "https://example.com/a"),
             Some(super::ReleasedTab {
                 physical_id: 9,
                 url: super::UrlDigest::of("https://example.com/a"),
@@ -2957,6 +2989,25 @@ mod tests {
     }
 
     #[test]
+    fn a_workspace_whose_claim_names_no_agent_leaves_no_tab_for_reuse() {
+        let store = WorkspaceStore::default();
+        let unnamed =
+            client_workspace_with_tabs(&store, "", TEST_BROWSER, &[(3, "https://example.com/")]);
+        assert_eq!(store.opener(&unnamed).unwrap().reuse_key, None);
+        let released = store.release(&unnamed);
+        assert_eq!(
+            released.physical_ids,
+            vec![3],
+            "its tabs are still released"
+        );
+        kept_open(&store, &released);
+        assert!(
+            store.lock().released.is_empty(),
+            "a tab no one may reuse is never pooled"
+        );
+    }
+
+    #[test]
     fn a_released_tab_is_claimed_only_by_a_session_of_the_client_that_released_it() {
         const SCRIPTS: &str = "ghostlight call";
         const AGENT: &str = "Claude Code";
@@ -2976,20 +3027,25 @@ mod tests {
         );
         kept_open(&store, &store.release(&agent));
 
-        // Tab 3 sits in the "Ghostlight - ghostlight call" group. An exact URL and a lower id do
-        // not make it the agent's: the agent gets the tab its own client released.
+        // An exact URL and a lower id do not make tab 3 the agent's: the agent gets the tab its
+        // own sessions kept.
         assert_eq!(
-            claimed_by(&store, TEST_BROWSER, AGENT, "https://example.com/"),
+            claimed_by(&store, TEST_BROWSER, &key_of(AGENT), "https://example.com/"),
             Some(7)
         );
         assert_eq!(
-            claimed_by(&store, TEST_BROWSER, AGENT, "https://example.com/"),
+            claimed_by(&store, TEST_BROWSER, &key_of(AGENT), "https://example.com/"),
             None,
             "another client's tab is never the agent's to reuse"
         );
         // Asking left the scripts' tab in the pool for their next session.
         assert_eq!(
-            claimed_by(&store, TEST_BROWSER, SCRIPTS, "https://example.com/"),
+            claimed_by(
+                &store,
+                TEST_BROWSER,
+                &key_of(SCRIPTS),
+                "https://example.com/"
+            ),
             Some(3)
         );
     }
@@ -3043,12 +3099,13 @@ mod tests {
             .unwrap()
             .add_tab(TEST_BROWSER, &physical(3, "https://example.com/"))
             .unwrap();
+        let command_line = crate::agent::Agent::command_line().id;
         assert_eq!(
-            claimed_by(&store, TEST_BROWSER, SHELL, "https://example.com/"),
+            claimed_by(&store, TEST_BROWSER, &command_line, "https://example.com/"),
             Some(4)
         );
         assert_eq!(
-            claimed_by(&store, TEST_BROWSER, SHELL, "https://example.com/"),
+            claimed_by(&store, TEST_BROWSER, &command_line, "https://example.com/"),
             None
         );
     }
@@ -3068,10 +3125,10 @@ mod tests {
             physical(9, url),
         ];
         let first = store
-            .claim_released(TEST_BROWSER, TEST_CLIENT, url)
+            .claim_released(TEST_BROWSER, &key_of(TEST_CLIENT), url)
             .unwrap();
         let second = store
-            .claim_released(TEST_BROWSER, TEST_CLIENT, url)
+            .claim_released(TEST_BROWSER, &key_of(TEST_CLIENT), url)
             .unwrap();
         let (moved, kept) = if first.physical_id == 8 {
             (first, second)

@@ -85,7 +85,7 @@ fn negotiation_counteroffers_the_latest_revision_for_an_unknown_one() {
     assert_eq!(result["serverInfo"]["name"], "ghostlight");
     assert_eq!(result["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(result["instructions"], crate::language::SERVER_INSTRUCTIONS);
-    assert_eq!(session.client_label(), "test client");
+    assert_eq!(session.claim(), Some("test client"));
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn discovery_then_initialize_serves_one_session() {
         result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
         "ghostlight"
     );
-    assert_eq!(session.client_label(), "Antigravity");
+    assert_eq!(session.claim(), Some("Antigravity"));
     assert!(!session.is_initialized());
 
     let reply = replies(session.accept(&initialize_line(json!(2), "2025-06-18")));
@@ -557,7 +557,7 @@ fn resume_state_round_trips_through_the_token() {
 
     let resumed = McpSession::resumed(decoded);
     assert!(resumed.is_initialized());
-    assert_eq!(resumed.client_label(), "test client");
+    assert_eq!(resumed.claim(), Some("test client"));
     assert_eq!(
         resumed.resume_state(Vec::new()).unwrap().revision,
         LATEST_REVISION
@@ -595,7 +595,52 @@ fn a_resume_token_an_earlier_build_handed_out_decodes() {
     assert_eq!(state.revision, "2025-06-18");
     let session = McpSession::resumed(state);
     assert!(session.is_initialized());
-    assert!(!session.client_label().is_empty());
+    assert_eq!(session.claim(), None, "the token names no client");
+}
+
+#[test]
+fn an_empty_name_and_no_name_stay_the_same_unknown_agent_after_a_resume() {
+    use crate::agent::Agent;
+    use crate::intake::session::IntakeChannel;
+    use crate::provenance::{Attribution, ConnectionEvidence};
+
+    let unnamed = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": LATEST_REVISION, "capabilities": {}}
+    });
+    let mut empty = unnamed.clone();
+    empty["params"]["clientInfo"] = json!({"name": " \u{200f} ", "version": "1"});
+    for line in [unnamed, empty] {
+        let mut session = McpSession::new();
+        replies(session.accept(&line.to_string()));
+        let token = session.resume_state(Vec::new()).unwrap().encode();
+        let resumed = McpSession::resumed(ResumeState::decode(&token).unwrap());
+        for claim in [session.claim(), resumed.claim()] {
+            assert_eq!(claim, None, "{line}");
+            let evidence =
+                ConnectionEvidence::new(Attribution::accepted(IntakeChannel::Mcp), claim);
+            assert_eq!(evidence.details().agent, Agent::unknown(), "{line}");
+            assert_eq!(evidence.reuse_key(), None, "{line}");
+        }
+    }
+    let written = json!({"revision": "2025-06-18", "client_label": ""});
+    let token = format!(
+        "{RESUME_TOKEN_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(written.to_string())
+    );
+    let resumed = McpSession::resumed(ResumeState::decode(&token).unwrap());
+    assert_eq!(resumed.claim(), None, "a token's empty name is no name");
+    let rewritten = resumed.resume_state(Vec::new()).unwrap().encode();
+    let body = URL_SAFE_NO_PAD
+        .decode(rewritten.strip_prefix(RESUME_TOKEN_PREFIX).unwrap())
+        .unwrap();
+    let rewritten: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        rewritten,
+        json!({"revision": "2025-06-18", "owned_tabs": []})
+    );
 }
 
 #[test]
@@ -625,7 +670,7 @@ fn a_resume_token_written_with_the_retired_fields_still_resumes() {
 
     let mut resumed = McpSession::resumed(state);
     assert!(resumed.is_initialized());
-    assert_eq!(resumed.client_label(), "returning client");
+    assert_eq!(resumed.claim(), Some("returning client"));
     let steps = resumed.accept(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
     assert_eq!(forwards(&steps), vec![ServiceRequest::Catalog]);
 
@@ -647,7 +692,7 @@ fn a_malformed_token_is_rejected() {
     assert_eq!(ResumeState::decode("rs1.W10"), Err(ResumeError::Content));
     let unsupported = ResumeState {
         revision: "1999-01-01".into(),
-        client_label: "c".into(),
+        claim: Some("c".into()),
         owned_tabs: Vec::new(),
     };
     assert_eq!(

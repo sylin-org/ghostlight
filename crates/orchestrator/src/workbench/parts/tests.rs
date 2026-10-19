@@ -57,6 +57,7 @@ fn details() -> ConnectionDetails {
         channel: IntakeChannel::Mcp,
         explanation: "Declared by the client.".into(),
         agent: Agent::of(Some("claude-code"), IntakeChannel::Mcp),
+        source_agent: None,
     }
 }
 
@@ -792,7 +793,7 @@ fn watchers_see_the_keys_they_saw_before() {
             }),
             ..Attribution::accepted(IntakeChannel::Mcp)
         },
-        "claude-code",
+        Some("claude-code"),
     );
     let live = connection.details();
     let recorded = connection.attribution().details();

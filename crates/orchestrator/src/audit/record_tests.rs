@@ -338,7 +338,7 @@ fn golden_connection() -> crate::provenance::ConnectionEvidence {
             }),
             ..crate::provenance::Attribution::accepted(crate::intake::session::IntakeChannel::Mcp)
         },
-        "claude-code",
+        Some("claude-code"),
     )
 }
 

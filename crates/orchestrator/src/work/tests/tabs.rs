@@ -2,11 +2,14 @@
 //! the two ways out of a held tab.
 //!
 //! Default reuse is the service's choice (ADR-0196 Decision 9): only a tab Ghostlight opened and
-//! a released session of the same client left open is ever reused, and the adapter is always told
-//! not to choose. A held tab refuses reading and acting, and only a navigation to an allowed page
+//! a released session of the same agent left open is ever reused, and the adapter is always told
+//! not to choose. The agent is the one the opener's claim names (ADR-0203 Decision 9), and the tab
+//! group is titled for the agent the window names. A held tab refuses reading and acting, and only a navigation to an allowed page
 //! or a close may select it (ADR-0203 Decision 2.4).
 
 use super::*;
+use crate::provenance::{Attribution, ConnectionEvidence, Source};
+use std::sync::Arc;
 
 /// Open one fresh controlled tab and return its handle.
 fn open_at(
@@ -49,8 +52,72 @@ fn later_session_of(
     workspaces: &crate::workspace::WorkspaceStore,
     earlier: &crate::workspace::WorkspaceId,
 ) -> crate::workspace::WorkspaceId {
-    let client = workspaces.opener_claim(earlier).unwrap();
-    workspaces.admit(client, IntakeChannel::Mcp)
+    let opener = workspaces.single_connection(earlier).unwrap();
+    workspaces.connect(
+        Arc::new(ConnectionEvidence::new(
+            Attribution::accepted(opener.attribution().channel),
+            opener.claim(),
+        )),
+        None,
+    )
+}
+
+/// Admit a session on `channel` whose client claimed `claim`, started by the app of the catalog
+/// agent `source`, or by a program that is no agent's app when `source` is none.
+fn session_of(
+    workspaces: &crate::workspace::WorkspaceStore,
+    channel: IntakeChannel,
+    claim: Option<&str>,
+    source: Option<&str>,
+) -> crate::workspace::WorkspaceId {
+    let source = Source {
+        agent: source.map(str::to_owned),
+        image: "program.exe".into(),
+    };
+    workspaces.connect(
+        Arc::new(ConnectionEvidence::new(
+            Attribution {
+                source: Some(source),
+                ..Attribution::accepted(channel)
+            },
+            claim,
+        )),
+        None,
+    )
+}
+
+/// The group title of the one tab-opening command among `calls`.
+fn opened_group(calls: &[BrowserCommand]) -> String {
+    let titles: Vec<&String> = calls
+        .iter()
+        .filter_map(|call| match call {
+            BrowserCommand::OpenTab { group_title, .. }
+            | BrowserCommand::AdoptTab { group_title, .. } => Some(group_title),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(titles.len(), 1, "{calls:?}");
+    titles[0].clone()
+}
+
+/// Open `url` in `workspace` as an open that may reuse a kept tab, answered as a fresh tab
+/// `tab_id`, and return the commands it sent.
+fn open_fresh(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &crate::workspace::WorkspaceId,
+    tab_id: u64,
+    url: &str,
+) -> Vec<BrowserCommand> {
+    let before = browser.calls().len();
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(tab_id, url),
+        committed_urls: vec![url.into()],
+    }));
+    let opened = navigate(executor, workspace, url);
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
+    assert_eq!(opened.facts["created"], true, "{}", opened.summary);
+    browser.calls()[before..].to_vec()
 }
 
 fn navigate(
@@ -115,9 +182,9 @@ fn a_released_ghostlight_tab_is_reused_by_the_next_session_on_its_host() {
         &CancellationToken::default(),
     );
     assert_eq!(listed.facts["tabs"][0]["tab"], reused.facts["tab"]);
-    let client = workspaces.opener_claim(&next).unwrap();
+    let key = workspaces.opener(&next).unwrap().reuse_key.unwrap();
     assert_eq!(
-        workspaces.claim_released(FAKE_BROWSER, &client, "https://example.com/b"),
+        workspaces.claim_released(FAKE_BROWSER, &key, "https://example.com/b"),
         None
     );
 }
@@ -215,9 +282,9 @@ fn a_released_tab_the_person_took_back_or_closed_is_not_reused() {
         .iter()
         .any(|call| matches!(call, BrowserCommand::Navigate { .. })));
     // Candidates that failed the live check are gone, so the next open does not ask again.
-    let client = workspaces.opener_claim(&next).unwrap();
+    let key = workspaces.opener(&next).unwrap().reuse_key.unwrap();
     assert_eq!(
-        workspaces.claim_released(FAKE_BROWSER, &client, "https://example.com/b"),
+        workspaces.claim_released(FAKE_BROWSER, &key, "https://example.com/b"),
         None
     );
 }
@@ -225,8 +292,8 @@ fn a_released_tab_the_person_took_back_or_closed_is_not_reused() {
 #[test]
 fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_it() {
     let (executor, browser, workspaces, _, _) = fixture();
-    // The sample scripts open example.com and exit. Preserve-tabs keeps their tab open, out of
-    // the "Ghostlight - ghostlight call" group (ADR-0201).
+    // A script client opens example.com and exits. Preserve-tabs keeps its tab open, out of the
+    // "Ghostlight - ghostlight call" group (ADR-0201).
     let scripts = workspaces.admit("ghostlight call".into(), IntakeChannel::Mcp);
     open_at(&executor, &browser, &scripts, 7, "https://example.com/a");
     let scripts_again = later_session_of(&workspaces, &scripts);
@@ -285,6 +352,195 @@ fn a_tab_another_client_released_is_not_reused_and_its_own_client_still_reuses_i
         ),
         "{calls:?}"
     );
+}
+
+#[test]
+fn a_group_is_titled_for_the_agent_the_window_names() {
+    let (executor, browser, workspaces, _, _) = fixture();
+    for (tab_id, claim, source, agent) in [
+        (20, Some("claude-code"), None, "Claude Code"),
+        (21, Some(" Claude-Code "), Some("cursor"), "Claude Code"),
+        (22, None, Some("claude-desktop"), "Claude Desktop"),
+        (23, Some("my agent"), Some("claude-desktop"), "my agent"),
+    ] {
+        let session = session_of(&workspaces, IntakeChannel::Mcp, claim, source);
+        let window = workspaces
+            .summaries()
+            .into_iter()
+            .find(|summary| summary.id == session.as_str())
+            .unwrap()
+            .opener
+            .agent
+            .name;
+        assert_eq!(window, agent, "{claim:?} {source:?}");
+        let calls = open_fresh(
+            &executor,
+            &browser,
+            &session,
+            tab_id,
+            "https://example.com/",
+        );
+        assert_eq!(
+            opened_group(&calls),
+            format!("Ghostlight - {window}"),
+            "{claim:?} {source:?}"
+        );
+    }
+    let command_line = session_of(
+        &workspaces,
+        IntakeChannel::Cli,
+        Some("ghostlight call"),
+        None,
+    );
+    let calls = open_fresh(
+        &executor,
+        &browser,
+        &command_line,
+        24,
+        "https://example.com/",
+    );
+    assert_eq!(opened_group(&calls), "Ghostlight - Command line");
+}
+
+#[test]
+fn an_opener_the_catalog_cannot_name_is_titled_unknown_agent() {
+    let (executor, browser, workspaces, _, _) = fixture();
+    let by_program = session_of(&workspaces, IntakeChannel::Mcp, None, None);
+    let calls = open_fresh(&executor, &browser, &by_program, 20, "https://example.com/");
+    assert_eq!(opened_group(&calls), "Ghostlight - Unknown agent");
+    for (tab_id, unnamed) in [(21, ""), (22, "  "), (23, "Unknown agent")] {
+        let unseen = workspaces.admit(unnamed.into(), IntakeChannel::Mcp);
+        let calls = open_fresh(&executor, &browser, &unseen, tab_id, "https://example.org/");
+        assert_eq!(
+            opened_group(&calls),
+            "Ghostlight - Unknown agent",
+            "{unnamed:?}"
+        );
+    }
+}
+
+#[test]
+fn a_client_that_names_nothing_reuses_no_kept_tab() {
+    let (executor, browser, workspaces, _, _) = fixture();
+    let first = workspaces.admit(String::new(), IntakeChannel::Mcp);
+    open_at(&executor, &browser, &first, 7, "https://example.com/a");
+    let next = workspaces.admit(String::new(), IntakeChannel::Mcp);
+    assert_eq!(release_kept_open(&workspaces, &first), vec![7]);
+
+    let calls = open_fresh(&executor, &browser, &next, 12, "https://example.com/b");
+    assert_eq!(calls.len(), 1, "no kept tab is even looked for: {calls:?}");
+    assert!(
+        matches!(calls[0], BrowserCommand::OpenTab { .. }),
+        "{calls:?}"
+    );
+
+    // Nor does a named client reuse the tab a client that named nothing kept.
+    let named = workspaces.admit("test".into(), IntakeChannel::Mcp);
+    let calls = open_fresh(&executor, &browser, &named, 13, "https://example.com/c");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+}
+
+#[test]
+fn a_claimless_client_started_by_claude_code_reuses_no_claude_code_tab() {
+    let (executor, browser, workspaces, _, _) = fixture();
+    let claude_code = session_of(&workspaces, IntakeChannel::Mcp, Some("claude-code"), None);
+    open_at(
+        &executor,
+        &browser,
+        &claude_code,
+        7,
+        "https://example.com/a",
+    );
+    let next_claude_code = later_session_of(&workspaces, &claude_code);
+    assert_eq!(release_kept_open(&workspaces, &claude_code), vec![7]);
+
+    // The window names this session Claude Code from its source, and its group says so, but its
+    // client claimed nothing, so it reuses nothing.
+    let claimless = session_of(&workspaces, IntakeChannel::Mcp, None, Some("claude-code"));
+    let calls = open_fresh(&executor, &browser, &claimless, 12, "https://example.com/b");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(opened_group(&calls), "Ghostlight - Claude Code");
+
+    // The kept tab still waits for a session whose client claims Claude Code.
+    let before = browser.calls().len();
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![tab(7, "https://example.com/a")],
+    }));
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/c"),
+        committed_urls: vec!["https://example.com/c".into()],
+    }));
+    let reused = navigate(&executor, &next_claude_code, "https://example.com/c");
+    assert_eq!(reused.facts["reused"], true, "{}", reused.summary);
+    assert_eq!(
+        opened_group(&browser.calls()[before..]),
+        "Ghostlight - Claude Code"
+    );
+}
+
+#[test]
+fn a_command_line_session_reuses_a_tab_another_command_line_session_kept() {
+    let (executor, browser, workspaces, _, _) = fixture();
+    let script = session_of(
+        &workspaces,
+        IntakeChannel::Cli,
+        Some("ghostlight call"),
+        None,
+    );
+    open_at(&executor, &browser, &script, 7, "https://example.com/a");
+    let another = session_of(
+        &workspaces,
+        IntakeChannel::Cli,
+        Some("nightly report"),
+        None,
+    );
+    assert_eq!(release_kept_open(&workspaces, &script), vec![7]);
+
+    let before = browser.calls().len();
+    browser.push(Ok(BrowserOutcome::Tabs {
+        tabs: vec![tab(7, "https://example.com/a")],
+    }));
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/b"),
+        committed_urls: vec!["https://example.com/b".into()],
+    }));
+    let reused = navigate(&executor, &another, "https://example.com/b");
+
+    assert_eq!(reused.status, Status::Succeeded, "{}", reused.summary);
+    assert_eq!(reused.facts["reused"], true);
+    let calls = browser.calls()[before..].to_vec();
+    assert!(
+        matches!(
+            &calls[..],
+            [BrowserCommand::ListTabs, BrowserCommand::AdoptTab { tab_id: 7, group_title, .. }]
+                if group_title == "Ghostlight - Command line"
+        ),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn a_tab_a_command_line_session_kept_is_not_reused_by_claude_code() {
+    let (executor, browser, workspaces, _, _) = fixture();
+    let script = session_of(&workspaces, IntakeChannel::Cli, None, Some("claude-code"));
+    open_at(&executor, &browser, &script, 7, "https://example.com/a");
+    assert_eq!(release_kept_open(&workspaces, &script), vec![7]);
+
+    let claude_code = session_of(
+        &workspaces,
+        IntakeChannel::Mcp,
+        Some("claude-code"),
+        Some("claude-code"),
+    );
+    let calls = open_fresh(
+        &executor,
+        &browser,
+        &claude_code,
+        12,
+        "https://example.com/b",
+    );
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(opened_group(&calls), "Ghostlight - Claude Code");
 }
 
 #[test]

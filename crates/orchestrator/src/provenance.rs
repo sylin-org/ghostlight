@@ -15,20 +15,27 @@
 //! agent's catalog id as [`Attribution::claimed_agent`], so history names the agent after a restart
 //! as the live row did (ADR-0202 Decision 14a). It is a claim, closed and bounded; the client's own
 //! words stay in memory.
+//!
+//! The name a client claims is bounded once, here ([`bounded_claim`]), wherever it is read: from
+//! the client's `initialize`, from a resume token, and into a connection's evidence. A client that
+//! names nothing claims nothing (ADR-0203 Decision 9).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::agent::Agent;
 use crate::install::apps::{is_wrapper, AppLocations, PATH_SEPARATORS};
 use crate::install::icons::IconPlaces;
 use crate::intake::session::IntakeChannel;
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
+use crate::language::provenance::Claimed;
 pub use crate::language::provenance::ConnectionDetails;
 
-const REPORTED_APPLICATION_MAX_CHARS: usize = 100;
+/// The longest name a client's claim keeps, in characters.
+const CLAIM_MAX_CHARS: usize = 100;
 const CONNECTION_ID_PREFIX: &str = "connection_";
 
 /// The most ancestors of a connection's peer read for its source.
@@ -40,10 +47,19 @@ const IMAGE_MAX_CHARS: usize = 120;
 /// The longest catalog agent id a source keeps, in characters.
 const AGENT_ID_MAX_CHARS: usize = 64;
 
+/// The name a client `reported` for itself, as Ghostlight keeps it: stripped of control and
+/// direction text, cut to [`CLAIM_MAX_CHARS`] and trimmed. None when nothing is left, so an empty
+/// name and no name are one claim: none.
+#[must_use]
+pub fn bounded_claim(reported: &str) -> Option<String> {
+    let claim = bounded_label(reported, CLAIM_MAX_CHARS);
+    (!claim.is_empty()).then_some(claim)
+}
+
 /// Evidence captured once for one accepted connection. Caller claims remain memory-only.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConnectionEvidence {
-    reported_application: String,
+    claim: Option<String>,
     attribution: Attribution,
 }
 
@@ -159,16 +175,16 @@ impl SourceReader {
 
 impl ConnectionEvidence {
     /// The one evidence of an accepted connection: its `attribution`, observed and never changed
-    /// afterwards, beside the bounded name its client `claim`ed, which stays memory-only. The
-    /// attribution keeps only the catalog id that claim names, if any
+    /// afterwards, beside the name its client `claim`ed, if any, bounded ([`bounded_claim`]) and
+    /// kept in memory only. The attribution keeps only the catalog id that claim names, if any
     /// ([`crate::language::provenance::claimed_agent`]).
     #[must_use]
-    pub fn new(attribution: Attribution, claim: &str) -> Self {
-        let reported_application = bounded_label(claim, REPORTED_APPLICATION_MAX_CHARS);
+    pub fn new(attribution: Attribution, claim: Option<&str>) -> Self {
+        let claim = claim.and_then(bounded_claim);
         let claimed_agent =
-            crate::language::provenance::claimed_agent(&reported_application, attribution.channel);
+            crate::language::provenance::claimed_agent(claim.as_deref(), attribution.channel);
         Self {
-            reported_application,
+            claim,
             attribution: Attribution {
                 claimed_agent,
                 ..attribution
@@ -180,7 +196,7 @@ impl ConnectionEvidence {
     /// no source, for tests.
     #[cfg(test)]
     pub(crate) fn claimed(claim: &str, channel: IntakeChannel) -> Self {
-        Self::new(Attribution::accepted(channel), claim)
+        Self::new(Attribution::accepted(channel), Some(claim))
     }
 
     /// Borrow the durable evidence for this connection; it contains no caller-supplied label.
@@ -189,17 +205,32 @@ impl ConnectionEvidence {
         &self.attribution
     }
 
-    /// Borrow the bounded live application claim for familiar session labels.
+    /// The bounded name the connection's client claimed, none when it claimed none.
     #[must_use]
-    pub fn reported_application(&self) -> &str {
-        &self.reported_application
+    pub fn claim(&self) -> Option<&str> {
+        self.claim.as_deref()
     }
 
-    /// Present the live connection: its agent and the words that set its bounded application
-    /// claim beside the source Ghostlight saw.
+    /// The key of the kept tabs a workspace this connection opens may reuse, and leaves for reuse:
+    /// the id of the agent its claim names on its channel ([`Agent::of`]). Every command-line
+    /// session shares the command line's; a claim the catalog knows gives that agent's catalog
+    /// id; any other claim gives an unknown agent under its claimed name. A claim that names no
+    /// agent gives none, so such a session reuses no kept tab and no one reuses its tabs.
+    ///
+    /// It is a claim, a courtesy between clients and never authority. The source Ghostlight saw
+    /// takes no part, because the source decides nothing (ADR-0202 Decision 1, ADR-0203
+    /// Decision 9).
+    #[must_use]
+    pub fn reuse_key(&self) -> Option<String> {
+        let agent = Agent::of(self.claim(), self.attribution.channel);
+        (agent != Agent::unknown()).then_some(agent.id)
+    }
+
+    /// Present the live connection: its agent and the words that set its bounded claim beside
+    /// the source Ghostlight saw.
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
-        crate::language::provenance::details(&self.attribution, Some(&self.reported_application))
+        crate::language::provenance::details(&self.attribution, Claimed::Live(self.claim()))
     }
 }
 
@@ -248,7 +279,7 @@ impl Attribution {
     /// a live connection's is, without reconstructing any application claim.
     #[must_use]
     pub fn details(&self) -> ConnectionDetails {
-        crate::language::provenance::details(self, None)
+        crate::language::provenance::details(self, Claimed::Unkept)
     }
 }
 
@@ -329,7 +360,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::Agent;
 
     /// The agent the window shows for a connection these details describe.
     fn agent_of(details: &ConnectionDetails) -> Agent {
@@ -370,7 +400,7 @@ mod tests {
             &format!("\n\u{202e}{}\0", "x".repeat(150)),
             IntakeChannel::Cli,
         );
-        assert_eq!(evidence.reported_application(), "x".repeat(100));
+        assert_eq!(evidence.claim(), Some("x".repeat(100).as_str()));
         assert_eq!(
             evidence.details().reported_application,
             Some("x".repeat(100))
@@ -424,7 +454,7 @@ mod tests {
                 source,
                 ..Attribution::accepted(IntakeChannel::Mcp)
             },
-            claim,
+            Some(claim),
         )
     }
 
@@ -514,11 +544,62 @@ mod tests {
 
     #[test]
     fn a_client_that_reported_no_name_is_the_unknown_agent_and_claims_nothing() {
-        for unnamed in ["", " \t ", crate::intake::mcp::DEFAULT_CLIENT_LABEL] {
-            let details = ConnectionEvidence::claimed(unnamed, IntakeChannel::Mcp).details();
+        for unnamed in [None, Some(""), Some(" \t "), Some("\u{202e}\u{200f}")] {
+            let evidence =
+                ConnectionEvidence::new(Attribution::accepted(IntakeChannel::Mcp), unnamed);
+            assert_eq!(evidence.claim(), None, "{unnamed:?}");
+            assert_eq!(evidence.reuse_key(), None, "{unnamed:?}");
+            let details = evidence.details();
             assert_eq!(agent_of(&details), Agent::unknown(), "{unnamed:?}");
             assert_eq!(details.reported_application, None, "{unnamed:?}");
             assert!(!details.explanation.contains('"'), "{unnamed:?}");
+        }
+    }
+
+    #[test]
+    fn a_reuse_key_is_the_agent_the_claim_names_and_never_the_source() {
+        let key = |claim: Option<&str>, channel, source: Option<Source>| {
+            ConnectionEvidence::new(
+                Attribution {
+                    source,
+                    ..Attribution::accepted(channel)
+                },
+                claim,
+            )
+            .reuse_key()
+        };
+        assert_eq!(
+            key(Some("claude-code"), IntakeChannel::Mcp, None),
+            key(Some(" Claude Code "), IntakeChannel::Mcp, claude_desktop()),
+            "one catalog agent is one key, whatever started it"
+        );
+        assert_eq!(
+            key(Some("claude-code"), IntakeChannel::Mcp, None).as_deref(),
+            Some("claude-code")
+        );
+        assert_eq!(
+            key(Some("ghostlight call"), IntakeChannel::Cli, None),
+            key(None, IntakeChannel::Cli, None),
+            "every command-line session shares the command line's key"
+        );
+        assert_eq!(
+            key(None, IntakeChannel::Cli, None),
+            Some(Agent::command_line().id)
+        );
+        assert_eq!(
+            key(Some("my agent"), IntakeChannel::Mcp, None),
+            Some(Agent::of(Some("my agent"), IntakeChannel::Mcp).id)
+        );
+        assert_ne!(
+            key(Some("my agent"), IntakeChannel::Mcp, None),
+            key(Some("claude-code"), IntakeChannel::Mcp, None)
+        );
+        for nobody in [None, Some(""), Some("Unknown agent"), Some("Command line")] {
+            assert_eq!(
+                key(nobody, IntakeChannel::Mcp, claude_desktop()),
+                None,
+                "a claim that names no agent gives no key, even from an agent's app: {nobody:?}"
+            );
         }
     }
 
@@ -661,7 +742,7 @@ mod tests {
                 }),
                 ..Attribution::accepted(IntakeChannel::Mcp)
             },
-            "claude-code",
+            Some("claude-code"),
         );
         let encoded = serde_json::to_value(evidence.attribution()).unwrap();
         assert_eq!(

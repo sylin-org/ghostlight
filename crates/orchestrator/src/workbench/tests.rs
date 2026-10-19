@@ -1678,7 +1678,7 @@ fn a_session_card_names_the_agent_its_operations_name() {
             }),
             ..Attribution::accepted(IntakeChannel::Mcp)
         },
-        crate::intake::mcp::DEFAULT_CLIENT_LABEL,
+        None,
     ));
     let workspaces = crate::workspace::WorkspaceStore::default();
     let workspace = workspaces.connect(Arc::clone(&evidence), None);
@@ -1808,7 +1808,7 @@ fn a_session_that_reported_no_name_is_the_unknown_agent_and_its_chip_keeps_only_
     use crate::intake::session::IntakeChannel;
 
     let workspaces = crate::workspace::WorkspaceStore::default();
-    for unnamed in ["", "   ", crate::intake::mcp::DEFAULT_CLIENT_LABEL] {
+    for unnamed in ["", "   ", "\u{200f}"] {
         workspaces.admit(unnamed.into(), IntakeChannel::Mcp);
     }
     workspaces.admit("Some\u{202e}Agent\u{200f}".into(), IntakeChannel::Mcp);

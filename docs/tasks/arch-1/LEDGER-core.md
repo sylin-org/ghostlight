@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6 and C7 have landed. C13 is next. ux-2 has closed, so every slice whose
-"After" is met can start.
+C1, C2, C3a, C4, C5, C6, C7 and C13 have landed, and C22 landed with C13. C9 is next. ux-2 has
+closed, so every slice whose "After" is met can start.
 
 ## Slices
 
@@ -21,8 +21,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits; see Notes | landed (e4f353ab, 1d10bf74, review fixup) |
 | C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | see Notes | landed (9beb7976) |
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | see Notes | landed (5122ae5a, review fixup) |
-| C7 | fix(language): a workspace refusal says what is true | candidate | C6 | see Notes | landed (this commit) |
-| C13 | fix(provenance): the opener is named once | candidate | C7 | - | todo |
+| C7 | fix(language): a workspace refusal says what is true | candidate | C6 | see Notes | landed (8f2241c0, e2d6b413) |
+| C13 | fix(provenance): the opener is named once | candidate | C7 | see Notes | landed (this commit) |
 | C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | - | todo |
 | C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | - | todo |
 | C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | - | todo |
@@ -40,7 +40,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C19b | feat(audit): the record names the browser | none | I1 | - | todo |
 | C19c | refactor(work): the completion path's leftovers go | none | ux-2 closes | - | todo |
 | C20 | test(language): the plugin skill names only catalog tools and fields | none | I9b | - | todo |
-| C22 | refactor(intake): the "MCP client" placeholder goes | none | C13 | cross-lane `agent/mod.rs`, `workbench/tests.rs` | todo |
+| C22 | refactor(intake): the "MCP client" placeholder goes | none | C13 | cross-lane `agent/mod.rs`, `workbench/tests.rs`; see Notes | landed (with C13, this commit) |
 
 ## Notes
 
@@ -313,3 +313,45 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   sentence, the three new causes); the SIEM guide's three cause words; the ADR's Consequences and
   the owner's try-list say "no longer open" informally, and the sentence now says the handle names
   no open tab.
+- C13, the claim: `provenance::bounded_claim` is the one bound (control and direction text
+  stripped, 100 characters, trimmed, empty is none). `McpSession` keeps `claim: Option<String>`
+  through it when it reads `initialize`, discovery and a resume token, and `ConnectionEvidence::new`
+  takes `Option<&str>` through the same function. The token keeps the key `client_label` and omits
+  it for no claim, so a token an earlier build wrote still resumes its client's name. A token
+  written by an earlier build for a client that sent no name carries "MCP client", and resumes as an
+  unknown agent of that name, under the group title it already had.
+- C13, a live connection with no claim: `language::provenance::details` takes `Claimed::Live` or
+  `Claimed::Unkept` instead of an optional name, because with the placeholder gone an absent name
+  no longer told a live connection from a record. A live claimless connection stays the unknown
+  agent, never the earlier session's.
+- C13, read once: `WorkspaceState.named` holds an `Opener { agent, reuse_key }`, built when the
+  workspace opens. The group title, the ownership refusal and reuse read it. The session card still
+  reads `opener.details()`, the same function over the same evidence and the static roster, so it
+  names the same agent and keeps a current icon. `WorkspaceStore::opener_claim` became `opener`.
+- C13, the pool: a workspace with no reuse key leaves no tab in the released pool at all, since no
+  one may claim it. Its tabs are still released and closed as preserve-tabs says.
+- C13, the title: `language::provenance::group_title` writes "Ghostlight - " and the agent's name,
+  bounded to 80 characters as before. Agent names, not claims, now title groups, so a client that
+  claims "claude-code" gets "Ghostlight - Claude Code" and a command-line session gets
+  "Ghostlight - Command line", where it got "Ghostlight - ghostlight call". The popup's title parse
+  reads the right name with no extension change.
+- C13 absorbs C22: removing `claimed_name`'s decode, which C13 deletes, made the uses C22 names
+  (`agent/mod.rs`, `workbench/tests.rs`) assert something false, so they changed in this commit to
+  read no claim (`None`, or a name that bounds to nothing), and `DEFAULT_CLIENT_LABEL` went with
+  them. One `ConnectionDetails` literal in `workbench/parts/tests.rs` gained `source_agent`. These
+  are test-only cross-lane edits; no surface or install source changed.
+- C13, proofs: `a_group_is_titled_for_the_agent_the_window_names`,
+  `an_opener_the_catalog_cannot_name_is_titled_unknown_agent`,
+  `a_client_that_names_nothing_reuses_no_kept_tab`,
+  `a_claimless_client_started_by_claude_code_reuses_no_claude_code_tab`,
+  `a_command_line_session_reuses_a_tab_another_command_line_session_kept` and
+  `a_tab_a_command_line_session_kept_is_not_reused_by_claude_code` in `work/tests/tabs.rs`;
+  `an_empty_name_and_no_name_stay_the_same_unknown_agent_after_a_resume` in
+  `intake/mcp/tests.rs`; `connection_details_carry_the_sources_catalog_agent_unserialized` and
+  `a_group_title_is_the_agents_name_after_ghostlight` in `language/provenance.rs`;
+  `a_reuse_key_is_the_agent_the_claim_names_and_never_the_source` in `provenance.rs`;
+  `a_workspace_whose_claim_names_no_agent_leaves_no_tab_for_reuse` in `workspace/mod.rs`. No
+  catalog, result or audit golden changed. No journey checks a group title, so none changed and
+  none is needed. D2: ARCHITECTURE's opener-claim lines, INTENT's and the installation guide's
+  `Ghostlight - <client label>`, LANGUAGE's reuse rule and ACCEPTANCE's Extension product gates
+  item 8 now read the opener's agent name.
