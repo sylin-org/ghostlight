@@ -6,7 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10, P1, P2, P3, P4, P9, P5 and P6 landed. Next: P7. S4a is unblocked, and P5 unblocks C10c and S3.
+P10, P1, P2, P3, P4, P9, P5, P6 and P7 landed. Next: P8. S4a is unblocked, P5 unblocks C10c and S3,
+and P7 is the first half of what S4b waits for.
 
 ## Slices
 
@@ -21,8 +22,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | see Notes | landed (c2c958ff) |
 | P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | see Notes | landed (994a6ffa) |
 | P5 | refactor(governance): one publication is read whole | none | ux-2 closes | see Notes | landed (c5a37984) |
-| P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites, see Notes | landed (this commit) |
-| P7 | refactor(governance): one settings vocabulary | none | ux-2 closes | - | todo |
+| P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites, see Notes | landed (67cf4811) |
+| P7 | refactor(governance): one settings vocabulary | none | ux-2 closes | cross-lane core tests, see Notes | landed (this commit) |
 | P8 | refactor(language): the policy sentences live in language/policy.rs | none | ux-2 closes | cross-lane `language/mod.rs` | todo |
 
 ## Notes
@@ -137,3 +138,20 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `workbench/web/tests.rs`, `workbench/parts/tests.rs`) that built a facade, edited mechanically;
   no lane had an open slice in those files. The catalog and result goldens are unchanged, and
   `tests/golden/agents/native/linux.txt` is not affected.
+- P7: `manifest::PolicySetting` is the closed vocabulary of `config[].key`, and `key()` spells each
+  key once. `validate_config` decodes the key through it and each setting checks its own value;
+  `assemble`, `PolicyLayer::new`, the screenshot and channel checks, the audit requirement and
+  `Manifest::browser_startup` read through it, and the `Manifest` readers take a `PolicySetting`
+  instead of a string. `SCREENSHOTS_ENABLED_KEY`, `MCP_CHANNEL_ENABLED_KEY`,
+  `CLI_CHANNEL_ENABLED_KEY`, `audit::MODE_KEY` and `channel_enabled_key` are deleted;
+  `PolicySetting::channel_enabled` takes the last one's place. One departure in shape, none in
+  decision: `ConfigEntry.key` stays the authored string, so an unknown key is still refused at
+  `config[i].key` with "is not a registered policy setting" rather than as a serde shape error, and
+  the document is written back byte for byte. The proof
+  `every_registered_setting_parses_and_round_trips` pins the eight schema-4 keys literally, parses
+  one document authoring all of them, reads each back through its reader, writes it back unchanged,
+  and refuses a wrong-typed value for each. Test fixtures that author documents keep their literal
+  JSON, since they are documents. Cross-lane, core's: `work/tests/channels.rs` and
+  `work/tests/documents.rs` name the key through `PolicySetting`; no core slice was open in them.
+  `workbench/parts.rs`'s `SACRED_DOMAINS_KEY` and the page's copy are S4b's. The catalog and result
+  goldens are unchanged.

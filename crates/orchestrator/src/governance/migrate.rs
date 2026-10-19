@@ -292,11 +292,11 @@ mod tests {
         assert!(migration.removed.is_empty(), "{:?}", migration.removed);
         let carried = manifest::parse(&migration.document, "moved").unwrap();
         assert_eq!(
-            carried.boolean_setting(crate::governance::MCP_CHANNEL_ENABLED_KEY),
+            carried.boolean_setting(manifest::PolicySetting::McpChannelEnabled),
             Some(false)
         );
         assert_eq!(
-            carried.boolean_setting(crate::governance::CLI_CHANNEL_ENABLED_KEY),
+            carried.boolean_setting(manifest::PolicySetting::CliChannelEnabled),
             Some(true)
         );
         assert_eq!(carried.config[1].level, manifest::SettingLevel::Recommended);

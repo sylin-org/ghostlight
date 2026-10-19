@@ -1,11 +1,9 @@
 //! Monotonic audit-availability requirement across the existing authority layers.
 
 use super::effective::{layer_kind, LayerKind};
+use super::manifest::PolicySetting;
 use super::{AuthoritySnapshot, PolicyLayer};
 use serde::{Deserialize, Serialize};
-
-/// Registered choice for continuing work during a known history-storage failure.
-pub const MODE_KEY: &str = "audit.availability";
 
 /// Whether browser work continues while history cannot be saved.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -56,7 +54,7 @@ impl AuditRequirement {
         for (index, layer) in layers.iter().enumerate() {
             let Some(mode) = layer
                 .manifest
-                .string_setting(MODE_KEY)
+                .string_setting(PolicySetting::AuditAvailability)
                 .and_then(AuditMode::parse)
             else {
                 continue;
@@ -121,7 +119,8 @@ mod tests {
     use super::*;
 
     fn choosing(mode: &str) -> manifest::Manifest {
-        manifest::parse(&format!(r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{MODE_KEY}","value":"{mode}","level":"mandatory"}}]}}"#), "test").unwrap()
+        let key = PolicySetting::AuditAvailability.key();
+        manifest::parse(&format!(r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{key}","value":"{mode}","level":"mandatory"}}]}}"#), "test").unwrap()
     }
 
     fn snapshot(
@@ -171,6 +170,6 @@ mod tests {
             serde_json::from_str::<AuditMode>("\"require_audit\"").unwrap(),
             AuditMode::RequireAudit
         );
-        assert!(manifest::parse(&serde_json::to_string(&serde_json::json!({"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":MODE_KEY,"value":"silent","level":"mandatory"}]})).unwrap(), "test").is_err());
+        assert!(manifest::parse(&serde_json::to_string(&serde_json::json!({"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":PolicySetting::AuditAvailability.key(),"value":"silent","level":"mandatory"}]})).unwrap(), "test").is_err());
     }
 }

@@ -217,7 +217,7 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
     let view = image.facts["view"].as_str().unwrap();
     let mut policy: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     policy["config"].as_array_mut().unwrap().push(json!({
-        "key":crate::governance::SCREENSHOTS_ENABLED_KEY,"value":false,"level":"mandatory",
+        "key":crate::governance::manifest::PolicySetting::ScreenshotsEnabled.key(),"value":false,"level":"mandatory",
     }));
     fs::write(&path, serde_json::to_vec(&policy).unwrap()).unwrap();
     governance.refresh_tick();

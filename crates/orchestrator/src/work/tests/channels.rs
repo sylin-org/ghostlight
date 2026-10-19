@@ -20,7 +20,7 @@ fn mcp_off() -> (Scratch, GovernanceFacade) {
         &path,
         all_open_policy_with(&format!(
             r#"[{{"key":"{}","value":false,"level":"mandatory"}}]"#,
-            crate::governance::MCP_CHANNEL_ENABLED_KEY
+            crate::governance::manifest::PolicySetting::McpChannelEnabled.key()
         )),
     )
     .unwrap();

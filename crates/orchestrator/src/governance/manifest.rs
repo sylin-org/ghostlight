@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use super::{Capability, CapabilitySet};
+use crate::intake::session::IntakeChannel;
 
 /// Whether Ghostlight may start a browser when admitted work finds none connected.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -162,11 +163,130 @@ impl SettingLevel {
     }
 }
 
+/// One registered schema-4 policy setting: the closed vocabulary of `config[].key`.
+///
+/// Validation, assembly and every reader name a setting through this type, so a key is spelled
+/// once, in [`Self::key`]. A document whose key is not one of these is refused.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PolicySetting {
+    /// `audit.availability`: whether work continues while history cannot be saved.
+    AuditAvailability,
+    /// `browser.tabs.allow_close`: `false` removes model-driven tab close.
+    TabsAllowClose,
+    /// `browser.screenshots.enabled`: `false` refuses complete screenshots, including visible
+    /// embedded documents.
+    ScreenshotsEnabled,
+    /// `browser.startup`: whether Ghostlight may start a browser when none is connected.
+    BrowserStartup,
+    /// `channels.mcp.enabled`: `false` refuses every request on the `mcp` channel.
+    McpChannelEnabled,
+    /// `channels.cli.enabled`: `false` refuses every request on the `cli` channel.
+    CliChannelEnabled,
+    /// `privacy.preserve_target_names`: `false` keeps page-authored target names out of results and
+    /// audit.
+    PreserveTargetNames,
+    /// `content.security.sacred_domains`: the destinations a layer marks never-touch.
+    SacredDomains,
+}
+
+impl PolicySetting {
+    /// Every registered setting.
+    pub const ALL: [Self; 8] = [
+        Self::AuditAvailability,
+        Self::TabsAllowClose,
+        Self::ScreenshotsEnabled,
+        Self::BrowserStartup,
+        Self::McpChannelEnabled,
+        Self::CliChannelEnabled,
+        Self::PreserveTargetNames,
+        Self::SacredDomains,
+    ];
+
+    /// The key a schema-4 document authors for this setting.
+    #[must_use]
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::AuditAvailability => "audit.availability",
+            Self::TabsAllowClose => "browser.tabs.allow_close",
+            Self::ScreenshotsEnabled => "browser.screenshots.enabled",
+            Self::BrowserStartup => "browser.startup",
+            Self::McpChannelEnabled => "channels.mcp.enabled",
+            Self::CliChannelEnabled => "channels.cli.enabled",
+            Self::PreserveTargetNames => "privacy.preserve_target_names",
+            Self::SacredDomains => "content.security.sacred_domains",
+        }
+    }
+
+    /// The registered setting an authored key names, or `None` for a key this schema lacks.
+    #[must_use]
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|setting| setting.key() == key)
+    }
+
+    /// The switch that turns `channel` on or off (ADR-0202 Decision 22a). Unset means on.
+    #[must_use]
+    pub const fn channel_enabled(channel: IntakeChannel) -> Self {
+        match channel {
+            IntakeChannel::Mcp => Self::McpChannelEnabled,
+            IntakeChannel::Cli => Self::CliChannelEnabled,
+        }
+    }
+
+    /// Refuse a value this setting does not accept, naming `path` in `source`.
+    fn check(self, value: &Value, source: &str, path: &str) -> Result<(), ManifestError> {
+        match self {
+            Self::AuditAvailability => {
+                if value
+                    .as_str()
+                    .and_then(super::audit::AuditMode::parse)
+                    .is_none()
+                {
+                    return field(source, path, "must be keep_working or require_audit");
+                }
+            }
+            Self::TabsAllowClose
+            | Self::ScreenshotsEnabled
+            | Self::McpChannelEnabled
+            | Self::CliChannelEnabled
+            | Self::PreserveTargetNames => {
+                if !value.is_boolean() {
+                    return field(source, path, "must be a boolean");
+                }
+            }
+            Self::SacredDomains => {
+                let Some(items) = value.as_array() else {
+                    return field(source, path, "must be an array of host patterns");
+                };
+                let patterns: Option<Vec<String>> = items
+                    .iter()
+                    .map(|item| item.as_str().map(str::to_owned))
+                    .collect();
+                let Some(patterns) = patterns else {
+                    return field(source, path, "must contain only strings");
+                };
+                if patterns.iter().any(|pattern| pattern == "*") {
+                    return field(source, path, "must not contain the universal pattern");
+                }
+                validate_patterns(&patterns, source, path)?;
+            }
+            Self::BrowserStartup => {
+                let Some(value) = value.as_str() else {
+                    return field(source, path, "must be a string");
+                };
+                if BrowserStartup::from_str(value).is_none() {
+                    return field(source, path, "must be on_demand or manual");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One narrowly registered setting.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigEntry {
-    /// Registered key.
+    /// The authored key, one of [`PolicySetting::key`] once the document is validated.
     pub key: String,
     /// Typed JSON value validated for the key.
     pub value: Value,
@@ -201,38 +321,38 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Resolve one boolean setting if this manifest authors it.
-    #[must_use]
-    pub fn boolean_setting(&self, key: &str) -> Option<bool> {
+    /// The authored value of `setting`, if this manifest authors it.
+    fn setting(&self, setting: PolicySetting) -> Option<&Value> {
         self.config
             .iter()
-            .find(|entry| entry.key == key)
-            .and_then(|entry| entry.value.as_bool())
+            .find(|entry| entry.key == setting.key())
+            .map(|entry| &entry.value)
+    }
+
+    /// Resolve one boolean setting if this manifest authors it.
+    #[must_use]
+    pub fn boolean_setting(&self, setting: PolicySetting) -> Option<bool> {
+        self.setting(setting).and_then(Value::as_bool)
     }
 
     /// Resolve one string setting if this manifest authors it.
     #[must_use]
-    pub fn string_setting(&self, key: &str) -> Option<&str> {
-        self.config
-            .iter()
-            .find(|entry| entry.key == key)
-            .and_then(|entry| entry.value.as_str())
+    pub fn string_setting(&self, setting: PolicySetting) -> Option<&str> {
+        self.setting(setting).and_then(Value::as_str)
     }
 
     /// Resolve the browser startup setting if this manifest authors it.
     #[must_use]
     pub fn browser_startup(&self) -> Option<BrowserStartup> {
-        self.string_setting("browser.startup")
+        self.string_setting(PolicySetting::BrowserStartup)
             .and_then(BrowserStartup::from_str)
     }
 
     /// Resolve one string-array setting if this manifest authors it.
     #[must_use]
-    pub fn string_array_setting(&self, key: &str) -> Option<Vec<String>> {
-        self.config
-            .iter()
-            .find(|entry| entry.key == key)
-            .and_then(|entry| entry.value.as_array())
+    pub fn string_array_setting(&self, setting: PolicySetting) -> Option<Vec<String>> {
+        self.setting(setting)
+            .and_then(Value::as_array)
             .map(|items| {
                 items
                     .iter()
@@ -526,60 +646,14 @@ fn validate_patterns(patterns: &[String], source: &str, path: &str) -> Result<()
 }
 
 fn validate_config(entry: &ConfigEntry, index: usize, source: &str) -> Result<(), ManifestError> {
-    let path = format!("config[{index}].value");
-    match entry.key.as_str() {
-        super::audit::MODE_KEY => {
-            if entry
-                .value
-                .as_str()
-                .and_then(super::audit::AuditMode::parse)
-                .is_none()
-            {
-                return field(source, &path, "must be keep_working or require_audit");
-            }
-        }
-        "browser.tabs.allow_close"
-        | super::SCREENSHOTS_ENABLED_KEY
-        | super::MCP_CHANNEL_ENABLED_KEY
-        | super::CLI_CHANNEL_ENABLED_KEY
-        | "privacy.preserve_target_names" => {
-            if !entry.value.is_boolean() {
-                return field(source, &path, "must be a boolean");
-            }
-        }
-        "content.security.sacred_domains" => {
-            let Some(items) = entry.value.as_array() else {
-                return field(source, &path, "must be an array of host patterns");
-            };
-            let patterns: Option<Vec<String>> = items
-                .iter()
-                .map(|item| item.as_str().map(str::to_owned))
-                .collect();
-            let Some(patterns) = patterns else {
-                return field(source, &path, "must contain only strings");
-            };
-            if patterns.iter().any(|pattern| pattern == "*") {
-                return field(source, &path, "must not contain the universal pattern");
-            }
-            validate_patterns(&patterns, source, &path)?;
-        }
-        "browser.startup" => {
-            let Some(value) = entry.value.as_str() else {
-                return field(source, &path, "must be a string");
-            };
-            if BrowserStartup::from_str(value).is_none() {
-                return field(source, &path, "must be on_demand or manual");
-            }
-        }
-        _ => {
-            return field(
-                source,
-                &format!("config[{index}].key"),
-                "is not a registered policy setting",
-            )
-        }
-    }
-    Ok(())
+    let Some(setting) = PolicySetting::from_key(&entry.key) else {
+        return field(
+            source,
+            &format!("config[{index}].key"),
+            "is not a registered policy setting",
+        );
+    };
+    setting.check(&entry.value, source, &format!("config[{index}].value"))
 }
 
 fn bounded_nonempty(
@@ -675,7 +749,10 @@ fn write_canonical(value: &Value, output: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, valid_host_pattern, BrowserStartup, ManifestError};
+    use serde_json::{json, Value};
+
+    use super::{parse, valid_host_pattern, BrowserStartup, ManifestError, PolicySetting};
+    use crate::intake::session::IntakeChannel;
 
     #[test]
     fn a_deeply_nested_document_is_rejected_before_it_reaches_the_recursive_parser() {
@@ -834,12 +911,101 @@ mod tests {
         }
     }
 
+    /// One value `setting` accepts, for documents that exercise every registered key.
+    fn accepted(setting: PolicySetting) -> Value {
+        match setting {
+            PolicySetting::AuditAvailability => json!("require_audit"),
+            PolicySetting::TabsAllowClose
+            | PolicySetting::ScreenshotsEnabled
+            | PolicySetting::McpChannelEnabled
+            | PolicySetting::CliChannelEnabled
+            | PolicySetting::PreserveTargetNames => json!(false),
+            PolicySetting::BrowserStartup => json!("manual"),
+            PolicySetting::SacredDomains => json!(["vault.example", "*.bank.example"]),
+        }
+    }
+
+    #[test]
+    fn every_registered_setting_parses_and_round_trips() {
+        // The schema-4 keys, spelled out: a renamed variant must not change a document.
+        assert_eq!(
+            PolicySetting::ALL.map(PolicySetting::key),
+            [
+                "audit.availability",
+                "browser.tabs.allow_close",
+                "browser.screenshots.enabled",
+                "browser.startup",
+                "channels.mcp.enabled",
+                "channels.cli.enabled",
+                "privacy.preserve_target_names",
+                "content.security.sacred_domains",
+            ]
+        );
+        let config: Vec<Value> = PolicySetting::ALL
+            .into_iter()
+            .map(|setting| {
+                assert_eq!(PolicySetting::from_key(setting.key()), Some(setting));
+                json!({"key": setting.key(), "value": accepted(setting), "level": "mandatory"})
+            })
+            .collect();
+        let document =
+            json!({"schema": 4, "name": "every", "version": "1", "grants": [], "config": config});
+        let policy = parse(&document.to_string(), "every").expect("every setting is registered");
+        for (setting, entry) in PolicySetting::ALL.into_iter().zip(&policy.config) {
+            assert_eq!(entry.key, setting.key());
+            assert_eq!(entry.value, accepted(setting));
+        }
+        assert_eq!(
+            policy.string_setting(PolicySetting::AuditAvailability),
+            Some("require_audit")
+        );
+        assert_eq!(
+            policy.boolean_setting(PolicySetting::TabsAllowClose),
+            Some(false)
+        );
+        assert_eq!(policy.browser_startup(), Some(BrowserStartup::Manual));
+        assert_eq!(
+            policy.string_array_setting(PolicySetting::SacredDomains),
+            Some(vec![
+                "vault.example".to_owned(),
+                "*.bank.example".to_owned()
+            ])
+        );
+
+        let written = serde_json::to_string(&policy).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&written).unwrap(),
+            document,
+            "the document is written back unchanged"
+        );
+        assert_eq!(parse(&written, "written").unwrap(), policy);
+
+        for setting in PolicySetting::ALL {
+            let wrong = json!({"schema": 4, "name": "wrong", "version": "1", "grants": [],
+                "config": [{"key": setting.key(), "value": {}, "level": "mandatory"}]});
+            assert!(
+                parse(&wrong.to_string(), "wrong").is_err(),
+                "{setting:?} refuses a value of the wrong type"
+            );
+        }
+        assert_eq!(PolicySetting::from_key("browser.unheard"), None);
+        assert_eq!(
+            PolicySetting::channel_enabled(IntakeChannel::Mcp),
+            PolicySetting::McpChannelEnabled
+        );
+        assert_eq!(
+            PolicySetting::channel_enabled(IntakeChannel::Cli),
+            PolicySetting::CliChannelEnabled
+        );
+    }
+
     #[test]
     fn the_channel_switches_are_booleans() {
-        for key in [
-            crate::governance::MCP_CHANNEL_ENABLED_KEY,
-            crate::governance::CLI_CHANNEL_ENABLED_KEY,
+        for setting in [
+            PolicySetting::McpChannelEnabled,
+            PolicySetting::CliChannelEnabled,
         ] {
+            let key = setting.key();
             let document = |value: &str| {
                 format!(
                     r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{key}","value":{value},"level":"mandatory"}}]}}"#
@@ -847,7 +1013,7 @@ mod tests {
             };
             for value in [false, true] {
                 let policy = parse(&document(&value.to_string()), "switch").expect("a boolean");
-                assert_eq!(policy.boolean_setting(key), Some(value));
+                assert_eq!(policy.boolean_setting(setting), Some(value));
             }
             let error = parse(&document(r#""off""#), "switch").unwrap_err();
             assert!(error.to_string().contains("must be a boolean"), "{error}");
@@ -861,7 +1027,10 @@ mod tests {
                 r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"browser.startup","value":"{value}","level":"mandatory"}}]}}"#
             );
             let policy = parse(&document, "registered").expect("closed value parses");
-            assert_eq!(policy.string_setting("browser.startup"), Some(value));
+            assert_eq!(
+                policy.string_setting(PolicySetting::BrowserStartup),
+                Some(value)
+            );
             assert_eq!(policy.browser_startup(), BrowserStartup::from_str(value));
         }
     }

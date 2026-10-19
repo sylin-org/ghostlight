@@ -31,6 +31,7 @@ use crate::intake::session::IntakeChannel;
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
 use file_state::FileState;
+use manifest::PolicySetting;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -40,26 +41,8 @@ const RUNTIME_ACTIVE: u8 = 0;
 const RUNTIME_HOLD: u8 = 1;
 const RUNTIME_END: u8 = 2;
 
-/// Binary permission for complete screenshots, including visible embedded documents.
-pub const SCREENSHOTS_ENABLED_KEY: &str = "browser.screenshots.enabled";
-
-/// The switch for work from MCP agents: `false` refuses every request on the `mcp` channel.
-pub const MCP_CHANNEL_ENABLED_KEY: &str = "channels.mcp.enabled";
-
-/// The switch for work from the command line: `false` refuses every request on the `cli` channel.
-pub const CLI_CHANNEL_ENABLED_KEY: &str = "channels.cli.enabled";
-
 /// The tier word a record's `policy_tier` gives the organization's layer, in audit and history.
 pub const MANAGED_TIER: &str = "managed";
-
-/// The policy key that switches `channel` on or off (ADR-0202 Decision 22a). Unset means on.
-#[must_use]
-pub const fn channel_enabled_key(channel: IntakeChannel) -> &'static str {
-    match channel {
-        IntakeChannel::Mcp => MCP_CHANNEL_ENABLED_KEY,
-        IntakeChannel::Cli => CLI_CHANNEL_ENABLED_KEY,
-    }
-}
 
 /// One independent governed browser capability fact.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -478,7 +461,7 @@ impl PolicyLayer {
     /// The layer `manifest` authors at `tier`, with the never-touch list its settings hold.
     fn new(tier: AuthorityTier, manifest: manifest::Manifest) -> Self {
         let never_touch = manifest
-            .string_array_setting("content.security.sacred_domains")
+            .string_array_setting(PolicySetting::SacredDomains)
             .unwrap_or_default();
         Self {
             tier,
@@ -509,7 +492,11 @@ impl AuthoritySnapshot {
             return Decision::deny(ReasonCode::InvalidAuthority);
         }
         for (index, layer) in self.layers.iter().enumerate() {
-            if layer.manifest.boolean_setting(SCREENSHOTS_ENABLED_KEY) == Some(false) {
+            if layer
+                .manifest
+                .boolean_setting(PolicySetting::ScreenshotsEnabled)
+                == Some(false)
+            {
                 return Decision::policy(
                     ReasonCode::ScreenshotDenied,
                     PolicyAttribution {
@@ -533,12 +520,12 @@ impl AuthoritySnapshot {
     /// boundary the request goes on to cross refuses invalid authority itself.
     #[must_use]
     pub fn channel_refusal(&self, channel: IntakeChannel) -> Option<(Decision, PolicyAuthor)> {
-        let key = channel_enabled_key(channel);
+        let setting = PolicySetting::channel_enabled(channel);
         let (index, layer) = self
             .layers
             .iter()
             .enumerate()
-            .find(|(_, layer)| layer.manifest.boolean_setting(key) == Some(false))?;
+            .find(|(_, layer)| layer.manifest.boolean_setting(setting) == Some(false))?;
         let decision = Decision::policy(
             ReasonCode::ChannelDenied,
             PolicyAttribution {
@@ -2167,11 +2154,11 @@ fn assemble(
     for (policy, tier) in sources {
         let Some(policy) = policy else { continue };
         let index = u16::try_from(layers.len()).expect("policy layer count is bounded");
-        if policy.boolean_setting("browser.tabs.allow_close") == Some(false) {
+        if policy.boolean_setting(PolicySetting::TabsAllowClose) == Some(false) {
             tab_close_allowed = false;
             tab_close_source.get_or_insert(index);
         }
-        if policy.boolean_setting("privacy.preserve_target_names") == Some(false) {
+        if policy.boolean_setting(PolicySetting::PreserveTargetNames) == Some(false) {
             preserve_target_names = false;
         }
         layers.push(PolicyLayer::new(tier, policy));

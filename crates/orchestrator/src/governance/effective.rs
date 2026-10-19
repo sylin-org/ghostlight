@@ -1405,7 +1405,7 @@ mod tests {
         let mode = |value: &str| {
             policy(&format!(
                 r#"{{"schema":4,"name":"p","version":"1","grants":[],"config":[{{"key":"{}","value":"{value}","level":"mandatory"}}]}}"#,
-                crate::governance::audit::MODE_KEY
+                manifest::PolicySetting::AuditAvailability.key()
             ))
         };
         let choices = [

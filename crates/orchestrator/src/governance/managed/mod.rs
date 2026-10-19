@@ -1065,7 +1065,7 @@ mod tests {
     fn switched(organization: Option<serde_json::Value>) -> serde_json::Value {
         let mut manifest = manifest("org", "read");
         manifest["config"] = serde_json::json!([{
-            "key": super::super::MCP_CHANNEL_ENABLED_KEY,
+            "key": crate::governance::manifest::PolicySetting::McpChannelEnabled.key(),
             "value": false,
             "level": "mandatory"
         }]);

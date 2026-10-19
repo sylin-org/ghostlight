@@ -50,7 +50,8 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
             "capture",
             all_open_grant(),
             &format!(
-                r#"[{{"key":"{SCREENSHOTS_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
+                r#"[{{"key":"{key}","value":{value},"level":"mandatory"}}]"#,
+                key = PolicySetting::ScreenshotsEnabled.key()
             ),
         )
     };
@@ -70,7 +71,8 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
             "invalid",
             all_open_grant(),
             &format!(
-                r#"[{{"key":"{SCREENSHOTS_ENABLED_KEY}","value":"masked","level":"mandatory"}}]"#,
+                r#"[{{"key":"{key}","value":"masked","level":"mandatory"}}]"#,
+                key = PolicySetting::ScreenshotsEnabled.key()
             )
         ),
         "test"
@@ -90,7 +92,10 @@ fn a_switch_left_unset_is_on() {
         policy(
             "on",
             all_open_grant(),
-            &format!(r#"[{{"key":"{CLI_CHANNEL_ENABLED_KEY}","value":true,"level":"mandatory"}}]"#),
+            &format!(
+                r#"[{{"key":"{key}","value":true,"level":"mandatory"}}]"#,
+                key = PolicySetting::CliChannelEnabled.key()
+            ),
         ),
     )
     .unwrap();
@@ -110,7 +115,8 @@ fn a_channel_switch_refuses_only_its_channel_and_names_its_layer() {
             "channels",
             all_open_grant(),
             &format!(
-                r#"[{{"key":"{MCP_CHANNEL_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
+                r#"[{{"key":"{key}","value":{value},"level":"mandatory"}}]"#,
+                key = PolicySetting::McpChannelEnabled.key()
             ),
         )
     };
@@ -145,7 +151,8 @@ fn the_switches_a_person_reads_are_the_ones_the_executor_checks() {
             "mine",
             all_open_grant(),
             &format!(
-                r#"[{{"key":"{MCP_CHANNEL_ENABLED_KEY}","value":false,"level":"mandatory"}}]"#
+                r#"[{{"key":"{key}","value":false,"level":"mandatory"}}]"#,
+                key = PolicySetting::McpChannelEnabled.key()
             ),
         ),
     )
