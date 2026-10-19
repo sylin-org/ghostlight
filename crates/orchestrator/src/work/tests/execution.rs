@@ -1654,7 +1654,7 @@ fn child_receipts_share_authority_without_holding_the_session() {
         r#"{"schema":4,"name":"deny","version":"1","grants":[]}"#,
     )
     .unwrap();
-    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()));
     let (executor, browser, _, workspace, audit) = fixture_with_governance(governance.clone());
     let result = executor.execute(
         &workspace,
@@ -1819,7 +1819,7 @@ fn a_paused_runtime_refuses_recording_status_stop_and_discard() {
     // Every operation in this executor -- even ones needing no capability at all, like
     // activating a tab -- crosses the runtime gate before it can reach the browser. Recording
     // status, stop and discard cross it like every other operation, so a pause holds them too.
-    let governance = GovernanceFacade::new(None, None);
+    let governance = GovernanceFacade::new(None);
     assert_eq!(
         governance.apply_runtime_intent(RuntimeControlIntent::Hold),
         RuntimeControlState::Held
@@ -2251,7 +2251,7 @@ fn tab_close_policy_blocks_before_browser_dispatch() {
     )
     .unwrap();
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
@@ -2305,7 +2305,7 @@ fn refused_navigation_audits_only_the_attempted_host() {
 
 #[test]
 fn the_workbench_origin_is_refused_by_name_and_other_loopback_ports_are_not() {
-    let governance = GovernanceFacade::new(None, None);
+    let governance = GovernanceFacade::new(None);
     governance.protect_workbench_port(41259);
     let (executor, browser, _, workspace, audit) = fixture_with_governance(governance);
     for (url, origin) in [
@@ -2373,7 +2373,7 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
         )
         .unwrap();
     let (executor, browser, workspaces, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
 
     // An ordinary, fully governed opener tab, admitted under the narrow policy.
     browser.push(Ok(BrowserOutcome::TabOpened {
@@ -2490,7 +2490,7 @@ fn governance_can_remove_target_names_without_losing_the_safe_role() {
     )
     .unwrap();
     let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
@@ -2847,7 +2847,7 @@ fn denied_redirect_remains_visibly_open_when_close_policy_refuses_compensation()
     document["grants"][0]["hosts"]["allow"] = json!(["example.com"]);
     fs::write(&policy, serde_json::to_vec(&document).unwrap()).unwrap();
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "http://127.0.0.1/private"),
         committed_urls: vec![

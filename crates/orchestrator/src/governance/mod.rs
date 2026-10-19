@@ -1375,7 +1375,7 @@ pub const fn offers(state: RuntimeControlState) -> &'static [RuntimeControlInten
 pub struct GovernanceFacade {
     /// What every reader sees. Replaced whole; a reader locks it only to clone the `Arc`.
     published: Arc<Mutex<Arc<Publication>>>,
-    /// The local policy files and the last view of the managed authority. Writers lock it for the
+    /// The user policy file and the last view of the managed authority. Writers lock it for the
     /// time a file read takes, never across a network call.
     sources: Arc<Mutex<PolicySources>>,
     /// The managed authority itself. Only the refresher locks it, and it holds the lock across a
@@ -1428,10 +1428,7 @@ impl Publication {
             valid,
             channels_off,
             sacred_hosts: snapshot.sacred_hosts(),
-            organization_source: sources.managed.path.as_ref().map_or_else(
-                || organization.map(|_| passport_source(&passport)),
-                |path| Some(path.display().to_string()),
-            ),
+            organization_source: organization.map(|_| passport_source(&passport)),
             organization_document: organization.map(document),
             user_source: sources
                 .user
@@ -1495,7 +1492,7 @@ impl Publication {
     }
 }
 
-/// What the facade last saw of the managed authority, kept beside the local files so a
+/// What the facade last saw of the managed authority, kept beside the user policy file so a
 /// publication never waits for a fetch.
 #[derive(Clone, Debug)]
 struct RemoteView {
@@ -1522,7 +1519,7 @@ impl RemoteView {
 
 #[derive(Debug)]
 struct PolicySources {
-    managed: PolicySource,
+    /// The managed authority as last seen. Absent only for a facade built without one.
     remote: Option<RemoteView>,
     user: PolicySource,
     user_origin: effective::UserLayerSource,
@@ -1531,11 +1528,10 @@ struct PolicySources {
 }
 
 impl PolicySources {
-    fn new(local: Option<PathBuf>, managed: Option<PathBuf>) -> Self {
+    fn new(local: Option<PathBuf>) -> Self {
         Self {
-            managed: PolicySource::new(managed, "managed"),
             remote: None,
-            user: PolicySource::new(local, "user"),
+            user: PolicySource::new(local),
             user_origin: effective::UserLayerSource::Environment,
             owned_user_path: None,
         }
@@ -1544,11 +1540,10 @@ impl PolicySources {
     /// A user layer Ghostlight owns at an explicit path, for tests that must not touch this
     /// machine's real state directory.
     #[cfg(test)]
-    fn owning(path: PathBuf, managed: Option<PathBuf>) -> Self {
+    fn owning(path: PathBuf) -> Self {
         Self {
-            managed: PolicySource::new(managed, "managed"),
             remote: None,
-            user: PolicySource::with_options(Some(path.clone()), "user", true),
+            user: PolicySource::with_options(Some(path.clone()), true),
             user_origin: effective::UserLayerSource::Workbench,
             owned_user_path: Some(path),
         }
@@ -1562,16 +1557,15 @@ impl PolicySources {
     fn production(local: Option<PathBuf>) -> Self {
         let (user, user_origin) = match local {
             Some(path) => (
-                PolicySource::new(Some(path), "user"),
+                PolicySource::new(Some(path)),
                 effective::UserLayerSource::Environment,
             ),
             None => (
-                PolicySource::with_options(paths::user_policy_path(), "user", true),
+                PolicySource::with_options(paths::user_policy_path(), true),
                 effective::UserLayerSource::Workbench,
             ),
         };
         Self {
-            managed: PolicySource::new(None, "managed"),
             remote: None,
             user,
             user_origin,
@@ -1582,38 +1576,22 @@ impl PolicySources {
         }
     }
 
-    #[cfg(test)]
-    fn remote_only() -> Self {
-        Self {
-            managed: PolicySource::new(None, "managed"),
-            remote: None,
-            user: PolicySource::new(None, "user"),
-            user_origin: effective::UserLayerSource::Workbench,
-            owned_user_path: None,
-        }
-    }
-
-    /// Read both local files again, whatever their state.
+    /// Read the user policy file again, whatever its state.
     fn reload_local(&mut self) {
-        self.managed.refresh("managed");
-        self.user.refresh("user");
+        self.user.refresh();
     }
 
-    /// Read each local file that changed since it was last read. True when any did.
+    /// Read the user policy file if it changed since it was last read. True when it did.
     fn reload_changed(&mut self) -> bool {
-        let managed = self.managed.refresh_if_changed("managed");
-        let user = self.user.refresh_if_changed("user");
-        managed || user
+        self.user.refresh_if_changed()
     }
 
     fn managed_configured(&self) -> bool {
-        self.remote.as_ref().is_some_and(|remote| remote.configured) || self.managed.configured()
+        self.remote.as_ref().is_some_and(|remote| remote.configured)
     }
 
     fn managed_valid(&self) -> bool {
-        self.remote
-            .as_ref()
-            .map_or(self.managed.last_load_valid, |remote| remote.valid)
+        self.remote.as_ref().is_none_or(|remote| remote.valid)
     }
 
     /// Whether configured authority can be enforced, which is the one validity every surface uses.
@@ -1628,23 +1606,13 @@ impl PolicySources {
         self.remote
             .as_ref()
             .and_then(|remote| remote.manifest.as_ref())
-            .or(self.managed.active.as_ref())
     }
 
-    /// The organization the managed layer names, from the same source
-    /// [`Self::managed_manifest`] reads. A signed publication was resolved when it was verified; a
-    /// plain file has no presentation, so its own block is the whole answer.
+    /// The organization the signed publication names, resolved when it was verified.
     fn managed_organization(&self) -> Option<effective::OrganizationIdentity> {
-        match self
-            .remote
+        self.remote
             .as_ref()
-            .filter(|remote| remote.manifest.is_some())
-        {
-            Some(remote) => remote.organization.clone(),
-            None => self.managed.active.as_ref().and_then(|policy| {
-                effective::OrganizationIdentity::resolve(None, policy.organization.as_ref())
-            }),
-        }
+            .and_then(|remote| remote.organization.clone())
     }
 
     fn managed_sequence(&self) -> Option<u64> {
@@ -1652,33 +1620,11 @@ impl PolicySources {
     }
 
     fn managed_passport(&self) -> ManagedPolicyPassport {
-        if let Some(remote) = &self.remote {
-            return remote.passport.clone();
-        }
-        let configured = self.managed.configured();
-        let verified = self.managed.active.is_some();
-        ManagedPolicyPassport {
-            configured,
-            verified,
-            freshness: if !configured {
-                ManagedPolicyFreshness::NotConfigured
-            } else if verified {
-                ManagedPolicyFreshness::Fresh
-            } else {
-                ManagedPolicyFreshness::NoPolicy
-            },
-            sequence: None,
-            organization: None,
-            rationale: None,
-            contacts: Vec::new(),
-            source_class: if configured {
-                ManagedPolicySource::File
-            } else {
-                ManagedPolicySource::None
-            },
-            last_success_ms: None,
-            last_attempt_ms: None,
-        }
+        self.remote
+            .as_ref()
+            .map_or_else(ManagedPolicyPassport::not_configured, |remote| {
+                remote.passport.clone()
+            })
     }
 }
 
@@ -1708,7 +1654,7 @@ struct PolicySource {
     /// failing closed. A path someone else named is not optional, because naming a file that is not
     /// there is a mistake worth refusing over. Ghostlight also moves a file it owns from the
     /// retired schema 3 to schema 4 when the move keeps its meaning; it never rewrites a file
-    /// someone else named, or the organization's.
+    /// someone else named.
     owned: bool,
     present: bool,
     active: Option<manifest::Manifest>,
@@ -1719,11 +1665,11 @@ struct PolicySource {
 }
 
 impl PolicySource {
-    fn new(path: Option<PathBuf>, tier: &str) -> Self {
-        Self::with_options(path, tier, false)
+    fn new(path: Option<PathBuf>) -> Self {
+        Self::with_options(path, false)
     }
 
-    fn with_options(path: Option<PathBuf>, tier: &str, owned: bool) -> Self {
+    fn with_options(path: Option<PathBuf>, owned: bool) -> Self {
         let mut source = Self {
             last_load_valid: path.is_none(),
             owned,
@@ -1733,25 +1679,25 @@ impl PolicySource {
             last_error: None,
             seen: None,
         };
-        source.refresh(tier);
+        source.refresh();
         source
     }
 
     /// Read the file again only when its state differs from the last read. True when it did.
-    fn refresh_if_changed(&mut self, tier: &str) -> bool {
+    fn refresh_if_changed(&mut self) -> bool {
         let Some(path) = &self.path else {
             return false;
         };
         if self.seen == Some(FileState::of(path)) {
             return false;
         }
-        self.refresh(tier);
+        self.refresh();
         true
     }
 
     /// Read the file now. The state is taken before the read, so a write that lands during it is
     /// seen on the next check.
-    fn refresh(&mut self, tier: &str) {
+    fn refresh(&mut self) {
         let Some(path) = &self.path else { return };
         self.seen = Some(FileState::of(path));
         if self.owned && !path.exists() {
@@ -1773,10 +1719,10 @@ impl PolicySource {
                 if self.last_error.as_deref() != Some(detail.as_str()) {
                     if self.active.is_some() {
                         eprintln!(
-                            "Ghostlight kept the last valid {tier} policy after reload failed: {detail}"
+                            "Ghostlight kept the last valid user policy after reload failed: {detail}"
                         );
                     } else {
-                        eprintln!("Ghostlight {tier} policy is not valid: {detail}");
+                        eprintln!("Ghostlight user policy is not valid: {detail}");
                     }
                 }
                 self.last_load_valid = false;
@@ -1847,6 +1793,22 @@ pub struct ManagedPolicyPassport {
 }
 
 impl ManagedPolicyPassport {
+    /// The passport of a machine no administrator bootstrap governs.
+    fn not_configured() -> Self {
+        Self {
+            configured: false,
+            verified: false,
+            freshness: ManagedPolicyFreshness::NotConfigured,
+            sequence: None,
+            organization: None,
+            rationale: None,
+            contacts: Vec::new(),
+            source_class: ManagedPolicySource::None,
+            last_success_ms: None,
+            last_attempt_ms: None,
+        }
+    }
+
     /// This passport naming `organization`, the one identity its publication resolved, so the
     /// passport never names the organization differently from the snapshot.
     fn naming(self, organization: Option<&effective::OrganizationIdentity>) -> Self {
@@ -1915,29 +1877,33 @@ impl GovernanceFacade {
         self.published().diagnostics.clone()
     }
 
-    /// Construct the facade from explicit policy paths.
+    /// Construct the facade from an explicit user policy path, with no managed authority.
+    ///
+    /// Organization authority arrives only as a signed bundle, which [`Self::from_environment`]
+    /// reads through the administrator's bootstrap.
     #[must_use]
-    pub fn new(local_policy: Option<PathBuf>, managed_policy: Option<PathBuf>) -> Self {
-        Self::publishing(PolicySources::new(local_policy, managed_policy), None)
+    pub fn new(local_policy: Option<PathBuf>) -> Self {
+        Self::publishing(PolicySources::new(local_policy), None)
     }
 
     /// A facade whose user layer is one Ghostlight owns at an explicit path.
     #[cfg(test)]
-    pub(crate) fn owning_user_policy(path: PathBuf, managed: Option<PathBuf>) -> Self {
-        Self::publishing(PolicySources::owning(path, managed), None)
+    pub(crate) fn owning_user_policy(path: PathBuf) -> Self {
+        Self::publishing(PolicySources::owning(path), None)
     }
 
+    /// A facade under the managed authority at `paths`, over an optional user policy.
     #[cfg(test)]
-    fn with_managed_paths(paths: managed::ManagedPaths) -> Self {
+    fn with_managed_paths(local_policy: Option<PathBuf>, paths: managed::ManagedPaths) -> Self {
         Self::publishing(
-            PolicySources::remote_only(),
+            PolicySources::new(local_policy),
             Some(managed::ManagedAuthority::from_paths(paths)),
         )
     }
 
     /// Construct the facade from Ghostlight-specific environment variables.
     ///
-    /// The first publication uses only what is on this machine: the policy files and the
+    /// The first publication uses only what is on this machine: the user policy file and the
     /// organization's last verified policy. The refresher fetches from the organization's
     /// endpoint afterwards, so a slow endpoint never delays a start.
     #[must_use]
@@ -2004,7 +1970,7 @@ impl GovernanceFacade {
         }
     }
 
-    /// Read the local policy files again now and publish, with no network work.
+    /// Read the user policy file again now and publish, with no network work.
     ///
     /// A person who edits their policy in the workbench sees it take effect at once, not on the
     /// refresher's next check.

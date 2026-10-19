@@ -1643,7 +1643,7 @@ mod tests {
 
     #[test]
     fn policy_projection_is_quiet_when_all_open_and_removes_impossible_tools() {
-        let all_open = GovernanceFacade::new(None, None).snapshot();
+        let all_open = GovernanceFacade::new(None).snapshot();
         assert_eq!(catalog_for(&all_open), catalog());
 
         let path = crate::scratch::Scratch::file("catalog-policy.json");
@@ -1652,7 +1652,7 @@ mod tests {
             r#"{"schema":4,"name":"read only","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
-        let read_only = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
+        let read_only = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
         let names: Vec<_> = catalog_for(&read_only)
             .into_iter()
             .map(|tool| tool.name)

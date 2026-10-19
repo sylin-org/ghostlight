@@ -163,8 +163,8 @@ fn a_cut_listing_reports_what_was_left_out_with_target_names_on_and_off() {
     )
     .unwrap();
     for governance in [
-        GovernanceFacade::new(None, None),
-        GovernanceFacade::new(Some(hidden_names.to_path_buf()), None),
+        GovernanceFacade::new(None),
+        GovernanceFacade::new(Some(hidden_names.to_path_buf())),
     ] {
         let (executor, browser, _, workspace, audit) = fixture_with_governance(governance);
         open_page(&executor, &browser, &workspace);

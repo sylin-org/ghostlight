@@ -125,7 +125,7 @@ fn opened(
     FakeExtension,
     crate::workspace::WorkspaceId,
 ) {
-    opened_under(fault, GovernanceFacade::new(None, None))
+    opened_under(fault, GovernanceFacade::new(None))
 }
 
 /// [`opened`] under the given governance.
@@ -503,7 +503,7 @@ fn a_dialog_raised_by_a_denied_document_is_refused_and_its_message_stays_out() {
     .unwrap();
     let (executor, fake, workspace, audit) = opened_audited(
         dialog_fault(Some(DIALOG_FRAME)),
-        GovernanceFacade::new(Some(policy.to_path_buf()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf())),
     );
     let before = requests_so_far(&fake);
     for arguments in [json!({"action": "status"}), json!({"action": "dismiss"})] {
@@ -761,7 +761,7 @@ fn a_refused_fill_lists_what_would_succeed_and_names_each_handle() {
         {"field": 1, "problem": "not_boolean"}
     ]});
     let (executor, _fake, workspace, audit) =
-        opened_audited(refusing_form(detail), GovernanceFacade::new(None, None));
+        opened_audited(refusing_form(detail), GovernanceFacade::new(None));
     let (role, agree) = form_handles(&executor, &workspace);
 
     let result = execute(
@@ -817,7 +817,7 @@ fn a_refused_fill_without_target_names_speaks_in_unnamed_nouns() {
     ]});
     let (executor, _fake, workspace) = opened_under(
         refusing_form(detail),
-        GovernanceFacade::new(Some(policy.to_path_buf()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf())),
     );
     let (role, _) = form_handles(&executor, &workspace);
 
@@ -891,7 +891,7 @@ fn a_fill_says_what_the_page_now_holds() {
         {"field": 1, "now": "checked"}
     ]}));
     let (executor, _fake, workspace, audit) =
-        opened_audited(verifying_form(verify), GovernanceFacade::new(None, None));
+        opened_audited(verifying_form(verify), GovernanceFacade::new(None));
     let (role, agree) = form_handles(&executor, &workspace);
 
     let result = execute(
@@ -934,7 +934,7 @@ fn a_fill_without_target_names_says_only_how_many_fields_it_filled() {
         returned(json!({"retained": true, "fields": [{"field": 0, "now": "Administrator"}]}));
     let (executor, _fake, workspace) = opened_under(
         verifying_form(verify),
-        GovernanceFacade::new(Some(policy.to_path_buf()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf())),
     );
     let (role, _) = form_handles(&executor, &workspace);
 
@@ -959,7 +959,7 @@ fn a_normalized_match_is_echoed_with_the_value_the_caller_gave() {
         {"field": 0, "now": "Administrator", "matched": "normalized"}
     ]}));
     let (executor, _fake, workspace, audit) =
-        opened_audited(verifying_form(verify), GovernanceFacade::new(None, None));
+        opened_audited(verifying_form(verify), GovernanceFacade::new(None));
     let (role, _) = form_handles(&executor, &workspace);
 
     let result = execute(
@@ -999,7 +999,7 @@ fn a_normalized_match_without_target_names_keeps_the_given_value_out_of_the_sent
     ]}));
     let (executor, _fake, workspace) = opened_under(
         verifying_form(verify),
-        GovernanceFacade::new(Some(policy.to_path_buf()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf())),
     );
     let (role, _) = form_handles(&executor, &workspace);
 
@@ -1082,7 +1082,7 @@ fn a_fill_the_page_partly_undid_is_a_partial_failure_with_no_dialog_advice() {
         "detail": {"problems": [{"field": 0, "problem": "reverted", "now": "Choose one..."}]}
     }}});
     let (executor, _fake, workspace, audit) =
-        opened_audited(verifying_form(verify), GovernanceFacade::new(None, None));
+        opened_audited(verifying_form(verify), GovernanceFacade::new(None));
     let (role, agree) = form_handles(&executor, &workspace);
 
     let result = execute(

@@ -733,7 +733,7 @@ fn independent_configured_grants_admit_every_catalog_variant_and_its_flow_child(
             .unwrap();
             // Establish ordinary handles, then authorize the requested work with only its
             // independent grants. Discovery in an earlier call does not grant this call Read.
-            executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()), None);
+            executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()));
             for reply in case.replies.clone() {
                 browser.push(Ok(reply));
             }
@@ -824,7 +824,7 @@ fn observation_variants_reject_missing_configured_capabilities_before_browser_ef
                     .unwrap(),
                 )
                 .unwrap();
-                executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()), None);
+                executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()));
                 for reply in case.replies {
                     browser.push(Ok(reply));
                 }
@@ -893,7 +893,7 @@ fn recording_attachment_checks_read_sources_and_write_destination_independently(
                     {"id":"elsewhere","hosts":{"allow":["unrelated.example"]},"allowed":["read","write"]}
                 ]
             })).unwrap()).unwrap();
-            executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()), None);
+            executor.governance = GovernanceFacade::new(Some(policy.to_path_buf()));
             let mut case = cases(&target, &button, &tab_handle)
                 .into_iter()
                 .find(|case| case.variant == Some("save_target"))

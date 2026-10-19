@@ -2076,7 +2076,7 @@ mod tests {
         let directory = temp_home("passive-browsing");
         let policy = directory.join("policy.json");
         std::fs::write(&policy, r#"{"schema":4,"name":"test","version":"1","grants":[{"id":"read","hosts":{"allow":["allowed.example"]},"allowed":["read"]}]}"#).unwrap();
-        let governance = GovernanceFacade::new(Some(policy), None);
+        let governance = GovernanceFacade::new(Some(policy));
         let workspaces = WorkspaceStore::default();
         let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
         let tab = PhysicalTab {
@@ -2447,7 +2447,7 @@ mod tests {
         crate::workbench::WorkbenchFacade::new(
             crate::workbench::WorkbenchProjection::default(),
             workspaces.clone(),
-            crate::governance::GovernanceFacade::new(None, None),
+            crate::governance::GovernanceFacade::new(None),
             Arc::new(crate::browser::RelayBrowserPort::new(
                 "events-test".into(),
                 super::page_assets(),
@@ -2732,7 +2732,7 @@ mod tests {
             browser.clone()
         };
         let workspaces = WorkspaceStore::default();
-        let governance = GovernanceFacade::new(None, None);
+        let governance = GovernanceFacade::new(None);
         let diagnostics = crate::diagnostics::DiagnosticsHub::for_tests();
         let projection = WorkbenchProjection::default();
         let audit = Arc::new(AuditRecorder::new(
@@ -4814,7 +4814,7 @@ mod tests {
             .unwrap();
         };
         write("rules", json!(["read", "action", "write", "execute"]));
-        let governance = GovernanceFacade::new(Some(path.clone()), None);
+        let governance = GovernanceFacade::new(Some(path.clone()));
         let advertised = AdvertisedCatalog::default();
         assert!(
             advertised.changed_by(&governance.snapshot()).is_none(),

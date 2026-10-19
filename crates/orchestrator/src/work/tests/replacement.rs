@@ -459,7 +459,7 @@ fn workspace_without_target_names(
     )
     .unwrap();
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],
@@ -569,7 +569,7 @@ fn without_read_authorization_there_is_no_replacement_and_no_candidates() {
     )
     .unwrap();
     let (executor, browser, workspaces, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
     browser.push(Ok(BrowserOutcome::TabOpened {
         tab: tab(7, "https://example.com/"),
         committed_urls: vec!["https://example.com/".into()],

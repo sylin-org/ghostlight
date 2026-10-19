@@ -1,6 +1,6 @@
 use super::*;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 
@@ -20,25 +20,45 @@ fn all_open_grant() -> &'static str {
     r#"[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]"#
 }
 
+/// A facade under `organization`, published as a signed bundle, over the user policy at `local`.
+///
+/// The returned directory holds the bundle and its bootstrap, so it must outlive the facade.
+fn under_organization(
+    name: &str,
+    local: Option<&Path>,
+    organization: &str,
+) -> (Scratch, GovernanceFacade) {
+    let root = Scratch::named(&format!("{name}-organization"));
+    let facade = GovernanceFacade::with_managed_paths(
+        local.map(Path::to_path_buf),
+        managed::ManagedPaths::signed(&root, organization),
+    );
+    (root, facade)
+}
+
 #[test]
 fn screenshot_permission_is_binary_default_on_and_tighten_only() {
     assert!(
-        GovernanceFacade::new(None, None)
+        GovernanceFacade::new(None)
             .snapshot()
             .authorize_screenshot()
             .allowed
     );
     let local = temporary("screenshot-local");
-    let managed = temporary("screenshot-managed");
-    for (local_value, managed_value, author) in [(true, false, "managed"), (false, true, "user")] {
-        for (path, value) in [(&local, local_value), (&managed, managed_value)] {
-            fs::write(path, policy("capture", all_open_grant(), &format!(
+    let capture = |value: bool| {
+        policy(
+            "capture",
+            all_open_grant(),
+            &format!(
                 r#"[{{"key":"{SCREENSHOTS_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
-            ))).unwrap();
-        }
-        let snapshot =
-            GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()))
-                .snapshot();
+            ),
+        )
+    };
+    for (local_value, managed_value, author) in [(true, false, "managed"), (false, true, "user")] {
+        fs::write(&local, capture(local_value)).unwrap();
+        let (_organization, facade) =
+            under_organization("screenshot", Some(&local), &capture(managed_value));
+        let snapshot = facade.snapshot();
         let decision = snapshot.authorize_screenshot();
         assert!(!decision.allowed);
         assert_eq!(decision.reason, ReasonCode::ScreenshotDenied);
@@ -60,10 +80,10 @@ fn screenshot_permission_is_binary_default_on_and_tighten_only() {
 
 #[test]
 fn a_switch_left_unset_is_on() {
-    let open = GovernanceFacade::new(None, None).snapshot();
+    let open = GovernanceFacade::new(None).snapshot();
     let unset = temporary("channel-unset");
     fs::write(&unset, policy("quiet", all_open_grant(), "[]")).unwrap();
-    let authored = GovernanceFacade::new(Some(unset.to_path_buf()), None).snapshot();
+    let authored = GovernanceFacade::new(Some(unset.to_path_buf())).snapshot();
     let on = temporary("channel-on");
     fs::write(
         &on,
@@ -74,7 +94,7 @@ fn a_switch_left_unset_is_on() {
         ),
     )
     .unwrap();
-    let switched_on = GovernanceFacade::new(Some(on.to_path_buf()), None).snapshot();
+    let switched_on = GovernanceFacade::new(Some(on.to_path_buf())).snapshot();
     for snapshot in [open, authored, switched_on] {
         for channel in [IntakeChannel::Mcp, IntakeChannel::Cli] {
             assert_eq!(snapshot.channel_refusal(channel), None, "{channel:?}");
@@ -85,27 +105,23 @@ fn a_switch_left_unset_is_on() {
 #[test]
 fn a_channel_switch_refuses_only_its_channel_and_names_its_layer() {
     let local = temporary("channel-local");
-    let managed = temporary("channel-managed");
+    let channels = |value: bool| {
+        policy(
+            "channels",
+            all_open_grant(),
+            &format!(
+                r#"[{{"key":"{MCP_CHANNEL_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
+            ),
+        )
+    };
     for (local_value, managed_value, author, tier) in [
         (true, false, PolicyAuthor::Organization, "managed"),
         (false, true, PolicyAuthor::User, "user"),
     ] {
-        for (path, value) in [(&local, local_value), (&managed, managed_value)] {
-            fs::write(
-                path,
-                policy(
-                    "channels",
-                    all_open_grant(),
-                    &format!(
-                        r#"[{{"key":"{MCP_CHANNEL_ENABLED_KEY}","value":{value},"level":"mandatory"}}]"#,
-                    ),
-                ),
-            )
-            .unwrap();
-        }
-        let snapshot =
-            GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()))
-                .snapshot();
+        fs::write(&local, channels(local_value)).unwrap();
+        let (_organization, facade) =
+            under_organization("channel", Some(&local), &channels(managed_value));
+        let snapshot = facade.snapshot();
         let (decision, refused_by) = snapshot
             .channel_refusal(IntakeChannel::Mcp)
             .expect("the switch is off");
@@ -123,7 +139,6 @@ fn a_channel_switch_refuses_only_its_channel_and_names_its_layer() {
 #[test]
 fn the_switches_a_person_reads_are_the_ones_the_executor_checks() {
     let local = temporary("channel-read");
-    let managed = temporary("channel-read-managed");
     fs::write(
         &local,
         policy(
@@ -135,12 +150,11 @@ fn the_switches_a_person_reads_are_the_ones_the_executor_checks() {
         ),
     )
     .unwrap();
-    fs::write(
-        &managed,
+    let (_organization, facade) = under_organization(
+        "channel-read",
+        Some(&local),
         r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
-    )
-    .unwrap();
-    let facade = GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()));
+    );
     let snapshot = facade.snapshot();
     let off = snapshot.channels_off();
     assert_eq!(
@@ -246,14 +260,14 @@ fn rewrite(path: &Path, content: impl AsRef<[u8]>) {
 fn snapshot_for(name: &str, source: impl AsRef<[u8]>) -> super::AuthoritySnapshot {
     let path = temporary(name);
     fs::write(&path, source).unwrap();
-    let snapshot = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
+    let snapshot = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
     drop(path);
     snapshot.as_ref().clone()
 }
 
 #[test]
 fn no_policy_allows_local_and_remote_http_destinations() {
-    let facade = GovernanceFacade::new(None, None);
+    let facade = GovernanceFacade::new(None);
     let snapshot = facade.snapshot();
     assert!(snapshot.preserves_target_names());
     assert!(snapshot.authorize_tab_close().allowed);
@@ -284,7 +298,7 @@ const WORKBENCH_PORT: u16 = 41234;
 
 #[test]
 fn the_workbench_origin_is_denied_to_agents_under_all_open() {
-    let facade = GovernanceFacade::new(None, None);
+    let facade = GovernanceFacade::new(None);
     facade.protect_workbench_port(WORKBENCH_PORT);
     let snapshot = facade.snapshot();
     for url in [
@@ -328,7 +342,7 @@ fn a_policy_grant_cannot_open_the_workbench_origin() {
         r#"{"schema":4,"name":"loopback","version":"1","grants":[{"id":"loopback","hosts":{"allow":["127.0.0.1"]},"allowed":["read","action","write","execute"]}]}"#,
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()));
     drop(path);
     facade.protect_workbench_port(WORKBENCH_PORT);
     let snapshot = facade.snapshot();
@@ -347,7 +361,7 @@ fn a_policy_grant_cannot_open_the_workbench_origin() {
 
 #[test]
 fn a_snapshot_taken_before_the_port_is_known_sees_it_once_set() {
-    let facade = GovernanceFacade::new(None, None);
+    let facade = GovernanceFacade::new(None);
     let snapshot = facade.snapshot();
     let url = "http://127.0.0.1:41234/";
     assert!(snapshot.authorize_landing(Capability::Read, url).allowed);
@@ -363,7 +377,7 @@ fn a_snapshot_taken_before_the_port_is_known_sees_it_once_set() {
 
 #[test]
 fn non_http_schemes_still_refuse_without_policy() {
-    let snapshot = GovernanceFacade::new(None, None).snapshot();
+    let snapshot = GovernanceFacade::new(None).snapshot();
     for url in [
         "chrome://extensions/",
         "chrome-extension://example/options.html",
@@ -394,17 +408,13 @@ fn never_touch_layers(
         )
     };
     let local = temporary(&format!("{name}-local"));
-    let managed = temporary(&format!("{name}-managed"));
     fs::write(&local, policy("mine", all_open_grant(), &never_touch(user))).unwrap();
-    fs::write(
-        &managed,
-        policy("org", all_open_grant(), &never_touch(organization)),
-    )
-    .unwrap();
-    GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()))
-        .snapshot()
-        .as_ref()
-        .clone()
+    let (_organization, facade) = under_organization(
+        name,
+        Some(&local),
+        &policy("org", all_open_grant(), &never_touch(organization)),
+    );
+    facade.snapshot().as_ref().clone()
 }
 
 #[test]
@@ -458,7 +468,7 @@ fn an_organization_never_touch_refusal_carries_tier_rule_and_denial_id() {
 #[test]
 fn a_non_http_scheme_stays_ghostlights_own_ceiling() {
     let authored = never_touch_layers("never-touch-scheme", &["bank.example"], &["mail.example"]);
-    let open = GovernanceFacade::new(None, None).snapshot();
+    let open = GovernanceFacade::new(None).snapshot();
     for snapshot in [&authored, open.as_ref()] {
         for url in ["chrome://extensions/", "file:///tmp/bank.example.html"] {
             let refused = snapshot.authorize_landing(Capability::Read, url);
@@ -522,7 +532,6 @@ fn local_destinations_follow_authored_host_and_capability_rules() {
 #[test]
 fn tab_close_policy_is_monotonic_across_authority_layers() {
     let local = temporary("local-tab-close");
-    let managed = temporary("managed-tab-close");
     fs::write(
         &local,
         policy(
@@ -532,17 +541,16 @@ fn tab_close_policy_is_monotonic_across_authority_layers() {
         ),
     )
     .unwrap();
-    fs::write(
-        &managed,
-        policy(
+    let (_organization, facade) = under_organization(
+        "tab-close",
+        Some(&local),
+        &policy(
             "managed",
             all_open_grant(),
             r#"[{"key":"browser.tabs.allow_close","value":true,"level":"recommended"}]"#,
         ),
-    )
-    .unwrap();
-    let snapshot =
-        GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf())).snapshot();
+    );
+    let snapshot = facade.snapshot();
     assert_eq!(
         snapshot.authorize_tab_close().reason,
         ReasonCode::TabCloseDenied
@@ -553,7 +561,6 @@ fn tab_close_policy_is_monotonic_across_authority_layers() {
 #[test]
 fn target_name_preservation_is_default_on_and_monotonic_across_layers() {
     let local = temporary("local-target-names");
-    let managed = temporary("managed-target-names");
     fs::write(
         &local,
         policy(
@@ -563,18 +570,16 @@ fn target_name_preservation_is_default_on_and_monotonic_across_layers() {
         ),
     )
     .unwrap();
-    fs::write(
-        &managed,
-        policy(
+    let (_organization, facade) = under_organization(
+        "target-names-open",
+        Some(&local),
+        &policy(
             "managed",
             all_open_grant(),
             r#"[{"key":"privacy.preserve_target_names","value":true,"level":"recommended"}]"#,
         ),
-    )
-    .unwrap();
-
-    let snapshot =
-        GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf())).snapshot();
+    );
+    let snapshot = facade.snapshot();
     assert!(!snapshot.preserves_target_names());
 
     fs::write(
@@ -586,17 +591,16 @@ fn target_name_preservation_is_default_on_and_monotonic_across_layers() {
         ),
     )
     .unwrap();
-    fs::write(
-        &managed,
-        policy(
+    let (_organization, facade) = under_organization(
+        "target-names-hidden",
+        Some(&local),
+        &policy(
             "managed",
             all_open_grant(),
             r#"[{"key":"privacy.preserve_target_names","value":false,"level":"mandatory"}]"#,
         ),
-    )
-    .unwrap();
-    let snapshot =
-        GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf())).snapshot();
+    );
+    let snapshot = facade.snapshot();
     assert!(!snapshot.preserves_target_names());
 }
 
@@ -612,7 +616,7 @@ fn configured_policy_bounds_hosts_and_capabilities() {
         ),
     )
     .unwrap();
-    let snapshot = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
+    let snapshot = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
     drop(path);
     assert!(
         snapshot
@@ -657,7 +661,7 @@ fn authority_requires_every_independent_capability_in_a_compound_set() {
             ),
         )
         .unwrap();
-    let snapshot = GovernanceFacade::new(Some(path.to_path_buf()), None).snapshot();
+    let snapshot = GovernanceFacade::new(Some(path.to_path_buf())).snapshot();
     assert!(
         snapshot
             .authorize_requirements(CapabilitySet::READ.union(CapabilitySet::WRITE))
@@ -842,19 +846,17 @@ fn an_empty_policy_refuses_ordinary_hosts_and_protected_resources_stay_protected
 
 #[test]
 fn layers_compose_by_intersection_and_snapshots_have_deterministic_identity() {
-    let managed = temporary("compose-managed");
     let local = temporary("compose-local");
-    fs::write(
-        &managed,
-        r#"{"schema":4,"name":"managed","version":"1","grants":[]}"#,
-    )
-    .unwrap();
     fs::write(
             &local,
             r#"{"schema":4,"name":"local","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
         )
         .unwrap();
-    let facade = GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()));
+    let (_organization, facade) = under_organization(
+        "compose",
+        Some(&local),
+        r#"{"schema":4,"name":"managed","version":"1","grants":[]}"#,
+    );
     let first = facade.snapshot();
     let same = facade.snapshot();
     let denied = first.authorize_landing(Capability::Read, "https://example.com");
@@ -933,7 +935,7 @@ fn maintained_policy_examples_match_the_schema_four_decoder() {
 #[test]
 fn authoring_validates_before_it_replaces_and_never_leaves_the_product_failing_closed() {
     let path = temporary("authored-policy");
-    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf());
     // A machine that has never authored one is open, not failing closed.
     assert!(
         facade
@@ -995,7 +997,7 @@ fn a_policy_file_ghostlight_does_not_own_is_never_written_back() {
         br#"{"schema":4,"name":"theirs","version":"1","grants":[]}"#,
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()));
     assert!(matches!(
         facade
             .apply_user_policy(r#"{"schema":4,"name":"mine","version":"1","grants":[]}"#)
@@ -1011,15 +1013,17 @@ fn a_policy_file_ghostlight_does_not_own_is_never_written_back() {
 
 #[test]
 fn a_candidate_policy_is_decided_under_the_organization_ceiling_without_being_applied() {
-    let managed = temporary("preview-managed");
+    let organization = Scratch::named("preview-organization");
     let owned = temporary("preview-user");
-    fs::write(
-            &managed,
-            br#"{"schema":4,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
-        )
-        .unwrap();
-    let facade =
-        GovernanceFacade::owning_user_policy(owned.to_path_buf(), Some(managed.to_path_buf()));
+    let facade = GovernanceFacade::publishing(
+        PolicySources::owning(owned.to_path_buf()),
+        Some(managed::ManagedAuthority::from_paths(
+            managed::ManagedPaths::signed(
+                &organization,
+                r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"work","hosts":{"allow":["example.com"]},"allowed":["read","action"]}]}"#,
+            ),
+        )),
+    );
 
     let decided = facade
             .candidate_snapshot(
@@ -1054,7 +1058,7 @@ fn an_owned_schema_three_user_policy_moves_at_load_and_keeps_a_backup() {
     let path = temporary("owned-schema-three");
     let original = r#"{"schema":3,"name":"mine","version":"1","mode":"enforce","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}],"config":[{"key":"channels.cli.enabled","value":true,"level":"mandatory"},{"key":"policy.user.enabled","value":false,"level":"mandatory"},{"key":"content.frames.handling","value":"permitted_content","level":"mandatory"}]}"#;
     fs::write(&path, original).unwrap();
-    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf());
     let snapshot = facade.snapshot();
     assert!(facade.diagnostics().authority_valid);
     assert!(
@@ -1086,7 +1090,7 @@ fn a_schema_3_user_policy_moved_at_load_keeps_owner_only_access() {
         use std::os::unix::fs::PermissionsExt as _;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
     }
-    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf());
     assert!(facade.diagnostics().authority_valid);
     assert!(manifest::parse(&fs::read_to_string(&path).unwrap(), "moved").is_ok());
     crate::install::record::assert_owner_only(&path);
@@ -1098,7 +1102,7 @@ fn an_owned_schema_three_user_policy_that_would_change_meaning_fails_closed_unto
     let path = temporary("owned-observe");
     let original = r#"{"schema":3,"name":"mine","version":"1","mode":"observe","grants":[]}"#;
     fs::write(&path, original).unwrap();
-    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf());
     assert_eq!(
         facade
             .snapshot()
@@ -1112,49 +1116,27 @@ fn an_owned_schema_three_user_policy_that_would_change_meaning_fails_closed_unto
 }
 
 #[test]
-fn administrator_schema_three_files_fail_closed_and_are_never_rewritten() {
-    let managed = temporary("admin-managed");
+fn a_named_schema_three_user_policy_fails_closed_and_is_never_rewritten() {
     let named = temporary("admin-named");
     let document = r#"{"schema":3,"name":"theirs","version":"1","grants":[]}"#;
-    for (user, organization) in [
-        (Some(named.to_path_buf()), None),
-        (None, Some(managed.to_path_buf())),
-    ] {
-        fs::write(&managed, document).unwrap();
-        fs::write(&named, document).unwrap();
-        let facade = GovernanceFacade::new(user, organization);
-        assert_eq!(
-            facade
-                .snapshot()
-                .authorize_capability(Capability::Read)
-                .reason,
-            ReasonCode::InvalidAuthority
-        );
-        for path in [&managed, &named] {
-            assert_eq!(fs::read_to_string(path).unwrap(), document);
-            assert!(!migrate::backup_path(path).exists());
-        }
-    }
-}
-
-#[test]
-fn invalid_managed_authority_fails_closed() {
-    let path = temporary("invalid-managed");
-    fs::write(&path, br#"{"version":1,"managed":false}"#).unwrap();
-    let facade = GovernanceFacade::new(None, Some(path.to_path_buf()));
-    let snapshot = facade.snapshot();
+    fs::write(&named, document).unwrap();
+    let facade = GovernanceFacade::new(Some(named.to_path_buf()));
     assert_eq!(
-        snapshot.authorize_capability(Capability::Read).reason,
+        facade
+            .snapshot()
+            .authorize_capability(Capability::Read)
+            .reason,
         ReasonCode::InvalidAuthority
     );
-    assert!(!facade.diagnostics().authority_valid);
+    assert_eq!(fs::read_to_string(&named).unwrap(), document);
+    assert!(!migrate::backup_path(&named).exists());
 }
 
 #[test]
 fn a_local_policy_that_never_validated_fails_closed_everywhere_it_is_reported() {
     let path = temporary("invalid-local");
     fs::write(&path, "{half-written").unwrap();
-    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()));
     assert_eq!(
         facade
             .snapshot()
@@ -1172,17 +1154,6 @@ fn a_local_policy_that_never_validated_fails_closed_everywhere_it_is_reported() 
 }
 
 #[test]
-fn an_unreachable_managed_authority_fails_closed_from_cold_start() {
-    let path = temporary("missing-managed");
-    let facade = GovernanceFacade::new(None, Some(path.to_path_buf()));
-    let snapshot = facade.snapshot();
-    assert_eq!(
-        snapshot.authorize_capability(Capability::Read).reason,
-        ReasonCode::InvalidAuthority
-    );
-}
-
-#[test]
 fn snapshot_does_not_change_when_policy_file_changes() {
     let path = temporary("immutable");
     fs::write(
@@ -1194,7 +1165,7 @@ fn snapshot_does_not_change_when_policy_file_changes() {
         ),
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()));
     let first = facade.snapshot();
     rewrite(
         &path,
@@ -1229,7 +1200,7 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
         ),
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()));
     assert!(
         facade
             .snapshot()
@@ -1279,7 +1250,7 @@ fn invalid_reload_keeps_last_valid_authority_until_a_valid_replacement_arrives()
 /// and no deadline to reconcile.
 #[test]
 fn pause_prevents_the_next_browser_effect_and_resume_restores_it() {
-    let facade = GovernanceFacade::new(None, None);
+    let facade = GovernanceFacade::new(None);
     assert!(facade.runtime_decision().allowed);
 
     assert_eq!(
@@ -1307,7 +1278,7 @@ fn pause_prevents_the_next_browser_effect_and_resume_restores_it() {
 /// directive gets the same refusal rather than quietly resuming the work a person interrupted.
 #[test]
 fn stop_is_still_terminal() {
-    let facade = GovernanceFacade::new(None, None);
+    let facade = GovernanceFacade::new(None);
     assert_eq!(
         facade.apply_runtime_intent(RuntimeControlIntent::EndSession),
         RuntimeControlState::Ended
@@ -1415,7 +1386,7 @@ fn every_state_changes_only_through_an_act_it_offers() {
 
 #[test]
 fn human_control_intents_are_authoritative_and_end_is_terminal() {
-    let facade = GovernanceFacade::new(None, None);
+    let facade = GovernanceFacade::new(None);
     assert_eq!(facade.runtime_state(), RuntimeControlState::Active);
     assert_eq!(
         facade.apply_runtime_intent(RuntimeControlIntent::ToggleHold),
@@ -1451,7 +1422,7 @@ fn a_reader_is_never_held_up_by_the_sources_lock() {
         ),
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()));
     let sources = facade.hold_sources();
 
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -1480,7 +1451,7 @@ fn a_reader_is_never_held_up_by_the_sources_lock() {
 #[test]
 fn a_workbench_edit_is_visible_at_once_and_a_removal_returns_to_all_open() {
     let path = temporary("workbench-edit");
-    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.to_path_buf());
     assert!(
         facade
             .snapshot()
@@ -1520,7 +1491,7 @@ fn a_workbench_edit_is_visible_at_once_and_a_removal_returns_to_all_open() {
 fn control_changes_reach_the_observer_once_each() {
     use std::sync::Mutex;
 
-    let facade = GovernanceFacade::new(None, None);
+    let facade = GovernanceFacade::new(None);
     let seen: Arc<Mutex<Vec<RuntimeControlState>>> = Arc::default();
     let recorder = Arc::clone(&seen);
     facade
@@ -1553,7 +1524,7 @@ fn the_authored_policy_and_its_directory_are_private() {
 
     let directory = Scratch::named("authored-policy");
     let path = directory.join("policy").join("user.json");
-    let facade = GovernanceFacade::owning_user_policy(path.clone(), None);
+    let facade = GovernanceFacade::owning_user_policy(path.clone());
     facade
         .apply_user_policy(r#"{"schema":4,"name":"mine","version":"1","grants":[]}"#)
         .unwrap();

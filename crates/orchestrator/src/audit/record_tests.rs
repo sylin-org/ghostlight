@@ -347,7 +347,7 @@ fn permitted(
     requirements: CapabilitySet,
     url: &str,
 ) -> (AuthoritySnapshot, Decision, evidence::PermissionTrace) {
-    let snapshot = crate::governance::GovernanceFacade::new(None, None)
+    let snapshot = crate::governance::GovernanceFacade::new(None)
         .snapshot()
         .as_ref()
         .clone();
@@ -394,8 +394,7 @@ fn click_refused_by_policy() -> AuditRecord {
         r#"{"schema":4,"name":"research","version":"1","grants":[{"id":"reading","hosts":{"allow":["example.com"]},"allowed":["read"]}]}"#,
     )
     .unwrap();
-    let snapshot =
-        crate::governance::GovernanceFacade::new(Some(policy.to_path_buf()), None).snapshot();
+    let snapshot = crate::governance::GovernanceFacade::new(Some(policy.to_path_buf())).snapshot();
     drop(policy);
     let (decision, check) =
         snapshot.authorize_with_evidence(CapabilitySet::ACTION, Some("https://example.com/"));
@@ -615,7 +614,7 @@ fn a_line_written_before_audit_v2_reads_and_shows_in_history() {
     let history = crate::workbench::WorkbenchFacade::new(
         projection,
         crate::workspace::WorkspaceStore::default(),
-        crate::governance::GovernanceFacade::new(None, None),
+        crate::governance::GovernanceFacade::new(None),
         std::sync::Arc::new(crate::browser::RelayBrowserPort::new(
             "audit-record-test".into(),
             crate::browser::adapter::chromium::protocol4::assets::page_assets(),

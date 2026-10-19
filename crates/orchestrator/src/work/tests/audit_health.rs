@@ -63,7 +63,7 @@ fn strict_audit_stops_later_flow_work_under_continue_and_keeps_prior_effects() {
     )
     .unwrap();
     let (mut executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
     executor.audit = Arc::new(crate::audit::AuditRecorder::new(
         Arc::new(UnwritableAudit),
         executor.workbench.clone(),
@@ -143,7 +143,7 @@ fn audit_health_is_rechecked_after_an_earlier_admission() {
     )
     .unwrap();
     let (mut executor, _, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
     executor.audit = Arc::new(crate::audit::AuditRecorder::new(
         Arc::new(UnwritableAudit),
         executor.workbench.clone(),

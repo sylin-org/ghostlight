@@ -162,7 +162,6 @@ fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
         let path = governed.then(|| policy_file(false));
         let (executor, browser, _, workspace, _) = fixture_with_governance(GovernanceFacade::new(
             path.as_ref().map(|path| path.to_path_buf()),
-            None,
         ));
         open(&executor, &browser, &workspace);
         browser.set_documents(7, DocumentInventory::default());
@@ -187,7 +186,7 @@ fn permitted_screenshots_do_not_filter_or_inventory_embedded_documents() {
 #[test]
 fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
     let path = policy_file(true);
-    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()));
     let (executor, browser, _, workspace, audit) = fixture_with_governance(governance.clone());
     open(&executor, &browser, &workspace);
     browser.push(Ok(BrowserOutcome::targets(
@@ -253,7 +252,7 @@ fn disabling_screenshots_refuses_every_capture_branch_before_dispatch() {
 fn excluded_documents_are_filtered_before_extraction_and_hosts_stay_in_human_details() {
     let path = policy_file(false);
     let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::Text {
@@ -307,7 +306,7 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
     for child_supported in [true, false] {
         let path = policy_file(false);
         let (executor, browser, _, workspace, _) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
         open(&executor, &browser, &workspace);
         browser.push(Ok(BrowserOutcome::targets(
             7,
@@ -354,7 +353,7 @@ fn a_permitted_target_survives_an_unrelated_exclusion() {
 fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
     let path = policy_file(true);
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::targets(
@@ -393,7 +392,7 @@ fn readable_embedded_field_is_not_writable_and_batch_never_starts() {
 fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
     let path = policy_file(false);
     let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::Observed {
@@ -440,8 +439,7 @@ fn unseen_documents_cannot_prove_absence_and_scripts_do_not_cross_exclusions() {
 
 #[test]
 fn all_open_scripts_keep_their_browser_behavior_without_document_host_restrictions() {
-    let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(None, None));
+    let (executor, browser, _, workspace, _) = fixture_with_governance(GovernanceFacade::new(None));
     open(&executor, &browser, &workspace);
     let mut documents = inventory(false);
     documents.documents[1].url = "about:blank".into();
@@ -484,7 +482,7 @@ fn every_recording_destination_requires_current_access_to_all_captured_sources()
     ] {
         let path = policy_file(false);
         let (executor, browser, _, workspace, _) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
         open(&executor, &browser, &workspace);
         let mut summary = recording_summary(RecordingState::Frozen, "https://example.com/");
         summary
@@ -516,7 +514,7 @@ fn an_unseen_placeholder_makes_restricted_unbounded_work_refuse_before_dispatch(
     for supported in [false, true] {
         let path = policy_file(false);
         let (executor, browser, _, workspace, audit) =
-            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+            fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
         open(&executor, &browser, &workspace);
         browser.set_documents(
             7,

@@ -301,7 +301,7 @@ fn targeted_focused_and_selector_typing_keep_action_authority_through_landing() 
                     {"id":"landing","hosts":{"allow":["landing.example"]},"allowed":[if destination_action {"action"} else {"read"}]}
                 ]
             })).unwrap()).unwrap();
-            let governance = GovernanceFacade::new(Some(policy.to_path_buf()), None);
+            let governance = GovernanceFacade::new(Some(policy.to_path_buf()));
             let (executor, browser, _, workspace, audit) =
                 fixture_with_governance(governance.clone());
             browser.push(Ok(BrowserOutcome::TabOpened {
@@ -423,7 +423,7 @@ fn a_read_denied_typing_postcondition_preserves_the_applied_landing_without_hold
                 ]
             })).unwrap()).unwrap();
             let (executor, browser, _, workspace, audit) =
-                fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
+                fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf())));
             browser.push(Ok(BrowserOutcome::TabOpened {
                 tab: tab(7, "https://example.com/"),
                 committed_urls: vec!["https://example.com/".into()],

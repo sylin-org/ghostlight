@@ -249,7 +249,7 @@ impl Fixture {
         let facade = WorkbenchFacade::new(
             WorkbenchProjection::default(),
             crate::workspace::WorkspaceStore::default(),
-            GovernanceFacade::owning_user_policy(policy_path, None),
+            GovernanceFacade::owning_user_policy(policy_path),
             Arc::new(crate::browser::RelayBrowserPort::new(
                 "epoch".into(),
                 crate::browser::adapter::chromium::protocol4::assets::page_assets(),
@@ -1546,7 +1546,7 @@ fn a_facade_with_no_server_reports_watching_on_and_no_address() {
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         Arc::new(crate::browser::RelayBrowserPort::new(
             "epoch".into(),
             crate::browser::adapter::chromium::protocol4::assets::page_assets(),
@@ -2532,7 +2532,7 @@ fn a_facade_that_is_not_served_cannot_change_watching() {
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         Arc::new(crate::browser::RelayBrowserPort::new(
             "epoch".into(),
             crate::browser::adapter::chromium::protocol4::assets::page_assets(),
@@ -2549,7 +2549,7 @@ fn a_facade_that_is_not_served_does_not_claim_anyone_can_watch() {
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         Arc::new(crate::browser::RelayBrowserPort::new(
             "epoch".into(),
             crate::browser::adapter::chromium::protocol4::assets::page_assets(),

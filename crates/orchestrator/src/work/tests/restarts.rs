@@ -402,7 +402,7 @@ fn restarting_mid_call() -> (
         restarted_at: Mutex::new(None),
     });
     let (executor, workspace, _) =
-        executor_on(GovernanceFacade::new(None, None), &workspaces, port.clone());
+        executor_on(GovernanceFacade::new(None), &workspaces, port.clone());
     let handle = open_agent_tab(&executor, &browser, &workspace);
     *port.armed.lock().unwrap() = true;
     (executor, browser, port, workspaces, workspace, handle)

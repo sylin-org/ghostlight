@@ -135,7 +135,7 @@ fn setup_view() -> crate::language::setup::SetupView {
 /// A snapshot with every field filled, so the keys of each part are all the keys it can have.
 fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
     let path = temp_policy();
-    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()));
     let (_, check) = governance
         .snapshot()
         .authorize_with_evidence(CapabilitySet::READ, Some("https://example.com/"));
@@ -722,7 +722,7 @@ fn activity_keys(audience: Audience) -> BTreeSet<String> {
 }
 
 fn authority(path: &Path) -> EffectiveAuthority {
-    let mut authority = GovernanceFacade::new(Some(path.to_owned()), None).effective_authority();
+    let mut authority = GovernanceFacade::new(Some(path.to_owned())).effective_authority();
     authority.organization = Some(crate::governance::effective::OrganizationIdentity {
         name: Some("Example Org".into()),
         statement: Some("Because.".into()),

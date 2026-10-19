@@ -24,7 +24,7 @@ fn mcp_off() -> (Scratch, GovernanceFacade) {
         )),
     )
     .unwrap();
-    let facade = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(path.to_path_buf()));
     (path, facade)
 }
 

@@ -1227,9 +1227,9 @@ mod tests {
             )
             .unwrap();
             // The facade reads the file once here; nothing in these tests refreshes it.
-            GovernanceFacade::new(Some(path.to_path_buf()), None)
+            GovernanceFacade::new(Some(path.to_path_buf()))
         } else {
-            GovernanceFacade::new(None, None)
+            GovernanceFacade::new(None)
         };
         let browser = Arc::new(FakeBrowser::default());
         browser.connect(Vec::new());

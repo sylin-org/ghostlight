@@ -43,7 +43,7 @@ fn a_flow_record_keeps_its_own_admission_check() {
 fn each_flow_step_record_holds_only_its_own_checks_and_coverage() {
     let path = policy_file(false);
     let (executor, browser, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
     open(&executor, &browser, &workspace);
     browser.set_documents(7, inventory(true));
     browser.push(Ok(BrowserOutcome::Text {
@@ -210,7 +210,7 @@ impl BrowserPort for HeldRead {
 fn two_calls_in_one_workspace_keep_their_own_findings() {
     let path = policy_file(false);
     let (mut executor, fake, _, workspace, audit) =
-        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf()), None));
+        fixture_with_governance(GovernanceFacade::new(Some(path.to_path_buf())));
     open(&executor, &fake, &workspace);
     fake.set_documents(7, inventory(true));
     fake.push(Ok(BrowserOutcome::Text {

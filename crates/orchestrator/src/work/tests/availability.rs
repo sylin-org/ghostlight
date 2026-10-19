@@ -96,10 +96,7 @@ fn manual_startup() -> (GovernanceFacade, Scratch) {
         all_open_policy_with(r#"[{"key":"browser.startup","value":"manual","level":"mandatory"}]"#),
     )
     .unwrap();
-    (
-        GovernanceFacade::new(Some(policy.to_path_buf()), None),
-        policy,
-    )
+    (GovernanceFacade::new(Some(policy.to_path_buf())), policy)
 }
 
 fn list_tabs(
@@ -178,7 +175,7 @@ fn await_unregistered(port: &RelayBrowserPort) {
 fn a_pinned_browser_that_reconnects_takes_the_call() {
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (executor, workspaces, workspace) =
-        relay_fixture(Arc::clone(&port), GovernanceFacade::new(None, None));
+        relay_fixture(Arc::clone(&port), GovernanceFacade::new(None));
 
     let first = attach(&port, false);
     bind_tab(&workspaces, &workspace, RELAY_BROWSER);
@@ -205,7 +202,7 @@ fn a_silent_pinned_browser_that_answers_again_takes_the_call() {
         },
     ));
     let (executor, workspaces, workspace) =
-        relay_fixture(Arc::clone(&port), GovernanceFacade::new(None, None));
+        relay_fixture(Arc::clone(&port), GovernanceFacade::new(None));
     let fake = Arc::new(attach(&port, false));
     bind_tab(&workspaces, &workspace, RELAY_BROWSER);
 
@@ -328,10 +325,7 @@ fn on_demand_startup() -> (GovernanceFacade, Scratch) {
         ),
     )
     .unwrap();
-    (
-        GovernanceFacade::new(Some(policy.to_path_buf()), None),
-        policy,
-    )
+    (GovernanceFacade::new(Some(policy.to_path_buf())), policy)
 }
 
 /// The installed browser the relay fixture's scripted extensions connect as: their hello
@@ -936,7 +930,7 @@ fn launch_without_extension(
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
     let (mut executor, _, workspace) = relay_fixture(
         Arc::clone(&port),
-        GovernanceFacade::new(Some(policy.to_path_buf()), None),
+        GovernanceFacade::new(Some(policy.to_path_buf())),
     );
     executor
         .workbench

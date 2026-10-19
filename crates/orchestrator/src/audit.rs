@@ -679,7 +679,7 @@ mod tests {
             WorkbenchFacade::new(
                 projection,
                 crate::workspace::WorkspaceStore::default(),
-                crate::governance::GovernanceFacade::new(None, None),
+                crate::governance::GovernanceFacade::new(None),
                 Arc::new(crate::browser::RelayBrowserPort::new(
                     "audit-recovery-test".into(),
                     crate::browser::adapter::chromium::protocol4::assets::page_assets(),

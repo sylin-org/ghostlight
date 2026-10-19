@@ -99,7 +99,7 @@ fn projection_tracks_current_work_then_moves_it_to_history() {
 
     let durable = Arc::new(MemoryAudit::default());
     let sink = AuditRecorder::new(durable.clone(), projection.clone());
-    let governance = GovernanceFacade::new(None, None);
+    let governance = GovernanceFacade::new(None);
     let snapshot = governance.snapshot();
     let record = AuditRecord::now(
         "invocation_1",
@@ -161,7 +161,7 @@ fn operation_lifetime_publishes_one_gapless_sequence() {
         workspace: "workspace_1".into(),
         physical_id: None,
     });
-    let governance = GovernanceFacade::new(None, None);
+    let governance = GovernanceFacade::new(None);
     let authority = governance.snapshot();
     AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone()).record(
         &AuditRecord::now(
@@ -388,7 +388,7 @@ fn a_preview_reports_recorded_work_a_candidate_policy_would_have_refused() {
     let facade = WorkbenchFacade::new(
         projection,
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         Arc::new(crate::browser::RelayBrowserPort::new(
             "epoch".into(),
             crate::browser::adapter::chromium::protocol4::assets::page_assets(),
@@ -524,7 +524,7 @@ fn pause_and_resume_apply_while_no_browser_is_connected() {
     use crate::browser::adapter::RuntimeControlState;
     use crate::language::readiness::Readiness;
 
-    let governance = GovernanceFacade::new(None, None);
+    let governance = GovernanceFacade::new(None);
     let browser = ControlledBrowser::new(false, false);
     let facade = facade_over(governance.clone(), browser.clone());
     let before = facade.snapshot();
@@ -587,7 +587,7 @@ fn a_control_confirmation_states_the_authority_and_never_browser_delivery() {
     // person hears the same thing, because the authority's state is the whole effect.
     for (connected, publish_fails) in [(true, false), (true, true), (false, false)] {
         let browser = ControlledBrowser::new(connected, publish_fails);
-        let governance = GovernanceFacade::new(None, None);
+        let governance = GovernanceFacade::new(None);
         governance.relay_runtime_state(browser.clone());
         let facade = facade_over(governance, browser.clone());
         let result = facade.apply_runtime_intent(WorkbenchRuntimeIntent::Hold);
@@ -614,7 +614,7 @@ fn an_invalid_policy_reads_as_not_ready_on_every_surface() {
     let path = temporary_policy("invalid");
     std::fs::write(&path, "{half-written").unwrap();
     let facade = facade_over(
-        GovernanceFacade::new(Some(path.to_path_buf()), None),
+        GovernanceFacade::new(Some(path.to_path_buf())),
         ControlledBrowser::new(true, false),
     );
     let snapshot = facade.snapshot();
@@ -661,7 +661,7 @@ fn switched_off_channels_are_said_on_the_band_and_in_the_rules_check() {
         )
         .unwrap();
         let facade = facade_over(
-            GovernanceFacade::new(Some(path.to_path_buf()), None),
+            GovernanceFacade::new(Some(path.to_path_buf())),
             ControlledBrowser::new(true, false),
         );
         let snapshot = facade.snapshot();
@@ -679,7 +679,7 @@ fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
 
     let path = temporary_policy("retained");
     std::fs::write(&path, READ_ONLY_POLICY).unwrap();
-    let governance = GovernanceFacade::new(Some(path.to_path_buf()), None);
+    let governance = GovernanceFacade::new(Some(path.to_path_buf()));
     let facade = facade_over(governance.clone(), ControlledBrowser::new(true, false));
     let applied = facade.snapshot();
     assert_eq!(applied.readiness.state, Readiness::Ready);
@@ -793,7 +793,7 @@ fn a_snapshot_is_never_newer_than_the_changes_it_claims() {
     let facade = WorkbenchFacade::new(
         projection.clone(),
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         Arc::new(BusyBrowser {
             projection,
             fired: std::sync::atomic::AtomicBool::new(false),
@@ -841,7 +841,7 @@ fn a_pause_says_where_it_came_from_and_a_repeat_says_nothing_new() {
     use crate::language::workbench as words;
 
     let facade = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
     );
     let events = Arc::new(Events::default());
@@ -904,7 +904,7 @@ fn work_that_only_waits_leaves_the_band_ready() {
     let facade = WorkbenchFacade::new(
         projection.clone(),
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -946,7 +946,7 @@ fn work_and_saving_health_refresh_the_status_and_connections_without_a_pull() {
     let facade = WorkbenchFacade::new(
         projection.clone(),
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -991,7 +991,7 @@ fn work_and_saving_health_refresh_the_status_and_connections_without_a_pull() {
 #[test]
 fn the_authority_id_tags_the_policy_hint() {
     let path = temporary_policy("hint");
-    let governance = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
+    let governance = GovernanceFacade::owning_user_policy(path.to_path_buf());
     let facade = facade_over(governance.clone(), ControlledBrowser::new(true, false));
     let events = Arc::new(Events::default());
     facade.attach_events(events.clone());
@@ -1090,7 +1090,7 @@ fn facade_with_acts(attach: bool) -> (Scratch, WorkbenchFacade, Arc<RecordingAct
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         crate::workspace::WorkspaceStore::default(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         Arc::new(crate::browser::RelayBrowserPort::new(
             "epoch".into(),
             crate::browser::adapter::chromium::protocol4::assets::page_assets(),
@@ -1214,7 +1214,7 @@ fn every_change_the_orchestrator_publishes_carries_the_kind_the_window_reads() {
     };
 
     let snapshot = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
     )
     .snapshot();
@@ -1481,7 +1481,7 @@ fn agents_are_counted_as_at_a_glance_groups_them_and_connections_by_intake() {
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         workspaces,
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -1518,7 +1518,7 @@ fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         workspaces,
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(false, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -1595,7 +1595,7 @@ fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::
     let facade = WorkbenchFacade::new(
         projection.clone(),
         workspaces,
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(false, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     )
@@ -1614,7 +1614,7 @@ fn one_agent_across_the_window(reported: &str, hosts: &[&str]) -> crate::agent::
         received_at_ms: crate::audit::unix_ms(),
     });
     let recorder = AuditRecorder::new(Arc::new(MemoryAudit::default()), projection.clone());
-    let governance = GovernanceFacade::new(None, None);
+    let governance = GovernanceFacade::new(None);
     let record = AuditRecord::now(
         "invocation_done",
         workspace.as_str(),
@@ -1656,7 +1656,7 @@ fn facade_with(
     let facade = WorkbenchFacade::new(
         projection.clone(),
         workspaces.clone(),
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(false, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -1776,7 +1776,7 @@ fn the_search_names_each_page_as_its_tab_does() {
     use crate::language::workbench as words;
 
     let facade = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(false, false),
     );
     let tabs = include_str!("../../ui/lib/words.js");
@@ -1815,7 +1815,7 @@ fn a_session_that_reported_no_name_is_the_unknown_agent_and_its_chip_keeps_only_
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         workspaces,
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(false, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -1841,7 +1841,7 @@ fn a_session_that_reported_no_name_is_the_unknown_agent_and_its_chip_keeps_only_
 #[test]
 fn a_service_with_nothing_connected_counts_nothing() {
     let facade = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(false, false),
     );
     assert_eq!(
@@ -1855,7 +1855,7 @@ fn the_controls_are_published_when_they_differ_and_not_otherwise() {
     use crate::browser::adapter::RuntimeControlState;
 
     let facade = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
     );
     let events = Arc::new(Events::default());
@@ -1976,7 +1976,7 @@ impl SetupBench {
         let facade = WorkbenchFacade::new(
             projection.clone(),
             workspaces.clone(),
-            GovernanceFacade::new(None, None),
+            GovernanceFacade::new(None),
             browser.clone(),
             crate::diagnostics::DiagnosticsHub::for_tests(),
         )
@@ -2044,7 +2044,7 @@ fn a_request_that_reached_a_browser(workspace: &str) -> AuditRecord {
 #[test]
 fn a_service_that_tracks_no_setup_announces_none() {
     let facade = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
     );
     let events = Arc::new(Events::default());
@@ -2322,7 +2322,7 @@ fn with_no_browser_the_glance_says_which_browser_a_request_starts_and_only_then(
     ] {
         let path = startup_policy(posture);
         let facade = facade_over(
-            GovernanceFacade::new(Some(path.to_path_buf()), None),
+            GovernanceFacade::new(Some(path.to_path_buf())),
             ControlledBrowser::new(false, false),
         )
         .with_installed_browsers(vec![chrome()]);
@@ -2368,7 +2368,7 @@ fn a_browser_that_starts_on_request_leaves_the_band_ready_and_status_passing() {
     ] {
         let path = startup_policy(posture);
         let facade = facade_over(
-            GovernanceFacade::new(Some(path.to_path_buf()), None),
+            GovernanceFacade::new(Some(path.to_path_buf())),
             ControlledBrowser::new(false, false),
         )
         .with_installed_browsers(vec![chrome.clone()]);
@@ -2394,7 +2394,7 @@ fn the_status_checks_say_ghostlight_browser_rules_and_history_in_plain_words() {
     use crate::language::workbench as words;
 
     let snapshot = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
     )
     .snapshot();
@@ -2434,7 +2434,7 @@ fn with_no_browser_and_no_installed_one_the_glance_says_no_browser() {
 
     let path = startup_policy("on_demand");
     let facade = facade_over(
-        GovernanceFacade::new(Some(path.to_path_buf()), None),
+        GovernanceFacade::new(Some(path.to_path_buf())),
         ControlledBrowser::new(false, false),
     )
     .with_installed_browsers(Vec::new());
@@ -2446,7 +2446,7 @@ fn with_no_browser_and_no_installed_one_the_glance_says_no_browser() {
     drop(path);
 
     let connected = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
     )
     .with_installed_browsers(vec![chrome()]);
@@ -2463,7 +2463,7 @@ fn a_snapshot_never_waits_on_another_reading_the_installed_browsers() {
 
     let path = startup_policy("on_demand");
     let facade = facade_over(
-        GovernanceFacade::new(Some(path.to_path_buf()), None),
+        GovernanceFacade::new(Some(path.to_path_buf())),
         ControlledBrowser::new(false, false),
     );
     let (entered, reading) = mpsc::channel();
@@ -2522,7 +2522,7 @@ fn each_browser_counts_the_tabs_of_the_sessions_that_work_in_it() {
     let facade = WorkbenchFacade::new(
         WorkbenchProjection::default(),
         workspaces,
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(true, false),
         crate::diagnostics::DiagnosticsHub::for_tests(),
     );
@@ -2684,7 +2684,7 @@ fn the_search_offers_the_browser_work_section_for_browser_work() {
     use crate::language::workbench as words;
 
     let facade = facade_over(
-        GovernanceFacade::new(None, None),
+        GovernanceFacade::new(None),
         ControlledBrowser::new(false, false),
     );
     let hit = facade

@@ -64,6 +64,31 @@ impl ManagedPaths {
             status: Some(path.join("managed-status.json")),
         }
     }
+
+    /// Paths under `root` whose bootstrap names one local bundle signed over `manifest`, so a test
+    /// layers an organization policy the one way an administrator publishes it.
+    #[cfg(test)]
+    pub(crate) fn signed(root: &Path, manifest: &str) -> Self {
+        const SEED: [u8; 32] = [43; 32];
+        const SOURCE: &str = "org.bundle";
+        let paths = Self::under(root);
+        let manifest = serde_json::from_str(manifest).expect("a test manifest is JSON");
+        fs::write(
+            root.join(SOURCE),
+            bundle::sign(&SEED, None, 1, manifest, None),
+        )
+        .expect("the test bundle is written");
+        let bootstrap = serde_json::json!({
+            "source": SOURCE,
+            "pubkey_ed25519": encode_hex(&crypto::signing::ed25519_public(&SEED)),
+        });
+        fs::write(
+            &paths.bootstrap,
+            serde_json::to_vec_pretty(&bootstrap).expect("the bootstrap serializes"),
+        )
+        .expect("the test bootstrap is written");
+        paths
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
@@ -828,7 +853,7 @@ mod tests {
         )
         .unwrap();
         write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let facade = super::super::GovernanceFacade::with_managed_paths(paths);
+        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
 
         let snapshot = facade.snapshot();
 
@@ -933,7 +958,7 @@ mod tests {
             |sequence, name| bundle::sign(&seed, None, sequence, manifest(name, "read"), None);
         fs::write(&source, signed(12, "org-a")).unwrap();
         write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
-        let facade = super::super::GovernanceFacade::with_managed_paths(paths);
+        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
         let first = facade.snapshot();
         assert_eq!(first.managed_sequence, Some(12));
 
@@ -1031,7 +1056,7 @@ mod tests {
         .unwrap();
         write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
         let status = paths.status.clone().unwrap();
-        let facade = super::super::GovernanceFacade::with_managed_paths(paths);
+        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
         let status = fs::read_to_string(status).unwrap();
         (root, facade, status)
     }
@@ -1173,5 +1198,79 @@ mod tests {
         assert!(status.contains("Example Org"), "{status}");
         assert!(!status.contains("Northwind"), "{status}");
         assert!(!status.contains("it@northwind.example"), "{status}");
+    }
+
+    /// A facade under the bootstrap at `paths`, and whether every read is refused for invalid
+    /// authority, as the facade enforces and as it reports.
+    fn fails_closed(paths: ManagedPaths) -> (super::super::GovernanceFacade, bool) {
+        let facade = super::super::GovernanceFacade::with_managed_paths(None, paths);
+        let refused = facade
+            .snapshot()
+            .authorize_capability(super::super::Capability::Read)
+            .reason
+            == super::super::ReasonCode::InvalidAuthority;
+        let reported = !facade.diagnostics().authority_valid;
+        (facade, refused && reported)
+    }
+
+    #[test]
+    fn invalid_managed_authority_fails_closed() {
+        let root = directory("invalid");
+        let paths = ManagedPaths::under(&root);
+        fs::write(root.join("org.bundle"), br#"{"version":1,"managed":false}"#).unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &[44_u8; 32]);
+        assert!(fails_closed(paths).1);
+    }
+
+    #[test]
+    fn an_unreachable_managed_authority_fails_closed_from_cold_start() {
+        let root = directory("unreachable");
+        let paths = ManagedPaths::under(&root);
+        write_bootstrap(&paths.bootstrap, "missing.bundle", &[45_u8; 32]);
+        assert!(fails_closed(paths).1);
+    }
+
+    #[test]
+    fn a_signed_schema_three_manifest_fails_closed_and_its_bundle_is_never_rewritten() {
+        let root = directory("schema-three");
+        let paths = ManagedPaths::under(&root);
+        let seed = [46_u8; 32];
+        let signed = bundle::sign(
+            &seed,
+            None,
+            1,
+            serde_json::json!({"schema": 3, "name": "theirs", "version": "1", "grants": []}),
+            None,
+        );
+        fs::write(root.join("org.bundle"), &signed).unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &seed);
+        assert!(fails_closed(paths).1);
+        assert_eq!(fs::read(root.join("org.bundle")).unwrap(), signed);
+    }
+
+    #[test]
+    fn a_passport_never_reports_an_unsigned_file_as_verified() {
+        let root = directory("unsigned");
+        let paths = ManagedPaths::under(&root);
+        let unsigned = serde_json::to_vec(&manifest("org", "read")).unwrap();
+        fs::write(root.join("org.bundle"), &unsigned).unwrap();
+        fs::write(paths.cache.as_ref().unwrap(), &unsigned).unwrap();
+        write_bootstrap(&paths.bootstrap, "org.bundle", &[47_u8; 32]);
+
+        let (facade, closed) = fails_closed(paths);
+
+        assert!(closed);
+        let diagnostics = facade.diagnostics();
+        assert!(diagnostics.managed_authority_configured);
+        assert!(!diagnostics.managed_authority_active);
+        for passport in [
+            &diagnostics.managed_policy,
+            &facade.effective_authority().passport,
+        ] {
+            assert!(passport.configured);
+            assert!(!passport.verified);
+            assert_eq!(passport.freshness, super::ManagedPolicyFreshness::NoPolicy);
+            assert_eq!(passport.sequence, None);
+        }
     }
 }

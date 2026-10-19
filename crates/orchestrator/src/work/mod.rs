@@ -3288,7 +3288,7 @@ mod tests {
         crate::workspace::WorkspaceId,
         Arc<MemoryAudit>,
     ) {
-        fixture_with_governance(GovernanceFacade::new(None, None))
+        fixture_with_governance(GovernanceFacade::new(None))
     }
 
     fn temporary_policy(name: &str) -> Scratch {
@@ -3309,7 +3309,7 @@ mod tests {
         }
 
         fn facade(&self) -> GovernanceFacade {
-            let facade = GovernanceFacade::new(Some(self.0.to_path_buf()), None);
+            let facade = GovernanceFacade::new(Some(self.0.to_path_buf()));
             self.1.lock().unwrap().push(facade.clone());
             facade
         }

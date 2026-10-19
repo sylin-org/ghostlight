@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10, P1, P2, P3, P4, P9 and P5 landed. Next: P6. S4a is unblocked, and P5 unblocks C10c and S3.
+P10, P1, P2, P3, P4, P9, P5 and P6 landed. Next: P7. S4a is unblocked, and P5 unblocks C10c and S3.
 
 ## Slices
 
@@ -20,8 +20,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | see Notes | landed (9c705f86) |
 | P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | see Notes | landed (c2c958ff) |
 | P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | see Notes | landed (994a6ffa) |
-| P5 | refactor(governance): one publication is read whole | none | ux-2 closes | see Notes | landed (this commit) |
-| P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites | todo |
+| P5 | refactor(governance): one publication is read whole | none | ux-2 closes | see Notes | landed (c5a37984) |
+| P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites, see Notes | landed (this commit) |
 | P7 | refactor(governance): one settings vocabulary | none | ux-2 closes | - | todo |
 | P8 | refactor(language): the policy sentences live in language/policy.rs | none | ux-2 closes | cross-lane `language/mod.rs` | todo |
 
@@ -117,3 +117,23 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   facade's single-fact readers stay for their callers. The proofs `the_chip_is_the_compiled_headline`
   and `enforcement_and_the_view_name_the_same_audit_layer` live in `effective.rs`. The catalog and
   result goldens are unchanged.
+- P6: `GovernanceFacade::new` takes the user policy only, and `owning_user_policy` takes its path
+  only. `PolicySources.managed` and every branch that read it are deleted, so the organization
+  layer, its identity, its validity and its passport come from the managed authority alone; a
+  facade built without one reports the new `ManagedPolicyPassport::not_configured`. With one file
+  left, `PolicySource` loses its tier parameter. The organization layer's source line is always the
+  passport's class ("Signed bundle from a local file"), never a path. The layered tests publish
+  their organization layer through `ManagedPaths::signed`, a test helper that signs one local
+  bundle and writes its bootstrap, under `with_managed_paths`, which now takes an optional user
+  policy (so `PolicySources::remote_only` is deleted too). Two departures in shape, none in
+  decision. The fail-closed proofs live in `governance/managed/mod.rs` beside the bootstrap
+  helpers: `invalid_managed_authority_fails_closed` (a malformed bundle),
+  `an_unreachable_managed_authority_fails_closed_from_cold_start`,
+  `a_signed_schema_three_manifest_fails_closed_and_its_bundle_is_never_rewritten` and
+  `a_passport_never_reports_an_unsigned_file_as_verified` (an unsigned manifest as both source and
+  cache). The administrator schema-3 test kept only its user half, as
+  `a_named_schema_three_user_policy_fails_closed_and_is_never_rewritten`. And the call sites were
+  about 150, not twenty: every core test and surface test (`workbench/tests.rs`,
+  `workbench/web/tests.rs`, `workbench/parts/tests.rs`) that built a facade, edited mechanically;
+  no lane had an open slice in those files. The catalog and result goldens are unchanged, and
+  `tests/golden/agents/native/linux.txt` is not affected.

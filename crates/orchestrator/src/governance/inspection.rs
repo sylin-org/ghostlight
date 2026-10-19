@@ -172,7 +172,7 @@ fn explain(policy: &manifest::Manifest, out: &mut impl Write) -> Result<()> {
 
 fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
     let manifest = load(policy)?;
-    let facade = GovernanceFacade::new(Some(policy.to_path_buf()), None);
+    let facade = GovernanceFacade::new(Some(policy.to_path_buf()));
     let snapshot = facade.snapshot();
     let file = fs::File::open(audit).with_context(|| format!("read audit {}", audit.display()))?;
     let mut records = 0_u64;
