@@ -14,6 +14,7 @@ pub mod manifest;
 pub mod migrate;
 pub mod paths;
 
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io;
@@ -667,24 +668,125 @@ impl AuthoritySnapshot {
         (policy_decision.unwrap_or_else(Decision::allow), outcomes)
     }
 
-    /// Whether policy-aware discovery can prove that some host-scoped variant may proceed.
+    /// Whether some host admits `requirements` under this snapshot, so the catalog may list a tool
+    /// that needs them.
     ///
-    /// Discovery is an optimization only. Final-boundary admission still resolves the real host
-    /// and current immutable snapshot.
+    /// It holds exactly when [`Self::reach`], the answer the Policy page states, is not
+    /// unavailable: both ask the same probes, and this stops at the first one admitted. So the
+    /// catalog, the page and enforcement agree. Final-boundary admission still decides each real
+    /// host.
     #[must_use]
     pub fn could_admit(&self, requirements: CapabilitySet) -> bool {
+        self.valid
+            && (requirements.is_empty()
+                || self
+                    .probes()
+                    .hosts()
+                    .any(|host| self.probe(requirements, &host) == ProbeAnswer::Admitted))
+    }
+
+    /// Where `requirements` may be used, across every layer.
+    ///
+    /// Each probe host goes through the same decision a landing does, never-touch hosts and the
+    /// window's own origin included, so the answer is the enforced one. The probe set stands for
+    /// every host the snapshot's patterns tell apart ([`ProbeSet`]), which makes the answer exact.
+    fn reach(&self, requirements: CapabilitySet) -> Reach {
+        let mut reach = Reach {
+            state: effective::CapabilityState::Unavailable,
+            narrowed_by: Vec::new(),
+            nowhere: Vec::new(),
+        };
         if !self.valid {
-            return false;
+            return reach;
         }
-        if requirements.is_empty() {
-            return true;
+        let probes = self.probes();
+        let mut admitted = false;
+        let mut refused = false;
+        let mut narrowed = vec![false; self.layers.len()];
+        let mut somewhere = vec![false; self.layers.len()];
+        for host in probes.hosts() {
+            match self.probe(requirements, &host) {
+                ProbeAnswer::Admitted => {
+                    admitted = true;
+                    somewhere.fill(true);
+                }
+                ProbeAnswer::Refused(alone) => {
+                    refused = true;
+                    for (index, admits) in alone.into_iter().enumerate() {
+                        narrowed[index] |= !admits;
+                        somewhere[index] |= admits;
+                    }
+                }
+                ProbeAnswer::Beyond => {}
+            }
         }
-        let outcomes: Vec<_> = self
-            .layers
-            .iter()
-            .map(|layer| decide_potential_host(layer, requirements))
-            .collect();
-        outcomes.iter().all(|outcome| outcome.denial.is_none())
+        reach.state = if !admitted {
+            effective::CapabilityState::Unavailable
+        } else if self.probe(requirements, probes.unmatched()) != ProbeAnswer::Admitted {
+            effective::CapabilityState::SomeAllowed
+        } else if refused {
+            effective::CapabilityState::SomeBlocked
+        } else {
+            effective::CapabilityState::Available
+        };
+        for (index, layer) in self.layers.iter().enumerate() {
+            if narrowed[index] {
+                reach.narrowed_by.push(layer.tier);
+            }
+            if !somewhere[index] {
+                reach.nowhere.push(layer.tier);
+            }
+        }
+        reach
+    }
+
+    /// Whether the layer of `tier` admits `requirements` on some host `within` allows and no
+    /// ceiling refuses, or `None` when the snapshot has no such layer.
+    fn layer_admits_within(
+        &self,
+        tier: AuthorityTier,
+        requirements: CapabilitySet,
+        within: &manifest::HostRules,
+    ) -> Option<bool> {
+        let index = self.layers.iter().position(|layer| layer.tier == tier)?;
+        Some(self.probes().hosts().any(|host| {
+            evaluate_host(&host, within) == HostOutcome::Allowed
+                && match self.probe(requirements, &host) {
+                    ProbeAnswer::Admitted => true,
+                    ProbeAnswer::Refused(alone) => alone[index],
+                    ProbeAnswer::Beyond => false,
+                }
+        }))
+    }
+
+    /// The probe set for every pattern this snapshot holds: each layer's grants and the
+    /// never-touch list.
+    fn probes(&self) -> ProbeSet {
+        ProbeSet::of(
+            self.layers
+                .iter()
+                .flat_map(|layer| &layer.manifest.grants)
+                .flat_map(|grant| grant.hosts.allow.iter().chain(&grant.hosts.deny))
+                .chain(&self.sacred_hosts)
+                .map(String::as_str),
+        )
+    }
+
+    /// Decide `requirements` on one probe host, as a landing there would be decided.
+    fn probe(&self, requirements: CapabilitySet, host: &str) -> ProbeAnswer {
+        let (decision, outcomes) = self.decide_landing(requirements, &format!("https://{host}/"));
+        if decision.allowed {
+            ProbeAnswer::Admitted
+        } else if outcomes.is_empty() {
+            ProbeAnswer::Beyond
+        } else {
+            ProbeAnswer::Refused(
+                outcomes
+                    .iter()
+                    .map(|outcome| outcome.denial.is_none())
+                    .collect(),
+            )
+        }
     }
 
     fn resolve_outcomes(&self, outcomes: &[LayerOutcome]) -> Option<Decision> {
@@ -728,36 +830,108 @@ impl AuthoritySnapshot {
     }
 }
 
-fn decide_potential_host(layer: &PolicyLayer, requirements: CapabilitySet) -> LayerOutcome {
-    if layer.manifest.grants.iter().any(|grant| {
-        requirements.is_subset_of(grant.allowed_set()) && grant_has_possible_host(grant)
-    }) {
-        return LayerOutcome {
-            grants: vec![],
-            denial: None,
-        };
-    }
-    LayerOutcome {
-        grants: vec![],
-        denial: Some(RawDenial {
-            reason: ReasonCode::CapabilityDenied,
-            rule: PolicyRule::Capability,
-            grant: None,
-        }),
+/// The cross-layer answer to where one requirement set may be used.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Reach {
+    /// How widely it is admitted, and which way the rules point.
+    state: effective::CapabilityState,
+    /// The layers that refuse it on some host no ceiling refuses, in authority order.
+    narrowed_by: Vec<AuthorityTier>,
+    /// The layers that admit it on no host even on their own, in authority order.
+    nowhere: Vec<AuthorityTier>,
+}
+
+impl Reach {
+    /// Whether every layer admits it somewhere on its own while no host is admitted by all of
+    /// them: each layer allows it, but on different sites.
+    fn disjoint(&self) -> bool {
+        self.state == effective::CapabilityState::Unavailable
+            && self.nowhere.is_empty()
+            && self.narrowed_by.len() > 1
     }
 }
 
-fn grant_has_possible_host(grant: &manifest::Grant) -> bool {
-    grant.hosts.allow.iter().any(|pattern| {
-        let host = if pattern == "*" {
-            "policy-probe.invalid".to_owned()
-        } else if let Some(suffix) = pattern.strip_prefix("*.") {
-            format!("policy-probe.{suffix}")
-        } else {
-            pattern.clone()
+/// How the snapshot decided one probe host.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ProbeAnswer {
+    /// Every layer admits it.
+    Admitted,
+    /// A boundary before the layers refuses it: a ceiling, or an address no page can have.
+    Beyond,
+    /// The layers refuse it. Each entry says whether that layer, on its own, admits it.
+    Refused(Vec<bool>),
+}
+
+/// The first label of every probe host. A number follows it while it would collide.
+const PROBE_LABEL: &str = "ghostlight-probe";
+
+/// A finite set of hosts that stands for every host a set of patterns tells apart.
+///
+/// Two hosts that match the same patterns get the same decision, so one host from each class
+/// answers "admitted anywhere" exactly. The classes are: each exact pattern, the hosts under each
+/// suffix wildcard that match no longer suffix and no exact pattern, and the hosts that match no
+/// suffix and no exact pattern. The probe for a suffix is one fresh label under it, and the probe
+/// for the last class is the fresh label alone. The label has no dot, so it never matches a
+/// longer suffix, and it is chosen so that no probe it builds is an exact pattern.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProbeSet {
+    label: String,
+    exact: BTreeSet<String>,
+    suffixes: BTreeSet<String>,
+}
+
+impl ProbeSet {
+    fn of<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut exact = BTreeSet::new();
+        let mut suffixes = BTreeSet::new();
+        for pattern in patterns {
+            let pattern = pattern.trim().to_ascii_lowercase();
+            if pattern == "*" {
+                continue;
+            }
+            match pattern.strip_prefix("*.") {
+                Some(suffix) => suffixes.insert(suffix.to_owned()),
+                None => exact.insert(pattern),
+            };
+        }
+        let collides = |label: &str| {
+            exact.contains(label)
+                || suffixes
+                    .iter()
+                    .any(|suffix| exact.contains(&format!("{label}.{suffix}")))
         };
-        evaluate_host(&host, &grant.hosts) == HostOutcome::Allowed
-    })
+        let label = (0_usize..)
+            .map(|attempt| {
+                if attempt == 0 {
+                    PROBE_LABEL.to_owned()
+                } else {
+                    format!("{PROBE_LABEL}-{attempt}")
+                }
+            })
+            .find(|label| !collides(label))
+            .expect("finitely many patterns leave a free label");
+        Self {
+            label,
+            exact,
+            suffixes,
+        }
+    }
+
+    /// The probe that matches no suffix and no exact pattern.
+    fn unmatched(&self) -> &str {
+        &self.label
+    }
+
+    /// Every probe: the unmatched one, each exact pattern, then one fresh host under each suffix.
+    fn hosts(&self) -> impl Iterator<Item = String> + '_ {
+        std::iter::once(self.label.clone())
+            .chain(self.exact.iter().cloned())
+            .chain(
+                self.suffixes
+                    .iter()
+                    .map(|suffix| format!("{}.{suffix}", self.label)),
+            )
+    }
 }
 
 fn decide_resource_less(layer: &PolicyLayer, requirements: CapabilitySet) -> LayerOutcome {
@@ -1090,6 +1264,7 @@ impl Published {
         );
 
         let inputs = effective::Inputs {
+            snapshot: Arc::clone(&snapshot),
             organization,
             user,
             valid,

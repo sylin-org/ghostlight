@@ -1440,3 +1440,44 @@ fn the_authored_policy_and_its_directory_are_private() {
     assert_eq!(mode(&path), 0o600);
     assert_eq!(mode(path.parent().unwrap()), 0o700);
 }
+
+#[test]
+fn no_probe_matches_an_authored_suffix() {
+    let snapshot = snapshot_for(
+        "probes",
+        policy(
+            "probes",
+            r#"[{"id":"g","hosts":{"allow":["*.example.com","ghostlight-probe","ghostlight-probe.example.com","*.a.example.com"],"deny":["ghostlight-probe-1.example.com","bank.example"]},"allowed":["read"]}]"#,
+            r#"[{"key":"content.security.sacred_domains","value":["*.vault.example"],"level":"mandatory"}]"#,
+        ),
+    );
+    let probes = snapshot.probes();
+    let patterns = [
+        "*.example.com",
+        "ghostlight-probe",
+        "ghostlight-probe.example.com",
+        "*.a.example.com",
+        "ghostlight-probe-1.example.com",
+        "bank.example",
+        "*.vault.example",
+    ];
+    let matched = |host: &str| -> Vec<&str> {
+        patterns
+            .iter()
+            .copied()
+            .filter(|pattern| host_matches(host, pattern))
+            .collect()
+    };
+    assert_eq!(probes.unmatched(), "ghostlight-probe-2");
+    assert!(matched(probes.unmatched()).is_empty());
+    for suffix in ["example.com", "a.example.com", "vault.example"] {
+        let fresh = format!("{}.{suffix}", probes.unmatched());
+        assert!(probes.hosts().any(|host| host == fresh), "{fresh}");
+        // The fresh host matches its own suffix and the suffixes above it, never an exact
+        // pattern or a longer suffix.
+        for pattern in matched(&fresh) {
+            let above = pattern.strip_prefix("*.").expect("only suffixes match");
+            assert!(suffix.ends_with(above), "{fresh} matched {pattern}");
+        }
+    }
+}

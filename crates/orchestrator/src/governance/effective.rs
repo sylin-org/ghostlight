@@ -11,9 +11,13 @@
 //! that decided it. The words are authored here, in the orchestrator, so the window renders
 //! sentences rather than inventing them from booleans.
 
+use std::sync::Arc;
+
 use serde::Serialize;
 
-use super::{manifest, Capability, CapabilitySet, ManagedPolicyPassport};
+use super::{
+    manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet, ManagedPolicyPassport,
+};
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::{PolicyAuthor, OWN_CONTROL_PAGE_CEILING};
 
@@ -293,6 +297,8 @@ pub fn chip(
 
 /// Everything the projection needs, gathered by the facade under one lock.
 pub(super) struct Inputs<'a> {
+    /// The snapshot enforcement reads, which answers where each capability may be used.
+    pub(super) snapshot: Arc<AuthoritySnapshot>,
     pub(super) organization: Option<&'a manifest::Manifest>,
     pub(super) user: Option<&'a manifest::Manifest>,
     pub(super) valid: bool,
@@ -367,7 +373,7 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
             LayerKind::User,
             "Your rules".to_owned(),
             policy,
-            inputs.organization,
+            Some(&inputs.snapshot),
             inputs.user_source.clone(),
             inputs.user_document.clone(),
         ));
@@ -494,22 +500,15 @@ fn capability_line(
         };
     }
 
-    let layers = [
-        (LayerKind::Organization, inputs.organization),
-        (LayerKind::User, inputs.user),
-    ];
-    // Layers intersect, so the effective answer is the narrowest any of them gives, and the
-    // deciders are every layer that gave something narrower than "nothing restricts this".
-    let mut state = CapabilityState::Available;
-    let mut decided_by = Vec::new();
-    for (kind, policy) in layers {
-        let Some(policy) = policy else { continue };
-        let layer = reach(policy, required);
-        state = state.min(layer);
-        if layer != CapabilityState::Available {
-            decided_by.push(kind);
-        }
-    }
+    // The snapshot answers across every layer at once, so two layers that each allow the
+    // capability on different sites read as allowing it nowhere, as enforcement decides.
+    let reach = inputs.snapshot.reach(required);
+    let state = reach.state;
+    let mut decided_by: Vec<LayerKind> = reach
+        .narrowed_by
+        .iter()
+        .map(|tier| layer_kind(*tier))
+        .collect();
 
     let named = organization.map(|identity| identity.name.clone());
     let word = |kind: LayerKind| match (kind, named.as_deref()) {
@@ -551,8 +550,14 @@ fn capability_line(
         CapabilityState::SomeAllowed => {
             format!("Refused everywhere except the sites {who} allowed.")
         }
+        CapabilityState::Unavailable if reach.disjoint() => {
+            format!("Not available. The sites {who} allow do not overlap.")
+        }
         CapabilityState::Unavailable => {
-            let kind = decided_by.first().copied().unwrap_or(LayerKind::Ghostlight);
+            let kind = reach
+                .nowhere
+                .first()
+                .map_or(LayerKind::Ghostlight, |tier| layer_kind(*tier));
             // "you does not allow it" is what a template gets you. Whoever refused is named in
             // their own grammar, because a person reading why they were stopped deserves a
             // sentence rather than a substitution.
@@ -599,59 +604,19 @@ fn with_switches(mut decided_by: Vec<LayerKind>, switched: ChannelsOff<'_>) -> V
     decided_by
 }
 
-/// How widely one layer admits a capability, and which way its rules point.
-fn reach(policy: &manifest::Manifest, required: CapabilitySet) -> CapabilityState {
-    let mut widest = CapabilityState::Unavailable;
-    for grant in &policy.grants {
-        if !required.is_subset_of(grant.allowed_set()) {
-            continue;
-        }
-        let universal = grant.hosts.allow.iter().any(|pattern| pattern == "*");
-        let state = if universal && grant.hosts.deny.is_empty() {
-            CapabilityState::Available
-        } else if universal {
-            CapabilityState::SomeBlocked
-        } else if !any_allow_survives_deny(grant) {
-            // Every allow pattern in this grant is fully canceled by a deny in the same grant,
-            // so it admits nothing anywhere -- this must read the same as an empty allow list,
-            // not as "some sites allowed". See any_allow_survives_deny for why exact pattern
-            // equality is the right (and only) test.
-            continue;
-        } else {
-            CapabilityState::SomeAllowed
-        };
-        widest = widest.max(state);
+/// The layer kind a person reads for one authority tier.
+const fn layer_kind(tier: AuthorityTier) -> LayerKind {
+    match tier {
+        AuthorityTier::Managed => LayerKind::Organization,
+        AuthorityTier::User => LayerKind::User,
     }
-    widest
-}
-
-/// Whether at least one of this grant's allow patterns is not fully canceled by its own deny
-/// list, i.e. whether the grant can admit any host at all.
-///
-/// A deny pattern only ever fully cancels an allow pattern in the *same* grant when the two are
-/// the identical pattern text. This falls directly out of `pattern_specificity`'s tie-break: for
-/// a deny to beat an allow at *every* host the allow pattern matches, it must be at least as
-/// specific everywhere the allow pattern applies. A broader deny (`*.example.com` denying
-/// `*.a.example.com`) loses the tie at every shared host, because the narrower allow pattern is
-/// *more* specific there, not less; a narrower deny (one exact host under a wildcard allow)
-/// only cancels that one host, leaving the rest of the allow pattern's hosts still admitted. The
-/// only pattern that is simultaneously broad enough to cover every host the allow pattern
-/// matches and specific enough to win the tie at all of them is that same pattern, verbatim.
-fn any_allow_survives_deny(grant: &manifest::Grant) -> bool {
-    grant.hosts.allow.iter().any(|allow| {
-        !grant
-            .hosts
-            .deny
-            .iter()
-            .any(|deny| deny.eq_ignore_ascii_case(allow))
-    })
 }
 
 fn layer_view(
     kind: LayerKind,
     title: String,
     policy: &manifest::Manifest,
-    ceiling: Option<&manifest::Manifest>,
+    ceiling: Option<&AuthoritySnapshot>,
     path: Option<String>,
     document: Option<String>,
 ) -> LayerView {
@@ -690,13 +655,14 @@ fn layer_view(
 
 /// Mark a rule only when Ghostlight can prove it does nothing.
 ///
-/// Both checks are deliberately conservative. A rule carrying a note is certainly inert; a rule
-/// without one may still be, and saying so on a guess would be worse than staying quiet.
+/// A rule carrying a note is certainly inert; a rule without one may still be, and saying so on a
+/// guess would be worse than staying quiet. The organization's refusal is read from `ceiling`, the
+/// snapshot enforcement reads, over every host the rule allows.
 fn note(
     index: usize,
     grant: &manifest::Grant,
     siblings: &[manifest::Grant],
-    ceiling: Option<&manifest::Manifest>,
+    ceiling: Option<&AuthoritySnapshot>,
 ) -> Option<RuleNote> {
     if siblings[..index]
         .iter()
@@ -704,13 +670,8 @@ fn note(
     {
         return Some(RuleNote::Unreachable);
     }
-    let ceiling = ceiling?;
-    let admitted = grant.hosts.allow.iter().any(|pattern| {
-        ceiling
-            .grants
-            .iter()
-            .any(|above| covers_pattern_with(above, grant.allowed_set(), pattern))
-    });
+    let admitted =
+        ceiling?.layer_admits_within(AuthorityTier::Managed, grant.allowed_set(), &grant.hosts)?;
     (!admitted && !grant.hosts.allow.is_empty()).then_some(RuleNote::NoEffect)
 }
 
@@ -729,15 +690,6 @@ fn covers_grant(earlier: &manifest::Grant, later: &manifest::Grant) -> bool {
                 .iter()
                 .any(|broad| pattern_covers(broad, pattern))
         })
-}
-
-fn covers_pattern_with(above: &manifest::Grant, required: CapabilitySet, pattern: &str) -> bool {
-    required.is_subset_of(above.allowed_set())
-        && above
-            .hosts
-            .allow
-            .iter()
-            .any(|broad| pattern_covers(broad, pattern))
 }
 
 /// Whether every host matched by `narrow` is also matched by `broad`.
@@ -798,7 +750,14 @@ mod tests {
         compile, pattern_covers, CapabilityState, Inputs, LayerKind, RuleNote, Situation,
         UserLayerSource, OWN_CONTROL_PAGE_CEILING,
     };
-    use crate::governance::{manifest, ManagedPolicyPassport};
+    use std::sync::Arc;
+
+    use crate::governance::{
+        assemble, manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet,
+        ManagedPolicyPassport, OwnOrigin,
+    };
+    use crate::language::capability_map;
+    use crate::language::catalog_for;
     use crate::language::channel_switch::ChannelsOff;
     use crate::language::outcome::PolicyAuthor;
 
@@ -821,16 +780,34 @@ mod tests {
         }
     }
 
+    /// The snapshot enforcement would read for these layers.
+    fn snapshot(
+        organization: Option<&manifest::Manifest>,
+        user: Option<&manifest::Manifest>,
+    ) -> Arc<AuthoritySnapshot> {
+        Arc::new(assemble(
+            [
+                (organization.cloned(), AuthorityTier::Managed),
+                (user.cloned(), AuthorityTier::User),
+            ],
+            None,
+            true,
+            &OwnOrigin::default(),
+        ))
+    }
+
     fn inputs<'a>(
         organization: Option<&'a manifest::Manifest>,
         user: Option<&'a manifest::Manifest>,
     ) -> Inputs<'a> {
+        let snapshot = snapshot(organization, user);
         Inputs {
+            sacred_hosts: snapshot.sacred_hosts().to_vec(),
+            snapshot,
             organization,
             user,
             valid: true,
             channels_off: ChannelsOff::default(),
-            sacred_hosts: Vec::new(),
             organization_source: None,
             organization_document: None,
             user_source: None,
@@ -1085,6 +1062,17 @@ mod tests {
         assert_eq!(rules[0].note, None);
         assert_eq!(rules[1].note, Some(RuleNote::Unreachable));
         assert_eq!(rules[2].note, Some(RuleNote::NoEffect));
+
+        // A wide rule under a narrow organization grant still works on the host both allow, so it
+        // is not marked inert.
+        let narrow = policy(
+            r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"one","hosts":{"allow":["x.example.com"]},"allowed":["read"]}]}"#,
+        );
+        let wide = policy(
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"wide","hosts":{"allow":["*.example.com"]},"allowed":["read"]}]}"#,
+        );
+        let view = compile(&inputs(Some(&narrow), Some(&wide)));
+        assert_eq!(view.layers[1].rules[0].note, None);
     }
 
     #[test]
@@ -1135,5 +1123,176 @@ mod tests {
         assert!(!pattern_covers("*.example.com", "example.com"));
         assert!(!pattern_covers("example.com", "a.example.com"));
         assert!(pattern_covers("example.com", "EXAMPLE.com"));
+    }
+
+    /// Whether a tool needs nothing, so a policy that admits nothing still lists it.
+    fn needs_nothing(tool: &str) -> bool {
+        capability_map::variants(tool).any(|variant| variant.requirements.is_empty())
+    }
+
+    #[test]
+    fn disjoint_layer_grants_admit_nothing_and_advertise_nothing() {
+        let organization = policy(
+            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"a","hosts":{"allow":["a.example"]},"allowed":["read"]}]}"#,
+        );
+        let user = policy(
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"b","hosts":{"allow":["b.example"]},"allowed":["read"]}]}"#,
+        );
+        let snapshot = snapshot(Some(&organization), Some(&user));
+        for host in ["a.example", "b.example", "c.example"] {
+            assert!(
+                !snapshot
+                    .authorize_landing(Capability::Read, &format!("https://{host}/"))
+                    .allowed,
+                "{host}"
+            );
+        }
+        assert!(!snapshot.could_admit(CapabilitySet::READ));
+        let listed = catalog_for(&snapshot);
+        assert!(listed.iter().all(|tool| needs_nothing(&tool.name)));
+        assert!(!listed.iter().any(|tool| tool.name == "browser_read"));
+
+        let read = &compile(&inputs(Some(&organization), Some(&user))).capabilities[0];
+        assert_eq!(read.state, CapabilityState::Unavailable);
+        assert_eq!(
+            read.detail,
+            "Not available. The sites Northwind and you allow do not overlap."
+        );
+        assert_eq!(read.decided_by, [LayerKind::Organization, LayerKind::User]);
+    }
+
+    #[test]
+    fn a_grant_whose_deny_cancels_its_universal_allow_reads_unavailable() {
+        let canceled = policy(
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"nothing","hosts":{"allow":["*"],"deny":["*"]},"allowed":["read"]}]}"#,
+        );
+        let snapshot = snapshot(None, Some(&canceled));
+        assert!(
+            !snapshot
+                .authorize_landing(Capability::Read, "https://example.com/")
+                .allowed
+        );
+        assert!(!snapshot.could_admit(CapabilitySet::READ));
+        let read = &compile(&inputs(None, Some(&canceled))).capabilities[0];
+        assert_eq!(read.state, CapabilityState::Unavailable);
+        assert_eq!(read.detail, "Not available. You do not allow it anywhere.");
+        assert_eq!(read.decided_by, [LayerKind::User]);
+    }
+
+    #[test]
+    fn a_grant_reaching_only_never_touch_hosts_advertises_nothing() {
+        for (organization, user) in [
+            (
+                None,
+                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"bank","hosts":{"allow":["bank.example","*.vault.example"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["bank.example","*.vault.example"],"level":"mandatory"}]}"#,
+            ),
+            (
+                Some(
+                    r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read"]}],"config":[{"key":"content.security.sacred_domains","value":["*.bank.example"],"level":"mandatory"}]}"#,
+                ),
+                r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"bank","hosts":{"allow":["*.bank.example"]},"allowed":["read"]}]}"#,
+            ),
+        ] {
+            let organization = organization.map(policy);
+            let user = policy(user);
+            let snapshot = snapshot(organization.as_ref(), Some(&user));
+            assert!(!snapshot.could_admit(CapabilitySet::READ), "{}", user.name);
+            assert!(!catalog_for(&snapshot)
+                .iter()
+                .any(|tool| tool.name == "browser_read"));
+            let view = compile(&inputs(organization.as_ref(), Some(&user)));
+            assert_eq!(view.capabilities[0].state, CapabilityState::Unavailable);
+        }
+    }
+
+    #[test]
+    fn the_catalog_the_policy_page_and_enforcement_agree_on_every_fixture() {
+        let layer = |grants: &str, config: &str| {
+            policy(&format!(
+                r#"{{"schema":4,"name":"fixture","version":"1","grants":{grants},"config":{config}}}"#
+            ))
+        };
+        let read = |hosts: &str| format!(r#"[{{"id":"g","hosts":{hosts},"allowed":["read"]}}]"#);
+        let never_touch_bank = r#"[{"key":"content.security.sacred_domains","value":["bank.example"],"level":"mandatory"}]"#;
+        let fixtures = [
+            (None, None),
+            (None, Some(layer(&read(r#"{"allow":["*"]}"#), "[]"))),
+            (
+                Some(layer(&read(r#"{"allow":["a.example"]}"#), "[]")),
+                Some(layer(&read(r#"{"allow":["b.example"]}"#), "[]")),
+            ),
+            (
+                None,
+                Some(layer(&read(r#"{"allow":["*"],"deny":["*"]}"#), "[]")),
+            ),
+            (
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["bank.example"]}"#),
+                    never_touch_bank,
+                )),
+            ),
+            (
+                Some(layer(&read(r#"{"allow":["*.example.com"]}"#), "[]")),
+                Some(layer(
+                    r#"[{"id":"g","hosts":{"allow":["a.example.com"]},"allowed":["read","action"]}]"#,
+                    "[]",
+                )),
+            ),
+            (
+                Some(layer(
+                    &read(r#"{"allow":["*"],"deny":["intranet.example"]}"#),
+                    "[]",
+                )),
+                Some(layer(&read(r#"{"allow":["example.com"]}"#), "[]")),
+            ),
+            (Some(layer("[]", "[]")), None),
+            (
+                None,
+                Some(layer(
+                    &read(r#"{"allow":["*.a.example.com"],"deny":["*.example.com"]}"#),
+                    "[]",
+                )),
+            ),
+            (
+                Some(layer(&read(r#"{"allow":["*.example.com"]}"#), "[]")),
+                Some(layer(&read(r#"{"allow":["deep.a.example.com"]}"#), "[]")),
+            ),
+        ];
+        // Chosen by hand, apart from the probes, so enforcement is asked independently.
+        let hosts = [
+            "example.com",
+            "a.example.com",
+            "deep.a.example.com",
+            "a.example",
+            "b.example",
+            "intranet.example",
+            "bank.example",
+            "unrelated.org",
+        ];
+        for (index, (organization, user)) in fixtures.iter().enumerate() {
+            let snapshot = snapshot(organization.as_ref(), user.as_ref());
+            let view = compile(&inputs(organization.as_ref(), user.as_ref()));
+            for line in &view.capabilities {
+                let required = CapabilitySet::one(line.capability);
+                let enforced = hosts.iter().any(|host| {
+                    snapshot
+                        .authorize_landing(required, &format!("https://{host}/"))
+                        .allowed
+                });
+                let page = line.state != CapabilityState::Unavailable;
+                let catalog = snapshot.could_admit(required);
+                assert_eq!(page, enforced, "fixture {index}, {:?}", line.capability);
+                assert_eq!(catalog, enforced, "fixture {index}, {:?}", line.capability);
+            }
+            let reads = catalog_for(&snapshot)
+                .iter()
+                .any(|tool| tool.name == "browser_read");
+            assert_eq!(
+                reads,
+                view.capabilities[0].state != CapabilityState::Unavailable,
+                "fixture {index}"
+            );
+        }
     }
 }
