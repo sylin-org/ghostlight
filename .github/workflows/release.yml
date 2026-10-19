@@ -195,3 +195,43 @@ jobs:
           path: dist/winget-manifest/
           if-no-files-found: error
           retention-days: 14
+
+  # The candidate installed, used and uninstalled the way a person on Linux does it, on the oldest
+  # and the newest supported Ubuntu (linux-2 L2-16).
+  install-from-bundle:
+    needs: candidate-bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      CHROME_FOR_TESTING: 152.0.7977.82
+      # The runner refuses Chrome's own sandbox; the browser here is a disposable runner's.
+      GHOSTLIGHT_TEST_NO_SANDBOX: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: release-candidate
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+      - name: Keep the pinned Chrome for Testing archive between runs
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ghostlight-chrome.zip
+          key: chrome-for-testing-${{ env.CHROME_FOR_TESTING }}-${{ runner.os }}
+      - name: Unpack the pinned Chrome for Testing
+        run: |
+          archive="$RUNNER_TEMP/ghostlight-chrome.zip"
+          [ -f "$archive" ] || curl -fsSL --retry 4 --retry-delay 15 -o "$archive" \
+            "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_FOR_TESTING/linux64/chrome-linux64.zip"
+          unzip -q "$archive" -d "$RUNNER_TEMP/ghostlight-chrome"
+          echo "GHOSTLIGHT_TEST_BROWSER=$RUNNER_TEMP/ghostlight-chrome/chrome-linux64/chrome" >> "$GITHUB_ENV"
+      - name: Install from the bundle, use it from an agent, uninstall
+        run: dbus-run-session -- xvfb-run -a node tests/linux/release-install.mjs --bundle release-candidate --browser "$GHOSTLIGHT_TEST_BROWSER"

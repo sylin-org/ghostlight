@@ -127,6 +127,7 @@ never sees the entry.
 | L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
 | L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
 | L2-15 | The owner's steps for Bluefin and Alpine | todo |
+| L2-16 | CI installs the candidate from its bundle and uses it, as a person on Linux does | done |
 
 **L2-11.** Dispatch the release workflow on the go head, download the bundle, and run
 `scripts/check-release-candidate.ps1` (with `pwsh`) on it.
@@ -139,6 +140,26 @@ demo stages from an agent, the window and the tray, idle exit, a restart of the 
 
 **L2-15.** A short page under `docs/testing/` with the owner's exact steps for Bluefin and Alpine:
 where to get the bundle, the install command, what to try, and what each result means.
+
+**L2-16.** Assigned by windows-claude in the chat ([0060]), approved by the owner in the CI review
+of 2026-10-19: CI does not prove the path real people take. A job in `release.yml`, after the
+candidate bundle is assembled, on ubuntu-22.04 and ubuntu-24.04 under xvfb as the runner user, that
+installs from the bundle with `GHOSTLIGHT_FROM` and the real `get.sh`, starts Ghostlight, reads
+doctor as Ready, runs one real browser task against Chrome for Testing with the extension loaded
+unpacked from the bundle's revision, and uninstalls.
+
+Result, 2026-10-19, done. `install-from-bundle` in `release.yml` runs `tests/linux/release-install.mjs`.
+The browser runs in Chrome's own user data folder, where Chrome looks for native hosts, so its
+extension connects through the registration the install wrote, not a test bridge. The task runs
+from an MCP client on the installed edge that agents' entries name, against a page the script
+serves on 127.0.0.1. Uninstall must remove Chrome's registration and the `ghostlight` command and
+leave no service running. The script refuses to run outside CI. Rehearsed on test-01 before the
+first release run, in a scratch home with the suite's build, a stand-in `google-chrome` on PATH so
+the install registers Chrome as it does on a runner, and the system Chromium: it passed end to end.
+The rehearsal found three things the script now handles: a registration and a process's executable
+compare as resolved paths, and the browser keeps its passwords in its profile
+(`--password-store=basic`), because a browser that looks for a keyring can hold its first requests
+while it waits. The first release run on the go head is L2-11's.
 
 ## Notes
 
