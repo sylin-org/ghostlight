@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use ghostlight_relay::home::{EDGE_EXECUTABLE_NAME, SERVICE_EXECUTABLE_NAME};
 
+use super::entry::{lies_within, same_path};
 use super::icons::{desktop_entry_value, program, read_text, IconPlaces, IconSource, ProgramPlace};
 
 /// The programs that only start another, by file stem in lowercase: shells, consoles, script
@@ -83,9 +84,6 @@ const TRY_EXEC_KEY: &str = "TryExec";
 /// The `[Desktop Entry]` key whose first word is the program an app runs.
 const EXEC_KEY: &str = "Exec";
 
-/// The prefix Windows puts before a path that skips its length limit.
-const VERBATIM_PREFIX: &str = r"\\?\";
-
 /// A program's file stem as [`WRAPPERS`] compares it: what follows the last path separator of
 /// either system, lowercase, without `.exe` and without a trailing version.
 fn stem(file_name: &str) -> String {
@@ -135,22 +133,10 @@ impl Location {
     /// Whether the program at `image` is this location's.
     fn holds(&self, image: &Path) -> bool {
         match self {
-            Self::Folder(folder) => comparable(image).starts_with(comparable(folder)),
-            Self::File(file) => comparable(image) == comparable(file),
+            Self::Folder(folder) => lies_within(image, folder, cfg!(windows)),
+            Self::File(file) => same_path(image, file),
         }
     }
-}
-
-/// A path as two places compare it: without the verbatim prefix, and lowercase on Windows, whose
-/// paths ignore case.
-fn comparable(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    let text = text.strip_prefix(VERBATIM_PREFIX).unwrap_or(&text);
-    PathBuf::from(if cfg!(windows) {
-        text.to_lowercase()
-    } else {
-        text.to_owned()
-    })
 }
 
 /// Where each catalog agent's app is installed on one computer, as one look found it.

@@ -6,13 +6,14 @@
 //! rewritten.
 
 use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use thiserror::Error;
-use uuid::Uuid;
+
+use super::record::{Link, Replace};
 
 const APPLICATION_ID: &str = "org.sylin.ghostlight";
 const DESKTOP_TEMPLATE: &str = include_str!("../../../../packaging/linux/ghostlight.desktop.hbs");
@@ -318,48 +319,21 @@ fn symlink(path: &Path) -> Result<bool, DesktopIntegrationError> {
     }
 }
 
+/// How the entry and its icon are written: the access a file there had kept, and a link refused,
+/// since inspection already calls a link at either path foreign and one may appear after it
+/// looked.
+const ENTRY_WRITE: Replace = Replace {
+    link: Link::Refuse,
+    ..Replace::SHARED
+};
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), DesktopIntegrationError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| DesktopIntegrationError::InvalidPath(path.to_path_buf()))?;
-    fs::create_dir_all(parent).map_err(|source| DesktopIntegrationError::Write {
-        path: parent.to_path_buf(),
-        source,
-    })?;
-    let temporary = parent.join(format!(
-        ".ghostlight-desktop-{}.tmp",
-        Uuid::new_v4().simple()
-    ));
-    let write_result = (|| {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        match fs::rename(&temporary, path) {
-            Ok(()) => Ok(()),
-            Err(error)
-                if path.exists()
-                    && matches!(
-                        error.kind(),
-                        io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
-                    ) =>
-            {
-                fs::remove_file(path)?;
-                fs::rename(&temporary, path)
-            }
-            Err(error) => Err(error),
-        }
-    })();
-    if let Err(source) = write_result {
-        let _ = fs::remove_file(&temporary);
-        return Err(DesktopIntegrationError::Write {
+    ENTRY_WRITE
+        .write(path, bytes)
+        .map_err(|source| DesktopIntegrationError::Write {
             path: path.to_path_buf(),
             source,
-        });
-    }
-    Ok(())
+        })
 }
 
 fn remove_file(path: &Path) -> Result<(), DesktopIntegrationError> {
@@ -388,9 +362,6 @@ pub enum DesktopIntegrationError {
         /// Operating-system error.
         source: io::Error,
     },
-    /// An owned path had no parent directory.
-    #[error("invalid desktop integration path: {0}")]
-    InvalidPath(PathBuf),
     /// Foreign state occupies one of the two exact product paths.
     #[error("foreign desktop integration was left untouched at {desktop_entry} or {icon}")]
     ForeignState {

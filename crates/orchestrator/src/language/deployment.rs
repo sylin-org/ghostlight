@@ -553,6 +553,12 @@ pub fn flatpak_failed(step: &FlatpakStep) -> bool {
     matches!(step.result, FlatpakResult::Failed(_))
 }
 
+/// Why a file Ghostlight writes as its own was left alone: a link sits where it belongs.
+#[must_use]
+pub fn link_refused(path: &str) -> String {
+    format!("{path} is a link, and Ghostlight does not write its own files through a link")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

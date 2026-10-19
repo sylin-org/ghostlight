@@ -9,7 +9,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use super::{bundle, crypto, encode_hex, manifest, validate_bootstrap, Bootstrap};
-use crate::install::record::create_private;
+use crate::install::record::{atomic_replace_keeping_access, create_private};
 
 const ED25519_SEED_FILE: &str = "policy-ed25519.seed";
 const MLDSA_SEED_FILE: &str = "policy-mldsa65.seed";
@@ -267,7 +267,7 @@ fn sign_explicit(options: &SignOptions, out: &mut impl Write) -> Result<()> {
         options.sequence,
         options.presentation.as_deref(),
     )?;
-    atomic_write(&options.output, &bytes)?;
+    write_bundle(&options.output, &bytes)?;
     writeln!(
         out,
         "Signed policy sequence {} to {}.",
@@ -307,7 +307,7 @@ fn publish(options: &PublishOptions, out: &mut impl Write) -> Result<()> {
         sequence,
         options.presentation.as_deref(),
     )?;
-    atomic_write(&options.output, &bytes)?;
+    write_bundle(&options.output, &bytes)?;
     let bootstrap = Bootstrap {
         source: options.source.clone(),
         pubkey_ed25519: encode_hex(&crypto::signing::ed25519_public(&ed25519)),
@@ -403,13 +403,11 @@ fn write_seed(path: &Path, seed: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-    fs::write(&temporary, bytes)?;
-    fs::rename(&temporary, path).with_context(|| format!("replace {}", path.display()))
+/// Publish a signed bundle at `path`. A bundle is meant for other accounts and machines, so it
+/// keeps the access a file there had, and a new one gets its directory's default access.
+fn write_bundle(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_replace_keeping_access(path, bytes)
+        .with_context(|| format!("replace {}", path.display()))
 }
 
 fn usage() -> &'static str {
@@ -422,7 +420,66 @@ mod tests {
 
     use super::{parse, run, Command, ED25519_SEED_FILE, MLDSA_SEED_FILE};
     use crate::install::record::assert_owner_only;
+    use crate::install::record::steps::{self, Step};
     use crate::scratch::Scratch;
+
+    /// A policy and an Ed25519 seed below `root`, and the `sign` command that signs the policy
+    /// into `output` at `sequence`.
+    fn sign_command(root: &Scratch, output: &std::path::Path, sequence: u64) -> Command {
+        let keys = root.join("keys");
+        let manifest = root.join("policy.json");
+        fs::write(
+            &manifest,
+            r#"{"schema":4,"name":"org","version":"1","grants":[]}"#,
+        )
+        .unwrap();
+        if !keys.join(ED25519_SEED_FILE).exists() {
+            run(
+                &Command::Keygen {
+                    directory: keys.clone(),
+                    ed25519_only: true,
+                },
+                &mut Vec::new(),
+            )
+            .unwrap();
+        }
+        parse(&[
+            "sign".into(),
+            manifest.display().to_string(),
+            format!("--ed25519-seed={}", keys.join(ED25519_SEED_FILE).display()),
+            format!("--sequence={sequence}"),
+            format!("--out={}", output.display()),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn a_first_policy_sign_creates_its_bundle() {
+        let root = Scratch::named("policy-first-sign");
+        let output = root.join("published").join("policy.bundle");
+        run(&sign_command(&root, &output, 1), &mut Vec::new()).unwrap();
+        assert!(!fs::read(&output).unwrap().is_empty());
+        let names: Vec<_> = fs::read_dir(output.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["policy.bundle"]);
+    }
+
+    #[test]
+    fn a_bundle_write_is_synced_before_its_rename() {
+        let root = Scratch::named("policy-sign-synced");
+        let output = root.join("policy.bundle");
+        let command = sign_command(&root, &output, 1);
+        steps::taken();
+        run(&command, &mut Vec::new()).unwrap();
+        let taken = steps::taken();
+        let [Step::Synced(synced), Step::Renamed(renamed, published)] = taken.as_slice() else {
+            panic!("one synced write then one rename, not {taken:?}");
+        };
+        assert_eq!(synced, renamed);
+        assert_eq!(published, &output);
+    }
 
     #[test]
     fn keygen_seeds_are_readable_only_by_the_user() {

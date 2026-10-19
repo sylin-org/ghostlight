@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 use winreg::RegKey;
 
+use super::entry::lies_within;
 use super::layout::Layout;
 use super::record::atomic_replace;
 
@@ -267,27 +268,14 @@ impl UninstallKey for CurrentUserKey {
 }
 
 /// Whether `candidate`, a path or a command line that starts with one, is `directory` or below
-/// it. Case, slash direction, a leading quote and the `\\?\` prefix do not matter.
+/// it, by the one same-location rule's Windows spelling. Case, slash direction, a leading quote
+/// and the `\\?\` prefix do not matter.
 fn is_inside(candidate: &str, directory: &Path) -> bool {
-    let directory = comparable(&directory.to_string_lossy());
-    let directory = directory.trim_end_matches('\\');
-    let candidate = comparable(candidate);
-    candidate == directory
-        || candidate
-            .strip_prefix(directory)
-            .is_some_and(|rest| rest.starts_with('\\'))
-}
-
-/// `path` lower-case, backslash-separated, without a leading quote or `\\?\` prefix.
-fn comparable(path: &str) -> String {
-    let path = path
-        .trim_start_matches('"')
-        .replace('/', "\\")
-        .to_lowercase();
-    match path.strip_prefix(r"\\?\") {
-        Some(rest) => rest.to_owned(),
-        None => path,
-    }
+    lies_within(
+        Path::new(candidate.trim_start_matches('"')),
+        directory,
+        true,
+    )
 }
 
 /// What a shortcut says about itself.

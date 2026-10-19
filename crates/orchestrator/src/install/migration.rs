@@ -61,10 +61,10 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use thiserror::Error;
 
 use super::container::Residence;
-use super::entry;
+use super::entry::{lies_within, same_location, same_path};
 use super::layout::{retired_connector_names, Layout, INSTALL_RECORD_NAME};
 use super::native_host::{self, NativeHostRegistry};
-use super::record::{self, InstallRecord, Version};
+use super::record::{self, InstallRecord, Link, Replace, Version};
 use super::setup_state::{self, SetupRecord};
 use super::{HarnessRegistry, HarnessState};
 
@@ -1153,19 +1153,20 @@ fn remove_file(path: &Path) -> FlatpakResult {
 }
 
 /// Put the override file back to `before`: its text, or no file at all.
+///
+/// The file is Flatpak's, so it keeps its access, and a link that took its place since it was
+/// read is refused.
 fn restore_override(path: &Path, before: Option<&str>) -> FlatpakResult {
     let Some(text) = before else {
         return remove_file(path);
     };
-    let mut staged = path.as_os_str().to_owned();
-    staged.push(".restore");
-    let staged = PathBuf::from(staged);
-    match fs::write(&staged, text).and_then(|()| fs::rename(&staged, path)) {
+    let replace = Replace {
+        link: Link::Refuse,
+        ..Replace::SHARED
+    };
+    match replace.write(path, text.as_bytes()) {
         Ok(()) => FlatpakResult::Restored,
-        Err(error) => {
-            let _ = fs::remove_file(&staged);
-            FlatpakResult::Failed(error.to_string())
-        }
+        Err(error) => FlatpakResult::Failed(error.to_string()),
     }
 }
 
@@ -1444,44 +1445,6 @@ pub fn is_virtualized(path: &Path) -> bool {
         .any(|window| window[0] == "packages" && window[2] == "localcache")
 }
 
-/// The text of `path` in a form that compares equal across separator and case spellings.
-fn comparable(path: &Path) -> String {
-    comparable_text(&path.to_string_lossy())
-}
-
-/// Normalize separators, the verbatim prefix and, on Windows, case.
-fn comparable_text(text: &str) -> String {
-    let text = if cfg!(windows) {
-        text.replace('\\', "/").to_lowercase()
-    } else {
-        text.to_owned()
-    };
-    let text = text.strip_prefix("//?/").unwrap_or(&text);
-    text.trim_end_matches('/').to_owned()
-}
-
-/// Whether two paths name the same location, by spelling.
-fn same_path(left: &Path, right: &Path) -> bool {
-    comparable(left) == comparable(right)
-}
-
-/// Whether two paths name the same location: the same spelling, or the same place once links, case
-/// and the Windows verbatim prefix are resolved.
-fn same_location(left: &Path, right: &Path) -> bool {
-    same_path(left, right)
-        || entry::same_path(&entry::canonical_path(left), &entry::canonical_path(right))
-}
-
-/// Whether `path` is `directory` or lies below it, by spelling.
-fn is_inside(path: &Path, directory: &Path) -> bool {
-    let path = comparable(path);
-    let directory = comparable(directory);
-    path == directory
-        || path
-            .strip_prefix(&directory)
-            .is_some_and(|rest| rest.starts_with('/'))
-}
-
 /// Whether `text` (a configuration file) mentions any of `directories`.
 ///
 /// Paths in JSON and TOML configuration carry doubled backslashes on Windows, so both spellings
@@ -1514,7 +1477,7 @@ fn find_registrations(old_directories: &[PathBuf]) -> Vec<Registration> {
         for (id, connector) in connectors {
             if old_directories
                 .iter()
-                .any(|directory| is_inside(&connector, directory))
+                .any(|directory| lies_within(&connector, directory, cfg!(windows)))
             {
                 found.push(Registration {
                     kind: RegistrationKind::NativeHost,
@@ -2516,12 +2479,12 @@ mod tests {
         } else {
             "/repo/target/release"
         });
+        let within = |path: &Path| lies_within(path, &directory, cfg!(windows));
         let inside = directory.join("ghostlight-browser-connector");
-        assert!(is_inside(&inside, &directory));
-        assert!(is_inside(&directory, &directory));
-        assert!(!is_inside(
-            &directory.with_file_name("release-old").join("connector"),
-            &directory
+        assert!(within(&inside));
+        assert!(within(&directory));
+        assert!(!within(
+            &directory.with_file_name("release-old").join("connector")
         ));
         assert!(mentions_directory(
             &format!("{{\"command\": \"{}\"}}", inside.display()).replace('\\', "\\\\"),
@@ -2532,10 +2495,7 @@ mod tests {
             std::slice::from_ref(&directory)
         ));
         if cfg!(windows) {
-            assert!(is_inside(
-                Path::new(r"\\?\c:\repo\TARGET\release\x.exe"),
-                &directory
-            ));
+            assert!(within(Path::new(r"\\?\c:\repo\TARGET\release\x.exe")));
         }
     }
 

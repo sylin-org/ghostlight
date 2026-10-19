@@ -6,9 +6,9 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b, I4 and I5 have landed. ux-2 has closed, so I6, I8, I10, I12 and I13 can
-start, and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
-registers) and the live check on a test machine.
+I1, I3, I7, I9a, I9b, I4, I5 and I2 have landed. ux-2 has closed, so I6, I8, I10, I12 and I13
+can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
+a test machine.
 
 ## Slices
 
@@ -24,7 +24,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | held for the owner | todo (held for the owner's question 1) |
 | I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I5 | fix(install): Ghostlight's npm launcher entry is Ghostlight's | none | none | see Notes | landed (this commit) |
-| I2 | fix(install): one atomic replace and one same-location rule | none | I1 | - | todo |
+| I2 | fix(install): one atomic replace and one same-location rule | none | I1 | see Notes | landed (this commit) |
 | I6 | fix(install): the roster cache follows the acts, and a command reads it once | none | ux-2 closes (`install/mod.rs`) | - | todo |
 | I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys | todo |
 | I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs` | todo |
@@ -142,3 +142,49 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   moves the window's words into `language/`, can word the launcher from `detail`.
 - I5 changes no golden (no writer or native seed holds a launcher entry) and needs no journey.
   `linux.txt` is unaffected.
+- I2, the one replace: `install::record::Replace` with three stated options, `access` (`Private`
+  or `Kept`), `backup` and `link` (`Follow` or `Refuse`). `Replace::OWN` (private, no backup, a
+  link refused) is `atomic_replace`; `Replace::SHARED` (access kept, no backup, a link written
+  through) is `atomic_replace_keeping_access`. The client-config writer is `SHARED` with a backup,
+  the native-host manifest and the policy bundle are `SHARED`, and the Linux desktop entry and the
+  Flatpak override restore are `SHARED` with a link refused (inspection already calls a link
+  there foreign). Every temporary is `.ghostlight-<uuid>.tmp` beside the file it replaces, and
+  the stray sweep reads `record::is_temporary`.
+- I2, links: `atomic_replace` used to rename over a link, leaving a plain private file where the
+  link was. It now refuses the link (`language::deployment::link_refused`) and changes nothing,
+  because the options are follow or refuse, and a private record must never be written through a
+  link. `atomic_replace_keeping_access` used to do the same; it now writes through the link, so a
+  policy file a person or tool keeps as a link stays one. No caller outside install changed. Not
+  a changed decision.
+- I2, the remove-then-rename fallbacks: every one went, not only "the second". The native host's
+  went with `write_file_atomic`, and the client-config writer's and the desktop entry's went
+  because the one replace has none: on Windows a rename that fails over a file also fails to
+  delete it, and on Linux the rename never fails that way, so the fallback only lost atomicity.
+  `HarnessError::InvalidPath`, `NativeHostError::InvalidPath` and
+  `DesktopIntegrationError::InvalidPath` went with their writers; a path with no parent is now the
+  replace's `InvalidInput` error.
+- I2, the same-location rule: it lives in `install::entry` beside `canonical_path`. `same_path`
+  compares spelling (on Windows without regard to case, slash direction, a trailing separator or
+  the verbatim prefix), `same_location` adds the comparison once links are resolved, and
+  `lies_within` says a path is below a directory. The crate-private `spelled_alike`,
+  `same_location_on` and `lies_within` take whether the paths are Windows paths, so the tests that
+  model a Windows computer on Linux keep working. Gone: `install/mod.rs`'s `comparable` and
+  `paths_equal`; `migration.rs`'s `comparable`, `comparable_text`, `same_path`, `same_location` and
+  `is_inside`; `native_host.rs`'s `normalize_path` and `same_path`; `apps.rs`'s `comparable` and
+  `windows_entry.rs`'s. Case now folds by Unicode lowercase everywhere, as four of the old rules
+  did. `user_path.rs` keeps its own compare: it reads `PATH` text with `%VARIABLE%` references,
+  not paths.
+- I2, which half each site reads: a path a client or another tool wrote (an entry's command, a
+  legacy relay root, a registry value, a manifest's program) is compared by `same_location`; the
+  copies of a client's settings, the Store app's private view and the home roots, which Ghostlight
+  spells from the same roots, are compared by spelling, as before. Resolving them could merge a
+  Store app's private copy with the plain file when Ghostlight runs inside that app's container.
+- I2, the proofs: `a_bundle_write_is_synced_before_its_rename` reads the steps the replace took
+  through a test-only per-thread log (`record::steps`). `register_and_inspect_agree_on_a_respelled_registry_value`
+  respells the value through `.` on every system, and on Windows also with forward slashes and
+  capitals; it runs on disk with an in-memory registry. `a_legacy_relay_entry_spelled_with_forward_slashes_is_owned`
+  is Windows-only, since Linux reads a backslash as a file-name character. Extra proofs in
+  `record.rs`: the one temporary pattern, a kept-access first write and its directories, the
+  backup, and a link refused or followed. The native host's link test was renamed
+  `a_registration_file_is_written_through_a_link` and goes through the system writer.
+- I2 changes no golden and needs no journey. `linux.txt` is unaffected.

@@ -31,8 +31,8 @@ mod writer_golden;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsStr;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
@@ -44,7 +44,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 use toml_edit::{value, Array, DocumentMut, Item, Table};
-use uuid::Uuid;
 
 use crate::agent::image::{monogram, Monogram};
 use crate::agent::Agent;
@@ -54,6 +53,7 @@ use container::{AppContainer, Residence};
 use icons::{AgentIconSources, IconSource, KnownFolder, ProgramPlace};
 use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
 use packaged::{CopyPlace, DataRoots, Packages, SettingsCopy};
+use record::{Access, Link, Replace};
 
 const SERVER_NAME: &str = "ghostlight";
 /// The key of the program an entry starts, in every dialect.
@@ -70,13 +70,8 @@ const CLAUDE_DESKTOP_PACKAGE: &str = "Claude";
 const CODEX_PACKAGE: &str = "OpenAI.Codex";
 /// File in the state directory recording where each MCP client's configuration was found.
 const HARNESS_LOCATIONS_FILE: &str = "harness-locations.json";
-/// How the name of the temporary file a configuration write creates beside the configuration
-/// begins; a simple UUID and [`TEMPORARY_SUFFIX`] follow.
-const TEMPORARY_PREFIX: &str = ".ghostlight-";
-/// How the name of a configuration write's temporary file ends.
-const TEMPORARY_SUFFIX: &str = ".tmp";
-/// The age past which a configuration write's temporary file is no write in flight but one an
-/// interrupted write left behind. A write takes milliseconds.
+/// The age past which a replace's temporary file beside a configuration is no write in flight
+/// but one an interrupted write left behind. A write takes milliseconds.
 const STRAY_TEMPORARY_AGE: Duration = Duration::from_secs(60);
 /// The Windows variable that names the person's home, read before `HOME`.
 const USER_PROFILE_VARIABLE: &str = "USERPROFILE";
@@ -285,7 +280,11 @@ impl HarnessRegistry {
                 !matches!(definition.dialect, ConfigDialect::Manual(_))
                     && context.private_to(definition).is_none()
             })
-            .map(|definition| resolve_through_symlink(&definition.path).unwrap_or(definition.path))
+            .map(|definition| {
+                CONFIGURATION_WRITE
+                    .target(&definition.path)
+                    .unwrap_or(definition.path)
+            })
             .chain(std::iter::once(context.locations.clone()))
             .filter_map(|path| path.parent().map(Path::to_path_buf))
             .collect();
@@ -720,11 +719,9 @@ impl HarnessContext {
         if self.inside_own_app(definition.own_package) {
             return None;
         }
-        let path = comparable(&definition.path);
         view.roots
             .iter()
-            .map(|root| comparable(root))
-            .any(|root| path == root || path.starts_with(&format!("{root}/")))
+            .any(|root| entry::lies_within(&definition.path, root, self.windows))
             .then_some(&view.container)
     }
 
@@ -806,14 +803,6 @@ impl HarnessContext {
     }
 }
 
-/// A path as one lowercase string with forward slashes, for comparing Windows paths.
-fn comparable(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_lowercase()
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HarnessRoots {
     config: PathBuf,
@@ -880,21 +869,24 @@ struct HarnessDefinition {
 }
 
 impl HarnessDefinition {
-    /// Whether `path` is the private copy of the agent's settings kept by its own Store app.
-    fn packaged(&self) -> bool {
-        let path = comparable(&self.path);
-        self.copies
-            .iter()
-            .any(|copy| copy.place == CopyPlace::OwnPackage && comparable(&copy.file) == path)
+    /// Whether `path` is the private copy of the agent's settings kept by its own Store app, on
+    /// Windows (`windows`) or another system.
+    fn packaged(&self, windows: bool) -> bool {
+        self.copies.iter().any(|copy| {
+            copy.place == CopyPlace::OwnPackage
+                && entry::spelled_alike(&copy.file, &self.path, windows)
+        })
     }
 
     /// The configuration files of the agent's other copies of its settings that exist: what
-    /// `path` is not, but an earlier install or another package may still hold.
-    fn other_copies(&self) -> impl Iterator<Item = &Path> {
-        let path = comparable(&self.path);
+    /// `path` is not, but an earlier install or another package may still hold, on Windows
+    /// (`windows`) or another system.
+    fn other_copies(&self, windows: bool) -> impl Iterator<Item = &Path> {
         self.copies
             .iter()
-            .filter(move |copy| comparable(&copy.file) != path && copy.file.is_file())
+            .filter(move |copy| {
+                !entry::spelled_alike(&copy.file, &self.path, windows) && copy.file.is_file()
+            })
             .map(|copy| copy.file.as_path())
     }
 
@@ -1853,9 +1845,9 @@ fn inspect(context: &HarnessContext, definition: &HarnessDefinition) -> HarnessS
         copy_only: manual,
         private_view: !changeable,
         config_path: definition.path.to_string_lossy().into_owned(),
-        packaged: definition.packaged(),
+        packaged: definition.packaged(context.windows),
         other_copy: definition
-            .other_copies()
+            .other_copies(context.windows)
             .next()
             .map(|path| path.to_string_lossy().into_owned()),
         owned_copies: owned_copies
@@ -1883,7 +1875,7 @@ fn product_config_parent_exists(context: &HarnessContext, path: &Path) -> bool {
     // appear installed on every ordinary machine and would make aggregate setup overreach.
     ![&context.home, &context.config, &context.roaming]
         .into_iter()
-        .any(|root| paths_equal(parent, root, context.windows))
+        .any(|root| entry::spelled_alike(parent, root, context.windows))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2347,7 +2339,7 @@ fn owned_other_copies<'a>(
     definition: &'a HarnessDefinition,
 ) -> Vec<&'a Path> {
     definition
-        .other_copies()
+        .other_copies(context.windows)
         .filter(|path| holds_owned_entry(context, definition, path))
         .collect()
 }
@@ -2944,7 +2936,7 @@ fn legacy_relay_owned(command: &str, args: Option<&[&str]>, edge: &Path, windows
     let Some(expected_root) = edge.parent().and_then(Path::parent) else {
         return false;
     };
-    paths_equal(actual_root, expected_root, windows)
+    entry::same_location_on(actual_root, expected_root, windows)
 }
 
 fn command_registration_state(
@@ -2959,10 +2951,8 @@ fn command_registration_state(
             RegistrationState::Launcher,
         );
     }
-    let actual = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
-    let expected = fs::canonicalize(edge).unwrap_or_else(|_| edge.to_path_buf());
     let current = command_name(command, EDGE_COMMAND_NAME)
-        && paths_equal(&actual, &expected, windows)
+        && entry::same_location_on(Path::new(command), edge, windows)
         && args == Some(&MCP_ARGUMENTS[..]);
     if current {
         RegistrationState::Current
@@ -2970,16 +2960,6 @@ fn command_registration_state(
         RegistrationState::Retired
     } else {
         RegistrationState::Updatable
-    }
-}
-
-fn paths_equal(actual: &Path, expected: &Path, windows: bool) -> bool {
-    let actual = actual.to_string_lossy();
-    let expected = expected.to_string_lossy();
-    if windows {
-        actual.eq_ignore_ascii_case(&expected)
-    } else {
-        actual == expected
     }
 }
 
@@ -3145,55 +3125,17 @@ fn is_executable_file(path: &Path, windows: bool) -> bool {
     }
 }
 
-/// If `path` is itself a symlink, resolve it to the real file it points at, so a subsequent
-/// atomic write lands on that file instead of unlinking the symlink and leaving a plain file in
-/// its place. A symlinked client config (for example, one tracked through a synced dotfiles repo)
-/// is a deliberate choice; silently replacing the link with an ordinary file would orphan
-/// whatever it pointed to without telling anyone.
-pub(crate) fn resolve_through_symlink(path: &Path) -> io::Result<PathBuf> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path),
-        _ => Ok(path.to_path_buf()),
-    }
-}
+/// How Ghostlight replaces a client's configuration: the client's access kept, the old file
+/// copied beside it first, and a link written through. A configuration tracked through a link (a
+/// synced dotfiles repository, say) is a deliberate choice, so it stays a link to the file it
+/// names.
+const CONFIGURATION_WRITE: Replace = Replace {
+    access: Access::Kept,
+    backup: true,
+    link: Link::Follow,
+};
 
-/// The temporary file a configuration write creates beside the configuration. It is removed when
-/// dropped unless it was renamed into place, so a write that fails at any step leaves none.
-struct Temporary {
-    path: PathBuf,
-    placed: bool,
-}
-
-impl Temporary {
-    /// A new temporary name in `directory`; no file is made.
-    fn beside(directory: &Path) -> Self {
-        Self {
-            path: directory.join(format!(
-                "{TEMPORARY_PREFIX}{}{TEMPORARY_SUFFIX}",
-                Uuid::new_v4().simple()
-            )),
-            placed: false,
-        }
-    }
-}
-
-impl Drop for Temporary {
-    fn drop(&mut self) {
-        if !self.placed {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
-}
-
-/// Whether `name` is the name of a configuration write's temporary file.
-fn is_write_temporary(name: &OsStr) -> bool {
-    name.to_str()
-        .and_then(|name| name.strip_prefix(TEMPORARY_PREFIX))
-        .and_then(|name| name.strip_suffix(TEMPORARY_SUFFIX))
-        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
-}
-
-/// Remove from `directory` each configuration write's temporary file that is at least
+/// Remove from `directory` each replace temporary ([`record::is_temporary`]) that is at least
 /// [`STRAY_TEMPORARY_AGE`] old at `now`. Returns how many were removed.
 fn remove_stray_temporaries_in(directory: &Path, now: SystemTime) -> usize {
     let Ok(entries) = fs::read_dir(directory) else {
@@ -3201,7 +3143,7 @@ fn remove_stray_temporaries_in(directory: &Path, now: SystemTime) -> usize {
     };
     entries
         .flatten()
-        .filter(|entry| is_write_temporary(&entry.file_name()))
+        .filter(|entry| record::is_temporary(&entry.file_name()))
         .filter(|entry| {
             entry
                 .metadata()
@@ -3215,41 +3157,11 @@ fn remove_stray_temporaries_in(directory: &Path, now: SystemTime) -> usize {
         .count()
 }
 
+/// Replace a client's configuration at `path` with `bytes`, as [`CONFIGURATION_WRITE`] says.
 fn replace_with_backup(path: &Path, bytes: &[u8]) -> Result<(), HarnessError> {
-    let path = &resolve_through_symlink(path).map_err(HarnessError::Write)?;
-    let permissions = fs::metadata(path)
-        .ok()
-        .map(|metadata| metadata.permissions());
-    let parent = path
-        .parent()
-        .ok_or_else(|| HarnessError::InvalidPath(path.to_path_buf()))?;
-    fs::create_dir_all(parent).map_err(HarnessError::Write)?;
-    let mut temporary = Temporary::beside(parent);
-    let backup = path.with_extension(format!(
-        "{}.ghostlight-backup",
-        path.extension().and_then(OsStr::to_str).unwrap_or("config")
-    ));
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    let mut file = options.open(&temporary.path).map_err(HarnessError::Write)?;
-    file.write_all(bytes).map_err(HarnessError::Write)?;
-    if let Some(permissions) = permissions {
-        fs::set_permissions(&temporary.path, permissions).map_err(HarnessError::Write)?;
-    }
-    file.sync_all().map_err(HarnessError::Write)?;
-    drop(file);
-    if path.exists() {
-        fs::copy(path, &backup).map_err(HarnessError::Write)?;
-    }
-    if let Err(error) = fs::rename(&temporary.path, path) {
-        if !path.exists() {
-            return Err(HarnessError::Write(error));
-        }
-        fs::remove_file(path).map_err(HarnessError::Write)?;
-        fs::rename(&temporary.path, path).map_err(HarnessError::Write)?;
-    }
-    temporary.placed = true;
-    Ok(())
+    CONFIGURATION_WRITE
+        .write(path, bytes)
+        .map_err(HarnessError::Write)
 }
 
 fn read_or_empty(path: &Path) -> Result<String, HarnessError> {
@@ -3341,9 +3253,6 @@ pub enum HarnessError {
     /// Ghostlight's own located-path state is malformed.
     #[error("Ghostlight's harness location state is malformed: {0}")]
     MalformedLocationState(String),
-    /// A path has no writable parent.
-    #[error("harness configuration path has no parent: {0}")]
-    InvalidPath(PathBuf),
     /// The change would reach only the private view of the app container named here.
     #[error("{}", words::client_kept_private(.0))]
     PrivateView(String),
@@ -3365,14 +3274,13 @@ mod tests {
     use super::{
         agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
         edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots,
-        holds_owned_entry, inspect, inspect_json, inspect_toml, is_write_temporary,
-        json_entry_args, json_entry_command, json_entry_defaults, jsonc_options, manual_json_setup,
-        mcp_command_line, packaged, remove_stray_temporaries_in, replace_with_backup,
-        resolve_through_symlink, AppContainer, Attention, ClientName, ForeignCommand,
-        HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots, HarnessState,
-        HarnessSummary, JsonDialect, LauncherPin, NpmLauncher, Packages, PrivateView,
-        RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, MCP_ARGUMENT,
-        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
+        holds_owned_entry, inspect, inspect_json, inspect_toml, json_entry_args,
+        json_entry_command, json_entry_defaults, jsonc_options, manual_json_setup,
+        mcp_command_line, packaged, remove_stray_temporaries_in, replace_with_backup, AppContainer,
+        Attention, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
+        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, LauncherPin,
+        NpmLauncher, Packages, PrivateView, RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME,
+        HARNESS_LOCATIONS_FILE, MCP_ARGUMENT, RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -3434,24 +3342,6 @@ mod tests {
     }
 
     #[test]
-    fn only_a_configuration_write_temporary_is_recognised() {
-        use std::ffi::OsStr;
-
-        assert!(is_write_temporary(OsStr::new(
-            ".ghostlight-0123456789abcdef0123456789abcdef.tmp"
-        )));
-        for other in [
-            ".ghostlight-desktop-0123456789abcdef0123456789abcdef.tmp",
-            ".ghostlight-0123456789abcdef.tmp",
-            ".ghostlight-0123456789abcdef0123456789abcdef.json",
-            "ghostlight-0123456789abcdef0123456789abcdef.tmp",
-            "settings.json",
-        ] {
-            assert!(!is_write_temporary(OsStr::new(other)), "{other}");
-        }
-    }
-
-    #[test]
     fn an_install_removes_the_temporaries_an_interrupted_write_left_beside_a_configuration() {
         use std::time::{Duration, SystemTime};
 
@@ -3479,13 +3369,6 @@ mod tests {
         assert_eq!(registry.remove_stray_temporaries(), 0);
         assert_eq!(registry.remove_stray_temporaries_at(later), 1);
         assert!(!settings.join(stray).exists());
-    }
-
-    #[test]
-    fn resolve_through_symlink_leaves_an_ordinary_path_alone() {
-        let directory = temporary("resolve-plain");
-        let path = directory.join("config.json");
-        assert_eq!(resolve_through_symlink(&path).unwrap(), path);
     }
 
     #[cfg(unix)]
@@ -4428,6 +4311,24 @@ mod tests {
             ),
             RegistrationState::Foreign(Some(_))
         ));
+    }
+
+    /// Windows reads `/` as `\` and ignores case, so a 1.x relay entry a client wrote with
+    /// forward slashes is still Ghostlight's own, and Uninstall and Fix find it.
+    #[cfg(windows)]
+    #[test]
+    fn a_legacy_relay_entry_spelled_with_forward_slashes_is_owned() {
+        let directory = temporary("legacy-relay-slashes");
+        let install_root = directory.join("bin");
+        let current = install_root
+            .join("v1")
+            .join(executable_name(EDGE_COMMAND_NAME, true));
+        let legacy = install_root.join("v0").join("ghostlight-relay.exe");
+        let respelled = legacy.to_string_lossy().replace('\\', "/").to_uppercase();
+        assert_eq!(
+            command_registration_state(&respelled, Some(&["--role", "agent"]), &current, true),
+            RegistrationState::Updatable
+        );
     }
 
     #[test]

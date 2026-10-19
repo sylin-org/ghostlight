@@ -15,17 +15,18 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use uuid::Uuid;
 
 use super::browser_package::{self, BrowserPackage, BrowserPackageContext, BrowserPackageSpec};
 use super::container::{self, AppContainer, Residence};
+use super::entry::{canonical_path, same_location_on};
 use super::layout::{Layout, EDGE_COMMAND_NAME, MANIFESTS_DIRECTORY_NAME};
+use super::record;
 
 /// Stable native-messaging identity used by every supported Chromium browser.
 pub const HOST_NAME: &str = "org.sylin.ghostlight";
@@ -46,6 +47,14 @@ pub enum NativeHostPlatform {
     Windows,
     /// Per-browser files below the XDG user configuration directory.
     Linux,
+}
+
+impl NativeHostPlatform {
+    /// Whether paths of this layout are Windows paths, which the same-location rule reads
+    /// without regard to case or slash direction.
+    const fn is_windows(self) -> bool {
+        matches!(self, Self::Windows)
+    }
 }
 
 /// State of one browser's Ghostlight native-host registration.
@@ -290,7 +299,7 @@ impl NativeHostRegistry {
                 local: root.join("local"),
                 layout: Layout::new(root.join("ghostlight")),
                 manifests: root.join(MANIFESTS_DIRECTORY_NAME),
-                connector: normalize_path(connector),
+                connector: canonical_path(connector),
                 browser_packages: BrowserPackageContext::isolated(&root.join("browser-packages")),
                 windows_browser_roots: Vec::new(),
                 registry_isolated: true,
@@ -377,7 +386,7 @@ impl NativeHostContext {
             local,
             layout,
             manifests,
-            connector: normalize_path(&connector),
+            connector: canonical_path(&connector),
             browser_packages,
             windows_browser_roots,
             registry_isolated,
@@ -625,7 +634,7 @@ impl HostManifest {
         Self {
             name: HOST_NAME.into(),
             description: HOST_DESCRIPTION.into(),
-            path: normalize_path(connector),
+            path: canonical_path(connector),
             connection_type: "stdio".into(),
             allowed_origins: expected_origins(),
         }
@@ -638,7 +647,7 @@ impl HostManifest {
     fn current(&self, expected: &Self, platform: NativeHostPlatform) -> bool {
         self.name == expected.name
             && self.description == expected.description
-            && same_path(&self.path, &expected.path, platform)
+            && same_location_on(&self.path, &expected.path, platform.is_windows())
             && self.connection_type == expected.connection_type
             && self.allowed_origins == expected.allowed_origins
     }
@@ -688,7 +697,12 @@ impl RegistrationIo for SystemRegistrationIo {
     }
 
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), NativeHostError> {
-        write_file_atomic(path, contents)
+        record::atomic_replace_keeping_access(path, contents.as_bytes()).map_err(|source| {
+            NativeHostError::Write {
+                path: path.to_path_buf(),
+                source,
+            }
+        })
     }
 
     fn remove_file(&self, path: &Path) -> Result<(), NativeHostError> {
@@ -804,10 +818,10 @@ fn inspect_browser(
                 contents.as_deref(),
                 &expected,
                 context.platform,
-                same_path(
+                same_location_on(
                     &registered_path,
                     &browser_manifest_path(context, browser),
-                    context.platform,
+                    context.platform.is_windows(),
                 ),
             )
         }
@@ -851,7 +865,9 @@ fn classify_manifest(
         .path
         .parent()
         .zip(expected.path.parent())
-        .is_some_and(|(registered, expected)| same_path(registered, expected, platform));
+        .is_some_and(|(registered, expected)| {
+            same_location_on(registered, expected, platform.is_windows())
+        });
     Ok((
         if current_location && manifest.current(expected, platform) {
             NativeHostState::Current
@@ -1060,11 +1076,14 @@ fn register_manifest(
     manifest_path: &Path,
 ) -> Result<Registration, NativeHostError> {
     let key = context.registry_key(browser);
-    let value = normalize_path(manifest_path).to_string_lossy().into_owned();
-    if registration_io
-        .read_registry(&key)?
-        .is_some_and(|current| current.eq_ignore_ascii_case(&value))
-    {
+    let value = canonical_path(manifest_path).to_string_lossy().into_owned();
+    if registration_io.read_registry(&key)?.is_some_and(|current| {
+        same_location_on(
+            Path::new(&current),
+            Path::new(&value),
+            context.platform.is_windows(),
+        )
+    }) {
         return Ok(Registration::Unchanged);
     }
     if context.private_registry().is_some() {
@@ -1133,9 +1152,7 @@ fn apply_uninstall_for(
         for browser in BROWSERS {
             if registration_io
                 .read_registry(&context.registry_key(browser))?
-                .is_some_and(|value| {
-                    same_path(&PathBuf::from(value), &path, NativeHostPlatform::Windows)
-                })
+                .is_some_and(|value| same_location_on(Path::new(&value), &path, true))
             {
                 still_referenced = true;
                 break;
@@ -1199,13 +1216,7 @@ fn remove_legacy_windows_manifest(
         for browser in BROWSERS {
             referenced |= registration_io
                 .read_registry(&context.registry_key(browser))?
-                .is_some_and(|value| {
-                    same_path(
-                        &PathBuf::from(value),
-                        &manifest,
-                        NativeHostPlatform::Windows,
-                    )
-                });
+                .is_some_and(|value| same_location_on(Path::new(&value), &manifest, true));
         }
         if !referenced {
             registration_io.remove_file(&manifest)?;
@@ -1346,77 +1357,6 @@ fn executable_name(name: &str, platform: NativeHostPlatform) -> String {
     }
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let rendered = canonical.to_string_lossy();
-    let stripped = rendered
-        .strip_prefix(r"\\?\UNC\")
-        .map(|rest| format!(r"\\{rest}"))
-        .or_else(|| rendered.strip_prefix(r"\\?\").map(str::to_string));
-    stripped.map_or(canonical, PathBuf::from)
-}
-
-fn same_path(left: &Path, right: &Path, platform: NativeHostPlatform) -> bool {
-    let left = normalize_path(left).to_string_lossy().into_owned();
-    let right = normalize_path(right).to_string_lossy().into_owned();
-    if platform == NativeHostPlatform::Windows {
-        left.eq_ignore_ascii_case(&right)
-    } else {
-        left == right
-    }
-}
-
-fn write_file_atomic(path: &Path, contents: &str) -> Result<(), NativeHostError> {
-    let path = &super::resolve_through_symlink(path).map_err(|source| NativeHostError::Write {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| NativeHostError::InvalidPath(path.to_path_buf()))?;
-    fs::create_dir_all(parent).map_err(|source| NativeHostError::Write {
-        path: parent.to_path_buf(),
-        source,
-    })?;
-    let temporary = parent.join(format!(
-        ".ghostlight-native-host-{}.tmp",
-        Uuid::new_v4().simple()
-    ));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|source| NativeHostError::Write {
-            path: temporary.clone(),
-            source,
-        })?;
-    file.write_all(contents.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|source| NativeHostError::Write {
-            path: temporary.clone(),
-            source,
-        })?;
-    if let Err(source) = fs::rename(&temporary, path) {
-        if path.exists() {
-            fs::remove_file(path).map_err(|source| NativeHostError::Write {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            fs::rename(&temporary, path).map_err(|source| NativeHostError::Write {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        } else {
-            let _ = fs::remove_file(&temporary);
-            return Err(NativeHostError::Write {
-                path: path.to_path_buf(),
-                source,
-            });
-        }
-    }
-    Ok(())
-}
-
 #[cfg(windows)]
 fn read_registry_value(key: &str) -> Result<Option<String>, NativeHostError> {
     use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
@@ -1516,9 +1456,6 @@ pub enum NativeHostError {
     /// An action completed without reaching the required exact state.
     #[error("native-host registration did not reach the expected current state")]
     VerificationFailed,
-    /// A target has no parent directory.
-    #[error("native-host path has no parent: {0}")]
-    InvalidPath(PathBuf),
     /// The change would reach only the private view of the app container this process runs in.
     #[error("{0}")]
     PrivateView(String),
@@ -1607,13 +1544,63 @@ mod tests {
         }
     }
 
+    /// Registration files on disk, as the system keeps them, beside an in-memory registry.
+    #[derive(Default)]
+    struct DiskFiles {
+        memory: MemoryIo,
+    }
+
+    impl RegistrationIo for DiskFiles {
+        fn read_file(&self, path: &Path) -> Result<Option<String>, NativeHostError> {
+            SystemRegistrationIo.read_file(path)
+        }
+
+        fn write_file(&self, path: &Path, contents: &str) -> Result<(), NativeHostError> {
+            SystemRegistrationIo.write_file(path, contents)
+        }
+
+        fn remove_file(&self, path: &Path) -> Result<(), NativeHostError> {
+            SystemRegistrationIo.remove_file(path)
+        }
+
+        fn remove_empty_directory(&self, path: &Path) -> Result<bool, NativeHostError> {
+            SystemRegistrationIo.remove_empty_directory(path)
+        }
+
+        fn read_registry(&self, key: &str) -> Result<Option<String>, NativeHostError> {
+            self.memory.read_registry(key)
+        }
+
+        fn write_registry(&self, key: &str, value: &str) -> Result<(), NativeHostError> {
+            self.memory.write_registry(key, value)
+        }
+
+        fn remove_registry(&self, key: &str) -> Result<(), NativeHostError> {
+            self.memory.remove_registry(key)
+        }
+
+        fn path_exists(&self, path: &Path) -> bool {
+            SystemRegistrationIo.path_exists(path)
+        }
+    }
+
     fn symlink_probe_directory(name: &str) -> Scratch {
         Scratch::named(&format!("native-host-{name}"))
     }
 
+    /// The names in `directory`, sorted.
+    fn names_in(directory: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
     #[cfg(unix)]
     #[test]
-    fn write_file_atomic_writes_through_a_symlinked_registration_file() {
+    fn a_registration_file_is_written_through_a_link() {
         use std::os::unix::fs::symlink;
 
         let directory = symlink_probe_directory("symlink-unix");
@@ -1622,11 +1609,9 @@ mod tests {
         let link = directory.join("registration.json");
         symlink(&real, &link).unwrap();
 
-        write_file_atomic(&link, "new").unwrap();
+        SystemRegistrationIo.write_file(&link, "new").unwrap();
 
-        // The link is untouched -- still a symlink, still pointing at the same real file.
-        // Before write_file_atomic resolved through the link, the rename inside it unlinked the
-        // link and left a plain file in its place, orphaning whatever the link pointed to.
+        // The link stays a link to the same file, and the file holds the new bytes.
         let metadata = fs::symlink_metadata(&link).unwrap();
         assert!(metadata.file_type().is_symlink());
         assert_eq!(fs::read_to_string(&real).unwrap(), "new");
@@ -1635,7 +1620,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn write_file_atomic_writes_through_a_symlinked_registration_file() {
+    fn a_registration_file_is_written_through_a_link() {
         use std::os::windows::fs::symlink_file;
 
         let directory = symlink_probe_directory("symlink-windows");
@@ -1644,16 +1629,69 @@ mod tests {
         let link = directory.join("registration.json");
         if symlink_file(&real, &link).is_err() {
             // No symlink privilege (Developer Mode / an elevated shell) in this environment.
-            // The equivalent Unix test above exercises the same write_file_atomic logic.
+            // The equivalent Unix test exercises the same replace.
             return;
         }
 
-        write_file_atomic(&link, "new").unwrap();
+        SystemRegistrationIo.write_file(&link, "new").unwrap();
 
         let metadata = fs::symlink_metadata(&link).unwrap();
         assert!(metadata.file_type().is_symlink());
         assert_eq!(fs::read_to_string(&real).unwrap(), "new");
         assert_eq!(fs::read_to_string(&link).unwrap(), "new");
+    }
+
+    #[test]
+    fn a_failed_native_host_write_leaves_no_temporary() {
+        let directory = symlink_probe_directory("failed-write");
+        // A directory where the manifest belongs: the rename over it fails after the temporary
+        // was written.
+        let manifest = directory.join(format!("{HOST_NAME}.json"));
+        fs::create_dir(&manifest).unwrap();
+
+        assert!(SystemRegistrationIo.write_file(&manifest, "{}").is_err());
+        assert!(manifest.is_dir());
+        assert_eq!(names_in(&directory), [format!("{HOST_NAME}.json")]);
+    }
+
+    #[test]
+    fn register_and_inspect_agree_on_a_respelled_registry_value() {
+        let (_root, context) = windows_context_with_connector();
+        let registration_io = DiskFiles::default();
+        apply_install(&context, &registration_io).unwrap();
+        let written = registration_io.memory.registry_writes().len();
+        assert_eq!(written, BROWSERS.len());
+
+        // The same manifest, spelled through `.`, and on Windows also with forward slashes and in
+        // capitals, as another tool may have written the value.
+        let manifest = canonical_path(&windows_manifest_path(&context));
+        let respelled = manifest
+            .parent()
+            .unwrap()
+            .join(".")
+            .join(manifest.file_name().unwrap())
+            .to_string_lossy()
+            .into_owned();
+        let respelled = if cfg!(windows) {
+            respelled.replace('\\', "/").to_uppercase()
+        } else {
+            respelled
+        };
+        for browser in BROWSERS {
+            registration_io
+                .memory
+                .registry()
+                .insert(context.registry_key(browser), respelled.clone());
+        }
+
+        let report = inspect(&context, &registration_io).unwrap();
+        assert!(report
+            .browsers
+            .iter()
+            .all(|browser| browser.state == NativeHostState::Current));
+        let again = apply_install(&context, &registration_io).unwrap();
+        assert!(!again.changed);
+        assert_eq!(registration_io.memory.registry_writes().len(), written);
     }
 
     /// A context rooted in a fresh scratch directory, which lives as long as the returned guard.
@@ -2127,7 +2165,7 @@ mod tests {
                 .registry()
                 .get(&windows_registry_key(&BROWSERS[0])),
             Some(
-                &normalize_path(&windows_manifest_path(&context))
+                &canonical_path(&windows_manifest_path(&context))
                     .to_string_lossy()
                     .into_owned()
             )

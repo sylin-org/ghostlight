@@ -7,6 +7,10 @@
 //! channel amendment). It is pure: the caller gathers the facts and performs the answer. Links
 //! are not followed here, so the caller resolves every path it passes with [`canonical_path`]
 //! first.
+//!
+//! The paths it compares are compared by Ghostlight's one same-location rule, which lives here
+//! for every installer part (ADR-0203 Decision 11.2): [`same_path`] by spelling,
+//! [`same_location`] once links are resolved, and [`lies_within`] for a path below a directory.
 
 use std::path::{Path, PathBuf};
 
@@ -125,23 +129,65 @@ fn forward_unless_self(current_exe: &Path, target: &Path) -> Entry {
     }
 }
 
-/// Whether two canonical executable paths name the same file. On Windows the comparison ignores
-/// ASCII case, the difference between `/` and `\`, a trailing separator and the verbatim prefix.
+/// Whether two paths are spelled as one path on this system: [`spelled_alike`] for the system
+/// this build runs on. For paths already resolved with [`canonical_path`], such as the entry
+/// rule's executables; [`same_location`] resolves them itself.
 #[must_use]
 pub fn same_path(left: &Path, right: &Path) -> bool {
-    if cfg!(windows) {
-        comparable(left) == comparable(right)
+    spelled_alike(left, right, cfg!(windows))
+}
+
+/// Whether two paths are spelled as one path on Windows (`windows`) or on another system.
+///
+/// On Windows the comparison ignores case, the difference between `/` and `\`, a trailing
+/// separator and the verbatim prefix. Elsewhere it compares the paths' components, so a trailing
+/// or doubled `/` and an inner `.` do not matter and case does.
+#[must_use]
+pub(crate) fn spelled_alike(left: &Path, right: &Path, windows: bool) -> bool {
+    if windows {
+        windows_spelling(left) == windows_spelling(right)
     } else {
         left == right
     }
 }
 
-/// The key two Windows spellings of one path share.
-fn comparable(path: &Path) -> String {
+/// Whether two paths name the same location: Ghostlight's one same-location rule (ADR-0203
+/// Decision 11.2), for the system this build runs on.
+///
+/// They do when they are [`spelled_alike`], or when they are once links, `.` and `..` are
+/// resolved ([`canonical_path`]). A path that cannot be resolved is compared as it is spelled.
+#[must_use]
+pub fn same_location(left: &Path, right: &Path) -> bool {
+    same_location_on(left, right, cfg!(windows))
+}
+
+/// [`same_location`] for paths of Windows (`windows`) or of another system.
+#[must_use]
+pub(crate) fn same_location_on(left: &Path, right: &Path, windows: bool) -> bool {
+    spelled_alike(left, right, windows)
+        || spelled_alike(&canonical_path(left), &canonical_path(right), windows)
+}
+
+/// Whether `path` is `directory` or lies below it, spelled as [`spelled_alike`] reads paths of
+/// Windows (`windows`) or of another system. Links are not resolved.
+#[must_use]
+pub(crate) fn lies_within(path: &Path, directory: &Path, windows: bool) -> bool {
+    if !windows {
+        return path.starts_with(directory);
+    }
+    let path = windows_spelling(path);
+    let directory = windows_spelling(directory);
+    path == directory
+        || path
+            .strip_prefix(&directory)
+            .is_some_and(|rest| rest.starts_with('\\'))
+}
+
+/// The key every Windows spelling of one path shares: backslashes, no verbatim prefix, no
+/// trailing separator, lowercase.
+fn windows_spelling(path: &Path) -> String {
     let text = path.to_string_lossy().replace('/', "\\");
-    strip_verbatim(&text)
-        .trim_end_matches('\\')
-        .to_ascii_lowercase()
+    strip_verbatim(&text).trim_end_matches('\\').to_lowercase()
 }
 
 /// The text of a Windows path without its verbatim prefix.
