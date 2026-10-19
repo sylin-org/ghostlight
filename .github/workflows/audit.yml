@@ -1,0 +1,26 @@
+name: Advisories
+
+# The RustSec advisory database changes without our code changing, so a new advisory is checked
+# once a day here instead of failing whatever push happens to come next. The release workflow runs
+# the same check before it builds anything.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+      - run: rustup toolchain install
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-audit@0.22.2
+      - run: cargo audit

@@ -5,9 +5,11 @@ on:
   push:
     branches: [main, dev]
 
+# A newer push waits for the run in progress instead of cancelling it, so every run that starts
+# reports. Only a run still waiting to start gives way to a newer one.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -175,13 +177,20 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - name: Keep the pinned Chrome for Testing archive between runs
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ghostlight-chrome.zip
+          key: chrome-for-testing-152.0.7977.82-${{ runner.os }}
       - name: Install pinned Chrome for Testing
         shell: pwsh
         run: |
           $chromePlatform = if ($IsWindows) { 'win64' } else { 'linux64' }
           $chromeRoot = Join-Path $env:RUNNER_TEMP 'ghostlight-chrome'
           $chromeArchive = Join-Path $env:RUNNER_TEMP 'ghostlight-chrome.zip'
-          Invoke-WebRequest "https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.82/$chromePlatform/chrome-$chromePlatform.zip" -OutFile $chromeArchive
+          if (-not (Test-Path -LiteralPath $chromeArchive)) {
+            Invoke-WebRequest "https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.82/$chromePlatform/chrome-$chromePlatform.zip" -OutFile $chromeArchive -MaximumRetryCount 4 -RetryIntervalSec 15
+          }
           Expand-Archive -LiteralPath $chromeArchive -DestinationPath $chromeRoot
           $chromeDirectory = Join-Path $chromeRoot "chrome-$chromePlatform"
           $chromeExecutable = Join-Path $chromeDirectory $(if ($IsWindows) { 'chrome.exe' } else { 'chrome' })
@@ -215,6 +224,7 @@ jobs:
       - name: Install dependency policy tools
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
-          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
-      - run: cargo audit
+          tool: cargo-deny@0.20.2
+      # The advisory database changes without our code changing, so cargo audit runs daily
+      # (audit.yml) and in the release workflow, not on every push.
       - run: cargo deny check licenses bans sources
