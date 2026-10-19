@@ -52,7 +52,7 @@ use uuid::Uuid;
 
 use crate::audit::AuditRecorder;
 use crate::browser::adapter::chromium::protocol4::assets::page_assets;
-use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome, RuntimeControlIntent};
+use crate::browser::adapter::{BrowserCommand, BrowserEvent, BrowserOutcome};
 use crate::browser::transport::{SocketReader, SocketWriter};
 use crate::browser::{
     AdapterLifecycleObserver, Availability, BrowserError, BrowserEventSink, BrowserPort,
@@ -1064,15 +1064,12 @@ fn serve_desktop(
             _ => continue,
         };
         match item {
-            TrayItemId::Hold => {
-                intake
-                    .workbench
-                    .apply_runtime_control(RuntimeControlIntent::Hold, RuntimeSource::Tray);
-            }
-            TrayItemId::Resume => {
-                intake
-                    .workbench
-                    .apply_runtime_control(RuntimeControlIntent::Resume, RuntimeSource::Tray);
+            TrayItemId::Hold | TrayItemId::Resume => {
+                if let Some(intent) = item.intent(intake.workbench.runtime_state()) {
+                    intake
+                        .workbench
+                        .apply_runtime_control(intent, RuntimeSource::Tray);
+                }
             }
             TrayItemId::Quit => intake.quit.begin(QuitReason::Quit, QUIT_GRACE),
             TrayItemId::Open => {
@@ -3232,10 +3229,12 @@ mod tests {
             .iter()
             .map(|summary| summary.connections[0].explanation.clone())
             .collect();
+        let unseen =
+            ConnectionEvidence::new(Attribution::accepted(IntakeChannel::Mcp), "relay test")
+                .details()
+                .explanation;
         assert!(
-            explanations.contains(&crate::language::provenance::claimed_name_explanation(
-                "relay test"
-            )),
+            explanations.contains(&unseen),
             "a stream with no peer process keeps the caveat: {explanations:?}"
         );
     }

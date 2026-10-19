@@ -104,7 +104,7 @@ const controlsPart = ({
     },
     viewing: served ? {
       label: "Others can watch", watch, url: "http://127.0.0.1:41234/",
-      word: watch ? "On -- anyone on this computer can open this view" : "Off -- only this window shows Ghostlight",
+      word: watch ? "On: anyone on this computer can open this view" : "Off: only this window shows Ghostlight",
       acts: { set_watching: act() }
     } : {
       label: "Others can watch", watch: false, url: null, word: SHEET_NOT_SERVED,
@@ -116,7 +116,7 @@ const controlsPart = ({
       acts: { set_diagnostics: act(), reveal_diagnostics: act() }
     },
     notifications: {
-      label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
+      label: "Notifications", state: "On", word: "Send one local checkup notification. Nothing leaves this device.",
       acts: { test_notification: act() }
     },
     browser: {
@@ -861,7 +861,7 @@ const provenanceChecks = [];
 {
   const evidence = {
     connection_id: "connection_original", reported_application: "Original <script>claim</script>",
-    channel: "mcp", explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it."
+    channel: "mcp", explanation: '"Original <script>claim</script>" is what the agent calls itself; Ghostlight does not verify it.'
   };
   const claimed = namedAgent("Original <script>claim</script>");
   const laterSession = { id: "shared-workspace", agent: namedAgent("Later application"), channel: "cli" };
@@ -876,12 +876,13 @@ const provenanceChecks = [];
   provenanceChecks.push(["live action attribution uses its own connection and escapes the claim",
     html.includes("Original &lt;script&gt;claim&lt;/script&gt;")
       && !html.includes("Later application") && !html.includes("<script>claim")]);
-  const restored = { ...record, provenance: { ...evidence, reported_application: null }, agent: namedAgent(null) };
+  const restored = { ...record, provenance: { ...evidence, reported_application: null,
+    explanation: "The agent's name is its own claim. Ghostlight does not verify it." }, agent: namedAgent("Codex") };
   connectionView.hero(entries.entryFromRecord(restored), false);
   html = nodes.get("hero-body").innerHTML;
-  provenanceChecks.push(["restored history keeps its connection without borrowing a current claim",
-    html.includes("Not retained in history") && html.includes("connection_original")
-      && !html.includes("Later application") && html.includes("MCP client")]);
+  provenanceChecks.push(["restored history keeps its connection, behind Copy id, without borrowing a current claim",
+    html.includes('data-copy-connection="connection_original"') && html.includes("own claim")
+      && !html.includes("Later application") && !html.includes("Not retained") && !html.includes("Reported application"), html]);
   connectionView.hero(entries.entryFromRecord({ ...record, provenance: null, channel: null, agent: namedAgent(null) }), false);
   html = nodes.get("hero-body").innerHTML;
   provenanceChecks.push(["legacy history names missing evidence without borrowing current-session identity",
@@ -889,10 +890,10 @@ const provenanceChecks = [];
   const group = { ...record, tool: "browser_flow", steps: [{ position: 1, state: "recorded", record }] };
   connectionView.hero(entries.entryFromRecord(group), false);
   html = nodes.get("hero-body").innerHTML;
-  provenanceChecks.push(["parent and recorded child each expose collapsed connection evidence",
+  provenanceChecks.push(["a flow shows its connection once, collapsed, and not under each step",
     html.includes('data-history-details="provenance-work:connection"')
-      && html.includes('data-history-details="provenance-work:step:1:connection"')
-      && !html.includes('data-history-details="provenance-work:connection" open')]);
+      && !html.includes('data-history-details="provenance-work:step:1:connection"')
+      && !html.includes('data-history-details="provenance-work:connection" open'), html]);
 }
 
 // At a glance: one summary, two shelves, and an agent's card in place of a list of connections.
@@ -1635,10 +1636,10 @@ const httpChecks = [
     watchOpening.rosterLine + watchOpening.status],
   ["Settings in a watching page shows Pause while agents run and the rest as state, with no Quit",
     watchOpening.sheetPause === false && watchOpening.quitHidden === true
-      && watchOpening.sheetViewingWord === "On -- anyone on this computer can open this view"
+      && watchOpening.sheetViewingWord === "On: anyone on this computer can open this view"
       && JSON.stringify(watchOpening.rail) === JSON.stringify([
-        "Comfortable, standard text, motion follows the system", "On -- anyone on this computer can open this view", "Running",
-        "Send one local checkup notification. Nothing leaves this device.", "On (marker)"]),
+        "Comfortable, standard text, motion follows the system", "On: anyone on this computer can open this view", "Running",
+        "On", "On (marker)"]),
     JSON.stringify(watchOpening)],
   ["Sharing says who can see a watching page, and Status carries the service's sentence at its top",
     watchOpening.who === SHEET_WATCHER
@@ -1715,8 +1716,8 @@ const httpChecks = [
   ["Turn off in Settings is one keyed PUT, waited for as a change; the rail, the sentence and the chip follow",
     viewingRequest?.method === "PUT" && viewingRequest.body === '{"watch":false}'
       && viewingRequest.headers.Authorization === "Bearer key-1" && viewingRequest.credentials === "omit"
-      && sheetAfterOff.word === "Off -- only this window shows Ghostlight" && sheetAfterOff.toggle === "Turn on"
-      && sheetAfterOff.rail === "Off -- only this window shows Ghostlight" && sheetAfterOff.who === SHEET_PRIVATE
+      && sheetAfterOff.word === "Off: only this window shows Ghostlight" && sheetAfterOff.toggle === "Turn on"
+      && sheetAfterOff.rail === "Off: only this window shows Ghostlight" && sheetAfterOff.who === SHEET_PRIVATE
       && sheetAfterOff.chipTitle === SHEET_PRIVATE && sheetAfterOff.snapshots === 0,
     JSON.stringify({ viewingRequest, sheetAfterOff })],
   ["Quit asks inline first, Cancel puts the button back, and only the second press is one keyed POST",
@@ -1818,16 +1819,16 @@ const checks = [
       && sheetAfterBoot.runtimeWord === "Running" && sheetAfterBoot.hold === false
       && sheetAfterBoot.resume === true && sheetAfterBoot.start === true
       && sheetAfterBoot.service === "Ghostlight is running; 1 agent and 1 browser connected."
-      && sheetAfterBoot.viewingWord === "On -- anyone on this computer can open this view"
+      && sheetAfterBoot.viewingWord === "On: anyone on this computer can open this view"
       && sheetAfterBoot.viewingUrl === "http://127.0.0.1:41234/"
       && sheetAfterBoot.viewingToggle === "Turn off" && sheetAfterBoot.viewingToggleHidden === false
       && sheetAfterBoot.notificationsWord.startsWith("Send one local checkup notification"),
     JSON.stringify(sheetAfterBoot)],
   ["the rail states the sections, and the window is offered Quit and told who can see",
     sheetAfterBoot.railScreen === "Comfortable, standard text, motion follows the system"
-      && sheetAfterBoot.railSharing === "On -- anyone on this computer can open this view"
+      && sheetAfterBoot.railSharing === "On: anyone on this computer can open this view"
       && sheetAfterBoot.railBrowserWork === "Running" && sheetAfterBoot.railDiagnostics === "On (marker)"
-      && sheetAfterBoot.railNotifications.startsWith("Send one local checkup notification")
+      && sheetAfterBoot.railNotifications === "On"
       && sheetAfterBoot.quitShown && sheetAfterBoot.who.startsWith("Others on this computer can watch")
       && sheetAfterBoot.address === 0
       && sheetAfterBoot.errors.every((error) => error.includes("deliberate About failure")),
@@ -1838,8 +1839,8 @@ const checks = [
       && sheetAfterBoot.diagnosticsReveal === false,
     JSON.stringify(sheetAfterBoot)],
   ["a pushed controls part updates Settings and takes the chip away once only the window shows Ghostlight, with no snapshot",
-    sheetAfterPush.railSharing === "Off -- only this window shows Ghostlight" && sheetAfterPush.railDiagnostics === "Off"
-      && sheetAfterPush.viewingWord === "Off -- only this window shows Ghostlight"
+    sheetAfterPush.railSharing === "Off: only this window shows Ghostlight" && sheetAfterPush.railDiagnostics === "Off"
+      && sheetAfterPush.viewingWord === "Off: only this window shows Ghostlight"
       && sheetAfterPush.viewingToggle === "Turn on" && sheetAfterPush.diagnosticsWord === "Off"
       && sheetAfterPush.diagnosticsToggle === "Turn on" && sheetAfterPush.chip === "" && sheetAfterPush.chipHidden === true
       && sheetAfterPush.chipTitle === SHEET_PRIVATE && sheetAfterPush.snapshots === 0,
@@ -1919,7 +1920,7 @@ const checks = [
   ["the page opens on the agent that needs attention, with its evidence and Fix",
     agentsShown.opening.includes('id="agents-pane-title">Junie</h2>')
       && agentsShown.rail.includes('data-agent="junie" aria-controls="agents-pane" aria-current="true"')
-      && agentsShown.opening.includes("What Ghostlight found") && agentsShown.opening.includes("`alien-agent`")
+      && agentsShown.opening.includes("What Ghostlight found") && agentsShown.opening.includes('<code class="agent-code">alien-agent</code>') && !agentsShown.opening.includes("`")
       && agentsShown.opening.includes(">Fix</button>") && agentsShown.opening.includes("Backs up settings.json"),
     agentsShown.opening],
   ["an agent that needs attention and cannot be fixed gets numbered steps",
@@ -1970,7 +1971,7 @@ const checks = [
     `shown=${fixConfirmationShown} calls=${JSON.stringify(managedHarnesses)}`],
   ["the headline counts the agents with Ghostlight, and Set up everything says beforehand what it will do",
     agentsShown.heading === "Ghostlight is in <em>2 of the 6</em> agents it can check."
-      && agentsShown.caption === "Will connect Claude Code and update Cursor. goose, Junie and Kilo Code are left for you."
+      && agentsShown.caption === "Connects Claude Code and updates Cursor. goose, Junie and Kilo Code need you."
       && agentsShown.setupTitle === agentsShown.caption,
     JSON.stringify(agentsShown.heading + " | " + agentsShown.caption)],
   ["the page offers one Copy MCP command, in its header, with the command shown",

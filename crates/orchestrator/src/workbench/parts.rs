@@ -392,6 +392,8 @@ pub struct DiagnosticsActs {
 pub struct NotificationControls {
     /// The row's label.
     pub label: &'static str,
+    /// The state word the Settings rail shows for the section.
+    pub state: &'static str,
     /// What the test does.
     pub word: &'static str,
     /// What the context may do.
@@ -524,6 +526,7 @@ impl ControlsPart {
             },
             notifications: NotificationControls {
                 label: words::CONTROLS_NOTIFICATIONS_LABEL,
+                state: words::CONTROLS_NOTIFICATIONS_ON,
                 word: words::CONTROLS_NOTIFICATIONS_WORD,
                 acts: NotificationActs {
                     test_notification: unavailable,

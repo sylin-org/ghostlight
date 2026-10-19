@@ -3488,13 +3488,16 @@ mod tests {
     }
 
     #[test]
-    fn the_command_line_and_the_unknown_agent_are_reserved_entries_no_row_takes() {
-        use crate::agent::{COMMAND_LINE_ID, UNKNOWN_ID, UNKNOWN_NAME_SEPARATOR};
-        use crate::language::provenance::{COMMAND_LINE_AGENT, UNKNOWN_AGENT};
+    fn the_reserved_entries_are_entries_no_row_takes() {
+        use crate::agent::{COMMAND_LINE_ID, EARLIER_ID, UNKNOWN_ID, UNKNOWN_NAME_SEPARATOR};
+        use crate::language::provenance::{COMMAND_LINE_AGENT, EARLIER_SESSION, UNKNOWN_AGENT};
 
         for row in ROSTER {
             for id in [row.id, row.agent_id] {
-                assert!(![COMMAND_LINE_ID, UNKNOWN_ID].contains(&id), "{id}");
+                assert!(
+                    ![COMMAND_LINE_ID, UNKNOWN_ID, EARLIER_ID].contains(&id),
+                    "{id}"
+                );
                 assert!(!id.contains(UNKNOWN_NAME_SEPARATOR), "{id}");
             }
             for reserved in [
@@ -3502,6 +3505,8 @@ mod tests {
                 UNKNOWN_ID,
                 COMMAND_LINE_AGENT,
                 UNKNOWN_AGENT,
+                EARLIER_ID,
+                EARLIER_SESSION,
             ] {
                 assert!(!row.is_called(reserved), "{} is called {reserved}", row.id);
             }

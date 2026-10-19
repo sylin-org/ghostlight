@@ -560,9 +560,10 @@ workbench shows waiting becoming running once.
     and points to the Policy page, never Ready. The header, the Status authority card, and the
     Policy tab read the one validity governance enforces. A failed reload that keeps the last valid
     policy in force stays Ready, keeps its Policy situation, and shows a Status warning.
-19. Pause, Resume, End session, and Start session are offered and applied while the authority is
-    reachable and no browser is connected. A workbench that loses the authority disables the header
-    control until it reaches the authority again, even though its last snapshot offered control.
+19. Pause, Resume, End session, and Start a new session are offered and applied while the
+    authority is reachable and no browser is connected. A workbench that loses the authority
+    disables the header control until it reaches the authority again, even though its last
+    snapshot offered control.
     Each confirmation states only the resulting authority state, identically whether control
     publication to adapters succeeded, failed, or reached none.
 20. The service links no UI toolkit and starts with no display. `cargo tree` for

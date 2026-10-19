@@ -499,7 +499,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agents-heading-side { display: flex; flex: none; width: min-content; flex-direction: column; align-items: flex-end; gap: 5px; }
 .agents-heading-side .page-heading-actions > * { flex: none; white-space: nowrap; }
 .agents-command { max-width: 100%; overflow: hidden; color: var(--ink-3); font: 400 11.5px/1.4 var(--mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
-.page-heading .agents-caption { margin: 0; color: var(--ink-4); font: 400 11.5px/1.45 var(--mono); text-align: right; }
+.page-heading .agents-caption { margin: 0; color: var(--ink-4); font: 400 11.5px/1.45 var(--sans); text-align: left; text-wrap: pretty; }
 
 .agents { display: grid; flex: 1 1 auto; min-height: 0; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; }
 .agents-rail { display: flex; min-height: 0; flex-direction: column; }
@@ -610,7 +610,9 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agent-use .link-button { margin-left: auto; }
 .agent-evidence { margin: 14px 0 0; padding: 10px 14px; border-left: 2px solid var(--amber); border-radius: 0 8px 8px 0; background: rgba(251, 191, 36, .05); }
 .agent-evidence .kicker { color: var(--amber); }
-.agent-evidence p { margin: 7px 0 0; color: var(--ink-2); font: 400 12px/1.5 var(--mono); overflow-wrap: anywhere; }
+.agent-evidence p { margin: 7px 0 0; color: var(--ink-2); font: 400 12.5px/1.5 var(--sans); overflow-wrap: anywhere; }
+/* A program or path the service names in its sentence. */
+.agent-code { color: var(--ink-3); font: 400 12px/1.5 var(--mono); }
 
 /* What the agent's state lets the person do next: each button with the sentence that says what it does. */
 .agent-next { display: grid; gap: 10px; margin-top: 20px; }
@@ -676,7 +678,7 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 @container shell (max-width: 660px) {
   .agents-heading { flex-direction: column; align-items: stretch; }
   .agents-heading-side { width: auto; align-items: flex-start; }
-  .agents-command, .page-heading .agents-caption { text-align: left; }
+  .agents-command { text-align: left; }
 }
 
 /* Four checks in a row, or two and two where four do not fit: never three and one alone. */
@@ -1107,11 +1109,8 @@ kbd { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 4px; col
 .disclosure:hover, details[open] > .disclosure { color: var(--ink); }
 .disclosure svg { width: 10px; height: 10px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; transition: transform .2s var(--calm); }
 details[open] > .disclosure svg { transform: rotate(180deg); }
-.connection-facts { margin: 10px 0 0; font-size: 12px; }
-.connection-facts > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 14px; margin: 5px 0; }
-.connection-facts dt { color: var(--ink-4); }
-.connection-facts dd { margin: 0; overflow-wrap: anywhere; }
-.connection-explanation { max-width: 72ch; color: var(--ink-4); font-size: 12px; overflow-wrap: anywhere; }
+.connection-explanation { max-width: 72ch; margin: 8px 0 0; color: var(--ink-4); font-size: 12px; overflow-wrap: anywhere; }
+.connection-copy { display: block; margin-top: 6px; }
 .history-steps { list-style: none; padding: 0; margin: 12px 0 0; max-height: 360px; overflow-y: auto; }
 .history-step { padding: 10px 0; border-top: 1px solid var(--line); }
 .step-line { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: start; }
@@ -1121,7 +1120,7 @@ details[open] > .disclosure svg { transform: rotate(180deg); }
 .step-status { font-size: 12px; }
 .permission-details ul { padding-left: 20px; }
 .permission-details li p { margin: 3px 0 8px; overflow-wrap: anywhere; }
-.history-step > .permission-details, .history-step > .connection-details { margin-left: 32px; }
+.history-step > .permission-details { margin-left: 32px; }
 @container shell (max-width: 820px) { .row-history { grid-column: 1 / -1; } .step-line { grid-template-columns: 20px minmax(0, 1fr); } .step-status { grid-column: 2; } }
 
 /* ---------------- what this screen may do, and what it may not ---------------- */

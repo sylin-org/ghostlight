@@ -659,6 +659,7 @@ fn controls_keys() -> BTreeSet<String> {
         "notifications",
         "notifications.acts",
         "notifications.label",
+        "notifications.state",
         "notifications.word",
         "runtime",
         "runtime.acts",

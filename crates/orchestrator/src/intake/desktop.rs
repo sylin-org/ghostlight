@@ -30,7 +30,7 @@ use std::fmt;
 use ghostlight_relay::protocol::GoodbyeReason;
 use serde::{Deserialize, Serialize};
 
-use crate::browser::adapter::RuntimeControlState;
+use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use crate::language::readiness::Readiness;
 use crate::language::workbench::{self as words, ConnectionCounts};
 use crate::workbench::PageAddress;
@@ -286,7 +286,8 @@ pub enum TrayItemId {
     Open,
     /// Pause the agents' browser work.
     Hold,
-    /// Let the agents' browser work continue.
+    /// Let the agents' browser work continue: resume a pause, or start a new session after one
+    /// ended.
     Resume,
     /// Quit Ghostlight.
     Quit,
@@ -313,14 +314,28 @@ impl TrayItemId {
         Self::ALL.into_iter().find(|item| item.as_str() == text)
     }
 
-    /// What the entry says.
+    /// What the entry says while browser work is `runtime`: Resume starts a new session once the
+    /// session ended, in the words the window and the browser toolbar use for it.
     #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Open => words::TRAY_OPEN,
-            Self::Hold => words::TRAY_HOLD,
-            Self::Resume => words::TRAY_RESUME,
-            Self::Quit => words::TRAY_QUIT,
+    pub const fn label(self, runtime: RuntimeControlState) -> &'static str {
+        match (self, runtime) {
+            (Self::Open, _) => words::TRAY_OPEN,
+            (Self::Hold, _) => words::TRAY_HOLD,
+            (Self::Resume, RuntimeControlState::Ended) => words::TRAY_START_SESSION,
+            (Self::Resume, _) => words::TRAY_RESUME,
+            (Self::Quit, _) => words::TRAY_QUIT,
+        }
+    }
+
+    /// The runtime control a click on the entry asks for while browser work is `runtime`, as its
+    /// label says ([`Self::label`]); none for Open and Quit, which control no browser work.
+    #[must_use]
+    pub const fn intent(self, runtime: RuntimeControlState) -> Option<RuntimeControlIntent> {
+        match (self, runtime) {
+            (Self::Hold, _) => Some(RuntimeControlIntent::Hold),
+            (Self::Resume, RuntimeControlState::Ended) => Some(RuntimeControlIntent::StartSession),
+            (Self::Resume, _) => Some(RuntimeControlIntent::Resume),
+            (Self::Open | Self::Quit, _) => None,
         }
     }
 }
@@ -381,7 +396,7 @@ impl TrayModel {
     /// The tray for a service in `readiness` with `runtime` control and `counts` connected.
     ///
     /// Open and Quit can always be chosen. Pause can be chosen while browser work is active, and
-    /// Resume while it is paused or the session ended.
+    /// Resume while it is paused; once the session ended, that entry starts a new one.
     #[must_use]
     pub fn of(
         readiness: Readiness,
@@ -395,7 +410,7 @@ impl TrayModel {
                 .into_iter()
                 .map(|id| TrayItem {
                     id,
-                    label: id.label().to_owned(),
+                    label: id.label(runtime).to_owned(),
                     enabled: match id {
                         TrayItemId::Open | TrayItemId::Quit => true,
                         TrayItemId::Hold => active,
@@ -638,22 +653,65 @@ mod tests {
     }
 
     #[test]
-    fn a_paused_or_ended_tray_offers_resume_but_not_pause() {
-        for (readiness, runtime) in [
-            (Readiness::Paused, RuntimeControlState::Held),
-            (Readiness::SessionEnded, RuntimeControlState::Ended),
+    fn a_paused_tray_offers_resume_but_not_pause() {
+        let tray = TrayModel::of(
+            Readiness::Paused,
+            RuntimeControlState::Held,
+            golden_counts(),
+        );
+        assert_eq!(tray.state, TrayState::Paused);
+        assert_eq!(
+            listed(&tray),
+            [
+                ("open", "Open Ghostlight", true),
+                ("hold", "Pause agents", false),
+                ("resume", "Resume agents", true),
+                ("quit", "Quit Ghostlight", true),
+            ]
+        );
+        assert_eq!(
+            TrayItemId::Resume.intent(RuntimeControlState::Held),
+            Some(RuntimeControlIntent::Resume)
+        );
+    }
+
+    #[test]
+    fn an_ended_tray_offers_a_new_session_but_not_pause() {
+        let tray = TrayModel::of(
+            Readiness::SessionEnded,
+            RuntimeControlState::Ended,
+            golden_counts(),
+        );
+        assert_eq!(tray.state, TrayState::Paused);
+        assert_eq!(
+            listed(&tray),
+            [
+                ("open", "Open Ghostlight", true),
+                ("hold", "Pause agents", false),
+                ("resume", "Start a new session", true),
+                ("quit", "Quit Ghostlight", true),
+            ]
+        );
+        assert_eq!(
+            TrayItemId::Resume.intent(RuntimeControlState::Ended),
+            Some(RuntimeControlIntent::StartSession),
+            "the entry does what it says: a resume would leave an ended session ended"
+        );
+    }
+
+    #[test]
+    fn only_the_runtime_entries_ask_for_a_runtime_control() {
+        for runtime in [
+            RuntimeControlState::Active,
+            RuntimeControlState::Held,
+            RuntimeControlState::Ended,
         ] {
-            let tray = TrayModel::of(readiness, runtime, golden_counts());
-            assert_eq!(tray.state, TrayState::Paused);
             assert_eq!(
-                listed(&tray),
-                [
-                    ("open", "Open Ghostlight", true),
-                    ("hold", "Pause agents", false),
-                    ("resume", "Resume agents", true),
-                    ("quit", "Quit Ghostlight", true),
-                ]
+                TrayItemId::Hold.intent(runtime),
+                Some(RuntimeControlIntent::Hold)
             );
+            assert_eq!(TrayItemId::Open.intent(runtime), None);
+            assert_eq!(TrayItemId::Quit.intent(runtime), None);
         }
     }
 

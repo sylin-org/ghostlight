@@ -268,7 +268,7 @@
       drawQuit();
       drawRailState("sharing", part.viewing.word);
       drawRailState("browser-work", part.runtime.word);
-      drawRailState("notifications", part.notifications.word);
+      drawRailState("notifications", part.notifications.state);
       drawRailState("diagnostics", part.diagnostics.word);
     }
 

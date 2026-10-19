@@ -163,6 +163,21 @@
     fromCommandLine: "from the command line"
   });
 
+  /**
+   * The fixed words of an action's detail card. The connection says what Ghostlight can vouch for
+   * in the service's words, and the intake only when it is the exception, the command line.
+   */
+  const CARD = Object.freeze({
+    connection: "Connection details",
+    notRecorded: "Connection details were not recorded.",
+    commandLine: "Came through the command line.",
+    permissions: "Permission details",
+    permissionsOmitted: "Additional permission checks were omitted."
+  });
+
+  /** The hover of a browser's chip: the extension by its product name, and its version. */
+  const browserChipTitle = (version) => `Ghostlight in Browser ${version}`;
+
   /** How many session lines an agent's card shows before it says how many more there are. */
   const GLANCE_CARD_LINES = 4;
 
@@ -241,7 +256,7 @@
     reduced: "Reduced",
     pause: "Pause agents",
     resume: "Resume agents",
-    startSession: "Start session",
+    startSession: "Start a new session",
     endSession: "End session",
     turnOn: "Turn on",
     turnOff: "Turn off",
@@ -481,18 +496,17 @@
 
   /**
    * What Set up everything will do, said before it is pressed: the agents it connects, the ones it
-   * updates, and the ones it leaves to the person.
+   * updates, and the ones that need the person ("Connects 5 agents and updates Cursor. Goose needs
+   * you."). Empty when it would do nothing, since the button is not shown then.
    */
   function agentPlan({ connect, update, left }) {
-    const leftWords = left.length
-      ? ` ${fewOrCount(left)} ${left.length === 1 ? "is" : "are"} left for you.` : "";
-    if (!connect.length && !update.length) {
-      return left.length ? `Nothing Ghostlight can set up.${leftWords}` : "Nothing to set up.";
-    }
+    if (!connect.length && !update.length) return "";
     const parts = [];
-    if (connect.length) parts.push(`connect ${fewOrCount(connect)}`);
-    if (update.length) parts.push(`update ${fewOrCount(update)}`);
-    return `Will ${parts.join(" and ")}.${leftWords}`;
+    if (connect.length) parts.push(`connects ${fewOrCount(connect)}`);
+    if (update.length) parts.push(`updates ${fewOrCount(update)}`);
+    const said = parts.join(" and ");
+    const need = left.length ? ` ${fewOrCount(left)} ${left.length === 1 ? "needs" : "need"} you.` : "";
+    return `${said[0].toUpperCase()}${said.slice(1)}.${need}`;
   }
 
   /** An agent's sessions and tabs on its rail line, and whether one is working: "3 sessions, 1 tab, working". */
@@ -551,7 +565,7 @@
       case "update": return `Rewrites Ghostlight's own entry in ${file}. Nothing else in the file changes. Restart ${name} afterwards.`;
       case "fix": return `Backs up ${file}, then puts Ghostlight's entry in place of what is there. Nothing else in the file changes. Asks first.`;
       case "locate": return `Lets you choose ${name}'s settings file or program yourself, if Ghostlight looks in the wrong place.`;
-      case "repair": return `The sentence above says what Ghostlight saw. Ghostlight leaves ${file} as it is.`;
+      case "repair": return `Ghostlight leaves ${file} as it is.`;
       case "recheck":
         return agent.evidence
           ? `Once the entry is right, ${name} moves to ${AGENT_STATE_WORDS.installed}.`
@@ -1005,11 +1019,6 @@
   /** How long ago something settled, as a phrase: "20m ago". */
   const agoSaid = (timestamp) => `${ago(timestamp)} ago`;
 
-  function shortId(value) {
-    const text = String(value ?? "");
-    return text.length <= 20 ? text : `${text.slice(0, 10)}...${text.slice(-6)}`;
-  }
-
   /**
    * A settled record has no presentation activity, so its medallion comes from the tool.
    * Without this every historical row wears the same glyph and the queue reads as one texture.
@@ -1089,10 +1098,14 @@
     unknown: "outcome could not be confirmed"
   };
 
+  /**
+   * The note a settled row adds to its sentence for the readiness the service observed: only a
+   * caution about the sentence. A page that was ready to use, loaded or not, needs no word.
+   */
   const READINESS_NOTE = {
     not_applicable: "",
     complete: "",
-    interactive: "interactive",
+    interactive: "",
     loading: "never settled",
     unknown: "readiness unknown"
   };
@@ -1101,8 +1114,8 @@
    * Which readiness values mark a settled row as worth finding while scrolling.
    *
    * A document that never settled, or whose readiness could not be observed, is a caution about
-   * the sentence beside it; "interactive" is only extra information. The duration cell carries
-   * the amber treatment so the row is found by eye instead of read for.
+   * the sentence beside it. The duration cell carries the amber treatment so the row is found by
+   * eye instead of read for.
    */
   const READINESS_ATTENTION = new Set(["loading", "unknown"]);
 
@@ -1145,7 +1158,7 @@
     POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
-    CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
+    CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES, CARD, browserChipTitle,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun,
     screenState, byteSize,
     neverTouchedCount, leftOutCount,
@@ -1158,5 +1171,5 @@
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords, settingLimits,
     OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES,
     validHostPattern, hostReadback, patternCovers,
-    escapeHtml, words, duration, ago, agoSaid, shortId });
+    escapeHtml, words, duration, ago, agoSaid });
 });

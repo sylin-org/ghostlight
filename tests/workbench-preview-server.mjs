@@ -153,9 +153,15 @@ const harnesses = [
   previewHarness({ id: "vscode", name: "Visual Studio Code", target: "User", state: "available", configPath: "/home/test/.config/Code/User/mcp.json", manualSetup: jsonSetup("servers") })
 ];
 
-/** The command line and an agent nothing names, the catalog's two reserved entries. */
+/**
+ * The command line, an agent nothing names, and the earlier session of work recorded before agent
+ * names were kept: the catalog's reserved entries.
+ */
 const COMMAND_LINE_AGENT = { id: "command_line", name: "Command line", symbol: { glyph: "command_line" } };
 const UNKNOWN_AGENT = { id: "unknown", name: "Unknown agent", symbol: { glyph: "unknown" } };
+const EARLIER_AGENT = {
+  id: "earlier", name: "Earlier session", symbol: { glyph: "unknown" }, note: "Recorded before Ghostlight kept agent names."
+};
 
 /**
  * The agent the service names by `name`: the roster's agent of that name, the command line, or an
@@ -199,7 +205,7 @@ const controlsFixture = {
   },
   viewing: {
     label: "Others can watch", watch: true, url: "http://127.0.0.1:41234/",
-    word: "On -- anyone on this computer can open this view",
+    word: "On: anyone on this computer can open this view",
     acts: { set_watching: { available: true, why_not: null } }
   },
   diagnostics: {
@@ -207,7 +213,7 @@ const controlsFixture = {
     acts: { set_diagnostics: { available: true, why_not: null }, reveal_diagnostics: { available: true, why_not: null } }
   },
   notifications: {
-    label: "Notifications", word: "Send one local checkup notification. Nothing leaves this device.",
+    label: "Notifications", state: "On", word: "Send one local checkup notification. Nothing leaves this device.",
     acts: { test_notification: { available: true, why_not: null } }
   },
   browser: {
@@ -219,8 +225,12 @@ const controlsFixture = {
   you: { context: "control", word: "Shared", sentence: "Others on this computer can watch this view in a browser." }
 };
 
-/** What an MCP connection seen with no source and no live claim establishes (`language::provenance`). */
-const MCP_EXPLANATION = "The application name is the MCP client's own claim. Ghostlight does not verify it.";
+/** What an MCP connection a claim named, seen with no source, establishes (`language::provenance`). */
+const CLAIM_CAVEAT = "The agent's name is its own claim. Ghostlight does not verify it.";
+
+/** Whether the name a client reported says more than the agent it names (`language::provenance`). */
+const plain = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+const saysMore = (reported, agent) => agent.id === UNKNOWN_AGENT.id || plain(reported) !== plain(agent.name);
 
 /** What Ghostlight cannot vouch for in any command-line session. */
 const CLI_SCRIPTS_UNVERIFIED = "Ghostlight does not verify the scripts and instructions it runs.";
@@ -240,8 +250,9 @@ const catalogAgent = (id) => harnesses.find((harness) => harness.agent.id === id
  * channel, the claimed catalog agent and the source Ghostlight saw start it) and the name its
  * client `reported`, which only a live connection has. The command line names its own agent. On
  * MCP a live claim names the agent, else the kept claimed agent, else the source's catalog agent,
- * else the unknown agent. Only live words are quoted. No preview source is an app the claimed
- * agent runs inside, so the fixture leaves out that sentence.
+ * else the unknown agent, or the earlier session for a record with no source. Only live words are
+ * quoted, and only where they say more than the agent's name. No preview source is an app the
+ * claimed agent runs inside, so the fixture leaves out that sentence.
  */
 function previewDetails({ connection_id = null, channel, claimed_agent = null, source = null }, reported = null) {
   const sourceName = source && (catalogAgent(source.agent)?.name ?? source.image);
@@ -252,15 +263,20 @@ function previewDetails({ connection_id = null, channel, claimed_agent = null, s
     explanation = source ? `A ghostlight call from ${sourceName}. ${CLI_SCRIPTS_UNVERIFIED}`
       : `A ghostlight call session is a local program. ${CLI_SCRIPTS_UNVERIFIED}`;
   } else {
-    agent = reported ? agentNamed(Object.keys(REPORTED).find((name) => REPORTED[name] === reported) ?? reported)
-      : catalogAgent(claimed_agent) ?? catalogAgent(source?.agent) ?? UNKNOWN_AGENT;
-    const quoted = reported && `"${reported}" is what the agent calls itself`;
-    explanation = !source ? (quoted ? `${quoted}; Ghostlight does not verify it.` : MCP_EXPLANATION)
-      : source.agent === agent.id || !quoted ? `Started by ${sourceName}.`
-        : `${quoted}. Started by ${sourceName}.`;
+    const claim = reported ? agentNamed(Object.keys(REPORTED).find((name) => REPORTED[name] === reported) ?? reported)
+      : catalogAgent(claimed_agent);
+    agent = claim ?? catalogAgent(source?.agent) ?? (reported !== null || source ? UNKNOWN_AGENT : EARLIER_AGENT);
+    const quoted = reported && saysMore(reported, agent) && `"${reported}" is what the agent calls itself`;
+    explanation = !source ? (quoted ? `${quoted}; Ghostlight does not verify it.` : claim ? CLAIM_CAVEAT : "")
+      : source.agent === agent.id ? `Started by ${sourceName}.`
+        : quoted ? `${quoted}. Started by ${sourceName}.`
+          : claim ? `${CLAIM_CAVEAT} Started by ${sourceName}.` : `Started by ${sourceName}.`;
   }
   return {
-    provenance: { connection_id, reported_application: reported, channel, explanation: connection_id === null ? LEGACY_EXPLANATION : explanation },
+    provenance: {
+      connection_id, reported_application: reported || null, channel,
+      explanation: connection_id === null && explanation ? LEGACY_EXPLANATION : explanation
+    },
     agent
   };
 }
@@ -461,7 +477,7 @@ if (historyScenario) {
 }
 
 /** What a preview session's live connection says, with the name its client reported. */
-const liveDetails = (session) => previewDetails({ connection_id: `connection_${session.id}`, channel: session.channel }, REPORTED[session.agent.name]);
+const liveDetails = (session) => previewDetails({ connection_id: `connection_${session.id}`, channel: session.channel }, REPORTED[session.agent.name] ?? "");
 
 // C1 fixtures carry connection evidence: the name each agent's client reported for itself.
 for (const session of snapshot.sessions) session.connections = [liveDetails(session).provenance];
@@ -704,8 +720,8 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
     controls.runtime.state = preview.service.runtime_state;
     controls.runtime.word = { active: "Running", held: "Paused", ended: "Session ended" }[controls.runtime.state];
     controls.viewing.word = controls.viewing.watch
-      ? "On -- anyone on this computer can open this view"
-      : "Off -- only this window shows Ghostlight";
+      ? "On: anyone on this computer can open this view"
+      : "Off: only this window shows Ghostlight";
     // The window wears the Sharing word while others can watch, and no chip while only it shows.
     controls.you.word = controls.viewing.watch ? "Shared" : null;
     controls.you.sentence = controls.viewing.watch
@@ -745,16 +761,9 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
         summary: blocked ? "Authority blocked the browser job." : spec.summary,
         duration_ms: spec.ms,
         observed: blocked ? {} : spec.observed,
-        // The record carries the intake and the agent of the session that ran it, as the service's do.
+        // The record carries the intake and the evidence of the session that ran it, as the service's do.
         channel: session.channel,
-        agent: session.agent,
-        provenance: {
-          connection_id: "connection_" + session.id,
-          reported_application: session.channel === "cli" ? null : session.agent.name,
-          channel: session.channel,
-          explanation: session.channel === "cli" ? "A ghostlight call session is a local program."
-            : '"' + session.agent.name + '" is what the agent calls itself; Ghostlight does not verify it.'
-        }
+        ...liveDetails(session)
       };
       publish({ kind: "operation_settled", record });
       publishLive();

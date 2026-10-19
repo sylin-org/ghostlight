@@ -297,7 +297,7 @@ mod tests {
         use crate::intake::session::IntakeChannel;
         use crate::provenance::ConnectionEvidence;
 
-        let mcp = ConnectionEvidence::claimed("Some Agent", IntakeChannel::Mcp);
+        let mcp = ConnectionEvidence::claimed("codex-mcp-client", IntakeChannel::Mcp);
         let cli = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
         let from_mcp = HistoryItem::from(child(1).with_provenance(Some(mcp.attribution())));
         let from_cli = HistoryItem::from(child(1).with_provenance(Some(cli.attribution())));
@@ -325,7 +325,7 @@ mod tests {
         assert_ne!(sentences[0], sentences[1]);
         assert_ne!(sentences[0], sentences[2]);
         assert_ne!(sentences[1], sentences[2]);
-        assert!(mcp_details.explanation.contains("MCP client"));
+        assert!(mcp_details.explanation.contains("its own claim"));
         assert!(cli_details.explanation.contains("local program"));
     }
 

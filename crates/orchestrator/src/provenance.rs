@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(absent.connection_id, None);
         assert_eq!(absent.observed_at_ms, None);
         assert_eq!(absent.details().reported_application, None);
-        assert_eq!(agent_of(&absent.details()), Agent::unknown());
+        assert_eq!(agent_of(&absent.details()), Agent::earlier());
     }
 
     #[test]
@@ -404,8 +404,8 @@ mod tests {
         assert_eq!(unknown.attribution().claimed_agent, None);
         assert_eq!(
             agent_of(&unknown.attribution().details()),
-            Agent::unknown(),
-            "a name the catalog does not know is never kept"
+            Agent::earlier(),
+            "a name the catalog does not know is never kept, so with no source the record names none"
         );
         let script = ConnectionEvidence::claimed("ghostlight call", IntakeChannel::Cli);
         assert_eq!(agent_of(&script.details()), Agent::command_line());
@@ -460,9 +460,13 @@ mod tests {
     }
 
     #[test]
-    fn restored_mcp_history_without_a_source_stays_unknown() {
+    fn restored_mcp_history_without_a_source_or_a_claim_is_the_earlier_session() {
         let unseen = restored(connected("my agent", None).attribution()).details();
-        assert_eq!(unseen.agent, Agent::unknown());
+        assert_eq!(unseen.agent, Agent::earlier());
+        assert_eq!(
+            unseen.explanation, "",
+            "it shows no name, so it has no caveat"
+        );
         let program = restored(
             connected(
                 "my agent",
@@ -474,13 +478,17 @@ mod tests {
             .attribution(),
         )
         .details();
-        assert_eq!(program.agent, Agent::unknown());
+        assert_eq!(
+            program.agent,
+            Agent::unknown(),
+            "a record with a source is not an early one"
+        );
         assert_eq!(program.explanation, "Started by WindowsTerminal.exe.");
         assert_eq!(
             restored(&Attribution::legacy(IntakeChannel::Mcp))
                 .details()
                 .agent,
-            Agent::unknown()
+            Agent::earlier()
         );
     }
 

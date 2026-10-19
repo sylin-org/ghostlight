@@ -109,6 +109,10 @@ pub const TRAY_HOLD: &str = "Pause agents";
 /// The tray entry that lets the agents' browser work continue.
 pub const TRAY_RESUME: &str = "Resume agents";
 
+/// The tray entry that starts a new session once one ended: the words the window and the browser
+/// toolbar use.
+pub const TRAY_START_SESSION: &str = "Start a new session";
+
 /// The tray entry that quits Ghostlight.
 pub const TRAY_QUIT: &str = "Quit Ghostlight";
 
@@ -252,10 +256,10 @@ pub const CONTROLS_RUNTIME_ENDED: &str = "Session ended";
 pub const CONTROLS_VIEWING_LABEL: &str = "Others can watch";
 
 /// The state word of "Others can watch" while it is on.
-pub const CONTROLS_VIEWING_ON: &str = "On -- anyone on this computer can open this view";
+pub const CONTROLS_VIEWING_ON: &str = "On: anyone on this computer can open this view";
 
 /// The state word of "Others can watch" while it is off.
-pub const CONTROLS_VIEWING_OFF: &str = "Off -- only this window shows Ghostlight";
+pub const CONTROLS_VIEWING_OFF: &str = "Off: only this window shows Ghostlight";
 
 /// The label of the Controls row for process diagnostics.
 pub const CONTROLS_DIAGNOSTICS_LABEL: &str = "Process diagnostics";
@@ -271,6 +275,9 @@ pub fn controls_diagnostics_on(layer: &str) -> String {
 
 /// The label of the Controls row for the notification test.
 pub const CONTROLS_NOTIFICATIONS_LABEL: &str = "Notifications";
+
+/// The state word of notifications, which Ghostlight always sends: the Settings rail says it.
+pub const CONTROLS_NOTIFICATIONS_ON: &str = "On";
 
 /// What the notification test does.
 pub const CONTROLS_NOTIFICATIONS_WORD: &str =
@@ -775,7 +782,10 @@ mod tests {
 
     #[test]
     fn the_pause_entries_use_the_words_of_the_band_and_the_browser_toolbar() {
-        assert_eq!((TRAY_HOLD, TRAY_RESUME), ("Pause agents", "Resume agents"));
+        assert_eq!(
+            (TRAY_HOLD, TRAY_RESUME, TRAY_START_SESSION),
+            ("Pause agents", "Resume agents", "Start a new session")
+        );
     }
 
     #[test]

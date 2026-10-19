@@ -261,20 +261,25 @@ try {
       complete: true, timestamp_ms: Date.now(), channel: 'mcp', provenance: {
         ...window.__GHOSTLIGHT_PREVIEW__.sessions[0].connections[0],
         reported_application: null,
-        explanation: "The application name is the MCP client's own claim. Ghostlight does not verify it." },
-      agent: { id: 'unknown', name: 'Unknown agent', symbol: { glyph: 'unknown' } } };
+        explanation: "The agent's name is its own claim. Ghostlight does not verify it." },
+      agent: { id: 'codex', name: 'Codex', symbol: { glyph: 'unknown' } } };
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record });
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
       ...record, invocation: 'c1-legacy', provenance: null } });
     window.__GHOSTLIGHT_PUBLISH__({ kind: 'operation_settled', record: {
       ...record, invocation: 'c1-escaped', provenance: { ...record.provenance,
-        reported_application: '<img src=x onerror="window.__C1_INJECTED__=true">' } } });
+        explanation: '"<img src=x onerror=window.__C1_INJECTED__=true>" is what the agent calls itself.' } } });
   })()`);
   const restoredDetails = '[data-history-details="c1-restored:connection"]';
   const legacyDetails = '[data-history-details="c1-legacy:connection"]';
   const escapedDetails = '[data-history-details="c1-escaped:connection"]';
   await until(() => evaluate(`!!document.querySelector('${restoredDetails}') && !!document.querySelector('${escapedDetails}')`), "restored and escaped connection records");
-  assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('Not retained in history')`), true);
+  assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes("The agent's name is its own claim.")`), true);
+  assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('Codex')`), false,
+    "the card names its agent once, in its meta line");
+  assert.equal(await evaluate(`/Reported application|Not retained|Intake/.test(document.querySelector('${restoredDetails}').textContent)`), false);
+  assert.equal(await evaluate(`!!document.querySelector('${restoredDetails} [data-copy-connection]')`), true,
+    "the connection id is behind Copy id");
   assert.equal(await evaluate(`document.querySelector('${restoredDetails}').textContent.includes('Later application')`), false);
   assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('Connection details were not recorded.')`), true);
   assert.equal(await evaluate(`document.querySelector('${legacyDetails}').textContent.includes('Later application')`), false);

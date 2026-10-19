@@ -1,7 +1,7 @@
 //! Who an agent is and what the window shows for it.
 //!
 //! The roster in [`crate::install`] is the catalog of agents Ghostlight can set up; the command
-//! line and an unknown agent are the catalog's two reserved entries. Wherever the window names an
+//! line, an unknown agent and the earlier session are the catalog's reserved entries. Wherever the window names an
 //! agent (a session, an operation and a history item, an Integrations row) it carries one
 //! [`Agent`], built here or from a roster row through [`Agent::listed`], so every surface draws the
 //! same name and the same symbol. The agent of work is named once, from its connection evidence,
@@ -25,14 +25,20 @@ use serde::{Serialize, Serializer};
 use self::image::{AgentImage, Monogram};
 use crate::install::icons::IconCache;
 use crate::intake::session::IntakeChannel;
-use crate::language::provenance::{claimed_name, COMMAND_LINE_AGENT, UNKNOWN_AGENT};
+use crate::language::provenance::{
+    claimed_name, COMMAND_LINE_AGENT, EARLIER_SESSION, EARLIER_SESSION_NOTE, UNKNOWN_AGENT,
+};
 
 /// The id of the command line, the catalog's reserved entry for `ghostlight call` sessions. No
 /// roster row uses it.
 pub const COMMAND_LINE_ID: &str = "command_line";
 
-/// The id of an agent nothing names, the catalog's other reserved entry. No roster row uses it.
+/// The id of an agent nothing names, the catalog's second reserved entry. No roster row uses it.
 pub const UNKNOWN_ID: &str = "unknown";
+
+/// The id of the earlier session, the catalog's reserved entry for recorded work that kept no
+/// agent ([`Agent::earlier`]). No roster row uses it.
+pub const EARLIER_ID: &str = "earlier";
 
 /// What joins [`UNKNOWN_ID`] to the name an agent Ghostlight does not know reported, in that
 /// agent's id. No roster id holds it.
@@ -54,7 +60,7 @@ const ABOUT_KEY: &str = "about";
 const GLYPH_KEY: &str = "glyph";
 
 /// The names of the catalog's reserved entries, which no client's claim may take.
-const RESERVED_NAMES: [&str; 2] = [COMMAND_LINE_AGENT, UNKNOWN_AGENT];
+const RESERVED_NAMES: [&str; 3] = [COMMAND_LINE_AGENT, UNKNOWN_AGENT, EARLIER_SESSION];
 
 /// One agent as the window names and shows it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -70,6 +76,10 @@ pub struct Agent {
     pub name: String,
     /// What to show for the agent.
     pub symbol: Symbol,
+    /// What the window says on hover beside the name, for a reserved entry whose name needs a
+    /// word more; absent for every other agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<&'static str>,
 }
 
 /// What the window shows for an agent: a closed vocabulary the page draws as given.
@@ -158,6 +168,7 @@ impl Agent {
             id: id.to_owned(),
             name: name.to_owned(),
             symbol: Symbol::image(id, &AgentImage::best(id, monogram, cache)),
+            note: None,
         }
     }
 
@@ -168,16 +179,31 @@ impl Agent {
             id: COMMAND_LINE_ID.to_owned(),
             name: COMMAND_LINE_AGENT.to_owned(),
             symbol: Symbol::Glyph(Glyph::CommandLine),
+            note: None,
         }
     }
 
-    /// An agent nothing names: a client that reported no name, or a record that kept none.
+    /// An agent nothing names: a live client that reported no name, or a record whose source was
+    /// no agent's app.
     #[must_use]
     pub fn unknown() -> Self {
         Self {
             id: UNKNOWN_ID.to_owned(),
             name: UNKNOWN_AGENT.to_owned(),
             symbol: Symbol::Glyph(Glyph::Unknown),
+            note: None,
+        }
+    }
+
+    /// The agent of recorded work that kept neither a claimed agent nor a source: work from
+    /// before Ghostlight kept agent names, with the unknown glyph and a hover that says so.
+    #[must_use]
+    pub fn earlier() -> Self {
+        Self {
+            id: EARLIER_ID.to_owned(),
+            name: EARLIER_SESSION.to_owned(),
+            symbol: Symbol::Glyph(Glyph::Unknown),
+            note: Some(EARLIER_SESSION_NOTE),
         }
     }
 
@@ -188,6 +214,7 @@ impl Agent {
             id: format!("{UNKNOWN_ID}{UNKNOWN_NAME_SEPARATOR}{name}"),
             name: name.to_owned(),
             symbol: Symbol::Glyph(Glyph::Unknown),
+            note: None,
         }
     }
 
@@ -199,8 +226,9 @@ impl Agent {
     /// invents a name.
     ///
     /// The name stays the client's own claim: it names the agent for a person and grants nothing.
-    /// An MCP client that calls itself "Command line" or "Unknown agent" is not the command line
-    /// and does not wear its glyph; its claim still shows in the connection's explanation.
+    /// An MCP client that calls itself "Command line", "Unknown agent" or "Earlier session" is
+    /// none of them and does not wear the command line's glyph; its claim still shows in the
+    /// connection's explanation.
     #[must_use]
     pub fn of(reported: Option<&str>, channel: IntakeChannel) -> Self {
         match channel {
@@ -376,6 +404,7 @@ mod tests {
             "Unknown agent",
             "unknown agent",
             " UnknownAgent ",
+            "Earlier session",
         ] {
             let agent = Agent::of(Some(claimed), IntakeChannel::Mcp);
             assert_eq!(agent, Agent::unknown(), "{claimed:?}");
@@ -413,6 +442,7 @@ mod tests {
                     address: monogram_address("codex", image::monogram!("codex.svg")),
                     about: None,
                 },
+                note: None,
             }
         );
         assert_eq!(
@@ -425,6 +455,7 @@ mod tests {
                 id: "unknown:Some Agent".into(),
                 name: "Some Agent".into(),
                 symbol: Symbol::Glyph(Glyph::Unknown),
+                note: None,
             }
         );
         assert_ne!(

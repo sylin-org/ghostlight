@@ -46,14 +46,14 @@ function part({ context = "control", watch = true, runtime = "active", layer = "
       acts: { hold: act(true), resume: act(), start_session: act(), end_session: act() }
     },
     viewing: {
-      label: "Others can watch", watch, url, word: watch ? "On -- anyone on this computer can open this view" : "Off -- only this window shows Ghostlight",
+      label: "Others can watch", watch, url, word: watch ? "On: anyone on this computer can open this view" : "Off: only this window shows Ghostlight",
       acts: { set_watching: act() }
     },
     diagnostics: {
       label: "Process diagnostics", on, layer, used_bytes: 2048, folder: "~/.ghostlight/logs",
       word: on ? `On (${layer})` : "Off", acts: { set_diagnostics: act(), reveal_diagnostics: act() }
     },
-    notifications: { label: "Notifications", word: "Send one local checkup notification.", acts: { test_notification: act() } },
+    notifications: { label: "Notifications", state: "On", word: "Send one local checkup notification.", acts: { test_notification: act() } },
     browser: {
       set_in: "Set in the browser",
       effects: { label: "Agent activity effects", word: "The cursor, click ripples and scan-lines on a page an agent works in. They start on." },
@@ -541,14 +541,14 @@ test("each rail entry shows the state of its section, in the service's words", (
   const shown = kit();
   shown.settings.render(part({ runtime: "held" }));
   assert.equal(said(shown, "rail-screen-state"), "Comfortable, standard text, motion follows the system");
-  assert.equal(said(shown, "rail-sharing-state"), "On -- anyone on this computer can open this view");
+  assert.equal(said(shown, "rail-sharing-state"), "On: anyone on this computer can open this view");
   assert.equal(said(shown, "rail-browser-work-state"), "Paused");
-  assert.equal(said(shown, "rail-notifications-state"), "Send one local checkup notification.");
+  assert.equal(said(shown, "rail-notifications-state"), "On");
   assert.equal(said(shown, "rail-diagnostics-state"), "On (marker)");
   assert.equal(shown.el("rail-diagnostics-state").title, "On (marker)");
 
   shown.settings.render(part({ watch: false, layer: "off", runtime: "ended" }));
-  assert.equal(said(shown, "rail-sharing-state"), "Off -- only this window shows Ghostlight");
+  assert.equal(said(shown, "rail-sharing-state"), "Off: only this window shows Ghostlight");
   assert.equal(said(shown, "rail-browser-work-state"), "Session ended");
   assert.equal(said(shown, "rail-diagnostics-state"), "Off");
 });
@@ -594,7 +594,7 @@ test("the sections say what the part says, in the service's words", () => {
   assert.equal(said(shown, "controls-runtime-word"), "Paused");
   assert.equal(said(shown, "controls-runtime-note"), "Paused from the tray.");
   assert.equal(said(shown, "controls-viewing-label"), "Others can watch");
-  assert.equal(said(shown, "controls-viewing-word"), "On -- anyone on this computer can open this view");
+  assert.equal(said(shown, "controls-viewing-word"), "On: anyone on this computer can open this view");
   assert.equal(said(shown, "controls-viewing-url"), "http://127.0.0.1:41234/");
   assert.equal(said(shown, "controls-diagnostics-word"), "On (marker)");
   assert.equal(said(shown, "controls-diagnostics-place"), "~/.ghostlight/logs (2.0 KB)");
@@ -739,9 +739,9 @@ test("in Watch each other section says where the change is made, with one Contin
     assert.equal(shown.el(`settings-${section}-closed`).hidden, true, section);
   }
   // The rest is state: the words are still there, and nothing can be pressed to change them.
-  assert.equal(said(shown, "controls-viewing-word"), "On -- anyone on this computer can open this view");
+  assert.equal(said(shown, "controls-viewing-word"), "On: anyone on this computer can open this view");
   assert.equal(said(shown, "controls-diagnostics-word"), "On (marker)");
-  assert.equal(said(shown, "rail-sharing-state"), "On -- anyone on this computer can open this view");
+  assert.equal(said(shown, "rail-sharing-state"), "On: anyone on this computer can open this view");
 
   shown.click(shown.el("settings-sharing-continue-button"));
   await settle();
@@ -1422,6 +1422,7 @@ test("the shelves name each agent once with its glyph, a count past one session,
   assert.ok(chipMarkup("command_line").includes(Words.SYMBOL_GLYPHS[Words.GLYPH.commandLine]), "the command line wears the prompt");
   const browsers = bar.wearing("glance-chip").filter((chip) => chip.tag === "span");
   assert.deepEqual(browsers.map((chip) => chip.textContent), ["Google Chrome3 tabs"]);
+  assert.equal(browsers[0].attributes.title, "Ghostlight in Browser 2.0.0", "the extension by its product name");
 });
 
 test("the shelves group sessions by the agent id the service gives, never by name", () => {
@@ -1659,7 +1660,10 @@ test("a pane for each state: its sentence, the step it allows with what it does,
 test("an agent that needs attention shows the service's evidence and numbered steps when it cannot be fixed", () => {
   const shown = agentsPage(ROSTER);
   assert.equal(shown.title(), "Junie");
-  assert.equal(shown.pane().wearing("agent-evidence")[0].children[1].textContent.includes("`npx` with 2 arguments"), true);
+  const evidence = shown.pane().wearing("agent-evidence")[0].children[1];
+  assert.ok(evidence.textContent.includes("npx with 2 arguments"), evidence.textContent);
+  assert.ok(!evidence.textContent.includes("`"), "the service's marks are drawn as code, not printed");
+  assert.equal(shown.pane().wearing("agent-code")[0].textContent, "npx");
   const steps = shown.pane().wearing("agent-steps")[0].children;
   assert.deepEqual(steps.map((step) => step.children[1].textContent), ["Copy setup", "Re-check"]);
   const fixable = agentsPage(ROSTER.map((row) => (row.id === "junie" ? { ...row, can_fix: true } : row)));
@@ -1758,7 +1762,8 @@ test("a copy-only agent found here claims nothing about a file Ghostlight never 
   assert.match(lead, /cannot tell whether goose has Ghostlight&#039;s entry/);
   assert.ok(!/does not know about Ghostlight|not connected/.test(lead), lead);
   assert.deepEqual(shown.pane().wearing("agent-act").map((row) => row.children[0].textContent), ["Copy setup"]);
-  assert.equal(shown.el("integrations-caption").textContent, "Nothing Ghostlight can set up. goose is left for you.");
+  assert.equal(shown.el("setup-integrations").hidden, true, "nothing for Set up everything to do, so it is not offered");
+  assert.equal(shown.el("integrations-caption").hidden, true);
   const alone = agentsPage([goose]);
   assert.equal(alone.el("integrations-heading").innerHTML, "Ghostlight cannot check <em>goose</em>, which is set up by hand.");
 });
@@ -1776,7 +1781,8 @@ test("a copy-only agent with a live session is connected, and is never called no
   assert.deepEqual(shown.pane().wearing("agent-act"), [], "nothing to do next");
   assert.equal(shown.pane().wearing("agent-remove").length, 0, "Ghostlight never edits its file, so it offers no Remove");
   assert.ok(!shown.el("agents-pane").innerHTML.includes("not connected"));
-  assert.equal(shown.el("integrations-caption").textContent, "Nothing to set up.");
+  assert.equal(shown.el("setup-integrations").hidden, true);
+  assert.equal(shown.el("integrations-caption").hidden, true);
 });
 
 test("Remove asks first, naming the sessions that use Ghostlight now", () => {
@@ -1805,14 +1811,16 @@ test("the headline counts the agents with Ghostlight, and Set up everything says
   assert.equal(head([agent("c", "C", "not_detected")]), "Add Ghostlight to your agent.");
   const shown = agentsPage(ROSTER);
   assert.equal(shown.el("integrations-heading").innerHTML, "Ghostlight is in <em>2 of your 5</em> agents.");
-  assert.equal(shown.el("integrations-caption").textContent, "Will connect Cursor and update Kiro. Junie is left for you.");
-  assert.equal(shown.el("setup-integrations").disabled, false);
-  assert.equal(Words.agentPlan({ connect: [], update: [], left: [] }), "Nothing to set up.");
-  assert.equal(Words.agentPlan({ connect: ["A", "B", "C", "D"], update: [], left: ["goose"] }),
-    "Will connect 4 agents. goose is left for you.");
+  assert.equal(shown.el("integrations-caption").textContent, "Connects Cursor and updates Kiro. Junie needs you.");
+  assert.equal(shown.el("setup-integrations").hidden, false);
+  assert.equal(shown.el("integrations-caption").hidden, false);
+  assert.equal(Words.agentPlan({ connect: [], update: [], left: [] }), "");
+  assert.equal(Words.agentPlan({ connect: ["A", "B", "C", "D"], update: [], left: ["goose", "Junie"] }),
+    "Connects 4 agents. goose and Junie need you.");
+  assert.equal(Words.agentPlan({ connect: [], update: ["Cursor"], left: [] }), "Updates Cursor.");
   const done = agentsPage(on(2));
-  assert.equal(done.el("setup-integrations").disabled, true);
-  assert.equal(done.el("integrations-caption").textContent, "Nothing to set up.");
+  assert.equal(done.el("setup-integrations").hidden, true, "a primary that can do nothing is not shown");
+  assert.equal(done.el("integrations-caption").hidden, true);
 });
 
 test("the page offers one Copy MCP command, in its header, with the command shown small", () => {
@@ -1881,7 +1889,7 @@ test("a settled action says the service's sentence, the readiness note beside it
 
 test("every readiness the service reports reads beside the row's sentence, and the doubtful ones mark its duration", () => {
   // Readiness in work/result.rs, as it serializes, and the note a settled row carries for each.
-  const notes = { not_applicable: "", complete: "", interactive: "interactive", loading: "never settled", unknown: "readiness unknown" };
+  const notes = { not_applicable: "", complete: "", interactive: "", loading: "never settled", unknown: "readiness unknown" };
   assert.deepEqual(Object.keys(Words.READINESS_NOTE).sort(), Object.keys(notes).sort());
   const sentence = "Read 1,240 words from example.com.";
   for (const [readiness, note] of Object.entries(notes)) {
@@ -1930,7 +1938,8 @@ test("a row names its tool in words, the exact name on hover and among the detai
   assert.equal(cell("row-tool-name").textContent, "fill form");
   assert.equal(cell("row-tool").attributes.title, "browser_fill_form");
   const meta = cells.wearing("hero-meta")[0];
-  assert.ok(meta.textContent.includes("browser_fill_form"), meta.textContent);
+  assert.ok(!meta.textContent.includes("browser_fill_form"), "the exact name is the tool's hover, not a fact to read");
+  assert.ok(!meta.textContent.includes("succeeded"), "success is what the sentence says");
   assert.equal(cells.wearing("hero-tool")[0].attributes.title, "browser_fill_form");
 });
 
@@ -1942,7 +1951,8 @@ test("a row names one capability, the most consequential, and a screen reader he
   const heard = cell("row-tool").children.filter((node) => node.classes.has("sr-only") && !node.classes.has("row-by-said"));
   assert.deepEqual(heard.map((node) => node.textContent), [", read and write"]);
   assert.equal(cells.wearing("cap-label")[0].textContent, "read + write", "the detail card shows the whole set");
-  assert.ok(cells.wearing("hero-meta")[0].textContent.includes("read + write authority"));
+  assert.ok(cells.wearing("hero-meta")[0].textContent.includes("read + write"));
+  assert.ok(!cells.wearing("hero-meta")[0].textContent.includes("authority"), "the meta line says the capability plainly");
 
   for (const [capability, word, said] of [["read", "read", "read"], ["read + action", "action", "read and action"],
     ["read + action + execute", "execute", "read, action and execute"]]) {
@@ -1984,12 +1994,23 @@ test("a flow takes the most consequential capability its steps used, and never s
   assert.equal(Words.capabilityClass(running), "cap-read");
 });
 
-test("an action the service names no agent for says Unknown agent, its workspace id only on hover", () => {
+test("work recorded before agent names were kept says Earlier session and why, never a workspace id", () => {
   const workspace = "workspace_0123456789abcdef825";
-  const { cell, text } = rowOf(settledRead({ invocation: "unknown-1", workspace, provenance: null, agent: namedAgent("Unknown agent") }));
-  assert.equal(cell("row-client").textContent, "Unknown agent");
-  assert.equal(cell("row-client").attributes.title, workspace);
+  const earlier = {
+    id: "earlier", name: "Earlier session", symbol: { glyph: "unknown" }, note: "Recorded before Ghostlight kept agent names."
+  };
+  const { cell, cells, text } = rowOf(settledRead({ invocation: "earlier-1", workspace, agent: earlier, provenance: {
+    connection_id: "connection_old", reported_application: null, channel: "mcp", explanation: ""
+  } }));
+  assert.equal(cell("row-client").textContent, "Earlier session");
+  assert.equal(cell("row-client").attributes.title, "Recorded before Ghostlight kept agent names.");
   assert.ok(!text.includes("workspace_"), `a raw id is printed in the row: ${text}`);
+  assert.ok(![...cells.root.descendants()].some((node) => node.attributes?.title === workspace), "no hover holds the workspace id");
+  assert.equal(cells.wearing("connection-explanation").length, 0, "no caveat about a name the card does not show");
+
+  const live = rowOf(settledRead({ invocation: "unknown-1", workspace, agent: namedAgent("Unknown agent") }));
+  assert.equal(live.cell("row-client").textContent, "Unknown agent");
+  assert.equal(live.cell("row-client").attributes.title, undefined);
 });
 
 test("an action names the agent its record names, with no hover id", () => {
@@ -1999,6 +2020,46 @@ test("an action names the agent its record names, with no hover id", () => {
   } }));
   assert.equal(cell("row-client").textContent, "Codex");
   assert.equal(cell("row-client").attributes.title, undefined);
+});
+
+test("an action's card names its agent once and keeps the connection to what Ghostlight can vouch for", () => {
+  const mcp = rowOf(settledRead({ invocation: "card-mcp", agent: namedAgent("Codex"), provenance: {
+    connection_id: "connection_1", reported_application: "codex-mcp-client", channel: "mcp",
+    explanation: "\"codex-mcp-client\" is what the agent calls itself; Ghostlight does not verify it."
+  } }));
+  const connection = mcp.cells.wearing("connection-details")[0];
+  assert.equal(mcp.cells.wearing("hero-meta")[0].textContent.split("Codex").length - 1, 1, "the agent is named in the meta line");
+  assert.ok(!connection.textContent.includes("Codex"), "and not again under the connection");
+  assert.doesNotMatch(connection.textContent, /Reported application|Not retained|Intake/);
+  assert.ok(connection.textContent.includes("is what the agent calls itself"), "the trust note stays");
+  const copy = mcp.cells.wearing("connection-copy")[0];
+  assert.equal(copy.dataset.copyConnection, "connection_1");
+  assert.equal(copy.textContent, "Copy id");
+  assert.ok(!connection.textContent.includes("connection_1"), "the id is behind Copy id, not printed");
+
+  const cli = rowOf(settledRead({ invocation: "card-cli", channel: "cli", agent: namedAgent("Command line"), provenance: {
+    connection_id: "connection_2", reported_application: null, channel: "cli",
+    explanation: "A ghostlight call session is a local program."
+  } }));
+  assert.ok(cli.cells.wearing("connection-details")[0].textContent.includes("Came through the command line."));
+  assert.ok(!mcp.cells.wearing("connection-details")[0].textContent.includes("command line"));
+
+  const nothing = rowOf(settledRead({ invocation: "card-none", agent: namedAgent("Unknown agent"), provenance: {
+    connection_id: null, reported_application: null, channel: "mcp", explanation: ""
+  } }));
+  assert.equal(nothing.cells.wearing("connection-details").length, 0, "a connection with nothing to say draws no disclosure");
+});
+
+test("permission checks the service explained in the same words are said once", () => {
+  const check = (host) => ({ requirements: ["read"], host, allowed: true, reason: "permitted", layers: [] });
+  const { cells } = rowOf(settledRead({ invocation: "same-1",
+    permissions: { checks: [check("example.com"), check("example.com"), check("example.org")], truncated: false },
+    permission_explanations: ["Allowed: no rules are set.", "Allowed: no rules are set.", "Allowed: no rules are set."] }));
+  const lines = cells.wearing("permission-details")[0].descendants();
+  const items = [...lines].filter((node) => node.tag === "li");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].children[0].textContent, "read on example.com, read on example.org");
+  assert.equal(items[0].children[1].textContent, "Allowed: no rules are set.");
 });
 
 test("the intake is marked only for the command line, never for MCP", () => {
@@ -2587,7 +2648,7 @@ test("a call that did not match the catalog is drawn as the failure it is, not a
   assert.doesNotMatch(row.className, /\bblocked\b/);
   assert.ok(cell("row-tool").textContent.endsWith(", failed"), cell("row-tool").textContent);
   assert.ok(!details.wearing("hero-refusal").length, "no policy line under a failure");
-  assert.ok(details.wearing("hero-meta")[0].textContent.includes("failed"), "the meta line agrees");
+  assert.ok(details.wearing("hero-meta")[0].textContent.includes("failed"), "the details say the failure in words");
 });
 
 test("a refusal says why once, in its sentence, and who decided on its refusal line, never as a code", () => {
@@ -3189,14 +3250,14 @@ test("the band, the pill and About count one thing, the agents At a glance group
   assert.equal(about.includes("Sessions"), false);
 });
 
-test("the band's wheel says Pause agents and Resume agents, the words of the tray and the toolbar", () => {
+test("the band's wheel says Pause agents, Resume agents and Start a new session, the words of the tray and the toolbar", () => {
   const shown = glance();
   shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0 });
   assert.equal(shown.el("wheel-label").textContent, "Pause agents");
   shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "held", running: 0 });
   assert.equal(shown.el("wheel-label").textContent, "Resume agents");
   shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "ended", running: 0 });
-  assert.equal(shown.el("wheel-label").textContent, "Start session");
+  assert.equal(shown.el("wheel-label").textContent, "Start a new session");
   assert.equal(said(kit(), "controls-resume"), "Resume agents");
 });
 

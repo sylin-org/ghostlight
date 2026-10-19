@@ -321,12 +321,25 @@ const presentation = (() => {
     addEffect("read-scan", {});
   }
 
+  /** The pill's arrow: the kit's right arrow, drawn in the pill's sky. */
+  function navigationArrow() {
+    return svgElement("svg", {
+      class: "nav-arrow", width: 12, height: 12, viewBox: "0 0 24 24", fill: "none", "aria-hidden": "true"
+    }, [
+      svgElement("path", {
+        d: "M5 12h14M13 6l6 6-6 6",
+        stroke: "currentColor",
+        "stroke-width": 2.4,
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round"
+      })
+    ]);
+  }
+
   function navigationPill() {
     const path = `${location.host}${location.pathname === "/" ? "" : location.pathname}` || "this page";
     const pill = addEffect("nav-pill", {});
-    const arrow = document.createElement("span");
-    arrow.className = "nav-arrow";
-    arrow.textContent = "->";
+    const arrow = navigationArrow();
     const destination = document.createElement("span");
     destination.textContent = path.slice(0, 58);
     pill.append(arrow, destination);

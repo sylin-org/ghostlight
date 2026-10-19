@@ -20,7 +20,7 @@ the push.
 | u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | landed (this commit) |
 | u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | landed (this commit) |
 | u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | landed (this commit) |
-| u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | todo |
+| u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | landed (this commit); the tray tooltip's period (j-32) needs crates/desktop, see Notes |
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
 | n2 the-tray-keeps-the-mascot | native | j-11 (owner) | landed (this commit) |
@@ -284,3 +284,48 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   They are labelled "Agent activity effects" and "Action captions", the names the extension's
   settings page shows, rather than the item's "Page effects", so a person finds them there. A
   screen that shows nothing hides them.
+- u6 (j-08): the band's wheel says "Start a new session". The tray's Resume entry says it too
+  once the session ended, and its click now asks for a new session: the authority ignores Resume
+  on an ended session, so the old "Resume agents" there did nothing. The words and the intent
+  come from `TrayItemId::label` and `TrayItemId::intent`, both by the runtime state; the shell's
+  four entry ids are unchanged, so crates/desktop needs nothing. The desktop goldens were
+  regenerated and did not change: their trays are Ready and Paused.
+- u6 (j-32), open for the native lane: the tray tooltip's "Ready. Ghostlight is running; ..." is
+  not made here. `each_golden_decodes_to_its_frame` in crates/desktop/src/link.rs pins the
+  tooltip of tests/golden/desktop/workbench.json as "Ready -- Ghostlight is running; ...", and
+  this lane may not edit crates/desktop. One commit changes `tray_tooltip` in
+  language/workbench.rs (`format!("{}. {line}", ...)` in both arms, and its two tests),
+  regenerates the desktop goldens and updates that assertion. Others can watch reads "On: anyone
+  on this computer can open this view" and "Off: only this window shows Ghostlight", the re-walk's
+  colon form. The navigate pill's arrow is the kit's arrow path as an SVG, and
+  tests/golden/protocol4/assets.sha256 is regenerated.
+- u6 (j-28): Set up everything and its caption are hidden whenever nothing is left for it to do,
+  in the window as on a watching page; once a press leaves nothing to do, focus moves to Re-check.
+  The caption reads "Connects Cursor and updates Kiro. Junie needs you." in left-aligned sans;
+  agentPlan says nothing when there is nothing to set up, so "Nothing to set up." is deleted. The
+  service's evidence keeps its words, and the page sets each backticked program or path as code.
+- u6 (j-29): the hero meta says the capability alone ("read + write"). The browser chip's hover is
+  "Ghostlight in Browser 2.0.0".
+- u6 (window-9): the controls part's notifications group gains `state`, "On", which the rail shows
+  (workbench/parts.rs, outside the lane's list and owned by no other lane).
+- u6 (window-7): the earlier session is a reserved agent (`Agent::earlier`, id `earlier`) with a
+  hover the service words, `Agent.note`; the page shows any agent's note on hover and never a
+  workspace id. It names a record that kept neither a claimed agent nor a source. A record whose
+  client claimed a name the catalog does not know, and whose source could not be read, also reads
+  "Earlier session": nothing on such a record tells it apart from an old one. A record with a
+  source, or with a claimed id the catalog no longer lists, stays "Unknown agent", as does a live
+  client that sent no name. An agent nothing named gets no caveat, so its explanation is empty.
+- u6 (window-3): the card names the agent once, in its meta line. The connection disclosure holds
+  the service's sentence, "Came through the command line." for the command line, and Copy id;
+  Reported application, Intake and the printed id are gone, and a connection with nothing to say
+  draws no disclosure. "Show the reported name only when it differs" is decided in
+  language/provenance.rs: a live client's own words are quoted only where they read differently
+  from the agent's name once case and punctuation are set aside ("codex-mcp-client" for Codex, not
+  "claude-code" for Claude Code). An agent a claim named keeps the caveat, now "The agent's name is
+  its own claim. Ghostlight does not verify it.", which no longer says "application" or "MCP
+  client"; where a source stands apart from the claim, the caveat comes before "Started by ...".
+  Permission checks the service explained in the same words are one line, under every check they
+  cover. The meta line drops "authority", the raw tool name (the tool's hover keeps it) and
+  "succeeded"; a row's details still say failed, unknown or kept, which nothing else on them says
+  in words, and the running card says it beside its clock. A flow's steps no longer repeat the
+  flow's connection. docs/1.0/ARCHITECTURE.md names the earlier session and the quoting rule.

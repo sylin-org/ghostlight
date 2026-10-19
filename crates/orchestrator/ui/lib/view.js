@@ -20,10 +20,11 @@
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
-    escapeHtml, words, duration, ago, agoSaid, shortId,
+    escapeHtml, words, duration, ago, agoSaid,
     OUTCOME_WORD, PHASE_WORD, workCounts, bandFacts, rowBy, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
     CONTINUE_LABEL, POLICY_IN_WINDOW, RECONNECTING, neverTouchedCount, leftOutCount,
-    KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
+    KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
+    CARD, browserChipTitle,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine
   } = globalThis.GhostlightWords;
   const { settledMs, isRunning, isPending, isUnsettled, isBlocked, isFailed, isKept } = globalThis.GhostlightEntries;
@@ -220,13 +221,14 @@
 
     /**
      * The agent's name as text, and the hover it wears. The service names the agent of every
-     * action from the action's own connection evidence, including after disconnect or restart; an
-     * agent it does not know keeps its workspace id one hover away, never printed. A cell whose
-     * words a screen reader already hears elsewhere (`heardElsewhere`) is hidden from it.
+     * action from the action's own connection evidence, including after disconnect or restart, and
+     * gives the words of the hover where a name needs one more, as work recorded before names were
+     * kept does. A cell whose words a screen reader already hears elsewhere (`heardElsewhere`) is
+     * hidden from it.
      */
     function agentMarkup(tag, className, entry, heardElsewhere = false) {
       const agent = entry.agent;
-      const hover = agent?.symbol?.glyph === GLYPH.unknown ? ` title="${escapeHtml(entry.workspace ?? "")}"` : "";
+      const hover = agent?.note ? ` title="${escapeHtml(agent.note)}"` : "";
       const hidden = heardElsewhere ? ' aria-hidden="true"' : "";
       return `<${tag} class="${className}"${hover}${hidden}>${escapeHtml(agent?.name ?? "")}</${tag}>`;
     }
@@ -354,17 +356,26 @@
         + `<summary class="disclosure">${escapeHtml(title)}${CHEVRON}</summary>${body}</details>`;
     }
 
+    /**
+     * The permission checks of an action, one line per distinct sentence: checks the service
+     * explained in the same words are said once, under every check they cover.
+     */
     function permissionMarkup(entry, key) {
       const explanations = entry.permissionExplanations ?? entry.permission_explanations ?? [];
       const checks = entry.permissions?.checks ?? [];
       if (!explanations.length) return "";
-      const rows = explanations.map((explanation, index) => {
+      const lines = new Map();
+      explanations.forEach((explanation, index) => {
         const check = checks[index];
         const context = check ? `${(check.requirements ?? []).join(" + ")}${check.host ? ` on ${check.host}` : ""}` : "";
-        return `<li><span>${escapeHtml(context)}</span><p>${escapeHtml(explanation)}</p></li>`;
-      }).join("");
-      const limited = entry.permissions?.truncated ? '<p>Additional permission checks were omitted.</p>' : "";
-      return historyDetails(key, "Permission details", `<ul>${rows}</ul>${limited}`);
+        const line = lines.get(explanation) ?? [];
+        if (context && !line.includes(context)) line.push(context);
+        lines.set(explanation, line);
+      });
+      const rows = [...lines].map(([explanation, contexts]) =>
+        `<li><span>${escapeHtml(contexts.join(", "))}</span><p>${escapeHtml(explanation)}</p></li>`).join("");
+      const limited = entry.permissions?.truncated ? `<p>${escapeHtml(CARD.permissionsOmitted)}</p>` : "";
+      return historyDetails(key, CARD.permissions, `<ul>${rows}</ul>${limited}`);
     }
 
     function storageMarkup(entry) {
@@ -372,25 +383,28 @@
     }
 
     /**
-     * Render an action's authored connection evidence without treating a claim as trust. A live
-     * claim is never written to history, so a recorded action may have none.
+     * An action's connection, as an agent's card says it: the agent is named once, in the card's
+     * meta line, so this says only what Ghostlight can vouch for in the service's words (which
+     * quote a client's own name only where it says more than the agent's), the intake only when it
+     * is the command line, and the connection id behind Copy id. Empty when there is nothing to say.
      */
     function connectionFields(evidence) {
-      const fields = [
-        ["Reported application", evidence.reported_application ?? "Not retained in history"],
-        ["Intake", evidence.channel]
-      ];
-      if (evidence.connection_id) fields.push(["Connection", shortId(evidence.connection_id)]);
-      return '<dl class="connection-facts">' + fields.map(([label, value]) =>
-        `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")
-        + `</dl><p class="connection-explanation">${escapeHtml(evidence.explanation)}</p>`;
+      let body = "";
+      if (evidence.explanation) body += `<p class="connection-explanation">${escapeHtml(evidence.explanation)}</p>`;
+      if (evidence.channel === INTAKE.cli) body += `<p class="connection-explanation">${escapeHtml(CARD.commandLine)}</p>`;
+      if (evidence.connection_id) {
+        body += `<button class="link-button connection-copy" type="button" data-copy-connection="${escapeHtml(evidence.connection_id)}"`
+          + ` title="${escapeHtml(evidence.connection_id)}">${escapeHtml(GLANCE.copyId)}</button>`;
+      }
+      return body;
     }
 
+    /** The connection disclosure of an action, once per card: a flow's steps share their flow's. */
     function connectionMarkup(entry, key) {
       if (!entry.provenance && !entry.settled && entry.complete !== true) return "";
       const body = entry.provenance ? connectionFields(entry.provenance)
-        : '<p class="connection-explanation">Connection details were not recorded.</p>';
-      return historyDetails(key, "Connection details", body, "connection-details");
+        : `<p class="connection-explanation">${escapeHtml(CARD.notRecorded)}</p>`;
+      return body ? historyDetails(key, CARD.connection, body, "connection-details") : "";
     }
 
     function compositionMarkup(entry) {
@@ -403,8 +417,7 @@
         const label = labels[state] ?? words(state);
         const problem = receipt?.storage === "unconfirmed" || !["succeeded", "not_run", "pending"].includes(state);
         const title = receipt?.summary ?? (step.tool ? toolWords(step.tool) : `Step ${step.position}`);
-        const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`)
-          + connectionMarkup(receipt, `${entry.invocation}:step:${step.position}:connection`) : "";
+        const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`) : "";
         return `<li class="history-step" data-step-problem="${problem}"><div class="step-line">`
           + `<span class="step-number">${step.position}</span><span>${escapeHtml(title)}</span><span class="step-status">${escapeHtml(label)}</span></div>`
           + (receipt ? `<div class="step-meta">${escapeHtml(receipt.capability)}${receipt.effect !== "none" ? `; ${escapeHtml(words(receipt.effect))} effects` : ""}</div>` : "")
@@ -425,8 +438,12 @@
         `<p>${escapeHtml(details.summary)}</p>` + (hosts ? `<p>${escapeHtml(details.explanation)}</p><ul>${hosts}</ul>` : unnamed));
     }
 
-    /** The facts of one action, for the running card and a row's details. A resting card says its age above. */
-    function heroMarkup(entry, resting = false) {
+    /**
+     * The facts of one action, for the running card and a row's details. A resting card says its
+     * age above. The running card says the outcome beside its clock (`outcomeBeside`); a row's
+     * details say a settled action's outcome in the meta line when it did not succeed.
+     */
+    function heroMarkup(entry, resting = false, outcomeBeside = false) {
       // The sentence names the host itself, so the hero carries no host chip: it would say the
       // same thing twice. Readiness is the one observed fact no sentence states.
       const observed = entry.settled ? entry.observed : null;
@@ -442,12 +459,14 @@
         const steps = stepsUsed(entry);
         if (steps) meta.push(`<span><i></i>${escapeHtml(steps)}</span>`);
       } else if (label) {
-        meta.push(`<span><i></i>${escapeHtml(label)} authority</span>`);
+        meta.push(`<span><i></i>${escapeHtml(label)}</span>`);
       }
-      if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
+      // Success is what the sentence already says, a refusal has its own line, and the catalog
+      // name is the tool's hover, so none of them is said again here.
+      const outcome = entry.settled && !outcomeBeside ? outcomeWord(entry) : "";
+      if (outcome) meta.push(`<span><i></i>${escapeHtml(outcome.toLowerCase())}</span>`);
       if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);
       if (entry.settled && entry.endedAt && !resting) meta.push(`<span><i></i>${escapeHtml(agoSaid(entry.endedAt))}</span>`);
-      if (entry.tool) meta.push(`<span class="hero-tool-name"><i></i>${escapeHtml(entry.tool)}</span>`);
 
       // The sentence already says why a refusal happened, so the reason is not said again as a
       // code; the refusal line says who decided and where to look.
@@ -623,7 +642,7 @@
         ? `<div class="hero-rest"><span class="kicker">${escapeHtml(LAST_ACTION)}</span>`
           + `<span class="hero-age" id="hero-age">${escapeHtml(agoSaid(entry.endedAt))}</span></div>`
         : "";
-      replaceHistoryMarkup(el["hero-body"], rest + heroMarkup(entry, resting));
+      replaceHistoryMarkup(el["hero-body"], rest + heroMarkup(entry, resting, true));
       el["hero-right"].innerHTML = heroRightMarkup(entry);
       if (animate) {
         for (const node of [el["hero-med"], el["hero-body"], el["hero-right"]]) {
@@ -866,7 +885,7 @@
       }
       chip(told);
       el["refresh-integrations"].hidden = !can(ACT.rescan);
-      el["setup-integrations"].hidden = !can(ACT.setupAll);
+      el["setup-integrations"].hidden = !can(ACT.setupAll) || el["setup-integrations"].dataset.actionable !== "true";
       policyAccess();
     }
 
@@ -979,7 +998,7 @@
 
     /** One browser on its shelf, with the tabs its sessions hold. */
     function browserChipMarkup(browser) {
-      const version = browser.adapter_version ? ` title="Adapter ${escapeHtml(browser.adapter_version)}"` : "";
+      const version = browser.adapter_version ? ` title="${escapeHtml(browserChipTitle(browser.adapter_version))}"` : "";
       return `<span class="chip glance-chip on"${version}>${KIND_GLYPHS.browser}${escapeHtml(browser.family)}`
         + `<small>${escapeHtml(tabsCount(browser.tab_count ?? 0))}</small></span>`;
     }
@@ -1299,6 +1318,13 @@
     /** A path that breaks after its separators, so it wraps between folders. */
     const breakable = (text) => escapeHtml(text).replace(/([\\/]+)/g, "$1<wbr>");
 
+    /**
+     * The service's sentence with each program and path it marks in backticks set as code, the
+     * marks themselves left out. The words are the service's, unchanged.
+     */
+    const codeSpans = (text) => String(text ?? "").split("`").map((part, index) =>
+      (index % 2 ? `<code class="agent-code">${breakable(part)}</code>` : escapeHtml(part))).join("");
+
     /** The entry, whole, one block per line, each line's indent held by a class. */
     function docMarkup(doc) {
       return String(doc ?? "").split("\n").map((line) => {
@@ -1334,7 +1360,7 @@
       // verbatim and the page adds no words of its own to it.
       if (agent.evidence) {
         html += `<div class="agent-evidence"><span class="kicker">${escapeHtml(AGENTS.evidence)}</span>`
-          + `<p>${escapeHtml(agent.evidence)}</p></div>`;
+          + `<p>${codeSpans(agent.evidence)}</p></div>`;
       }
       if (inUse(agent)) {
         const tone = toneOf(agent);
@@ -1369,14 +1395,17 @@
         left: agents.filter((agent) => agent.state === "needs_attention" || agent.standing === BY_HAND)
           .map((agent) => agent.label)
       };
+      // Set up everything is offered only while it would do something: a primary that can do
+      // nothing is not shown, and neither is the caption that says what it would do.
       const actionable = plan.connect.length + plan.update.length > 0;
+      const offered = actionable && can(ACT.setupAll);
       const setup = el["setup-integrations"];
-      setup.disabled = !actionable;
       setup.dataset.actionable = String(actionable);
+      setup.hidden = !offered;
       const said = agentPlan(plan);
       setup.title = said;
       el["integrations-caption"].textContent = said;
-      el["integrations-caption"].hidden = !can(ACT.setupAll) || !agents.length;
+      el["integrations-caption"].hidden = !offered;
       const command = agents[0]?.connector_command ?? "";
       el["integrations-command"].textContent = command;
       el["integrations-command"].title = command;

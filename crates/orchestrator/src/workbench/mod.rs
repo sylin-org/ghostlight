@@ -1130,6 +1130,12 @@ impl WorkbenchFacade {
         self.apply_runtime_control(intent.into(), RuntimeSource::Window)
     }
 
+    /// The state of browser work now: active, paused or ended.
+    #[must_use]
+    pub fn runtime_state(&self) -> RuntimeControlState {
+        self.governance.runtime_state()
+    }
+
     /// Apply one runtime control from `source`, the one path every screen takes.
     ///
     /// The window, a watching screen, the tray and the browser toolbar all end here. The state is

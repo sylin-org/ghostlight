@@ -987,6 +987,7 @@ function wire() {
 
   el["setup-integrations"].addEventListener("click", async (event) => {
     const button = event.currentTarget;
+    const held = document.activeElement === button;
     button.disabled = true;
     try {
       const result = await transport.setupDetectedHarnesses();
@@ -995,7 +996,9 @@ function wire() {
     } catch (error) {
       sayFailure(error);
     } finally {
-      button.disabled = button.dataset.actionable !== "true";
+      button.disabled = false;
+      // Once nothing is left to set up the button is gone, so focus moves to Re-check beside it.
+      if (held && button.hidden) el["refresh-integrations"].focus({ preventScroll: true });
     }
   });
 
