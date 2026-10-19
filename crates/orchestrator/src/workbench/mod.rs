@@ -1971,9 +1971,14 @@ impl From<AuditRecord> for HistoryItem {
             .iter()
             .map(|check| crate::language::history::permission(check, channel, tier))
             .collect();
-        let summary =
-            crate::language::history::for_the_person(&value.summary, value.reason, channel, tier)
-                .unwrap_or(value.summary);
+        let summary = crate::language::history::for_the_person(
+            &value.summary,
+            value.reason,
+            value.refusal_facts.as_ref(),
+            channel,
+            tier,
+        )
+        .unwrap_or(value.summary);
         Self {
             storage: crate::language::audit_health::Storage::Saved,
             storage_detail: if value.unconfirmed_history_steps > 0 {

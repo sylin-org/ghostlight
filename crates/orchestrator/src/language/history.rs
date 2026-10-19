@@ -1,13 +1,15 @@
 //! Closed composition receipt identities and readable retained-history explanations.
 //!
 //! History is read by a person in the window. A record keeps the summary the model was told, and
-//! a few of those speak to the model about "the user": the human controls' directives and the
-//! channel refusal. [`for_the_person`] gives the window its own sentence for them, and the
-//! permission explanations name a refusal's reason in words rather than as a code.
+//! a few of those speak to the model about "the user": the human controls' directives, the
+//! channel refusal, the refusal that leaves opening a browser to the person, and the credential
+//! refusal. [`for_the_person`] gives the window its own sentence for them, and the permission
+//! explanations name a refusal's reason in words rather than as a code.
 
 use crate::governance::evidence::PermissionCheck;
 use crate::governance::{ReasonCode, MANAGED_TIER};
 use crate::intake::session::IntakeChannel;
+use crate::language::audit::AuditRefusal;
 use crate::language::channel_switch;
 use crate::language::outcome::{PolicyAuthor, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE};
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,13 @@ const YOU_PAUSED: &str = "You paused Ghostlight.";
 
 /// What the window says in place of the stop directive the model was told.
 const YOU_ENDED: &str = "You ended the session.";
+
+/// What the window says in place of the refusal that asks the model to have the user open a
+/// browser.
+const NO_BROWSER_CONNECTED: &str = "No browser was connected, so nothing ran. Open a browser window with Ghostlight in Browser installed.";
+
+/// What the window says in place of the refusal of credential input the user had not authorized.
+const SECRET_NOT_ALLOWED: &str = "Refused to type a password or other secret you had not allowed.";
 
 /// Whose layer a record's `policy_tier` names: the organization's for the managed tier, and the
 /// person's own otherwise.
@@ -36,16 +45,23 @@ pub fn author_of(tier: Option<&str>) -> PolicyAuthor {
 /// agents.". A record keeps no organization name, so the organization's refusal says "Your
 /// organization's policy", and the refusal line beneath it names the organization. A pause or a
 /// stop says what the person did, followed by whatever the model's sentence went on to say about
-/// the action.
+/// the action. A refusal that left opening a browser to the person, or that kept a secret from
+/// being typed, is read from the record's closed `refusal` facts, never from its prose.
 #[must_use]
 pub fn for_the_person(
     summary: &str,
     reason: ReasonCode,
+    refusal: Option<&AuditRefusal>,
     channel: IntakeChannel,
     tier: Option<&str>,
 ) -> Option<String> {
     if reason == ReasonCode::ChannelDenied {
         return Some(channel_switch::refused(channel, author_of(tier), None));
+    }
+    match refusal {
+        Some(AuditRefusal::BrowserStartupManual) => return Some(NO_BROWSER_CONNECTED.into()),
+        Some(AuditRefusal::CredentialAuthorization) => return Some(SECRET_NOT_ALLOWED.into()),
+        _ => {}
     }
     [
         (HUMAN_PAUSE_DIRECTIVE, YOU_PAUSED),
@@ -156,6 +172,8 @@ pub fn permission(check: &PermissionCheck, channel: IntakeChannel, tier: Option<
 mod tests {
     use super::*;
     use crate::governance::CapabilitySet;
+    use crate::language::field_problem::ControlRef;
+    use crate::language::outcome::{ExtensionAdvice, Refusal, TargetRole};
 
     fn refused(reason: ReasonCode) -> PermissionCheck {
         PermissionCheck {
@@ -174,6 +192,7 @@ mod tests {
             for_the_person(
                 model,
                 ReasonCode::ChannelDenied,
+                None,
                 IntakeChannel::Mcp,
                 Some("user")
             )
@@ -184,6 +203,7 @@ mod tests {
             for_the_person(
                 model,
                 ReasonCode::ChannelDenied,
+                None,
                 IntakeChannel::Cli,
                 Some(MANAGED_TIER)
             )
@@ -206,6 +226,7 @@ mod tests {
             for_the_person(
                 HUMAN_PAUSE_DIRECTIVE,
                 ReasonCode::RuntimeHold,
+                None,
                 IntakeChannel::Mcp,
                 None
             )
@@ -219,6 +240,7 @@ mod tests {
             for_the_person(
                 &unconfirmed,
                 ReasonCode::SessionEnded,
+                None,
                 IntakeChannel::Mcp,
                 None
             )
@@ -230,6 +252,7 @@ mod tests {
             for_the_person(
                 "Opened example.com.",
                 ReasonCode::Permitted,
+                None,
                 IntakeChannel::Mcp,
                 None
             ),
@@ -260,5 +283,42 @@ mod tests {
             assert!(!said.contains('_'), "{said}");
             assert!(said.is_ascii() && said.ends_with('.'), "{said}");
         }
+    }
+
+    /// The window's sentence for a refusal the model was told, read as the window reads it.
+    fn in_the_window(refusal: &Refusal) -> Option<String> {
+        let audit = refusal.audit();
+        for_the_person(
+            audit.summary(),
+            ReasonCode::Permitted,
+            audit.refusal(),
+            IntakeChannel::Mcp,
+            None,
+        )
+    }
+
+    #[test]
+    fn a_refusal_that_leaves_the_browser_to_the_person_tells_them_what_to_open() {
+        let refusal = Refusal::BrowserStartupManual {
+            browsers: vec!["Google Chrome".into()],
+            extension: ExtensionAdvice::Plain,
+        };
+        assert!(refusal.audit().summary().contains("Ask the user"));
+        assert_eq!(
+            in_the_window(&refusal).as_deref(),
+            Some("No browser was connected, so nothing ran. Open a browser window with Ghostlight in Browser installed.")
+        );
+    }
+
+    #[test]
+    fn a_credential_refusal_tells_the_person_their_secret_stayed_untyped() {
+        let refusal = Refusal::CredentialAuthorization {
+            control: ControlRef::new(TargetRole::Textbox, "Password", None, false),
+        };
+        assert!(refusal.audit().summary().contains("the user"));
+        assert_eq!(
+            in_the_window(&refusal).as_deref(),
+            Some("Refused to type a password or other secret you had not allowed.")
+        );
     }
 }
