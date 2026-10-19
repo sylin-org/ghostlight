@@ -1085,7 +1085,7 @@ impl WorkbenchFacade {
             }
         }
         for item in &snapshot.history {
-            let outcome = HitOutcome::of(item);
+            let outcome = words::search_outcome(item.outcome);
             let browser = item.browser.as_deref().unwrap_or_default();
             if hits.finds_action(
                 &item.tool,
@@ -1094,11 +1094,11 @@ impl WorkbenchFacade {
                     item.observed.host.as_deref().unwrap_or_default(),
                     &item.agent.name,
                     browser,
-                    outcome.map_or("", HitOutcome::as_str),
+                    outcome.unwrap_or_default(),
                 ],
             ) {
                 hits.push(SearchHit {
-                    outcome,
+                    outcome: outcome.map(|_| item.outcome),
                     timestamp_ms: Some(item.timestamp_ms),
                     ..SearchHit::new(
                         SearchKind::History,
@@ -1907,6 +1907,10 @@ pub struct HistoryItem {
     pub denial_id: Option<String>,
     /// Terminal status.
     pub status: String,
+    /// What the call came to, decided once from the typed record
+    /// ([`crate::language::history::OutcomeClass::recorded`]). The window draws the row from it
+    /// and never from `allowed` and `status`.
+    pub outcome: crate::language::history::OutcomeClass,
     /// Effect class.
     pub effect: String,
     /// Ghostlight-authored sentence naming what happened, as a person reads it: the record's
@@ -1941,6 +1945,7 @@ pub struct HistoryItem {
 
 impl From<AuditRecord> for HistoryItem {
     fn from(value: AuditRecord) -> Self {
+        let outcome = crate::language::history::OutcomeClass::recorded(&value);
         let provenance = value
             .provenance
             .as_ref()
@@ -1996,6 +2001,7 @@ impl From<AuditRecord> for HistoryItem {
             grant_id: value.grant_id,
             denial_id: value.denial_id,
             status: value.status,
+            outcome,
             effect: value.effect,
             summary,
             duration_ms: value.duration_ms,
@@ -2271,9 +2277,10 @@ pub struct SearchHit {
     pub detail: String,
     /// When a recorded action settled; the window says how long ago.
     pub timestamp_ms: Option<u64>,
-    /// How a recorded action ended, present only when it did not succeed.
+    /// How a recorded action ended, present only when its row says so in a word
+    /// ([`words::search_outcome`]).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<HitOutcome>,
+    pub outcome: Option<crate::language::history::OutcomeClass>,
     /// Workbench destination that owns this result.
     pub view: SearchDestination,
 }
@@ -2318,49 +2325,6 @@ pub enum SearchKind {
     Configuration,
     /// Supported development-harness registration.
     Installation,
-}
-
-/// How a recorded action ended when it did not succeed, in the window's wire words: the outcomes
-/// its row wears (`OUTCOME_WORD` in `ui/lib/words.js`; `isBlocked`, `isFailed` and `isKept` in
-/// `ui/lib/entries.js`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HitOutcome {
-    /// Policy or a person refused it.
-    Blocked,
-    /// It was permitted and failed.
-    Failed,
-    /// It was permitted and what it did cannot be confirmed.
-    Unknown,
-    /// It was permitted and a browser setting held it back.
-    Kept,
-}
-
-impl HitOutcome {
-    /// How `item` ended, or `None` when it succeeded or was cancelled.
-    fn of(item: &HistoryItem) -> Option<Self> {
-        use crate::work::result::Status;
-        use serde::de::IntoDeserializer;
-        let status: Result<Status, serde::de::value::Error> =
-            Status::deserialize(item.status.as_str().into_deserializer());
-        match status.ok()? {
-            Status::Blocked if !item.allowed => Some(Self::Blocked),
-            Status::Blocked => Some(Self::Kept),
-            Status::Failed => Some(Self::Failed),
-            Status::Unknown => Some(Self::Unknown),
-            Status::Succeeded | Status::Cancelled => None,
-        }
-    }
-
-    /// The wire word, which is also what a search for the outcome matches.
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Blocked => "blocked",
-            Self::Failed => "failed",
-            Self::Unknown => "unknown",
-            Self::Kept => "kept",
-        }
-    }
 }
 
 /// Closed workbench destinations used by global search.

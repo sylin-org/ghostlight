@@ -95,6 +95,7 @@ impl Gathered {
             sessions: self.sessions.clone(),
             browsers: self.browsers.clone(),
             no_browser: self.no_browser.clone(),
+            counts: self.counts(),
             harnesses_in_use: self.harnesses_in_use.clone(),
         }
     }
@@ -102,13 +103,19 @@ impl Gathered {
     /// What is connected in this look: the agents as At a glance groups them, the connections by
     /// intake, and the browsers.
     pub fn counts(&self) -> ConnectionCounts {
-        count_connections(
-            self.sessions
-                .iter()
-                .map(|session| (session.agent.id.clone(), session.connections.as_slice())),
-            self.browsers.len(),
-        )
+        counts_of(&self.sessions, self.browsers.len())
     }
+}
+
+/// What is connected, from `sessions` and the number of connected `browsers`, as
+/// [`count_connections`] counts it.
+pub(super) fn counts_of(sessions: &[SessionSummary], browsers: usize) -> ConnectionCounts {
+    count_connections(
+        sessions
+            .iter()
+            .map(|session| (session.agent.id.clone(), session.connections.as_slice())),
+        browsers,
+    )
 }
 
 /// The parts last published, which a refresh compares with.

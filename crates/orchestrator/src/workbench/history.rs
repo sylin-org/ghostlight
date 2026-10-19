@@ -2,7 +2,7 @@
 
 use super::{push_bounded, AuditRecord, HistoryItem, VecDeque};
 use crate::governance::CapabilitySet;
-use crate::language::history::{CompositionKind, COMPOSITION_STEP_LIMIT};
+use crate::language::history::{CompositionKind, OutcomeClass, COMPOSITION_STEP_LIMIT};
 use crate::language::outcome::{Observed, Outcome};
 use serde::Serialize;
 
@@ -72,6 +72,7 @@ pub(super) fn merge_stored(
             parent.capability = CapabilitySet::EMPTY.label();
             parent.requirements = CapabilitySet::EMPTY;
             parent.status = "unknown".into();
+            parent.outcome = OutcomeClass::Unknown;
             parent.effect = "unknown".into();
             parent.allowed = true;
             parent.reason.clear();
@@ -106,7 +107,7 @@ pub(super) fn merge_stored(
                 .filter(|step| {
                     step.record
                         .as_ref()
-                        .is_some_and(|record| record.status == "succeeded")
+                        .is_some_and(|record| record.outcome == OutcomeClass::Succeeded)
                 })
                 .count();
             item.summary = if live {

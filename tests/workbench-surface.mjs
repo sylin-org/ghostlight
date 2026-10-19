@@ -269,6 +269,25 @@ const retiredSetup = {
   connected_line: null, tagline: null
 };
 
+/**
+ * What the service counts of a flat snapshot's sessions and browsers (workbench
+ * `ConnectionCounts`): one agent per agent id, the connections by intake, and the browsers.
+ */
+function countsOf({ sessions = [], browsers = [] }) {
+  const connections = sessions.flatMap((session) => session.connections ?? []);
+  return {
+    agents: new Set(sessions.map((session) => session.agent?.id)).size,
+    mcp_clients: connections.filter((connection) => connection.channel === "mcp").length,
+    command_line: connections.filter((connection) => connection.channel === "cli").length,
+    browsers: browsers.length
+  };
+}
+
+/** A flat snapshot with the counts the service's connections part carries beside its sessions. */
+function withCounts(flat) {
+  return { ...flat, counts: countsOf(flat) };
+}
+
 /** The parts of a snapshot answer, from the one flat snapshot this fixture is written as. */
 function partsOf(flat) {
   return {
@@ -277,7 +296,7 @@ function partsOf(flat) {
       audit_notice: flat.audit_notice, configuration: flat.configuration,
       ...(flat.runtime_note === undefined ? {} : { runtime_note: flat.runtime_note })
     },
-    connections: { sessions: flat.sessions, browsers: flat.browsers },
+    connections: { sessions: flat.sessions, browsers: flat.browsers, counts: countsOf(flat) },
     activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage ?? [] },
     integrations: { harnesses: flat.harnesses },
     diagnostics: { diagnostics: flat.diagnostics },
@@ -571,7 +590,7 @@ const agentRoster = [
   agentRow("continue", "Continue", "not_detected", { copy_only: true }),
   agentRow("crush", "Crush", "not_detected")
 ];
-view.collections({
+view.collections(withCounts({
   sessions: [
     { id: "w-zed-1", agent: namedAgent("Zed"), channel: "mcp", tab_count: 1, running_operations: 0 },
     { id: "w-zed-2", agent: namedAgent("Zed"), channel: "mcp", tab_count: 2, running_operations: 1 },
@@ -582,7 +601,7 @@ view.collections({
   browsers: [], diagnostics: [], history: [], service: { version: "1.0.0" },
   configuration: { managed_policy: { configured: false } },
   harnesses: agentRoster
-}, new Set());
+}), new Set());
 const agentsShown = {
   heading: nodes.get("integrations-heading").innerHTML,
   caption: nodes.get("integrations-caption").textContent,
@@ -663,7 +682,7 @@ const fixWasManaged = managedHarnesses.some((call) =>
 
 // A refusal has to lead somewhere. The deciding rule and the denial handle are recorded on every
 // enforced denial, and an organization that supplied contacts supplied them for this moment.
-view.collections({
+view.collections(withCounts({
   sessions: [], browsers: [], harnesses: [], diagnostics: [], history: [], service: { version: "1.0.0" },
   configuration: {
     managed_policy: {
@@ -671,7 +690,7 @@ view.collections({
       contacts: [{ kind: "email", value: "security@example.test", label: "Security team" }]
     }
   }
-}, new Set());
+}), new Set());
 view.hero({
   invocation: "i9", workspace: "w1", tool: "browser_execute", capability: "execute",
   settled: true, allowed: false, phase: "blocked", reason: "policy_denied",
@@ -812,13 +831,13 @@ const loadingDuration = durationCellOf("loading");
 const interactiveDuration = durationCellOf("interactive");
 
 // The ADR-0145 status card: rendered from the orchestrator-owned state, with both person acts.
-view.collections({
+view.collections(withCounts({
   sessions: [], browsers: [],
   diagnostics: [{ severity: "passing", label: "Ghostlight", detail: "Running and accepting agents." }],
   history: [], service: { version: "1.0.0", started_at_ms: 0, runtime_state: "active" },
   configuration: { managed_policy: { configured: false } },
   harnesses: []
-}, []);
+}), []);
 
 const historyChecks = [];
 {
@@ -923,7 +942,7 @@ const glanceChecks = [];
   ];
   const browsers = [{ id: "chrome", family: "Google Chrome", adapter_version: "2.0.0", tab_count: 2, connected: true }];
   const draw = (facts) => {
-    glanceView.collections({ ...snapshot(), ...facts }, new Set());
+    glanceView.collections(withCounts({ ...snapshot(), ...facts }), new Set());
     return nodes.get("connections").innerHTML;
   };
   let html = draw({ sessions, browsers });
@@ -978,7 +997,7 @@ const glanceChecks = [];
 }
 
 // H7: an existing health surface stays quiet when healthy and keeps failed storage explicit.
-const healthSnapshot = snapshot();
+const healthSnapshot = withCounts(snapshot());
 healthSnapshot.audit_notice = "History cannot be saved. Browser work can continue. Ghostlight checks automatically.";
 view.collections(healthSnapshot, new Set());
 const auditNoticeVisible = nodes.get("audit-health").hidden === false && nodes.get("audit-health").textContent === healthSnapshot.audit_notice;
@@ -1119,7 +1138,7 @@ function fakeService(kind, { served = true } = {}) {
   });
   const parts = () => ({
     status: status(),
-    connections: kind === "watch" ? WATCHED_CONNECTIONS : { sessions: [], browsers: [] },
+    connections: withCounts(kind === "watch" ? WATCHED_CONNECTIONS : { sessions: [], browsers: [] }),
     activity: { operations: [], history: [], document_coverage: [] },
     integrations: { harnesses: roster() },
     diagnostics: {
@@ -2007,7 +2026,7 @@ const checks = [
     (() => {
       // Every word belongs to crates/orchestrator/src/language/readiness.rs. A word the window
       // made up would be a second source of truth for the one answer the front door gives.
-      const bare = { sessions: [], browsers: [], history: [] };
+      const bare = withCounts({ sessions: [], browsers: [], history: [] });
       const told = { ...bare, readiness: { state: "ready", word: "Lantern lit", detail: "Said by the service.", tone: "quiet", invites_control: true } };
       view.band({ connected: true, snapshot: told, runtime: "active", running: 0 });
       const handed = nodes.get("state-word").textContent;
@@ -2020,7 +2039,7 @@ const checks = [
     (() => {
       const wheel = nodes.get("wheel");
       const readiness = { state: "ready", word: "Ready", detail: "Connected.", tone: "quiet" };
-      const snapshot = (invites) => ({
+      const snapshot = (invites) => withCounts({
         sessions: [], browsers: [], history: [], readiness: { ...readiness, ...invites }, controls: controlsPart()
       });
       view.band({ connected: true, snapshot: snapshot({}), runtime: "active", running: 0 });
@@ -2035,7 +2054,7 @@ const checks = [
       // The orchestrator offers runtime control whenever it answers, because a pause is its own
       // state rather than something a browser holds. Only an unreachable authority disables it.
       const wheel = nodes.get("wheel");
-      const notConnected = (runtime) => ({
+      const notConnected = (runtime) => withCounts({
         sessions: [], browsers: [], history: [], controls: controlsPart({ runtime }),
         readiness: { state: "not_connected", word: "Not connected", detail: "No browser.", tone: "offline", invites_control: true }
       });

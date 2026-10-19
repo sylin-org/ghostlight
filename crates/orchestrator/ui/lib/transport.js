@@ -151,6 +151,7 @@
       },
       sessions,
       browsers,
+      counts: connections.counts,
       harnesses_in_use: connections.harnesses_in_use ?? [],
       operations,
       history,

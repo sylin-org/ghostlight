@@ -196,6 +196,9 @@ pub struct ConnectionsPart {
     /// What the window says in place of a browser, present only while none is connected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_browser: Option<String>,
+    /// What is connected, counted once by the service, as the tray and `status` count it. The
+    /// band and About show these numbers and never count the sessions themselves.
+    pub counts: ConnectionCounts,
     /// The ids of the client roster's rows in use now ([`harnesses_in_use`]), in roster order.
     /// The Integrations page reads it beside the sessions it is decided from, so it changes when
     /// they do.
@@ -210,6 +213,7 @@ impl ConnectionsPart {
             sessions: snapshot.sessions.clone(),
             browsers: snapshot.browsers.clone(),
             no_browser: snapshot.no_browser.clone(),
+            counts: super::live::counts_of(&snapshot.sessions, snapshot.browsers.len()),
             harnesses_in_use: harnesses_in_use(&snapshot.harnesses, &snapshot.sessions),
         }
     }

@@ -168,3 +168,80 @@ fn the_page_has_a_word_for_every_state_the_roster_sends_and_no_other() {
         expected.iter().map(String::as_str).collect::<BTreeSet<_>>()
     );
 }
+
+/// The entries of the page's frozen object `name` in `words.js`, as (key, value) pairs in order,
+/// with the quotes taken off.
+fn page_table<'a>(words: &'a str, name: &str) -> Vec<(&'a str, &'a str)> {
+    let opening = format!("const {name} = Object.freeze({{");
+    let start = words.find(&opening).expect("the page has the table") + opening.len();
+    let block = &words[start..];
+    let block = &block[..block.find("});").expect("the table ends")];
+    block
+        .lines()
+        .filter_map(|line| line.trim().trim_end_matches(',').split_once(':'))
+        .map(|(key, value)| (key.trim(), value.trim().trim_matches('"')))
+        .collect()
+}
+
+#[test]
+fn the_page_draws_every_outcome_class_and_is_found_by_its_word() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::language::history::OutcomeClass;
+    use crate::language::workbench::search_outcome;
+
+    let words = include_str!("../../ui/lib/words.js");
+    let names: BTreeMap<&str, &str> = page_table(words, "OUTCOME").into_iter().collect();
+    let classes = [
+        OutcomeClass::Succeeded,
+        OutcomeClass::Refused,
+        OutcomeClass::Kept,
+        OutcomeClass::NeedsYou,
+        OutcomeClass::Failed,
+        OutcomeClass::Unknown,
+        OutcomeClass::Cancelled,
+    ];
+    // A new class fails to compile here, so it cannot reach the page without a word.
+    for class in classes {
+        match class {
+            OutcomeClass::Succeeded
+            | OutcomeClass::Refused
+            | OutcomeClass::Kept
+            | OutcomeClass::NeedsYou
+            | OutcomeClass::Failed
+            | OutcomeClass::Unknown
+            | OutcomeClass::Cancelled => {}
+        }
+    }
+    let wire = |class: OutcomeClass| {
+        serde_json::to_value(class)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(
+        names
+            .values()
+            .copied()
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>(),
+        classes.iter().copied().map(wire).collect::<BTreeSet<_>>(),
+        "the page names exactly the classes the service sends"
+    );
+    // The word a row wears is the word search finds it by, and a row with no word is found by none.
+    let shown: BTreeMap<String, String> = page_table(words, "OUTCOME_WORD")
+        .into_iter()
+        .map(|(key, word)| {
+            let name = key.trim_start_matches("[OUTCOME.").trim_end_matches(']');
+            (names[name].to_owned(), word.to_lowercase())
+        })
+        .collect();
+    for class in classes {
+        assert_eq!(
+            shown.get(&wire(class)).map(String::as_str),
+            search_outcome(class),
+            "{class:?}"
+        );
+    }
+}

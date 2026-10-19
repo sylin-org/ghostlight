@@ -1508,6 +1508,35 @@ fn agents_are_counted_as_at_a_glance_groups_them_and_connections_by_intake() {
 }
 
 #[test]
+fn the_connections_part_carries_the_counts_the_tray_says() {
+    use crate::intake::session::IntakeChannel;
+    use crate::language::workbench::service_line;
+
+    let workspaces = crate::workspace::WorkspaceStore::default();
+    workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
+    workspaces.admit("Claude Code".into(), IntakeChannel::Mcp);
+    workspaces.admit("a script".into(), IntakeChannel::Cli);
+    let facade = WorkbenchFacade::new(
+        WorkbenchProjection::default(),
+        workspaces,
+        GovernanceFacade::new(None),
+        ControlledBrowser::new(true, false),
+        crate::diagnostics::DiagnosticsHub::for_tests(),
+    );
+    // The window's band and About show these numbers, so they say what the tray says.
+    let part = super::parts::ConnectionsPart::of(&facade.snapshot());
+    assert_eq!(part.counts, facade.connection_counts());
+    assert_eq!((part.counts.agents, part.counts.browsers), (2, 1));
+    assert!(facade
+        .tray_model()
+        .tooltip
+        .ends_with(&service_line(Some(part.counts))));
+    let wire = serde_json::to_value(&part).unwrap();
+    assert_eq!(wire["counts"]["agents"], 2);
+    assert_eq!(wire["counts"]["browsers"], 1);
+}
+
+#[test]
 fn each_session_names_its_agent_as_a_person_knows_it_and_keeps_the_reported_name() {
     use crate::intake::session::IntakeChannel;
 
@@ -2602,15 +2631,22 @@ fn a_search_never_matches_on_an_opaque_id() {
 
 #[test]
 fn a_recorded_action_that_did_not_succeed_carries_its_outcome_and_is_found_by_it() {
+    use crate::language::audit::AuditRefusal;
+    use crate::language::history::OutcomeClass;
+
     let mut failed = a_navigation_to("invocation_1", "example.com", 1_000);
     failed.status = "failed".into();
     let mut kept = a_navigation_to("invocation_2", "example.com", 2_000);
     kept.status = "blocked".into();
+    kept.refusal_facts = Some(AuditRefusal::LocalInterlock);
     let mut blocked = a_navigation_to("invocation_3", "example.com", 3_000);
     blocked.status = "blocked".into();
     blocked.allowed = false;
     blocked.reason = crate::governance::ReasonCode::HostDenied;
-    let facade = a_history_of(&[failed, kept, blocked]);
+    let mut credential = a_navigation_to("invocation_4", "example.com", 4_000);
+    credential.status = "blocked".into();
+    credential.refusal_facts = Some(AuditRefusal::CredentialAuthorization);
+    let facade = a_history_of(&[failed, kept, blocked, credential]);
     let outcomes: Vec<_> = facade
         .search("example.com")
         .into_iter()
@@ -2619,19 +2655,58 @@ fn a_recorded_action_that_did_not_succeed_carries_its_outcome_and_is_found_by_it
     assert_eq!(
         outcomes,
         [
-            ("invocation_3".to_owned(), Some(super::HitOutcome::Blocked)),
-            ("invocation_2".to_owned(), Some(super::HitOutcome::Kept)),
-            ("invocation_1".to_owned(), Some(super::HitOutcome::Failed)),
+            ("invocation_4".to_owned(), Some(OutcomeClass::NeedsYou)),
+            ("invocation_3".to_owned(), Some(OutcomeClass::Refused)),
+            ("invocation_2".to_owned(), Some(OutcomeClass::Kept)),
+            ("invocation_1".to_owned(), Some(OutcomeClass::Failed)),
         ]
     );
-    let blocked: Vec<String> = facade
-        .search("blocked")
-        .into_iter()
-        .map(|hit| hit.id)
-        .collect();
-    assert_eq!(blocked, ["invocation_3"]);
-    let wire = serde_json::to_value(&facade.search("example.com")[0]).unwrap();
-    assert_eq!(wire["outcome"], "blocked");
+    let found = |query: &str| -> Vec<String> {
+        facade.search(query).into_iter().map(|hit| hit.id).collect()
+    };
+    // Each is found by the word its row wears.
+    assert_eq!(found("blocked"), ["invocation_3"]);
+    assert_eq!(found("needs you"), ["invocation_4"]);
+    assert_eq!(found("kept"), ["invocation_2"]);
+    let wire = serde_json::to_value(&facade.search("example.com")[1]).unwrap();
+    assert_eq!(wire["outcome"], "refused");
+}
+
+#[test]
+fn a_credential_refusal_row_says_needs_you() {
+    use crate::language::audit::AuditRefusal;
+    use crate::language::history::OutcomeClass;
+
+    let mut credential = a_navigation_to("invocation_1", "example.com", 1_000);
+    credential.status = "blocked".into();
+    credential.refusal_facts = Some(AuditRefusal::CredentialAuthorization);
+    let row = &a_history_of(&[credential]).snapshot().history[0];
+    assert_eq!(row.outcome, OutcomeClass::NeedsYou);
+    assert_eq!(serde_json::to_value(row).unwrap()["outcome"], "needs_you");
+}
+
+#[test]
+fn a_kept_tab_row_says_kept() {
+    use crate::language::audit::AuditRefusal;
+    use crate::language::history::OutcomeClass;
+
+    let mut kept = a_navigation_to("invocation_1", "example.com", 1_000);
+    kept.tool = "browser_tabs".into();
+    kept.status = "blocked".into();
+    kept.refusal_facts = Some(AuditRefusal::LocalInterlock);
+    // A record blocked with no refusal of its own was refused, never kept: the class says which.
+    let mut refused = a_navigation_to("invocation_2", "example.com", 2_000);
+    refused.status = "blocked".into();
+    let snapshot = a_history_of(&[kept, refused]).snapshot();
+    let outcome = |invocation: &str| {
+        snapshot
+            .history
+            .iter()
+            .find(|row| row.invocation == invocation)
+            .map(|row| row.outcome)
+    };
+    assert_eq!(outcome("invocation_1"), Some(OutcomeClass::Kept));
+    assert_eq!(outcome("invocation_2"), Some(OutcomeClass::Refused));
 }
 
 #[test]

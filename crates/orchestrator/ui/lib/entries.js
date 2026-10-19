@@ -6,7 +6,7 @@
 })(globalThis, function createGhostlightEntries() {
   "use strict";
 
-  const { PHASE } = globalThis.GhostlightWords;
+  const { PHASE, OUTCOME } = globalThis.GhostlightWords;
 
   /* -------------------------------- entries ------------------------------- */
 
@@ -38,14 +38,15 @@
       capability: record.capability,
       startedAt: existing?.startedAt,
       endedAt: record.timestamp_ms,
-      phase: record.complete === false && existing && !existing.settled ? existing.phase : isRefusal(record) ? "blocked" : "completed",
-      allowed: record.allowed,
+      phase: record.complete === false && existing && !existing.settled ? existing.phase
+        : record.outcome === OUTCOME.refused ? "blocked" : "completed",
       reason: record.reason,
       // Kept so a refusal can name the rule that caused it rather than only that it happened.
       policyTier: record.policy_tier ?? null,
       grantId: record.grant_id ?? null,
       denialId: record.denial_id ?? null,
-      status: record.status,
+      // What the service decided the call came to; the row is drawn from it alone.
+      outcome: record.outcome ?? null,
       effect: record.effect,
       summary: record.summary,
       storage: record.storage,
@@ -82,38 +83,18 @@
   /** Whether the work has not settled yet, running or pending. */
   const isUnsettled = entry => isRunning(entry) || isPending(entry);
 
-  /**
-   * The terminal statuses a record names, in the service's wire words (work/result.rs `Status`).
-   */
-  const STATUS = Object.freeze({
-    succeeded: "succeeded", blocked: "blocked", failed: "failed", cancelled: "cancelled", unknown: "unknown"
-  });
-
-  /**
-   * Whether a record is a refusal: its decision refused the action and its status says blocked. A
-   * call that did not match the catalog was refused too, but its status says it failed, and it is
-   * drawn as the failure it is rather than as a policy block.
-   */
-  const isRefusal = record => record.allowed === false && record.status === STATUS.blocked;
-
   /** Whether policy or a person refused the action: the one outcome drawn in the full red treatment. */
-  const isBlocked = entry => entry.phase === "blocked" || isRefusal(entry);
+  const isBlocked = entry => entry.phase === "blocked" || entry.outcome === OUTCOME.refused;
 
   /**
-   * Whether a permitted action settled without doing what it was asked: it failed, or what it did
-   * cannot be confirmed. A refusal is not a failure; it has its own treatment.
+   * Whether a settled action did not do what it was asked: it failed, or what it did cannot be
+   * confirmed. A refusal is not a failure; it has its own treatment.
    */
-  const isFailed = entry => Boolean(entry.settled) && !isBlocked(entry)
-    && (entry.status === STATUS.failed || entry.status === STATUS.unknown);
-
-  /**
-   * Whether a permitted action was held back by a browser setting rather than by policy, such as a
-   * tab the preserve-tabs setting kept open: the record is blocked, but policy allowed it.
-   */
-  const isKept = entry => Boolean(entry.settled) && !isBlocked(entry) && entry.status === STATUS.blocked;
+  const isFailed = entry => Boolean(entry.settled)
+    && (entry.outcome === OUTCOME.failed || entry.outcome === OUTCOME.unknown);
 
   return Object.freeze({
-    STATUS, entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isPending, isUnsettled,
-    isBlocked, isFailed, isKept
+    entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isPending, isUnsettled,
+    isBlocked, isFailed
   });
 });

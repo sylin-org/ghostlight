@@ -370,16 +370,16 @@ const snapshot = {
   // that never reached one. A restored record is named for the agent it kept as claimed, and one
   // that kept no claim and no source reads "Unknown agent".
   history: [
-    { timestamp_ms: ago(60000), invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
-    { timestamp_ms: ago(90000), invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    { timestamp_ms: ago(60000), invocation: "invocation_disconnected", workspace: "workspace_claude", tool: "browser_press_key", capability: "action", allowed: true, reason: "browser_disconnected", status: "failed", outcome: "failed", effect: "none", summary: "The browser this session works in is not connected. Nothing was sent.", duration_ms: 40, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
+    { timestamp_ms: ago(90000), invocation: "invocation_blocked", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: false, reason: "tab_close_denied", status: "blocked", outcome: "refused", effect: "none", summary: "Authority blocked the browser job.", duration_ms: 120, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
     // A tab the browser's Preserve Ghostlight tabs setting kept open: refused, but not by policy.
-    { timestamp_ms: ago(120000), invocation: "invocation_kept", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: true, reason: "browser_local_interlock", status: "blocked", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings.", duration_ms: 60, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    { timestamp_ms: ago(120000), invocation: "invocation_kept", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: true, reason: "browser_local_interlock", status: "blocked", outcome: "kept", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings.", duration_ms: 60, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
     // Work from a channel your rules switched off, and a call that does not match the catalog.
-    { timestamp_ms: ago(150000), invocation: "invocation_channel_off", workspace: "workspace_claude", tool: "browser_read", capability: "read", allowed: false, reason: "channel_denied", policy_tier: "user", status: "blocked", effect: "none", summary: "Your policy turns off work from MCP agents.", permission_explanations: ["Refused. Your policy turns off work from MCP agents."], permissions: { checks: [{ requirements: [], host: null, allowed: false, reason: "channel_denied", layers: [] }], truncated: false }, duration_ms: 4, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
-    { timestamp_ms: ago(180000), invocation: "invocation_invalid", workspace: "workspace_codex", tool: "browser_click", capability: "local", allowed: false, reason: "invalid_request", status: "failed", effect: "none", summary: "The call does not match the Ghostlight catalog.", duration_ms: 2, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
-    { timestamp_ms: ago(240000), invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", ...previewDetails({ connection_id: "connection_script", channel: "cli" }) },
-    { timestamp_ms: ago(420000), invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored", channel: "mcp" }) },
-    { timestamp_ms: ago(480000), invocation: "invocation_restored_claimed", workspace: "workspace_0193f1c2a8b4e7d6826", tool: "browser_read", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Read example.com.", duration_ms: 30, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored_claimed", channel: "mcp", claimed_agent: "claude-code", source: { agent: "cursor", image: "Cursor.exe" } }) }
+    { timestamp_ms: ago(150000), invocation: "invocation_channel_off", workspace: "workspace_claude", tool: "browser_read", capability: "read", allowed: false, reason: "channel_denied", policy_tier: "user", status: "blocked", outcome: "refused", effect: "none", summary: "Your policy turns off work from MCP agents.", permission_explanations: ["Refused. Your policy turns off work from MCP agents."], permissions: { checks: [{ requirements: [], host: null, allowed: false, reason: "channel_denied", layers: [] }], truncated: false }, duration_ms: 4, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
+    { timestamp_ms: ago(180000), invocation: "invocation_invalid", workspace: "workspace_codex", tool: "browser_click", capability: "local", allowed: false, reason: "invalid_request", status: "failed", outcome: "failed", effect: "none", summary: "The call does not match the Ghostlight catalog.", duration_ms: 2, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    { timestamp_ms: ago(240000), invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", outcome: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", ...previewDetails({ connection_id: "connection_script", channel: "cli" }) },
+    { timestamp_ms: ago(420000), invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", outcome: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored", channel: "mcp" }) },
+    { timestamp_ms: ago(480000), invocation: "invocation_restored_claimed", workspace: "workspace_0193f1c2a8b4e7d6826", tool: "browser_read", capability: "read", allowed: true, reason: "permitted", status: "succeeded", outcome: "succeeded", effect: "none", summary: "Read example.com.", duration_ms: 30, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored_claimed", channel: "mcp", claimed_agent: "claude-code", source: { agent: "cursor", image: "Cursor.exe" } }) }
   ],
   diagnostics: [
     { id: "service", label: "Ghostlight", severity: "passing", detail: "Running and accepting agents." },
@@ -477,9 +477,9 @@ const script = [
 const historyScenario = process.env.GHOSTLIGHT_PREVIEW_SCENARIO === "h4";
 if (historyScenario) {
   const permission = (allowed, capability) => ({ checks: [{ requirements: capability.split(" + "), host: "example.com", allowed, reason: allowed ? "permitted" : "capability_denied", layers: [{ tier: "managed", grants: ["browsing"], allowed }] }], truncated: false });
-  const child = (tool, summary, status, effect, capability) => ({ invocation: "history_example", workspace: "workspace_codex", tool, summary, status, effect, capability, allowed: status === "succeeded", complete: true, duration_ms: 120, observed: {}, permissions: permission(status === "succeeded", capability), permission_explanations: [status === "succeeded" ? "Allowed: organization policy permits this work (browsing)." : "Refused: organization policy refuses this work (browsing)."] });
+  const child = (tool, summary, status, effect, capability) => ({ invocation: "history_example", workspace: "workspace_codex", tool, summary, status, outcome: status === "succeeded" ? "succeeded" : "refused", effect, capability, allowed: status === "succeeded", complete: true, duration_ms: 120, observed: {}, permissions: permission(status === "succeeded", capability), permission_explanations: [status === "succeeded" ? "Allowed: organization policy permits this work (browsing)." : "Refused: organization policy refuses this work (browsing)."] });
   snapshot.operations = [];
-  snapshot.history.unshift({ invocation: "history_example", workspace: "workspace_codex", tool: "browser_flow", capability: "", allowed: false, reason: "capability_denied", status: "blocked", effect: "partial", summary: "Completed 2 of 4 steps. Step 3 blocked by policy.", complete: true, timestamp_ms: FIXTURE_EPOCH, duration_ms: 920, observed: {}, steps: [
+  snapshot.history.unshift({ invocation: "history_example", workspace: "workspace_codex", tool: "browser_flow", capability: "", allowed: false, reason: "capability_denied", status: "blocked", outcome: "refused", effect: "partial", summary: "Completed 2 of 4 steps. Step 3 blocked by policy.", complete: true, timestamp_ms: FIXTURE_EPOCH, duration_ms: 920, observed: {}, steps: [
     { position: 1, state: "recorded", tool: "browser_navigate", record: child("browser_navigate", "Opened example.com.", "succeeded", "applied", "read") },
     { position: 2, state: "recorded", tool: "browser_fill_form", record: child("browser_fill_form", "Filled 3 fields on example.com.", "succeeded", "applied", "read + write") },
     { position: 3, state: "recorded", tool: "browser_execute", record: child("browser_execute", "Policy blocked JavaScript execution on example.com.", "blocked", "none", "execute") },
@@ -518,7 +518,7 @@ const olderHistory = Array.from({ length: CAPPED_HISTORY_LENGTH - snapshot.histo
   const spec = script[at % script.length];
   const record = {
     timestamp_ms: ago(600000 + at * 45000), invocation: `invocation_older_${at}`, workspace: "workspace_codex",
-    tool: spec.tool, capability: spec.capability, allowed: true, reason: "permitted", status: "succeeded",
+    tool: spec.tool, capability: spec.capability, allowed: true, reason: "permitted", status: "succeeded", outcome: "succeeded",
     effect: spec.effect, summary: spec.summary, duration_ms: spec.ms, observed: spec.observed, channel: "mcp", browser: "Chrome"
   };
   retainConnection(record);
@@ -570,10 +570,21 @@ const serviceLine = (agents, browsers) => {
     : `Ghostlight is running; ${parts.join(" and ")} connected.`;
 };
 
-/** The page with the overview and the Status summary counting what it shows connected. */
+/**
+ * The page with the overview, the connections part's counts and the Status summary counting what
+ * it shows connected.
+ */
 const summarized = (flat) => {
   const changed = structuredClone(flat);
   const agents = new Set(changed.sessions.map((session) => session.agent.id)).size;
+  const connections = changed.sessions.flatMap((session) => session.connections ?? []);
+  // What the connections part counts, as the tray says it (workbench `ConnectionCounts`).
+  changed.counts = {
+    agents,
+    mcp_clients: connections.filter((connection) => connection.channel === "mcp").length,
+    command_line: connections.filter((connection) => connection.channel === "cli").length,
+    browsers: changed.browsers.length
+  };
   changed.overview.connected_browsers = changed.browsers.length;
   changed.controls.service.word = serviceLine(agents, changed.browsers.length);
   return changed;
@@ -815,6 +826,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
         allowed: !blocked,
         reason: blocked ? "policy_denied_execute" : "permitted",
         status: blocked ? "blocked" : "succeeded",
+        outcome: blocked ? "refused" : "succeeded",
         effect: blocked ? "none" : spec.effect,
         summary: blocked ? "Authority blocked the browser job." : spec.summary,
         duration_ms: spec.ms,
@@ -981,7 +993,7 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
       ...(flat.runtime_note === undefined ? {} : { runtime_note: flat.runtime_note })
     },
     connections: {
-      sessions: flat.sessions, browsers: flat.browsers, harnesses_in_use: flat.harnesses_in_use,
+      sessions: flat.sessions, browsers: flat.browsers, counts: flat.counts, harnesses_in_use: flat.harnesses_in_use,
       ...(flat.no_browser ? { no_browser: flat.no_browser } : {})
     },
     activity: { operations: flat.operations, history: flat.history, document_coverage: flat.document_coverage || [] },

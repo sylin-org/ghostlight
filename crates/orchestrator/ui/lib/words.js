@@ -72,10 +72,31 @@
   const TRY_AGAIN = "Try again";
 
   /**
-   * The word a settled action that did not succeed carries on the running card and in what a screen
-   * reader hears for its row, by the outcome it had.
+   * What a settled action came to, in the service's wire words (`language::history::OutcomeClass`).
+   * The service decides it once for each record; the window draws it and never derives it.
    */
-  const OUTCOME_WORD = Object.freeze({ failed: "Failed", unknown: "Unknown", kept: "Kept", blocked: "Blocked" });
+  const OUTCOME = Object.freeze({
+    succeeded: "succeeded",
+    refused: "refused",
+    kept: "kept",
+    needsYou: "needs_you",
+    failed: "failed",
+    unknown: "unknown",
+    cancelled: "cancelled"
+  });
+
+  /**
+   * The word a settled action that did not succeed carries on the running card and in what a screen
+   * reader hears for its row, by the outcome it had. A success and a cancellation carry none. The
+   * search palette finds each by the same word (`language::workbench::search_outcome`).
+   */
+  const OUTCOME_WORD = Object.freeze({
+    [OUTCOME.refused]: "Blocked",
+    [OUTCOME.kept]: "Kept",
+    [OUTCOME.needsYou]: "Needs you",
+    [OUTCOME.failed]: "Failed",
+    [OUTCOME.unknown]: "Unknown"
+  });
 
   /** The phases of work that has not settled, in the service's wire words (workbench `OperationPhase`). */
   const PHASE = Object.freeze({ waiting: "waiting", running: "running", held: "held" });
@@ -1184,7 +1205,7 @@
 
   return Object.freeze({ FEED_LIMIT, HISTORY_HELD, WORKING_LATCH_MS, VIEWS, SEARCH_ADDRESSES, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
-    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
+    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, BAND_FACT, bandFacts, rowBy, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, POLICY_IN_WINDOW, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES, CARD, browserChipTitle,

@@ -169,6 +169,14 @@ test("the rows in use follow the connections part, as the service publishes them
   assert.deepEqual(store.snapshot().harnesses_in_use, []);
 });
 
+test("the counts follow the connections part, as the service counted them for the tray", () => {
+  const { store } = latched({ browsers: [], configuration: {}, overview: {}, harnesses_in_use: [] });
+  const counts = { agents: 2, mcp_clients: 3, command_line: 0, browsers: 1 };
+  store.applyChange({ seq: 1, change: { kind: "connections_changed",
+    connections: { sessions: [{ id: "w" }], browsers: [{ id: "b" }], harnesses_in_use: [], counts } } });
+  assert.deepEqual(store.snapshot().counts, counts);
+});
+
 /* ------------------------------------ the latch ------------------------------------ */
 
 test("the band stays working for ten seconds after the last action, not for each operation", () => {

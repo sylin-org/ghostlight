@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::install::HarnessState;
 use crate::language::channel_switch::ChannelsOff;
+use crate::language::history::OutcomeClass;
 use crate::language::readiness::Readiness;
 use crate::language::setup::{WORD_BY_HAND, WORD_CONNECTED, WORD_NEEDS_UPDATE};
 
@@ -668,6 +669,21 @@ pub const SEARCH_BLOCKED: &str = "blocked";
 
 /// The word for work that finished before its record arrived.
 pub const SEARCH_FINISHED: &str = "finished";
+
+/// The word a recorded action is found by for how it ended: the outcome word its row wears, in
+/// lower case (`OUTCOME_WORD` in `ui/lib/words.js`), or `None` for an outcome its row says nothing
+/// about, a success or a cancellation.
+#[must_use]
+pub const fn search_outcome(class: OutcomeClass) -> Option<&'static str> {
+    match class {
+        OutcomeClass::Refused => Some(SEARCH_BLOCKED),
+        OutcomeClass::Kept => Some("kept"),
+        OutcomeClass::NeedsYou => Some("needs you"),
+        OutcomeClass::Failed => Some("failed"),
+        OutcomeClass::Unknown => Some("unknown"),
+        OutcomeClass::Succeeded | OutcomeClass::Cancelled => None,
+    }
+}
 
 /// The second line of an action in flight in the search palette: the agent that asked for it and
 /// the word for where it stands (`phase`, one of the `SEARCH_` phase words), as in

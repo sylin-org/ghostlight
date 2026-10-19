@@ -1051,16 +1051,32 @@ function namedAgent(name) {
 function settledRead(overrides = {}) {
   return {
     invocation: "read-1", workspace: "w1", tool: "browser_read", capability: "read", requirements: ["read"],
-    allowed: true, reason: "permitted", status: "succeeded", effect: "none", complete: true, timestamp_ms: 1,
-    duration_ms: 1200, summary: "Read 1,240 words from example.com.", storage: "saved", storage_detail: "",
+    allowed: true, reason: "permitted", status: "succeeded", outcome: "succeeded", effect: "none", complete: true,
+    timestamp_ms: 1, duration_ms: 1200, summary: "Read 1,240 words from example.com.", storage: "saved", storage_detail: "",
     steps: [], permissions: { checks: [], truncated: false }, permission_explanations: [],
     observed: { host: "example.com", readiness: "complete", count: 1240 }, channel: "mcp",
     ...overrides
   };
 }
 
+/**
+ * What the service counts of `sessions` and `browsers` (workbench `ConnectionCounts`): one agent
+ * per agent id, the connections by intake, and the browsers.
+ */
+function countsOf(sessions, browsers) {
+  const connections = sessions.flatMap((session) => session.connections ?? []);
+  return {
+    agents: new Set(sessions.map((session) => session.agent.id)).size,
+    mcp_clients: connections.filter((connection) => connection.channel === "mcp").length,
+    command_line: connections.filter((connection) => connection.channel === "cli").length,
+    browsers: browsers.length
+  };
+}
+
 /** A snapshot answer from a service with one client, one browser and one settled read. */
 function snapshotAnswer({ history = [settledRead()], sessions, service = { version: "2.0.0", started_at_ms: 1, runtime_state: "active" } } = {}) {
+  const connected = sessions ?? [{ id: "w1", agent: namedAgent("Codex"), channel: "mcp", tab_count: 1, running_operations: 0 }];
+  const browsers = [{ id: "b1", family: "Chrome", adapter_version: "2.0.0" }];
   return {
     seq: 1,
     instance: "i1",
@@ -1075,10 +1091,7 @@ function snapshotAnswer({ history = [settledRead()], sessions, service = { versi
           managed_policy: { configured: false, contacts: [] }
         }
       },
-      connections: {
-        sessions: sessions ?? [{ id: "w1", agent: namedAgent("Codex"), channel: "mcp", tab_count: 1, running_operations: 0 }],
-        browsers: [{ id: "b1", family: "Chrome", adapter_version: "2.0.0" }]
-      },
+      connections: { sessions: connected, browsers, counts: countsOf(connected, browsers) },
       activity: { operations: [], history, document_coverage: [] },
       integrations: { harnesses: [] },
       diagnostics: { diagnostics: [] },
@@ -1326,6 +1339,7 @@ function glance({ sessions = GLANCE_SESSIONS, browsers = [{ id: "b1", family: "G
   const shown = drawing();
   const answer = snapshotAnswer({ sessions });
   answer.parts.connections.browsers = browsers;
+  answer.parts.connections.counts = countsOf(sessions, browsers);
   if (noBrowser !== undefined) answer.parts.connections.no_browser = noBrowser;
   const snapshot = Transport.flatten(answer);
   shown.view.collections(snapshot, new Set());
@@ -2101,7 +2115,7 @@ test("the intake is marked only for the command line, never for MCP", () => {
 test("a call refused before it reached a browser shows no browser, though its session works in one", () => {
   const session = { id: "w1", agent: namedAgent("Codex"), channel: "mcp", browser: "Chromium" };
   const refused = rowOf(settledRead({
-    invocation: "refused-1", allowed: false, reason: "browser_disconnected", status: "failed",
+    invocation: "refused-1", allowed: false, reason: "browser_disconnected", status: "failed", outcome: "failed",
     summary: "The browser this session works in is not connected. Nothing was sent."
   }), { sessionFor: () => session });
   assert.equal(refused.cell("row-browser").textContent, "");
@@ -2585,7 +2599,7 @@ test("a burst of quick actions replaces the card in place and keeps it live betw
   const refused = clocked();
   const asked = startedRead("r", "running");
   refused.view.hero(asked, false);
-  refused.view.hero(Entries.entryFromRecord(settledRead({ invocation: "r", status: "failed", summary: "Could not." }), asked), false);
+  refused.view.hero(Entries.entryFromRecord(settledRead({ invocation: "r", status: "failed", outcome: "failed", summary: "Could not." }), asked), false);
   assert.ok(!refused.el("hero").classes.has("live"), "a failure shows at once");
   const paused = clocked();
   const reading = startedRead("p", "running");
@@ -2604,7 +2618,7 @@ test("a burst of quick actions replaces the card in place and keeps it live betw
 
 test("a card that has led for five minutes with nothing running rests as the last action", () => {
   const shown = clocked();
-  const entry = Entries.entryFromRecord(settledRead({ invocation: "old", timestamp_ms: 10_000, status: "failed", summary: "Could not." }), null);
+  const entry = Entries.entryFromRecord(settledRead({ invocation: "old", timestamp_ms: 10_000, status: "failed", outcome: "failed", summary: "Could not." }), null);
   shown.view.rebuildFeed([entry]);
   assert.ok(!shown.el("hero").classes.has("rested"));
   shown.pass(5 * 60_000);
@@ -2623,15 +2637,15 @@ test("a card that has led for five minutes with nothing running rests as the las
 test("a failed, a kept and a refused action each say their outcome in the sentence", () => {
   const shown = clocked();
   const cases = [
-    [{ invocation: "f", tool: "browser_click", status: "failed", summary: "Could not find that control." },
+    [{ invocation: "f", tool: "browser_click", status: "failed", outcome: "failed", summary: "Could not find that control." },
       "click, failed: Could not find that control."],
-    [{ invocation: "k", tool: "browser_tabs", status: "blocked", summary: "Kept the tab open." },
+    [{ invocation: "k", tool: "browser_tabs", status: "blocked", outcome: "kept", summary: "Kept the tab open." },
       "tabs, kept: Kept the tab open."],
-    [{ invocation: "r", tool: "browser_execute", allowed: false, status: "blocked", reason: "channel_denied",
+    [{ invocation: "r", tool: "browser_execute", allowed: false, status: "blocked", outcome: "refused", reason: "channel_denied",
       summary: "Your policy turns off work from MCP agents." },
       "execute, blocked: Your policy turns off work from MCP agents."],
     // A refusal with no sentence says its outcome word, never its reason code.
-    [{ invocation: "e", tool: "browser_execute", allowed: false, status: "blocked", reason: "denied_by_policy", summary: "" },
+    [{ invocation: "e", tool: "browser_execute", allowed: false, status: "blocked", outcome: "refused", reason: "denied_by_policy", summary: "" },
       "execute, blocked: Blocked"]
   ];
   for (const [record, sentence] of cases) {
@@ -2644,7 +2658,7 @@ test("a failed, a kept and a refused action each say their outcome in the senten
 
 test("a failed row reads like a refused one: its sentence in the soft red on the red edge, its time alone", () => {
   const { shown, cell } = rowOf(settledRead({ invocation: "fail-1", tool: "browser_click", capability: "action",
-    status: "failed", effect: "none", summary: "Could not find that control." }));
+    status: "failed", outcome: "failed", effect: "none", summary: "Could not find that control." }));
   const [row] = queueRows(shown);
   assert.match(row.className, /\bfailed\b/);
   assert.equal(cell("row-dur").textContent, "1.2s", "the duration column holds the time alone");
@@ -2662,7 +2676,7 @@ test("a failed row reads like a refused one: its sentence in the soft red on the
 
 test("a call that did not match the catalog is drawn as the failure it is, not as a policy block", () => {
   const record = settledRead({ invocation: "invalid-1", tool: "browser_click", capability: "action",
-    allowed: false, reason: "invalid_request", status: "failed", effect: "none",
+    allowed: false, reason: "invalid_request", status: "failed", outcome: "failed", effect: "none",
     summary: "The call does not match the Ghostlight catalog." });
   const entry = Entries.entryFromRecord(record, null);
   assert.equal(Entries.isBlocked(entry), false);
@@ -2678,7 +2692,7 @@ test("a call that did not match the catalog is drawn as the failure it is, not a
 
 test("a refusal says why once, in its sentence, and who decided on its refusal line, never as a code", () => {
   const record = settledRead({ invocation: "off-1", tool: "browser_read", allowed: false, reason: "channel_denied",
-    status: "blocked", policy_tier: "user", denial_id: "deny-1",
+    status: "blocked", outcome: "refused", policy_tier: "user", denial_id: "deny-1",
     summary: "Your policy turns off work from MCP agents." });
   const { shown, cells: details } = rowOf(record);
   const [row] = queueRows(shown);
@@ -2690,10 +2704,10 @@ test("a refusal says why once, in its sentence, and who decided on its refusal l
 
 test("a screen reader hears each row's outcome on its button", () => {
   const cases = [
-    [{ invocation: "f", status: "failed", summary: "Could not find that control." }, ", failed"],
-    [{ invocation: "u", status: "unknown", effect: "unknown" }, ", unknown"],
-    [{ invocation: "k", status: "blocked", summary: "Kept the tab open." }, ", kept"],
-    [{ invocation: "r", allowed: false, reason: "denied_by_policy", status: "blocked" }, ", blocked"],
+    [{ invocation: "f", status: "failed", outcome: "failed", summary: "Could not find that control." }, ", failed"],
+    [{ invocation: "u", status: "unknown", outcome: "unknown", effect: "unknown" }, ", unknown"],
+    [{ invocation: "k", status: "blocked", outcome: "kept", summary: "Kept the tab open." }, ", kept"],
+    [{ invocation: "r", allowed: false, reason: "denied_by_policy", status: "blocked", outcome: "refused" }, ", blocked"],
   ];
   for (const [record, heard] of cases) {
     const { cell } = rowOf(settledRead(record));
@@ -2704,20 +2718,20 @@ test("a screen reader hears each row's outcome on its button", () => {
 });
 
 test("an action whose effect cannot be confirmed wears the failed look", () => {
-  const { shown, cell } = rowOf(settledRead({ invocation: "unknown-1", status: "unknown", effect: "unknown" }));
+  const { shown, cell } = rowOf(settledRead({ invocation: "unknown-1", status: "unknown", outcome: "unknown", effect: "unknown" }));
   assert.match(queueRows(shown)[0].className, /\bfailed\b/);
   assert.equal(cell("row-dur").textContent, "1.2s");
 });
 
 test("a kept row stays in ink with its time alone, and a refusal keeps the shared look", () => {
   const kept = rowOf(settledRead({ invocation: "kept-1", tool: "browser_tabs", capability: "action",
-    status: "blocked", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on." }));
+    status: "blocked", outcome: "kept", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on." }));
   const keptClass = queueRows(kept.shown)[0].className;
   assert.match(keptClass, /\bkept\b/);
   assert.doesNotMatch(keptClass, /\b(failed|blocked)\b/);
   assert.equal(kept.cell("row-dur").textContent, "1.2s");
 
-  const refused = rowOf(settledRead({ invocation: "refused-1", allowed: false, reason: "denied_by_policy", status: "blocked" }));
+  const refused = rowOf(settledRead({ invocation: "refused-1", allowed: false, reason: "denied_by_policy", status: "blocked", outcome: "refused" }));
   const className = queueRows(refused.shown)[0].className;
   assert.match(className, /\bblocked\b/);
   assert.doesNotMatch(className, /\b(failed|kept)\b/);
@@ -2728,9 +2742,33 @@ test("a kept row stays in ink with its time alone, and a refusal keeps the share
   assert.equal(plain.cell("row-dur").textContent, "1.2s");
 });
 
+test("a credential refusal row says needs you, in ink, and is never drawn as kept or blocked", () => {
+  // The service classes a refused secret as needs you; its status says blocked and authority
+  // admitted it, which is all the page once read, and it then said Kept.
+  const record = settledRead({ invocation: "secret-1", tool: "browser_type_text", capability: "write",
+    status: "blocked", outcome: "needs_you", effect: "none",
+    summary: "Ghostlight did not type your password: you have not allowed Ghostlight to type it." });
+  const { shown, cell } = rowOf(record);
+  const className = queueRows(shown)[0].className;
+  assert.match(className, /\bneeds-you\b/);
+  assert.doesNotMatch(className, /\b(failed|kept|blocked)\b/);
+  assert.ok(cell("row-tool").textContent.endsWith(", needs you"), cell("row-tool").textContent);
+  const hero = drawing();
+  hero.view.hero(Entries.entryFromRecord(record, null), false);
+  assert.ok(hero.el("hero").classes.has("needs-you"));
+  assert.equal(drawn(hero.el("hero-right").innerHTML).wearing("outcome")[0].textContent, "Needs you");
+  assert.equal(naming(".hero.needs-you .outcome")[0].declarations.color, "var(--ink-3)");
+
+  // A flow's step says the same of its own record, and its other steps say theirs.
+  const flow = flowRecord();
+  flow.steps[1].record = { ...record, invocation: "flow-1" };
+  const steps = rowOf(flow).cells.wearing("step-status").map((node) => node.textContent);
+  assert.deepEqual(steps, ["Completed", "Needs you", "Completed", "Not run"]);
+});
+
 test("a failed hero wears the refusal's edge and red word, and a kept one stays in ink", () => {
   const shown = drawing();
-  shown.view.hero(Entries.entryFromRecord(settledRead({ status: "failed", summary: "Could not find that control." }), null), false);
+  shown.view.hero(Entries.entryFromRecord(settledRead({ status: "failed", outcome: "failed", summary: "Could not find that control." }), null), false);
   assert.ok(shown.el("hero").classes.has("failed"));
   assert.equal(drawn(shown.el("hero-right").innerHTML).wearing("outcome")[0].textContent, "Failed");
   for (const selector of [".hero.failed::before", ".hero.blocked::before"]) {
@@ -2741,7 +2779,7 @@ test("a failed hero wears the refusal's edge and red word, and a kept one stays 
   }
 
   const kept = drawing();
-  kept.view.hero(Entries.entryFromRecord(settledRead({ status: "blocked", summary: "Kept the tab open." }), null), false);
+  kept.view.hero(Entries.entryFromRecord(settledRead({ status: "blocked", outcome: "kept", summary: "Kept the tab open." }), null), false);
   assert.ok(kept.el("hero").classes.has("kept"));
   assert.equal(drawn(kept.el("hero-right").innerHTML).wearing("outcome")[0].textContent, "Kept");
 });
@@ -2885,7 +2923,7 @@ test("a search hit says what it found in words: its kind, its second line with t
   const shown = drawing();
   shown.view.searchResults([
     { kind: "history", id: "read-1", title: "navigate: Opened sylin.org.", detail: "Claude Code, Google Chrome",
-      timestamp_ms: Date.now() - 4 * 60_000, outcome: "blocked", view: "history" },
+      timestamp_ms: Date.now() - 4 * 60_000, outcome: "refused", view: "history" },
     { kind: "installation", id: "codex", title: "Codex", detail: "Connected", timestamp_ms: null, view: "install" }
   ]);
   const hits = drawn(shown.el("palette-results").innerHTML);
@@ -2894,7 +2932,8 @@ test("a search hit says what it found in words: its kind, its second line with t
   assert.deepEqual(lines, ["Claude Code, Google Chrome, 4m ago", "Connected"]);
   const outcomes = hits.wearing("hit-outcome");
   assert.equal(outcomes[0].textContent, "Blocked");
-  assert.ok(outcomes[0].classes.has("blocked"), "a refusal says so in its row's colour");
+  assert.ok(outcomes[0].classes.has("refused"), "a refusal says so in its row's colour");
+  assert.equal(naming(".hit-outcome.refused")[0].declarations.color, "var(--danger)");
   assert.equal(outcomes[1].textContent, "");
   assert.deepEqual(hits.wearing("hit").map((node) => node.dataset.searchId), ["read-1", "codex"]);
   // Every kind of hit the service words (workbench SearchKind) has a word of its own here.
@@ -3351,16 +3390,25 @@ test("the agent pane's header is the agent's icon beside its name and state, wit
 
 /* ------------------------------ one vocabulary ------------------------------ */
 
-test("the band, the pill and About count one thing, the agents At a glance groups", () => {
-  // Four sessions of three agents: Claude Code, Codex twice, and the command line.
+test("the band and About count what the tray counts", () => {
+  // Four sessions of three agents: Claude Code, Codex twice, and the command line. The service
+  // counts them as At a glance groups them, so the band, the pill and About agree.
   const shown = glance();
   shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0 });
   assert.match(shown.el("state-facts").innerHTML,
     /^<span class="fact fact-agents"><b>3<\/b> agents<\/span><span class="fact fact-browsers"> &middot; <b>1<\/b> browser<\/span>/);
   assert.equal(shown.read().wearing("glance-side")[0].textContent, "3 agents");
-  const about = drawn(shown.el("about-facts").innerHTML).root.children.map((node) => node.textContent);
-  assert.deepEqual(about.slice(2, 4), ["Agents", "3 connected"]);
-  assert.equal(about.includes("Sessions"), false);
+  const facts = () => drawn(shown.el("about-facts").innerHTML).root.children.map((node) => node.textContent);
+  assert.deepEqual(facts().slice(2, 6), ["Agents", "3 connected", "Browsers", "1 attached"]);
+  assert.equal(facts().includes("Sessions"), false);
+  // The numbers are the connections part's, the ones the tray says: the page never counts the
+  // sessions or the browsers again.
+  const counted = { ...shown.snapshot, counts: { agents: 7, mcp_clients: 6, command_line: 1, browsers: 2 } };
+  shown.view.band({ connected: true, snapshot: counted, runtime: "active", running: 0 });
+  assert.match(shown.el("state-facts").innerHTML,
+    /^<span class="fact fact-agents"><b>7<\/b> agents<\/span><span class="fact fact-browsers"> &middot; <b>2<\/b> browsers<\/span>/);
+  shown.view.collections(counted, new Set());
+  assert.deepEqual(facts().slice(2, 6), ["Agents", "7 connected", "Browsers", "2 attached"]);
 });
 
 /** The glance's snapshot with the controls part the service publishes for `runtime`. */

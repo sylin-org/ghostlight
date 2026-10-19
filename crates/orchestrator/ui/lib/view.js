@@ -21,17 +21,32 @@
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
     escapeHtml, words, duration, ago, agoSaid,
-    OUTCOME_WORD, PHASE_WORD, workCounts, bandFacts, rowBy, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
+    OUTCOME, OUTCOME_WORD, PHASE_WORD, workCounts, bandFacts, rowBy, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
     CONTINUE_LABEL, POLICY_IN_WINDOW, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     CARD, browserChipTitle,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine,
     FEED_LIMIT, HIT_KIND, SEARCH_FOUND_NOTHING, searchAll
   } = globalThis.GhostlightWords;
-  const { settledMs, isRunning, isPending, isUnsettled, isBlocked, isFailed, isKept } = globalThis.GhostlightEntries;
+  const { settledMs, isRunning, isPending, isUnsettled, isBlocked } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 
   const TOAST_MS = 4200;
+
+  /**
+   * The look a settled outcome other than a refusal gives its row and the running card: a failure
+   * and an unconfirmed action in the danger treatment, a kept tab and work that needs the person
+   * in the quiet one.
+   */
+  const OUTCOME_LOOK = Object.freeze({
+    [OUTCOME.failed]: "failed",
+    [OUTCOME.unknown]: "failed",
+    [OUTCOME.kept]: "kept",
+    [OUTCOME.needsYou]: "needs-you"
+  });
+
+  /** The state of a flow's step whose record arrived (workbench `StepHistoryState::Recorded`). */
+  const STEP_RECORDED = "recorded";
 
   /** What the band's wheel says for each act it can do, in the words of the tray and Settings. */
   const WHEEL_WORDS = Object.freeze({
@@ -190,8 +205,8 @@
     function sentence(entry) {
       if (entry.summary) return entry.summary;
       if (!entry.settled) return entry.activity;
-      if (isBlocked(entry)) return OUTCOME_WORD.blocked;
-      return EFFECT_STORY[entry.effect] || (entry.status ? words(entry.status) : "completed");
+      if (isBlocked(entry)) return OUTCOME_WORD[OUTCOME.refused];
+      return EFFECT_STORY[entry.effect] || (entry.outcome ? words(entry.outcome) : "completed");
     }
 
     /**
@@ -427,9 +442,10 @@
       if (!entry.steps?.length) return storageMarkup(entry) + permissionMarkup(entry, `${entry.invocation}:permission`) + connection + coverageMarkup(entry);
       const rows = entry.steps.map((step) => {
         const receipt = step.record;
-        const state = receipt?.status ?? step.state;
+        // A recorded step says what the service decided it came to; any other says where it stands.
+        const state = step.state === STEP_RECORDED && receipt ? receipt.outcome : step.state;
         const labels = { succeeded: "Completed", not_started: "Could not start", not_run: "Not run", pending: "Pending", unconfirmed: "Receipt unavailable" };
-        const label = labels[state] ?? words(state);
+        const label = labels[state] ?? OUTCOME_WORD[state] ?? words(state);
         const problem = receipt?.storage === "unconfirmed" || !["succeeded", "not_run", "pending"].includes(state);
         const title = receipt?.summary ?? (step.tool ? toolWords(step.tool) : `Step ${step.position}`);
         const detail = receipt ? storageMarkup(receipt) + permissionMarkup(receipt, `${entry.invocation}:step:${step.position}:permission`) : "";
@@ -530,29 +546,26 @@
       const outcome = unsettled
         ? PHASE_WORD[entry.phase]
         : isBlocked(entry)
-          ? OUTCOME_WORD.blocked
-          : outcomeWord(entry) || words(entry.status ?? "completed");
+          ? OUTCOME_WORD[OUTCOME.refused]
+          : outcomeWord(entry) || words(entry.outcome ?? "completed");
       // The stopwatch is for the eye: a screen reader hears the settled sentence instead.
       return `<div class="elapsed" id="elapsed" aria-hidden="true">${escapeHtml(elapsed)}</div>`
         + `<div class="outcome">${escapeHtml(outcome)}</div>`;
     }
 
     /**
-     * The word a settled action that did not succeed carries, or "" for one that did: Failed, or
-     * Unknown when what it did cannot be confirmed, for a permitted action that did not do what it
-     * was asked, and Kept for one a browser setting held back. A refusal has its own treatment.
+     * The word a settled action that did not succeed carries, by the outcome the service decided,
+     * or "" for one that succeeded or was cancelled: Failed, or Unknown when what it did cannot be
+     * confirmed, Kept for a tab a browser setting held open, and Needs you for work that waits on
+     * the person. A refusal has its own treatment.
      */
     function outcomeWord(entry) {
-      if (isFailed(entry)) return OUTCOME_WORD[entry.status];
-      if (isKept(entry)) return OUTCOME_WORD.kept;
-      return "";
+      return entry.settled && !isBlocked(entry) ? OUTCOME_WORD[entry.outcome] ?? "" : "";
     }
 
     /** The class a settled outcome adds to its row and to the running card. */
     function outcomeClass(entry) {
-      if (isFailed(entry)) return "failed";
-      if (isKept(entry)) return "kept";
-      return "";
+      return entry.settled && !isBlocked(entry) ? OUTCOME_LOOK[entry.outcome] ?? "" : "";
     }
 
     /*
@@ -572,7 +585,7 @@
     function say(entry) {
       if (!entry?.settled || spoken.has(entry.invocation)) return;
       spoken.add(entry.invocation);
-      const outcome = isBlocked(entry) ? OUTCOME_WORD.blocked : outcomeWord(entry);
+      const outcome = isBlocked(entry) ? OUTCOME_WORD[OUTCOME.refused] : outcomeWord(entry);
       toSay = actionSaid(entry.tool, describe(entry), outcome);
       if (sayTimer !== null) return;
       const wait = saidAt + SAID_GAP_MS - now();
@@ -679,7 +692,7 @@
       const said = escapeHtml(pending ? PHASE_WORD[entry.phase]
         : isRunning(entry) ? elapsedSoFar(entry) : duration(settledMs(entry)));
       const outcome = pending ? PHASE_WORD[entry.phase]
-        : isBlocked(entry) ? OUTCOME_WORD.blocked : outcomeWord(entry);
+        : isBlocked(entry) ? OUTCOME_WORD[OUTCOME.refused] : outcomeWord(entry);
       // The list names one capability, the most consequential, in its own column, or under the tool
       // where there is no room for the column. A screen reader hears the whole set on the button.
       const capability = escapeHtml(capabilityWord(entry));
@@ -861,12 +874,12 @@
         el["state-facts"].textContent = "";
       } else {
         // Each fact is a whole of its own, its separator inside it, so the band drops whole facts as
-        // it narrows and never cuts one. The agents are the ones At a glance shows, grouped the same
-        // way, so the band and the pill agree. Only running work counts as running; what waits or is
-        // held is counted under its own word.
+        // it narrows and never cuts one. The agents and browsers are the service's counts, the ones
+        // the tray says. Only running work counts as running; what waits or is held is counted under
+        // its own word.
         const told = bandFacts({
-          agents: agentGroups(facts.snapshot.sessions).length,
-          browsers: facts.snapshot.browsers.length,
+          agents: facts.snapshot.counts.agents,
+          browsers: facts.snapshot.counts.browsers,
           work: workCounts({ ...facts, paused: facts.runtime !== "active" }),
           recorded: facts.snapshot.history.length
         });
@@ -1125,8 +1138,9 @@
     }
 
     /**
-     * The About page. The product's version and license come from the service; the three counts
-     * come from data, so a screen that is shown no data passes none.
+     * The About page. The product's version and license come from the service, and so do the agents
+     * and browsers it counts, as the tray counts them; the recorded actions are the history this
+     * screen holds. A screen that is shown no data passes no counts.
      */
     function about({ version, license, counts }) {
       const exact = String(version ?? "");
@@ -2348,7 +2362,7 @@
       const product = {
         version: access?.product?.version ?? snapshot.service?.version,
         license: access?.product?.license,
-        counts: { agents: agentGroups(snapshot.sessions).length, browsers: snapshot.browsers.length, recorded: snapshot.history.length }
+        counts: { agents: snapshot.counts.agents, browsers: snapshot.counts.browsers, recorded: snapshot.history.length }
       };
       ifChanged("about", product, () => about(product));
       // The page's own memo decides; its facts hold each agent's live sessions, which change alone.
