@@ -23,12 +23,9 @@ use super::result::Readiness;
 use super::{
     action_subject, adapter_budget_ms, bounded, followed, load_physical_files, named_key,
     observed_host, readiness, ApplicationExecutor, Effect, InvocationContext, InvocationResult,
-    ResolvedLocation, Status, Terminal,
+    ResolvedLocation, Status, Terminal, SELECTOR_MATCH_MAX,
 };
 use crate::browser::adapter::PhysicalFile;
-
-/// A wait for a selector asks only whether one control matches.
-const PRESENCE_MATCH_MAX: usize = 1;
 
 impl ApplicationExecutor {
     pub(super) fn perform_fill(
@@ -937,7 +934,7 @@ impl ApplicationExecutor {
                                 role: selector.role.clone(),
                                 exact: selector.exact,
                                 form_scope: false,
-                                max_results: PRESENCE_MATCH_MAX,
+                                max_results: SELECTOR_MATCH_MAX,
                             },
                         ) {
                             Ok(BrowserOutcome::Targets { targets, .. }) if !targets.is_empty() => {

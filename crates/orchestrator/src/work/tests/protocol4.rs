@@ -1135,3 +1135,59 @@ fn a_page_that_never_settled_is_still_an_unknown_effect_with_dialog_advice() {
     assert_eq!(result.effect, Effect::Unknown);
     assert!(result.model_text().contains("browser_dialog"));
 }
+
+/// A page with two controls named Save. Its semantic query keeps the maximum it is sent and says
+/// when more matched, as the page asset does.
+fn two_saves() -> Fault {
+    let semantic = |world: &wire::WorldCall| {
+        let maximum = world.message["max_results"].as_u64().unwrap_or(0);
+        let targets: Vec<Value> = (1..=std::cmp::min(2, maximum))
+            .map(|index| {
+                json!({"locator": format!("locator_a1_{index}"), "role": "button",
+                    "name": "Save", "state": [], "credential_class": false})
+            })
+            .collect();
+        returned(json!({"targets": targets, "truncated": maximum < 2}))
+    };
+    Box::new(move |correlation, primitive| {
+        let wire::Primitive::Call(call) = primitive else {
+            return None;
+        };
+        let answers: Vec<Value> = call
+            .calls
+            .iter()
+            .map(|world| {
+                if world.message["kind"] == "query_semantic" {
+                    semantic(world)
+                } else {
+                    page(world)
+                }
+            })
+            .collect();
+        Some(FakeExtension::ok(correlation, json!({"answers": answers})))
+    })
+}
+
+#[test]
+fn a_selector_present_wait_over_two_matches_reports_no_size_limit() {
+    let (executor, _fake, workspace) = opened(two_saves());
+
+    let waited = execute(
+        &executor,
+        &workspace,
+        "browser_wait",
+        json!({"condition": "selector_present", "selector": {"name": "Save"}}),
+    );
+
+    assert_eq!(waited.status, Status::Succeeded, "{}", waited.summary);
+    assert_ne!(
+        waited.facts["coverage"]["limited_by_size"], true,
+        "{}",
+        waited.facts
+    );
+    assert!(
+        !waited.model_text().contains("size limit"),
+        "{}",
+        waited.model_text()
+    );
+}

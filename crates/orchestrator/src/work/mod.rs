@@ -73,8 +73,10 @@ use result::{CompletionGate, Effect, InvocationResult, Readiness, Status};
 /// How many controls a stale-target refusal offers.
 const STALE_CANDIDATES_MAX: usize = 3;
 
-/// The most controls one semantic selector lists. A selector must match exactly one, and past
-/// this many the refusal says at least this many matched.
+/// The most controls one semantic query lists. A selector must match exactly one, and past this
+/// many the refusal says at least this many matched. A presence wait and a stale handle's
+/// candidates ask with it too, so the page cuts their answer, and the result reports a size
+/// limit, only past this many matches.
 const SELECTOR_MATCH_MAX: usize = 8;
 
 /// Cloneable cancellation state forwarded from the MCP edge to physical dispatch.
@@ -888,10 +890,12 @@ impl ApplicationExecutor {
                 role: Some(info.role_page.clone()),
                 exact: false,
                 form_scope: false,
-                max_results: STALE_CANDIDATES_MAX,
+                max_results: SELECTOR_MATCH_MAX,
             },
         ) {
-            Ok(BrowserOutcome::Targets { targets, .. }) => targets,
+            Ok(BrowserOutcome::Targets { targets, .. }) => {
+                targets.into_iter().take(STALE_CANDIDATES_MAX).collect()
+            }
             _ => Vec::new(),
         }
     }

@@ -18,7 +18,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | A1 | fix(adapter): an embedded document's change is stale, and a targeted read reports the tab | candidate | none | see Notes | landed (fa3bcb02 and a9d40c83) |
 | A2 | fix(adapter): a Downloads save carries effect, and diagnostics bind only when asked | candidate | none | see Notes | landed (a0dfc56b) |
 | A3 | refactor(adapter): no content command runs without a scope | none | none | see Notes | landed (8f5722e8) |
-| A4 | refactor(adapter): the authority's budgets reach the adapter as values | none | ux-2 closes (`assets.sha256`) | cross-lane work's `DOCUMENT_TREE_NODE_LIMIT`; see Notes | landed (this commit) |
+| A4 | refactor(adapter): the authority's budgets reach the adapter as values | none | ux-2 closes (`assets.sha256`) | cross-lane work's `DOCUMENT_TREE_NODE_LIMIT`; see Notes | landed (f6ff657d and its review fix) |
 
 ## Notes
 
@@ -93,10 +93,18 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `a_content_command_without_a_scope_is_a_protocol_error` in `protocol4/translate/tests.rs`. No
   journey is needed.
 - A4, who owns each number: work names every semantic query's maximum, as it does for find:
-  `SELECTOR_MATCH_MAX` (8) for a selector, `STALE_CANDIDATES_MAX` (3) for a stale handle's
-  candidates, whose `take` goes because the merge already holds the listing to it, and
-  `PRESENCE_MATCH_MAX` (1) for a `selector_present` wait, which only asks whether one matches. The
-  page reads `max_results` and keeps no number of its own.
+  `SELECTOR_MATCH_MAX` (8) for a selector, a stale handle's candidates and a `selector_present`
+  wait. The page reads `max_results` and keeps no number of its own.
+- A4, review fix: the first cut asked a presence wait for 1 match and the stale candidates for 3.
+  The page marks its answer truncated when more matched than it was asked for, and the scope turns
+  that into the coverage size limit, so a satisfied wait over two "Save" buttons said "The result
+  reached its size limit." and the stale refusal said it past 3 fuzzy matches. The size limit
+  should mean content the agent was owed was left out. Both queries now ask with
+  `SELECTOR_MATCH_MAX`, so the threshold is the 8 the page held before A4, and work keeps the
+  stale refusal's `STALE_CANDIDATES_MAX` (3) with its own `take`. The scope still marks any
+  truncated answer, the one rule for every content call. Proof:
+  `a_selector_present_wait_over_two_matches_reports_no_size_limit` in `work/tests/protocol4.rs`,
+  which runs through the protocol-4 scope with a page that keeps the maximum it is sent.
 - A4, the cut flag: `Listing.truncated` carries the merge's `over`. `Outcome::SelectorUnresolved`
   gains `more`, and with it the sentence starts "At least". Zero matches keep their sentence. The
   outcome change is the one edit in `language/` (core's `outcome.rs` and `self_check/hints.rs`).
