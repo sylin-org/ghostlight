@@ -8,7 +8,7 @@
 //!
 //! This module answers first and shows the derivation second, which is the posture every mature
 //! layered-policy surface settled on (ADR-0122 Decision 2). Every line it produces names the layer
-//! that decided it. The words are authored here, in the orchestrator, so the window renders
+//! that decided it. The words come from [`crate::language::policy`], so the window renders
 //! sentences rather than inventing them from booleans.
 
 use std::sync::Arc;
@@ -20,7 +20,8 @@ use super::{
     ManagedPolicyPassport,
 };
 use crate::language::channel_switch::ChannelsOff;
-use crate::language::outcome::{PolicyAuthor, OWN_CONTROL_PAGE_CEILING};
+use crate::language::outcome::PolicyAuthor;
+use crate::language::policy;
 
 /// Which layers are in force right now.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -346,39 +347,11 @@ pub(super) struct Inputs<'a> {
     pub(super) user_source: Option<String>,
     pub(super) user_document: Option<String>,
     pub(super) user_layer_source: UserLayerSource,
-    pub(super) owned_user_path: Option<String>,
+    /// The path this window may write the user policy to, or why it may not: the facade's own
+    /// answer, so the window and a refused write say the same thing.
+    pub(super) authoring: Result<String, super::AuthoringError>,
     pub(super) windows: bool,
     pub(super) passport: ManagedPolicyPassport,
-}
-
-/// Plain labels for the independent capabilities.
-///
-/// The person reading this has no reason to know what "action" means as a policy word, so the
-/// surface never asks them to learn one (ADR-0122 Decision 6).
-const fn wording(capability: Capability) -> (&'static str, &'static str) {
-    match capability {
-        Capability::Read => (
-            "Look at pages",
-            "Read page text, take screenshots, scroll, and find things on a page.",
-        ),
-        Capability::Action => (
-            "Click and type",
-            "Click, type, press keys, drag, and move through history.",
-        ),
-        Capability::Write => (
-            "Fill in forms",
-            "Enter information into forms and upload files.",
-        ),
-        Capability::Execute => ("Run page code", "Run JavaScript inside a page."),
-    }
-}
-
-const fn layer_word(kind: LayerKind) -> &'static str {
-    match kind {
-        LayerKind::Organization => "your organization",
-        LayerKind::User => "you",
-        LayerKind::Ghostlight => "Ghostlight",
-    }
 }
 
 /// Build the compiled answer.
@@ -394,10 +367,11 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
     if let Some(policy) = inputs.organization {
         layers.push(layer_view(
             LayerKind::Organization,
-            organization
-                .as_ref()
-                .and_then(|named| named.name.clone())
-                .unwrap_or_else(|| "Your organization".to_owned()),
+            policy::organization_title(
+                organization
+                    .as_ref()
+                    .and_then(|named| named.name.as_deref()),
+            ),
             policy,
             None,
             inputs.organization_source.clone(),
@@ -407,7 +381,7 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
     if let Some(policy) = inputs.user {
         layers.push(layer_view(
             LayerKind::User,
-            "Your rules".to_owned(),
+            policy::USER_LAYER_TITLE.to_owned(),
             policy,
             Some(&inputs.snapshot),
             inputs.user_source.clone(),
@@ -422,7 +396,7 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
         organization,
         capabilities,
         layers,
-        ceilings: ceilings(&inputs.sacred_hosts),
+        ceilings: policy::ceilings(&inputs.sacred_hosts),
         user_layer: user_layer(inputs),
         browser_startup: browser_startup(inputs),
         passport: inputs.passport.clone(),
@@ -471,33 +445,13 @@ fn headline(
     organization: Option<&OrganizationIdentity>,
     channels_off: ChannelsOff<'_>,
 ) -> String {
-    let said = situation_sentence(situation, organization);
+    let said = policy::situation(
+        situation,
+        organization.and_then(|identity| identity.name.as_deref()),
+    );
     match channels_off.policy_line() {
         Some(line) if situation != Situation::FailingClosed => format!("{said} {line}"),
         _ => said,
-    }
-}
-
-fn situation_sentence(situation: Situation, organization: Option<&OrganizationIdentity>) -> String {
-    let named = organization.and_then(|identity| identity.name.as_deref());
-    match situation {
-        Situation::AllOpen => {
-            "No rules apply. Agents may work on ordinary websites, within the limits below.".into()
-        }
-        Situation::OrganizationOnly => named.map_or_else(
-            || "Your organization sets the rules on this machine.".into(),
-            |name| format!("{name} sets the rules on this machine."),
-        ),
-        Situation::UserOnly => "You set the rules on this machine.".into(),
-        Situation::Layered => named.map_or_else(
-            || "Your organization sets the rules, and you have narrowed them further.".into(),
-            |name| format!("{name} sets the rules, and you have narrowed them further."),
-        ),
-        Situation::FailingClosed => {
-            "Ghostlight is refusing all governed work: a configured policy source is not valid. \
-             Nothing is permitted until it can be read again."
-                .into()
-        }
     }
 }
 
@@ -506,7 +460,7 @@ fn capability_line(
     inputs: &Inputs<'_>,
     organization: Option<&OrganizationIdentity>,
 ) -> CapabilityLine {
-    let (label, covers) = wording(capability);
+    let (label, covers) = policy::capability_wording(capability);
     let required = CapabilitySet::one(capability);
     if !inputs.valid {
         return CapabilityLine {
@@ -514,7 +468,7 @@ fn capability_line(
             label,
             covers,
             state: CapabilityState::Unavailable,
-            detail: "Refused while a configured policy source cannot be read.".into(),
+            detail: policy::REFUSED_WHILE_INVALID.into(),
             decided_by: vec![LayerKind::Ghostlight],
         };
     }
@@ -529,16 +483,8 @@ fn capability_line(
         .map(|tier| layer_kind(*tier))
         .collect();
 
-    let named = organization.and_then(|identity| identity.name.clone());
-    let word = |kind: LayerKind| match (kind, named.as_deref()) {
-        (LayerKind::Organization, Some(name)) => name.to_owned(),
-        (kind, _) => layer_word(kind).to_owned(),
-    };
-    let who = decided_by
-        .iter()
-        .map(|kind| word(*kind))
-        .collect::<Vec<_>>()
-        .join(" and ");
+    let named = organization.and_then(|identity| identity.name.as_deref());
+    let who = policy::who(&decided_by, named);
 
     let switched = inputs.channels_off;
     if switched.all() {
@@ -548,72 +494,43 @@ fn capability_line(
             label,
             covers,
             state: CapabilityState::Unavailable,
-            detail: format!("Not available. {}", switched.said().unwrap_or_default()),
+            detail: policy::not_available(&switched.said().unwrap_or_default()),
             decided_by: with_switches(decided_by, switched),
         };
     }
 
     let mut detail = match state {
-        CapabilityState::Available if switched.any() => {
-            "Available on ordinary websites.".to_owned()
-        }
-        CapabilityState::Available => {
-            "Available on ordinary websites. Nothing narrows it.".to_owned()
-        }
+        CapabilityState::Available if switched.any() => policy::AVAILABLE.to_owned(),
+        CapabilityState::Available => policy::AVAILABLE_UNNARROWED.to_owned(),
         // Polarity is the point of these two sentences. A rule that carves holes out of an open
         // baseline and a rule that opens holes in a closed one both leave a capability available
         // "on some sites", and a person cannot act on that without knowing which way it points.
-        CapabilityState::SomeBlocked => {
-            format!("Available everywhere except the sites {who} blocked.")
-        }
-        CapabilityState::SomeAllowed => {
-            format!("Refused everywhere except the sites {who} allowed.")
-        }
-        CapabilityState::Unavailable if reach.disjoint() => {
-            format!("Not available. The sites {who} allow do not overlap.")
-        }
+        CapabilityState::SomeBlocked => policy::some_blocked(&who),
+        CapabilityState::SomeAllowed => policy::some_allowed(&who),
+        CapabilityState::Unavailable if reach.disjoint() => policy::disjoint(&who),
         CapabilityState::Unavailable => match (reach.nowhere.first(), &reach.never_touched) {
             // Every layer allows it somewhere, but only on never-touch hosts, so the never-touch
             // list is what refuses it: its author is named and credited.
             (None, Some(never)) => {
-                let names = |tiers: &[AuthorityTier]| {
+                let kinds = |tiers: &[AuthorityTier]| {
                     tiers
                         .iter()
-                        .map(|tier| word(layer_kind(*tier)))
+                        .map(|tier| layer_kind(*tier))
                         .collect::<Vec<_>>()
-                        .join(" and ")
                 };
-                let allow = match never.allowed_by.as_slice() {
-                    [AuthorityTier::Managed] => "allows",
-                    _ => "allow",
-                };
-                for tier in &never.marked_by {
-                    if !decided_by.contains(&layer_kind(*tier)) {
-                        decided_by.push(layer_kind(*tier));
+                let marked_by = kinds(&never.marked_by);
+                for kind in &marked_by {
+                    if !decided_by.contains(kind) {
+                        decided_by.push(*kind);
                     }
                 }
                 decided_by.sort_by_key(|kind| *kind != LayerKind::Organization);
-                format!(
-                    "Not available. The only sites {} {allow} it on are marked never-touch by {}.",
-                    names(&never.allowed_by),
-                    names(&never.marked_by)
-                )
+                policy::only_never_touch(&kinds(&never.allowed_by), &marked_by, named)
             }
-            (nowhere, _) => {
-                let kind = nowhere.map_or(LayerKind::Ghostlight, |tier| layer_kind(*tier));
-                // "you does not allow it" is what a template gets you. Whoever refused is named
-                // in their own grammar, because a person reading why they were stopped deserves
-                // a sentence rather than a substitution.
-                let refusal = match kind {
-                    LayerKind::User => "You do not allow it anywhere.".to_owned(),
-                    LayerKind::Ghostlight => "Ghostlight does not allow it anywhere.".to_owned(),
-                    LayerKind::Organization => format!(
-                        "{} does not allow it anywhere.",
-                        named.as_deref().unwrap_or("Your organization")
-                    ),
-                };
-                format!("Not available. {refusal}")
-            }
+            (nowhere, _) => policy::allowed_nowhere(
+                nowhere.map_or(LayerKind::Ghostlight, |tier| layer_kind(*tier)),
+                named,
+            ),
         },
     };
     // A switch narrows who may do it rather than where: said on every line something can still
@@ -757,33 +674,15 @@ fn pattern_covers(broad: &str, narrow: &str) -> bool {
             .ends_with(&format!(".{}", suffix.to_ascii_lowercase()))
 }
 
-fn ceilings(sacred: &[String]) -> Vec<String> {
-    let mut lines = vec!["Anything that is not an ordinary http or https address.".to_owned()];
-    for host in sacred {
-        lines.push(format!("{host}, marked never-touch by policy."));
-    }
-    lines.push(OWN_CONTROL_PAGE_CEILING.to_owned());
-    lines
-}
-
 fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
-    let owned = inputs.user_layer_source != UserLayerSource::Environment;
-    let editable = owned && inputs.owned_user_path.is_some();
-    let blocked_reason = if !owned {
-        Some(
-            "An environment variable points Ghostlight at a policy file it does not own, so this \
-             window shows it without changing it."
-                .to_owned(),
-        )
-    } else if inputs.owned_user_path.is_none() {
-        Some("This environment names no per-user state directory to keep a policy in.".to_owned())
-    } else {
-        None
+    let (path, blocked_reason) = match &inputs.authoring {
+        Ok(path) => (Some(path.clone()), None),
+        Err(why) => (None, Some(why.to_string())),
     };
     UserLayer {
         source: inputs.user_layer_source,
-        editable,
-        path: inputs.owned_user_path.clone(),
+        editable: path.is_some(),
+        path,
         blocked_reason,
     }
 }
@@ -793,18 +692,18 @@ mod tests {
     use super::{
         compile, pattern_covers, CapabilityState, ChipTone, Inputs, LayerKind,
         OrganizationIdentity, PolicyChip, RuleNote, Situation, UserLayerSource,
-        OWN_CONTROL_PAGE_CEILING,
     };
     use std::sync::Arc;
 
     use crate::governance::{
-        assemble, manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet,
-        ManagedPolicyPassport, OwnOrigin,
+        assemble, manifest, AuthoringError, AuthoritySnapshot, AuthorityTier, Capability,
+        CapabilitySet, ManagedPolicyPassport, OwnOrigin,
     };
     use crate::language::capability_map;
     use crate::language::catalog_for;
     use crate::language::channel_switch::ChannelsOff;
-    use crate::language::outcome::PolicyAuthor;
+    use crate::language::outcome::{PolicyAuthor, OWN_CONTROL_PAGE_CEILING};
+    use crate::language::policy;
 
     fn policy(text: &str) -> manifest::Manifest {
         manifest::parse(text, "test").expect("test policy parses")
@@ -866,7 +765,7 @@ mod tests {
             } else {
                 UserLayerSource::None
             },
-            owned_user_path: Some("state/user-policy.json".into()),
+            authoring: Ok("state/user-policy.json".into()),
             windows: cfg!(windows),
             passport: passport(),
         }
@@ -1131,9 +1030,14 @@ mod tests {
         );
         let mut named = inputs(None, Some(&user));
         named.user_layer_source = UserLayerSource::Environment;
+        named.authoring = Err(AuthoringError::NotOwned);
         let view = compile(&named);
         assert!(!view.user_layer.editable);
-        assert!(view.user_layer.blocked_reason.is_some());
+        assert_eq!(view.user_layer.path, None);
+        assert_eq!(
+            view.user_layer.blocked_reason.as_deref(),
+            Some(policy::NOT_OWNED)
+        );
         // A wide-open grant narrows nothing, so no capability line invents a decider.
         assert!(view
             .capabilities

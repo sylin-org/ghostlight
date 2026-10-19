@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10, P1, P2, P3, P4, P9, P5, P6 and P7 landed. Next: P8. S4a is unblocked, P5 unblocks C10c and S3,
-and P7 is the first half of what S4b waits for.
+Every slice landed: P10, P1, P2, P3, P4, P9, P5, P6, P7 and P8. The lane is closed. S4a is
+unblocked, P5 unblocks C10c and S3, and P7 and P8 unblock S4b.
 
 ## Slices
 
@@ -23,8 +23,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | see Notes | landed (994a6ffa) |
 | P5 | refactor(governance): one publication is read whole | none | ux-2 closes | see Notes | landed (c5a37984) |
 | P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites, see Notes | landed (67cf4811) |
-| P7 | refactor(governance): one settings vocabulary | none | ux-2 closes | cross-lane core tests, see Notes | landed (this commit) |
-| P8 | refactor(language): the policy sentences live in language/policy.rs | none | ux-2 closes | cross-lane `language/mod.rs` | todo |
+| P7 | refactor(governance): one settings vocabulary | none | ux-2 closes | cross-lane core tests, see Notes | landed (1e12f49c) |
+| P8 | refactor(language): the policy sentences live in language/policy.rs | none | ux-2 closes | cross-lane `language/mod.rs`, see Notes | landed (this commit) |
 
 ## Notes
 
@@ -155,3 +155,21 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `work/tests/documents.rs` name the key through `PolicySetting`; no core slice was open in them.
   `workbench/parts.rs`'s `SACRED_DOMAINS_KEY` and the page's copy are S4b's. The catalog and result
   goldens are unchanged.
+- P8: `language::policy` holds every sentence the compiled view, the facade's authoring refusal
+  and `ghostlight policy` say: the capability labels, the situation headline, each capability
+  line (including P1's disjoint and never-touch lines), the layer titles, the ceilings, the signed
+  source classes, and the validate, explain, simulate and usage lines. `effective.rs`'s `wording`,
+  `layer_word` and `situation_sentence`, `passport_source`, the `AuthoringError` literals and
+  `inspection.rs`'s `explain` and `short_hash` are deleted. "Not owned" and "no home" are one
+  sentence each, `policy::NOT_OWNED` and `policy::NO_HOME`: the window's "shows it without changing
+  it" and its "This environment names" give way to the error's wording. One departure in reach,
+  none in decision: one sentence was not enough while the window and the write decided apart, so
+  the window's user layer now reads the facade's own answer (`PolicySources::writable_user_path`,
+  which the write reads too) instead of re-deriving it from the layer's source and
+  `paths::user_policy_path()`. A file an environment variable names but that does not exist no
+  longer shows an editor whose every write would be refused, and `user_layer.path` is absent
+  whenever the window may not write. `OWN_CONTROL_PAGE_CEILING` stays in core's
+  `language/outcome.rs`, which `policy::ceilings` reads. The proof
+  `the_window_and_the_error_say_one_sentence_for_a_policy_this_window_cannot_change` lives in
+  `governance/tests.rs` and covers a named file, an absent named file and a machine with no home.
+  The catalog and result goldens are unchanged.

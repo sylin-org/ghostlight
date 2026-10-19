@@ -1018,6 +1018,44 @@ fn a_policy_file_ghostlight_does_not_own_is_never_written_back() {
     assert!(path.exists());
 }
 
+/// The window says why it cannot change this person's policy in the sentence a write it is asked
+/// for anyway is refused with: for a file an environment variable names, present or not, and for a
+/// machine with no per-user state directory.
+#[test]
+fn the_window_and_the_error_say_one_sentence_for_a_policy_this_window_cannot_change() {
+    use crate::language::policy::{NOT_OWNED, NO_HOME};
+
+    let named = temporary("named-elsewhere");
+    fs::write(
+        &named,
+        br#"{"schema":4,"name":"theirs","version":"1","grants":[]}"#,
+    )
+    .unwrap();
+    let absent = temporary("named-elsewhere-absent");
+    let homeless = PolicySources {
+        remote: None,
+        user: PolicySource::with_options(None, true),
+        user_origin: effective::UserLayerSource::Workbench,
+        owned_user_path: None,
+    };
+    for (facade, said) in [
+        (GovernanceFacade::new(Some(named.to_path_buf())), NOT_OWNED),
+        (GovernanceFacade::new(Some(absent.to_path_buf())), NOT_OWNED),
+        (GovernanceFacade::publishing(homeless, None), NO_HOME),
+    ] {
+        let window = facade.effective_authority().user_layer;
+        assert!(!window.editable, "{said}");
+        assert_eq!(window.path, None, "{said}");
+        assert_eq!(window.blocked_reason.as_deref(), Some(said));
+        let refused = facade
+            .apply_user_policy(r#"{"schema":4,"name":"mine","version":"1","grants":[]}"#)
+            .unwrap_err();
+        assert_eq!(refused.to_string(), said);
+        assert_eq!(facade.remove_user_policy().unwrap_err().to_string(), said);
+    }
+    assert!(!absent.exists());
+}
+
 #[test]
 fn a_candidate_policy_is_decided_under_the_organization_ceiling_without_being_applied() {
     let organization = Scratch::named("preview-organization");

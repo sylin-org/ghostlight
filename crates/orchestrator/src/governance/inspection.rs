@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 
 use super::{managed, manifest, migrate, GovernanceFacade};
-use crate::language::{capability_map, migration};
+use crate::language::{migration, policy as words};
 
 /// Every `ghostlight policy` subcommand, in help order.
 ///
@@ -52,26 +52,19 @@ pub fn parse(arguments: &[String]) -> Result<Command> {
         [action, ..] if matches!(action.as_str(), "keygen" | "pubkey" | "sign" | "publish") => {
             managed::cli::parse(arguments).map(Command::Author)
         }
-        _ => Err(anyhow!(
-            "usage: ghostlight policy <validate|explain|migrate> <policy.json>\n       ghostlight policy simulate <policy.json> <audit.jsonl>\n       ghostlight policy <keygen|pubkey|sign|publish> ..."
-        )),
+        _ => Err(anyhow!(words::USAGE)),
     }
 }
 
 /// Run one policy inspection without starting a browser or writing audit.
 pub fn run(command: &Command, out: &mut impl Write) -> Result<()> {
     match command {
-        Command::Validate(path) => {
-            let policy = load(path)?;
-            writeln!(
-                out,
-                "Valid schema-4 policy: {} {} ({})",
-                policy.name,
-                policy.version,
-                short_hash(&policy.hash)
-            )?;
+        Command::Validate(path) => writeln!(out, "{}", words::valid(&load(path)?))?,
+        Command::Explain(path) => {
+            for line in words::explanation(&load(path)?) {
+                writeln!(out, "{line}")?;
+            }
         }
-        Command::Explain(path) => explain(&load(path)?, out)?,
         Command::Migrate(path) => migrate(path, out)?,
         Command::Simulate { policy, audit } => simulate(policy, audit, out)?,
         Command::Author(command) => managed::cli::run(command, out)?,
@@ -103,73 +96,6 @@ fn migrate(path: &Path, out: &mut impl Write) -> Result<()> {
     Ok(())
 }
 
-fn explain(policy: &manifest::Manifest, out: &mut impl Write) -> Result<()> {
-    writeln!(out, "Policy: {} {}", policy.name, policy.version)?;
-    writeln!(out, "Identity: {}", short_hash(&policy.hash))?;
-    if let Some(identity) = &policy.identity {
-        if let Some(principal) = &identity.principal {
-            writeln!(out, "Principal: {principal}")?;
-        }
-        if let Some(groups) = &identity.groups {
-            if !groups.is_empty() {
-                writeln!(out, "Groups: {}", groups.join(", "))?;
-            }
-        }
-    }
-    if policy.grants.is_empty() {
-        writeln!(
-            out,
-            "Grants: none. Governed browser work is denied by default."
-        )?;
-    } else {
-        writeln!(out, "Grants:")?;
-        for grant in &policy.grants {
-            let allowed = grant.allowed_set().label();
-            let hosts = if grant.hosts.allow.is_empty() {
-                "no hosts".into()
-            } else {
-                grant.hosts.allow.join(", ")
-            };
-            write!(out, "  {}: {allowed} on {hosts}", grant.id)?;
-            if !grant.hosts.deny.is_empty() {
-                write!(out, "; except {}", grant.hosts.deny.join(", "))?;
-            }
-            writeln!(out)?;
-            if let Some(description) = &grant.description {
-                writeln!(out, "    {description}")?;
-            }
-        }
-    }
-    if !policy.config.is_empty() {
-        writeln!(out, "Settings:")?;
-        for setting in &policy.config {
-            writeln!(
-                out,
-                "  {} = {} ({})",
-                setting.key,
-                setting.value,
-                setting.level.as_str()
-            )?;
-        }
-    }
-    writeln!(out, "Capability map:")?;
-    for entry in capability_map::DIRECTORY {
-        let variant = entry
-            .variant
-            .map(|value| format!(" ({value})"))
-            .unwrap_or_default();
-        writeln!(
-            out,
-            "  {}{}: {} -- {}",
-            entry.tool,
-            variant,
-            entry.requirements.label(),
-            entry.description
-        )?;
-    }
-    Ok(())
-}
-
 fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
     let manifest = load(policy)?;
     let facade = GovernanceFacade::new(Some(policy.to_path_buf()));
@@ -184,15 +110,11 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
         let record = match line {
             crate::audit::AuditLine::Receipt(record) => record,
             crate::audit::AuditLine::Gap(gap) => {
-                writeln!(
-                    out,
-                    "History gap: {} receipts were not confirmed saved.",
-                    gap.unconfirmed_receipts
-                )?;
+                writeln!(out, "{}", words::history_gap(gap.unconfirmed_receipts))?;
                 continue;
             }
             crate::audit::AuditLine::Unreadable => {
-                writeln!(out, "Unreadable history entry at line {index}; skipped.")?;
+                writeln!(out, "{}", words::unreadable_line(index))?;
                 continue;
             }
             crate::audit::AuditLine::Empty => continue,
@@ -206,32 +128,19 @@ fn simulate(policy: &Path, audit: &Path, out: &mut impl Write) -> Result<()> {
         );
         if !decision.allowed {
             denied += 1;
-            let host = record.observed.host.as_deref().unwrap_or("no host");
-            writeln!(
-                out,
-                "Would deny line {}: {} [{}] on {} -- {}{}",
-                index,
-                record.tool,
-                requirements.label(),
-                host,
-                decision.policy_rule().unwrap_or(decision.reason.as_str()),
-                decision
-                    .denial_id()
-                    .map(|id| format!(" ({id})"))
-                    .unwrap_or_default()
-            )?;
+            let line = words::would_deny(&words::WouldDeny {
+                line: index,
+                tool: &record.tool,
+                requirements: &requirements.label(),
+                host: record.observed.host.as_deref(),
+                rule: decision.policy_rule().unwrap_or(decision.reason.as_str()),
+                denial_id: decision.denial_id().as_deref(),
+            });
+            writeln!(out, "{line}")?;
         }
     }
-    writeln!(
-        out,
-        "Simulated {records} record(s) against {} {}: {denied} would be denied.",
-        manifest.name, manifest.version
-    )?;
+    writeln!(out, "{}", words::simulated(records, &manifest, denied))?;
     Ok(())
-}
-
-fn short_hash(hash: &str) -> &str {
-    hash.get(..12).unwrap_or(hash)
 }
 
 #[cfg(test)]

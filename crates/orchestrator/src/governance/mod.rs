@@ -30,6 +30,7 @@ use crate::install::record::atomic_replace;
 use crate::intake::session::IntakeChannel;
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
+use crate::language::policy;
 use file_state::FileState;
 use manifest::PolicySetting;
 use serde::{Deserialize, Serialize};
@@ -1415,7 +1416,8 @@ impl Publication {
             valid,
             channels_off,
             sacred_hosts: snapshot.sacred_hosts(),
-            organization_source: organization.map(|_| passport_source(&passport)),
+            organization_source: organization
+                .map(|_| policy::signed_source(passport.source_class).to_owned()),
             organization_document: organization.map(document),
             user_source: sources
                 .user
@@ -1428,7 +1430,9 @@ impl Publication {
             } else {
                 effective::UserLayerSource::None
             },
-            owned_user_path: paths::user_policy_path().map(|path| path.display().to_string()),
+            authoring: sources
+                .writable_user_path()
+                .map(|path| path.display().to_string()),
             windows: cfg!(windows),
             passport: passport.clone(),
         };
@@ -1563,6 +1567,15 @@ impl PolicySources {
         }
     }
 
+    /// The user policy path this window may write, or why it may not. The window's user layer and
+    /// a write it is asked for read this one answer.
+    fn writable_user_path(&self) -> Result<PathBuf, AuthoringError> {
+        if self.user_origin == effective::UserLayerSource::Environment {
+            return Err(AuthoringError::NotOwned);
+        }
+        self.owned_user_path.clone().ok_or(AuthoringError::NoHome)
+    }
+
     /// Read the user policy file again, whatever its state.
     fn reload_local(&mut self) {
         self.user.refresh();
@@ -1621,15 +1634,6 @@ impl PolicySources {
 /// bundle and has no plain file to show. The canonical hash is never authored and never rendered.
 fn document(policy: &manifest::Manifest) -> String {
     serde_json::to_string_pretty(policy).unwrap_or_else(|_| String::from("{}"))
-}
-
-/// Name a signed managed source by class, never by address.
-fn passport_source(passport: &ManagedPolicyPassport) -> String {
-    match passport.source_class {
-        ManagedPolicySource::Https => "Signed bundle from an HTTPS source".into(),
-        ManagedPolicySource::File => "Signed bundle from a local file".into(),
-        ManagedPolicySource::None => "Signed bundle".into(),
-    }
 }
 
 #[derive(Debug)]
@@ -2085,10 +2089,10 @@ pub struct Candidate {
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum AuthoringError {
     /// Ghostlight reads this policy but does not own its file.
-    #[error("An environment variable points Ghostlight at a policy file it does not own, so this window cannot change it.")]
+    #[error("{}", policy::NOT_OWNED)]
     NotOwned,
     /// This environment names no per-user state directory.
-    #[error("This machine names no per-user state directory to keep a policy in.")]
+    #[error("{}", policy::NO_HOME)]
     NoHome,
     /// The document is not a valid policy.
     #[error("{0}")]
@@ -2128,14 +2132,7 @@ impl GovernanceFacade {
 
     /// The user policy path this window may write, or why it may not.
     fn writable_user_policy_path(&self) -> Result<PathBuf, AuthoringError> {
-        let sources = lock(&self.sources);
-        if sources.user_origin == effective::UserLayerSource::Environment {
-            return Err(AuthoringError::NotOwned);
-        }
-        sources
-            .owned_user_path
-            .clone()
-            .ok_or(AuthoringError::NoHome)
+        lock(&self.sources).writable_user_path()
     }
 }
 
