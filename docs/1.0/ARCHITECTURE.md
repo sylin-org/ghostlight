@@ -332,14 +332,15 @@ unknown disposition.
 
 Compatibility uses three axes, all additive (ADR-0199 Decision 8): the relay protocol, the
 adapter protocol, and the MCP revision, which only the service negotiates. The shell has no axis
-of its own. Adapter behavior is selected by explicitly advertised
-physical capabilities, never by parsing an implementation version. A new service may continue to
-use an older adapter for every capability that adapter advertises.
+of its own. On the adapter axis the hello names the adapter protocol major, and that is the whole
+negotiation: no capability list crosses, and nothing parses an implementation version. Protocol 4
+stays compatible by staying additive. Within the major nothing is removed or renamed, every reader
+ignores a field it does not know, each closed code the service reads has a fallback arm, and an
+extension asked for a primitive it does not know answers `unsupported` without dispatching it.
 
-Each adapter has one closed executable handler table. Its hello capability revisions are derived
-from that table and its passive frame handlers, never maintained as a second declaration. Platform
-is identity and presentation information; executor dispatch is capability-based. A vendor protocol
-such as CDP is private adapter technique, not a second wire vocabulary.
+Each adapter has one closed executable handler table. Platform is identity and presentation
+information, never a dispatch key. A vendor protocol such as CDP is private adapter technique, not
+a second wire vocabulary.
 
 The browser adapter is a service component. `browser/adapter/mod.rs` names a closed `Family`
 (Chromium) and re-exports the service's internal browser work vocabulary from

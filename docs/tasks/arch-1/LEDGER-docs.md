@@ -81,6 +81,9 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 - D2, "Pause/Stop" kept: `docs/design/security-assessment-2026-09-06.md` and
   `docs/design/tool-surface-review-2026-09-07.md` are dated reviews that quote the vocabulary of
   their day, so they keep it.
-- D2, for the coordinator: ARCHITECTURE's Fringe stability paragraph still says hello capability
-  revisions derive from the handler table, which the protocol-4 hello no longer carries. It
-  predates this batch and no landed slice changed it, so D2 leaves it.
+- D2, Fringe stability: ARCHITECTURE said adapter behavior is selected by advertised capabilities
+  and that hello capability revisions derive from the handler table. The protocol-4 hello carries
+  neither (`protocol4/wire.rs` `Hello`, the worker's hello), so the paragraph now says what
+  protocol 4 does: the hello names the protocol major, no capability list crosses, and the
+  protocol stays compatible by staying additive with tolerant readers and `unsupported` for an
+  unknown primitive.
