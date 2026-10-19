@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-P10, P1, P2, P3, P4 and P9 landed. Next: P5. S4a is unblocked.
+P10, P1, P2, P3, P4, P9 and P5 landed. Next: P6. S4a is unblocked, and P5 unblocks C10c and S3.
 
 ## Slices
 
@@ -19,8 +19,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | P2 | fix(governance): a never-touch refusal names the layer that wrote it | candidate | ux-2 closes | flatten already gone, see Notes | landed (bc00a84b) |
 | P3 | fix(governance): one replay of recorded work | candidate | ux-2 closes | see Notes | landed (9c705f86) |
 | P4 | fix(governance): one organization identity per publication | candidate | ux-2 closes | see Notes | landed (c2c958ff) |
-| P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | see Notes | landed (this commit) |
-| P5 | refactor(governance): one publication is read whole | none | ux-2 closes | - | todo |
+| P9 | fix(governance): an owned user policy moved at load stays owner-only | candidate | ux-2 closes | see Notes | landed (994a6ffa) |
+| P5 | refactor(governance): one publication is read whole | none | ux-2 closes | see Notes | landed (this commit) |
 | P6 | refactor(governance): the unsigned managed file path goes | none | ux-2 closes | cross-lane core and surface call sites | todo |
 | P7 | refactor(governance): one settings vocabulary | none | ux-2 closes | - | todo |
 | P8 | refactor(language): the policy sentences live in language/policy.rs | none | ux-2 closes | cross-lane `language/mod.rs` | todo |
@@ -97,3 +97,23 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   person names, which other accounts may read. No departure. The proof writes the schema-3 file
   open first (0644 on Unix, the directory's inherited access on Windows) and checks the moved file
   and its backup are owner-only. The catalog and result goldens are unchanged.
+- P5: `GovernanceFacade::published()` is public and returns the whole `Publication` (renamed from
+  `Published`), with its snapshot, compiled answer, chip and diagnostics. The chip is
+  `PolicyChip::of(&authority)`: its situation and sentence are the compiled view's, and its warning
+  tone reads the view's passport. The situation match in the publication build and `effective::chip`'s
+  own headline call are deleted. The audit requirement is resolved once, at assembly, over the
+  snapshot's layers (`AuditRequirement::of`); enforcement and the compiled view read it, so
+  `AuditPolicy::resolve`, `requiring_layer` and its always-true `matches!` are deleted. The
+  publication's own `startup` copy is gone too: `browser_startup()` reads the compiled view.
+  `EffectiveAuthority.id` carries the snapshot's id. Three departures in shape, none in decision.
+  The id is not serialized: it digests the layers' documents, and the window withholds such a
+  value from a watcher, as it already does for the policy hint's tag. The policy hint the person's
+  own write sends is now tagged with that id, as the refresher's already was (it had carried the
+  user layer's edit tag, so one part's tag meant two things); the write precondition still uses the
+  edit tag. Cross-lane, surface's: `workbench/live.rs::policy_changed` reads one publication, the
+  hint test in `workbench/tests.rs` becomes `the_authority_id_tags_the_policy_hint`, and
+  `workbench/web/tests.rs`'s hint check names the authority id; S3 and S4a had not started in those
+  files. The executor keeping the publication and `policy_explain` reading it are C10c's, so the
+  facade's single-fact readers stay for their callers. The proofs `the_chip_is_the_compiled_headline`
+  and `enforcement_and_the_view_name_the_same_audit_layer` live in `effective.rs`. The catalog and
+  result goldens are unchanged.

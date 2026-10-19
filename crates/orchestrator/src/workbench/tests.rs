@@ -985,8 +985,11 @@ fn work_and_saving_health_refresh_the_status_and_connections_without_a_pull() {
     assert_eq!(heard(&events).len(), before);
 }
 
+/// Applying, editing and removing rules each hint at the policy with the id of the authority now
+/// in force, so the window's one tag per part means one thing; the refresher does not repeat a
+/// hint the person's own act already gave.
 #[test]
-fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_not_repeat_it() {
+fn the_authority_id_tags_the_policy_hint() {
     let path = temporary_policy("hint");
     let governance = GovernanceFacade::owning_user_policy(path.to_path_buf(), None);
     let facade = facade_over(governance.clone(), ControlledBrowser::new(true, false));
@@ -1009,10 +1012,10 @@ fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_no
         applied,
         [(
             super::parts::HintedPart::Policy,
-            super::parts::policy_etag(&facade.policy())
+            governance.snapshot().id().to_owned()
         )]
     );
-    assert_ne!(applied[0].1, super::parts::NO_POLICY_ETAG);
+    assert_eq!(applied[0].1, facade.policy().id);
 
     // The refresher has nothing new to say about an authority the person just applied.
     facade.authority_refreshed();
@@ -1035,7 +1038,9 @@ fn applying_rules_hints_at_the_policy_with_its_new_tag_and_the_refresher_does_no
 
     let tag = super::parts::policy_etag(&facade.policy());
     facade.remove_user_policy_if(&tag).unwrap();
-    assert_eq!(hints(&heard(&events)).len(), 3);
+    let removed = hints(&heard(&events));
+    assert_eq!(removed.len(), 3);
+    assert_eq!(removed[2].1, governance.snapshot().id());
 }
 
 /// A set of native acts that records what it was asked for and answers from a script.

@@ -1,6 +1,7 @@
 //! Monotonic audit-availability requirement across the existing authority layers.
 
-use super::{effective::LayerKind, manifest::Manifest, AuthoritySnapshot, AuthorityTier};
+use super::effective::{layer_kind, LayerKind};
+use super::{AuthoritySnapshot, PolicyLayer};
 use serde::{Deserialize, Serialize};
 
 /// Registered choice for continuing work during a known history-storage failure.
@@ -35,27 +36,39 @@ pub struct AuditPolicy {
     pub organization_mode: Option<AuditMode>,
 }
 
-impl AuditPolicy {
-    /// Resolve the strictest authored choice without relaxing an organization requirement.
-    #[must_use]
-    pub fn resolve(organization: Option<&Manifest>, user: Option<&Manifest>) -> Self {
+/// The audit requirement of one publication, resolved once when its snapshot is assembled.
+///
+/// Enforcement and the compiled view both read this one answer, so a refusal is attributed to the
+/// layer the Policy page names.
+#[derive(Clone, Debug, Default)]
+pub(super) struct AuditRequirement {
+    /// What the compiled view reports.
+    policy: AuditPolicy,
+    /// The snapshot index of the layer whose choice is in force.
+    layer: Option<u16>,
+}
+
+impl AuditRequirement {
+    /// The strictest choice `layers` author, in authority order: a later layer can tighten the
+    /// organization's choice and never relax it.
+    pub(super) fn of(layers: &[PolicyLayer]) -> Self {
         let mut resolved = Self::default();
-        for (manifest, source) in [
-            (organization, LayerKind::Organization),
-            (user, LayerKind::User),
-        ] {
-            let Some(mode) = manifest
-                .and_then(|m| m.string_setting(MODE_KEY))
+        for (index, layer) in layers.iter().enumerate() {
+            let Some(mode) = layer
+                .manifest
+                .string_setting(MODE_KEY)
                 .and_then(AuditMode::parse)
             else {
                 continue;
             };
+            let source = layer_kind(layer.tier);
             if source == LayerKind::Organization {
-                resolved.organization_mode = Some(mode);
+                resolved.policy.organization_mode = Some(mode);
             }
-            if resolved.source.is_none() || mode > resolved.mode {
-                resolved.mode = mode;
-                resolved.source = Some(source);
+            if resolved.layer.is_none() || mode > resolved.policy.mode {
+                resolved.policy.mode = mode;
+                resolved.policy.source = Some(source);
+                resolved.layer = Some(u16::try_from(index).expect("bounded authority layers"));
             }
         }
         resolved
@@ -63,37 +76,40 @@ impl AuditPolicy {
 }
 
 impl AuthoritySnapshot {
-    fn requiring_layer(&self) -> Option<usize> {
-        self.layers.iter().position(|layer| {
-            matches!(layer.tier, AuthorityTier::Managed | AuthorityTier::User)
-                && layer
-                    .manifest
-                    .string_setting(MODE_KEY)
-                    .and_then(AuditMode::parse)
-                    == Some(AuditMode::RequireAudit)
-        })
+    /// The effective audit requirement and the layer that set it, as enforcement applies it.
+    #[must_use]
+    pub fn audit_policy(&self) -> &AuditPolicy {
+        &self.audit.policy
     }
 
     /// Whether this invocation requires a currently working audit destination.
     #[must_use]
     pub fn requires_audit(&self) -> bool {
-        self.requiring_layer().is_some()
+        self.audit.policy.mode == AuditMode::RequireAudit
     }
 
     /// Admit current storage health with attribution to the actual immutable policy requirement.
     #[must_use]
     pub fn authorize_audit(&self, available: bool) -> super::Decision {
-        let Some(index) = self.requiring_layer().filter(|_| !available) else {
+        let Some(index) = self
+            .audit
+            .layer
+            .filter(|_| self.requires_audit() && !available)
+        else {
             return super::Decision::permitted();
         };
         let rule = super::PolicyRule::AuditAvailability;
         super::Decision::policy(
             super::ReasonCode::AuditUnavailable,
             super::PolicyAttribution {
-                layer: u16::try_from(index).expect("bounded authority layers"),
+                layer: index,
                 grant: None,
                 rule,
-                denial: super::denial_bytes(&self.layers[index].manifest.hash, "", rule),
+                denial: super::denial_bytes(
+                    &self.layers[usize::from(index)].manifest.hash,
+                    "",
+                    rule,
+                ),
             },
         )
     }
@@ -101,34 +117,60 @@ impl AuthoritySnapshot {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{assemble, manifest, AuthorityTier, OwnOrigin};
     use super::*;
-    fn manifest(mode: &str) -> Manifest {
-        super::super::manifest::parse(&format!(r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{MODE_KEY}","value":"{mode}","level":"mandatory"}}]}}"#), "test").unwrap()
+
+    fn choosing(mode: &str) -> manifest::Manifest {
+        manifest::parse(&format!(r#"{{"schema":4,"name":"test","version":"1","grants":[],"config":[{{"key":"{MODE_KEY}","value":"{mode}","level":"mandatory"}}]}}"#), "test").unwrap()
     }
+
+    fn snapshot(
+        organization: Option<manifest::Manifest>,
+        user: Option<manifest::Manifest>,
+    ) -> AuthoritySnapshot {
+        assemble(
+            [
+                (organization, AuthorityTier::Managed),
+                (user, AuthorityTier::User),
+            ],
+            None,
+            None,
+            true,
+            &OwnOrigin::default(),
+        )
+    }
+
     #[test]
     fn either_layer_can_require_audit_and_user_cannot_relax_the_organization() {
-        let strict = manifest("require_audit");
-        let permissive = manifest("keep_working");
+        let strict = || Some(choosing("require_audit"));
+        let permissive = || Some(choosing("keep_working"));
         assert_eq!(AuditPolicy::default().mode, AuditMode::KeepWorking);
-        let policy = AuditPolicy::resolve(Some(&strict), Some(&permissive));
-        assert_eq!(policy.mode, AuditMode::RequireAudit);
-        assert_eq!(policy.source, Some(LayerKind::Organization));
+        let policy = snapshot(strict(), permissive()).audit_policy().clone();
         assert_eq!(
-            AuditPolicy::resolve(Some(&permissive), Some(&strict)).source,
+            policy,
+            AuditPolicy {
+                mode: AuditMode::RequireAudit,
+                source: Some(LayerKind::Organization),
+                organization_mode: Some(AuditMode::RequireAudit),
+            }
+        );
+        assert_eq!(
+            snapshot(permissive(), strict()).audit_policy().source,
             Some(LayerKind::User)
         );
         assert_eq!(
-            AuditPolicy::resolve(None, Some(&strict)).mode,
+            snapshot(None, strict()).audit_policy().mode,
             AuditMode::RequireAudit
         );
         assert_eq!(
-            AuditPolicy::resolve(None, Some(&permissive)).mode,
+            snapshot(None, permissive()).audit_policy().mode,
             AuditMode::KeepWorking
         );
+        assert_eq!(snapshot(None, None).audit_policy(), &AuditPolicy::default());
         assert_eq!(
             serde_json::from_str::<AuditMode>("\"require_audit\"").unwrap(),
             AuditMode::RequireAudit
         );
-        assert!(super::super::manifest::parse(&serde_json::to_string(&serde_json::json!({"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":MODE_KEY,"value":"silent","level":"mandatory"}]})).unwrap(), "test").is_err());
+        assert!(manifest::parse(&serde_json::to_string(&serde_json::json!({"schema":4,"name":"test","version":"1","grants":[],"config":[{"key":MODE_KEY,"value":"silent","level":"mandatory"}]})).unwrap(), "test").is_err());
     }
 }

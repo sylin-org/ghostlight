@@ -665,14 +665,15 @@ impl Live {
         }
     }
 
-    /// Tell every screen that the person's rules changed, with their new tag.
+    /// Tell every screen that the person's rules changed, tagged with the authority now in force.
     ///
     /// The refresher does not announce the same authority again.
     pub fn policy_changed(&self) {
-        lock(&self.remembered).authority = self.governance.snapshot().id().to_owned();
+        let id = self.governance.published().authority().id.clone();
+        lock(&self.remembered).authority.clone_from(&id);
         self.projection.publish(WorkbenchChange::PartChanged {
             part: HintedPart::Policy,
-            etag: parts::policy_etag(&self.governance.effective_authority()),
+            etag: id,
         });
     }
 

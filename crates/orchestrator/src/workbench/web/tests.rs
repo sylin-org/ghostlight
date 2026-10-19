@@ -1934,7 +1934,8 @@ fn the_acts_that_change_a_part_hint_at_it_with_its_tag() {
         .unwrap()
         .to_owned();
     assert_ne!(new_tag, tag);
-    assert_eq!(hinted.json()["change"]["etag"], new_tag);
+    // The policy hint is tagged with the authority now in force.
+    assert_eq!(hinted.json()["change"]["etag"], fixture.facade.policy().id);
     assert_eq!(
         hinted.id,
         Some(format!(

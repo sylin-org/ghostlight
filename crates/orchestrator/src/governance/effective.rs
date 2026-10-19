@@ -16,7 +16,8 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use super::{
-    manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet, ManagedPolicyPassport,
+    manifest, AuthoritySnapshot, AuthorityTier, Capability, CapabilitySet, ManagedPolicyFreshness,
+    ManagedPolicyPassport,
 };
 use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::{PolicyAuthor, OWN_CONTROL_PAGE_CEILING};
@@ -247,7 +248,13 @@ pub struct UserLayer {
 /// The complete compiled answer.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EffectiveAuthority {
-    /// Effective requirement for saving audit receipts.
+    /// The id of the authority this answer was compiled from, the one the audit line records.
+    ///
+    /// It is for the service's own readers and is never sent to the window: it is a digest of
+    /// the layers' documents, so a watcher could test guesses about a withheld list against it.
+    #[serde(skip)]
+    pub id: String,
+    /// Effective requirement for saving audit receipts, as the snapshot enforces it.
     pub audit: super::audit::AuditPolicy,
     /// Which layers are in force.
     pub situation: Situation,
@@ -298,30 +305,27 @@ pub struct PolicyChip {
     pub tone: ChipTone,
 }
 
-/// Author the policy tab's state, naming the organization its publication resolved.
-#[must_use]
-pub fn chip(
-    situation: Situation,
-    organization: Option<&OrganizationIdentity>,
-    stale: bool,
-    channels_off: ChannelsOff<'_>,
-) -> PolicyChip {
-    let detail = headline(situation, organization, channels_off);
-    let tone = match situation {
-        Situation::FailingClosed => ChipTone::Failing,
-        Situation::AllOpen => ChipTone::Open,
-        Situation::OrganizationOnly | Situation::UserOnly | Situation::Layered => {
-            if stale {
-                ChipTone::Warning
-            } else {
-                ChipTone::Applied
+impl PolicyChip {
+    /// The policy tab's state, read from the compiled answer: its situation and headline, and a
+    /// warning tone while the organization's policy is the last known good one.
+    #[must_use]
+    pub fn of(authority: &EffectiveAuthority) -> Self {
+        let tone = match authority.situation {
+            Situation::FailingClosed => ChipTone::Failing,
+            Situation::AllOpen => ChipTone::Open,
+            Situation::OrganizationOnly | Situation::UserOnly | Situation::Layered => {
+                if authority.passport.freshness == ManagedPolicyFreshness::LastKnownGood {
+                    ChipTone::Warning
+                } else {
+                    ChipTone::Applied
+                }
             }
+        };
+        Self {
+            situation: authority.situation,
+            detail: authority.headline.clone(),
+            tone,
         }
-    };
-    PolicyChip {
-        situation,
-        detail,
-        tone,
     }
 }
 
@@ -409,7 +413,8 @@ pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
         ));
     }
     EffectiveAuthority {
-        audit: super::audit::AuditPolicy::resolve(inputs.organization, inputs.user),
+        id: inputs.snapshot.id().to_owned(),
+        audit: inputs.snapshot.audit_policy().clone(),
         situation,
         headline,
         organization,
@@ -642,7 +647,7 @@ fn with_switches(mut decided_by: Vec<LayerKind>, switched: ChannelsOff<'_>) -> V
 }
 
 /// The layer kind a person reads for one authority tier.
-const fn layer_kind(tier: AuthorityTier) -> LayerKind {
+pub(super) const fn layer_kind(tier: AuthorityTier) -> LayerKind {
     match tier {
         AuthorityTier::Managed => LayerKind::Organization,
         AuthorityTier::User => LayerKind::User,
@@ -784,8 +789,9 @@ fn user_layer(inputs: &Inputs<'_>) -> UserLayer {
 #[cfg(test)]
 mod tests {
     use super::{
-        compile, pattern_covers, CapabilityState, Inputs, LayerKind, OrganizationIdentity,
-        RuleNote, Situation, UserLayerSource, OWN_CONTROL_PAGE_CEILING,
+        compile, pattern_covers, CapabilityState, ChipTone, Inputs, LayerKind,
+        OrganizationIdentity, PolicyChip, RuleNote, Situation, UserLayerSource,
+        OWN_CONTROL_PAGE_CEILING,
     };
     use std::sync::Arc;
 
@@ -1354,6 +1360,86 @@ mod tests {
                 view.capabilities[0].state != CapabilityState::Unavailable,
                 "fixture {index}"
             );
+        }
+    }
+
+    #[test]
+    fn the_chip_is_the_compiled_headline() {
+        let organization = policy(
+            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
+        );
+        let user = policy(
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"read","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+        );
+        let mut switched = inputs(Some(&organization), None);
+        switched.channels_off = ChannelsOff {
+            mcp: Some(PolicyAuthor::Organization),
+            cli: None,
+            organization: Some("Northwind"),
+        };
+        let mut stale = inputs(Some(&organization), Some(&user));
+        stale.passport.freshness = crate::governance::ManagedPolicyFreshness::LastKnownGood;
+        let mut broken = inputs(None, Some(&user));
+        broken.valid = false;
+        for (fixture, tone) in [
+            (inputs(None, None), ChipTone::Open),
+            (inputs(Some(&organization), None), ChipTone::Applied),
+            (inputs(None, Some(&user)), ChipTone::Applied),
+            (inputs(Some(&organization), Some(&user)), ChipTone::Applied),
+            (switched, ChipTone::Applied),
+            (stale, ChipTone::Warning),
+            (broken, ChipTone::Failing),
+        ] {
+            let view = compile(&fixture);
+            let chip = PolicyChip::of(&view);
+            assert_eq!(chip.detail, view.headline);
+            assert_eq!(chip.situation, view.situation);
+            assert_eq!(chip.tone, tone, "{:?}", view.situation);
+        }
+    }
+
+    #[test]
+    fn enforcement_and_the_view_name_the_same_audit_layer() {
+        let mode = |value: &str| {
+            policy(&format!(
+                r#"{{"schema":4,"name":"p","version":"1","grants":[],"config":[{{"key":"{}","value":"{value}","level":"mandatory"}}]}}"#,
+                crate::governance::audit::MODE_KEY
+            ))
+        };
+        let choices = [
+            None,
+            Some(mode("keep_working")),
+            Some(mode("require_audit")),
+        ];
+        for organization in &choices {
+            for user in &choices {
+                let fixture = inputs(organization.as_ref(), user.as_ref());
+                let view = compile(&fixture);
+                let refused = fixture.snapshot.authorize_audit(false);
+                assert_eq!(
+                    !refused.allowed,
+                    fixture.snapshot.requires_audit(),
+                    "{organization:?} {user:?}"
+                );
+                if refused.allowed {
+                    assert_eq!(
+                        view.audit.mode,
+                        crate::governance::audit::AuditMode::KeepWorking
+                    );
+                    continue;
+                }
+                let (tier, _) = fixture.snapshot.attribution(refused).expect("attributed");
+                let named = match view.audit.source {
+                    Some(LayerKind::Organization) => AuthorityTier::Managed,
+                    Some(LayerKind::User) => AuthorityTier::User,
+                    other => panic!("no layer named: {other:?}"),
+                };
+                assert_eq!(tier, named.as_str(), "{organization:?} {user:?}");
+                assert_eq!(
+                    view.audit.mode,
+                    crate::governance::audit::AuditMode::RequireAudit
+                );
+            }
         }
     }
 }

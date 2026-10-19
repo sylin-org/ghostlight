@@ -402,6 +402,8 @@ pub struct AuthoritySnapshot {
     valid: bool,
     /// The organization this publication names, resolved once from its carriers.
     organization: Option<effective::OrganizationIdentity>,
+    /// The audit requirement, resolved once from the layers.
+    audit: audit::AuditRequirement,
     own_origin: OwnOrigin,
 }
 
@@ -1366,13 +1368,13 @@ pub const fn offers(state: RuntimeControlState) -> &'static [RuntimeControlInten
 
 /// A small governance service facade used by the application executor.
 ///
-/// Every reader sees the one [`Published`] authority and takes no file or network step to get it.
+/// Every reader sees the one [`Publication`] and takes no file or network step to get it.
 /// The refresher is the only caller that checks files on a schedule or reaches the organization's
 /// endpoint, so the managed fetch never runs on the invocation path (ADR-0197).
 #[derive(Clone, Debug)]
 pub struct GovernanceFacade {
     /// What every reader sees. Replaced whole; a reader locks it only to clone the `Arc`.
-    published: Arc<Mutex<Arc<Published>>>,
+    published: Arc<Mutex<Arc<Publication>>>,
     /// The local policy files and the last view of the managed authority. Writers lock it for the
     /// time a file read takes, never across a network call.
     sources: Arc<Mutex<PolicySources>>,
@@ -1383,21 +1385,23 @@ pub struct GovernanceFacade {
     own_origin: OwnOrigin,
 }
 
-/// One immutable publication of authority, with every view the workbench reads built from it.
+/// One immutable publication of authority, with every view its readers need built from it.
+///
+/// A reader that needs more than one of these facts reads them from one publication, so the
+/// snapshot it enforces and the answer it reports describe the same instant.
 #[derive(Debug)]
-struct Published {
+pub struct Publication {
     snapshot: Arc<AuthoritySnapshot>,
     diagnostics: GovernanceDiagnostics,
     chip: effective::PolicyChip,
     authority: effective::EffectiveAuthority,
-    startup: manifest::BrowserStartup,
     /// The organization layer a candidate user policy is previewed under.
     managed: Option<manifest::Manifest>,
     managed_sequence: Option<u64>,
     managed_valid: bool,
 }
 
-impl Published {
+impl Publication {
     fn build(sources: &PolicySources, own_origin: &OwnOrigin) -> Self {
         let managed = sources.managed_manifest().cloned();
         let managed_sequence = sources.managed_sequence();
@@ -1415,24 +1419,7 @@ impl Published {
         let passport = sources.managed_passport().naming(snapshot.organization());
         let user = sources.user.active.as_ref();
         let organization = managed.as_ref();
-
-        let situation = if !valid {
-            effective::Situation::FailingClosed
-        } else {
-            match (organization.is_some(), user.is_some()) {
-                (true, true) => effective::Situation::Layered,
-                (true, false) => effective::Situation::OrganizationOnly,
-                (false, true) => effective::Situation::UserOnly,
-                (false, false) => effective::Situation::AllOpen,
-            }
-        };
         let channels_off = snapshot.channels_off();
-        let chip = effective::chip(
-            situation,
-            snapshot.organization(),
-            matches!(passport.freshness, ManagedPolicyFreshness::LastKnownGood),
-            channels_off,
-        );
 
         let inputs = effective::Inputs {
             snapshot: Arc::clone(&snapshot),
@@ -1462,7 +1449,6 @@ impl Published {
             passport: passport.clone(),
         };
         let authority = effective::compile(&inputs);
-        let startup = authority.browser_startup.value;
 
         Self {
             snapshot,
@@ -1476,13 +1462,36 @@ impl Published {
                 authority_valid: valid,
                 managed_policy: passport,
             },
-            chip,
+            chip: effective::PolicyChip::of(&authority),
             authority,
-            startup,
             managed,
             managed_sequence,
             managed_valid: sources.managed_valid(),
         }
+    }
+
+    /// The snapshot enforcement reads.
+    #[must_use]
+    pub fn snapshot(&self) -> &Arc<AuthoritySnapshot> {
+        &self.snapshot
+    }
+
+    /// The compiled answer a person and `policy_explain` read, carrying the snapshot's id.
+    #[must_use]
+    pub const fn authority(&self) -> &effective::EffectiveAuthority {
+        &self.authority
+    }
+
+    /// The policy tab's state, read from the compiled answer.
+    #[must_use]
+    pub const fn chip(&self) -> &effective::PolicyChip {
+        &self.chip
+    }
+
+    /// Content-free facts about the policy sources behind this publication.
+    #[must_use]
+    pub const fn diagnostics(&self) -> &GovernanceDiagnostics {
+        &self.diagnostics
     }
 }
 
@@ -1949,7 +1958,7 @@ impl GovernanceFacade {
             sources.remote = Some(RemoteView::of(remote));
         }
         let own_origin = OwnOrigin::default();
-        let published = Arc::new(Published::build(&sources, &own_origin));
+        let published = Arc::new(Publication::build(&sources, &own_origin));
         Self {
             published: Arc::new(Mutex::new(published)),
             sources: Arc::new(Mutex::new(sources)),
@@ -1959,7 +1968,11 @@ impl GovernanceFacade {
         }
     }
 
-    fn published(&self) -> Arc<Published> {
+    /// The publication in force, whole: its snapshot, its compiled answer and its views.
+    ///
+    /// This clones an `Arc` and reads no file and no network.
+    #[must_use]
+    pub fn published(&self) -> Arc<Publication> {
         Arc::clone(&lock(&self.published))
     }
 
@@ -2002,7 +2015,7 @@ impl GovernanceFacade {
     }
 
     fn publish(&self, sources: &PolicySources) {
-        *lock(&self.published) = Arc::new(Published::build(sources, &self.own_origin));
+        *lock(&self.published) = Arc::new(Publication::build(sources, &self.own_origin));
     }
 
     /// Hold the sources lock, as a refresher mid-read does.
@@ -2057,7 +2070,7 @@ impl GovernanceFacade {
     /// Resolve the effective missing-browser startup preference.
     #[must_use]
     pub fn browser_startup(&self) -> manifest::BrowserStartup {
-        self.published().startup
+        self.published().authority.browser_startup.value
     }
 
     /// Protect the workbench's own loopback port: no agent can open or read an address on it.
@@ -2198,11 +2211,13 @@ fn assemble(
         layers.push(PolicyLayer::new(tier, policy));
     }
     let id = authority_id(&layers, valid);
+    let audit = audit::AuditRequirement::of(&layers);
 
     AuthoritySnapshot {
         id,
         managed_sequence,
         layers,
+        audit,
         tab_close_allowed,
         tab_close_source,
         preserve_target_names,
