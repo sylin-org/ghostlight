@@ -18,7 +18,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C1 | fix(audit): the durable record keeps only what may be retained | candidate | ux-2 closes | see Notes | landed (fe18e597) |
 | C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | see Notes | landed (7bd0bf20) |
 | C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | see Notes | landed (ec15bacb, journey fixup) |
-| C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits; see Notes | landed (e4f353ab, this commit) |
+| C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits; see Notes | landed (e4f353ab, 1d10bf74, review fixup) |
 | C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | - | todo |
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | - | todo |
 | C7 | fix(language): a workspace refusal says what is true | candidate | C6 | - | todo |
@@ -120,13 +120,28 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   connection it replaces, before the new one is registered, because the replaced stream's own end
   is never reported. That is the one route by which "every registration of a browser id" reaches
   the aggregate; the event vocabulary in `browser/adapter/work.rs` is unchanged.
-- C4, what a call selects: the wait for an absent browser runs when the call names a pending tab
-  handle, or a target handle on a pending tab. A call that names neither selects only a sole
-  confirmed tab, because a pending binding is inert, so it never waits. A flow step waits on its
-  own frame, since each step runs the same confirmation. The wait ends the binding only when the
-  browser did not come back (not connected, another profile, recovery left to the person or
-  failed); a paused runtime, a silent connection, a spent deadline or a cancel answers the call
-  with that refusal and keeps the binding pending.
+- C4, what a call selects: the wait for an absent browser runs for the pending binding the call
+  would select. That is the tab it names, the tab of a target it names (a fill's field and submit
+  targets and a drag's two ends included) or the tab of a view it names. A call that names none
+  of them works in the workspace's only tab, so while the workspace holds no confirmed tab and all
+  its pending bindings are in one browser, it waits for that browser and confirms them before it
+  selects. That covers the service restart and the browser or native-host reconnect, so a
+  `browser_read` or `browser_navigate` without `tab` keeps working in the session's tab and
+  never opens a second one. A listing never waits (Decision 2), an open makes a fresh tab, and a
+  flow step waits on its own frame, since each step runs the same confirmation. The wait ends the
+  binding only when the browser did not come back (not connected, another profile, recovery left
+  to the person or failed); a paused runtime, a silent connection, a spent deadline or a cancel
+  answers the call with that refusal and keeps the binding pending.
+- C4, a gap inside a call: a browser can restart between two crossings of one call, so every
+  command addressed to one tab reads how the workspace holds that tab before it crosses
+  (`WorkspaceStore::binding_state`). After the browser is chosen and before any presentation cue,
+  a binding that went pending is confirmed with one `ListTabs`, and a tab the browser does not
+  confirm answers "That tab is no longer open." with nothing sent (`BrowserError::StaleTab`). The
+  port asks admission for a command that may change the page once it holds the connection it
+  writes to, and admission refuses a tab that went pending in between as never sent. A read the
+  port never asked about is confirmed again after its answer, and an answer from a tab the browser
+  no longer confirms is dropped. The lease's `confirm` moved to the store, because a crossing
+  holds no lease.
 - C4, a listing that fails: a `ListTabs` changes nothing, so its failure after dispatch is read
   as the same failure before dispatch (`work/pending.rs`, `listing_failure`), never as an effect
   that may have happened.
@@ -147,8 +162,16 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `a_resumed_tab_is_confirmed_by_id_and_url_before_its_first_use`,
   `a_token_from_before_a_browser_restart_restores_nothing`,
   `a_call_on_a_tab_whose_browser_never_returns_forgets_it`,
-  `a_call_that_names_no_pending_tab_leaves_it_pending_while_its_browser_is_away` and
-  `opening_in_another_browser_forgets_the_resumed_tabs_and_says_so`; in `workspace/mod.rs`
+  `a_call_that_names_no_pending_tab_leaves_it_pending_while_its_browser_is_away`,
+  `opening_in_another_browser_forgets_the_resumed_tabs_and_says_so`,
+  `a_gap_inside_a_call_never_sends_the_old_id_to_the_restarted_browser`,
+  `a_gap_inside_a_call_keeps_a_tab_whose_page_is_unchanged`,
+  `a_call_that_names_no_tab_waits_for_its_only_tabs_browser` (read, navigate) and
+  `a_resumed_session_that_names_no_tab_waits_for_its_tabs_browser`; in `work/pending.rs`
+  `a_fill_and_a_drag_select_their_tab_by_every_target_they_name` and
+  `a_listing_and_an_open_select_no_tab`; in `workspace/mod.rs`
+  `a_call_selects_the_pending_binding_it_names_or_the_only_one`,
+  `a_crossing_reads_how_its_workspace_holds_the_tab_it_names`,
   `a_new_tab_with_a_recycled_id_forgets_the_pending_binding`,
   `a_commit_never_confirms_a_pending_binding`,
   `a_release_after_a_browser_restart_closes_no_pending_tab`,

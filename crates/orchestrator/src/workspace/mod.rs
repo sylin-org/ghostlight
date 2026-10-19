@@ -131,6 +131,31 @@ pub struct TabBinding {
     pub pending: bool,
 }
 
+/// How a workspace holds one physical tab of one browser, as a command addressed to that tab
+/// reads it before it crosses to the browser.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BindingState {
+    /// The workspace holds a binding of the tab that its browser has confirmed.
+    Confirmed,
+    /// The workspace holds a binding of the tab that waits for its browser to confirm it.
+    Pending,
+    /// The workspace holds no binding of the tab.
+    Unbound,
+}
+
+/// The handles a call names that choose its tab: a tab, targets on a tab, or a view of one.
+///
+/// A call that names none of them works in the workspace's only tab.
+#[derive(Clone, Debug, Default)]
+pub struct TabRequest<'a> {
+    /// The tab handle the call names.
+    pub tab: Option<&'a str>,
+    /// Every target handle the call names, each of which lives on one tab.
+    pub targets: Vec<&'a str>,
+    /// The view handle the call names, which was taken on one tab.
+    pub view: Option<&'a str>,
+}
+
 /// Mint a short handle with `prefix` that `taken` does not already name.
 fn short_handle(prefix: &str, taken: impl Fn(&str) -> bool) -> String {
     loop {
@@ -691,7 +716,7 @@ struct WorkspaceState {
     /// Which browser this workspace works in, once its first tab bound one.
     ///
     /// Only binding a tab writes it ([`WorkspaceLease::add_tab`], [`WorkspaceLease::restore_tab`]
-    /// and a confirmed pending binding, [`WorkspaceLease::confirm`]), so a call that binds no tab
+    /// and a confirmed pending binding, [`WorkspaceStore::confirm`]), so a call that binds no tab
     /// leaves the choice open.
     /// A workspace lives in one browser for its whole life. Its tabs, targets, and views are all
     /// physical things inside that one browser, and physical tab ids only mean anything there, so
@@ -1532,6 +1557,44 @@ impl WorkspaceStore {
         bindings
     }
 
+    /// How `workspace` holds `browser`'s tab `physical_id` now.
+    ///
+    /// Every command addressed to one tab reads this before it crosses, because a gap in what the
+    /// service knows of the browser can open while a call runs (ADR-0203 Decision 1).
+    #[must_use]
+    pub fn binding_state(&self, workspace: &str, browser: &str, physical_id: u64) -> BindingState {
+        let state = self.lock();
+        let binding = state.workspaces.get(workspace).and_then(|workspace| {
+            workspace
+                .tabs
+                .values()
+                .find(|tab| tab.physical_id == physical_id && tab.browser == browser)
+        });
+        match binding {
+            Some(tab) if tab.is_confirmed() => BindingState::Confirmed,
+            Some(_) => BindingState::Pending,
+            None => BindingState::Unbound,
+        }
+    }
+
+    /// Confirm or forget `workspace`'s pending bindings of `browser` against `live`, the tabs
+    /// that browser lists now (ADR-0203 Decision 1). Only the call that holds the workspace's
+    /// lease confirms, before it selects a tab and again before a crossing whose tab went pending
+    /// while it ran.
+    ///
+    /// A binding whose id the browser lists at the URL it is remembered by, and that no other
+    /// workspace holds, is kept: it takes the live title and readiness and keeps its generation,
+    /// handles and captures. The first one binds the workspace's browser. Every other pending
+    /// binding of `browser` is forgotten as closed, and its handle then reads as no longer open.
+    pub fn confirm(
+        &self,
+        workspace: &WorkspaceId,
+        browser: &str,
+        live: &[PhysicalTab],
+    ) -> Result<(), WorkspaceError> {
+        self.lock().confirm(workspace, browser, live)
+    }
+
     /// Invalidate agent references after an unrelated page change, without governing browsing.
     ///
     /// A commit in a released tab means the person or the page took it back, since no Ghostlight
@@ -1702,39 +1765,55 @@ impl WorkspaceLease {
         browsers
     }
 
-    /// The browser of the pending binding a call that names `tab`, or the target `target`, would
-    /// select, if that binding is pending.
+    /// The browser of the pending binding the call that names `request` would select, if that
+    /// binding is pending.
     ///
-    /// A call that names neither selects only a sole confirmed tab, so it selects no pending one.
+    /// A named tab, a named target's tab or a named view's tab selects its binding. A call that
+    /// names none of them selects the workspace's only tab, so while the workspace holds no
+    /// confirmed tab and every pending binding is in one browser, it selects a binding of that
+    /// browser.
     #[must_use]
-    pub fn pending_browser_of(&self, tab: Option<&str>, target: Option<&str>) -> Option<String> {
+    pub fn pending_browser_of(&self, request: &TabRequest<'_>) -> Option<String> {
         let state = self.store.lock();
         let workspace = state.workspaces.get(&self.workspace)?;
-        let handle = match (tab, target) {
-            (Some(tab), _) => TabHandle(tab.into()),
-            (None, Some(target)) => workspace
-                .targets
-                .get(&TargetHandle(target.into()))?
-                .tab
-                .clone(),
-            (None, None) => return None,
-        };
-        workspace
+        let named: Vec<TabHandle> = request
+            .tab
+            .map(|tab| TabHandle(tab.into()))
+            .into_iter()
+            .chain(request.targets.iter().filter_map(|target| {
+                workspace
+                    .targets
+                    .get(&TargetHandle((*target).into()))
+                    .map(|record| record.tab.clone())
+            }))
+            .chain(request.view.and_then(|view| {
+                workspace
+                    .views
+                    .get(&ViewHandle(view.into()))
+                    .map(|view| view.tab.clone())
+            }))
+            .collect();
+        if !named.is_empty() {
+            return named.iter().find_map(|handle| {
+                workspace
+                    .tabs
+                    .get(handle)
+                    .filter(|binding| !binding.is_confirmed())
+                    .map(|binding| binding.browser.clone())
+            });
+        }
+        if workspace.confirmed_tabs().next().is_some() {
+            return None;
+        }
+        let mut browsers = workspace
             .tabs
-            .get(&handle)
-            .filter(|binding| !binding.is_confirmed())
-            .map(|binding| binding.browser.clone())
-    }
-
-    /// Confirm or forget this workspace's pending bindings of `browser` against `live`, the tabs
-    /// that browser lists now (ADR-0203 Decision 1).
-    ///
-    /// A binding whose id the browser lists at the URL it is remembered by, and that no other
-    /// workspace holds, is kept: it takes the live title and readiness and keeps its generation,
-    /// handles and captures. The first one binds the workspace's browser. Every other pending
-    /// binding of `browser` is forgotten as closed, and its handle then reads as no longer open.
-    pub fn confirm(&self, browser: &str, live: &[PhysicalTab]) -> Result<(), WorkspaceError> {
-        self.store.lock().confirm(&self.workspace, browser, live)
+            .values()
+            .filter(|tab| !tab.is_confirmed())
+            .map(|tab| tab.browser.as_str());
+        let browser = browsers.next()?;
+        browsers
+            .all(|other| other == browser)
+            .then(|| browser.to_owned())
     }
 
     /// Forget every pending binding of `browser` without asking any browser, after that browser
@@ -2478,8 +2557,9 @@ mod tests {
     use crate::language::outcome::TargetRole;
 
     use super::{
-        short_handle, ReleasedTabs, SnapshotScope, StaleReason, TargetBook, TargetHandle,
-        WorkspaceError, WorkspaceId, WorkspaceStore, HANDLE_ALPHABET, HANDLE_SUFFIX_CHARS,
+        short_handle, BindingState, ReleasedTabs, SnapshotScope, StaleReason, TargetBook,
+        TargetHandle, WorkspaceError, WorkspaceId, WorkspaceStore, HANDLE_ALPHABET,
+        HANDLE_SUFFIX_CHARS,
     };
     use crate::language::outcome::DialogKind;
 
@@ -2909,7 +2989,10 @@ mod tests {
         let lease = store.acquire(&workspace).unwrap();
         assert_eq!(lease.pending_browsers(), vec![TEST_BROWSER.to_owned()]);
         assert_eq!(
-            lease.pending_browser_of(Some(&handle), None),
+            lease.pending_browser_of(&super::TabRequest {
+                tab: Some(&handle),
+                ..Default::default()
+            }),
             Some(TEST_BROWSER.into())
         );
         assert_eq!(
@@ -2939,6 +3022,87 @@ mod tests {
     }
 
     #[test]
+    fn a_call_selects_the_pending_binding_it_names_or_the_only_one() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_test(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
+        let tab = lease
+            .apply_landing(&tab.handle, &physical(7, AGENT_URL))
+            .unwrap();
+        let target = lease
+            .register_targets(&tab, &[control("#email", "Email")])
+            .unwrap()[0]
+            .0
+            .clone();
+        drop(lease);
+        store.apply_browser_disconnect(TEST_BROWSER);
+        let lease = store.acquire(&workspace).unwrap();
+        let away = Some(TEST_BROWSER.to_owned());
+
+        // A call that names nothing selects the only binding, and a target names its tab.
+        assert_eq!(
+            lease.pending_browser_of(&super::TabRequest::default()),
+            away
+        );
+        assert_eq!(
+            lease.pending_browser_of(&super::TabRequest {
+                targets: vec!["target_unknown", target.as_str()],
+                ..Default::default()
+            }),
+            away
+        );
+
+        // With a confirmed tab beside it, or pending tabs in two browsers, a call that names
+        // nothing selects no pending one.
+        store.remember_tab(
+            &workspace,
+            "tab_away",
+            "browser_away",
+            9,
+            super::UrlDigest::of(AGENT_URL),
+        );
+        assert_eq!(
+            lease.pending_browser_of(&super::TabRequest::default()),
+            None
+        );
+        store
+            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .unwrap();
+        assert_eq!(
+            lease.pending_browser_of(&super::TabRequest::default()),
+            None
+        );
+        assert_eq!(
+            lease.pending_browser_of(&super::TabRequest {
+                tab: Some("tab_away"),
+                ..Default::default()
+            }),
+            Some("browser_away".into()),
+            "a named tab selects its binding wherever it is"
+        );
+    }
+
+    #[test]
+    fn a_crossing_reads_how_its_workspace_holds_the_tab_it_names() {
+        let store = WorkspaceStore::default();
+        let (workspace, _) = pending_workspace(&store);
+        let state = |id| store.binding_state(workspace.as_str(), TEST_BROWSER, id);
+        assert_eq!(state(7), BindingState::Pending);
+        assert_eq!(state(8), BindingState::Unbound);
+        store
+            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
+            .unwrap();
+        assert_eq!(state(7), BindingState::Confirmed);
+        assert_eq!(
+            store.binding_state(workspace.as_str(), "browser_elsewhere", 7),
+            BindingState::Unbound
+        );
+    }
+
+    #[test]
     fn a_confirmed_binding_keeps_its_handle_and_a_moved_one_is_forgotten() {
         let store = WorkspaceStore::default();
         let workspace = workspace_with_tabs(
@@ -2951,8 +3115,8 @@ mod tests {
         let lease = store.acquire(&workspace).unwrap();
         let mut live = physical(7, AGENT_URL);
         live.title = "Live title".into();
-        lease
-            .confirm(TEST_BROWSER, &[live, physical(8, PERSONS_URL)])
+        store
+            .confirm(&workspace, TEST_BROWSER, &[live, physical(8, PERSONS_URL)])
             .unwrap();
 
         let tabs = lease.tabs().unwrap();
@@ -2983,8 +3147,8 @@ mod tests {
             .unwrap();
         assert!(store.tab_bindings(workspace.as_str()).is_empty());
         let lease = store.acquire(&workspace).unwrap();
-        lease
-            .confirm(TEST_BROWSER, &[physical(7, AGENT_URL)])
+        store
+            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
             .unwrap();
         assert!(lease.tabs().unwrap().is_empty());
     }
@@ -3002,8 +3166,8 @@ mod tests {
         assert!(bindings[0].pending);
         assert_eq!(bindings[0].url, super::UrlDigest::of(AGENT_URL));
         let lease = store.acquire(&workspace).unwrap();
-        lease
-            .confirm(TEST_BROWSER, &[physical(7, PERSONS_URL)])
+        store
+            .confirm(&workspace, TEST_BROWSER, &[physical(7, PERSONS_URL)])
             .unwrap();
         assert!(lease.tabs().unwrap().is_empty());
         assert!(store.tab_bindings(workspace.as_str()).is_empty());
@@ -3033,8 +3197,8 @@ mod tests {
             super::UrlDigest::of(AGENT_URL),
         );
         let lease = store.acquire(&workspace).unwrap();
-        lease
-            .confirm(TEST_BROWSER, &[physical(7, AGENT_URL)])
+        store
+            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
             .unwrap();
         assert!(lease.tabs().unwrap().is_empty());
         assert!(store.tab_bindings(workspace.as_str()).is_empty());
@@ -3086,8 +3250,8 @@ mod tests {
         assert_eq!(store.browser_of(workspace.as_str()), None);
         let lease = store.acquire(&workspace).unwrap();
         assert_eq!(lease.forget_pending("browser_elsewhere"), Ok(()));
-        lease
-            .confirm(TEST_BROWSER, &[physical(7, AGENT_URL)])
+        store
+            .confirm(&workspace, TEST_BROWSER, &[physical(7, AGENT_URL)])
             .unwrap();
         let tab = lease.select_tab(Some("tab_kept")).unwrap();
         assert_eq!(tab.physical_id, 7);

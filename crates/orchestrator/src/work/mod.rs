@@ -39,7 +39,9 @@ use url::Url;
 use crate::browser::recovery::{
     BrowserRecovery, RecoveryDecision, RecoveryFailure, RecoveryWaitError,
 };
-use crate::browser::{choose_browser, Availability, BrowserError, BrowserPort, RETURN_GRACE};
+use crate::browser::{
+    addressed_tab, choose_browser, Availability, BrowserError, BrowserPort, RETURN_GRACE,
+};
 use crate::events::{DenialPresentation, DomainEvent};
 
 use crate::audit::AuditRecord;
@@ -500,7 +502,7 @@ impl ApplicationExecutor {
             if let Some(terminal) = self.audit_preflight(context) {
                 return terminal;
             }
-            if let Some(terminal) = self.confirm_pending(context, lease) {
+            if let Some(terminal) = self.confirm_pending(context, lease, operation) {
                 return terminal;
             }
         }
@@ -1343,6 +1345,7 @@ impl ApplicationExecutor {
         command: BrowserCommand,
     ) -> Result<BrowserOutcome, BrowserError> {
         let browser = self.admitted_browser(context)?;
+        self.confirm_crossing(context, &browser, addressed_tab(&command))?;
         self.presentation.bind_command(
             context.workspace.as_str(),
             context.invocation.as_str(),
@@ -1371,6 +1374,13 @@ impl ApplicationExecutor {
     ///
     /// The name is read before sending, so a browser that disconnects after taking the command is
     /// still named in the record of the work it took part in.
+    ///
+    /// A command addressed to one tab is admitted only while that tab is one this workspace
+    /// controls in `browser` ([`Self::admit_tab`]). A port asks admission for a command that may
+    /// change the page, once it holds the connection it writes to. A read it never asked about may
+    /// have crossed to a connection that replaced the one its tab was confirmed on, so its tab is
+    /// confirmed again before its answer is used, and an answer from a tab the browser no longer
+    /// confirms is dropped as [`BrowserError::StaleTab`].
     fn send(
         &self,
         context: &InvocationContext<'_>,
@@ -1385,7 +1395,9 @@ impl ApplicationExecutor {
             .into_iter()
             .find(|summary| summary.id == browser)
             .map(|summary| summary.display_name());
+        let tab = addressed_tab(&command);
         let written = AtomicBool::new(false);
+        let asked = AtomicBool::new(false);
         let outcome = self.browser.call_guarded(
             browser,
             context.workspace.as_str(),
@@ -1393,12 +1405,19 @@ impl ApplicationExecutor {
             crate::browser::BrowserDispatch {
                 deadline,
                 cancelled,
-                admit: &|| self.admit_dispatch(context),
+                admit: &|| {
+                    asked.store(true, Ordering::SeqCst);
+                    self.admit_dispatch(context)?;
+                    tab.map_or(Ok(()), |tab| self.admit_tab(context, browser, tab))
+                },
                 written: &written,
             },
         );
         if let Some(name) = name.filter(|_| written.load(Ordering::SeqCst)) {
             context.findings.reach(name);
+        }
+        if outcome.is_ok() && !asked.load(Ordering::SeqCst) {
+            self.confirm_crossing(context, browser, tab)?;
         }
         outcome
     }
@@ -1419,11 +1438,12 @@ impl ApplicationExecutor {
     /// browser connected at all.
     ///
     /// The session's browser is the one its first tab bound, when [`WorkspaceLease::add_tab`] or
-    /// [`WorkspaceLease::restore_tab`] took it, or [`WorkspaceLease::confirm`] kept a pending one. A crossing reads that binding and never writes it,
-    /// so a crossing that binds no tab, such as a recording status, leaves the session free to
-    /// open its first tab in any browser. Until a tab binds one, the frame keeps its own first
-    /// choice, so one frame never crosses to two browsers. When the chosen browser is gone, the
-    /// call waits for it and may start that same browser again, but never moves to another one.
+    /// [`WorkspaceLease::restore_tab`] took it, or [`WorkspaceStore::confirm`] kept a pending one.
+    /// A crossing reads that binding and never writes it, so a crossing that binds no tab, such as
+    /// a recording status, leaves the session free to open its first tab in any browser. Until a
+    /// tab binds one, the frame keeps its own first choice, so one frame never crosses to two
+    /// browsers. When the chosen browser is gone, the call waits for it and may start that same
+    /// browser again, but never moves to another one.
     fn target_browser(&self, context: &InvocationContext<'_>) -> Result<String, BrowserError> {
         // The workspace vanished between admission and dispatch. Nothing physical should happen
         // for a workspace that no longer exists.
@@ -1877,6 +1897,9 @@ impl ApplicationExecutor {
         }
         if error == BrowserError::StaleView {
             return self.workspace_failure(context, WorkspaceError::StaleView);
+        }
+        if error == BrowserError::StaleTab {
+            return self.workspace_failure(context, WorkspaceError::StaleTab);
         }
         if error == BrowserError::DialogOpen {
             return self.failed(
@@ -2764,9 +2787,9 @@ fn unchecked(error: &BrowserError, admitted: Decision) -> (CheckFailure, Decisio
         BrowserError::DeadlineBeforeDispatch | BrowserError::DeadlineAfterDispatch => {
             (CheckFailure::DeadlineExpired, admitted)
         }
-        BrowserError::DisconnectedBeforeDispatch | BrowserError::DisconnectedAfterDispatch => {
-            (CheckFailure::Disconnected, admitted)
-        }
+        BrowserError::DisconnectedBeforeDispatch
+        | BrowserError::DisconnectedAfterDispatch
+        | BrowserError::StaleTab => (CheckFailure::Disconnected, admitted),
         BrowserError::NotAnsweringBeforeDispatch
         | BrowserError::BusyBeforeDispatch
         | BrowserError::WrongProfile
@@ -3093,6 +3116,7 @@ fn browser_reason(error: &BrowserError) -> &'static str {
         BrowserError::DialogOpen => "dialog_open",
         BrowserError::TabNotShowing => "tab_not_showing",
         BrowserError::StaleView => "stale_view",
+        BrowserError::StaleTab => WorkspaceReason::TabUnavailable.as_fact(),
         BrowserError::LocalInterlock(_) => "browser_local_interlock",
         BrowserError::Protocol(_)
         | BrowserError::Authentication
@@ -3155,7 +3179,8 @@ mod tests {
 
     use super::{
         adapter_budget_ms, browser_reason, observed_from, readiness_name, routing_refusal,
-        ApplicationExecutor, BrowserError, CancellationToken, Effect, Readiness, Status,
+        ApplicationExecutor, BrowserError, BrowserPort, CancellationToken, Effect, Readiness,
+        Status,
     };
 
     #[derive(Default)]
@@ -3215,12 +3240,26 @@ mod tests {
     ) {
         let browser = Arc::new(FakeBrowser::default());
         let workspaces = WorkspaceStore::default();
+        let (executor, workspace, audit) = executor_on(governance, &workspaces, browser.clone());
+        (executor, browser, workspaces, workspace, audit)
+    }
+
+    /// An executor that works in `workspaces` through `browser`, with one admitted workspace.
+    fn executor_on(
+        governance: GovernanceFacade,
+        workspaces: &WorkspaceStore,
+        browser: Arc<dyn BrowserPort>,
+    ) -> (
+        ApplicationExecutor,
+        crate::workspace::WorkspaceId,
+        Arc<MemoryAudit>,
+    ) {
         let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
         let audit = Arc::new(MemoryAudit::default());
         let mut executor = ApplicationExecutor::new(
             governance,
             workspaces.clone(),
-            browser.clone(),
+            browser,
             PresentationReactor::new(Arc::new(NoPresentation)),
             WorkbenchProjection::default(),
             Arc::new(crate::audit::AuditRecorder::new(
@@ -3239,7 +3278,7 @@ mod tests {
                 registration: NativeHostState::Current,
                 ordinary_executable: Some(PathBuf::from("chromium")),
             }]);
-        (executor, browser, workspaces, workspace, audit)
+        (executor, workspace, audit)
     }
 
     fn fixture() -> (

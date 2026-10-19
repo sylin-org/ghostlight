@@ -99,6 +99,67 @@ pub struct BrowserDispatch<'a> {
     pub written: &'a AtomicBool,
 }
 
+/// The one physical tab `command` acts on or reads, when it names one.
+///
+/// A command that names no tab, or several (a listing, an open, a diagnostics clear, the
+/// recording's own commands and presentation), has none.
+#[must_use]
+pub fn addressed_tab(command: &Work) -> Option<u64> {
+    match command {
+        Work::InDocuments { primitive, .. } => addressed_tab(primitive),
+        Work::DescribeDocuments { tab_id, .. }
+        | Work::FocusTab { tab_id }
+        | Work::AdoptTab { tab_id, .. }
+        | Work::Navigate { tab_id, .. }
+        | Work::TraverseHistory { tab_id, .. }
+        | Work::Reload { tab_id, .. }
+        | Work::CloseTab { tab_id, .. }
+        | Work::NavigateDiscardingBeforeUnload { tab_id, .. }
+        | Work::ReadText { tab_id, .. }
+        | Work::ReadDocument { tab_id, .. }
+        | Work::Inspect { tab_id, .. }
+        | Work::InspectTree { tab_id, .. }
+        | Work::Find { tab_id, .. }
+        | Work::Screenshot { tab_id, .. }
+        | Work::ScreenshotRegion { tab_id, .. }
+        | Work::DescribeTargets { tab_id, .. }
+        | Work::QuerySemantic { tab_id, .. }
+        | Work::Activate { tab_id, .. }
+        | Work::ActivatePoint { tab_id, .. }
+        | Work::ActivateModified { tab_id, .. }
+        | Work::ActivatePointModified { tab_id, .. }
+        | Work::WheelAt { tab_id, .. }
+        | Work::Scroll { tab_id, .. }
+        | Work::SetZoom { tab_id, .. }
+        | Work::ResizeWindow { tab_id, .. }
+        | Work::Hover { tab_id, .. }
+        | Work::HoverPoint { tab_id, .. }
+        | Work::Fill { tab_id, .. }
+        | Work::TypeText { tab_id, .. }
+        | Work::DescribeFocused { tab_id }
+        | Work::TypeFocused { tab_id, .. }
+        | Work::PressKey { tab_id, .. }
+        | Work::Drag { tab_id, .. }
+        | Work::DragPoints { tab_id, .. }
+        | Work::UploadFiles { tab_id, .. }
+        | Work::DropImageAt { tab_id, .. }
+        | Work::EvaluateScript { tab_id, .. }
+        | Work::Observe { tab_id, .. }
+        | Work::InspectDialog { tab_id }
+        | Work::HandleDialog { tab_id, .. }
+        | Work::ReadDiagnostics { tab_id, .. }
+        | Work::StartRecording { tab_id } => Some(*tab_id),
+        Work::ListTabs
+        | Work::OpenTab { .. }
+        | Work::ClearDiagnostics { .. }
+        | Work::StatusRecording
+        | Work::StopRecording
+        | Work::ExportRecording { .. }
+        | Work::DiscardRecording
+        | Work::Present { .. } => None,
+    }
+}
+
 /// A synchronous physical primitive port used only by the orchestrator executor.
 pub trait BrowserPort: Send + Sync {
     /// Dispatch one primitive to one exact browser and await a decisive receipt, cancellation,
@@ -1294,6 +1355,11 @@ pub enum BrowserError {
     /// The page's view moved on from the screenshot the point was chosen on, and nothing was sent.
     #[error("the view moved since the screenshot was taken")]
     StaleView,
+    /// The tab the command names is no longer one its workspace controls: after a gap in what
+    /// the service knew of the browser, the browser did not confirm it (ADR-0203 Decision 1).
+    /// Nothing was sent.
+    #[error("the tab is no longer one the workspace controls")]
+    StaleTab,
     /// A browser-local human safety choice refused the primitive without an effect.
     #[error("browser local interlock refused the primitive: {0}")]
     LocalInterlock(String),
