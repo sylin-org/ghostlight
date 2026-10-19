@@ -765,24 +765,6 @@ impl RelayBrowserPort {
         lock(&self.adapters).connections.contains_key(browser)
     }
 
-    /// Return the adapter version of the most recently attended browser for diagnostics.
-    #[must_use]
-    pub fn adapter_version(&self) -> Option<String> {
-        self.connected_browsers()
-            .into_iter()
-            .next()
-            .map(|browser| browser.adapter_version)
-    }
-
-    /// Return the persistent installation id of the most recently attended browser.
-    #[must_use]
-    pub fn browser_id(&self) -> Option<String> {
-        self.connected_browsers()
-            .into_iter()
-            .next()
-            .map(|browser| browser.id)
-    }
-
     /// Tell every attached browser stream that the service is closing it on purpose.
     ///
     /// The goodbye is the relay's fixed bytes, not an adapter frame: the browser edge reads it

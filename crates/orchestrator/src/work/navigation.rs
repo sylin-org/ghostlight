@@ -393,7 +393,9 @@ impl ApplicationExecutor {
                 Some(url),
             );
         }
-        let selected = match lease.select_tab(requested_tab) {
+        // A held tab may be navigated away from its refused page: the destination was authorized
+        // above, and a governed landing clears the hold.
+        let selected = match lease.select_tab_to_leave(requested_tab) {
             Ok(tab) => tab,
             Err(WorkspaceError::NoTab) if requested_tab.is_none() => {
                 return self.open_page(context, lease, url, reuse)
@@ -482,12 +484,7 @@ impl ApplicationExecutor {
                 let landing =
                     self.authorize_commits(context, Capability::Read, &tab, &committed_urls);
                 if !landing.allowed {
-                    let _ = lease.hold_tab(&selected.handle);
-                    self.emit(DomainEvent::HoldEntered {
-                        invocation: context.invocation.into(),
-                        workspace: context.workspace.as_str().into(),
-                        physical_id: selected.physical_id,
-                    });
+                    self.hold(context, lease, &selected);
                     return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), Some(&tab.url));
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
@@ -609,12 +606,7 @@ impl ApplicationExecutor {
                 let landing =
                     self.authorize_commits(context, Capability::Action, &tab, &committed_urls);
                 if !landing.allowed {
-                    let _ = lease.hold_tab(&selected.handle);
-                    self.emit(DomainEvent::HoldEntered {
-                        invocation: context.invocation.into(),
-                        workspace: context.workspace.as_str().into(),
-                        physical_id: selected.physical_id,
-                    });
+                    self.hold(context, lease, selected);
                     return self.blocked_at(
                         context,
                         landing,
@@ -672,41 +664,39 @@ impl ApplicationExecutor {
         lease: &WorkspaceLease,
         requested: &str,
     ) -> Terminal {
-        // Closing what is already gone is the desired state achieved, not an error.
-        if matches!(
-            lease.select_tab(Some(requested)),
-            Err(WorkspaceError::StaleTab)
-        ) {
-            let decision = self.authorize_tab_close(context);
-            if !decision.allowed {
-                return self.blocked(
-                    context,
-                    decision,
-                    None,
-                    Effect::None,
-                    true,
-                    json!({"tab":requested,"reason":decision.reason.as_str()}),
-                );
-            }
-            return Terminal {
-                result: InvocationResult::new(
-                    context.invocation,
-                    Status::Succeeded,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    Outcome::TabAlreadyClosed.summary().as_str(),
-                    json!({"tab":requested,"closed":false,"already_gone":true}),
-                    vec![],
-                ),
-                decision,
-                physical_id: None,
-                observed: Default::default(),
-                audit: Outcome::TabAlreadyClosed.audit(),
-            };
-        }
-        let selected = match lease.select_tab(Some(requested)) {
+        // A held tab may be closed: closing takes it away from the page that held it.
+        let selected = match lease.select_tab_to_leave(Some(requested)) {
             Ok(tab) => tab,
+            // Closing what is already gone is the desired state achieved, not an error.
+            Err(WorkspaceError::StaleTab) => {
+                let decision = self.authorize_tab_close(context);
+                if !decision.allowed {
+                    return self.blocked(
+                        context,
+                        decision,
+                        None,
+                        Effect::None,
+                        true,
+                        json!({"tab":requested,"reason":decision.reason.as_str()}),
+                    );
+                }
+                return Terminal {
+                    result: InvocationResult::new(
+                        context.invocation,
+                        Status::Succeeded,
+                        Effect::None,
+                        Readiness::NotApplicable,
+                        true,
+                        Outcome::TabAlreadyClosed.summary().as_str(),
+                        json!({"tab":requested,"closed":false,"already_gone":true}),
+                        vec![],
+                    ),
+                    decision,
+                    physical_id: None,
+                    observed: Default::default(),
+                    audit: Outcome::TabAlreadyClosed.audit(),
+                };
+            }
             Err(error) => return self.workspace_failure(context, error),
         };
         let decision = self.authorize_tab_close(context);

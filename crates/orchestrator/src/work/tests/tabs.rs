@@ -1,8 +1,10 @@
-//! Tab reuse, tab ownership across browsers, and handle lifetime across same-document changes.
+//! Tab reuse, tab ownership across browsers, handle lifetime across same-document changes, and
+//! the two ways out of a held tab.
 //!
 //! Default reuse is the service's choice (ADR-0196 Decision 9): only a tab Ghostlight opened and
 //! a released session of the same client left open is ever reused, and the adapter is always told
-//! not to choose.
+//! not to choose. A held tab refuses reading and acting, and only a navigation to an allowed page
+//! or a close may select it (ADR-0203 Decision 2.4).
 
 use super::*;
 
@@ -727,5 +729,146 @@ fn a_flow_that_opens_a_tab_acts_in_it_without_naming_it() {
             Some(BrowserCommand::EvaluateScript { tab_id: 11, .. })
         ),
         "{calls:?}"
+    );
+}
+
+/// Open a tab on example.com and let a navigation of it land on a host the policy refuses, which
+/// holds the tab. Returns the held tab's handle.
+fn held_tab(
+    executor: &ApplicationExecutor,
+    browser: &FakeBrowser,
+    workspace: &crate::workspace::WorkspaceId,
+) -> String {
+    let handle = open_at(executor, browser, workspace, 7, "https://example.com/");
+    browser.push(Ok(BrowserOutcome::Navigated {
+        tab: tab(7, "https://elsewhere.test/"),
+        committed_urls: vec!["https://elsewhere.test/".into()],
+    }));
+    let landed = executor.execute(
+        workspace,
+        "browser_navigate",
+        json!({"tab":handle,"url":"https://example.com/redirects"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(landed.status, Status::Blocked, "{}", landed.summary);
+    assert_eq!(landed.facts["held"], true);
+    handle
+}
+
+#[test]
+fn a_held_tab_can_be_navigated_to_an_allowed_page_and_is_released() {
+    for named in [true, false] {
+        let policy = example_com_only();
+        let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
+        let handle = held_tab(&executor, &browser, &workspace);
+
+        // The destination is authorized on its own, so a refused one sends nothing.
+        let before = browser.calls().len();
+        let refused = executor.execute(
+            &workspace,
+            "browser_navigate",
+            json!({"tab":handle,"url":"https://elsewhere.test/again"}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(refused.status, Status::Blocked);
+        assert_eq!(refused.effect, Effect::None);
+        assert_eq!(browser.calls().len(), before);
+
+        browser.push(Ok(BrowserOutcome::Navigated {
+            tab: tab(7, "https://example.com/back"),
+            committed_urls: vec!["https://example.com/back".into()],
+        }));
+        let input = if named {
+            json!({"tab":handle,"url":"https://example.com/back"})
+        } else {
+            json!({"url":"https://example.com/back"})
+        };
+        let left = executor.execute(
+            &workspace,
+            "browser_navigate",
+            input,
+            &CancellationToken::default(),
+        );
+        assert_eq!(left.status, Status::Succeeded, "{}", left.summary);
+        assert_eq!(left.facts["tab"], handle.as_str());
+        assert!(matches!(
+            browser.calls().last(),
+            Some(BrowserCommand::Navigate { tab_id: 7, .. })
+        ));
+
+        browser.push(Ok(BrowserOutcome::Text {
+            tab_id: 7,
+            text: "Back".into(),
+            truncated: false,
+            title: "Back".into(),
+            url: "https://example.com/back".into(),
+        }));
+        let read = executor.execute(
+            &workspace,
+            "browser_read",
+            json!({"tab":handle}),
+            &CancellationToken::default(),
+        );
+        assert_eq!(
+            read.status,
+            Status::Succeeded,
+            "the allowed landing released the hold: {}",
+            read.summary
+        );
+    }
+}
+
+#[test]
+fn a_held_tab_can_be_closed() {
+    let policy = example_com_only();
+    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(policy.facade());
+    let handle = held_tab(&executor, &browser, &workspace);
+
+    browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
+    let closed = executor.execute(
+        &workspace,
+        "browser_tabs",
+        json!({"action":"close","tab":handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(closed.status, Status::Succeeded, "{}", closed.summary);
+    assert_eq!(closed.facts["closed"], true);
+    assert!(matches!(
+        browser.calls().last(),
+        Some(BrowserCommand::CloseTab { tab_id: 7, .. })
+    ));
+    assert!(workspaces.tab_bindings(workspace.as_str()).is_empty());
+}
+
+#[test]
+fn a_held_tab_still_refuses_reads_actions_history_and_focus() {
+    let policy = example_com_only();
+    let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
+    let handle = held_tab(&executor, &browser, &workspace);
+    let before = browser.calls().len();
+    for (tool, input) in [
+        ("browser_read", json!({"tab":handle})),
+        ("browser_screenshot", json!({"tab":handle})),
+        ("browser_inspect", json!({"tab":handle})),
+        ("browser_press_key", json!({"tab":handle,"key":"Enter"})),
+        ("browser_execute", json!({"tab":handle,"script":"1"})),
+        ("browser_history", json!({"tab":handle,"action":"back"})),
+        ("browser_history", json!({"tab":handle,"action":"reload"})),
+        ("browser_tabs", json!({"action":"focus","tab":handle})),
+    ] {
+        let refused = executor.execute(&workspace, tool, input, &CancellationToken::default());
+        assert_eq!(
+            refused.status,
+            Status::Blocked,
+            "{tool}: {}",
+            refused.summary
+        );
+        assert_eq!(refused.facts["reason"], "tab_held", "{tool}");
+        assert_eq!(refused.effect, Effect::None, "{tool}");
+    }
+    assert_eq!(
+        browser.calls().len(),
+        before,
+        "nothing reached the held tab"
     );
 }

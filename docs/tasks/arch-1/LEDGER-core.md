@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1 has landed. C2 is next, then C3a. ux-2 has closed, so every slice whose "After" is met can
+C1 and C2 have landed. C3a is next, then C4. ux-2 has closed, so every slice whose "After" is met can
 start.
 
 ## Slices
@@ -15,8 +15,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
-| C1 | fix(audit): the durable record keeps only what may be retained | candidate | ux-2 closes | see Notes | landed (this commit) |
-| C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | - | todo |
+| C1 | fix(audit): the durable record keeps only what may be retained | candidate | ux-2 closes | see Notes | landed (fe18e597) |
+| C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | see Notes | landed (this commit) |
 | C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | - | todo |
 | C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits | todo |
 | C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | - | todo |
@@ -64,3 +64,19 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   in `language/audit.rs`; `a_fill_whose_submit_raises_a_confirm_writes_no_field_value` in
   `work/tests/execution.rs`. No audit golden changed: none of them carries a wrapper or an
   ownership refusal. No journey is needed.
+- C2, the held tab: the lease has `select_tab_to_leave`, which selects a held tab, beside
+  `select_tab`, which refuses it. Only `navigate_page` on an existing tab and `close_tab` call it.
+  A navigation that names no tab in a session whose only tab is held selects that tab too, because
+  it is an existing tab. The close of a held tab is still authorized as every close is today
+  (Action with no host, then the tab-close setting); C10a narrows it to the setting alone.
+- C2, `restore_tab`: it no longer carries a hold over. A hold was carried only when the handle was
+  still bound, and a binding at generation 0 now clears whatever the handle carried, its hold
+  included.
+- C2, `WorkspaceSummary::of` is private to the aggregate. The window still reads `browser_of` for
+  each workspace; S3 moves it onto `WorkspaceSummary.browser`.
+- C2, proofs: `a_tab_the_person_closes_leaves_no_snapshot_or_image` and
+  `a_recreated_handle_never_serves_the_closed_pages_capture_or_diff` in `workspace/mod.rs`;
+  `a_held_tab_can_be_navigated_to_an_allowed_page_and_is_released`, `a_held_tab_can_be_closed`
+  and `a_held_tab_still_refuses_reads_actions_history_and_focus` in `work/tests/tabs.rs`;
+  `a_read_that_holds_a_tab_announces_the_hold` in `work/tests/presentation.rs`. No golden changed
+  and no journey is needed. The hold words stay as they are until C6.

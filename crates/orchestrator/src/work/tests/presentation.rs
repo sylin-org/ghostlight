@@ -480,3 +480,58 @@ fn fill_upload_and_scroll_name_their_targets_once_the_browser_has_acted() {
     assert_eq!(dropped.status, Status::Succeeded, "{dropped:?}");
     assert!(signals.targets(dropped.invocation.as_str()).is_empty());
 }
+
+/// A read that finds its tab on a refused page holds the tab, and the hold shows on the page the
+/// way a navigation's hold does.
+#[test]
+fn a_read_that_holds_a_tab_announces_the_hold() {
+    let reference = Arc::new(PageSignals::default());
+    PresentationReactor::new(reference.clone()).react(&crate::events::DomainEvent::HoldEntered {
+        invocation: "reference".into(),
+        workspace: "reference".into(),
+        physical_id: 7,
+    });
+    let hold = reference.0.lock().unwrap()[0].clone();
+
+    let policy = example_com_only();
+    let (mut executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
+    let signals = Arc::new(PageSignals::default());
+    executor.presentation = PresentationReactor::new(signals.clone());
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded);
+    signals.0.lock().unwrap().clear();
+
+    // The page moved itself to a refused host without a navigation Ghostlight saw.
+    browser.push(Ok(BrowserOutcome::Text {
+        tab_id: 7,
+        text: "Elsewhere".into(),
+        truncated: false,
+        title: "Elsewhere".into(),
+        url: "https://elsewhere.test/".into(),
+    }));
+    let read = executor.execute(
+        &workspace,
+        "browser_read",
+        json!({"tab":opened.facts["tab"]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(read.status, Status::Blocked, "{}", read.summary);
+    assert_eq!(read.facts["held"], true);
+    let signals = signals.0.lock().unwrap();
+    assert!(
+        signals.iter().any(|signal| signal.signal == hold.signal
+            && signal.phase == hold.phase
+            && signal.detail == hold.detail
+            && signal.tab_id == Some(7)),
+        "{signals:?}"
+    );
+}

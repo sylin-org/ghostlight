@@ -71,8 +71,30 @@ pub struct WorkspaceSummary {
     pub opener: ConnectionDetails,
     /// Current connections, each with its own immutable observed and claimed evidence.
     pub connections: Vec<ConnectionDetails>,
+    /// The browser this workspace works in, once its first work chose one, read under the same
+    /// lock as the rest of the summary.
+    pub browser: Option<String>,
     /// Number of controlled tabs.
     pub tab_count: usize,
+}
+
+impl WorkspaceSummary {
+    /// Summarize one workspace as the aggregate holds it.
+    fn of(id: &WorkspaceId, workspace: &WorkspaceState) -> Self {
+        let mut connections: Vec<_> = workspace
+            .connections
+            .values()
+            .map(|connection| connection.details())
+            .collect();
+        connections.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
+        Self {
+            id: id.as_str().into(),
+            opener: workspace.opener.details(),
+            connections,
+            browser: workspace.browser.clone(),
+            tab_count: workspace.tabs.len(),
+        }
+    }
 }
 
 /// Opaque admitted MCP workspace handle.
@@ -540,6 +562,21 @@ struct WorkspaceState {
     images: HashMap<ImageHandle, ImageState>,
 }
 
+impl WorkspaceState {
+    /// Forget one tab binding and everything minted on it: its target records, which leave
+    /// tab-closed tombstones, its views, its snapshots and its images.
+    ///
+    /// Every end of a binding comes through here, so no capture, diff base or coordinate outlives
+    /// the tab it was taken from, and a handle bound again starts with nothing.
+    fn forget_tab(&mut self, handle: &TabHandle) {
+        self.tabs.remove(handle);
+        self.targets.remove_tab(handle);
+        self.views.retain(|_, view| &view.tab != handle);
+        self.snapshots.retain(|_, snapshot| &snapshot.tab != handle);
+        self.images.retain(|_, image| &image.tab != handle);
+    }
+}
+
 #[derive(Debug, Default)]
 struct AggregateState {
     workspaces: HashMap<WorkspaceId, WorkspaceState>,
@@ -671,20 +708,7 @@ impl WorkspaceStore {
         let mut summaries: Vec<_> = state
             .workspaces
             .iter()
-            .map(|(id, workspace)| WorkspaceSummary {
-                id: id.as_str().into(),
-                opener: workspace.opener.details(),
-                connections: {
-                    let mut details: Vec<_> = workspace
-                        .connections
-                        .values()
-                        .map(|connection| connection.details())
-                        .collect();
-                    details.sort_by(|a, b| a.connection_id.cmp(&b.connection_id));
-                    details
-                },
-                tab_count: workspace.tabs.len(),
-            })
+            .map(|(id, workspace)| WorkspaceSummary::of(id, workspace))
             .collect();
         summaries.sort_by(|left, right| left.id.cmp(&right.id));
         summaries
@@ -803,16 +827,6 @@ impl WorkspaceStore {
         }
         released.retain(|release| !release.physical_ids.is_empty());
         released
-    }
-
-    /// Every session marker currently owning a workspace.
-    #[must_use]
-    pub fn owners(&self) -> Vec<SessionMarker> {
-        self.lock()
-            .workspaces
-            .values()
-            .filter_map(|workspace| workspace.session.clone())
-            .collect()
     }
 
     /// Whether this workspace outlives its connection.
@@ -1304,9 +1318,7 @@ impl WorkspaceStore {
                 .iter()
                 .find_map(|(handle, tab)| (tab.physical_id == physical_id).then(|| handle.clone()));
             if let Some(handle) = handle {
-                workspace.tabs.remove(&handle);
-                workspace.targets.remove_tab(&handle);
-                workspace.views.retain(|_, view| view.tab != handle);
+                workspace.forget_tab(&handle);
                 return;
             }
         }
@@ -1343,8 +1355,26 @@ impl WorkspaceLease {
     ///
     /// A call that names no tab is refused with [`WorkspaceError::AmbiguousTab`] while the
     /// workspace holds several: callers that share one connection share its workspace, so no
-    /// tab among several is the one every caller means.
+    /// tab among several is the one every caller means. A held tab is refused with
+    /// [`WorkspaceError::Held`]: it shows a page governance refused, so nothing reads or acts on
+    /// it there.
     pub fn select_tab(&self, requested: Option<&str>) -> Result<SelectedTab, WorkspaceError> {
+        let tab = self.select_tab_to_leave(requested)?;
+        if tab.held {
+            return Err(WorkspaceError::Held);
+        }
+        Ok(tab)
+    }
+
+    /// Select a tab the way [`Self::select_tab`] does, a held one included.
+    ///
+    /// Only the two calls that take a tab away from the page that held it use this: a navigation
+    /// of an existing tab, whose governed landing clears the hold, and a close (ADR-0203
+    /// Decision 2.4). Each is authorized on its own, never on the page the held tab shows.
+    pub fn select_tab_to_leave(
+        &self,
+        requested: Option<&str>,
+    ) -> Result<SelectedTab, WorkspaceError> {
         let state = self.store.lock();
         let workspace = state
             .workspaces
@@ -1353,7 +1383,7 @@ impl WorkspaceLease {
         if let Some(requested) = requested {
             let handle = TabHandle(requested.into());
             if let Some(tab) = workspace.tabs.get(&handle) {
-                return held_or_selected(&handle, tab);
+                return Ok(selected(&handle, tab));
             }
             let owned_elsewhere = state.workspaces.iter().any(|(id, candidate)| {
                 id != &self.workspace && candidate.tabs.contains_key(&handle)
@@ -1367,7 +1397,7 @@ impl WorkspaceLease {
         let mut tabs = workspace.tabs.iter();
         match (tabs.next(), tabs.next()) {
             (None, _) => Err(WorkspaceError::NoTab),
-            (Some((handle, tab)), None) => held_or_selected(handle, tab),
+            (Some((handle, tab)), None) => Ok(selected(handle, tab)),
             (Some(_), Some(_)) => Err(WorkspaceError::AmbiguousTab),
         }
     }
@@ -1495,7 +1525,10 @@ impl WorkspaceLease {
         Ok(())
     }
 
-    /// Enter a tab hold after a denied committed landing.
+    /// Hold a tab whose page governance refused, after a landing or a read found it there.
+    ///
+    /// Only [`Self::select_tab_to_leave`] selects the tab while it is held, and a governed landing
+    /// clears the hold.
     pub fn hold_tab(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
         let workspace = state
@@ -1643,20 +1676,16 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        workspace.tabs.remove(handle);
-        workspace.targets.remove_tab(handle);
-        workspace.views.retain(|_, view| &view.tab != handle);
-        workspace
-            .snapshots
-            .retain(|_, snapshot| &snapshot.tab != handle);
-        workspace.images.retain(|_, image| &image.tab != handle);
+        workspace.forget_tab(handle);
         Ok(())
     }
 
     /// Recreate one dead tab binding under its existing durable handle.
     ///
     /// Continuation, not resurrection: the new physical tab starts a fresh document with no
-    /// history, and the caller's handle keeps referring to "this workspace's tab slot".
+    /// history, and the caller's handle keeps referring to "this workspace's tab slot". The
+    /// binding starts at generation 0 with nothing the handle carried before, so no target, view,
+    /// snapshot or image of the earlier page answers for the new one.
     pub fn restore_tab(
         &self,
         handle: &str,
@@ -1664,12 +1693,6 @@ impl WorkspaceLease {
     ) -> Result<SelectedTab, WorkspaceError> {
         let handle = TabHandle(handle.into());
         let mut state = self.store.lock();
-        let held = state
-            .workspaces
-            .get(&self.workspace)
-            .and_then(|workspace| workspace.tabs.get(&handle))
-            .map(|dead| dead.held)
-            .unwrap_or(false);
         if state.controlled_elsewhere(&self.workspace, tab.tab_id) {
             return Err(WorkspaceError::PhysicalTabOwned);
         }
@@ -1687,13 +1710,14 @@ impl WorkspaceLease {
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
+        workspace.forget_tab(&handle);
         let value = TabState {
             physical_id: tab.tab_id,
             generation: 0,
             url: tab.url.clone(),
             title: tab.title.clone(),
             readiness: tab.readiness,
-            held,
+            held: false,
             dialog: None,
         };
         workspace.tabs.insert(handle.clone(), value.clone());
@@ -2004,14 +2028,6 @@ fn selected(handle: &TabHandle, tab: &TabState) -> SelectedTab {
         title: tab.title.clone(),
         readiness: tab.readiness,
         held: tab.held,
-    }
-}
-
-fn held_or_selected(handle: &TabHandle, tab: &TabState) -> Result<SelectedTab, WorkspaceError> {
-    if tab.held {
-        Err(WorkspaceError::Held)
-    } else {
-        Ok(selected(handle, tab))
     }
 }
 
@@ -3183,6 +3199,129 @@ mod tests {
         store.apply_browser_close(TEST_BROWSER, 7);
         assert!(lease.confirm_tab_closed(&tab.handle).is_ok());
         assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
+    }
+
+    /// One landed tab carrying a snapshot, an image, a view and a target, with their handles.
+    fn tab_with_everything(
+        lease: &super::WorkspaceLease,
+        physical_id: u64,
+    ) -> (
+        super::SelectedTab,
+        super::ImageHandle,
+        super::ViewHandle,
+        TargetHandle,
+    ) {
+        let tab = lease
+            .add_tab(&physical(physical_id, "about:blank"))
+            .unwrap();
+        let tab = lease
+            .apply_landing(
+                &tab.handle,
+                &physical(physical_id, "https://example.com/old"),
+            )
+            .unwrap();
+        lease
+            .register_snapshot(&tab, whole_document(), serde_json::json!({"old":true}))
+            .unwrap();
+        let image = lease
+            .register_image(&tab, "image/jpeg", "AAAA", 3)
+            .unwrap()
+            .expect("under the ceiling");
+        let view = lease.register_view(&tab, viewport(), 800, 600).unwrap();
+        let target = lease
+            .register_targets(&tab, &[control("#old", "Old")])
+            .unwrap()[0]
+            .0
+            .clone();
+        (tab, image, view, target)
+    }
+
+    fn whole_document() -> SnapshotScope {
+        SnapshotScope {
+            root: None,
+            max_depth: 6,
+        }
+    }
+
+    fn viewport() -> ViewportGeometry {
+        ViewportGeometry {
+            scope: CaptureScope::Viewport,
+            page_x: 0.0,
+            page_y: 0.0,
+            css_width: 800.0,
+            css_height: 600.0,
+            visual_page_x: 0.0,
+            visual_page_y: 0.0,
+            visual_css_width: 800.0,
+            visual_css_height: 600.0,
+            device_scale: 1.0,
+            zoom: 1.0,
+            output_scale: 1.0,
+        }
+    }
+
+    /// The person's close forgets a tab the way Ghostlight's own close does: nothing minted on it
+    /// stays behind in the workspace.
+    #[test]
+    fn a_tab_the_person_closes_leaves_no_snapshot_or_image() {
+        let store = WorkspaceStore::default();
+        let workspace = admit_in_browser(&store);
+        let lease = store.acquire(&workspace).unwrap();
+        let _ = tab_with_everything(&lease, 7);
+
+        store.apply_browser_close(TEST_BROWSER, 7);
+
+        let state = store.lock();
+        let kept = &state.workspaces[&workspace];
+        assert!(kept.tabs.is_empty());
+        assert!(kept.snapshots.is_empty(), "no snapshot outlives its tab");
+        assert!(kept.images.is_empty(), "no image outlives its tab");
+        assert!(kept.views.is_empty());
+        assert!(kept.targets.records.is_empty());
+    }
+
+    /// A handle bound again, whether its tab closed first or not, starts with nothing its earlier
+    /// page left: the old capture, diff base, view and target never answer for the new page, even
+    /// once the new page reaches the generation the old one had.
+    #[test]
+    fn a_recreated_handle_never_serves_the_closed_pages_capture_or_diff() {
+        for closed_first in [false, true] {
+            let store = WorkspaceStore::default();
+            let workspace = admit_in_browser(&store);
+            let lease = store.acquire(&workspace).unwrap();
+            let (old, image, view, target) = tab_with_everything(&lease, 7);
+            if closed_first {
+                store.apply_browser_close(TEST_BROWSER, 7);
+            }
+
+            let restored = lease
+                .restore_tab(old.handle.as_str(), &physical(9, "about:blank"))
+                .unwrap();
+            assert_eq!(restored.generation, 0);
+            let landed = lease
+                .apply_landing(&restored.handle, &physical(9, "https://example.com/new"))
+                .unwrap();
+            assert_eq!(landed.generation, old.generation, "{closed_first}");
+
+            assert_eq!(
+                lease.previous_snapshot(&landed, &whole_document()),
+                None,
+                "the closed page's tree is no diff base ({closed_first})"
+            );
+            assert_eq!(lease.take_image(image.as_str(), &landed), None);
+            assert_eq!(
+                lease
+                    .resolve_view_point(view.as_str(), None, 1.0, 1.0)
+                    .unwrap_err(),
+                WorkspaceError::StaleView
+            );
+            assert_eq!(
+                lease.resolve_target(target.as_str(), None).unwrap_err(),
+                WorkspaceError::StaleTarget {
+                    reason: StaleReason::TabClosed
+                }
+            );
+        }
     }
 
     #[test]

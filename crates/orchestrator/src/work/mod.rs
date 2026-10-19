@@ -620,12 +620,7 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let landing = self.authorize_commits(context, landing_requirements, physical, commits);
         if !landing.allowed {
-            let _ = lease.hold_tab(&selected.handle);
-            self.emit(DomainEvent::HoldEntered {
-                invocation: context.invocation.into(),
-                workspace: context.workspace.as_str().into(),
-                physical_id: selected.physical_id,
-            });
+            self.hold(context, lease, selected);
             return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), Some(&physical.url));
         }
         let change = DocumentChange::between(&selected.url, physical, commits);
@@ -681,6 +676,20 @@ impl ApplicationExecutor {
             outcome,
             facts,
         )
+    }
+
+    /// Hold a tab whose page governance just refused, and announce the hold.
+    ///
+    /// Every path that finds its tab on a refused page comes here, a read as well as an action,
+    /// so the hold always shows. The tab then refuses reading and acting until a navigation
+    /// lands it on an allowed page or it is closed (ADR-0203 Decision 2.4).
+    fn hold(&self, context: &InvocationContext<'_>, lease: &WorkspaceLease, tab: &SelectedTab) {
+        let _ = lease.hold_tab(&tab.handle);
+        self.emit(DomainEvent::HoldEntered {
+            invocation: context.invocation.into(),
+            workspace: context.workspace.as_str().into(),
+            physical_id: tab.physical_id,
+        });
     }
 
     /// Authorize and resolve one controlled tab, executing the closure only when allowed (ADR-0176).
@@ -3272,6 +3281,23 @@ mod tests {
                 .set_modified(before + Duration::from_secs(2))
                 .unwrap();
         }
+    }
+
+    /// A policy that admits all work on example.com and nothing anywhere else, so a page that
+    /// lands on another host is refused after the fact and holds its tab.
+    fn example_com_only() -> TestPolicy {
+        let policy = TestPolicy::new();
+        fs::write(
+            &policy.0,
+            serde_json::to_vec(&json!({
+                "schema":4,"name":"test authority","version":"1",
+                "grants":[{"id":"example","hosts":{"allow":["example.com"]},
+                    "allowed":["read","action","write","execute"]}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        policy
     }
 
     fn all_open_policy_with(config: &str) -> String {

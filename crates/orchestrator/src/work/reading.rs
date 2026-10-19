@@ -55,7 +55,7 @@ impl ApplicationExecutor {
                     }) if tab_id == selected.physical_id => {
                         let landing = self.authorize_landing(context, Capability::Read, &url);
                         if !landing.allowed {
-                            let _ = lease.hold_tab(&selected.handle);
+                            self.hold(context, lease, selected);
                             return self.blocked_at(
                                 context,
                                 landing,
