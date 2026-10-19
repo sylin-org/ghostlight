@@ -121,13 +121,30 @@ never sees the entry.
 
 | Task | What | Status |
 | --- | --- | --- |
-| L2-10 | The full gate and every journey on the go head | todo |
+| L2-10 | The full gate and every journey on the go head | done |
 | L2-11 | The release workflow's bundle, built and verified | todo |
 | L2-12 | A clean install from the bundle, and real use | todo |
 | L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
 | L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
 | L2-15 | The owner's steps for Bluefin and Alpine | done |
 | L2-16 | CI installs the candidate from its bundle and uses it, as a person on Linux does | done |
+
+**L2-10.** Result, 2026-10-19, done, on ebfc4b4e (the go head 62bfa224 plus docs and
+coordination) on test-01. `tests/hardening-suite.mjs --lane=all` on a hidden KWin display in its
+own D-Bus session, with the system Chromium 154.0.8037.97 as the test browser: format, clippy,
+the Rust tests, the extension, both launchers, the WinGet archive, the policy grammar and every
+process journey passed, and so did the browser journeys frame, keyboard and history. One,
+script-browser, timed out on the extension's hello. Cause, in this harness only: on KDE, Chromium
+looks for its password store through D-Bus, and in an isolated D-Bus session that store does not
+answer, so the extension worker's first request to the journey's loopback bridge is held. A probe
+showed the worker had opened its port and its `/open` request never settled. The journey passed
+3 of 3 on the real session bus and 3 of 3 on the isolated bus with `--password-store=basic`, and
+CI (Chrome for Testing, no desktop) never meets it; no product or test change is needed. The
+Linux checks of `tests/linux` passed on the go head deployed in place: `startup-recovery.mjs` (four
+callers, one service, recovered in 5.6 s), `installed-journey.mjs` (all four cases, with the
+owner's Chromium connected) and `installed/desktop-check.py` (all five window phases under KDE
+Plasma on Wayland). After the deploy, the owner's Chromium reconnected to the new service by
+itself.
 
 **L2-11.** Dispatch the release workflow on the go head, download the bundle, and run
 `scripts/check-release-candidate.ps1` (with `pwsh`) on it.
