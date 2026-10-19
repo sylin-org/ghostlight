@@ -155,6 +155,11 @@ only if its folder is there when the browser starts. Seen on the way, for window
 extension probe counts the disabled 1.x store copy as holding the extension, so the refusal said to
 open a window of the browser, which cannot help; and the morning service's diagnostics file ends in
 a cut-off record at its exit.
+Then the owner loaded `extension/` unpacked again, the browser relay started and connected, and
+the first task passed through this session's Ghostlight tools: `browser_navigate` opened the demo
+desk, `browser_find` found "Ring the bell", `browser_click` opened its prompt, `browser_dialog`
+answered it, and `browser_read` showed the page's readout of the answer. `ghostlight status` reads
+"2 agents and 1 browser connected". Closing the tab was kept by preserve-tabs, as the owner set it.
 
 **Scope, 2026-10-19.** The owner, while Part 1 started: "you shouldn't try to install
 dependencies, I think - just make sure Ghostlight is working for this OS specifically. I'll deploy
