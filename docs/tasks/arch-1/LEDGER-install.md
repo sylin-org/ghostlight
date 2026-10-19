@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1 has landed. ux-2 has closed, so I3, I7, I9a, I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
+I1 and I3 have landed. ux-2 has closed, so I7, I9a, I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
 and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
 registers) and the live check on a test machine.
 
@@ -17,7 +17,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
 | I1 | fix(install): one owner-private creator for secrets and records | candidate | none | see Notes | landed (this commit) |
-| I3 | fix(install): Ghostlight owns the command, and the client keeps its own keys | candidate | ux-2 closes (`install/mod.rs`) | - | todo |
+| I3 | fix(install): Ghostlight owns the command, and the client keeps its own keys | candidate | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I7 | fix(deployment): a same-version install restores a missing shell | candidate | none | - | todo |
 | I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | - | todo |
 | I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | - | todo |
@@ -42,3 +42,17 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   the system's `icacls /save` and the user's SID with `whoami /user`. win-peer gains no new call.
 - I1, for C19b: `install::record::create_private` is now public, for the audit sink's new log.
 - I1 changes no golden and needs no journey. `linux.txt` is unaffected.
+- I3, the owned `type`: the one current predicate checks the dialect's `type` with the command
+  and its arguments, so an entry with the right command and no `type` (or another one) is now
+  updatable where it was installed, and an install sets only that key. A `type` in a dialect that
+  needs none is the client's. Not a changed decision: Decision 10.1 names `type` an owned key.
+- I3, the written bytes: an owned entry is updated key by key, so only owned keys that differ are
+  set and missing owned keys and defaults are appended. A one-line stale entry stays on one line;
+  a one-line entry that gains a key (`type`, `env`, `enabled`) is laid out one key per line, in its
+  own order, not the alphabetical order of a whole new entry. The writer golden pins each case. A
+  current entry spelled another way (case, `.` or a link to the same edge) is now left alone,
+  because the install reads inspection's path rule.
+- I3, the Codex writer already edited its entry in place; only its equality no-op went.
+- I3, an extra proof: `a_dialect_that_needs_a_type_is_updatable_without_it_and_the_update_keeps_the_rest`.
+- I3 changes no native golden: they seed no Ghostlight entry, so `linux.txt` is unaffected. It
+  needs no journey.

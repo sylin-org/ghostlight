@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 use ghostlight_relay::route::MCP_ARGUMENT;
-use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
+use jsonc_parser::cst::{CstInputValue, CstObject, CstObjectProp, CstRootNode};
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -56,6 +56,12 @@ use layout::{EDGE_COMMAND_NAME, RETIRED_MCP_CONNECTOR_NAME};
 use packaged::{CopyPlace, DataRoots, Packages, SettingsCopy};
 
 const SERVER_NAME: &str = "ghostlight";
+/// The key of the program an entry starts, in every dialect.
+const COMMAND_KEY: &str = "command";
+/// The key of the program's arguments, in the dialects that keep them apart from the command.
+const ARGS_KEY: &str = "args";
+/// The key of the kind of server an entry describes, in the dialects that need one.
+const TYPE_KEY: &str = "type";
 /// The arguments that make the edge the MCP relay, in every client's entry.
 const MCP_ARGUMENTS: [&str; 1] = [MCP_ARGUMENT];
 /// The package name of the Claude desktop app, which reads the Claude Desktop configuration.
@@ -1939,26 +1945,59 @@ fn inspect_json(
     windows: bool,
 ) -> Result<RegistrationState, HarnessError> {
     let parsed = parse_jsonc(source)?;
-    let Some(entry) = json_entry(&parsed, dialect) else {
-        return Ok(RegistrationState::Missing);
-    };
     Ok(
-        json_entry_command(entry, dialect).map_or(RegistrationState::Foreign(None), |command| {
-            let args = json_entry_args(entry, dialect);
-            command_registration_state(command, args.as_deref(), edge, windows)
+        json_entry(&parsed, dialect).map_or(RegistrationState::Missing, |entry| {
+            json_entry_state(entry, dialect, edge, windows)
         }),
     )
 }
 
+/// The state of `entry`, Ghostlight's key in a file written in `dialect`, for `edge`. It is the
+/// one reading of whether the entry is current: inspection reports it and an install that finds
+/// it current changes nothing. Current means every key Ghostlight owns holds its value: the
+/// command and its arguments name this edge, and the dialect's `type` is set. The defaults and
+/// every key the client added decide nothing (ADR-0203 Decision 10.1).
+fn json_entry_state(
+    entry: &Value,
+    dialect: JsonDialect,
+    edge: &Path,
+    windows: bool,
+) -> RegistrationState {
+    let Some(command) = json_entry_command(entry, dialect) else {
+        return RegistrationState::Foreign(None);
+    };
+    let args = json_entry_args(entry, dialect);
+    match command_registration_state(command, args.as_deref(), edge, windows) {
+        RegistrationState::Current
+            if json_entry_type(dialect)
+                .is_some_and(|kind| entry.get(TYPE_KEY).and_then(Value::as_str) != Some(kind)) =>
+        {
+            RegistrationState::Updatable
+        }
+        state => state,
+    }
+}
+
 fn inspect_toml(source: &str, context: &HarnessContext) -> Result<RegistrationState, HarnessError> {
     let document = parse_toml(source)?;
-    let Some(entry) = document
+    document
         .get("mcp_servers")
         .and_then(Item::as_table)
         .and_then(|servers| servers.get(SERVER_NAME))
-    else {
-        return Ok(RegistrationState::Missing);
-    };
+        .map_or(Ok(RegistrationState::Missing), |entry| {
+            toml_entry_state(entry, context)
+        })
+}
+
+/// The state of `entry`, Ghostlight's key in Codex's file, for the edge and the computer `context`
+/// describes: the one reading inspection reports and an install acts on. Current means the
+/// command and its arguments name this edge and, on Linux, the forwarding list holds every
+/// desktop variable Ghostlight needs; every other key is the client's (ADR-0203 Decision 10.1).
+/// Refuses an owned entry whose forwarding list Codex would not accept.
+fn toml_entry_state(
+    entry: &Item,
+    context: &HarnessContext,
+) -> Result<RegistrationState, HarnessError> {
     let command = entry
         .get("command")
         .and_then(Item::as_str)
@@ -2265,6 +2304,9 @@ fn fix_json(
 
 /// Make the edit `intent` to Ghostlight's entry in the JSON file at `path`, written in `dialect`,
 /// for the edge and the computer `context` describes. Whether the file changed.
+///
+/// An install edits an entry Ghostlight owns in place and keeps every key that is the client's;
+/// it writes the whole entry only where there is none. Fix replaces a foreign entry whole.
 fn edit_json_with(
     context: &HarnessContext,
     path: &Path,
@@ -2283,7 +2325,9 @@ fn edit_json_with(
         if !foreign && intent.replaces_foreign() {
             return Err(HarnessError::NotFixable);
         }
-        if intent == RegistrationEdit::Install && entry == &expected_json_entry(edge, dialect) {
+        if intent == RegistrationEdit::Install
+            && json_entry_state(entry, dialect, edge, context.windows) == RegistrationState::Current
+        {
             return Ok(false);
         }
     } else if intent.replaces_foreign() {
@@ -2298,11 +2342,16 @@ fn edit_json_with(
     let collection = json_collection(&object, dialect, intent.installs())?;
     if intent.installs() {
         let collection = collection.ok_or(HarnessError::Malformed(None))?;
-        let entry = cst_input(expected_json_entry(edge, dialect));
-        if let Some(existing) = collection.get(SERVER_NAME) {
-            existing.set_value(entry);
-        } else {
-            collection.append(SERVER_NAME, entry);
+        match (collection.get(SERVER_NAME), current) {
+            (Some(existing), Some(found)) if intent == RegistrationEdit::Install => {
+                update_owned_json_entry(&existing, found, edge, dialect)?;
+            }
+            (Some(existing), _) => {
+                existing.set_value(cst_input(expected_json_entry(edge, dialect)))
+            }
+            (None, _) => {
+                collection.append(SERVER_NAME, cst_input(expected_json_entry(edge, dialect)));
+            }
         }
     } else if let Some(entry) = collection.and_then(|collection| collection.get(SERVER_NAME)) {
         entry.remove();
@@ -2356,9 +2405,7 @@ fn edit_toml_with(
             return Err(HarnessError::NotFixable);
         }
         if intent == RegistrationEdit::Install
-            && command == edge.to_string_lossy()
-            && args.as_deref() == Some(&MCP_ARGUMENTS[..])
-            && missing_codex_desktop_environment(entry, context.linux)?.is_empty()
+            && toml_entry_state(entry, context)? == RegistrationState::Current
         {
             return Ok(false);
         }
@@ -2408,23 +2455,94 @@ fn json_entry(root: &Value, dialect: JsonDialect) -> Option<&Value> {
     }
 }
 
-fn expected_json_entry(edge: &Path, dialect: JsonDialect) -> Value {
-    let command = edge.to_string_lossy().into_owned();
-    let args = MCP_ARGUMENTS;
+/// The `type` Ghostlight's entry carries in `dialect`, where the dialect needs one to start a
+/// local program. Ghostlight owns it beside the command and its arguments.
+const fn json_entry_type(dialect: JsonDialect) -> Option<&'static str> {
     match dialect {
-        JsonDialect::Copilot => {
-            json!({"type":"local","command":command,"args":args,"env":{},"tools":["*"]})
-        }
-        JsonDialect::Servers => json!({"type":"stdio","command":command,"args":args}),
-        JsonDialect::Crush => json!({"type":"stdio","command":command,"args":args}),
-        JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => {
-            json!({"command":command,"args":args,"env":{}})
-        }
-        JsonDialect::OpenCodeV1 => {
-            json!({"type":"local","command":[command, MCP_ARGUMENT],"enabled":true})
-        }
-        JsonDialect::OpenCodeV2 => json!({"type":"local","command":[command, MCP_ARGUMENT]}),
+        JsonDialect::Copilot | JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => Some("local"),
+        JsonDialect::Servers | JsonDialect::Crush => Some("stdio"),
+        JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => None,
     }
+}
+
+/// The keys Ghostlight sets in its entry in `dialect` for `edge` at every install: the command,
+/// its arguments and the dialect's `type`. Every key named neither here nor in
+/// [`json_entry_defaults`] is the client's (ADR-0203 Decision 10.1).
+fn json_owned_keys(edge: &Path, dialect: JsonDialect) -> Vec<(&'static str, Value)> {
+    let command = edge.to_string_lossy().into_owned();
+    let mut keys: Vec<(&'static str, Value)> = json_entry_type(dialect)
+        .map(|kind| (TYPE_KEY, json!(kind)))
+        .into_iter()
+        .collect();
+    match dialect {
+        JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => {
+            keys.push((COMMAND_KEY, json!([command, MCP_ARGUMENT])));
+        }
+        JsonDialect::McpServers
+        | JsonDialect::Copilot
+        | JsonDialect::Servers
+        | JsonDialect::ContextServers
+        | JsonDialect::Crush
+        | JsonDialect::ZCode => {
+            keys.push((COMMAND_KEY, json!(command)));
+            keys.push((ARGS_KEY, json!(MCP_ARGUMENTS)));
+        }
+    }
+    keys
+}
+
+/// The keys Ghostlight writes into its entry in `dialect` only when the entry lacks them. The
+/// client may change or remove them, and they never make an entry stale.
+fn json_entry_defaults(dialect: JsonDialect) -> Vec<(&'static str, Value)> {
+    match dialect {
+        JsonDialect::Copilot => vec![("env", json!({})), ("tools", json!(["*"]))],
+        JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => {
+            vec![("env", json!({}))]
+        }
+        JsonDialect::OpenCodeV1 => vec![("enabled", json!(true))],
+        JsonDialect::Servers | JsonDialect::Crush | JsonDialect::OpenCodeV2 => Vec::new(),
+    }
+}
+
+/// The whole entry Ghostlight writes in `dialect` for `edge` where the file holds none: every key
+/// it owns and every default.
+fn expected_json_entry(edge: &Path, dialect: JsonDialect) -> Value {
+    Value::Object(
+        json_owned_keys(edge, dialect)
+            .into_iter()
+            .chain(json_entry_defaults(dialect))
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
+/// Bring `existing`, the entry Ghostlight owns, whose value `found` was read, up to date for
+/// `edge` in place: each owned key that differs is set, each missing owned key or default is
+/// added, and every other key and comment stays as the client wrote it.
+fn update_owned_json_entry(
+    existing: &CstObjectProp,
+    found: &Value,
+    edge: &Path,
+    dialect: JsonDialect,
+) -> Result<(), HarnessError> {
+    let entry = existing
+        .object_value()
+        .ok_or(HarnessError::Malformed(None))?;
+    for (key, value) in json_owned_keys(edge, dialect) {
+        match entry.get(key) {
+            Some(_) if found.get(key) == Some(&value) => {}
+            Some(member) => member.set_value(cst_input(value)),
+            None => {
+                entry.append(key, cst_input(value));
+            }
+        }
+    }
+    for (key, value) in json_entry_defaults(dialect) {
+        if entry.get(key).is_none() {
+            entry.append(key, cst_input(value));
+        }
+    }
+    Ok(())
 }
 
 fn json_collection(
@@ -2524,9 +2642,9 @@ fn json_entry_command(entry: &Value, dialect: JsonDialect) -> Option<&str> {
         | JsonDialect::Servers
         | JsonDialect::ContextServers
         | JsonDialect::Crush
-        | JsonDialect::ZCode => entry.get("command").and_then(Value::as_str),
+        | JsonDialect::ZCode => entry.get(COMMAND_KEY).and_then(Value::as_str),
         JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => entry
-            .get("command")
+            .get(COMMAND_KEY)
             .and_then(Value::as_array)
             .and_then(|command| command.first())
             .and_then(Value::as_str),
@@ -2540,9 +2658,9 @@ fn json_entry_args(entry: &Value, dialect: JsonDialect) -> Option<Vec<&str>> {
         | JsonDialect::Servers
         | JsonDialect::ContextServers
         | JsonDialect::Crush
-        | JsonDialect::ZCode => entry.get("args")?.as_array()?,
+        | JsonDialect::ZCode => entry.get(ARGS_KEY)?.as_array()?,
         JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => {
-            let command = entry.get("command")?.as_array()?;
+            let command = entry.get(COMMAND_KEY)?.as_array()?;
             command.get(1..)?
         }
     };
@@ -3053,7 +3171,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     use crate::agent::Symbol;
     use crate::install::record::assert_owner_only;
@@ -3065,12 +3183,12 @@ mod tests {
         agent_called, client_ids, command_registration_state, definition, definitions, edit_json,
         edit_toml, executable_name, expected_json_entry, fix_toml, harness_roots, inspect,
         inspect_json, inspect_toml, is_write_temporary, json_entry_args, json_entry_command,
-        jsonc_options, manual_json_setup, mcp_command_line, packaged, remove_stray_temporaries_in,
-        replace_with_backup, resolve_through_symlink, AppContainer, Attention, ClientName,
-        ForeignCommand, HarnessAction, HarnessContext, HarnessError, HarnessRegistry, HarnessRoots,
-        HarnessState, HarnessSummary, JsonDialect, Packages, PrivateView, RegistrationState,
-        CLINE_SETTINGS, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE, RETIRED_MCP_CONNECTOR_NAME,
-        ROSTER, SERVER_NAME,
+        json_entry_defaults, jsonc_options, manual_json_setup, mcp_command_line, packaged,
+        remove_stray_temporaries_in, replace_with_backup, resolve_through_symlink, AppContainer,
+        Attention, ClientName, ForeignCommand, HarnessAction, HarnessContext, HarnessError,
+        HarnessRegistry, HarnessRoots, HarnessState, HarnessSummary, JsonDialect, Packages,
+        PrivateView, RegistrationState, CLINE_SETTINGS, EDGE_COMMAND_NAME, HARNESS_LOCATIONS_FILE,
+        RETIRED_MCP_CONNECTOR_NAME, ROSTER, SERVER_NAME,
     };
 
     /// The name of the roster's agent whose client calls itself `reported`.
@@ -4673,6 +4791,122 @@ mod tests {
             inspect_json(&source, JsonDialect::McpServers, &current, cfg!(windows)).unwrap(),
             RegistrationState::Retired
         );
+    }
+
+    /// Every JSON dialect Ghostlight writes.
+    const JSON_DIALECTS: [JsonDialect; 8] = [
+        JsonDialect::McpServers,
+        JsonDialect::Copilot,
+        JsonDialect::Servers,
+        JsonDialect::ContextServers,
+        JsonDialect::Crush,
+        JsonDialect::OpenCodeV1,
+        JsonDialect::OpenCodeV2,
+        JsonDialect::ZCode,
+    ];
+
+    /// A file in `dialect` that holds `entry` under Ghostlight's key.
+    fn json_file_holding(dialect: JsonDialect, entry: Value) -> String {
+        let file = match dialect {
+            JsonDialect::McpServers | JsonDialect::Copilot => {
+                json!({"mcpServers": {SERVER_NAME: entry}})
+            }
+            JsonDialect::Servers => json!({"servers": {SERVER_NAME: entry}}),
+            JsonDialect::ContextServers => json!({"context_servers": {SERVER_NAME: entry}}),
+            JsonDialect::Crush | JsonDialect::OpenCodeV1 => json!({"mcp": {SERVER_NAME: entry}}),
+            JsonDialect::OpenCodeV2 | JsonDialect::ZCode => {
+                json!({"mcp": {"servers": {SERVER_NAME: entry}}})
+            }
+        };
+        serde_json::to_string_pretty(&file).unwrap()
+    }
+
+    #[test]
+    fn the_dry_run_and_the_install_agree_on_a_current_entry() {
+        let directory = temporary("current-agrees");
+        let context = context(&directory);
+        let edge = context.edge.clone();
+        // The edge spelled another way, with none of the defaults and a key of the client's own:
+        // what a dry run reads as current, an install leaves byte for byte.
+        let respelled = edge
+            .parent()
+            .unwrap()
+            .join(".")
+            .join(edge.file_name().unwrap());
+        for dialect in JSON_DIALECTS {
+            let mut entry = expected_json_entry(&respelled, dialect);
+            let members = entry.as_object_mut().unwrap();
+            for (key, _) in json_entry_defaults(dialect) {
+                members.remove(key);
+            }
+            members.insert("disabled".into(), json!(true));
+            let source = json_file_holding(dialect, entry);
+            let path = directory.join(format!("{dialect:?}.json"));
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                inspect_json(&source, dialect, &edge, context.windows).unwrap(),
+                RegistrationState::Current,
+                "{dialect:?}"
+            );
+            assert!(
+                !edit_json(&context, &path, dialect, true).unwrap(),
+                "{dialect:?}"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), source, "{dialect:?}");
+        }
+        let forwarded = if context.linux {
+            format!("env_vars = {:?}\n", super::CODEX_DESKTOP_ENVIRONMENT)
+        } else {
+            String::new()
+        };
+        let source = format!(
+            "[mcp_servers.ghostlight]\ncommand = {:?}\nargs = {:?}\nenabled = false\n{forwarded}",
+            respelled.to_string_lossy(),
+            super::MCP_ARGUMENTS
+        );
+        let path = directory.join("config.toml");
+        fs::write(&path, &source).unwrap();
+        assert_eq!(
+            inspect_toml(&source, &context).unwrap(),
+            RegistrationState::Current
+        );
+        assert!(!edit_toml(&context, &path, true).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+
+    #[test]
+    fn a_dialect_that_needs_a_type_is_updatable_without_it_and_the_update_keeps_the_rest() {
+        let directory = temporary("type-owned");
+        let context = context(&directory);
+        let edge = context.edge.clone();
+        for dialect in JSON_DIALECTS {
+            let Some(kind) = super::json_entry_type(dialect) else {
+                continue;
+            };
+            let mut entry = expected_json_entry(&edge, dialect);
+            let members = entry.as_object_mut().unwrap();
+            members.remove(super::TYPE_KEY);
+            members.insert("timeout".into(), json!(5000));
+            let source = json_file_holding(dialect, entry);
+            let path = directory.join(format!("{dialect:?}.json"));
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                inspect_json(&source, dialect, &edge, context.windows).unwrap(),
+                RegistrationState::Updatable,
+                "{dialect:?}"
+            );
+            assert!(edit_json(&context, &path, dialect, true).unwrap());
+            let written = fs::read_to_string(&path).unwrap();
+            let parsed: Value = serde_json::from_str(&written).unwrap();
+            let entry = super::json_entry(&parsed, dialect).unwrap();
+            assert_eq!(entry[super::TYPE_KEY], kind, "{dialect:?}");
+            assert_eq!(entry["timeout"], 5000, "{dialect:?}");
+            assert_eq!(
+                inspect_json(&written, dialect, &edge, context.windows).unwrap(),
+                RegistrationState::Current,
+                "{dialect:?}"
+            );
+        }
     }
 
     #[test]

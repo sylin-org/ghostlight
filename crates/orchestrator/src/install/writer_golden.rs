@@ -118,6 +118,21 @@ const KEPT_COMMENT: &str = "A person's own settings, kept as written.";
 const FORWARDED_LIST: &str = "[\"DISPLAY\", \"WAYLAND_DISPLAY\", \"XDG_RUNTIME_DIR\", \
                               \"DBUS_SESSION_BUS_ADDRESS\", \"XDG_CURRENT_DESKTOP\", \"XAUTHORITY\"]";
 
+/// The keys a client adds to or changes in Ghostlight's JSON entry, written out as a file holds
+/// them: the entry turned off, an approval, a tool filter and an environment of its own.
+const JSON_CLIENT_KEYS: &str = "\"disabled\": true, \"autoApprove\": [\"browser_read\"], \
+                                \"tools\": [\"browser_read\"], \"env\": {\"NOTE\": \"kept\"}";
+
+/// The keys a client adds to or changes in Ghostlight's OpenCode entry, whose command is one
+/// array: the entry turned off, a timeout and an environment of its own.
+const OPENCODE_CLIENT_KEYS: &str =
+    "\"enabled\": false, \"timeout\": 5000, \"environment\": {\"NOTE\": \"kept\"}";
+
+/// The keys a client adds to Ghostlight's Codex entry, written out as a seed: the entry turned
+/// off, a tool filter, a forwarding list of its own and an environment of its own.
+const TOML_CLIENT_KEYS: &str = "enabled = false\nenabled_tools = [\"browser_read\"]\n\
+                                env_vars = [\"NOTE_PATH\"]\nenv = { NOTE = \"kept\" }\n";
+
 /// A computer the installer runs on.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Computer {
@@ -193,13 +208,14 @@ impl Shape {
     }
 
     fn seeds(self) -> Vec<Seed> {
-        const PARSED: [Seed; 10] = [
+        const PARSED: [Seed; 11] = [
             Seed::Absent,
             Seed::Empty,
             Seed::Other,
             Seed::Foreign,
             Seed::Current,
             Seed::Stale,
+            Seed::OwnedWithClientKeys,
             Seed::LegacyRelay,
             Seed::Retired,
             Seed::Malformed,
@@ -227,6 +243,10 @@ enum Seed {
     Foreign,
     Current,
     Stale,
+    /// Ghostlight's entry for an edge somewhere else, carrying keys the client added or changed:
+    /// whether it is enabled, its approvals, its tool filter and its environment, and on Codex a
+    /// forwarding list of its own.
+    OwnedWithClientKeys,
     LegacyRelay,
     Retired,
     Malformed,
@@ -259,6 +279,10 @@ impl Seed {
             Self::Foreign => "foreign: another program under Ghostlight's key",
             Self::Current => "current: the entry Ghostlight writes for this edge",
             Self::Stale => "stale: Ghostlight's entry for an edge somewhere else",
+            Self::OwnedWithClientKeys => {
+                "owned with the client's keys: the stale entry, with keys the client added or \
+                 changed"
+            }
             Self::LegacyRelay => "legacy relay: the 1.x relay entry in this install",
             Self::Retired => "retired: an entry starting the retired connector",
             Self::Malformed => "malformed: a file that does not parse",
@@ -569,6 +593,10 @@ fn seed_bytes(run: &Run, shape: Shape, seed: Seed) -> Option<String> {
                 toml_document(Some(toml_entry(&edge, &[EDGE_ARGUMENT], true)))
             }
             Seed::Stale => toml_document(Some(toml_entry(&old_edge, &[EDGE_ARGUMENT], false))),
+            Seed::OwnedWithClientKeys => toml_document(Some(format!(
+                "{}{TOML_CLIENT_KEYS}",
+                toml_entry(&old_edge, &[EDGE_ARGUMENT], false)
+            ))),
             Seed::LegacyRelay => {
                 toml_document(Some(toml_entry(&legacy, &LEGACY_RELAY_ARGUMENTS, false)))
             }
@@ -590,6 +618,7 @@ fn seed_bytes(run: &Run, shape: Shape, seed: Seed) -> Option<String> {
                 Seed::Foreign => Some(json_entry(dialect, "node", &["server.js"])),
                 Seed::Current | Seed::CurrentNested => Some(json_current(dialect, &edge)),
                 Seed::Stale => Some(json_current(dialect, &old_edge)),
+                Seed::OwnedWithClientKeys => Some(json_with_client_keys(dialect, &old_edge)),
                 Seed::LegacyRelay => Some(json_entry(dialect, &legacy, &LEGACY_RELAY_ARGUMENTS)),
                 Seed::Retired => Some(json_entry(dialect, &retired, &[])),
                 _ => None,
@@ -663,6 +692,30 @@ fn json_current(dialect: JsonDialect, edge: &str) -> String {
         JsonDialect::OpenCodeV2 => {
             format!("{{\"type\": \"local\", \"command\": [{edge}, {argument}]}}")
         }
+    }
+}
+
+/// Ghostlight's entry in `dialect` for the edge `edge`, with the keys a client adds or changes,
+/// as a file holds it.
+fn json_with_client_keys(dialect: JsonDialect, edge: &str) -> String {
+    let edge = quoted(edge);
+    let argument = quoted(EDGE_ARGUMENT);
+    match dialect {
+        JsonDialect::McpServers | JsonDialect::ContextServers | JsonDialect::ZCode => {
+            format!("{{\"command\": {edge}, \"args\": [{argument}], {JSON_CLIENT_KEYS}}}")
+        }
+        JsonDialect::Copilot => format!(
+            "{{\"type\": \"local\", \"command\": {edge}, \"args\": [{argument}], \
+             {JSON_CLIENT_KEYS}}}"
+        ),
+        JsonDialect::Servers | JsonDialect::Crush => format!(
+            "{{\"type\": \"stdio\", \"command\": {edge}, \"args\": [{argument}], \
+             {JSON_CLIENT_KEYS}}}"
+        ),
+        JsonDialect::OpenCodeV1 | JsonDialect::OpenCodeV2 => format!(
+            "{{\"type\": \"local\", \"command\": [{edge}, {argument}], \
+             {OPENCODE_CLIENT_KEYS}}}"
+        ),
     }
 }
 

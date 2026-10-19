@@ -321,6 +321,78 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | args = ["--flag"]
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 
+=== Windows / owned with the client's keys: the stale entry, with keys the client added or changed
+seed <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+  |
+  | [mcp_servers.ghostlight]
+  | command = "<root>/Old Home/.ghostlight/bin/ghostlight.exe"
+  | args = ["mcp"]
+  | enabled = false
+  | enabled_tools = ["browser_read"]
+  | env_vars = ["NOTE_PATH"]
+  | env = { NOTE = "kept" }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://developers.openai.com/codex/cli/
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.codex/config.toml
+connector command: "<edge>" mcp
+manual setup:
+  | [mcp_servers]
+  |
+  | [mcp_servers.ghostlight]
+  | command = "<edge>"
+  | args = ["mcp"]
+-- check
+changed: no
+says: Codex was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Codex. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+  |
+  | [mcp_servers.ghostlight]
+  | command = "<edge>"
+  | args = ["mcp"]
+  | enabled = false
+  | enabled_tools = ["browser_read"]
+  | env_vars = ["NOTE_PATH"]
+  | env = { NOTE = "kept" }
+wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Codex. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
+
 === Windows / legacy relay: the 1.x relay entry in this install
 seed <root>/Pat Doe/.codex/config.toml:
   | # A person's own settings, kept as written.
@@ -925,6 +997,79 @@ wrote <root>/Pat Doe/.codex/config.toml:
   | command = "<edge>"
   | args = ["mcp"]
   | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
+wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Codex. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
+
+=== Linux / owned with the client's keys: the stale entry, with keys the client added or changed
+seed <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+  |
+  | [mcp_servers.ghostlight]
+  | command = "<root>/Old Home/.ghostlight/bin/ghostlight"
+  | args = ["mcp"]
+  | enabled = false
+  | enabled_tools = ["browser_read"]
+  | env_vars = ["NOTE_PATH"]
+  | env = { NOTE = "kept" }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://developers.openai.com/codex/cli/
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.codex/config.toml
+connector command: "<edge>" mcp
+manual setup:
+  | [mcp_servers]
+  |
+  | [mcp_servers.ghostlight]
+  | command = "<edge>"
+  | args = ["mcp"]
+  | env_vars = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
+-- check
+changed: no
+says: Codex was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Codex. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.codex/config.toml:
+  | # A person's own settings, kept as written.
+  | model = "o3"
+  |
+  | [mcp_servers.other]
+  | command = "other-server"
+  | args = ["--flag"]
+  |
+  | [mcp_servers.ghostlight]
+  | command = "<edge>"
+  | args = ["mcp"]
+  | enabled = false
+  | enabled_tools = ["browser_read"]
+  | env_vars = ["NOTE_PATH", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP", "XAUTHORITY"]
+  | env = { NOTE = "kept" }
 wrote <root>/Pat Doe/.codex/config.toml.ghostlight-backup: the seed's bytes
 -- fix
 refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations

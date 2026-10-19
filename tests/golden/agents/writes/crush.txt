@@ -357,11 +357,78 @@ wrote <root>/Pat Doe/.config/crush/crush.json:
   |   "mcp": {
   |     // Another server.
   |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<edge>", "args": ["mcp"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/crush/crush.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Crush. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/crush/crush.json.ghostlight-backup: the seed's bytes
+
+=== Windows / owned with the client's keys: the stale entry, with keys the client added or changed
+seed <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<root>/Old Home/.ghostlight/bin/ghostlight.exe", "args": ["mcp"], "disabled": true, "autoApprove": ["browser_read"], "tools": ["browser_read"], "env": {"NOTE": "kept"}},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://github.com/charmbracelet/crush
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/crush/crush.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcp": {
   |     "ghostlight": {
-  |       "args": ["mcp"],
+  |       "args": [
+  |         "mcp"
+  |       ],
   |       "command": "<edge>",
   |       "type": "stdio"
-  |     },
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Crush was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Crush. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<edge>", "args": ["mcp"], "disabled": true, "autoApprove": ["browser_read"], "tools": ["browser_read"], "env": {"NOTE": "kept"}},
   |   },
   | }
 wrote <root>/Pat Doe/.config/crush/crush.json.ghostlight-backup: the seed's bytes
@@ -433,8 +500,8 @@ wrote <root>/Pat Doe/.config/crush/crush.json:
   |     // Another server.
   |     "other": {"command": "other-server", "args": ["--flag"]},
   |     "ghostlight": {
-  |       "args": ["mcp"],
   |       "command": "<edge>",
+  |       "args": ["mcp"],
   |       "type": "stdio"
   |     },
   |   },
@@ -508,8 +575,8 @@ wrote <root>/Pat Doe/.config/crush/crush.json:
   |     // Another server.
   |     "other": {"command": "other-server", "args": ["--flag"]},
   |     "ghostlight": {
-  |       "args": ["mcp"],
   |       "command": "<edge>",
+  |       "args": ["mcp"],
   |       "type": "stdio"
   |     },
   |   },
@@ -1005,11 +1072,78 @@ wrote <root>/Pat Doe/.config/crush/crush.json:
   |   "mcp": {
   |     // Another server.
   |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<edge>", "args": ["mcp"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/crush/crush.json.ghostlight-backup: the seed's bytes
+-- fix
+refused: the Ghostlight entry changed and is no longer eligible for Fix; re-check integrations
+wrote nothing
+-- uninstall
+changed: yes
+says: Ghostlight was removed from Crush. Restart or reconnect it to unload the tools.
+after: available (detected, not connected) | Detected and ready for an explicit Ghostlight registration.
+wrote <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |   },
+  | }
+wrote <root>/Pat Doe/.config/crush/crush.json.ghostlight-backup: the seed's bytes
+
+=== Linux / owned with the client's keys: the stale entry, with keys the client added or changed
+seed <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<root>/Old Home/.ghostlight/bin/ghostlight", "args": ["mcp"], "disabled": true, "autoApprove": ["browser_read"], "tools": ["browser_read"], "env": {"NOTE": "kept"}},
+  |   },
+  | }
+-- inspect
+state: updatable (connected, needs an update)
+detail: Ghostlight's saved registration needs an update.
+offers: install, download, locate
+download: https://github.com/charmbracelet/crush
+copy only: no
+private view: no
+config path: <root>/Pat Doe/.config/crush/crush.json
+connector command: "<edge>" mcp
+manual setup:
+  | {
+  |   "mcp": {
   |     "ghostlight": {
-  |       "args": ["mcp"],
+  |       "args": [
+  |         "mcp"
+  |       ],
   |       "command": "<edge>",
   |       "type": "stdio"
-  |     },
+  |     }
+  |   }
+  | }
+  (no newline at end)
+-- check
+changed: no
+says: Crush was checked without changing configuration.
+after: updatable (connected, needs an update) | Ghostlight's saved registration needs an update.
+wrote nothing
+-- install
+changed: yes
+says: Ghostlight was registered with Crush. Restart or reconnect it to load the tools.
+after: installed (connected) | Ghostlight is registered for this user context.
+wrote <root>/Pat Doe/.config/crush/crush.json:
+  | {
+  |   // A person's own settings, kept as written.
+  |   "theme": "dark",
+  |   "mcp": {
+  |     // Another server.
+  |     "other": {"command": "other-server", "args": ["--flag"]},
+  |     "ghostlight": {"type": "stdio", "command": "<edge>", "args": ["mcp"], "disabled": true, "autoApprove": ["browser_read"], "tools": ["browser_read"], "env": {"NOTE": "kept"}},
   |   },
   | }
 wrote <root>/Pat Doe/.config/crush/crush.json.ghostlight-backup: the seed's bytes
@@ -1081,8 +1215,8 @@ wrote <root>/Pat Doe/.config/crush/crush.json:
   |     // Another server.
   |     "other": {"command": "other-server", "args": ["--flag"]},
   |     "ghostlight": {
-  |       "args": ["mcp"],
   |       "command": "<edge>",
+  |       "args": ["mcp"],
   |       "type": "stdio"
   |     },
   |   },
@@ -1156,8 +1290,8 @@ wrote <root>/Pat Doe/.config/crush/crush.json:
   |     // Another server.
   |     "other": {"command": "other-server", "args": ["--flag"]},
   |     "ghostlight": {
-  |       "args": ["mcp"],
   |       "command": "<edge>",
+  |       "args": ["mcp"],
   |       "type": "stdio"
   |     },
   |   },
