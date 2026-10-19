@@ -1248,7 +1248,7 @@
         connect: manage && agent.state === "available" && agent.can_install,
         update: manage && agent.state === "updatable" && agent.can_install,
         fix: manage && agent.state === "needs_attention" && agent.can_fix,
-        remove: manage && agent.state === "installed" && agent.can_uninstall,
+        remove: manage && agent.can_uninstall,
         locate: can(ACT.locate) && agent.can_locate,
         recheck: can(ACT.rescan) && agent.state === "needs_attention",
         copy: true

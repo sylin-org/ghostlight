@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-S1, S2 and S4a landed. Next: S8 and S7, which can start now.
+S1, S2, S4a and S9 landed. Next: S8 and S7, which can start now.
 
 ## Slices
 
@@ -23,6 +23,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | S4b | refactor(workbench): the Policy page's words come from governance | none | P7, P8 | - | todo |
 | S5 | refactor(workbench): the window's words come from language/ and are pinned | none | C18, C12b | - | todo |
 | S7 | test(desktop): the shell decodes and re-encodes every desktop golden | none | ux-2 closes | - | todo |
+| S9 | fix(workbench): the window offers Remove whenever the service does | none | I4 | the window half of G3-02; see Notes | landed (this commit) |
 
 ## Notes
 
@@ -92,3 +93,10 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   fakes carry the organization as the service names it, in the status part and the policy, and
   passports without the naming. Nothing else in those files changes. No golden changed, and no
   journey needs a test machine.
+- S9, added by the coordinator at integration: I4 made the service offer Uninstall for every
+  entry Ghostlight owns, updatable ones included (`can_uninstall`), but `actsOf` in
+  `ui/lib/view.js` still showed Remove only for an installed agent, so the window hid a Remove the
+  service offered (the second half of G3-02, Decision 10.2). Remove now reads the service's answer
+  alone (`manage && agent.can_uninstall`). The page test "Remove follows the service's answer
+  alone, so an updatable entry it can remove shows Remove" pins it both ways. No golden changed,
+  and no journey needs a test machine.

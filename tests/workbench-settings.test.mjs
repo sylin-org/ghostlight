@@ -1700,6 +1700,18 @@ test("a pane for each state: its sentence, the step it allows with what it does,
   assert.equal(shown.pane().wearing("agent-remove")[0].textContent, "Remove from Codex");
 });
 
+test("Remove follows the service's answer alone, so an updatable entry it can remove shows Remove", () => {
+  const removable = agentsPage(ROSTER.map((row) => (row.id === "kiro" ? { ...row, can_uninstall: true } : row)));
+  removable.pick("kiro");
+  assert.deepEqual(removable.pane().wearing("agent-act").map((row) => row.children[0].textContent), ["Update"]);
+  const remove = removable.pane().wearing("agent-remove")[0];
+  assert.equal(remove.textContent, "Remove from Kiro");
+  assert.equal(remove.dataset.harnessState, "updatable");
+  const kept = agentsPage(ROSTER.map((row) => (row.id === "codex" ? { ...row, can_uninstall: false } : row)));
+  kept.pick("codex");
+  assert.equal(kept.pane().wearing("agent-remove").length, 0, "an installed entry the service cannot remove shows no Remove");
+});
+
 test("an agent that needs attention shows the service's evidence and numbered steps when it cannot be fixed", () => {
   const shown = agentsPage(ROSTER);
   assert.equal(shown.title(), "Junie");

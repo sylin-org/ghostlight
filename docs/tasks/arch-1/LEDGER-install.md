@@ -107,8 +107,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   is unaffected. No journey is needed.
 - I4, for surface: the window still shows Remove only for an installed client
   (`ui/lib/view.js`, `actsOf`, `agent.state === "installed"`), so it hides a Remove the service now
-  offers for an updatable one. That file is surface's and the slice's Changes do not name it; the
-  coordinator decides whether a surface slice drops that test.
+  offers for an updatable one. That file is surface's and the slice's Changes do not name it, so
+  surface's S9 drops that test (LEDGER-surface.md).
 - I5, the state: every launcher entry is shown as `needs_attention`, with its own cause
   (`Attention::Launcher`), detail, evidence and dry-run line, and Fix offered. The window has no
   state between connected and needs attention that the reconcile, the setup of detected clients
