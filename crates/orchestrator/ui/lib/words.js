@@ -70,6 +70,31 @@
    */
   const OUTCOME_WORD = Object.freeze({ failed: "Failed", unknown: "Unknown", kept: "Kept", blocked: "Blocked" });
 
+  /** The phases of work that has not settled, in the service's wire words (workbench `OperationPhase`). */
+  const PHASE = Object.freeze({ waiting: "waiting", running: "running", held: "held" });
+
+  /**
+   * The word unsettled work carries on the running card, and pending work in its row's duration
+   * cell, by its phase. The band counts each phase under the same word, in lower case.
+   */
+  const PHASE_WORD = Object.freeze({ [PHASE.running]: "Running", [PHASE.waiting]: "Waiting", [PHASE.held]: "Held" });
+
+  /**
+   * What the band counts of the work in flight, as [count, word] pairs: what runs, then what waits
+   * and what a pause holds, each only when there is some. While paused with nothing running, the
+   * held work is the whole of it, so the band says "2 held" rather than "0 running, 2 held".
+   */
+  function workCounts({ running = 0, waiting = 0, held = 0, paused = false }) {
+    const counts = [];
+    if (running || !paused || !held) counts.push([running, PHASE.running]);
+    if (waiting) counts.push([waiting, PHASE.waiting]);
+    if (held) counts.push([held, PHASE.held]);
+    return counts;
+  }
+
+  /** The eyebrow of a running card that has rested: nothing has run for a while. */
+  const LAST_ACTION = "Last action";
+
   /**
    * The one sentence a screen reader hears when an action settles: the tool, the outcome word when
    * it did not succeed, and the row's own sentence, as in "navigate: Opened example.com.".
@@ -926,19 +951,20 @@
     return candidate.length > suffix.length && candidate.endsWith(`.${suffix}`);
   }
 
+  /**
+   * How long work took, or has taken so far: the one time format of every clock the window shows.
+   * Under a minute it counts tenths ("5.6s"), under an hour minutes and seconds ("1m 05s"), and
+   * after that hours ("1:05:09"). Tenths are cut, not rounded, so a running clock never shows
+   * "60.0s".
+   */
   function duration(ms) {
     if (!Number.isFinite(ms) || ms < 0) return "";
-    const seconds = ms / 1000;
-    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    if (ms < 60_000) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`;
+    const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
-    return `${minutes}m ${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
-  }
-
-  function stopwatch(ms) {
-    const seconds = Math.max(0, ms) / 1000;
-    if (seconds < 60) return seconds.toFixed(1).padStart(4, "0");
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+    const second = String(seconds % 60).padStart(2, "0");
+    if (minutes < 60) return `${minutes}m ${second}s`;
+    return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${second}`;
   }
 
   function ago(timestamp) {
@@ -951,6 +977,9 @@
     if (hours < 24) return `${hours}h`;
     return `${Math.floor(hours / 24)}d`;
   }
+
+  /** How long ago something settled, as a phrase: "20m ago". */
+  const agoSaid = (timestamp) => `${ago(timestamp)} ago`;
 
   function shortId(value) {
     const text = String(value ?? "");
@@ -1089,7 +1118,7 @@
 
   return Object.freeze({ FEED_LIMIT, WORKING_LATCH_MS, VIEWS, SEARCH_VIEWS,
     DEFAULT_VIEW, DEFAULT_SECTION, ADDRESSES, SETUP_ADDRESS, SETUP, parseAddress, addressOf,
-    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, actionSaid,
+    POLICY_CHANGED_ELSEWHERE, WINDOW_FAULT, NO_ANSWER, COPY_FAILED, LOAD_FAILED, TRY_AGAIN, OUTCOME_WORD, PHASE, PHASE_WORD, workCounts, LAST_ACTION, actionSaid,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, COPIED_SETUP, COPIED_COMMAND, RECONNECTING,
     WATCHING_TURNED_ON, WATCHING_TURNED_OFF, TEST_NOTIFICATION_SENT, ADDRESS_COPIED, SETTINGS, SETTINGS_SECTIONS,
     CONNECTION_ID_COPIED, INTAKE, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
@@ -1105,5 +1134,5 @@
     CAPABILITY_BADGE, CAPABILITY_TONE, SETTING_GROUPS, SACRED_KEY, settingWords, settingLimits,
     OPEN_RULE, OPEN_RULE_NOTE, NO_RULES_LEFT, NO_RULES,
     validHostPattern, hostReadback, patternCovers,
-    escapeHtml, words, duration, stopwatch, ago, shortId });
+    escapeHtml, words, duration, ago, agoSaid, shortId });
 });

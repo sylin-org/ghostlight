@@ -11,8 +11,8 @@
 })(globalThis, function createGhostlightStoreApi() {
   "use strict";
 
-  const { FEED_LIMIT, WORKING_LATCH_MS } = globalThis.GhostlightWords;
-  const { entryFromOperation, entryFromRecord, entryTime, isRunning } = globalThis.GhostlightEntries;
+  const { FEED_LIMIT, WORKING_LATCH_MS, PHASE } = globalThis.GhostlightWords;
+  const { entryFromOperation, entryFromRecord, entryTime, isRunning, isPending, isUnsettled } = globalThis.GhostlightEntries;
 
   /**
    * Everything the store can announce.
@@ -91,7 +91,7 @@
       state.feed = [...byInvocation.values()]
         .filter((entry) => !state.hidden.has(entry.invocation))
         .sort((left, right) => {
-          const rank = entry => isRunning(entry) ? (entry.phase === "waiting" ? 1 : 0) : 2;
+          const rank = entry => isUnsettled(entry) ? (entry.phase === PHASE.waiting ? 1 : 0) : 2;
           return rank(left) - rank(right) || entryTime(right) - entryTime(left);
         });
       trim();
@@ -109,8 +109,8 @@
       if (state.hidden.has(operation.invocation)) return;
       const entry = entryFromOperation(operation);
       const index = state.feed.findIndex((item) => item.invocation === entry.invocation);
-      if (entry.phase === "waiting" && index < 0 && state.feed.some(item => isRunning(item) && item.phase !== "waiting")) {
-        const lastLive = state.feed.findLastIndex(isRunning);
+      if (entry.phase === PHASE.waiting && index < 0 && state.feed.some(item => isUnsettled(item) && item.phase !== PHASE.waiting)) {
+        const lastLive = state.feed.findLastIndex(isUnsettled);
         state.feed.splice(lastLive + 1, 0, entry);
         trim();
         emit(CHANGE.Feed);
@@ -224,7 +224,9 @@
           runtime: state.runtime,
           working: working(),
           snapshot: state.snapshot,
-          running: state.feed.filter(isRunning).length
+          running: state.feed.filter(isRunning).length,
+          waiting: state.feed.filter((entry) => isPending(entry) && entry.phase === PHASE.waiting).length,
+          held: state.feed.filter((entry) => isPending(entry) && entry.phase === PHASE.held).length
         };
       },
 
@@ -308,10 +310,10 @@
        * does not quietly bring them back.
        */
       clearCompleted() {
-        const completed = state.feed.filter((entry) => !isRunning(entry));
+        const completed = state.feed.filter((entry) => !isUnsettled(entry));
         if (!completed.length) return 0;
         for (const entry of completed) state.hidden.add(entry.invocation);
-        state.feed = state.feed.filter(isRunning);
+        state.feed = state.feed.filter(isUnsettled);
         emit(CHANGE.Feed);
         emit(CHANGE.Band);
         return completed.length;

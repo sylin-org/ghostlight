@@ -6,6 +6,8 @@
 })(globalThis, function createGhostlightEntries() {
   "use strict";
 
+  const { PHASE } = globalThis.GhostlightWords;
+
   /* -------------------------------- entries ------------------------------- */
 
   function entryFromOperation(operation) {
@@ -70,7 +72,15 @@
    */
   const settledMs = entry =>
     entry.durationMs || (entry.endedAt && entry.startedAt ? entry.endedAt - entry.startedAt : NaN);
-  const isRunning = entry => !entry.settled && (entry.phase === "waiting" || entry.phase === "running" || entry.phase === "held");
+
+  /** Whether the work is running now: the only work that looks live. */
+  const isRunning = entry => !entry.settled && entry.phase === PHASE.running;
+
+  /** Whether the work is accepted but not running: waiting its turn, or held by a pause. */
+  const isPending = entry => !entry.settled && (entry.phase === PHASE.waiting || entry.phase === PHASE.held);
+
+  /** Whether the work has not settled yet, running or pending. */
+  const isUnsettled = entry => isRunning(entry) || isPending(entry);
 
   /** Whether policy refused the action: the one outcome drawn in the full red treatment. */
   const isBlocked = entry => entry.phase === "blocked" || entry.allowed === false;
@@ -96,6 +106,7 @@
   const isKept = entry => Boolean(entry.settled) && !isBlocked(entry) && entry.status === STATUS.blocked;
 
   return Object.freeze({
-    STATUS, entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isBlocked, isFailed, isKept
+    STATUS, entryFromOperation, entryFromRecord, entryTime, settledMs, isRunning, isPending, isUnsettled,
+    isBlocked, isFailed, isKept
   });
 });

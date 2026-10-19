@@ -7,7 +7,7 @@ use super::outcome::{
     counted, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CheckFailure, Outcome,
     Refusal, WorkspaceReason,
 };
-use super::page_refusal::PageRefusal;
+use super::page_refusal::{PageGesture, PageRefusal};
 use crate::intake::session::IntakeChannel;
 
 /// The explicitly permitted language projection of one terminal result.
@@ -25,6 +25,15 @@ pub struct AuditProjection {
 }
 
 impl AuditProjection {
+    /// Say which kind of act a browser failure could not do, in history's content-free words. Any
+    /// other projection is returned unchanged.
+    #[must_use]
+    pub fn for_gesture(mut self, gesture: PageGesture) -> Self {
+        if self.refusal == Some(AuditRefusal::BrowserPrimitiveFailed) {
+            self.summary = gesture.could_not().into();
+        }
+        self
+    }
     /// Retain child storage gaps without copying child payloads.
     pub fn with_unconfirmed_history(mut self, steps: u32) -> Self {
         self.unconfirmed_history_steps = steps;
@@ -235,9 +244,7 @@ impl Refusal {
             unconfirmed_history_steps: 0,
             coverage: None,
             summary: match self {
-                Self::BrowserPrimitive { .. } => {
-                    "The browser could not complete this operation.".into()
-                }
+                Self::BrowserPrimitive { .. } => PageGesture::Other.could_not().into(),
                 // The count is the whole of it: names, options and values stay out of history.
                 Self::FieldValuesRejected { fields, .. } => format!(
                     "Refused a form fill before any edit: {} could not take {}.",
@@ -354,6 +361,29 @@ mod tests {
         assert_eq!(
             serde_json::to_value(refusal.audit().refusal()).unwrap(),
             serde_json::json!({"reason":"browser_primitive_failed"})
+        );
+    }
+
+    #[test]
+    fn a_browser_failure_keeps_the_kind_of_act_it_could_not_do_and_nothing_of_the_page() {
+        let refusal = Refusal::BrowserPrimitive {
+            detail: "PRIVATE_EXCEPTION".into(),
+        };
+        let typed = refusal.audit().for_gesture(PageGesture::Type);
+        assert_eq!(
+            typed.summary(),
+            "The browser could not type into that field."
+        );
+        assert_eq!(typed.refusal(), refusal.audit().refusal());
+        assert_eq!(
+            refusal.audit().for_gesture(PageGesture::Other).summary(),
+            refusal.audit().summary()
+        );
+        let other = Refusal::BrowserContract.audit();
+        assert_eq!(
+            other.clone().for_gesture(PageGesture::Type).summary(),
+            other.summary(),
+            "only a browser failure takes the gesture's words"
         );
     }
 

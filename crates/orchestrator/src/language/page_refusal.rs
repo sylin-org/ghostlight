@@ -79,7 +79,8 @@ impl PageRefusal {
     }
 }
 
-/// What the refused call would have done to the page, so its sentence can say that it did not.
+/// What a call does to the page, so a refusal can say that it did not happen and a browser
+/// failure can say what the browser could not do.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PageGesture {
     /// A click, a press or a submit.
@@ -137,6 +138,24 @@ impl PageGesture {
             Self::Upload => "No file was attached.",
             Self::Capture => "Nothing was captured.",
             Self::Other => "Nothing was done on the page.",
+        }
+    }
+
+    /// The sentence history keeps when the browser could not make the gesture. It names the kind
+    /// of act only, never the page's text or the browser's error.
+    #[must_use]
+    pub const fn could_not(self) -> &'static str {
+        match self {
+            Self::Click => "The browser could not click that target.",
+            Self::Type => "The browser could not type into that field.",
+            Self::Fill => "The browser could not fill those fields.",
+            Self::Hover => "The browser could not move the pointer there.",
+            Self::Drag => "The browser could not drag that.",
+            Self::Scroll => "The browser could not scroll there.",
+            Self::Key => "The browser could not press that key.",
+            Self::Upload => "The browser could not attach that file.",
+            Self::Capture => "The browser could not capture that.",
+            Self::Other => "The browser could not complete this operation.",
         }
     }
 }

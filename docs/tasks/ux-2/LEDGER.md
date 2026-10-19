@@ -16,7 +16,7 @@ the push.
 | --- | --- | --- | --- |
 | u0 preview-shows-every-state | window | j-38 | landed (this commit) |
 | u1 teal-means-live | window | n-d-02, j-27, j-24, j-34 (window) | landed (this commit) |
-| u2 only-running-work-glows | window | n-d-01, j-25, window-10, window-9 (time format) | todo |
+| u2 only-running-work-glows | window | n-d-01, j-25, window-10, window-9 (time format), owner-1 | landed (this commit) |
 | u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | todo |
 | u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | todo |
 | u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | todo |
@@ -168,3 +168,26 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
 - e1 review: docs/1.0/ARCHITECTURE.md's extension setup-page paragraph now says what AGENTS.md
   and the freeze guard say. It had said the pages are frozen and change only with an owner
   decision to withdraw the submission.
+- u2 (n-d-01): isRunning now means phase running only; isPending covers waiting and held, and
+  isUnsettled both, which the store uses for ordering and Clear view. A pending row's duration
+  cell holds the word alone ("Waiting" in ink-3, "Held" in amber): the 62px column has no room
+  for a word and a clock, so the clock beside the word is on the running card only, in ink-3.
+  The band says "0 running, 2 waiting", and while paused with nothing running "2 held". The
+  phase words and the count rule live in words.js (PHASE, PHASE_WORD, workCounts).
+- u2 (j-25): the dwell is 600ms (SWAP_DWELL_MS in view.js). A burst skips both the card's swap
+  and the row's landing drop, and a plain settle holds the live look for the dwell; a refusal or
+  a failure shows at once.
+- u2 (window-10): after five minutes the settled card rests: a "Last action" eyebrow with its
+  age, no glow, the medallion and clock in ink. A failure keeps its red edge and its red word on
+  the card. BrowserPrimitive's kind word comes from the call's gesture (PageGesture::could_not
+  in language/page_refusal.rs, applied by AuditProjection::for_gesture), so history says "The
+  browser could not type into that field." The one line that applies it is in work/mod.rs,
+  outside this lane's list; language/outcome.rs is untouched.
+- u2 (window-9, time format): one format for every clock, duration() in words.js: "5.6s",
+  "1m 05s", then "1:05:09". stopwatch() is deleted.
+- u2 (owner-1): the owner, on Integrations: "I think we're misusing the mascot icon here. Maybe
+  only have the icon and the text - no green line, no mascot? we already have the green dot to
+  indicate connection". The pane header is now the agent's icon beside its name, state line and
+  icon line, at every width. The wire, the mascot, MASCOT, their rules and the mascot test are
+  deleted; the mascot route stays because setup still shows the mascot. This supersedes j-12's
+  50px mascot and the wire part of n-d-02.

@@ -298,6 +298,7 @@ body.runtime-offline .state-word { color: var(--ink-4); }
 .symbol-card svg { width: 14px; height: 14px; }
 .symbol-rail img { width: 22px; height: 22px; border-radius: 5px; }
 .symbol-rail svg { width: 16px; height: 16px; }
+.symbol-pane { width: 46px; height: 46px; }
 .symbol-pane img { width: 46px; height: 46px; border-radius: 11px; box-shadow: 0 0 0 1px var(--line-2); }
 .symbol-pane svg { width: 30px; height: 30px; }
 
@@ -379,6 +380,17 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
    setting kept back is not an error and stays in ink. */
 .hero.blocked .outcome, .hero.failed .outcome { color: var(--danger); }
 .hero.kept .outcome { color: var(--ink-3); }
+/* Work accepted but not running is still: its clock and its word in ink, a pause's word in amber. */
+.hero.waiting .elapsed, .hero.held .elapsed, .hero.waiting .outcome { color: var(--ink-3); }
+.hero.held .outcome { color: var(--held); }
+/* A card that has led for a while with nothing running rests as the last action: no glow, so the
+   band's word leads. A refusal or a failure keeps its red edge and its word. */
+.hero-rest { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.hero-age { color: var(--ink-4); font: 400 11.5px/1 var(--mono); }
+.hero.rested::after { opacity: 0; }
+.hero.rested .med { border-color: var(--line-2); }
+.hero.rested .med svg { stroke: var(--ink-3); }
+.hero.rested .elapsed { color: var(--ink-4); }
 
 .swap-in { animation: swap-in var(--beat-settle) var(--spring) both; }
 @keyframes swap-in { from { opacity: 0; transform: translateY(-9px); } to { opacity: 1; transform: none; } }
@@ -418,6 +430,8 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .row-dur { overflow: hidden; color: var(--ink-4); font: 400 11.5px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .row-when { color: var(--ink-4); font: 400 11.5px/1 var(--mono); text-align: right; }
 .row.running .row-dur { color: var(--a); }
+.row.waiting .row-dur { color: var(--ink-3); }
+.row.held .row-dur { color: var(--held); }
 /* A settled row whose document never settled, or whose readiness could not be observed, sets its
    duration in brighter ink so the eye finds it while scrolling; amber stays for write and held. The
    words stay in the activity cell for anyone who stops. */
@@ -560,35 +574,9 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 .agent-pane-in { padding: 22px 24px 24px; }
 .agent-pane-in.arriving { animation: view-in var(--beat-settle) var(--spring) both; }
 
-.agent-hero { display: flex; align-items: center; gap: 22px; }
-.agent-link { display: flex; flex: none; align-items: center; }
-/* Half the 100px sprite: averaged, since nearest-neighbour below whole pixels loses the face. */
-.agent-ghost { width: 50px; height: 50px; margin-left: 2px; image-rendering: auto; }
-.agent-wire { position: relative; width: 58px; height: 2px; margin: 0 6px; border-radius: 2px; background: var(--line-2); }
-.agent-wire i, .agent-wire b { display: none; }
-.s-installed .agent-wire { background: rgba(74, 222, 128, .45); }
-.s-live .agent-wire { background: rgba(var(--argb), .3); }
-.s-live .agent-wire i {
-  position: absolute; top: -2px; display: block; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--a); box-shadow: 0 0 8px rgba(var(--argb), .9);
-  animation: agent-flow var(--beat-particle) linear infinite;
-}
-.s-live .agent-wire i:nth-child(2) { animation-delay: 433ms; }
-.s-live .agent-wire i:nth-child(3) { animation-delay: 866ms; }
-@keyframes agent-flow { 0% { left: -3px; opacity: 0; } 15%, 85% { opacity: 1; } 100% { left: calc(100% - 3px); opacity: 0; } }
-.s-live .agent-ghost { filter: drop-shadow(0 0 10px rgba(var(--argb), .45)); }
-.s-not_detected .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); }
+/* The agent's icon beside its name and state, at every width and text size. */
+.agent-hero { display: flex; align-items: center; gap: 16px; }
 .s-not_detected .symbol-pane img { opacity: .45; filter: grayscale(.8); }
-.s-not_detected .agent-ghost { opacity: .7; }
-.s-by_hand .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--muted) 0 2px, transparent 2px 6px); }
-.s-available .agent-wire { height: 1px; background: repeating-linear-gradient(90deg, var(--offer) 0 4px, transparent 4px 8px); }
-.s-updatable .agent-wire { background: rgba(161, 161, 170, .5); }
-.s-updatable .agent-wire b, .s-needs_attention .agent-wire b {
-  position: absolute; top: 50%; left: 50%; display: block; width: 9px; height: 9px; transform: translate(-50%, -50%);
-  border: 1.5px solid var(--offer); border-radius: 50%; background: var(--bg);
-}
-.s-needs_attention .agent-wire { background: linear-gradient(90deg, rgba(251, 191, 36, .55) 0 36%, transparent 36% 64%, rgba(251, 191, 36, .55) 64%); }
-.s-needs_attention .agent-wire b { width: 8px; height: 8px; border: 0; border-radius: 2px; background: var(--amber); transform: translate(-50%, -50%) rotate(45deg); }
 
 .agent-hero-text { min-width: 0; }
 .agent-hero-text h2 { margin: 0; color: var(--ink); font-size: 22px; font-weight: 300; line-height: 1.2; letter-spacing: -.02em; }
@@ -664,8 +652,6 @@ button.glance-chip[aria-expanded="true"] { border-color: var(--line-2); backgrou
 
 @container (max-width: 560px) {
   .agent-pane-in { padding: 18px 16px 20px; }
-  .agent-hero { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .agent-wire { width: 40px; }
   .agent-act, .agent-fact { grid-template-columns: minmax(0, 1fr); }
   .agent-fact > button { justify-self: start; margin-top: 2px; }
   .agent-steps li { grid-template-columns: 22px minmax(0, 1fr); }

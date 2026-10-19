@@ -20,13 +20,13 @@
     agentHeadline, agentPlan, agentUse, agentLive, agentLead, agentWhy, agentFileLabel, agentCopyNote, agentEntryLabel,
     removeNote, removeLabel, confirmRemovalWords, confirmFixWords,
     hostReadback, patternCovers,
-    escapeHtml, words, duration, stopwatch, ago, shortId,
-    OUTCOME_WORD, actionSaid, LOAD_FAILED, TRY_AGAIN,
+    escapeHtml, words, duration, ago, agoSaid, shortId,
+    OUTCOME_WORD, PHASE_WORD, workCounts, LAST_ACTION, actionSaid, LOAD_FAILED, TRY_AGAIN,
     CONTINUE_LABEL, APPLY_IN_WINDOW_LABEL, RECONNECTING, neverTouchedCount, leftOutCount,
     KIND_GLYPHS, GLYPH, SYMBOL_GLYPHS, symbolMarkup, symbolAbout, INTAKE_MARK, toolWords, GLANCE, GLANCE_CARD_LINES,
     agentsCount, browsersCount, tabsCount, sessionsCount, andMore, sessionLine, noun
   } = globalThis.GhostlightWords;
-  const { settledMs, isRunning, isBlocked, isFailed, isKept } = globalThis.GhostlightEntries;
+  const { settledMs, isRunning, isPending, isUnsettled, isBlocked, isFailed, isKept } = globalThis.GhostlightEntries;
   const { ACT, OPENER_SERVICE, COPY_KIND } = globalThis.GhostlightTransport;
 
   const TOAST_MS = 4200;
@@ -36,6 +36,19 @@
    * reaches a screen reader as its latest action, not as a stream.
    */
   const SAID_GAP_MS = 1000;
+
+  /**
+   * The fewest milliseconds a running card stays before the next action may swap in with motion:
+   * the settle beat (--beat-settle, 420ms) and a short dwell. A burst faster than this replaces the
+   * card in place, and the live look holds across the gaps between its actions.
+   */
+  const SWAP_DWELL_MS = 600;
+
+  /**
+   * How long a settled action leads the running card before it rests as the last action, without
+   * its glow, so the band's word leads a window where nothing has run for a while.
+   */
+  const REST_AFTER_MS = 5 * 60_000;
 
   /** What can take focus inside a dialog, in the order Tab walks it. */
   const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
@@ -63,9 +76,6 @@
     const named = FOCUS_KEYS.filter((key) => node?.dataset?.[key] !== undefined);
     return named.length ? named.map((key) => `${key}=${node.dataset[key]}`).join("&") : null;
   }
-
-  /** The mascot the Integrations pane joins each agent to, served beside the page. */
-  const MASCOT = "extension/ghostlight-mascot.png";
 
   /** The chevron that marks a fold or a disclosure; it turns over once open. */
   const CHEVRON = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>';
@@ -413,7 +423,8 @@
         `<p>${escapeHtml(details.summary)}</p>` + (hosts ? `<p>${escapeHtml(details.explanation)}</p><ul>${hosts}</ul>` : unnamed));
     }
 
-    function heroMarkup(entry) {
+    /** The facts of one action, for the running card and a row's details. A resting card says its age above. */
+    function heroMarkup(entry, resting = false) {
       // The sentence names the host itself, so the hero carries no host chip: it would say the
       // same thing twice. Readiness is the one observed fact no sentence states.
       const observed = entry.settled ? entry.observed : null;
@@ -433,7 +444,7 @@
       }
       if (entry.settled && entry.status) meta.push(`<span><i></i>${escapeHtml(words(entry.status))}</span>`);
       if (note) meta.push(`<span><i></i>${escapeHtml(note)}</span>`);
-      if (entry.settled && entry.endedAt) meta.push(`<span><i></i>${escapeHtml(ago(entry.endedAt))} ago</span>`);
+      if (entry.settled && entry.endedAt && !resting) meta.push(`<span><i></i>${escapeHtml(agoSaid(entry.endedAt))}</span>`);
       if (entry.tool) meta.push(`<span class="hero-tool-name"><i></i>${escapeHtml(entry.tool)}</span>`);
 
       const reason = isBlocked(entry) && entry.reason
@@ -474,13 +485,14 @@
     const passportName = () => passport?.organization ?? null;
     const passportContacts = () => passport?.contacts ?? [];
 
+    /** How long work unsettled has taken so far. */
+    const elapsedSoFar = (entry) => duration(Math.max(0, now() - (entry.startedAt ?? now())));
+
     function heroRightMarkup(entry) {
-      const running = isRunning(entry);
-      const elapsed = running
-        ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
-        : duration(settledMs(entry));
-      const outcome = running
-        ? words(entry.phase)
+      const unsettled = isUnsettled(entry);
+      const elapsed = unsettled ? elapsedSoFar(entry) : duration(settledMs(entry));
+      const outcome = unsettled
+        ? PHASE_WORD[entry.phase]
         : isBlocked(entry)
           ? OUTCOME_WORD.blocked
           : outcomeWord(entry) || words(entry.status ?? "completed");
@@ -546,8 +558,39 @@
       say(entry);
     }
 
+    /*
+     * The running card's look over time.
+     *
+     * Only running work looks live. A burst of quick actions keeps the live look across the short
+     * gaps between them, and swaps without motion, so the card does not jitter. A settled action
+     * that has led for REST_AFTER_MS rests as the last action.
+     */
+    let heroEntry = null;
+    let heroSince = -Infinity;
+    let liveUntil = -Infinity;
+    let liveHeld = false;
+    let resting = false;
+
+    /** Whether a settled action has led the card long enough to rest. */
+    const rests = (entry) => Boolean(entry?.settled && entry.endedAt) && now() - entry.endedAt >= REST_AFTER_MS;
+
+    /** Let the held live look go once the burst is over, unless running work took the card back. */
+    function releaseLive() {
+      const left = liveUntil - now();
+      if (left > 0) {
+        schedule(releaseLive, left);
+        return;
+      }
+      liveHeld = false;
+      if (heroEntry && !isRunning(heroEntry)) el.hero.classList.remove("live");
+    }
+
     function paintHero(entry, animate) {
+      const wasLive = heroEntry !== null && (isRunning(heroEntry) || liveHeld);
+      heroEntry = entry ?? null;
       if (!entry) {
+        liveHeld = false;
+        resting = false;
         el.hero.className = "hero";
         el["hero-med"].innerHTML = GLYPHS.scan;
         el["hero-body"].innerHTML = '<div class="hero-tool">Nothing yet</div>'
@@ -555,13 +598,29 @@
         el["hero-right"].innerHTML = "";
         return;
       }
-      el.hero.className = `hero ${capabilityClass(entry)}`;
-      if (isRunning(entry)) el.hero.classList.add("live");
-      if (isBlocked(entry)) el.hero.classList.add("blocked");
       const outcome = outcomeClass(entry);
+      resting = rests(entry);
+      // A plain settle holds the live look for the dwell; a refusal or a failure shows at once.
+      const holding = !isRunning(entry) && wasLive && !isBlocked(entry) && !outcome && !resting;
+      if (holding && !liveHeld) {
+        liveHeld = true;
+        liveUntil = now() + SWAP_DWELL_MS;
+        schedule(releaseLive, SWAP_DWELL_MS);
+      } else if (!holding) {
+        liveHeld = false;
+      }
+      el.hero.className = `hero ${capabilityClass(entry)}`;
+      if (isRunning(entry) || liveHeld) el.hero.classList.add("live");
+      if (isPending(entry)) el.hero.classList.add(entry.phase);
+      if (isBlocked(entry)) el.hero.classList.add("blocked");
       if (outcome) el.hero.classList.add(outcome);
+      if (resting) el.hero.classList.add("rested");
       el["hero-med"].innerHTML = glyphFor(entry);
-      replaceHistoryMarkup(el["hero-body"], heroMarkup(entry));
+      const rest = resting
+        ? `<div class="hero-rest"><span class="kicker">${escapeHtml(LAST_ACTION)}</span>`
+          + `<span class="hero-age" id="hero-age">${escapeHtml(agoSaid(entry.endedAt))}</span></div>`
+        : "";
+      replaceHistoryMarkup(el["hero-body"], rest + heroMarkup(entry, resting));
       el["hero-right"].innerHTML = heroRightMarkup(entry);
       if (animate) {
         for (const node of [el["hero-med"], el["hero-body"], el["hero-right"]]) {
@@ -576,14 +635,14 @@
       const detailsKey = `${entry.invocation}:action`;
       const detailsId = `action-details-${entry.invocation}`;
       const open = expandedHistory.has(detailsKey);
-      const running = isRunning(entry);
-      const time = running
-        ? stopwatch(Date.now() - (entry.startedAt ?? Date.now()))
-        : duration(settledMs(entry));
-      // The duration column holds the time alone. An action that did not succeed says so in its own
-      // sentence and its row's look; a screen reader hears the outcome word on the button.
-      const said = escapeHtml(time);
-      const outcome = isBlocked(entry) ? OUTCOME_WORD.blocked : outcomeWord(entry);
+      // The duration column holds the time alone, or for pending work the word that says why there
+      // is none yet. An action that did not succeed says so in its own sentence and its row's look;
+      // a screen reader hears the outcome word, or the pending one, on the button.
+      const pending = isPending(entry);
+      const said = escapeHtml(pending ? PHASE_WORD[entry.phase]
+        : isRunning(entry) ? elapsedSoFar(entry) : duration(settledMs(entry)));
+      const outcome = pending ? PHASE_WORD[entry.phase]
+        : isBlocked(entry) ? OUTCOME_WORD.blocked : outcomeWord(entry);
       // The list names one capability, the most consequential, in its own column, or under the tool
       // where there is no room for the column. A screen reader hears the whole set on the button.
       const capability = escapeHtml(capabilityWord(entry));
@@ -608,6 +667,7 @@
     function rowClass(entry) {
       let name = `row ${capabilityClass(entry)}`;
       if (isRunning(entry)) name += " running";
+      if (isPending(entry)) name += ` ${entry.phase}`;
       if (isBlocked(entry)) name += " blocked";
       const outcome = outcomeClass(entry);
       if (outcome) name += ` ${outcome}`;
@@ -645,7 +705,7 @@
     function queueCount(feed) {
       const rows = Math.max(0, feed.length - 1);
       el["queue-count"].textContent = rows ? `${rows} ${rows === 1 ? "action" : "actions"}` : "";
-      el["clear-monitor"].disabled = !feed.some((entry) => !isRunning(entry));
+      el["clear-monitor"].disabled = !feed.some((entry) => !isUnsettled(entry));
     }
 
     /** Full rebuild. Only used on first paint and after a detected sequence gap. */
@@ -671,12 +731,18 @@
       queueCount(feed);
     }
 
+    /**
+     * The conveyor: the new action takes the card and the one before lands as the top row. Both move
+     * only when the card it replaces had time to settle; a burst is replaced in place.
+     */
     function promote(entry, previous, feed) {
+      const calm = now() - heroSince >= SWAP_DWELL_MS;
+      heroSince = now();
       if (previous) {
         el.queue.querySelector(".empty")?.remove();
-        el.queue.prepend(buildRow(previous, true));
+        el.queue.prepend(buildRow(previous, calm));
       }
-      hero(entry, true);
+      hero(entry, calm);
       queueCount(feed);
     }
 
@@ -706,9 +772,12 @@
         // The agents At a glance shows, grouped the same way, so the band and the pill agree.
         const agents = agentGroups(facts.snapshot.sessions).length;
         const browsers = facts.snapshot.browsers.length;
+        // Only running work counts as running; what waits or is held is counted under its own word.
+        const work = workCounts({ ...facts, paused: facts.runtime !== "active" })
+          .map(([count, word]) => `<b>${count}</b> ${word}`).join(", ");
         el["state-facts"].innerHTML = `<b>${agents}</b> ${noun(agents, "agent", "agents")}`
           + ` &middot; <b>${browsers}</b> ${noun(browsers, "browser", "browsers")}`
-          + ` &middot; <b>${facts.running}</b> running`
+          + ` &middot; ${work}`
           + ` &middot; <b>${facts.snapshot.history.length}</b> recorded`;
       }
 
@@ -1136,17 +1205,15 @@
     }
 
     /**
-     * The agent and the mascot, joined by a wire that shows the state, and under the state, when
-     * the agent wears its app's own icon, the service's line that says which app it came from.
+     * The agent's icon beside its name and its state, the dot and the word together, so the state
+     * is never colour alone; and under the state, when the agent wears its app's own icon, the
+     * service's line that says which app it came from. The icon is decoration.
      */
     function agentHeroMarkup(agent) {
       const tone = toneOf(agent);
       const about = symbolAbout(agent.agent);
       return `<header class="agent-hero s-${escapeHtml(tone)}">`
-        + '<div class="agent-link" aria-hidden="true">'
         + symbolMarkup(agent.agent, "pane")
-        + '<span class="agent-wire"><i></i><i></i><i></i><b></b></span>'
-        + `<img class="agent-ghost" src="${MASCOT}" alt="" width="50" height="50"></div>`
         + `<div class="agent-hero-text"><h2 id="agents-pane-title">${escapeHtml(agent.label)}</h2>`
         + `<div class="agent-state-line"><span class="agent-dot d-${escapeHtml(tone)}" aria-hidden="true"></span>`
         + `<span class="agent-state t-${escapeHtml(tone)}">${escapeHtml(agentStateWord(tone))}</span></div>`
@@ -2350,20 +2417,28 @@
 
     /* ------------------------------ live clocks --------------------------- */
 
+    /** Move the clocks of unsettled work: the card's for running or pending work, a row's for running. */
     function tickElapsed(feed) {
       const top = feed[0];
-      if (top && isRunning(top)) {
+      if (top && isUnsettled(top)) {
         const node = document.getElementById("elapsed");
-        if (node) node.textContent = stopwatch(Date.now() - (top.startedAt ?? Date.now()));
+        if (node) node.textContent = elapsedSoFar(top);
       }
       for (const entry of feed.slice(1)) {
         if (!isRunning(entry)) continue;
         const cell = rowNodes.get(entry.invocation)?.querySelector(".row-dur");
-        if (cell) cell.textContent = stopwatch(Date.now() - (entry.startedAt ?? Date.now()));
+        if (cell) cell.textContent = elapsedSoFar(entry);
       }
     }
 
+    /** Move the ages of settled work, and rest the running card once it has led long enough. */
     function tickAges(feed) {
+      const top = feed[0];
+      if (top && rests(top) !== resting) paintHero(top, false);
+      else if (resting) {
+        const node = document.getElementById("hero-age");
+        if (node) node.textContent = agoSaid(top.endedAt);
+      }
       for (const entry of feed.slice(1)) {
         if (!entry.endedAt) continue;
         const cell = rowNodes.get(entry.invocation)?.querySelector(".row-when");

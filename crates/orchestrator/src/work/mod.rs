@@ -1929,7 +1929,7 @@ impl ApplicationExecutor {
                 decision,
                 physical_id,
                 observed: Observed::default(),
-                audit: refusal.audit(),
+                audit: refusal.audit().for_gesture(context.gesture),
             };
         }
         if error.effect_unknown() {

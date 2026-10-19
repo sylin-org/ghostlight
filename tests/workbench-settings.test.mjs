@@ -94,6 +94,15 @@ class Element {
     };
   }
 
+  /** The class attribute, read and written as one string, as a browser's is. */
+  get className() {
+    return [...this.classes].join(" ");
+  }
+
+  set className(value) {
+    this.classes = new Set(String(value).split(/\s+/).filter(Boolean));
+  }
+
   addEventListener(type, handler) {
     (this.listeners[type] ??= []).push(handler);
   }
@@ -2265,6 +2274,118 @@ test("a burst of settled actions reaches a screen reader as at most one sentence
   assert.equal(said(shown, "action-said"), "read: Read 30 words from c.example.");
 });
 
+/* ---------------------------- only running work glows ---------------------------- */
+
+/** Work the window watched start in `phase`, as the live stream names it, `ago` milliseconds ago. */
+const startedRead = (invocation, phase, startedAt = 1) => Entries.entryFromOperation({
+  invocation, workspace: "w1", tool: "browser_read", activity: "Reading page", capability: "read",
+  phase, started_at_ms: startedAt
+});
+
+test("waiting and held work is still: it never wears the live look, and its row says why it has no time", () => {
+  const shown = clocked();
+  const running = startedRead("run", "running");
+  const waiting = startedRead("wait", "waiting");
+  const held = startedRead("hold", "held");
+  shown.view.rebuildFeed([running, waiting, held]);
+  assert.ok(shown.el("hero").classes.has("live"), "running work looks live");
+  const [waitRow, heldRow] = queueRows(shown);
+  for (const [row, phase, word] of [[waitRow, "waiting", "Waiting"], [heldRow, "held", "Held"]]) {
+    assert.ok(row.className.split(" ").includes(phase), row.className);
+    assert.ok(!row.className.split(" ").includes("running"), `${phase} work is not painted as running`);
+    const cells = drawn(row.innerHTML);
+    assert.equal(cells.wearing("row-dur")[0].textContent, word);
+    assert.ok(cells.wearing("sr-only").some((node) => node.textContent === `, ${phase}`), `a screen reader hears ${phase}`);
+  }
+  for (const phase of ["waiting", "held"]) {
+    const card = clocked();
+    card.view.hero(startedRead(phase, phase), false);
+    assert.ok(!card.el("hero").classes.has("live"), `a ${phase} card has no glow`);
+    assert.ok(card.el("hero").classes.has(phase));
+    assert.equal(drawn(card.el("hero-right").innerHTML).wearing("outcome")[0].textContent, Words.PHASE_WORD[phase]);
+  }
+  assert.equal(naming(".row.waiting .row-dur")[0].declarations.color, "var(--ink-3)");
+  assert.equal(naming(".row.held .row-dur")[0].declarations.color, "var(--held)");
+  assert.equal(naming(".hero.held .outcome")[0].declarations.color, "var(--held)");
+  assert.ok(naming(".hero.waiting .elapsed").length && naming(".hero.held .elapsed").length, "a pending clock is in ink");
+});
+
+test("the band counts only running work as running, and what waits or is held under its own word", () => {
+  assert.deepEqual(Words.workCounts({ running: 0, waiting: 2 }), [[0, "running"], [2, "waiting"]]);
+  assert.deepEqual(Words.workCounts({ running: 0, held: 2, paused: true }), [[2, "held"]]);
+  assert.deepEqual(Words.workCounts({ running: 1, held: 2, paused: true }), [[1, "running"], [2, "held"]]);
+  assert.deepEqual(Words.workCounts({ running: 0, paused: true }), [[0, "running"]]);
+  const shown = glance();
+  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "active", running: 0, waiting: 2, held: 0 });
+  assert.match(shown.el("state-facts").innerHTML, /&middot; <b>0<\/b> running, <b>2<\/b> waiting &middot; /);
+  shown.view.band({ connected: true, snapshot: shown.snapshot, runtime: "held", running: 0, waiting: 0, held: 2 });
+  assert.match(shown.el("state-facts").innerHTML, /&middot; <b>2<\/b> held &middot; /);
+});
+
+test("every clock in the window reads one way: tenths, then minutes and seconds, then hours", () => {
+  assert.equal(Words.duration(5_600), "5.6s");
+  assert.equal(Words.duration(59_990), "59.9s", "a running clock never shows 60.0s");
+  assert.equal(Words.duration(65_000), "1m 05s");
+  assert.equal(Words.duration(3_909_000), "1:05:09");
+  assert.equal(Words.stopwatch, undefined, "there is no second clock format");
+  const shown = clocked();
+  const running = startedRead("run", "running", 10_000 - 65_000);
+  const row = startedRead("row", "running", 10_000 - 5_600);
+  shown.view.rebuildFeed([running, row]);
+  assert.equal(drawn(shown.el("hero-right").innerHTML).wearing("elapsed")[0].textContent, "1m 05s");
+  assert.equal(drawn(queueRows(shown)[0].innerHTML).wearing("row-dur")[0].textContent, "5.6s");
+});
+
+test("a burst of quick actions replaces the card in place and keeps it live between them", () => {
+  const shown = clocked();
+  const first = startedRead("a", "running");
+  shown.view.promote(first, null, [first]);
+  assert.ok(shown.el("hero-body").classes.has("swap-in"), "the first action after a quiet card swaps in");
+  shown.el("hero-body").classes.delete("swap-in");
+  shown.pass(150);
+  const done = Entries.entryFromRecord(settledRead({ invocation: "a" }), first);
+  shown.view.hero(done, false);
+  assert.ok(shown.el("hero").classes.has("live"), "a quick settle holds the live look");
+  shown.pass(150);
+  const second = startedRead("b", "running");
+  shown.view.promote(second, done, [second, done]);
+  assert.ok(!shown.el("hero-body").classes.has("swap-in"), "a card shown for less than the dwell is replaced in place");
+  assert.doesNotMatch(queueRows(shown)[0].className, /\blanding\b/, "and the row below does not drop");
+  const settled = Entries.entryFromRecord(settledRead({ invocation: "b" }), second);
+  shown.view.hero(settled, false);
+  assert.ok(shown.el("hero").classes.has("live"));
+  shown.pass(600);
+  shown.run();
+  assert.ok(!shown.el("hero").classes.has("live"), "the live look goes once the burst is over");
+  shown.pass(600);
+  const third = startedRead("c", "running");
+  shown.view.promote(third, settled, [third, settled]);
+  assert.ok(shown.el("hero-body").classes.has("swap-in"), "after a calm card the next action swaps in again");
+  const refused = clocked();
+  const asked = startedRead("r", "running");
+  refused.view.hero(asked, false);
+  refused.view.hero(Entries.entryFromRecord(settledRead({ invocation: "r", status: "failed", summary: "Could not." }), asked), false);
+  assert.ok(!refused.el("hero").classes.has("live"), "a failure shows at once");
+});
+
+test("a card that has led for five minutes with nothing running rests as the last action", () => {
+  const shown = clocked();
+  const entry = Entries.entryFromRecord(settledRead({ invocation: "old", timestamp_ms: 10_000, status: "failed", summary: "Could not." }), null);
+  shown.view.rebuildFeed([entry]);
+  assert.ok(!shown.el("hero").classes.has("rested"));
+  shown.pass(5 * 60_000);
+  shown.view.tickAges([entry]);
+  assert.ok(shown.el("hero").classes.has("rested"));
+  const body = drawn(shown.el("hero-body").innerHTML);
+  assert.equal(body.wearing("kicker")[0].textContent, Words.LAST_ACTION);
+  assert.equal(body.wearing("hero-age").length, 1, "it says its age");
+  assert.ok(!body.wearing("hero-meta")[0].textContent.includes(" ago"), "and says it once");
+  assert.ok(shown.el("hero").classes.has("failed"), "a failure keeps its edge and its word");
+  assert.equal(naming(".hero.rested::after")[0].declarations.opacity, "0", "a resting card has no glow");
+  const later = RULES.findIndex((rule) => rule.selectors.includes(".hero.rested::after"));
+  assert.ok(later > RULES.findIndex((rule) => rule.selectors.includes(".hero.failed::after")), "even a failed one");
+});
+
 test("a failed, a kept and a refused action each say their outcome in the sentence", () => {
   const shown = clocked();
   const cases = [
@@ -2647,8 +2768,8 @@ const ACCENT = Object.freeze({
   "work running now": ["body.runtime-working .lamp-halo", "body.runtime-working .lamp-core", "body.runtime-working .state-word",
     ".glance-face.busy", ".glance-chip.busy", ".glance-card-head.busy", ".glance-chip.busy .symbol", ".glance-card-head.busy .symbol",
     ".hero::after", ".hero.live .elapsed", ".hero.live .med", ".hero.live .med svg", ".row.running .row-dur",
-    ".row.running .med-mini svg", ".agent-entry-sub.live", ".agent-dot.d-live", ".agent-dot.d-live::after", ".s-live .agent-wire",
-    ".s-live .agent-wire i", ".s-live .agent-ghost", ".agent-state.t-live", ".agent-use.live"],
+    ".row.running .med-mini svg", ".agent-entry-sub.live", ".agent-dot.d-live", ".agent-dot.d-live::after",
+    ".agent-state.t-live", ".agent-use.live"],
   "a control with focus": [":focus-visible", ".hit:focus-visible", ".about-link:focus-visible", ".agents-search input:focus",
     ".rule-detail input[type=\"text\"]:focus", "#sacred-hosts:focus", ".toggle input:focus-visible ~ .toggle-track",
     ".rule-row:focus-visible .rule-edit-hint"],
@@ -2671,8 +2792,8 @@ test("teal means live: only running work, focus, the pointer and an enabled prim
   assert.deepEqual([...allowed].filter((selector) => !drawn.includes(selector)), [], "an allowed selector is gone");
 });
 
-/** Artwork and shapes keep their own geometry: the trading card, monograms, icon tiles, scrollbars and the wire. */
-const SHAPED = /^(\.tcg|\.glance-face|\.symbol|.*scrollbar|.*agent-wire)/;
+/** Artwork and shapes keep their own geometry: the trading card, monograms, icon tiles and scrollbars. */
+const SHAPED = /^(\.tcg|\.glance-face|\.symbol|.*scrollbar)/;
 
 test("every word is set on one type scale and every corner on the kit's radii", () => {
   const sizes = new Set([10, 11.5, 12, 12.5, 13, 14.5, 17, 22, 25]);
@@ -2858,13 +2979,20 @@ test("the page's sky blue never reaches the window, and nothing is coloured inli
   assert.equal(naming(".tcg .orb-trust")[0].declarations.color, "var(--a)");
 });
 
-test("the mascot keeps its face in the agent pane: averaged below its size, crisp only at whole multiples", () => {
-  const sprite = readFileSync(join(ui, "..", "..", "..", "extension", "icons", "ghostlight-mascot.png"));
-  const native = sprite.readUInt32BE(16);
-  const ghost = naming(".agent-ghost")[0].declarations;
-  const drawnAt = pxOf(ghost.width);
-  const whole = drawnAt >= native && drawnAt % native === 0;
-  assert.ok(whole || ghost["image-rendering"] !== "pixelated", `${drawnAt}px from a ${native}px sprite drops rows of its face`);
+test("the agent pane's header is the agent's icon beside its name and state, with no mascot and no wire", () => {
+  const shown = agentsPage(ROSTER, { sessions: [glanceSession("w1", "Zed", { busy: true })], inUse: ["zed"] });
+  shown.pick("zed");
+  const header = shown.pane().wearing("agent-hero")[0];
+  assert.deepEqual(header.children.map((node) => [...node.classes][0]), ["symbol", "agent-hero-text"]);
+  assert.equal(header.children[0].attributes["aria-hidden"], "true", "the icon is decoration");
+  assert.equal(shown.title(), "Zed", "the pane keeps its accessible name");
+  assert.equal(shown.pane().wearing("agent-state")[0].textContent, "Working", "the state is said in words beside its dot");
+  assert.doesNotMatch(shown.el("agents-pane").innerHTML, /mascot|agent-wire|agent-ghost|agent-link/);
+  assert.ok(!RULES.some((rule) => rule.selectors.some((selector) => /agent-(wire|ghost|link)/.test(selector))),
+    "nothing in the stylesheet serves the wire or the mascot");
+  assert.equal(naming(".agent-hero")[0].declarations["align-items"], "center");
+  assert.ok(!RULES.some((rule) => rule.selectors.includes(".agent-hero") && rule.declarations["flex-direction"] === "column"),
+    "the icon stays beside the text at every width");
 });
 
 /* ------------------------------ one vocabulary ------------------------------ */

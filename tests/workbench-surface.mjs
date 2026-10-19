@@ -814,7 +814,7 @@ const historyChecks = [];
   store.applySnapshot({ seq: 0, service: { runtime_state: "active" }, operations: [active], history: [], sessions: [] }, true);
   store.applyChange({ seq: 1, change: { kind: "operation_started", operation: waiting } });
   historyChecks.push(["waiting work stays live beneath the running action", store.hero().invocation === active.invocation
-    && store.feed().length === 2 && sandbox.globalThis.GhostlightEntries.isRunning(store.feed()[1])]);
+    && store.feed().length === 2 && sandbox.globalThis.GhostlightEntries.isPending(store.feed()[1])]);
   store.applyChange({ seq: 2, change: { kind: "operation_started", operation: { ...waiting, phase: "running", activity: "Reading" } } });
   historyChecks.push(["admitted work becomes the running action without a duplicate row", store.hero().invocation === waiting.invocation && store.feed().length === 2]);
 }
