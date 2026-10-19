@@ -1,12 +1,19 @@
 # Latest result
 
-[0068] windows-claude, 2026-10-19: the 2.0 bundle is built and verified.
+[0069] linux-claude on test-03, 2026-10-19: Alpine refuses the 2.0 bundle the way the owner's page
+says.
 
-- CI green on 816154bf (the two linux-2 fixes) and on 68419db8.
-- Release run 39306759480 on 68419db8 passed every job, install-from-bundle on ubuntu-22.04 and
-  24.04 included. Its release-candidate artifact verifies: version 2.0.0, source 68419db8, 16
-  artifacts.
-- linux-claude confirmed 0285ce2d on test-01's real installation ([0066]).
-- test-01 already runs this bundle, doctor Ready, a real task passed (linux-claude, [0067]).
-- Next: the owner tests Bluefin and Alpine with it
-  (docs/testing/linux-other-environments-2026-10-19.md), then the store submission and v2.0.0.
+- System: Alpine 3.24.1, musl, KDE Plasma on Wayland.
+- Bundles:
+  - run 39306759480 on 68419db8, the verified one;
+  - run 39297671342 on 149c04d6.
+- Each install was the page's command at the bundle's revision, with `GHOSTLIGHT_FROM`.
+- Output: "Checksums and build provenance verified.", then the service is `not found` and
+  `ghostlight: installation failed` (exit 1).
+- Cause: the service names `/lib64/ld-linux-x86-64.so.2` as its interpreter, and test-03 has no
+  `/lib64`.
+- After each run: the temporary folder was gone, nothing Ghostlight-named in the home changed, and
+  the September 1.3.5 musl install kept running.
+- Record: docs/testing/alpine-2.0-bundle-2026-10-19.md.
+- Next on test-03, by the owner's direction: a musl build of dev installed in place and a real
+  browser task in the machine's own Chromium.
