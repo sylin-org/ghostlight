@@ -121,9 +121,9 @@ installation guide lines that say WinGet carries 2.0. Not before approval.
 
 ## CI
 
-The last green run is 39173115353 on `dev` 26e48ad0 (2026-10-18): every job, including the Rust,
+The last green run is 39213827086 on `dev` a669b5e9 (2026-10-19): every job, including the Rust,
 extension and page-asset gates, supply chain, and every process and real-browser journey on Linux
-and Windows.
+and Windows. It carries ux-2 and ADR-0203's documents; arch-1's code lands after it.
 
 ## Release checklist
 
