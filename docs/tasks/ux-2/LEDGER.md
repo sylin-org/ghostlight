@@ -24,7 +24,7 @@ the push.
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
 | n2 the-tray-keeps-the-mascot | native | j-11 (owner) | landed (this commit) |
-| e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit) | todo |
+| e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit), j-24 (options switches) | landed (this commit) |
 | o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | landed (this commit) |
 | k1 brand-reference-for-2-0 | docs | j-37 | landed (this commit) |
 
@@ -134,3 +134,22 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   test holds both scales; the trading card, monograms, icon tiles, scrollbars and the agent wire
   keep their own geometry.
 - u1 (j-34): the About card's halo breathes at --beat-breathe (4000ms), the band's tempo.
+- e1 (j-33): neither of the item's two fixes was enough on the tree. The Linux get script line
+  is longer than the Windows one (420px at 13.5px in Cascadia Code, about 430px in the monospace
+  fonts Linux has), so at 12.5px it still clipped up to about 930px, and one column below 920px
+  still clipped from 920 to 961px and, with Copy beside it, from 1000 to 1043px. The kit now goes
+  to one column below 980px and keeps Copy under the command below 1080px, the setup page's full
+  width, at the 13.5px size. Measured in the preview at 600 to 1400px: neither install command
+  nor the window's install and agent prompt panels scroll. Below about 490px the panel still
+  scrolls, as the kit intends for a narrow panel. The window's setup view takes the same
+  breakpoints from the same bytes.
+- e1 (j-34): --beat-glow is deleted rather than set to 4000ms beside --beat-breathe. The glow,
+  the lit lantern and the celebration loops now use --beat-breathe, so the kit has one breath.
+- e1 (j-24): the options page's switches copy the window's .toggle values exactly (32x18 track,
+  14px ink-3 thumb; on is an ink thumb on a .22 track with a .32 border; focus wears the accent).
+- e1 (n-d-06): the popup is lit only while its activity list has an entry, which is one per
+  running invocation. Idle Ready shows the waiting lantern, the same one as Not connected; the
+  words tell them apart.
+- e1: the freeze guard's head comment, its rule text and the kit's header now say what AGENTS.md
+  says: an extension change regenerates the package record, and once a submission is staged,
+  changing a packaged file means resubmitting, which is the owner's call.

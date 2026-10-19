@@ -26,13 +26,28 @@ function snapshot(patch = {}) {
 const PREFERENCES = Object.freeze({ effects: true, captions: true, diagnostics: false, preserveTabs: true });
 
 test("the popup draws each connected state with its own lantern", async () => {
+  const states = {
+    idle: {},
+    browsing: { activity: [{ client_label: "Claude Code", label: "Reading" }] },
+    held: { control_state: "held" },
+    ended: { control_state: "ended" }
+  };
   const lights = {};
-  for (const control of ["active", "held", "ended"]) {
-    const page = runPage("popup.js", { ui_snapshot: snapshot({ control_state: control }) });
+  for (const [name, patch] of Object.entries(states)) {
+    const page = runPage("popup.js", { ui_snapshot: snapshot(patch) });
     await settle();
-    lights[control] = page.byId("pop").dataset.light;
+    lights[name] = page.byId("pop").dataset.light;
   }
-  assert.deepEqual(lights, { active: "lit", held: "held", ended: "held" });
+  assert.deepEqual(lights, { idle: "waiting", browsing: "lit", held: "held", ended: "held" });
+});
+
+test("the popup's ended state offers Start a new session as its primary step", async () => {
+  const page = runPage("popup.js", { ui_snapshot: snapshot({ control_state: "ended" }) });
+  await settle();
+  const [start, ...rest] = page.byId("actions").children;
+  assert.equal(start.textContent, "Start a new session");
+  assert.equal(start.className, "gl-btn gl-btn--primary");
+  assert.deepEqual(rest, []);
 });
 
 test("the popup's Open Ghostlight link sends show_ghostlight", async () => {

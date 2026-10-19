@@ -13,7 +13,9 @@
   "use strict";
 
   // The popup's lantern: the setup page's lights, plus held, the waiting ghost with an amber ember
-  // that the window and the tray also show for Paused and for an ended session.
+  // that the window and the tray also show for Paused and for an ended session. The lantern is lit
+  // only while an agent is browsing; Ready with nobody browsing rests on the waiting pilot ember,
+  // as the window's lamp rests in ink until work runs.
   const LIGHT = Object.freeze({ ...setup.LIGHT, HELD: "held" });
   // The runtime_control intents the popup sends. The orchestrator owns the state each one moves.
   const INTENT = Object.freeze({
@@ -90,8 +92,12 @@
     return { title: WORDS.notConnected, line: OPEN_LINE, line2: place, action: null };
   }
 
-  function browsing(activity) {
-    const entries = Array.isArray(activity) ? activity : [];
+  // What agents are doing in this browser now: one entry per running invocation.
+  function browsingEntries(activity) {
+    return Array.isArray(activity) ? activity : [];
+  }
+
+  function browsing(entries) {
     if (entries.length === 0) return WORDS.idle;
     const first = entries[0]?.client_label;
     const same = typeof first === "string" && first !== "" && entries.every((entry) => entry?.client_label === first);
@@ -112,7 +118,7 @@
   function popupView(snapshot, { shortcut = null, platform = null } = {}) {
     const kind = link(snapshot);
     const view = {
-      light: kind === LINK.CONNECTED ? LIGHT.LIT : LIGHT.WAITING,
+      light: LIGHT.WAITING,
       eyebrow: WORDS.eyebrow,
       title: "",
       line: "",
@@ -139,7 +145,7 @@
       view.light = LIGHT.HELD;
       view.title = WORDS.ended.title;
       view.line = WORDS.ended.line;
-      view.secondary = { label: WORDS.startSession, intent: INTENT.START_SESSION };
+      view.primary = { label: WORDS.startSession, intent: INTENT.START_SESSION };
       return view;
     }
     view.quiet = { label: WORDS.endSession, intent: INTENT.END_SESSION };
@@ -150,8 +156,10 @@
       view.primary = keyed({ label: WORDS.resume, intent: INTENT.RESUME }, shortcut);
       return view;
     }
+    const entries = browsingEntries(snapshot.activity);
+    if (entries.length > 0) view.light = LIGHT.LIT;
     view.title = WORDS.ready;
-    view.line = browsing(snapshot.activity);
+    view.line = browsing(entries);
     view.secondary = keyed({ label: WORDS.pause, intent: INTENT.HOLD }, shortcut);
     return view;
   }

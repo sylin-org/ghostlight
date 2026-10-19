@@ -33,7 +33,7 @@ function actions(view) {
 
 test("connected and active is ready, with a pause and a quiet end", () => {
   const view = popup.popupView(snapshot(), { shortcut: SHORTCUT, platform: WIN });
-  assert.equal(view.light, LIGHT.LIT);
+  assert.equal(view.light, LIGHT.WAITING);
   assert.equal(view.eyebrow, "Ghostlight");
   assert.equal(view.title, "Ready");
   assert.equal(view.line, "No agent is browsing.");
@@ -81,16 +81,27 @@ test("an ended session offers a new one and no end", () => {
   assert.equal(view.title, "Session ended");
   assert.equal(view.line, "Agents can't use this browser until you start a new session.");
   assert.deepEqual(actions(view), {
-    primary: null,
-    secondary: { label: "Start a new session", intent: INTENT.START_SESSION },
+    primary: { label: "Start a new session", intent: INTENT.START_SESSION },
+    secondary: null,
     quiet: null,
     release: null
   });
 });
 
-test("ready is lit, and paused and ended are held, as the window and the tray show them", () => {
+test("ready waits, and paused and ended are held, as the window and the tray show them", () => {
   const lights = ["active", "held", "ended"].map((control) => popup.popupView(snapshot({ control_state: control })).light);
-  assert.deepEqual(lights, [LIGHT.LIT, LIGHT.HELD, LIGHT.HELD]);
+  assert.deepEqual(lights, [LIGHT.WAITING, LIGHT.HELD, LIGHT.HELD]);
+});
+
+test("the lantern is lit only while an agent is browsing", () => {
+  const browsing = { activity: [{ client_label: "Claude Code", label: "Reading" }] };
+  assert.equal(popup.popupView(snapshot(browsing)).light, LIGHT.LIT);
+  assert.equal(popup.popupView(snapshot({ activity: [] })).light, LIGHT.WAITING);
+  assert.equal(popup.popupView(snapshot({ activity: undefined })).light, LIGHT.WAITING);
+  for (const control of ["held", "ended"]) {
+    assert.equal(popup.popupView(snapshot({ control_state: control, ...browsing })).light, LIGHT.HELD);
+  }
+  assert.equal(popup.popupView(away(shared.LINK_UNREACHABLE, browsing), { platform: WIN }).light, LIGHT.WAITING);
 });
 
 test("every connected state links to the Ghostlight window and no other state does", () => {

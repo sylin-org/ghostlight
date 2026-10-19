@@ -1,13 +1,13 @@
 // Extension freeze guard (ADR-0200 D16).
 //
-// The 2.0 extension is submitted early to the stores and stays the same package through the
-// release, because a changed packaged file means withdrawing the submission and starting again.
-// This test computes the packaged set the way scripts/package-extension.ps1 stages it and fails
-// when a file is added, removed or changed against tests/golden/extension-2.0.0.files.sha256.
+// The packaged extension files are recorded, so no packaged file changes unnoticed. This test
+// computes the packaged set the way scripts/package-extension.ps1 stages it and fails when a file
+// is added, removed or changed against tests/golden/extension-2.0.0.files.sha256.
 //
-// A packaged file changes only with a recorded owner decision to withdraw and resubmit. The
-// golden is then regenerated from the new zip with
-// `node tests/guards/lib/extension-package.mjs <zip>`, in the same commit as the change.
+// An extension change regenerates the record in the same commit: package the extension with
+// scripts/package-extension.ps1, then write the golden from the new zip with
+// `node tests/guards/lib/extension-package.mjs <zip>`. Once a store submission is staged, changing
+// a packaged file means resubmitting, which is the owner's call.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,8 +16,9 @@ import { test } from "node:test";
 import { GOLDEN_PATH, packagedHashes, parseGolden } from "./lib/extension-package.mjs";
 
 const RULE =
-  "A packaged extension file changes only with a recorded owner decision to withdraw the store " +
-  "submission and resubmit (ADR-0200 Decision 16).";
+  "An extension change regenerates tests/golden/extension-2.0.0.files.sha256 in the same commit; " +
+  "once a store submission is staged, changing a packaged file means resubmitting, which is the " +
+  "owner's call (ADR-0200 Decision 16).";
 
 test("the packaged extension files equal the frozen 2.0.0 set", () => {
   const frozen = parseGolden(readFileSync(GOLDEN_PATH, "utf8"));
