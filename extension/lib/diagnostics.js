@@ -554,8 +554,7 @@
       detail = "problems",
       match_text: matchText,
       after,
-      limit = DEFAULT_READ_LIMIT,
-      allowNetworkUrl = () => true
+      limit = DEFAULT_READ_LIMIT
     } = {}) {
       requireTabId(tabId);
       if (!["both", "console", "network"].includes(source)) {
@@ -571,16 +570,12 @@
         && (typeof matchText !== "string" || matchText.length < 1 || matchText.length > MAX_MATCH_CHARS)) {
         throw new RangeError(`match_text must contain 1 to ${MAX_MATCH_CHARS} characters`);
       }
-      if (typeof allowNetworkUrl !== "function") {
-        throw new TypeError("allowNetworkUrl must be a function");
-      }
 
       const captureStarted = enable(tabId);
       const state = activeState(tabId);
       const afterSequence = after === undefined ? 0 : sequenceFromCursor(state, after);
       const entries = [];
       const literal = matchText?.toLowerCase();
-      let omittedCount = 0;
       let scannedSequence = afterSequence;
       let truncated = false;
 
@@ -591,19 +586,6 @@
         if (!selectedSource || !selectedDetail) {
           scannedSequence = entry.sequence;
           continue;
-        }
-        if (entry.entry === "network") {
-          let allowed = false;
-          try {
-            allowed = allowNetworkUrl(entry.url) === true;
-          } catch (_error) {
-            allowed = false;
-          }
-          if (!allowed) {
-            omittedCount += 1;
-            scannedSequence = entry.sequence;
-            continue;
-          }
         }
         if (!matchesLiteral(entry, literal)) {
           scannedSequence = entry.sequence;
@@ -624,7 +606,8 @@
         evicted: state.evictedThrough > 0
           && (after === undefined || afterSequence <= state.evictedThrough),
         capture_started: captureStarted || state.captureStartedPending,
-        omitted_count: omittedCount
+        // The browser leaves no entry out; the service counts what its policy withholds.
+        omitted_count: 0
       };
       state.captureStartedPending = false;
       return result;

@@ -16,7 +16,6 @@ const stateApi = globalThis.GhostlightState;
 const manifest = chrome.runtime.getManifest();
 
 const WELCOME_PAGE = "setup.html";
-const OUTDATED_SERVICE = "Update Ghostlight on this computer.";
 const SERVICE_UNAVAILABLE = "The local Ghostlight service is unavailable.";
 const ASSETS_REJECTED = "The service sent page code that failed its checksum.";
 const NATIVE_ENDED = "Native connection ended.";
@@ -32,6 +31,8 @@ const PLACEHOLDER_BRAND = /not.*a.*brand/i;
 const ENGINE_BRAND = "Chromium";
 const OFFSCREEN_TARGET = "ghostlight-offscreen";
 const CONTROLLED_KEY = "ghostlight.controlled";
+// The epoch of the service that granted the custody in CONTROLLED_KEY, kept beside it.
+const SERVICE_EPOCH_KEY = "ghostlight.service_epoch";
 const UNKNOWN_DIALOG = "unknown";
 
 // How the first connection of this worker ended, as far as the welcome page cares.
@@ -122,11 +123,14 @@ let helloUnanswered = false;
 let retryTimer = null;
 let backendLost = false;
 let persistChain = Promise.resolve();
+// `adapter_outdated` is set when the service refuses this extension as outdated and cleared only
+// by an accepted hello; `adapter_refusal` is the sentence the service sent with that refusal.
 let liveState = {
   connected: false,
   compatible: true,
   service_outdated: false,
-  service_version: null,
+  adapter_outdated: false,
+  adapter_refusal: null,
   control_state: RUNTIME.ACTIVE,
   last_error: null
 };
@@ -181,26 +185,24 @@ function persistPresentationQueue() {
   return chrome.storage.session.set({ [stateApi.PRESENTATIONS_KEY]: presentationQueue.snapshot() });
 }
 
+// What the popup, the options page and the setup page draw. The link is classified here from the
+// raw reason, so a surface gets the closed value and never Chrome's message text.
 function uiSnapshot() {
-  const outdated = liveState.service_outdated;
-  const generalized = liveState.last_error ? SERVICE_UNAVAILABLE : null;
   return {
-    ...liveState,
-    adapter_version: manifest.version,
-    browser_id: browserId,
-    attached_tabs: lifecycle.attachedCount(),
-    recording_tabs: recording.count(),
-    unseen_denials: presentationQueue.size(),
-    activity: notice.activityList(),
-    // Classified from the raw reason before it is generalized below, so surfaces get the closed
-    // value and never the message text.
+    connected: liveState.connected,
+    compatible: liveState.compatible,
+    control_state: liveState.control_state,
     link_state: shared.linkState({
       connected: liveState.connected,
       compatible: liveState.compatible,
-      outdated,
+      outdated: liveState.service_outdated,
+      adapterOutdated: liveState.adapter_outdated,
       lastError: liveState.last_error
     }),
-    last_error: outdated ? OUTDATED_SERVICE : preferences.diagnostics ? liveState.last_error : generalized
+    adapter_refusal: liveState.adapter_outdated ? liveState.adapter_refusal : null,
+    attached_tabs: lifecycle.attachedCount(),
+    recording_tabs: recording.count(),
+    activity: notice.activityList()
   };
 }
 
@@ -284,8 +286,7 @@ const controlledTabs = Object.freeze({
     persistControlled();
     await lifecycle.unretain(tabId);
     await world.ambientAll(tabId).catch(() => false);
-  },
-  managedIds
+  }
 });
 
 const input = globalThis.GhostlightInput.create({
@@ -331,8 +332,9 @@ async function initializeLocalState() {
   }
   preferences = stateApi.preferencesFromStorage(stored);
   await chrome.storage.local.set(stateApi.preferencesForStorage(preferences));
-  const session = await chrome.storage.session.get([CONTROLLED_KEY, stateApi.PRESENTATIONS_KEY]);
+  const session = await chrome.storage.session.get([CONTROLLED_KEY, SERVICE_EPOCH_KEY, stateApi.PRESENTATIONS_KEY]);
   presentationQueue.restore(session[stateApi.PRESENTATIONS_KEY]);
+  serviceEpoch = typeof session[SERVICE_EPOCH_KEY] === "string" ? session[SERVICE_EPOCH_KEY] : null;
   await restoreControlled(session[CONTROLLED_KEY]);
   connectionLog.record(connectionEvents.INITIALIZE_FINISHED, { browser_id: browserId, duration_ms: Date.now() - started });
 }
@@ -348,8 +350,8 @@ async function restoreControlled(stored) {
 }
 
 // A restarted worker keeps its managed tabs: each one is retained again. Page code exists only once
-// the service has accepted the hello, so telling the tabs their state and showing any waiting notice
-// happens in negotiate().
+// the service has accepted the hello, so telling the tabs their state, showing any waiting notice and
+// releasing custody that a service no longer running granted happen in negotiate().
 async function resumeControlledTabs() {
   await Promise.allSettled(managedIds().map((tabId) => lifecycle.retain(tabId)));
 }
@@ -452,7 +454,7 @@ async function establishNativeConnection() {
     awaitHelloAnswer();
   } catch (error) {
     nativePort = null;
-    setConnection({ connected: false, service_version: null, last_error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
+    setConnection({ connected: false, last_error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
     connectionLog.record(connectionEvents.CONNECT_FAILED, { attempt, stage, error: shared.bounded(error?.message ?? error, ERROR_CHARS) });
     failedConnection(error?.message);
     scheduleRetry(attempt);
@@ -480,7 +482,24 @@ function endHelloWait() {
 function onHelloTimeout() {
   helloTimer = null;
   settleWelcome(FIRST_CONNECTION.OTHER);
-  setConnection({ connected: false, compatible: false, service_outdated: true, last_error: OUTDATED_SERVICE });
+  setConnection({ connected: false, compatible: false, service_outdated: true });
+}
+
+// The service refused this extension's hello because it does not speak the service's protocol. The
+// link says to update Ghostlight in Browser until a later hello is accepted, and the reconnect after
+// the browser relay exits waits for the delayed retry instead of restarting the native host at once.
+function adapterRefused(message) {
+  connectionLog.record(connectionEvents.ADAPTER_REFUSED);
+  endHelloWait();
+  settleWelcome(FIRST_CONNECTION.OTHER);
+  const refusal = shared.bounded(message, ERROR_CHARS);
+  setConnection({
+    connected: false,
+    compatible: false,
+    service_outdated: false,
+    adapter_outdated: true,
+    adapter_refusal: refusal === "" ? null : refusal
+  });
 }
 
 function clearRetryTimer() {
@@ -503,7 +522,8 @@ function scheduleRetry(attempt) {
 
 // The port is gone. In-flight primitives are cancelled and their receipts dropped, pages are told the
 // service is away, and the connection comes back at once when the connector left on purpose after it
-// said the service was unavailable, else after a short delay.
+// said the service was unavailable, else after a short delay. A service that refused this extension
+// as outdated would refuse it again, so that case always takes the delay.
 function onPortClosed(port, attempt, reason = chrome.runtime.lastError?.message || NATIVE_ENDED) {
   if (nativePort !== port) return;
   nativePort = null;
@@ -511,10 +531,10 @@ function onPortClosed(port, attempt, reason = chrome.runtime.lastError?.message 
   backendLost = false;
   connectionLog.record(connectionEvents.NATIVE_DISCONNECTED, { attempt, error: reason });
   failedConnection(reason);
-  setConnection({ connected: false, service_version: null, last_error: reason });
+  setConnection({ connected: false, last_error: reason });
   settleServiceBoundaryState().catch(recordError);
   broadcastAmbient();
-  if (orderly) connectNative("service_returned");
+  if (orderly && !liveState.adapter_outdated) connectNative("service_returned");
   else scheduleRetry(attempt);
 }
 
@@ -538,13 +558,19 @@ async function settleServiceBoundaryState() {
   }
 }
 
+// Custody ends with the service that granted it. On a new service epoch every managed tab is
+// released: its debugger session, focus emulation and glow go, and it stays released until its next
+// top-level commit. The service takes a tab back with its next call that addresses it.
+async function releaseManagedTabs() {
+  await Promise.allSettled(managedIds().map((tabId) => controlledTabs.release(tabId)));
+}
+
 async function serviceLost(message, absent = false) {
   connectionLog.record(connectionEvents.BACKEND_UNAVAILABLE);
   backendLost = true;
   if (absent) endHelloWait();
   setConnection({
     connected: false,
-    service_version: null,
     last_error: message,
     ...(absent ? { service_outdated: false } : {})
   });
@@ -592,6 +618,7 @@ async function onNativeMessage(frame, port) {
     case FRAME.BACKEND_UNAVAILABLE:
       return serviceLost(SERVICE_UNAVAILABLE, frame[BACKEND_SERVICE_FIELD] === BACKEND_SERVICE_ABSENT);
     case FRAME.ERROR:
+      if (frame.code === shared.ADAPTER_INCOMPATIBLE) return adapterRefused(frame.message);
       setConnection({ last_error: shared.bounded(frame.message, ERROR_CHARS) });
       return;
     default:
@@ -623,8 +650,10 @@ async function negotiate(frame, port) {
   }
   if (port !== nativePort) return;
   if (frame.service_epoch !== serviceEpoch) {
-    serviceEpoch = frame.service_epoch;
     await settleServiceBoundaryState();
+    await releaseManagedTabs();
+    serviceEpoch = frame.service_epoch;
+    await chrome.storage.session.set({ [SERVICE_EPOCH_KEY]: serviceEpoch }).catch(() => {});
     if (port !== nativePort) return;
   }
   backendLost = false;
@@ -633,7 +662,8 @@ async function negotiate(frame, port) {
     connected: true,
     compatible: true,
     service_outdated: false,
-    service_version: frame.service_version ?? null,
+    adapter_outdated: false,
+    adapter_refusal: null,
     last_error: null
   });
   await applyRuntimeState(controlStateOf(frame.control_state) ?? RUNTIME.ACTIVE);
@@ -733,8 +763,10 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   }
 });
 
+// Only a navigation of the tab's own page starts a fresh diagnostics ring. An embedded document
+// that navigates keeps the console and network history the tab gathered.
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  buffers.beforeNavigate(details.tabId);
+  if (details.frameId === 0) buffers.beforeNavigate(details.tabId);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {

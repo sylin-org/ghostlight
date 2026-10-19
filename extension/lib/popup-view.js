@@ -28,7 +28,13 @@
   const OPEN = Object.freeze({ SETUP: "setup", OPTIONS: "options" });
   const CONTROL = Object.freeze({ HELD: "held", ENDED: "ended" });
   // How the popup reads the link: the one answer it needs from the snapshot.
-  const LINK = Object.freeze({ CONNECTED: "connected", OUTDATED: "outdated", ABSENT: "absent", START: "start" });
+  const LINK = Object.freeze({
+    CONNECTED: "connected",
+    OUTDATED: "outdated",
+    BROWSER_OUTDATED: "browser_outdated",
+    ABSENT: "absent",
+    START: "start"
+  });
 
   const WORDS = Object.freeze({
     eyebrow: "Ghostlight",
@@ -54,6 +60,7 @@
       line: "Update Ghostlight on this computer.",
       action: "Update this computer"
     }),
+    browserOutdated: Object.freeze({ title: "Update needed", line: "Update Ghostlight in Browser." }),
     release: (tabs) => (tabs === 1 ? "Release debugger session (1 tab)" : `Release debugger sessions (${tabs} tabs)`),
     settings: "Settings",
     show: setup.WORDS.met.action,
@@ -64,6 +71,7 @@
   const OPEN_LINE = `${setup.WORDS.open.lead}${setup.WORDS.open.accent}${setup.WORDS.open.trail}`;
 
   function link(snapshot) {
+    if (snapshot.link_state === shared.LINK_ADAPTER_OUTDATED) return LINK.BROWSER_OUTDATED;
     if (snapshot.link_state === shared.LINK_SERVICE_OUTDATED) return LINK.OUTDATED;
     if (snapshot.connected && snapshot.compatible) return LINK.CONNECTED;
     if (snapshot.link_state === shared.LINK_HOST_ABSENT || !snapshot.compatible) return LINK.ABSENT;
@@ -71,8 +79,17 @@
   }
 
   // The words for a link that is not connected; the popup and the options page both read these.
-  function disconnected(kind, platform) {
+  // An extension the service refused as outdated adds the service's own sentence on how to update.
+  function disconnected(kind, platform, refusal) {
     const place = setup.WORDS.openLead[setup.platformKey(platform)] ?? null;
+    if (kind === LINK.BROWSER_OUTDATED) {
+      return {
+        title: WORDS.browserOutdated.title,
+        line: WORDS.browserOutdated.line,
+        line2: typeof refusal === "string" && refusal !== "" ? refusal : null,
+        action: null
+      };
+    }
     if (kind === LINK.OUTDATED) {
       return {
         title: WORDS.outdated.title,
@@ -132,7 +149,7 @@
       settings: { label: WORDS.settings, open: OPEN.OPTIONS }
     };
     if (kind !== LINK.CONNECTED) {
-      const words = disconnected(kind, platform);
+      const words = disconnected(kind, platform, snapshot.adapter_refusal);
       view.title = words.title;
       view.line = words.line;
       view.line2 = words.line2;
@@ -178,7 +195,7 @@
         show: showWindow(kind)
       };
     }
-    const words = disconnected(kind, platform);
+    const words = disconnected(kind, platform, snapshot.adapter_refusal);
     return {
       title: words.title,
       line: words.line2 ? `${words.line} ${words.line2}` : words.line,

@@ -9,6 +9,7 @@ const { INTENT, OPEN, LIGHT } = popup;
 const WIN = "win";
 const LINUX = "linux";
 const SHORTCUT = "Alt+Shift+P";
+const REFUSAL = "Ghostlight in Browser is out of date. It updates itself within a day; to update now, open chrome://extensions, turn on Developer mode and click Update.";
 
 function snapshot(patch = {}) {
   return {
@@ -196,6 +197,7 @@ test("the connection sentence agrees with the popup for each link state", () => 
   const cases = [
     away(shared.LINK_HOST_ABSENT),
     away(shared.LINK_SERVICE_OUTDATED, { compatible: false }),
+    away(shared.LINK_ADAPTER_OUTDATED, { compatible: false, adapter_refusal: REFUSAL }),
     away(shared.LINK_UNREACHABLE),
     snapshot({ compatible: false, link_state: shared.LINK_UNREACHABLE })
   ];
@@ -242,4 +244,20 @@ test("an outdated service offers its update on the options connection", () => {
   assert.equal(connection.title, "Update needed");
   assert.equal(connection.needsSetup, true);
   assert.equal(connection.setupLabel, "Update this computer");
+});
+
+test("an extension the service refused says to update Ghostlight in Browser, with the service's own words", () => {
+  const view = popup.popupView(away(shared.LINK_ADAPTER_OUTDATED, { compatible: false, adapter_refusal: REFUSAL }), { platform: WIN });
+  assert.equal(view.light, LIGHT.WAITING);
+  assert.equal(view.title, "Update needed");
+  assert.equal(view.line, "Update Ghostlight in Browser.");
+  assert.equal(view.line2, REFUSAL);
+  assert.equal(view.primary, null, "nothing on this computer needs doing");
+  assert.equal(view.show, null);
+  const bare = popup.popupView(away(shared.LINK_ADAPTER_OUTDATED, { compatible: false, adapter_refusal: null }), { platform: WIN });
+  assert.equal(bare.line, "Update Ghostlight in Browser.");
+  assert.equal(bare.line2, null);
+  const connection = popup.connection(away(shared.LINK_ADAPTER_OUTDATED, { compatible: false, adapter_refusal: REFUSAL }), { platform: LINUX });
+  assert.equal(connection.line, `Update Ghostlight in Browser. ${REFUSAL}`);
+  assert.equal(connection.needsSetup, false);
 });

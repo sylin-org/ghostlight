@@ -73,10 +73,17 @@
   const LINK_UNREACHABLE = "unreachable";
   const LINK_HOST_ABSENT = "host_absent";
   const LINK_SERVICE_OUTDATED = "service_outdated";
+  const LINK_ADAPTER_OUTDATED = "adapter_outdated";
 
-  // The closed classification a surface renders. An outdated service is known from the hello that
+  // The code of the service's `error` frame that refuses a hello this extension sent because the
+  // service does not speak its protocol: this extension is the side to update.
+  const ADAPTER_INCOMPATIBLE = "adapter_incompatible";
+
+  // The closed classification a surface renders. A service that refused this extension as outdated
+  // said so outright, so that outranks everything; an outdated service is known from the hello that
   // never came, so it outranks a disconnect reason; a connected link is never reclassified.
-  function linkState({ connected, compatible, outdated = false, lastError }) {
+  function linkState({ connected, compatible, outdated = false, adapterOutdated = false, lastError }) {
+    if (adapterOutdated) return LINK_ADAPTER_OUTDATED;
     if (outdated) return LINK_SERVICE_OUTDATED;
     if (connected && compatible) return LINK_CONNECTED;
     const reason = typeof lastError === "string" ? lastError.toLowerCase() : "";
@@ -104,6 +111,8 @@
     LINK_UNREACHABLE,
     LINK_HOST_ABSENT,
     LINK_SERVICE_OUTDATED,
+    LINK_ADAPTER_OUTDATED,
+    ADAPTER_INCOMPATIBLE,
     linkState
   });
 });

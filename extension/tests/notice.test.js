@@ -101,7 +101,7 @@ test("a deferrable notice for a background tab retires the spinner at once and w
   assert.equal(queue.size(), 1);
   assert.ok(changes() > 0);
   const queued = queue.get(TAB);
-  assert.equal(queued.workspace, Notice.NAMESPACE);
+  assert.equal(queued.tabId, TAB);
   assert.equal(queued.signal.signal, "denial");
 });
 

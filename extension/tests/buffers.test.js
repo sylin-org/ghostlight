@@ -289,7 +289,7 @@ async function startRecording(rig, watch) {
   return result.ok.summary.recording_id;
 }
 
-const summaryOf = (rig, id) => rig.recording.status("protocol4", id).summary;
+const summaryOf = (rig, id) => rig.recording.status(id).summary;
 
 test("start takes a seed frame, starts the screencast and reports the recording, matching the golden shape", async () => {
   const rig = await managed({ withAssets: true });

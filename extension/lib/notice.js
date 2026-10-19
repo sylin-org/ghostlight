@@ -18,10 +18,7 @@
   // wait until its page is visible: it is queued (with the frame it names), the invocation's
   // spinner is retired at once, and the queued notice is shown when the person looks at the tab.
 
-  // The queue is keyed by workspace; this adapter has one namespace, because the service decides
-  // which tab a notice is for.
-  const NAMESPACE = "ghostlight";
-  const SIGNAL = Object.freeze({ COMPLETION: "completion", DENIAL: "denial", ATTENTION: "attention" });
+  const SIGNAL = Object.freeze({ COMPLETION: "completion", DENIAL: "denial" });
   const QUIET_ACTIVITY = "quiet";
   const GROUP_PREFIX = /^Ghostlight - /;
   const DEFAULT_CLIENT_LABEL = "MCP client";
@@ -30,7 +27,7 @@
   const NO_GROUP = -1;
 
   function isTerminal(signal) {
-    return signal === SIGNAL.COMPLETION || signal === SIGNAL.DENIAL || signal === SIGNAL.ATTENTION;
+    return signal === SIGNAL.COMPLETION || signal === SIGNAL.DENIAL;
   }
 
   /**
@@ -106,7 +103,7 @@
     function defer(tabId, frame, signal) {
       const stored = frame ? { ...signal, frame } : { ...signal };
       if (typeof stored.detail !== "string") delete stored.detail;
-      if (queue.defer(NAMESPACE, tabId, stored)) changed();
+      if (queue.defer(tabId, stored)) changed();
     }
 
     function queuedNotice(tabId) {
@@ -177,5 +174,5 @@
     return Object.freeze({ deliver, flush, flushWindow, activityList });
   }
 
-  return Object.freeze({ create, NAMESPACE });
+  return Object.freeze({ create });
 });

@@ -127,8 +127,6 @@ test("adapter state is content-free and deterministic", () => {
     ghostlight_debug: true,
     ghostlight_preserve_tabs: true
   });
-  assert.equal(state.connectionLabel({ connected: true, compatible: true, control_state: "held" }), "Paused");
-  assert.equal(state.controlState("attention"), "active");
   assert.deepEqual(state.badge({ connected: true, compatible: true, control_state: "held" }), { text: "II", color: "#5eead4" });
 });
 
@@ -144,16 +142,25 @@ test("unseen denial delivery is bounded, coalesced, and expires", () => {
     detail: "A configured guardrail prevented it.",
     tab_id: tabId
   });
-  assert.equal(queue.defer("workspace_a", 1, signal(1, "one")), true);
+  assert.equal(queue.defer(1, signal(1, "one")), true);
   now += 1;
-  assert.equal(queue.defer("workspace_a", 1, signal(1, "newest")), true);
+  assert.equal(queue.defer(1, signal(1, "newest")), true);
   assert.equal(queue.size(), 1);
   assert.equal(queue.get(1).signal.phase, "newest");
   now += 1;
-  queue.defer("workspace_a", 2, signal(2, "two"));
+  queue.defer(2, signal(2, "two"));
   now += 1;
-  queue.defer("workspace_a", 3, signal(3, "three"));
+  queue.defer(3, signal(3, "three"));
   assert.deepEqual(queue.snapshot().map((entry) => entry.tabId), [2, 3]);
   now += 100;
   assert.equal(queue.size(), 0);
+});
+
+test("the refusal code the worker recognizes is the one the service sends", () => {
+  const wire = readFileSync(join(__dirname, "..", "..", "crates", "orchestrator", "src", "browser", "adapter", "chromium", "protocol4", "wire.rs"), "utf8");
+  const sent = /pub const ADAPTER_INCOMPATIBLE: &str = "([a-z_]+)";/.exec(wire);
+  assert.ok(sent, "wire.rs declares the adapter_incompatible error code");
+  assert.equal(shared.ADAPTER_INCOMPATIBLE, sent[1]);
+  const golden = JSON.parse(readFileSync(join(__dirname, "..", "..", "tests", "golden", "protocol4", "frames", "error.json"), "utf8"));
+  assert.equal(golden.code, shared.ADAPTER_INCOMPATIBLE);
 });

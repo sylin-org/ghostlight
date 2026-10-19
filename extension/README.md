@@ -69,7 +69,10 @@ and the screenshot returns.
 
 The worker speaks adapter protocol 4 only (`../docs/design/adapter-protocol-4.md`). A service that
 cannot answer a protocol-4 hello is outdated, and the popup says "Update Ghostlight on this
-computer." There is no fallback dialect.
+computer." A service that refuses this extension's hello with `adapter_incompatible` speaks a
+protocol this extension does not: the popup, the options page and the setup page say "Update
+Ghostlight in Browser." with the service's own sentence on how, until a later hello is accepted, and
+the extension reconnects only on its delayed retry. There is no fallback dialect.
 
 The hello is the first frame. It carries this installation's persistent browser id, the browser's
 own product name, and whether it currently holds a focused window. The service answers with
@@ -77,6 +80,11 @@ own product name, and whether it currently holds a focused window. The service a
 the assets against their checksum and installs them into the isolated world `ghostlight` in every
 session, the root page and each out-of-process child. A service that sends assets which fail the
 checksum is refused.
+
+Custody of a tab follows the service that granted it. The extension keeps the service epoch beside
+its controlled tabs in session storage. A worker restart against the same service keeps them; a new
+epoch releases every one of them: the debugger leaves, focus emulation and the glow go, and the
+service takes a tab back with its next call that addresses it.
 
 Each request is one primitive and gets exactly one receipt of facts: whether it dispatched, which
 URLs committed, and a closed failure code. The service classifies effects. An unknown primitive is
@@ -102,7 +110,9 @@ for 15 seconds.
 
 Diagnostics are off until the service requests them for a controlled tab. The first read can be
 empty because earlier console and network activity was not captured. Entries are bounded and
-volatile; network URLs contain only origin and path. A tab close, runtime hold, idle expiry, worker
+volatile; network URLs contain only origin and path. A navigation of the tab's own page starts a
+fresh capture for a tab whose diagnostics are bound; an embedded document that navigates keeps it.
+A tab close, runtime hold, idle expiry, worker
 loss, native disconnect, or ended session erases the capture. Each tab holds at most 1,000 entries
 or 2 MiB for five idle minutes. Reads default to 50 problem entries and cannot request more than
 200; console text is capped at 2,000 characters.

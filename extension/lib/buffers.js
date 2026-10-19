@@ -36,13 +36,12 @@
   // to span (`watch`), and the guard each read and delivery is checked against.
   //
   // A diagnostics read resets the tab's ring when its binding differs from the last one, and a
-  // navigation begun on a bound tab starts a fresh ring. A recording is interrupted with
+  // top-level navigation begun on a bound tab starts a fresh ring. A recording is interrupted with
   // `document_boundary` the moment a watched tab commits any document, or when its frames no longer
   // show the watched set. Exporting runs the retained frames through the offscreen encoder, which
   // yields one GIF that is downloaded, returned to the service, or handed to a page world call as
-  // that call's attachment. The recordings live in one namespace of the shared recording store.
+  // that call's attachment.
 
-  const NAMESPACE = "protocol4";
   const DOMAIN = Object.freeze({ RUNTIME: "Runtime", NETWORK: "Network" });
   const SOURCE = Object.freeze({ BOTH: "both", CONSOLE: "console", NETWORK: "network" });
   const DIAGNOSTICS_OP = Object.freeze({ READ: "read", CLEAR: "clear" });
@@ -322,7 +321,7 @@
       const tab = await requireTab(tabId);
       await acquire(tabId);
       try {
-        const started = recording.start(NAMESPACE, tabId, tab.url);
+        const started = recording.start(tabId, tab.url);
         if (started.existing) return { result: RESULT.STARTED, summary: started.existing, existing: true };
         const state = recording.activeForTab(tabId);
         if (op.watch) watches.set(tabId, op.watch);
@@ -338,10 +337,10 @@
           });
           await worldCalls.ambientAll(tabId);
           changed();
-          return { result: RESULT.STARTED, summary: recording.status(NAMESPACE, state.id).summary, existing: false };
+          return { result: RESULT.STARTED, summary: recording.status(state.id).summary, existing: false };
         } catch (error) {
           // Discarding an active recording ends it, which stops the screencast and forgets the watch.
-          recording.discard(NAMESPACE, state.id);
+          recording.discard(state.id);
           throw error;
         }
       } finally {
@@ -350,12 +349,12 @@
     }
 
     function recordingStatus(op) {
-      const selected = recording.status(NAMESPACE, op.recording_id);
+      const selected = recording.status(op.recording_id);
       return selected.summary ? { result: RESULT.STATUS, summary: selected.summary } : { result: RESULT.NOT_FOUND };
     }
 
     async function stopRecording(op) {
-      const selected = recording.beginStop(NAMESPACE, op.recording_id);
+      const selected = recording.beginStop(op.recording_id);
       if (!selected.state) return { result: RESULT.NOT_FOUND };
       const state = selected.state;
       if (state.state !== RECORDING_STATE) return { result: RESULT.STOPPED, summary: selected.summary, changed: false };
@@ -376,7 +375,7 @@
     }
 
     function discardRecording(op) {
-      const discarded = recording.discard(NAMESPACE, op.recording_id);
+      const discarded = recording.discard(op.recording_id);
       if (discarded.notFound) return { result: RESULT.NOT_FOUND };
       return { result: RESULT.DISCARDED, recording_id: discarded.recordingId, released_bytes: discarded.releasedBytes };
     }
@@ -474,7 +473,7 @@
     // is a failure of the primitive, because the service must learn that the page changed; any other
     // trouble encoding or delivering is an `export_failed` result with its reason.
     async function exportRecording(op, fx, correlation) {
-      const selected = recording.retained(NAMESPACE, op.recording_id);
+      const selected = recording.retained(op.recording_id);
       if (selected.notFound) return { result: RESULT.NOT_FOUND };
       const destination = op.destination;
       let encoded = null;
@@ -571,8 +570,8 @@
     }
 
     /**
-     * Takes a `webNavigation.onBeforeNavigate` event. A tab whose diagnostics are bound starts a
-     * fresh ring for the new document and keeps its Runtime and Network capture on, so the
+     * Takes a top-frame `webNavigation.onBeforeNavigate` event. A tab whose diagnostics are bound
+     * starts a fresh ring for the new document and keeps its Runtime and Network capture on, so the
      * navigation itself stays observable.
      */
     function beforeNavigate(tabId) {
@@ -622,5 +621,5 @@
     });
   }
 
-  return Object.freeze({ create, NAMESPACE });
+  return Object.freeze({ create });
 });

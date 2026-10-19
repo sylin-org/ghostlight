@@ -17,17 +17,15 @@ function tab(overrides) {
   return { windowId: WINDOW, url: "https://example.com/", title: "Example Domain", ...overrides };
 }
 
-function setup({ browser = {}, cancelled = [], managed = [] } = {}) {
+function setup({ browser = {}, cancelled = [] } = {}) {
   const chrome = fakeBrowser(browser);
   const debuggerChrome = fakeChrome();
   const { lifecycle } = wire(debuggerChrome);
   let clock = 0;
   const hook = {
     calls: [],
-    managed,
     async manage(id) { this.calls.push(["manage", id]); },
-    async release(id) { this.calls.push(["release", id]); },
-    managedIds() { return this.managed; }
+    async release(id) { this.calls.push(["release", id]); }
   };
   const tabs = Tabs.create({
     chromeApi: chrome,
@@ -112,9 +110,8 @@ test("invalid_request messages match the golden receipts", async () => {
 
 // ---- list_tabs --------------------------------------------------------------------------------
 
-test("list_tabs reports an opener the service manages, matching the golden receipt", async () => {
+test("list_tabs reports each tab's facts, matching the golden receipt", async () => {
   const { tabs } = setup({
-    managed: [3],
     browser: {
       tabs: [
         { id: 3, windowId: WINDOW, url: "https://example.com/start", title: "Start", active: false },
@@ -128,7 +125,7 @@ test("list_tabs reports an opener the service manages, matching the golden recei
   assert.equal(result.dispatched, golden("receipts/list_tabs.ok").dispatched);
 });
 
-test("list_tabs without tab_ids lists every tab and hides the opener of an unmanaged tab", async () => {
+test("list_tabs without tab_ids lists every tab and never reports an opener", async () => {
   const { tabs } = setup({
     browser: {
       tabs: [
@@ -146,7 +143,7 @@ test("list_tabs without tab_ids lists every tab and hides the opener of an unman
   assert.equal(ok.tabs[2].url, "about:blank");
 });
 
-test("list_tabs with tab_ids includes the children of a named tab and reports the named opener", async () => {
+test("list_tabs with tab_ids includes the children of a named tab", async () => {
   const { tabs } = setup({
     browser: {
       tabs: [
@@ -157,7 +154,8 @@ test("list_tabs with tab_ids includes the children of a named tab and reports th
     }
   });
   const { ok } = await execute(tabs.listTabs, { tab_ids: [3] });
-  assert.deepEqual(ok.tabs.map((entry) => [entry.tab_id, entry.opener_tab_id]), [[3, undefined], [4, 3]]);
+  assert.deepEqual(ok.tabs.map((entry) => entry.tab_id), [3, 4]);
+  assert.equal(ok.tabs.some((entry) => "opener_tab_id" in entry), false);
 });
 
 // ---- open_tab ---------------------------------------------------------------------------------

@@ -13,7 +13,6 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const Buffers = require("../lib/buffers.js");
 const World = require("../lib/world.js");
 const { ROOT, node, fakeChrome, assets } = require("./p4-fakes.js");
 const { golden } = require("./p4-chrome.js");
@@ -86,7 +85,7 @@ function recordedPage({ startedAt, now }) {
     wall,
     recordingOptions: { now: () => wall.time, newId: () => MINTED_ID },
     seed(parts) {
-      parts.recording.start(Buffers.NAMESPACE, TAB, URL);
+      parts.recording.start(TAB, URL);
       const sizes = [...Array(17).fill(50000), 62340];
       sizes.forEach((size, index) => {
         wall.time = startedAt + index * 230;
@@ -95,7 +94,7 @@ function recordedPage({ startedAt, now }) {
       wall.time = now;
     },
     freeze(parts) {
-      const selected = parts.recording.beginStop(Buffers.NAMESPACE, MINTED_ID);
+      const selected = parts.recording.beginStop(MINTED_ID);
       parts.recording.finishStop(selected.state, "explicit");
     }
   };

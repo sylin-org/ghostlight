@@ -11,12 +11,11 @@
     WORKER_STARTED: "worker_started", INITIALIZE_STARTED: "initialize_started",
     INITIALIZE_FINISHED: "initialize_finished", CONNECT_REQUESTED: "connect_requested",
     NATIVE_PORT_OPENED: "native_port_opened", NATIVE_HELLO_SENT: "native_hello_sent",
-    NATIVE_HELLO_SKIPPED: "native_hello_skipped",
     NATIVE_DISCONNECTED: "native_disconnected", CONNECT_FAILED: "connect_failed",
     RETRY_SCHEDULED: "retry_scheduled", RETRY_FAILED: "retry_failed", ALARM_FIRED: "alarm_fired",
     BROWSER_STARTED: "browser_started", EXTENSION_INSTALLED: "extension_installed",
-    BACKEND_UNAVAILABLE: "backend_unavailable", HELLO_ACCEPTED: "hello_accepted",
-    PREFERENCES_CHANGED: "preferences_changed"
+    BACKEND_UNAVAILABLE: "backend_unavailable", ADAPTER_REFUSED: "adapter_refused",
+    HELLO_ACCEPTED: "hello_accepted", PREFERENCES_CHANGED: "preferences_changed"
   });
   const names = new Set(Object.values(EVENTS));
   const fields = new Set(["attempt", "trigger", "stage", "error", "browser_id", "has_port",

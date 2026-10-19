@@ -13,6 +13,7 @@
     COMPUTER: "computer",
     START: "start",
     UPDATE: "update",
+    UPDATE_BROWSER: "update_browser",
     MET: "met",
     UNSUPPORTED: "unsupported"
   });
@@ -53,6 +54,7 @@
     waiting: "Waiting for this computer.",
     install: Object.freeze({ lead: "Install Ghostlight on ", accent: "this computer", trail: "." }),
     update: Object.freeze({ lead: "Update Ghostlight on ", accent: "this computer", trail: "." }),
+    updateBrowser: Object.freeze({ lead: "Update ", accent: "Ghostlight in Browser", trail: "." }),
     open: Object.freeze({ lead: "Open Ghostlight on ", accent: "this computer", trail: "." }),
     openLead: Object.freeze({
       [PLATFORM.WIN]: "It is in the Start menu.",
@@ -132,7 +134,8 @@
     return [step(STEP.CURRENT), step(STEP.DONE, WORDS.added), step(STEP.TODO)];
   }
 
-  function view({ link_state, connected, compatible, platform, browser } = {}) {
+  // `refusal` is the service's own sentence when it refused this extension as outdated.
+  function view({ link_state, connected, compatible, platform, browser, refusal = null } = {}) {
     const key = platformKey(platform);
     if (!key) {
       return {
@@ -164,6 +167,20 @@
         ],
         light: LIGHT.LIT,
         action: { label: WORDS.met.action, kind: SHOW_GHOSTLIGHT }
+      };
+    }
+    if (link_state === shared.LINK_ADAPTER_OUTDATED) {
+      return {
+        state: STATE.UPDATE_BROWSER,
+        eyebrow: WORDS.eyebrow,
+        headline: WORDS.updateBrowser,
+        lead: typeof refusal === "string" && refusal !== "" ? refusal : null,
+        command: null,
+        fallback: null,
+        live: null,
+        steps: [step(STEP.DONE, WORDS.installed), step(STEP.CURRENT), step(STEP.TODO)],
+        light: LIGHT.WAITING,
+        action: null
       };
     }
     const waiting = {

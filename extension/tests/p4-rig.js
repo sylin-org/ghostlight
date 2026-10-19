@@ -85,8 +85,7 @@ function rig({
   const hook = {
     calls: [],
     async manage(id) { this.calls.push(id); },
-    async release() {},
-    managedIds() { return []; }
+    async release() {}
   };
   const box = {};
   const recording = Recording.create({ ...recordingOptions, onStop: (...stop) => box.buffers.recordingEnded(...stop) });

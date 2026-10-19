@@ -1,3 +1,5 @@
+// Ghostlight -- the extension's browser-local state: its storage keys, the person's preferences
+// and the toolbar badge.
 (function installGhostlightState(root, factory) {
   const api = factory();
   root.GhostlightState = api;
@@ -21,7 +23,6 @@
   const BADGE_HELD = "#5eead4";
   const BADGE_RECORDING = "#ef4444";
   const BADGE_TEXT_COLOR = "#08110f";
-  const CONTROL_STATES = Object.freeze(["active", "held", "ended"]);
 
   function newBrowserId(randomUuid) {
     return `browser_${randomUuid().replaceAll("-", "")}`;
@@ -57,18 +58,6 @@
     };
   }
 
-  function controlState(value) {
-    return CONTROL_STATES.includes(value) ? value : "active";
-  }
-
-  function connectionLabel(snapshot) {
-    if (!snapshot.connected) return "Service disconnected";
-    if (!snapshot.compatible) return "Version mismatch";
-    if (snapshot.control_state === "held") return "Paused";
-    if (snapshot.control_state === "ended") return "Session ended";
-    return "Connected";
-  }
-
   function badge(snapshot) {
     if (snapshot.control_state === "held") return { text: "II", color: BADGE_HELD };
     if (snapshot.recording_tabs > 0) return { text: "REC", color: BADGE_RECORDING };
@@ -88,8 +77,6 @@
     preferences,
     preferencesFromStorage,
     preferencesForStorage,
-    controlState,
-    connectionLabel,
     badge
   });
 });

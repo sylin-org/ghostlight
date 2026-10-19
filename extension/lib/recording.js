@@ -49,13 +49,6 @@
     return { kept, dropped };
   }
 
-  function requireWorkspace(value) {
-    if (typeof value !== "string" || value.length < 1 || value.length > 160) {
-      throw new TypeError("recording requires a bounded opaque workspace");
-    }
-    return value;
-  }
-
   function requireTabId(value) {
     if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError("recording requires a tab id");
     return value;
@@ -186,38 +179,33 @@
       state.timer?.unref?.();
     }
 
-    function owned(workspace) {
-      requireWorkspace(workspace);
+    function unexpired() {
       const current = currentTime();
       const values = [];
       for (const state of Array.from(recordings.values())) {
-        if (!expireIfDue(state, current) && state.workspace === workspace) values.push(state);
+        if (!expireIfDue(state, current)) values.push(state);
       }
       values.sort((left, right) => left.id.localeCompare(right.id));
       return values;
     }
 
-    function select(workspace, requested) {
-      const eligible = owned(workspace);
+    function select(requested) {
+      const eligible = unexpired();
       if (requested !== undefined && requested !== null) {
         const state = recordings.get(requested);
-        return state && state.workspace === workspace && !expireIfDue(state) ? { state } : { notFound: true };
+        return state && !expireIfDue(state) ? { state } : { notFound: true };
       }
       if (eligible.length === 0) return { notFound: true };
       if (eligible.length > 1) return { ambiguous: eligible.map((state) => state.id) };
       return { state: eligible[0] };
     }
 
-    function start(workspace, tabId, sourceUrl) {
-      workspace = requireWorkspace(workspace);
+    function start(tabId, sourceUrl) {
       tabId = requireTabId(tabId);
       const current = currentTime();
       const activeId = activeByTab.get(tabId);
       const active = activeId ? recordings.get(activeId) : null;
-      if (active && !expireIfDue(active, current)) {
-        if (active.workspace === workspace) return { existing: summary(active, current) };
-        throw Object.assign(new Error("tab already has an active recording"), { code: "recording_active" });
-      }
+      if (active && !expireIfDue(active, current)) return { existing: summary(active, current) };
       for (const state of Array.from(recordings.values())) expireIfDue(state, current);
       if (recordings.size >= MAX_RECORDINGS) throw Object.assign(new Error("recording count bound reached"), { code: "recording_memory_limit" });
       const id = newId();
@@ -225,7 +213,7 @@
         throw new Error("recording id generator returned an invalid identity");
       }
       const state = {
-        id, workspace, tabId, state: "recording", frames: [], bytesHeld: 0,
+        id, tabId, state: "recording", frames: [], bytesHeld: 0,
         startedAt: current, stoppedAt: null, hardExpiresAt: current + HARD_DURATION_MS,
         retentionExpiresAt: null, stopReason: null, lastSampleAt: null, finalizing: false,
         sourceUrls: new Set(), sourceUrlsComplete: true, timer: null
@@ -307,14 +295,14 @@
       state.sourceUrls.add(url);
     }
 
-    function status(workspace, requested) {
-      const selected = select(workspace, requested);
+    function status(requested) {
+      const selected = select(requested);
       if (selected.state) return { summary: summary(selected.state) };
       return selected;
     }
 
-    function beginStop(workspace, requested) {
-      const selected = select(workspace, requested);
+    function beginStop(requested) {
+      const selected = select(requested);
       if (!selected.state) return selected;
       selected.state.finalizing = true;
       return { state: selected.state, summary: summary(selected.state) };
@@ -341,14 +329,14 @@
     // Retained frames are readable inside the extension only. Nothing outside the browser ever
     // sees them: the encoder that consumes this runs here too, and only its finished GIF can
     // cross, and then only when a caller outside the browser asked for it (ADR-0109).
-    function retained(workspace, requested) {
-      const selected = select(workspace, requested);
+    function retained(requested) {
+      const selected = select(requested);
       if (!selected.state) return selected;
       return { summary: summary(selected.state), frames: selected.state.frames.map((frame) => ({ ...frame })) };
     }
 
-    function discard(workspace, requested) {
-      const selected = select(workspace, requested);
+    function discard(requested) {
+      const selected = select(requested);
       if (!selected.state) return selected;
       const recordingId = selected.state.id;
       const releasedBytes = selected.state.bytesHeld;

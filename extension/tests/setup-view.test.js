@@ -181,3 +181,17 @@ test("every word on the page is ASCII", () => {
   assert.ok(seen.length > 30);
   for (const text of seen) assert.match(text, /^[\x20-\x7e]*$/, text);
 });
+
+test("an extension the service refused asks to update Ghostlight in Browser and offers no command", () => {
+  const refusal = "Ghostlight in Browser is out of date.";
+  const model = setup.view({ link_state: shared.LINK_ADAPTER_OUTDATED, connected: false, compatible: false, platform: WIN, refusal });
+  assert.equal(model.state, STATE.UPDATE_BROWSER);
+  assert.equal(headline(model), "Update Ghostlight in Browser.");
+  assert.equal(model.lead, refusal);
+  assert.equal(model.command, null);
+  assert.equal(model.fallback, null);
+  assert.equal(model.live, null);
+  assert.deepEqual(states(model), [STEP.DONE, STEP.CURRENT, STEP.TODO]);
+  assert.deepEqual(words(model), ["Installed", "", ""]);
+  assert.equal(setup.view({ link_state: shared.LINK_ADAPTER_OUTDATED, platform: LINUX }).lead, null);
+});

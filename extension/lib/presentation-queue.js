@@ -16,9 +16,6 @@
       return value
         && Number.isInteger(value.tabId)
         && value.tabId > 0
-        && typeof value.workspace === "string"
-        && value.workspace.length > 0
-        && value.workspace.length <= 200
         && Number.isFinite(value.expiresAt)
         && value.expiresAt > now()
         && value.signal
@@ -47,8 +44,8 @@
       prune();
     }
 
-    function defer(workspace, tabId, signal) {
-      const entry = { workspace, tabId, signal: { ...signal, tab_id: tabId }, expiresAt: now() + ttlMs };
+    function defer(tabId, signal) {
+      const entry = { tabId, signal: { ...signal, tab_id: tabId }, expiresAt: now() + ttlMs };
       if (!valid(entry)) return false;
       entries.delete(tabId);
       entries.set(tabId, entry);

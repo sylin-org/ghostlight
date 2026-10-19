@@ -24,7 +24,7 @@ const EXTENSION_ID = "ghostlight-extension";
 const VERSION = "2.0.0";
 const CONTROLLED_KEY = "ghostlight.controlled";
 const PRESENTATIONS_KEY = "ghostlight.presentations";
-const OUTDATED = "Update Ghostlight on this computer.";
+const SERVICE_EPOCH_KEY = "ghostlight.service_epoch";
 const ENGINE = "131.0.6778.86";
 const BRANDS = [{ brand: "Not A;Brand", version: "99" }, { brand: "Chromium", version: "131" }, { brand: "Chrome", version: "131" }];
 const ACCOUNT = { id: TAB, windowId: WINDOW, url: "https://example.com/account", title: "Account", active: true, status: "complete" };
@@ -389,10 +389,8 @@ test("hello_accepted connects the link and applies the control state", async () 
     assert.equal(snapshot.connected, true);
     assert.equal(snapshot.compatible, true);
     assert.equal(snapshot.control_state, "held");
-    assert.equal(snapshot.service_version, "2.0.0");
     assert.equal(snapshot.link_state, "connected");
-    assert.equal(snapshot.adapter_version, VERSION);
-    assert.equal(snapshot.last_error, null);
+    assert.equal(snapshot.adapter_refusal, null);
     await worker.deliver({ kind: "control_state", state: "active" });
     assert.equal((await worker.ask({ kind: "ui_snapshot" })).value.control_state, "active");
   } finally { worker.dispose(); }
@@ -447,7 +445,102 @@ test("a second hello_accepted re-registers assets and settles state only on a ne
     assert.equal(registrations().length, first + 1, "the same assets register once");
 
     await worker.accept({ assets: next, service_epoch: "service_other" });
-    assert.deepEqual(worker.focusCalls(), [true, false, true], "a new epoch settles the boundary state");
+    assert.deepEqual(worker.focusCalls(), [true, false], "a new epoch settles the boundary state and releases custody");
+  } finally { worker.dispose(); }
+});
+
+test("a new service epoch releases every managed tab", async () => {
+  const worker = await connected();
+  try {
+    await worker.request("p4_other", "frames", { tab_id: OTHER_TAB });
+    assert.deepEqual([...worker.attached].sort(), [TAB, OTHER_TAB]);
+    assert.deepEqual(worker.focusCalls(), [true, true]);
+
+    await worker.accept({ service_epoch: "service_other" });
+    assert.deepEqual([...worker.attached], [], "the debugger leaves every tab");
+    assert.deepEqual(worker.focusCalls(), [true, true, false, false], "focus emulation goes and does not come back");
+    assert.deepEqual(controlledStore(worker), [[TAB, "released"], [OTHER_TAB, "released"]]);
+    assert.equal(worker.browser.store.session.get(SERVICE_EPOCH_KEY), "service_other");
+
+    worker.chrome.webNavigation.onCommitted.emit({ tabId: TAB, frameId: 0, url: "https://example.com/next" });
+    await flush();
+    assert.deepEqual(controlledStore(worker), [[OTHER_TAB, "released"]], "a released tab is forgotten at its next commit");
+
+    await worker.request("p4_again", "frames", goldenArgs("frames"));
+    assert.equal(worker.attached.has(TAB), true, "the new service takes a tab back with its next call");
+    assert.deepEqual(controlledStore(worker), [[OTHER_TAB, "released"], [TAB, "managed"]]);
+  } finally { worker.dispose(); }
+});
+
+test("a worker restart against the same service keeps custody", async () => {
+  const epoch = golden("frames/hello_accepted").service_epoch;
+  const worker = await boot({ session: { [CONTROLLED_KEY]: [[TAB, "managed"]], [SERVICE_EPOCH_KEY]: epoch } });
+  try {
+    await worker.accept();
+    assert.deepEqual(controlledStore(worker), [[TAB, "managed"]]);
+    assert.equal(worker.attached.has(TAB), true);
+    assert.deepEqual(worker.focusCalls(), [true]);
+    assert.ok(worker.ambient().some((facts) => facts.managed === true));
+  } finally { worker.dispose(); }
+});
+
+test("a worker restart against another service releases the custody the old one granted", async () => {
+  const worker = await boot({ session: { [CONTROLLED_KEY]: [[TAB, "managed"]], [SERVICE_EPOCH_KEY]: "service_gone" } });
+  try {
+    assert.equal(worker.attached.has(TAB), true, "the restarted worker retains its tabs before it knows the service");
+    await worker.accept();
+    assert.equal(worker.attached.has(TAB), false);
+    assert.deepEqual(controlledStore(worker), [[TAB, "released"]]);
+    assert.equal(worker.browser.store.session.get(SERVICE_EPOCH_KEY), golden("frames/hello_accepted").service_epoch);
+  } finally { worker.dispose(); }
+});
+
+test("an outdated extension says so and stops restarting the host", async () => {
+  const worker = await boot();
+  try {
+    const refusal = golden("frames/error");
+    assert.equal(refusal.code, "adapter_incompatible");
+    const first = worker.port;
+    await worker.deliver(refusal);
+    assert.equal(worker.timers.pending(10_000).length, 0, "the refusal ends the hello wait");
+    await worker.deliver(golden("frames/backend_unavailable.absent"));
+    await worker.close("Native host has exited.", first);
+    assert.equal(worker.ports.length, 1, "the relay's exit does not restart the native host at once");
+    assert.equal(worker.timers.pending(3_000).length, 1, "the delayed retry is armed");
+    const outdated = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(outdated.link_state, "adapter_outdated");
+    assert.equal(outdated.adapter_refusal, refusal.message);
+    assert.equal(outdated.connected, false);
+
+    worker.timers.fire(3_000);
+    await flush();
+    assert.equal(worker.ports.length, 2);
+    worker.timers.fire(10_000);
+    assert.equal((await worker.ask({ kind: "ui_snapshot" })).value.link_state, "adapter_outdated", "only an accepted hello clears it");
+
+    await worker.accept();
+    const healed = (await worker.ask({ kind: "ui_snapshot" })).value;
+    assert.equal(healed.link_state, "connected");
+    assert.equal(healed.adapter_refusal, null);
+  } finally { worker.dispose(); }
+});
+
+test("a subframe navigation keeps the diagnostics ring", async () => {
+  const worker = await connected();
+  try {
+    const read = (correlation) => worker.request(correlation, "diagnostics", {
+      op: "read", tab_id: TAB, source: "console", detail: "all", limit: 50, binding: "binding_a"
+    });
+    const texts = (correlation) => worker.receipts().find((entry) => entry.correlation === correlation).ok.entries.map((entry) => entry.text);
+    await read("p4_read_1");
+    worker.chrome.debugger.emit({ tabId: TAB }, "Runtime.consoleAPICalled", { type: "log", args: [{ type: "string", value: "kept" }] });
+    worker.chrome.webNavigation.onBeforeNavigate.emit({ tabId: TAB, frameId: 7 });
+    await read("p4_read_2");
+    assert.deepEqual(texts("p4_read_2"), ["kept"]);
+
+    worker.chrome.webNavigation.onBeforeNavigate.emit({ tabId: TAB, frameId: 0 });
+    await read("p4_read_3");
+    assert.deepEqual(texts("p4_read_3"), [], "a navigation of the page itself starts a fresh ring");
   } finally { worker.dispose(); }
 });
 
@@ -526,15 +619,14 @@ test("unknown frame kinds are ignored", async () => {
   } finally { worker.dispose(); }
 });
 
-test("a service error frame is shown without ending the connection", async () => {
+test("a service error frame of another code leaves the connection up", async () => {
   const worker = await boot();
   try {
     await worker.accept();
-    await worker.deliver(golden("frames/error"));
+    await worker.deliver({ kind: "error", code: "something_else", message: "Something else went wrong." });
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.connected, true);
-    await worker.ask({ kind: "set_preferences", preferences: { diagnostics: true } });
-    assert.match((await worker.ask({ kind: "ui_snapshot" })).value.last_error, /adapter protocol 4/);
+    assert.equal(snapshot.link_state, "connected");
   } finally { worker.dispose(); }
 });
 
@@ -626,7 +718,10 @@ test("a request that addresses a tab marks it managed, retains it and tells its 
 });
 
 test("managed tabs are retained again with their state when the worker starts", async () => {
-  const worker = await boot({ session: { [CONTROLLED_KEY]: [[TAB, "managed"], [OTHER_TAB, "released"], [99, "managed"], [14, "other"]] } });
+  const worker = await boot({ session: {
+    [CONTROLLED_KEY]: [[TAB, "managed"], [OTHER_TAB, "released"], [99, "managed"], [14, "other"]],
+    [SERVICE_EPOCH_KEY]: golden("frames/hello_accepted").service_epoch
+  } });
   try {
     assert.deepEqual([...worker.attached], [TAB]);
     await worker.accept();
@@ -640,12 +735,15 @@ test("managed tabs are retained again with their state when the worker starts", 
 
 test("a notice queued for a restored managed tab is shown after the first hello_accepted", async () => {
   const queued = {
-    workspace: "ws_1",
     tabId: TAB,
     signal: { invocation: "inv_1", signal: "denial", activity: "click", phase: "blocked", tab_id: TAB },
     expiresAt: Date.now() + 60_000
   };
-  const worker = await boot({ session: { [CONTROLLED_KEY]: [[TAB, "managed"]], [PRESENTATIONS_KEY]: [queued] } });
+  const worker = await boot({ session: {
+    [CONTROLLED_KEY]: [[TAB, "managed"]],
+    [SERVICE_EPOCH_KEY]: golden("frames/hello_accepted").service_epoch,
+    [PRESENTATIONS_KEY]: [queued]
+  } });
   try {
     assert.equal(worker.presented().length, 0, "no page code exists before the hello is accepted");
     assert.equal(worker.browser.store.session.get(PRESENTATIONS_KEY).length, 1);
@@ -653,7 +751,7 @@ test("a notice queued for a restored managed tab is shown after the first hello_
     assert.equal(worker.presented().length, 1);
     assert.equal(worker.presented()[0].invocation, "inv_1");
     assert.equal(worker.browser.store.session.get(PRESENTATIONS_KEY).length, 0);
-    assert.equal((await worker.ask({ kind: "ui_snapshot" })).value.unseen_denials, 0);
+    assert.deepEqual(worker.badge.at(-1), { text: "" });
   } finally { worker.dispose(); }
 });
 
@@ -669,7 +767,6 @@ test("a notice for a tab nobody is looking at waits in the persisted queue", asy
     const stored = worker.browser.store.session.get(PRESENTATIONS_KEY);
     assert.equal(stored.length, 1);
     assert.equal(stored[0].tabId, TAB);
-    assert.equal((await worker.ask({ kind: "ui_snapshot" })).value.unseen_denials, 1);
     assert.deepEqual(worker.badge.at(-1), { text: "!" });
     assert.equal(worker.badgeTextColors.at(-1), "#08110f");
   } finally { worker.dispose(); }
@@ -720,14 +817,12 @@ test("with no hello_accepted in 10 s the outdated-service state shows", async ()
     worker.timers.fire(10_000);
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.link_state, "service_outdated");
-    assert.equal(snapshot.last_error, OUTDATED);
     assert.equal(snapshot.connected, false);
     assert.equal(snapshot.compatible, false);
 
     await worker.accept();
     const healed = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(healed.link_state, "connected");
-    assert.equal(healed.last_error, null);
     assert.equal(healed.compatible, true);
   } finally { worker.dispose(); }
 });
@@ -752,7 +847,6 @@ test("a service that closes on the hello and reports itself unavailable still sh
     worker.timers.fire(10_000);
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.link_state, "service_outdated");
-    assert.equal(snapshot.last_error, OUTDATED);
   } finally { worker.dispose(); }
 });
 
@@ -764,9 +858,7 @@ test("a relay that finds no service ends the hello wait and the link reads not c
     assert.equal(worker.timers.pending(10_000).length, 0, "an absent service ends the hello wait");
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.link_state, "unreachable");
-    assert.equal(snapshot.service_outdated, false);
     assert.equal(snapshot.connected, false);
-    assert.notEqual(snapshot.last_error, OUTDATED);
     assert.equal(worker.ports.length, 1, "the port stays until the relay exits");
   } finally { worker.dispose(); }
 });
@@ -782,7 +874,6 @@ test("after a quit the relay exit reconnects with a fresh hello and the link is 
     assert.equal(worker.timers.pending(10_000).length, 1, "the fresh hello waits for an answer again");
     const waiting = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(waiting.link_state, "unreachable");
-    assert.equal(waiting.service_outdated, false);
 
     await worker.accept();
     const healed = (await worker.ask({ kind: "ui_snapshot" })).value;
@@ -798,7 +889,6 @@ test("a relay that reports the service absent clears an outdated verdict from an
     await worker.deliver(golden("frames/backend_unavailable.absent"));
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.link_state, "unreachable");
-    assert.equal(snapshot.service_outdated, false);
   } finally { worker.dispose(); }
 });
 
@@ -814,7 +904,6 @@ test("a port that closes without ever accepting still reaches the outdated-servi
     worker.timers.fire(10_000);
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.link_state, "service_outdated");
-    assert.equal(snapshot.last_error, OUTDATED);
   } finally { worker.dispose(); }
 });
 
@@ -834,7 +923,6 @@ test("the outdated-service wait spans replaced ports and a later hello_accepted 
     await worker.close("Native host has exited.");
     const outdated = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(outdated.link_state, "service_outdated");
-    assert.equal(outdated.last_error, OUTDATED);
 
     worker.chrome.alarms.onAlarm.emit({ name: "ghostlight-reconnect", scheduledTime: 6 });
     await flush();
@@ -843,7 +931,6 @@ test("the outdated-service wait spans replaced ports and a later hello_accepted 
     await worker.accept();
     const healed = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(healed.link_state, "connected");
-    assert.equal(healed.last_error, null);
   } finally { worker.dispose(); }
 });
 
@@ -897,7 +984,7 @@ test("backend_unavailable cancels in-flight work, tells pages, and reconnects at
     assert.equal(worker.ambient().at(-1).runtime, "disconnected");
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.connected, false);
-    assert.equal(snapshot.last_error, "The local Ghostlight service is unavailable.");
+    assert.equal(snapshot.link_state, "unreachable");
     assert.equal(worker.ports.length, 1, "the port stays until the connector exits");
 
     held.open();
@@ -1016,9 +1103,7 @@ test("the popup snapshot reports activity, tabs and the link before any service"
     const snapshot = (await worker.ask({ kind: "ui_snapshot" })).value;
     assert.equal(snapshot.connected, false);
     assert.equal(snapshot.link_state, "host_absent");
-    // The closed classification is computed before the reason is generalized, so a surface can tell
-    // the states apart without ever seeing Chrome's message text.
-    assert.equal(snapshot.last_error, "The local Ghostlight service is unavailable.");
+    assert.equal("last_error" in snapshot, false, "a surface gets the closed state, never Chrome's message text");
     assert.equal(snapshot.attached_tabs, 0);
     assert.equal(snapshot.recording_tabs, 0);
     assert.deepEqual(snapshot.activity, []);

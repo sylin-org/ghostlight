@@ -77,17 +77,15 @@
     if (!isObject(args)) throw invalid("The request arguments must be an object.");
   }
 
-  /** The `Tab` outcome object of a Chrome tab. `opener` is the opener tab id to report, when there is one. */
-  function tabFact(tab, opener) {
-    const fact = {
+  /** The `Tab` outcome object of a Chrome tab. */
+  function tabFact(tab) {
+    return {
       tab_id: tab.id,
       title: shared.bounded(tab.title, protocol.TITLE_CHARS),
       url: shared.bounded(tab.url || tab.pendingUrl || BLANK_URL, protocol.URL_CHARS),
       active: Boolean(tab.active),
       readiness: shared.readinessForStatus(tab.status)
     };
-    if (opener !== undefined) fact.opener_tab_id = opener;
-    return fact;
   }
 
   function sortedUnique(ids) {
@@ -103,7 +101,7 @@
    *
    * `lifecycle` is a GhostlightSessions instance, used for the debugger lease of a navigation that
    * discards beforeunload dialogs. `controlled` is the worker's controlled-tab hook:
-   * `manage(tabId)`, `release(tabId)` and `managedIds()`. `isCancelled(correlation)` reports a
+   * `manage(tabId)` and `release(tabId)`. `isCancelled(correlation)` reports a
    * cancel frame; `now` and `sleep` are the clock.
    */
   function create({
@@ -117,7 +115,7 @@
     if (!chromeApi?.tabs || !chromeApi?.windows || !chromeApi?.tabGroups || !chromeApi?.storage) {
       throw new TypeError("the tab primitives require the Chrome tabs, windows, tabGroups and storage APIs");
     }
-    if (!lifecycle?.cdp || !controlled?.manage || !controlled?.release || !controlled?.managedIds) {
+    if (!lifecycle?.cdp || !controlled?.manage || !controlled?.release) {
       throw new TypeError("the tab primitives require debugger sessions and the controlled-tab hook");
     }
 
@@ -314,15 +312,14 @@
         if (!Array.isArray(args.tab_ids)) throw invalid("tab_ids must be a list of tab ids.");
         for (const id of args.tab_ids) requireTabId(id, "tab_ids entry");
       },
-      /** Resolves `Tabs`. Reads only: no debugger, no custody. An opener is reported only when the service manages it or named it. */
+      /** Resolves `Tabs`: the named tabs and the tabs they opened, or every tab. Reads only: no debugger, no custody. */
       async run(args) {
         const named = Array.isArray(args.tab_ids) ? new Set(args.tab_ids) : null;
-        const openers = new Set([...controlled.managedIds(), ...(named ?? [])]);
         const all = await chromeApi.tabs.query({});
         return {
           tabs: all
             .filter((tab) => !named || named.has(tab.id) || named.has(tab.openerTabId))
-            .map((tab) => tabFact(tab, openers.has(tab.openerTabId) ? tab.openerTabId : undefined))
+            .map(tabFact)
         };
       }
     });

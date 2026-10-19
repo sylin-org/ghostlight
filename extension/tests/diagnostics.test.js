@@ -302,22 +302,6 @@ test("network evidence contains only sanitized bounded facts and problems filter
   assert.doesNotMatch(JSON.stringify(all), /password|secret|authorization|fragment/);
 });
 
-test("host authority callback omits network detail with only a content-free count", () => {
-  const diagnostics = diagnosticsApi.create({ now: clock(), cursorSecret: "test" });
-  diagnostics.enable(8);
-  diagnostics.requestWillBeSent(8, request("allowed", "https://allowed.test/fail"));
-  diagnostics.loadingFailed(8, { requestId: "allowed", errorText: "net::ERR_FAILED" });
-  diagnostics.requestWillBeSent(8, request("denied", "https://denied.test/fail"));
-  diagnostics.loadingFailed(8, { requestId: "denied", errorText: "net::ERR_FAILED" });
-
-  const result = diagnostics.read(8, {
-    allowNetworkUrl: (url) => url.startsWith("https://allowed.test/")
-  });
-  assert.deepEqual(result.entries.map((entry) => entry.url), ["https://allowed.test/fail"]);
-  assert.equal(result.omitted_count, 1);
-  assert.doesNotMatch(JSON.stringify(result), /denied/);
-});
-
 test("clear, tab forget, and clear-all release volatile capture state", () => {
   const diagnostics = diagnosticsApi.create({ now: clock(), cursorSecret: "test" });
   diagnostics.enable(9);

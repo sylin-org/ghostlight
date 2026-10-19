@@ -8,8 +8,7 @@
         "title": "Account",
         "url": "https://example.com/account",
         "active": true,
-        "readiness": "complete",
-        "opener_tab_id": 3
+        "readiness": "complete"
       },
       {"tab_id":13,"title":"Docs","url":"https://docs.example.com/","active":false,"readiness":"loading"}
     ]

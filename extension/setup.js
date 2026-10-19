@@ -304,7 +304,8 @@
       connected: snapshot.connected,
       compatible: snapshot.compatible,
       platform,
-      browser: shared.browserName(navigator.userAgentData?.brands)
+      browser: shared.browserName(navigator.userAgentData?.brands),
+      refusal: snapshot.adapter_refusal
     }));
   }
 

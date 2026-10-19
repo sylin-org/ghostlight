@@ -49,3 +49,11 @@ test("an outdated service outranks every disconnect reason, and a connected link
   assert.equal(shared.linkState({ connected: false, compatible: false, outdated: true }), "service_outdated");
   assert.equal(shared.linkState({ connected: true, compatible: true, outdated: false }), shared.LINK_CONNECTED);
 });
+
+test("an extension the service refused outranks an outdated service and every disconnect reason", () => {
+  assert.equal(
+    shared.linkState({ connected: false, compatible: false, outdated: true, adapterOutdated: true, lastError: "Specified native messaging host not found." }),
+    shared.LINK_ADAPTER_OUTDATED
+  );
+  assert.equal(shared.LINK_ADAPTER_OUTDATED, "adapter_outdated");
+});

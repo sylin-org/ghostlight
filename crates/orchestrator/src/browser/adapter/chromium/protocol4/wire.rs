@@ -968,14 +968,10 @@ pub struct Tab {
     pub active: bool,
     /// Browser-local readiness.
     pub readiness: Readiness,
-    /// The tab that opened this one, when Ghostlight controls or names it.
-    #[serde(default)]
-    pub opener_tab_id: Option<u64>,
 }
 
 impl From<Tab> for physical::PhysicalTab {
-    /// The physical tab the rest of the service uses. The opener is a routing fact the
-    /// physical tab does not carry.
+    /// The physical tab the rest of the service uses.
     fn from(tab: Tab) -> Self {
         Self {
             tab_id: tab.tab_id,
