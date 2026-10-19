@@ -108,3 +108,9 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   until the owner decides what a reviewer is offered. Historical records (task ledgers, the
   break-2.0 journey, coordination) keep their rc.1 lines, and code and test fixtures keep
   `2.0.0-rc.1` as a version-format example.
+- F7-no-rc1-names, fixup after review: the break-2.0 journey and seams ledgers are open to-do
+  lists that STATUS points at, not only history. Their old lines stay, and each open item that
+  told someone to publish or install `v2.0.0-rc.1` gains a dated note (2026-10-19) that the proof
+  is the install from the workflow's bundle with `GHOSTLIGHT_FROM`: journey.md's RESUME HERE, c02,
+  x01 and the release-order bullet in Owed to the owner, and seams.md's RESUME HERE and f12h owed
+  line. The Notes for certification carry no pinned commands.
