@@ -24,7 +24,7 @@ says the head is ready (arch-1 integrated, deployed on Windows and pushed).
 | L2-01 | Alpine (musl) gets a working Ghostlight from the release | blocked: owner, CachyOS only |
 | L2-02 | The install scripts install from a local release bundle | todo |
 | L2-03 | Bluefin readiness: Flatpak browsers, SELinux, read-only /usr | blocked: owner, CachyOS only |
-| L2-04 | What Claude Code does with the plugin and the installer's entry together | todo |
+| L2-04 | What Claude Code does with the plugin and the installer's entry together | done |
 
 **L2-01.** The release builds `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` only. On
 Alpine the glibc images cannot start: their interpreter `/lib64/ld-linux-x86-64.so.2` is absent
@@ -61,6 +61,42 @@ Ghostlight's own entry, and record with `claude --debug` and a process listing: 
 both servers start, the parent process of each, and whether a `notifications/tools/list_changed`
 from the second server is honored. Report the facts in the chat; windows-claude builds the
 installer and service side of "works regardless" from them.
+
+Result, 2026-10-19, done (reported in the chat). Claude Code 2.1.303 on test-01, in an isolated
+`CLAUDE_CONFIG_DIR` under the session's scratch folder. The plugin came from this repository's
+marketplace (`ghostlight@sylin-org-plugins` 1.0.1, server `npx -y ghostlight`); the installer's
+entry was written as `ghostlight install` writes it (`/home/test/.ghostlight/bin/ghostlight`,
+args `["mcp"]`, env `{}`). npm still serves 1.3.14, so `npx` was a PATH stand-in that logged each
+start and ran this repository's 2.0 launcher, which runs the installed edge. No login was used: a
+local stand-in for the Messages API on 127.0.0.1 answered each turn and recorded the tools each
+request offered the model.
+
+1. **Both start.** `plugin:ghostlight:ghostlight` and `ghostlight` both connect, 1 ms apart, in
+   print mode, in the interactive TUI and in `claude mcp list`. Each request offers the model 46
+   Ghostlight tools: 23 `mcp__ghostlight__*` and 23 `mcp__plugin_ghostlight_ghostlight__*`.
+2. **The duplicate rule.** Claude Code drops the plugin's server ("Suppressing plugin MCP server
+   ... duplicates manually-configured ...") only when a configured server has the same command and
+   the same args. Args count: `npx -y ghostlight mcp`, or `npx` with no args, beside the plugin's
+   `npx -y ghostlight` starts both. The name does not count (an entry named `foo` suppressed it),
+   and neither does `env`. `${HOME}` in a plugin's command is expanded before the comparison: a
+   scratch copy of the plugin with `${HOME}/.ghostlight/bin/ghostlight` and `["mcp"]` was
+   suppressed by the installer's entry. The configured server always wins.
+3. **Parents.** The installer's edge is a child of the Claude Code process. The plugin's edge is
+   its great-grandchild: Claude Code, `npm exec ghostlight` (npx), the npm launcher (node), then
+   `ghostlight mcp`. The real npx chain was read from npx running this repository's package with
+   an isolated npm cache and `--offline`.
+4. **list_changed.** Honored as a re-list: "Received tools/list_changed notification, refreshing
+   tools", and a `tools/list` within 4 ms, in print mode and the TUI (the notification was
+   injected by a logging proxy in front of the plugin's server). Additions reach the model: a server
+   whose first `tools/list` had no tools and whose re-list had 23 was offered with 0 tools on the
+   first turn and 23 on the next. Removals do not: after a re-list answered with no tools, or one,
+   the next turn still offered all 23. So a second server keeps itself out only by answering its
+   first `tools/list` with no tools, and can add its tools later.
+
+Side finding, not in this batch's files: the installer writes Claude Code's entry to
+`~/.claude.json` (`install/mod.rs`, the Claude Code path), but a Claude Code with
+`CLAUDE_CONFIG_DIR` set reads `$CLAUDE_CONFIG_DIR/.claude.json`, so that person's Claude Code
+never sees the entry.
 
 ## Part 2: the full test (after windows-claude's go)
 
