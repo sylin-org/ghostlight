@@ -75,10 +75,13 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   launcher row of `docs/trust/data-flows.md` for when the launcher downloads. Within the slice's
   Changes.
 - I9a changes no code, golden or journey. `linux.txt` is unaffected.
-- I9b, the false statements: the skill no longer says a document inspect returns a `snapshot_`
-  handle (it returns no handle) or that navigating through a closed tab handle recreates the tab,
-  and it drops the retired "session hold" and "Pause/Stop" (G4-02): a credential refusal now says
-  nothing is held or paused. Its result-field list is gone; it speaks of what a result says
+- I9b, the restated sentences: the skill no longer says a document inspect returns a `snapshot_`
+  handle or that navigating through a closed tab handle recreates the tab. Both sentences went
+  because they restate what the catalog and results already say (the slice's Deletes), not
+  because they were false: both behaviours hold in 2.0 (`register_snapshot` in
+  `work/reading.rs`; the `StaleTab` recovery in `work/navigation.rs`). Commit 2cd2131d's body
+  calls them claims; read it as this note says. The skill also drops the retired "session hold"
+  and "Pause/Stop" (G4-02): a credential refusal now says nothing is held or paused. Its result-field list is gone; it speaks of what a result says
   instead.
 - I9b, the hold sentence: the skill says a refused request does not pause the session. It drops
   "later permitted requests remain available", because a tab held after a refused landing refuses
