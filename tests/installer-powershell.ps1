@@ -115,6 +115,42 @@ Remove-Item Env:GHOSTLIGHT_VERSION
 if ($global:fixtureRequests.Count -ne 1 -or $global:fixtureRequests[0] -ne 'https://api.github.com/repos/sylin-org/ghostlight/releases/tags/v2.0.0-rc.1') {
     throw "Pinned prerelease asked for: $($global:fixtureRequests -join ', ')"
 }
+# A release bundle on this machine installs with no web request: the release workflow's layout,
+# SHA256SUMS beside assets and a manifest naming the version, in a folder whose name has a space. A
+# corrupt image in it is refused and changes nothing, and it cannot be combined with
+# GHOSTLIGHT_VERSION.
+$bundle = Join-Path $UserDirectory 'release candidate'
+$bundleAssets = Join-Path $bundle 'assets'
+[IO.Directory]::CreateDirectory($bundleAssets) | Out-Null
+foreach ($name in $global:fixtureNames) {
+    Copy-Item -LiteralPath (Join-Path $Binaries "$name.exe") -Destination (Join-Path $bundleAssets "$name-x86_64-pc-windows-msvc.exe")
+}
+[IO.File]::WriteAllBytes((Join-Path $bundle 'SHA256SUMS'), $global:fixtureChecksums)
+[IO.File]::WriteAllText((Join-Path $bundle 'release-candidate.json'), "{`n  `"schemaVersion`": 1,`n  `"version`": `"2.0.0`"`n}`n")
+$global:fixtureRequests.Clear()
+$global:fixtureDownloads.Clear()
+$env:GHOSTLIGHT_FROM = $bundle
+$said = @(& $installer 6>&1 | ForEach-Object { "$_" })
+if ($said -notcontains "Ghostlight 2.0.0 copied from $bundle. Checksums verified." -or
+    $said -notcontains "Ghostlight 2.0.0 is installed. Run 'ghostlight install' to connect your browsers and agents.") {
+    throw "Unexpected local bundle output: $($said -join ' | ')"
+}
+if ($global:fixtureRequests.Count -ne 0 -or $global:fixtureDownloads.Count -ne 0) {
+    throw "A local bundle asked the network: $(@($global:fixtureRequests) + @($global:fixtureDownloads) -join ', ')"
+}
+[IO.File]::WriteAllText((Join-Path $bundleAssets 'ghostlight-service-x86_64-pc-windows-msvc.exe'), 'invalid bundle image')
+$refused = $null
+try { & $installer } catch { $refused = $_.Exception.Message }
+if ($refused -ne 'Checksum verification failed for ghostlight-service-x86_64-pc-windows-msvc.exe.' -or
+    (Get-FileHash (Join-Path $destination 'ghostlight.exe')).Hash -ne $before) {
+    throw "A corrupt local image was not refused cleanly: $refused"
+}
+$env:GHOSTLIGHT_VERSION = '2.0.0'
+$combined = $null
+try { & $installer } catch { $combined = $_.Exception.Message }
+Remove-Item Env:GHOSTLIGHT_VERSION
+Remove-Item Env:GHOSTLIGHT_FROM
+if ($combined -ne 'GHOSTLIGHT_FROM and GHOSTLIGHT_VERSION cannot be combined.') { throw "A local bundle with a version: $combined" }
 $global:fixtureCorrupt = $true
 $rejected = $false
 try { & $installer } catch {
@@ -132,7 +168,7 @@ $installedFiles = @(Get-ChildItem -LiteralPath $destination -File | ForEach-Obje
 if (($installedFiles -join '|') -ne ($expectedFiles -join '|')) {
     throw "Unexpected installed files: $($installedFiles -join ', ')"
 }
-Write-Output 'PASS PowerShell installer: requested version by tag (prerelease too, absent refused), fixed paths, the three verified images, waited native install, space-containing profile, corrupt download preservation, temporary cleanup'
+Write-Output 'PASS PowerShell installer: requested version by tag (prerelease too, absent refused), fixed paths, the three verified images, waited native install, space-containing profile, a local bundle with no web request (corrupt image and version refused), corrupt download preservation, temporary cleanup'
 '@
 [IO.File]::WriteAllText($scenario, $scenarioSource)
 try {

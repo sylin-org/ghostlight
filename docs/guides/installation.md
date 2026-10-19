@@ -194,6 +194,40 @@ cargo build --workspace --target-dir .target-ghostlight-1.0
 node tests/process-journey.mjs
 ```
 
+## Test a build before its release
+
+The release workflow builds and checks a release candidate without tagging or publishing anything
+([`../RELEASE.md`](../RELEASE.md)). To install that build the way a person installs a release, run
+the real one-line installer against the workflow's bundle:
+
+1. Download the run's `release-candidate` artifact and unpack it, for example with
+   `gh run download <run id> -n release-candidate -D release-candidate`. The folder holds
+   `SHA256SUMS`, `release-candidate.json` and `assets`.
+2. Run the installer from the bundle's own revision (`sourceRevision` in `release-candidate.json`),
+   with `GHOSTLIGHT_FROM` naming the folder. On Linux:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/<revision>/scripts/get.sh | GHOSTLIGHT_FROM=~/Downloads/release-candidate sh
+   ```
+
+   On Windows, in PowerShell:
+
+   ```powershell
+   $env:GHOSTLIGHT_FROM = "$HOME\Downloads\release-candidate"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/<revision>/scripts/get.ps1 | iex
+   ```
+
+The installer copies each executable from the folder and checks it against `SHA256SUMS` exactly as
+it checks a download. It refuses an image that `SHA256SUMS` does not bind, and it fetches nothing
+from GitHub. With the GitHub CLI installed it also checks the build provenance. A folder of
+downloaded release assets, with `SHA256SUMS` beside the images, works the same way.
+`GHOSTLIGHT_FROM` cannot be combined with `GHOSTLIGHT_VERSION`.
+
+Until the 2.0 extension is in the Chrome Web Store, load the repository's `extension` folder at the
+bundle's revision unpacked (Developer mode, Load unpacked in `chrome://extensions`). It carries the
+development key, whose extension ID the installed browser registration allows. The bundle's
+extension ZIP is the store upload and has no key, so an unpacked copy of it gets another ID, which
+the registration refuses.
+
 ## Verify
 
 Open **Status**. A useful report distinguishes:

@@ -22,7 +22,7 @@ says the head is ready (arch-1 integrated, deployed on Windows and pushed).
 | Task | What | Status |
 | --- | --- | --- |
 | L2-01 | Alpine (musl) gets a working Ghostlight from the release | blocked: owner, CachyOS only |
-| L2-02 | The install scripts install from a local release bundle | todo |
+| L2-02 | The install scripts install from a local release bundle | done |
 | L2-03 | Bluefin readiness: Flatpak browsers, SELinux, read-only /usr | blocked: owner, CachyOS only |
 | L2-04 | What Claude Code does with the plugin and the installer's entry together | done |
 
@@ -44,6 +44,25 @@ bundle. Add a local source (for example `GHOSTLIGHT_FROM=<unpacked bundle direct
 verifies `SHA256SUMS` exactly as the GitHub path does and refuses anything unverified. Document it
 in each script's head and in the installation guide's testing section. Tests for both scripts;
 the PowerShell side is checked by CI's Windows jobs.
+
+Result, 2026-10-19, done. `GHOSTLIGHT_FROM=<folder>` in `get.sh` and `get.ps1` names the release
+workflow's unpacked `release-candidate` artifact (SHA256SUMS beside `assets`, with
+`release-candidate.json` naming the version) or a folder of release downloads (SHA256SUMS beside
+the images). Each image is copied into the script's temporary folder and the copy is checked
+against SHA256SUMS by the same rules as a download: one well-formed line per image, and the hash.
+Anything unbound, missing or different is refused before anything runs, and the scripts ask the
+network for nothing (`gh attestation verify` still runs when the GitHub CLI is present). It
+cannot be combined with `GHOSTLIGHT_VERSION`; `--restore` and `GHOSTLIGHT_NO_REGISTER` work with
+it. Documented in both script heads, the installation guide ("Test a build before its release")
+and RELEASE.md's cutover steps 1 to 3, which no longer publish `v2.0.0-rc.1`. Tests:
+`tests/installer-shell.mjs` passes here (both layouts, restore, no-register, corrupt, missing,
+unbound, no SHA256SUMS, version combination, absent folder, and no request in any of them).
+`tests/installer-powershell.ps1` gains a local bundle install with no web request, a corrupt image
+refused with the installation unchanged, and the version combination refused; it runs on CI's
+Windows job. Here, `get.ps1` in PowerShell 7.6.5 was run against stub images: the install and the
+seven refusals behave as in `get.sh`. Found on the way, for Part 2: the bundle's extension ZIP is
+the store upload, without the development key, so an unpacked copy of it gets an ID the browser
+registration refuses. Testers load `extension/` from the bundle's revision instead (guide).
 
 **L2-03.** Bluefin is Fedora Atomic: read-only `/usr`, SELinux enforcing, browsers from Flathub,
 Homebrew for command-line tools, GNOME. Check Ghostlight against each part you can reach here: a

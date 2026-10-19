@@ -237,23 +237,26 @@ artifact is independently observable.
 
 ### The 2.0 cutover
 
-2.0 is a hard cutover (ADR-0200 Decision 16 and its amendments). The release candidate
-`v2.0.0-rc.1` is published as a prerelease and never as latest, the staged extension waits for
-approval, and the cutover is then one sitting from the same commit as the candidate. The detailed
-commands are in [store-disclosure-2.0.md](release/store-disclosure-2.0.md).
+2.0 is a hard cutover (ADR-0200 Decision 16 and its amendments). There is no prerelease tag (the
+owner, 2026-10-19): the release candidate is the bundle the release workflow builds from the
+candidate commit, the staged extension waits for approval, and the cutover is then one sitting
+from the same commit as the candidate. The detailed commands are in
+[store-disclosure-2.0.md](release/store-disclosure-2.0.md).
 
 Before the cutover, while every 1.x user is untouched:
 
-1. Publish `v2.0.0-rc.1` as a GitHub prerelease with
-   [notes-v2.0.0-rc.1.md](release/notes-v2.0.0-rc.1.md) as its notes.
-2. Prove the pinned install on Windows PowerShell 5.1, PowerShell 7 and a Linux shell. The store
-   still serves the 1.x extension, so load `extension/` from the `v2.0.0-rc.1` source unpacked;
-   its pinned key gives it the development id the install registers.
+1. Dispatch the release workflow on the candidate commit (`gh workflow run release.yml --ref dev`),
+   download its `release-candidate` bundle and verify it with `scripts/check-release-candidate.ps1`.
+2. Prove the install on Windows PowerShell 5.1, PowerShell 7 and a Linux shell: run the one-line
+   installer from the candidate commit with `GHOSTLIGHT_FROM` naming the unpacked bundle
+   ([installation guide](guides/installation.md#test-a-build-before-its-release)). The store still
+   serves the 1.x extension, so load `extension/` from the candidate commit unpacked; its pinned
+   key gives it the development id the install registers.
 3. Upgrade a 1.x install on another machine while the store still serves 1.x. On a test machine
    that never ran 2.0, install 1.3.14 the way a user did (`npx -y ghostlight@1.3.14 install` and
    the store extension) and use it once from an agent. Keep no `npx ghostlight` client entry and
-   no 1.x Claude Desktop extension on it, since either would put 1.x back. Then run the pinned
-   command from a regular terminal and check: exactly one service runs, the policy moved to
+   no 1.x Claude Desktop extension on it, since either would put 1.x back. Then run step 2's
+   installer command from a regular terminal and check: exactly one service runs, the policy moved to
    `~/.ghostlight/policy`, the 1.x audit log is archived under `state`, on Windows the Start-menu
    shortcut and the Installed apps entry are 2.0's, the 1.x popup says version mismatch, the
    agent's words are right, and the unpacked 2.0 extension reaches Ready.
