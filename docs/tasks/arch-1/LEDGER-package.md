@@ -35,6 +35,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `adapter_refusal`, the sentence the service sent with `adapter_incompatible`. The popup and the
   options page show it under "Update Ghostlight in Browser.", and the setup page shows it as the
   lead, so the update sentence keeps one owner, `language::adapter::ADAPTER_INCOMPATIBLE`.
+  With `last_error` gone nothing shows a raw connection error, so the options page now says only
+  that Developer diagnostics keeps connection details for this browser (review fixup).
 - B2, the retry: Decision 3 says the extension stops restarting the native host until a hello is
   accepted; the Rebuild plan says it takes the delayed retry. The slice follows the plan: after a
   refusal the relay's exit no longer reconnects at once, and the 3 s retry keeps trying, so a
