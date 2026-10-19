@@ -336,6 +336,9 @@ the owner wants, and what this project learned the hard way.
   A sandboxed run (a bubblewrap home, a test home with its own browser profile, Chrome for
   Testing) is a false integration test: acceptance always uses the real installation and the
   system browser the person uses (owner, 2026-10-17, on the Linux batch).
+  The same holds when another session is asked for a check: ask for it on the real installation,
+  never in a scratch home (owner, 2026-10-19: "There's an ongoing mandate to USE this environment
+  for tests and validation. Isolation makes the process brittle and wasteful.").
 - **One live Ghostlight on the owner's machine, always.** Never run a second service, a demo or
   spike build of any Ghostlight executable, or a journey that starts its own service in a test
   home on the owner's machine: two of anything invites "which service is this adapter talking
