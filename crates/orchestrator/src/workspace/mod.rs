@@ -845,6 +845,15 @@ struct PooledTab {
 }
 
 impl AggregateState {
+    /// Remove `workspace` and return the confirmed tabs it held, recorded in the released pool.
+    fn release(&mut self, workspace: &WorkspaceId) -> ReleasedTabs {
+        let Some(removed) = self.workspaces.remove(workspace) else {
+            return ReleasedTabs::default();
+        };
+        self.remember_released(&removed);
+        ReleasedTabs::from_state(removed)
+    }
+
     /// Record the tabs a leaving workspace still holds as waiting for their release cleanup.
     ///
     /// None of them is reusable yet: only a cleanup answer that the browser kept a tab open
@@ -1177,18 +1186,56 @@ impl WorkspaceStore {
             .is_some_and(|state| state.session.is_some())
     }
 
+    /// Every admitted workspace.
+    #[must_use]
+    pub fn ids(&self) -> Vec<WorkspaceId> {
+        self.lock().workspaces.keys().cloned().collect()
+    }
+
     /// Release an MCP workspace and return the physical tabs it owned.
     ///
     /// The tabs wait in the released pool for their cleanup. A tab becomes reusable by the next
     /// open on its host from a session of the same client only once `settle_released` reports
     /// that the browser kept it open (the person's preserve-tabs choice).
     pub fn release(&self, workspace: &WorkspaceId) -> ReleasedTabs {
+        self.lock().release(workspace)
+    }
+
+    /// Release `workspace` as [`Self::release`] does once no invocation holds its lease, waiting
+    /// for that until `until` at the latest.
+    ///
+    /// Returns `None`, and leaves the workspace as it is, when a call still holds it at `until`.
+    /// A workspace that is already gone releases no tab.
+    pub fn release_unleased(
+        &self,
+        workspace: &WorkspaceId,
+        until: Instant,
+    ) -> Option<ReleasedTabs> {
         let mut state = self.lock();
-        let Some(removed) = state.workspaces.remove(workspace) else {
-            return ReleasedTabs::default();
-        };
-        state.remember_released(&removed);
-        ReleasedTabs::from_state(removed)
+        while state
+            .workspaces
+            .get(workspace)
+            .is_some_and(|held| held.leased)
+        {
+            let wait = until.saturating_duration_since(Instant::now());
+            if wait.is_zero() {
+                return None;
+            }
+            state = self
+                .leased
+                .wait_timeout(state, wait)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        Some(state.release(workspace))
+    }
+
+    /// Forget every workspace and every released tab without a browser command, at a service end
+    /// that sends the browser none: the end of the session and the idle exit (ADR-0203 Decision 3).
+    pub fn forget_all(&self) {
+        let mut state = self.lock();
+        state.workspaces.clear();
+        state.released.clear();
     }
 
     /// Settle one released tab once its release close in `browser` has answered.

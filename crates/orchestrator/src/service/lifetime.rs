@@ -17,6 +17,11 @@ use ghostlight_relay::protocol::StartReason;
 /// How long a quit lets in-flight invocations finish before the service exits anyway.
 pub const QUIT_GRACE: Duration = Duration::from_secs(10);
 
+/// How long a quit may take, once its drain is over, to hand out its last resume tokens, say its
+/// goodbyes and release its sessions' tabs before the browser goodbye. An update start waits
+/// [`UPDATE_LOCK_WAIT`], so the drain and this end fit inside it.
+pub const END_LIMIT: Duration = Duration::from_secs(5);
+
 /// How long an update start waits for the previous service to release `run/service.lock`: the
 /// installer's quit lets the old service drain first.
 pub const UPDATE_LOCK_WAIT: Duration = Duration::from_secs(30);

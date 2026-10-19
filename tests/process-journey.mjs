@@ -1,7 +1,9 @@
 // The real executables on relay protocol 4: an MCP session through `ghostlight mcp`, a synthetic
 // browser through `ghostlight chrome-extension://<id>/`, a service killed and restarted under
-// both, a browser restart that hands the agent's tab id to the person's page, Quit holding the next browser start back, ten racing starts leaving one service, and, on
-// Linux, the edge and the service each leaving on SIGTERM, the session's end there.
+// both, a browser restart that hands the agent's tab id to the person's page, a replace that keeps
+// the session's tab for the next service, Quit releasing that tab and holding the next browser
+// start back, ten racing starts leaving one service, and, on Linux, the edge and the service each
+// leaving on SIGTERM, the session's end there.
 // Every process runs in a fresh test home under the temp directory; nothing touches the real one.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -25,6 +27,8 @@ const catalog = JSON.parse(process.platform === "win32"
 const DENIED_HOST = "blocked.localhost";
 // The person's own page that a restarted browser shows under the agent's old tab id.
 const PERSONS_URL = "https://example.com/the-persons-own";
+// The page of the tab a replace keeps bound and a quit releases.
+const KEPT_URL = "https://example.com/kept";
 const BROWSER_ABSENT = (frame) => frame.kind === "backend_unavailable" && frame.service === "absent";
 const CONTENDERS = 10;
 // How long each binary may take to leave once it hears the end of the session, the budgets of
@@ -167,12 +171,40 @@ async function mainFlow() {
     assert.deepEqual(afterRestart.facts.tabs, [], "the person's tab is not listed under the agent's handle");
     console.log("PASS a browser restart never hands the agent's tab handle the person's tab");
 
-    // Quit holds.
+    // A replace closes nothing of a live session, and the next service resumes its tab from the
+    // session's token. The edge waits for the replacement, so the journey starts it, as an
+    // update does.
+    const keptOpen = await mcp.facts("browser_navigate", { url: KEPT_URL });
+    assert.equal(keptOpen.status, "succeeded");
+    const kept = keptOpen.facts.tab;
+    const keptId = world.tabs.find((tab) => tab.url === KEPT_URL).tab_id;
+    const closedBefore = restartedBrowser.requested("close_tab").length;
+    const replaced = await home.status();
+    const replacing = await home.control({ op: controlOp.quit, reason: quitReason.replace });
+    assert.deepEqual(replacing.value, { quitting: true });
+    await restartedBrowser.waitFor(BROWSER_ABSENT, 15_000, "the browser edge reports the replace");
+    assert.equal(restartedBrowser.requested("close_tab").length, closedBefore, "a replace closes no tab of a live session");
+    home.start(home.service, ["serve", "--reason", startReason.update], { stdio: ["ignore", "ignore", "pipe"] });
+    await until(async () => {
+      const next = await home.status();
+      return next !== null && next.instance !== replaced.instance;
+    }, "the replacing service serves", 40_000);
+    await within(restartedBrowser.ended, 20_000, "the browser edge exits when the replacing service accepts");
+    const resumedBrowser = SyntheticBrowser.viaEdge(home, world);
+    browsers.push(resumedBrowser);
+    await resumedBrowser.connect();
+    const resumed = await mcp.facts("browser_read", { tab: kept });
+    assert.equal(resumed.status, "succeeded", "the replacing service resumes the session's tab");
+    console.log("PASS a replace closes nothing and the next service resumes the session's tab");
+
+    // Quit releases the session's tab and holds.
     const quitting = await home.control({ op: controlOp.quit, reason: quitReason.quit });
     assert.deepEqual(quitting.value, { quitting: true });
     await until(async () => !(await home.status()), "the service is gone after quit", 20_000);
     assert.equal(existsSync(home.file(...QUIT_LATCH)), true, "quit leaves its latch");
-    await restartedBrowser.waitFor(BROWSER_ABSENT, 15_000, "the browser edge reports the quit");
+    await resumedBrowser.waitFor(BROWSER_ABSENT, 15_000, "the browser edge reports the quit");
+    assert.equal(resumedBrowser.requested("close_tab").some((request) => request.primitive.args.tab_id === keptId), true,
+      "the quit closes the session's tab before its browser goodbye");
     const afterQuit = SyntheticBrowser.viaEdge(home, world);
     browsers.push(afterQuit);
     afterQuit.send(afterQuit.helloFrame());
@@ -185,7 +217,7 @@ async function mainFlow() {
     const revived = await home.serviceUp();
     assert.equal(revived.started_by, startReason.agent);
     assert.equal(existsSync(home.file(...QUIT_LATCH)), false, "an agent start clears the latch");
-    await within(restartedBrowser.ended, 20_000, "the browser edge that heard the quit exits when a service accepts");
+    await within(resumedBrowser.ended, 20_000, "the browser edge that heard the quit exits when a service accepts");
     console.log("PASS Quit holds a browser start back and the next MCP request starts the service");
 
     // A browser and a heartbeat on the revived service.
@@ -194,6 +226,9 @@ async function mainFlow() {
     await last.connect();
     const listedAgain = await mcp.facts("browser_tabs", { action: "list" });
     assert.equal(listedAgain.status, "succeeded");
+    const forgotten = await mcp.facts("browser_read", { tab: kept });
+    assert.notEqual(forgotten.status, "succeeded", "the quit handed the session a token without its tab");
+    assert.equal(last.requested("call").length, 0, "nothing reads a tab the quit released");
     await until(() => last.heartbeats > 0, "the service sends a heartbeat", 40_000);
     const records = home.auditRecords();
     assert.equal(records.some((record) => record.tool === "browser_read" && record.allowed === true), true, "a read is in the audit");
@@ -284,4 +319,4 @@ assert.equal(vocabulary.relay, 4);
 await racingStarts();
 await mainFlow();
 if (process.platform === "linux") await sessionEnd();
-console.log("process journey ok: relay 4, the edge, restart continuity, Quit, racing starts and the session's end");
+console.log("process journey ok: relay 4, the edge, restart continuity, replace, Quit, racing starts and the session's end");

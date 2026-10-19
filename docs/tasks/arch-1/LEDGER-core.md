@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a and C4 have landed. C5 is next. ux-2 has closed, so every slice whose "After" is met
-can start.
+C1, C2, C3a, C4 and C5 have landed. C6 is next. ux-2 has closed, so every slice whose "After" is
+met can start.
 
 ## Slices
 
@@ -19,7 +19,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | see Notes | landed (7bd0bf20) |
 | C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | see Notes | landed (ec15bacb, journey fixup) |
 | C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits; see Notes | landed (e4f353ab, 1d10bf74, review fixup) |
-| C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | - | todo |
+| C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | see Notes | landed (this commit) |
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | - | todo |
 | C7 | fix(language): a workspace refusal says what is true | candidate | C6 | - | todo |
 | C13 | fix(provenance): the opener is named once | candidate | C7 | - | todo |
@@ -191,3 +191,47 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   no longer open." with no call reaching the tab, and the list is empty. Run it from a fresh build
   named by `GHOSTLIGHT_BIN_DIR`. D2: ARCHITECTURE's confirmation rule and the inert pending
   binding, and README.md:106 with the same-id, same-URL residual.
+- C5, the deadline: the ADR names one shared deadline and no length. `END_LIMIT` is 5 s from the
+  end of the drain to the browser goodbye, so the 10 s drain and the end fit inside the 30 s an
+  update start waits for the lock. A release command keeps its own 2 s (`RELEASE_CALL_LIMIT`) and
+  is not sent once the end's deadline has passed; its tab then leaves the released pool as one
+  whose close did not answer.
+- C5, the order: the shells' goodbye goes out with the MCP goodbyes (step 2), before the release.
+  The ADR names only the MCP and browser goodbyes.
+- C5, who decides: `Farewell` holds the live MCP streams and, once a session opens, its workspace
+  and queue. It takes over before the first goodbye, under the lock that enrolls streams, and from
+  then on `LiveSession::close` releases nothing. A release a closing session began before the
+  takeover runs to its end, and the end waits for it, under the same deadline, before the browser
+  goodbye. After the takeover each stream's token is sealed: the session watch and a finishing call
+  publish no token after the last one.
+- C5, the cancel: the ADR says a leased workspace is cancelled first. The end stops the whole queue
+  of every session whose workspace ends (`CancelCause::Quit`), not only its running call, so no
+  queued call of an ended session starts after its release. Workspaces no call holds are released
+  before the end waits for any held one.
+- C5, the end of the session and the idle exit forget every workspace and the released pool
+  without a browser command (`WorkspaceStore::forget_all`). The end of the session hands out no
+  last token, because its edges exit on `session_end`.
+- C5, a residual: a session accepted before a quit whose workspace opens after the takeover is not
+  among the live sessions the end saw, so a replace releases it and its last token carries no tab.
+  New openings are refused from the start of the drain, so only an opening already being read can
+  meet this.
+- C5, proofs: in `service/mod.rs`
+  `a_replace_keeps_a_live_sessions_tabs_bound_grouped_and_resumable`,
+  `a_quit_releases_every_session_and_hands_each_stream_a_token_without_tabs` (quit, uninstall and an
+  unknown reason), `a_command_line_session_is_released_at_every_service_end` (the four quit reasons
+  close its tab before the browser goodbye; the end of the session and the idle exit forget it with
+  no command), `a_session_whose_client_left_during_the_drain_is_released_on_replace`,
+  `a_leased_workspace_is_cancelled_before_its_release` (the cancel frame precedes the close, which
+  precedes the goodbye) and `a_session_end_says_goodbye_inside_the_fallback_with_many_tabs` (300
+  tabs, an extension that never answers). No golden changed.
+- C5, journey for the coordinator: `tests/process-journey.mjs` gains a replace before its Quit. The
+  session opens a tab, a `replace` quit closes nothing, the journey starts the replacing service as
+  an update does, and a new browser edge's `browser_read` on the kept handle succeeds. The Quit
+  then sends `close_tab` for that tab before the browser edge reports the service absent, and after
+  the revival the handle no longer reads. Run it from a fresh build named by `GHOSTLIGHT_BIN_DIR`.
+  `tests/installed-journey.mjs` check (26) said a quit keeps the earlier tab working, which
+  Decision 3 retires: the first call after the quit now reads the earlier handle as no longer open,
+  and a fresh tab opens and reads once the extension reconnects. The coordinator runs it on a test
+  machine.
+  D2: ARCHITECTURE's service end (the order, owned workspaces released at every end, the quit's
+  token without tabs) and LANGUAGE's resume after a quit.

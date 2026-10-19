@@ -1069,23 +1069,31 @@ check("policy", "(25) policy_explain, and a user policy refusing the second orig
   }
 });
 
-check("restart-continuity", "(26) a quit: the next call starts the service, the earlier tab works, the extension reconnects", async (t) => {
+check("restart-continuity", "(26) a quit: the next call starts the service, the quit released the earlier tab, the extension reconnects", async (t) => {
   const tab = await t.openFixture("/home");
   const before = await serviceStatus();
   assert.ok(before, "a service is running before the quit");
   await quitService();
   await until(async () => !(await serviceStatus()), "the old service to stop", 30000, 250);
   const started = Date.now();
-  // One call, which starts the service again. Only a browser that has not yet
+  // One call, which starts the service again. The quit released the session's tab and handed the
+  // session a token without it, so the earlier handle reads as no longer open (ADR-0203 Decision 3).
+  const released = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
+  assert.notEqual(released.status, "succeeded", `the quit kept the earlier tab: ${JSON.stringify(released)}`);
+  // A fresh tab opens and reads once the extension reconnects. Only a browser that has not yet
   // reconnected may need a repeat; a cut-off or expired answer is a failure of the hold.
-  let outcome = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
+  t.tag = `t${++t.tagCounter}x`;
+  const fresh = { url: `${t.A}/home?${t.tag}`, new_tab: true, ...(t.browser ? { browser: t.browser } : {}) };
+  let opened = await t.call("browser_navigate", fresh, { timeoutMs: RESTART_TIMEOUT_MS });
   let retries = 0;
-  while (outcome.status === "failed" && BROWSER_RECONNECTING.includes(outcome.facts?.reason) && Date.now() - started < RESTART_TIMEOUT_MS) {
+  while (opened.status === "failed" && BROWSER_RECONNECTING.includes(opened.facts?.reason) && Date.now() - started < RESTART_TIMEOUT_MS) {
     retries++;
     await sleep(2000);
-    outcome = await t.call("browser_read", { tab, max_chars: 2000 }, { timeoutMs: RESTART_TIMEOUT_MS });
+    opened = await t.call("browser_navigate", fresh, { timeoutMs: RESTART_TIMEOUT_MS });
   }
-  assert.equal(outcome.status, "succeeded", `the held call did not succeed with the earlier tab handle: ${JSON.stringify(outcome)}`);
+  assert.equal(opened.status, "succeeded", `no tab opened after the restart: ${JSON.stringify(opened)}`);
+  t.opened.push(opened.facts.tab);
+  await t.succeed("browser_read", { tab: opened.facts.tab, max_chars: 2000 });
   const after = await serviceStatus();
   assert.notEqual(after?.instance, before.instance, "the service instance is unchanged, so no restart happened");
   assert.equal(after.service, before.service);

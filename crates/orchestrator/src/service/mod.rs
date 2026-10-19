@@ -13,11 +13,15 @@
 //!
 //! A start carries the reason it was made for (ADR-0199 Decision 10). The reason decides what a
 //! held lock and the quit latch mean to it ([`lifetime`], [`latch`]). A person's Quit sets the
-//! latch, and every quit says goodbye on each live stream before the service exits ([`Quit`]). The
-//! end of the session is the fourth goodbye: the service says `session_end` on every stream and
-//! leaves without the latch and without waiting for work in flight (ADR-0199 Decision 13). The
-//! last way out is the idle exit: after [`idle::IDLE_EXIT`] with no stream of any role open the
-//! service leaves with no goodbye and no latch (ADR-0199 Decision 12).
+//! latch. Every quit decides its sessions' tabs once, after the drain and under one deadline
+//! ([`Quit`], ADR-0203 Decision 3): each MCP stream is handed its last resume token, the MCP
+//! goodbyes go out, the workspaces that end are released, and the browser goodbye goes last. A
+//! replacement keeps each live MCP session bound for its edge's resume; any other quit releases
+//! every session. The end of the session is the fourth goodbye: the service forgets every tab
+//! without a browser command, says `session_end` on every stream and leaves without the latch and
+//! without waiting for work in flight (ADR-0199 Decision 13). The last way out is the idle exit:
+//! after [`idle::IDLE_EXIT`] with no stream of any role open the service forgets every tab and
+//! leaves with no goodbye and no latch (ADR-0199 Decision 12).
 
 mod admission;
 pub mod hint;
@@ -30,12 +34,12 @@ pub mod shell;
 #[cfg(test)]
 pub(crate) mod test_home;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
@@ -83,6 +87,9 @@ use presence::Presence;
 use shell::{ShellRoute, Shells};
 
 const DIAGNOSTIC_CLEAR_BATCH_SIZE: usize = 256;
+
+/// The longest one release command may take: a diagnostics clear or a tab close.
+const RELEASE_CALL_LIMIT: Duration = Duration::from_secs(2);
 const QUEUED_METADATA_BYTES: usize = 512;
 
 /// Prefix of the value that changes on every service start.
@@ -99,7 +106,7 @@ const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 
 use admission::{Capacity, QueueBudget, Refused, SessionQueue};
 use idle::Streams;
-use lifetime::{Clock, Drain, ReadyWatch, SystemClock, QUIT_GRACE, READY_LIMIT};
+use lifetime::{Clock, Drain, ReadyWatch, SystemClock, END_LIMIT, QUIT_GRACE, READY_LIMIT};
 use lock::ServiceLock;
 
 /// What the runtime-published diagnostics line says: where the relay and the workbench listen.
@@ -397,6 +404,8 @@ impl ServiceHost {
             Arc::clone(&diagnostics),
             layout.quit_latch(),
             Arc::clone(&browser),
+            workspaces.clone(),
+            browser_port.clone(),
         );
         let ending: presence::Ending = {
             let quit = quit.clone();
@@ -640,8 +649,8 @@ impl Drop for ServiceHost {
     }
 }
 
-/// How the service ends on request: refuse new work, drain what runs, say goodbye, then make the
-/// quit signal that lets the process leave.
+/// How the service ends on request: refuse new work, drain what runs, decide every session's tabs
+/// and say goodbye ([`Farewell`]), then make the quit signal that lets the process leave.
 ///
 /// A person's Quit also sets the quit latch first, so a browser that restarts does not bring
 /// Ghostlight back. A replacement or an uninstall leaves it alone.
@@ -655,25 +664,28 @@ pub struct Quit {
 }
 
 impl Quit {
-    /// A quit that sets `latch` for a person's Quit and says goodbye on the MCP streams it is
-    /// given and on the streams of `browser`.
+    /// A quit that sets `latch` for a person's Quit, decides the tabs of the workspaces in
+    /// `workspaces` and closes released ones through `port`, and says goodbye on the MCP streams
+    /// it is given and on the streams of `browser`.
     fn new(
         diagnostics: Arc<DiagnosticsHub>,
         latch: PathBuf,
         browser: Arc<RelayBrowserPort>,
+        workspaces: WorkspaceStore,
+        port: Arc<dyn BrowserPort>,
     ) -> Self {
         Self {
             drain: Arc::new(Drain::default()),
             signal: Arc::default(),
             diagnostics,
             latch,
-            farewell: Arc::new(Farewell::new(browser)),
+            farewell: Arc::new(Farewell::new(browser, workspaces, port)),
         }
     }
 
     /// Begin a quit for `reason` unless one is under way: set the latch for a person's Quit,
-    /// refuse new work, and once the work in flight has finished or `grace` has passed, say
-    /// goodbye on every stream and make the quit signal.
+    /// refuse new work, and once the work in flight has finished or `grace` has passed, end every
+    /// session ([`Farewell::end`]) and make the quit signal.
     pub fn begin(&self, reason: QuitReason, grace: Duration) {
         if !self.drain.begin_quit() {
             return;
@@ -707,7 +719,7 @@ impl Quit {
                         drain.in_flight()
                     ),
                 );
-                farewell.say(goodbye_for(reason));
+                farewell.end(reason);
                 let signal = lock(&signal).clone();
                 if let Some(signal) = signal {
                     signal();
@@ -723,10 +735,10 @@ impl Quit {
         }
     }
 
-    /// Leave because the session is ending: refuse new work, say `session_end` goodbye on every
-    /// stream, then make the quit signal. Returns at once, and neither waits for work in
-    /// flight nor sets the latch, since a sign-out is not a person's Quit and the caller has
-    /// already armed the fallback exit that bounds this stop.
+    /// Leave because the session is ending: refuse new work, forget every tab without a browser
+    /// command, say `session_end` goodbye on every stream, then make the quit signal. Returns at
+    /// once, and neither waits for work in flight nor sets the latch, since a sign-out is not a
+    /// person's Quit and the caller has already armed the fallback exit that bounds this stop.
     pub fn session_end(&self) {
         self.drain.begin_quit();
         self.farewell.shells.close();
@@ -735,7 +747,7 @@ impl Quit {
         let spawned = thread::Builder::new()
             .name("ghostlight-session-end".into())
             .spawn(move || {
-                farewell.say(GoodbyeReason::SessionEnd);
+                farewell.end_session();
                 let signal = lock(&signal).clone();
                 if let Some(signal) = signal {
                     signal();
@@ -751,15 +763,17 @@ impl Quit {
         }
     }
 
-    /// Leave because no stream of any role was open for the idle limit: refuse new work and make
-    /// the quit signal. Returns at once, and neither says goodbye (no stream is open) nor sets the
-    /// latch, so the next edge, command or person starts the service again for its own reason.
-    /// A quit or a session end already under way is left to finish alone.
+    /// Leave because no stream of any role was open for the idle limit: refuse new work, forget
+    /// every tab without a browser command (no browser stream is open) and make the quit signal.
+    /// Returns at once, and neither says goodbye (no stream is open) nor sets the latch, so the
+    /// next edge, command or person starts the service again for its own reason. A quit or a
+    /// session end already under way is left to finish alone.
     fn idle_exit(&self, idle: Duration) {
         if !self.drain.begin_quit() {
             return;
         }
         self.farewell.shells.close();
+        self.farewell.forget_every_session();
         self.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::IDLE_EXIT,
             ghostlight_bridge::diagnostics::Level::Info,
@@ -771,10 +785,16 @@ impl Quit {
         }
     }
 
-    /// Record `writer` as a live MCP stream until the returned guard is dropped, so a quit says
-    /// goodbye on it.
-    fn enroll(&self, writer: Arc<SocketWriter>) -> Enrolled {
-        self.farewell.enroll(writer)
+    /// Record `wire` as a live MCP stream until the returned guard is dropped, so a quit hands it
+    /// its last token and says goodbye on it.
+    fn enroll(&self, wire: Arc<McpWire>) -> Enrolled {
+        self.farewell.enroll(wire)
+    }
+
+    /// Release the workspace of a session whose stream closed, unless a service end has taken
+    /// over every session; that end then decides the workspace.
+    fn release_on_close(&self, workspace: &WorkspaceId) {
+        self.farewell.release_on_close(workspace);
     }
 
     /// The Ghostlight shells attached to this service, which a quit says goodbye to and whose
@@ -800,42 +820,196 @@ fn goodbye_for(reason: QuitReason) -> GoodbyeReason {
     }
 }
 
-/// The live streams a quit says goodbye on before the service closes them.
+/// How every service end decides its sessions' tabs, once (ADR-0203 Decision 3), and the live
+/// streams it says goodbye on before the service closes them.
+///
+/// Until an end takes over, a session whose stream closes releases its own workspace. An end takes
+/// over before its first goodbye, and from then on it alone decides every workspace, so no release
+/// races the goodbye or the process exit.
 struct Farewell {
-    mcp: Mutex<BTreeMap<u64, Arc<SocketWriter>>>,
+    state: Mutex<FarewellState>,
+    /// Told when a release that a closing session began has finished.
+    closed: Condvar,
     next: AtomicU64,
     browser: Arc<RelayBrowserPort>,
     shells: Arc<Shells>,
+    workspaces: WorkspaceStore,
+    /// The port released tabs are closed through.
+    port: Arc<dyn BrowserPort>,
+}
+
+/// What a service end reads under one lock: the live MCP streams, whether an end took over, and
+/// how many releases closing sessions began before it did.
+#[derive(Default)]
+struct FarewellState {
+    streams: BTreeMap<u64, Arc<McpWire>>,
+    taken_over: bool,
+    releasing: usize,
 }
 
 impl Farewell {
-    fn new(browser: Arc<RelayBrowserPort>) -> Self {
+    fn new(
+        browser: Arc<RelayBrowserPort>,
+        workspaces: WorkspaceStore,
+        port: Arc<dyn BrowserPort>,
+    ) -> Self {
         Self {
-            mcp: Mutex::new(BTreeMap::new()),
+            state: Mutex::default(),
+            closed: Condvar::new(),
             next: AtomicU64::new(0),
             browser,
             shells: Arc::default(),
+            workspaces,
+            port,
         }
     }
 
     /// Record one MCP stream until the guard is dropped.
-    fn enroll(self: &Arc<Self>, writer: Arc<SocketWriter>) -> Enrolled {
+    fn enroll(self: &Arc<Self>, wire: Arc<McpWire>) -> Enrolled {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
-        lock(&self.mcp).insert(id, writer);
+        lock(&self.state).streams.insert(id, wire);
         Enrolled {
             farewell: Arc::clone(self),
             id,
         }
     }
 
-    /// Say goodbye with `reason` on every MCP stream, every shell and every browser stream.
-    fn say(&self, reason: GoodbyeReason) {
-        let writers: Vec<Arc<SocketWriter>> = lock(&self.mcp).values().cloned().collect();
-        for writer in writers {
-            let _ = writer.native(&McpFrame::Goodbye { reason });
+    /// Take every session over for this end and return the live MCP streams. From now on a
+    /// closing session releases nothing.
+    fn take_over(&self) -> Vec<Arc<McpWire>> {
+        let mut state = lock(&self.state);
+        state.taken_over = true;
+        state.streams.values().cloned().collect()
+    }
+
+    /// Release `workspace` and close its tabs, unless an end has taken over.
+    fn release_on_close(&self, workspace: &WorkspaceId) {
+        {
+            let mut state = lock(&self.state);
+            if state.taken_over {
+                return;
+            }
+            state.releasing += 1;
         }
-        self.shells.say_goodbye(reason);
-        self.browser.say_goodbye(reason);
+        let released = self.workspaces.release(workspace);
+        cleanup_released_tabs(
+            workspace.as_str(),
+            &released,
+            self.port.as_ref(),
+            &self.workspaces,
+            None,
+        );
+        lock(&self.state).releasing -= 1;
+        self.closed.notify_all();
+    }
+
+    /// End every session for a quit with `reason`, in this order and under one [`END_LIMIT`]:
+    ///
+    /// 1. each MCP stream is handed its last resume token, which carries the session's tabs only
+    ///    when its workspace stays bound;
+    /// 2. the MCP and shell goodbyes;
+    /// 3. the release of every workspace that ends: a command-line workspace at every end, and an
+    ///    MCP workspace unless a replacement keeps it bound for its live edge's resume. The work of
+    ///    each session that ends is cancelled first, and a workspace a call still holds at the
+    ///    deadline is left as it is;
+    /// 4. the browser goodbye.
+    fn end(&self, reason: QuitReason) {
+        let until = Instant::now() + END_LIMIT;
+        let goodbye = goodbye_for(reason);
+        let streams = self.take_over();
+        let kept: HashSet<WorkspaceId> = if reason == QuitReason::Replace {
+            streams
+                .iter()
+                .filter_map(|wire| wire.workspace())
+                .filter(|workspace| !self.workspaces.is_owned(workspace))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        for wire in &streams {
+            let keeps_tabs = wire
+                .workspace()
+                .is_some_and(|workspace| kept.contains(&workspace));
+            wire.hand_last_resume(&self.workspaces, keeps_tabs);
+        }
+        for wire in &streams {
+            wire.goodbye(goodbye);
+        }
+        self.shells.say_goodbye(goodbye);
+        self.release_all_but(&kept, &streams, until);
+        self.browser.say_goodbye(goodbye);
+    }
+
+    /// End every session because the session is ending: forget every tab without a browser
+    /// command, then say `session_end` on every stream.
+    fn end_session(&self) {
+        let streams = self.take_over();
+        self.workspaces.forget_all();
+        for wire in &streams {
+            wire.goodbye(GoodbyeReason::SessionEnd);
+        }
+        self.shells.say_goodbye(GoodbyeReason::SessionEnd);
+        self.browser.say_goodbye(GoodbyeReason::SessionEnd);
+    }
+
+    /// End every session when no stream is open to say goodbye on: forget every tab without a
+    /// browser command.
+    fn forget_every_session(&self) {
+        self.take_over();
+        self.workspaces.forget_all();
+    }
+
+    /// Release every workspace but `kept` and close its confirmed tabs before `until`, then wait
+    /// until then for the releases that closing sessions began before the end took over.
+    ///
+    /// The work of each session that ends is cancelled first, so a running call can finish and
+    /// give its workspace up. Workspaces no call holds are released before any is waited for.
+    fn release_all_but(
+        &self,
+        kept: &HashSet<WorkspaceId>,
+        streams: &[Arc<McpWire>],
+        until: Instant,
+    ) {
+        let ending: Vec<WorkspaceId> = self
+            .workspaces
+            .ids()
+            .into_iter()
+            .filter(|workspace| !kept.contains(workspace))
+            .collect();
+        for live in streams.iter().filter_map(|wire| wire.live.get()) {
+            if ending.contains(&live.workspace) {
+                live.queue.stop(CancelCause::Quit);
+            }
+        }
+        let mut held = Vec::new();
+        for workspace in ending {
+            match self.workspaces.release_unleased(&workspace, Instant::now()) {
+                Some(released) => self.close_released(&workspace, &released, until),
+                None => held.push(workspace),
+            }
+        }
+        for workspace in held {
+            if let Some(released) = self.workspaces.release_unleased(&workspace, until) {
+                self.close_released(&workspace, &released, until);
+            }
+        }
+        let state = lock(&self.state);
+        let wait = until.saturating_duration_since(Instant::now());
+        let _ = self
+            .closed
+            .wait_timeout_while(state, wait, |state| state.releasing > 0)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
+
+    /// Close the tabs `released` names before `until`.
+    fn close_released(&self, workspace: &WorkspaceId, released: &ReleasedTabs, until: Instant) {
+        cleanup_released_tabs(
+            workspace.as_str(),
+            released,
+            self.port.as_ref(),
+            &self.workspaces,
+            Some(until),
+        );
     }
 }
 
@@ -847,7 +1021,7 @@ struct Enrolled {
 
 impl Drop for Enrolled {
     fn drop(&mut self) {
-        lock(&self.farewell.mcp).remove(&self.id);
+        lock(&self.farewell.state).streams.remove(&self.id);
     }
 }
 
@@ -1252,24 +1426,24 @@ fn serve_mcp(
     let mut reader =
         SocketReader::new(connection.try_clone()?).interrupted_by(Arc::clone(&intake.stop));
     let writer = Arc::new(SocketWriter::new(connection)?);
-    let _enrolled = intake.quit.enroll(Arc::clone(&writer));
-
-    let (wire, mut live) = match resumed {
+    let (session, resumed_tabs) = match resumed {
         Some(state) => {
             let owned_tabs = state.owned_tabs.clone();
-            let wire = Arc::new(McpWire::new(
-                Arc::clone(&writer),
-                McpSession::resumed(state),
-            ));
+            (McpSession::resumed(state), Some(owned_tabs))
+        }
+        None => (McpSession::new(), None),
+    };
+    let wire = Arc::new(McpWire::new(Arc::clone(&writer), session));
+    let _enrolled = intake.quit.enroll(Arc::clone(&wire));
+
+    let mut live = match resumed_tabs {
+        Some(owned_tabs) => {
             let live = LiveSession::open(intake, &wire, &accepted)?;
             remember_resumed_tabs(&intake.workspaces, &live.workspace, &owned_tabs);
             wire.publish_resume(&intake.workspaces, &live.workspace);
-            (wire, Some(live))
+            Some(live)
         }
-        None => (
-            Arc::new(McpWire::new(Arc::clone(&writer), McpSession::new())),
-            None,
-        ),
+        None => None,
     };
 
     // Every way this connection can end has to reach the teardown below. A reset socket, an
@@ -1331,7 +1505,23 @@ struct Accepted {
 struct McpWire {
     writer: Arc<SocketWriter>,
     session: Mutex<McpSession>,
-    resume: Mutex<Option<String>>,
+    resume: Mutex<Resume>,
+    /// The session's workspace and queue once it opened, which a service end decides.
+    live: OnceLock<LiveEnd>,
+}
+
+/// The resume token a stream was last handed, and whether a service end handed it its last.
+#[derive(Default)]
+struct Resume {
+    last: Option<String>,
+    /// Nothing is published once a service end has handed the stream its last token.
+    sealed: bool,
+}
+
+/// What a service end needs of an opened session: its workspace, and its queue to cancel.
+struct LiveEnd {
+    workspace: WorkspaceId,
+    queue: Arc<SessionQueue>,
 }
 
 impl McpWire {
@@ -1339,7 +1529,8 @@ impl McpWire {
         Self {
             writer,
             session: Mutex::new(session),
-            resume: Mutex::new(None),
+            resume: Mutex::default(),
+            live: OnceLock::new(),
         }
     }
 
@@ -1355,11 +1546,21 @@ impl McpWire {
         lock(&self.session).client_label().to_owned()
     }
 
+    /// The workspace of the session, once it opened.
+    fn workspace(&self) -> Option<WorkspaceId> {
+        self.live.get().map(|live| live.workspace.clone())
+    }
+
     /// Write one MCP line to the client.
     fn send(&self, line: &Value) {
         let _ = self.writer.native(&McpFrame::Message {
             line: line.to_string(),
         });
+    }
+
+    /// Say goodbye with `reason` on this stream.
+    fn goodbye(&self, reason: GoodbyeReason) {
+        let _ = self.writer.native(&McpFrame::Goodbye { reason });
     }
 
     /// Render one answer from the session queue and write its lines.
@@ -1371,28 +1572,45 @@ impl McpWire {
     }
 
     /// Hand the edge a fresh resume token when what it would restore has changed: a binding was
-    /// confirmed or forgotten, or its URL moved.
+    /// confirmed or forgotten, or its URL moved. Once a service end handed the stream its last
+    /// token, nothing more is published.
     ///
     /// Each tab is written with its own binding's browser, a pending one included, so a call that
     /// completes before that browser returns keeps the tab in the token. A tab carries the digest
     /// of its URL, never the URL, so the edge holds no page address.
     fn publish_resume(&self, workspaces: &WorkspaceStore, workspace: &WorkspaceId) {
-        let owned_tabs: Vec<OwnedTab> = workspaces
-            .tab_bindings(workspace.as_str())
-            .into_iter()
-            .map(|binding| OwnedTab {
-                browser_id: binding.browser,
-                tab_id: binding.physical_id,
-                handle: binding.handle,
-                url_digest: Some(binding.url.as_str().to_owned()),
-            })
-            .collect();
+        let mut resume = lock(&self.resume);
+        if !resume.sealed {
+            self.write_resume(&mut resume, owned_tabs(workspaces, workspace));
+        }
+    }
+
+    /// Hand the edge the last resume token of this service, with the session's tabs only when
+    /// `keeps_tabs` says its workspace stays bound, and publish nothing after it.
+    ///
+    /// A session that ends at a quit resumes later with no tab, so its handles read as no longer
+    /// open instead of rebinding tabs the release left behind.
+    fn hand_last_resume(&self, workspaces: &WorkspaceStore, keeps_tabs: bool) {
+        let mut resume = lock(&self.resume);
+        if resume.sealed {
+            return;
+        }
+        let tabs = match self.workspace() {
+            Some(workspace) if keeps_tabs => owned_tabs(workspaces, &workspace),
+            _ => Vec::new(),
+        };
+        self.write_resume(&mut resume, tabs);
+        resume.sealed = true;
+    }
+
+    /// Write the token that restores `owned_tabs`, unless it is the one last written or the
+    /// session is not initialized yet.
+    fn write_resume(&self, resume: &mut Resume, owned_tabs: Vec<OwnedTab>) {
         let Some(state) = lock(&self.session).resume_state(owned_tabs) else {
             return;
         };
         let token = state.encode();
-        let mut last = lock(&self.resume);
-        if last.as_deref() == Some(token.as_str()) {
+        if resume.last.as_deref() == Some(token.as_str()) {
             return;
         }
         if self
@@ -1402,9 +1620,24 @@ impl McpWire {
             })
             .is_ok()
         {
-            *last = Some(token);
+            resume.last = Some(token);
         }
     }
+}
+
+/// The tabs a resume token restores for `workspace`: every binding, a pending one included, by
+/// its own browser and the digest of its URL.
+fn owned_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId) -> Vec<OwnedTab> {
+    workspaces
+        .tab_bindings(workspace.as_str())
+        .into_iter()
+        .map(|binding| OwnedTab {
+            browser_id: binding.browser,
+            tab_id: binding.physical_id,
+            handle: binding.handle,
+            url_digest: Some(binding.url.as_str().to_owned()),
+        })
+        .collect()
 }
 
 /// How often the refresher checks the policy files and the managed authority.
@@ -1523,6 +1756,10 @@ impl LiveSession {
         ));
         let advertised = Arc::new(AdvertisedCatalog::default());
         let watch_stop = Arc::new(AtomicBool::new(false));
+        let _ = wire.live.set(LiveEnd {
+            workspace: workspace.clone(),
+            queue: Arc::clone(&queue),
+        });
         let mut live = Self {
             workspace,
             connection,
@@ -1647,7 +1884,8 @@ impl LiveSession {
         true
     }
 
-    /// Stop the workers, detach the connection, and release a workspace nobody owns.
+    /// Stop the workers, detach the connection, and release a workspace nobody owns unless a
+    /// service end has taken over, which then decides it.
     ///
     /// The work still admitted is cancelled because Ghostlight quit, while a quit drains, and
     /// because the session ended otherwise.
@@ -1673,16 +1911,10 @@ impl LiveSession {
                 .unwrap_or_default(),
         );
         // A workspace with an owner outlives this connection: the caller is still there and its
-        // next call must reach the same tabs. It is released when its owner is gone, not when a
-        // socket is.
+        // next call must reach the same tabs. It is released when its owner is gone or the
+        // service ends, not when a socket is.
         if !intake.workspaces.is_owned(&self.workspace) {
-            let released = intake.workspaces.release(&self.workspace);
-            cleanup_released_tabs(
-                self.workspace.as_str(),
-                &released,
-                intake.browser_port.as_ref(),
-                &intake.workspaces,
-            );
+            intake.quit.release_on_close(&self.workspace);
         }
         intake.diagnostics.sink().emit(
             ghostlight_bridge::diagnostics::event::HARNESS_DETACHED,
@@ -1789,7 +2021,7 @@ fn register_missing_browsers(home: &Path, executable: &Path) {
 /// Close the tabs of every session whose owning process is gone.
 fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort) {
     for released in workspaces.reap(&owner_alive) {
-        cleanup_released_tabs("reaped", &released, browser, workspaces);
+        cleanup_released_tabs("reaped", &released, browser, workspaces, None);
     }
 }
 
@@ -1801,39 +2033,58 @@ fn reap_finished_sessions(workspaces: &WorkspaceStore, browser: &dyn BrowserPort
 /// setting refused its close: the browser then already dropped the dead workspace's binding and
 /// debugger hold and keeps the tab open. Until its close answers, no other session can claim it,
 /// so this close can never act on a tab another session took (ADR-0196 Decisions 8 and 9).
+///
+/// Each command has [`RELEASE_CALL_LIMIT`]. A service end also bounds the whole cleanup by
+/// `until`: a command that would start after it is not sent, and its tab leaves the pool as one
+/// whose close did not answer.
 fn cleanup_released_tabs(
     workspace: &str,
     released: &ReleasedTabs,
     browser: &dyn BrowserPort,
     workspaces: &WorkspaceStore,
+    until: Option<Instant>,
 ) {
     let Some(target) = released.browser.as_deref() else {
         return;
     };
+    let call_deadline = || {
+        let now = Instant::now();
+        let deadline = now + RELEASE_CALL_LIMIT;
+        match until {
+            Some(until) if until <= now => None,
+            Some(until) => Some(deadline.min(until)),
+            None => Some(deadline),
+        }
+    };
     let cancelled = AtomicBool::new(false);
     for tab_ids in released.physical_ids.chunks(DIAGNOSTIC_CLEAR_BATCH_SIZE) {
+        let Some(deadline) = call_deadline() else {
+            break;
+        };
         let _ = browser.call(
             target,
             workspace,
             BrowserCommand::ClearDiagnostics {
                 tab_ids: tab_ids.to_vec(),
             },
-            Instant::now() + Duration::from_secs(2),
+            deadline,
             &cancelled,
         );
     }
     for &tab_id in &released.physical_ids {
-        let closed = browser.call(
-            target,
-            workspace,
-            BrowserCommand::CloseTab {
-                tab_id,
-                released: true,
-            },
-            Instant::now() + Duration::from_secs(2),
-            &cancelled,
-        );
-        let kept_open = matches!(closed, Err(BrowserError::LocalInterlock(_)));
+        let kept_open = call_deadline().is_some_and(|deadline| {
+            let closed = browser.call(
+                target,
+                workspace,
+                BrowserCommand::CloseTab {
+                    tab_id,
+                    released: true,
+                },
+                deadline,
+                &cancelled,
+            );
+            matches!(closed, Err(BrowserError::LocalInterlock(_)))
+        });
         workspaces.settle_released(target, tab_id, kept_open);
     }
 }
@@ -2233,7 +2484,7 @@ mod tests {
         for _ in &released.physical_ids {
             browser.push(Err(BrowserError::LocalInterlock("preserved".into())));
         }
-        cleanup_released_tabs("released", released, &browser, workspaces);
+        cleanup_released_tabs("released", released, &browser, workspaces, None);
     }
 
     /// The tab a later session of the same client opening example.com would reuse, if any.
@@ -2264,7 +2515,7 @@ mod tests {
         browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 1 }));
         browser.push(Err(BrowserError::LocalInterlock("preserved".into())));
         browser.push(Err(BrowserError::DeadlineAfterDispatch));
-        cleanup_released_tabs("released", &released, &browser, &workspaces);
+        cleanup_released_tabs("released", &released, &browser, &workspaces, None);
 
         assert_eq!(
             browser.calls(),
@@ -2399,7 +2650,7 @@ mod tests {
         sink.on_event(FAKE_BROWSER, BrowserEvent::Disconnected);
         let released = workspaces.release(&workspace);
         let browser = FakeBrowser::default();
-        cleanup_released_tabs("released", &released, &browser, &workspaces);
+        cleanup_released_tabs("released", &released, &browser, &workspaces, None);
         assert!(browser.calls().is_empty(), "{:?}", browser.calls());
         assert_eq!(reusable_example_tab(&workspaces), None);
     }
@@ -2762,6 +3013,8 @@ mod tests {
             diagnostics.clone(),
             home.path().join("state").join("quit"),
             relay.clone(),
+            workspaces.clone(),
+            port.clone(),
         );
         let (signal, quit_requested) = std::sync::mpsc::channel();
         *super::lock(&quit.signal) = Some(Arc::new(move || {
@@ -4452,6 +4705,7 @@ mod tests {
             &released,
             &browser,
             &crate::workspace::WorkspaceStore::default(),
+            None,
         );
 
         let calls = browser.calls();
@@ -4763,6 +5017,419 @@ mod tests {
             .expect("the desktop is asked to exit when the grace ends");
         assert!(started.elapsed() >= Duration::from_millis(200));
         drop(host);
+    }
+
+    /// How an extension at a service end answers the page work a call sends it.
+    #[derive(Clone, Copy)]
+    enum PageWork {
+        /// Answer at once, as the returning browser does.
+        Answered,
+        /// Hold the answer until the service cancels the request.
+        HeldUntilCancelled,
+        /// Never answer anything, a release command included.
+        Silent,
+    }
+
+    /// Attach a protocol-4 extension for the returning browser that answers release commands and
+    /// page work as `work` says, and records every frame the service sends it.
+    fn attach_ending_browser(
+        served: &Served,
+        work: PageWork,
+    ) -> crate::browser::adapter::chromium::protocol4::fake::FakeExtension {
+        use crate::browser::adapter::chromium::protocol4::fake::{
+            FakeExtension, Reply as FakeReply,
+        };
+        use crate::browser::adapter::chromium::protocol4::wire::{Failure, Primitive};
+
+        /// What the returning browser answers to one primitive it is asked to run.
+        fn answer(primitive: &Primitive) -> Value {
+            match primitive {
+                Primitive::ListTabs(_) => json!({"tabs": []}),
+                Primitive::CloseTab(close) => json!({"tab_id": close.tab_id}),
+                Primitive::Frames(_) => json!({"frames": [{"frame_id": "T",
+                    "loader_id": "t1", "parent_frame_id": null, "url": RETURNING_URL}],
+                    "complete": true, "unseen": []}),
+                Primitive::Call(call) => json!({"answers": call.calls.iter().map(|world| {
+                    json!({"status": "returned", "envelope": {"ok": true,
+                        "value": returning_world_value(&world.message)}})
+                }).collect::<Vec<_>>()}),
+                _ => Value::Null,
+            }
+        }
+
+        let (service, extension) = pair().unwrap();
+        let fake = FakeExtension::connect(
+            extension,
+            &FakeExtension::hello(RETURNING_BROWSER),
+            Box::new(move |correlation, primitive| {
+                let page_work = matches!(primitive, Primitive::Frames(_) | Primitive::Call(_));
+                match work {
+                    PageWork::Silent => FakeReply::Never,
+                    PageWork::HeldUntilCancelled if page_work => {
+                        FakeReply::OnCancel(FakeExtension::failed(correlation, Failure::Cancelled))
+                    }
+                    _ => FakeReply::Now(FakeExtension::ok(correlation, answer(primitive))),
+                }
+            }),
+        );
+        served.relay.attach(service).unwrap();
+        eventually(|| served.relay.is_connected());
+        fake
+    }
+
+    /// Open an MCP session and wait until it is open, with its workspace, and return the stream
+    /// and that workspace.
+    fn open_session(served: &Served) -> (Connection, crate::workspace::WorkspaceId) {
+        let before = served.intake.workspaces.ids();
+        let mut socket = open_mcp(None);
+        initialize(&mut socket);
+        // A forwarded request is served only once the session has opened.
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        );
+        response(&mut socket, 2);
+        let workspace = served
+            .intake
+            .workspaces
+            .ids()
+            .into_iter()
+            .find(|workspace| !before.contains(workspace))
+            .expect("the session opened a workspace");
+        (socket, workspace)
+    }
+
+    /// Bind the returning browser's tab `tab_id` at its address to `workspace` as a confirmed
+    /// tab, and return its handle.
+    fn bind_tab(
+        workspaces: &crate::workspace::WorkspaceStore,
+        workspace: &crate::workspace::WorkspaceId,
+        tab_id: u64,
+    ) -> String {
+        use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
+
+        let lease = workspaces.acquire(workspace).unwrap();
+        let tab = PhysicalTab {
+            tab_id,
+            url: RETURNING_URL.into(),
+            title: "Example".into(),
+            active: true,
+            readiness: BrowserReadiness::Complete,
+        };
+        let added = lease.add_tab(RETURNING_BROWSER, &tab).unwrap();
+        lease.apply_landing(&added.handle, &tab).unwrap();
+        added.handle.as_str().to_owned()
+    }
+
+    /// Read `socket` up to its goodbye, and return the resume tokens handed out on the way and
+    /// the goodbye's reason.
+    fn until_goodbye(socket: &mut Connection) -> (Vec<ResumeState>, GoodbyeReason) {
+        let mut tokens = Vec::new();
+        loop {
+            match frame::read_frame::<McpFrame>(socket).unwrap() {
+                Some(McpFrame::Resume { token }) => {
+                    tokens.push(ResumeState::decode(&token).unwrap());
+                }
+                Some(McpFrame::Goodbye { reason }) => return (tokens, reason),
+                Some(_) => {}
+                None => panic!("the stream closed with no goodbye"),
+            }
+        }
+    }
+
+    /// The handles a resume token restores.
+    fn handles_in(token: &ResumeState) -> Vec<String> {
+        token
+            .owned_tabs
+            .iter()
+            .map(|tab| tab.handle.clone())
+            .collect()
+    }
+
+    /// Where in what an extension saw the service's goodbye came, if it came.
+    fn goodbye_at(
+        seen: &crate::browser::adapter::chromium::protocol4::fake::Seen,
+    ) -> Option<usize> {
+        seen.frames
+            .iter()
+            .position(|frame| frame.get("goodbye").is_some())
+    }
+
+    /// Where in what an extension saw each request for `primitive` came, with its tab.
+    fn requests_at(
+        seen: &crate::browser::adapter::chromium::protocol4::fake::Seen,
+        primitive: &str,
+    ) -> Vec<(usize, u64)> {
+        seen.frames
+            .iter()
+            .enumerate()
+            .filter(|(_, frame)| frame["kind"] == "request")
+            .filter(|(_, frame)| frame["primitive"]["name"] == primitive)
+            .map(|(at, frame)| {
+                (
+                    at,
+                    frame["primitive"]["args"]["tab_id"]
+                        .as_u64()
+                        .unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    /// The tabs a release closed, each before the browser goodbye, which has come.
+    fn closed_before_goodbye(
+        browser: &crate::browser::adapter::chromium::protocol4::fake::FakeExtension,
+    ) -> Vec<u64> {
+        let seen = browser.wait(|seen| goodbye_at(seen).is_some());
+        let goodbye = goodbye_at(&seen).unwrap();
+        let closes = requests_at(&seen, "close_tab");
+        assert!(
+            closes.iter().all(|(at, _)| *at < goodbye),
+            "every release close comes before the browser goodbye: {:?}",
+            seen.frames
+        );
+        let mut tabs: Vec<u64> = closes.into_iter().map(|(_, tab)| tab).collect();
+        tabs.sort_unstable();
+        tabs
+    }
+
+    #[test]
+    fn a_replace_keeps_a_live_sessions_tabs_bound_grouped_and_resumable() {
+        let home = TestHome::new("end-replace");
+        let served = serve_relayed(&home);
+        let browser = attach_ending_browser(&served, PageWork::Answered);
+        let (mut socket, workspace) = open_session(&served);
+        let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+
+        served
+            .intake
+            .quit
+            .begin(QuitReason::Replace, Duration::ZERO);
+
+        let (tokens, goodbye) = until_goodbye(&mut socket);
+        assert_eq!(goodbye, GoodbyeReason::Replace);
+        let last = tokens
+            .last()
+            .expect("a last token comes before the goodbye");
+        assert_eq!(handles_in(last), [handle.as_str()]);
+        assert!(last.owned_tabs[0].url_digest.is_some(), "{last:?}");
+        served
+            .quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the replace finishes");
+        assert_eq!(
+            closed_before_goodbye(&browser),
+            Vec::<u64>::new(),
+            "nothing closes or ungroups a live session's tab"
+        );
+        assert!(requests_at(&browser.wait(|_| true), "diagnostics").is_empty());
+        assert_eq!(bound_tabs(&served), vec![(handle, RETURNING_TAB)]);
+    }
+
+    #[test]
+    fn a_quit_releases_every_session_and_hands_each_stream_a_token_without_tabs() {
+        for reason in [QuitReason::Quit, QuitReason::Uninstall, QuitReason::Unknown] {
+            let home = TestHome::new("end-quit");
+            let served = serve_relayed(&home);
+            let browser = attach_ending_browser(&served, PageWork::Answered);
+            let (mut first, first_workspace) = open_session(&served);
+            let (mut second, second_workspace) = open_session(&served);
+            let first_tab = bind_tab(&served.intake.workspaces, &first_workspace, RETURNING_TAB);
+            let second_tab = bind_tab(
+                &served.intake.workspaces,
+                &second_workspace,
+                RETURNING_TAB + 1,
+            );
+            // The session watch hands each stream a token with its tab within a second, so the
+            // last token each stream gets says what the end decided.
+            for (socket, handle) in [(&mut first, &first_tab), (&mut second, &second_tab)] {
+                while handles_in(&next_resume(socket)) != [handle.as_str()] {}
+            }
+
+            served.intake.quit.begin(reason, Duration::ZERO);
+
+            for socket in [&mut first, &mut second] {
+                let (tokens, goodbye) = until_goodbye(socket);
+                assert_eq!(goodbye, super::goodbye_for(reason));
+                let last = tokens
+                    .last()
+                    .expect("a last token comes before the goodbye");
+                assert!(last.owned_tabs.is_empty(), "{reason:?}: {last:?}");
+            }
+            served
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the quit finishes");
+            assert_eq!(
+                closed_before_goodbye(&browser),
+                [RETURNING_TAB, RETURNING_TAB + 1],
+                "{reason:?}"
+            );
+            assert!(served.intake.workspaces.ids().is_empty(), "{reason:?}");
+        }
+    }
+
+    #[test]
+    fn a_command_line_session_is_released_at_every_service_end() {
+        for reason in [
+            QuitReason::Quit,
+            QuitReason::Replace,
+            QuitReason::Uninstall,
+            QuitReason::Unknown,
+        ] {
+            let home = TestHome::new("end-command-line");
+            let served = serve_relayed(&home);
+            let browser = attach_ending_browser(&served, PageWork::Answered);
+            let workspace = served.intake.workspaces.resume_or_admit(
+                "command line".into(),
+                IntakeChannel::Cli,
+                SessionMarker::Declared {
+                    key: "end-command-line".into(),
+                },
+            );
+            bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+
+            served.intake.quit.begin(reason, Duration::ZERO);
+
+            served
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the end finishes");
+            assert_eq!(
+                closed_before_goodbye(&browser),
+                [RETURNING_TAB],
+                "{reason:?}"
+            );
+            assert!(served.intake.workspaces.ids().is_empty(), "{reason:?}");
+        }
+
+        // The end of the session and the idle exit send the browser nothing and forget the tab.
+        for ends in [
+            (|quit: &super::Quit| quit.session_end()) as fn(&super::Quit),
+            |quit: &super::Quit| quit.idle_exit(Duration::ZERO),
+        ] {
+            let home = TestHome::new("end-command-line-quietly");
+            let served = serve_relayed(&home);
+            let browser = attach_ending_browser(&served, PageWork::Answered);
+            let workspace = served.intake.workspaces.resume_or_admit(
+                "command line".into(),
+                IntakeChannel::Cli,
+                SessionMarker::Declared {
+                    key: "end-command-line".into(),
+                },
+            );
+            bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+
+            ends(&served.intake.quit);
+
+            served
+                .quit_requested
+                .recv_timeout(PATIENCE)
+                .expect("the end finishes");
+            assert!(served.intake.workspaces.ids().is_empty());
+            assert!(requests_at(&browser.wait(|_| true), "close_tab").is_empty());
+        }
+    }
+
+    #[test]
+    fn a_session_whose_client_left_during_the_drain_is_released_on_replace() {
+        let home = TestHome::new("end-replace-left");
+        let served = serve_relayed(&home);
+        let browser = attach_ending_browser(&served, PageWork::Answered);
+        let (left, left_workspace) = open_session(&served);
+        let (mut stays, stays_workspace) = open_session(&served);
+        bind_tab(&served.intake.workspaces, &left_workspace, RETURNING_TAB);
+        let kept = bind_tab(
+            &served.intake.workspaces,
+            &stays_workspace,
+            RETURNING_TAB + 1,
+        );
+        let running = served.intake.quit.drain.admit().unwrap();
+
+        served.intake.quit.begin(QuitReason::Replace, PATIENCE);
+        drop(left);
+        eventually(|| served.intake.workspaces.ids() == [stays_workspace.clone()]);
+        drop(running);
+
+        let (tokens, goodbye) = until_goodbye(&mut stays);
+        assert_eq!(goodbye, GoodbyeReason::Replace);
+        assert_eq!(handles_in(tokens.last().unwrap()), [kept.as_str()]);
+        served
+            .quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the replace finishes");
+        assert_eq!(closed_before_goodbye(&browser), [RETURNING_TAB]);
+        assert_eq!(bound_tabs(&served), vec![(kept, RETURNING_TAB + 1)]);
+    }
+
+    #[test]
+    fn a_leased_workspace_is_cancelled_before_its_release() {
+        let home = TestHome::new("end-leased");
+        let served = serve_relayed(&home);
+        let browser = attach_ending_browser(&served, PageWork::HeldUntilCancelled);
+        let (mut socket, workspace) = open_session(&served);
+        let handle = bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB);
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": "browser_read", "arguments": {"tab": handle}}}),
+        );
+        drop(browser.wait(|seen| {
+            !requests_at(seen, "frames").is_empty() || !requests_at(seen, "call").is_empty()
+        }));
+
+        // The drain gives up on the call, so the end meets the workspace still leased.
+        served
+            .intake
+            .quit
+            .begin(QuitReason::Quit, Duration::from_millis(100));
+
+        let (_, goodbye) = until_goodbye(&mut socket);
+        assert_eq!(goodbye, GoodbyeReason::Quit);
+        served
+            .quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the quit finishes");
+        assert_eq!(closed_before_goodbye(&browser), [RETURNING_TAB]);
+        let seen = browser.wait(|_| true);
+        let cancelled = seen
+            .frames
+            .iter()
+            .position(|frame| frame["kind"] == "cancel")
+            .expect("the running call is cancelled");
+        let closed = requests_at(&seen, "close_tab")[0].0;
+        assert!(cancelled < closed, "{:?}", seen.frames);
+        drop(seen);
+        assert!(served.intake.workspaces.ids().is_empty());
+    }
+
+    #[test]
+    fn a_session_end_says_goodbye_inside_the_fallback_with_many_tabs() {
+        const TABS: u64 = 300;
+
+        let home = TestHome::new("end-session-many");
+        let served = serve_relayed(&home);
+        let browser = attach_ending_browser(&served, PageWork::Silent);
+        let (mut socket, workspace) = open_session(&served);
+        for tab in 0..TABS {
+            bind_tab(&served.intake.workspaces, &workspace, RETURNING_TAB + tab);
+        }
+
+        let began = Instant::now();
+        served.intake.quit.session_end();
+
+        let (_, goodbye) = until_goodbye(&mut socket);
+        assert_eq!(goodbye, GoodbyeReason::SessionEnd);
+        let seen = browser.wait(|seen| goodbye_at(seen).is_some());
+        assert!(
+            began.elapsed() < ghostlight_relay::os::session::FALLBACK_EXIT,
+            "both goodbyes come before the fallback exit: {:?}",
+            began.elapsed()
+        );
+        assert!(requests_at(&seen, "close_tab").is_empty());
+        assert!(requests_at(&seen, "diagnostics").is_empty());
+        drop(seen);
+        assert!(served.intake.workspaces.ids().is_empty());
     }
 
     #[test]
