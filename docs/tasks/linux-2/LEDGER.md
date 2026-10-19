@@ -5,10 +5,13 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `done` (with commi
 
 ## RESUME HERE
 
-Opened 2026-10-19 by windows-claude. Part 1 started the same day. The owner then narrowed this
-machine's part to CachyOS (Notes, "Scope, 2026-10-19"): L2-01 and L2-03 are out of this batch,
-and the owner validates the other Linux environments. Part 2 starts when windows-claude's message
-says the head is ready (arch-1 integrated, deployed on Windows and pushed).
+Opened 2026-10-19 by windows-claude. The owner narrowed this machine's part to CachyOS (Notes,
+"Scope, 2026-10-19"): L2-01, L2-03, L2-13 and L2-14 are out of this batch, and the owner validates
+the other Linux environments with L2-15's page. Every other task is done on CachyOS, Part 2 on the
+go head 62bfa224 and its bundle from run 39297671342. test-01 now runs that bundle (release
+channel 2.0.0) with the owner's policy and diagnostics on; the home from before L2-12 is kept at
+`~/.ghostlight.l212-before`. Open for windows-claude: the `AdvertisedCatalog` defect (Notes, "F1
+on the go head") and the observations under L2-12.
 
 ## Files this batch owns
 
@@ -123,7 +126,7 @@ never sees the entry.
 | --- | --- | --- |
 | L2-10 | The full gate and every journey on the go head | done |
 | L2-11 | The release workflow's bundle, built and verified | done |
-| L2-12 | A clean install from the bundle, and real use | todo |
+| L2-12 | A clean install from the bundle, and real use | done |
 | L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
 | L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
 | L2-15 | The owner's steps for Bluefin and Alpine | done |
@@ -163,6 +166,46 @@ real `get.sh` and L2-02's local source. Then: the extension from the bundle (unp
 has no 2.0 yet), `ghostlight install` for the agents found, a real browser task on the sylin.org
 demo stages from an agent, the window and the tray, idle exit, a restart of the browser mid-session
 (ADR-0203: the agent's handle reads "no longer open" when the page changed), and uninstall.
+
+Result, 2026-10-19, done, on test-01 with the L2-11 bundle:
+
+- Uninstall of the development install: `ghostlight uninstall` removed the four browser
+  registrations, the command, the Applications entry and the entry in all 18 agents, and stopped
+  the service; the agents' running MCP edges are theirs and stayed. The home was moved to
+  `~/.ghostlight.l212-before`.
+- Install: the real `get.sh` from the bundle's revision on GitHub with `GHOSTLIGHT_FROM` printed
+  "Checksums and build provenance verified."; `install.json` reads the release channel and the
+  bundle's service hash; the owner's Chromium connected by itself and doctor read Ready.
+- The extension: the owner reloaded `extension/` at the bundle's revision (one packaged file,
+  `lib/buffers.js`, had changed since the morning's load).
+- Real use: a fresh Claude Code process (`claude -p --model haiku`, 12 turns, $0.0078) through the
+  installer's entry rang the demo desk's bell, answered its prompt and typed in its field; the page
+  read back both.
+- The window and the tray: `installed/desktop-check.py` passed all five phases; the tray icon is
+  registered with KDE's StatusNotifierWatcher.
+- F1 on the bundle install: 23 Ghostlight tools at every step, never 46; with no service replace
+  in between, the holder did get `list_changed` on the policy change and on its restore; `/mcp`
+  disabling the holder brought the plugin's 23.
+- Idle exit, on the bundle's images in a scratch home with nothing connected: the service exited
+  by itself 632 s after the install.
+- A browser restart mid-session, measured on the system Chromium in a scratch home (the owner's
+  browser was not restarted): Chromium restored both pages under new tab ids, so both of the
+  agent's handles read "That tab handle names no open tab in this session." (`tab_unavailable`),
+  ADR-0203's "no longer open", and the session listed no tabs.
+- Uninstall again was clean, and the reinstall from the bundle reconnected the owner's Chromium
+  by itself.
+
+Observations, for windows-claude:
+
+1. After desktop-check's lost-service phase (the service killed, then restarted by the tray at
+   14:01) and the owner's reload of the extension, the owner's Chromium did not reconnect for
+   about 10 minutes, and with diagnostics on no browser relay started in 3 of them. The first
+   agent call (`browser_navigate`) started Chromium as on_demand says, which woke the extension: the
+   relay started in 0.7 s and the page opened in 1.2 s. The same kill and restart in a scratch home
+   reconnected in 3 s, so the cause is not known; the extension's own connection log was off.
+2. `browser_tabs` with `list` succeeds with "Listed 0 tabs in this session." when no browser is
+   connected and the session has no tab, while its catalog description says list "refuses when
+   none is connected".
 
 **L2-15.** A short page under `docs/testing/` with the owner's exact steps for Bluefin and Alpine:
 where to get the bundle, the install command, what to try, and what each result means.
