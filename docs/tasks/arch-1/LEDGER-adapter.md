@@ -39,3 +39,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   `describing_documents_binds_locators_points_and_focus_to_current_documents`, and
   `a_document_change_on_a_one_locator_call_is_a_navigated_target`, all in
   `protocol4/translate/tests.rs`. The work-level proof is C9's. No journey is needed.
+- A1, review fix: a recording exported into a page names one locator, the file input, and runs
+  under the scope guard, so `BrowserCommand::sole_locator` names it. A `document_changed` on that
+  export is a navigated target, pinned by
+  `a_document_change_during_a_page_export_is_a_navigated_target` in
+  `protocol4/translate/tests/points.rs`.

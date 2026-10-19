@@ -981,6 +981,27 @@ fn a_recording_exported_into_a_page_carries_its_attach_call_and_guard() {
 }
 
 #[test]
+fn a_document_change_during_a_page_export_is_a_navigated_target() {
+    // The file input's document reloaded between the description and the export, so the
+    // export names a target that navigated, not a document whose access is in doubt.
+    let (port, _fake) = port_with(Box::new(|correlation, primitive| {
+        Reply::Now(match primitive {
+            wire::Primitive::Frames(_) => FakeExtension::ok(correlation, nested_inventory()),
+            wire::Primitive::Recording(wire::RecordingOp::Export { .. }) => {
+                FakeExtension::failed(correlation, wire::Failure::DocumentChanged)
+            }
+            wire::Primitive::Recording(op) => FakeExtension::ok(correlation, recording_facts(op)),
+            _ => FakeExtension::ok(correlation, Value::Null),
+        })
+    }));
+    call(&port, BrowserCommand::StartRecording { tab_id: 12 }).unwrap();
+    assert_eq!(
+        call(&port, scoped(all_open(), export_to("C:c1:locator_a1_4"))),
+        Err(BrowserError::stale(StaleReason::Navigated))
+    );
+}
+
+#[test]
 fn a_recording_is_never_exported_into_a_document_the_scope_leaves_out() {
     let (port, fake) = exact();
     call(&port, BrowserCommand::StartRecording { tab_id: 12 }).unwrap();

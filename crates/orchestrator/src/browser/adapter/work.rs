@@ -943,9 +943,10 @@ impl BrowserCommand {
         }
     }
 
-    /// The one locator this command acts on or reads, when it names exactly one. A command with
-    /// no locator, or with several (a fill, a drag), has none, so a failure of one of them cannot
-    /// be attributed to a single document.
+    /// The one locator this command acts on or reads, when it names exactly one. A recording
+    /// exported into a page names the file input that takes it. A command with no locator, or
+    /// with several (a fill, a drag), has none, so a failure of one of them cannot be attributed
+    /// to a single document.
     #[must_use]
     pub fn sole_locator(&self) -> Option<&str> {
         match self.primitive() {
@@ -959,7 +960,11 @@ impl BrowserCommand {
             | Self::ActivateModified { locator, .. }
             | Self::Hover { locator, .. }
             | Self::TypeText { locator, .. }
-            | Self::UploadFiles { locator, .. } => Some(locator),
+            | Self::UploadFiles { locator, .. }
+            | Self::ExportRecording {
+                destination: RecordingDestination::Target { locator, .. },
+                ..
+            } => Some(locator),
             Self::DescribeTargets { locators, .. } => match locators.as_slice() {
                 [only] => Some(only),
                 _ => None,
@@ -1250,7 +1255,7 @@ mod tests {
     #[test]
     fn a_command_names_one_locator_only_when_it_acts_on_exactly_one() {
         use crate::browser::adapter::documents::DocumentScope;
-        use crate::browser::adapter::BrowserCommand;
+        use crate::browser::adapter::{BrowserCommand, RecordingDestination};
         let click = BrowserCommand::Activate {
             tab_id: 1,
             locator: "F:L:locator_a_1".into(),
@@ -1289,6 +1294,22 @@ mod tests {
             destination_locator: "b".into(),
         };
         assert_eq!(drag.sole_locator(), None);
+        let into_page = BrowserCommand::ExportRecording {
+            destination: RecordingDestination::Target {
+                tab_id: 1,
+                locator: "F:L:locator_a_2".into(),
+                file_name: "flow.gif".into(),
+            },
+            max_output_bytes: 4096,
+        };
+        assert_eq!(into_page.sole_locator(), Some("F:L:locator_a_2"));
+        let download = BrowserCommand::ExportRecording {
+            destination: RecordingDestination::Download {
+                file_name: "flow.gif".into(),
+            },
+            max_output_bytes: 4096,
+        };
+        assert_eq!(download.sole_locator(), None);
     }
 
     #[test]
