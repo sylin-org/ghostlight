@@ -185,6 +185,7 @@ fn populated() -> (WorkbenchSnapshot, EffectiveAuthority, Scratch) {
             paused: false,
             authority_invalid: false,
             working: false,
+            ..Default::default()
         }),
         overview: OverviewSummary {
             active_sessions: 1,

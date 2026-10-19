@@ -109,6 +109,11 @@ Internal browser commands are combined when a person experiences them as one job
   the same validity governance enforces, so the header, the Status authority card, and the Policy
   tab agree. A failed reload that keeps the last valid policy in force is not failing closed;
   Status warns about it instead.
+- The header never reads Ready with a promise the policy breaks. When the policy turns off the
+  channel of every connected agent, or every channel, it reads Turned off, in the held tone like a
+  pause, and says whose policy turned off which work. While another channel can still work it
+  stays Ready and says which agents are turned off. Policy, the Status rules check and the tray say
+  the same, from the switches the executor checks per request.
 
 ## Desktop workbench experience
 

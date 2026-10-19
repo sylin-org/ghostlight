@@ -14,8 +14,11 @@
 //   ?readiness=paused         Paused, with the waiting work held. Resume puts it back in flight,
 //                             settles it, and starts new work as on the working page.
 //   ?readiness=ended          Session ended.
-//   ?readiness=channel_off    MCP agents switched off in your rules and the command line on.
-//                             Policy shows the two channel switches with MCP off.
+//   ?readiness=channel_off    MCP agents switched off in your rules and the command line on. A
+//                             command-line agent is connected, so the band stays Ready and says
+//                             which agents can work; Policy and Status name the switch.
+//   ?readiness=turned_off     Both channels switched off in your rules: the band says Turned off,
+//                             held, and Policy shows nothing available.
 //   ?setup=<stage>            The setup view at one of its stages (workbench-setup-fixtures.mjs).
 //   ?browsers=none            No browser connected, with Google Chrome starting on request.
 //   ?agents=connected         Every agent found on this computer has Ghostlight.
@@ -271,10 +274,33 @@ const ago = (ms) => FIXTURE_EPOCH - ms;
 const READINESS = {
   session_ended: { word: "Session ended", detail: "This session was ended. Start a new session to let agents work again.", tone: "held" },
   paused: { word: "Paused", detail: "Browser work is paused. Resume when you are ready.", tone: "held" },
+  turned_off: { word: "Turned off", detail: "A policy turns off work from the agents that are connected. Open Policy to see the switches.", tone: "held" },
   not_connected: { word: "Not connected", detail: "No browser is connected. Open a supported Chromium browser with the Ghostlight extension installed.", tone: "offline" },
   policy_invalid: { word: "Policy not valid", detail: "A configured policy is not valid, so Ghostlight refuses all browser work. Open Policy to see what applies. A policy file still in schema 3 needs ghostlight policy migrate <file>.", tone: "attention" },
   working: { word: "Working", detail: "An agent is working in your browser right now.", tone: "working" },
   ready: { word: "Ready", detail: "Connected and idle. Agents can work when they ask.", tone: "quiet" }
+};
+
+/**
+ * What the service says about the switches each `?readiness=` page turns off, mirrored from
+ * `language/channel_switch.rs`: which switches your rules turn off, the band's sentence while
+ * another channel can work (`ready`) and while none of the connected agents can (`held`), and
+ * the line the Policy headline and the Status rules check add (`policy`).
+ */
+const CHANNELS_OFF = {
+  channel_off: {
+    mcp: "user",
+    ready: "MCP agents are turned off; command-line agents can work.",
+    held: "Your policy turns off work from MCP agents.",
+    policy: "MCP agents are turned off. Command-line work may continue.",
+    capability: "Only command-line work may use it: MCP agents are turned off."
+  },
+  turned_off: {
+    mcp: "user",
+    cli: "user",
+    held: "Your policy turns off work from MCP agents and the command line.",
+    policy: "MCP agents and the command line are turned off, so no agent may work."
+  }
 };
 
 /** What the window shows with no browser connected and none starting (`language::workbench`). */
@@ -317,8 +343,8 @@ const snapshot = {
     // A tab the browser's Preserve Ghostlight tabs setting kept open: refused, but not by policy.
     { timestamp_ms: ago(120000), invocation: "invocation_kept", workspace: "workspace_codex", tool: "browser_tabs", capability: "action", allowed: true, reason: "browser_local_interlock", status: "blocked", effect: "none", summary: "Kept the tab open: Preserve Ghostlight tabs is on. To let agents close tabs, turn it off in the Ghostlight in Browser settings.", duration_ms: 60, observed: {}, channel: "mcp", browser: "Chrome", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
     // Work from a channel your rules switched off, and a call that does not match the catalog.
-    { timestamp_ms: ago(150000), invocation: "invocation_channel_off", workspace: "workspace_claude", tool: "browser_read", capability: "read", allowed: false, reason: "channel_denied", status: "blocked", effect: "none", summary: "Blocked: the user's Ghostlight policy turns off work from MCP agents.", duration_ms: 4, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
-    { timestamp_ms: ago(180000), invocation: "invocation_invalid", workspace: "workspace_codex", tool: "browser_click", capability: "action", allowed: false, reason: "invalid_request", status: "blocked", effect: "none", summary: "The call does not match the Ghostlight catalog.", duration_ms: 2, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
+    { timestamp_ms: ago(150000), invocation: "invocation_channel_off", workspace: "workspace_claude", tool: "browser_read", capability: "read", allowed: false, reason: "channel_denied", policy_tier: "user", status: "blocked", effect: "none", summary: "Your policy turns off work from MCP agents.", permission_explanations: ["Refused. Your policy turns off work from MCP agents."], permissions: { checks: [{ requirements: [], host: null, allowed: false, reason: "channel_denied", layers: [] }], truncated: false }, duration_ms: 4, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_claude", channel: "mcp" }, "claude-code") },
+    { timestamp_ms: ago(180000), invocation: "invocation_invalid", workspace: "workspace_codex", tool: "browser_click", capability: "action", allowed: false, reason: "invalid_request", status: "failed", effect: "none", summary: "The call does not match the Ghostlight catalog.", duration_ms: 2, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_codex", channel: "mcp" }, "codex-mcp-client") },
     { timestamp_ms: ago(240000), invocation: "invocation_open", workspace: "workspace_script", tool: "browser_navigate", capability: "action", allowed: true, reason: "permitted", status: "succeeded", effect: "committed", summary: "Opened slow.example.org.", duration_ms: 8100, observed: { host: "slow.example.org", readiness: "loading" }, channel: "cli", browser: "Chrome", ...previewDetails({ connection_id: "connection_script", channel: "cli" }) },
     { timestamp_ms: ago(420000), invocation: "invocation_restored", workspace: "workspace_0193f1c2a8b4e7d6825", tool: "policy_explain", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Explained the policy.", duration_ms: 12, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored", channel: "mcp" }) },
     { timestamp_ms: ago(480000), invocation: "invocation_restored_claimed", workspace: "workspace_0193f1c2a8b4e7d6826", tool: "browser_read", capability: "read", allowed: true, reason: "permitted", status: "succeeded", effect: "none", summary: "Read example.com.", duration_ms: 30, observed: {}, channel: "mcp", ...previewDetails({ connection_id: "connection_restored_claimed", channel: "mcp", claimed_agent: "claude-code", source: { agent: "cursor", image: "Cursor.exe" } }) }
@@ -512,17 +538,50 @@ const READINESS_SCENES = {
   not_connected: (flat) => ({ ...idle(flat), browsers: [], no_browser: NO_BROWSER }),
   paused: (flat) => withRuntime({ ...flat, operations: flat.operations.map(heldWork) }, "held"),
   ended: (flat) => withRuntime(idle(flat), "ended"),
-  channel_off: (flat) => idle(flat)
+  channel_off: (flat) => switchedOff(idle(flat), CHANNELS_OFF.channel_off),
+  turned_off: (flat) => switchedOff(idle(flat), CHANNELS_OFF.turned_off)
 };
 const TICKING_SCENE = "working";
 
-/** The policy with your rules switching MCP agents off, which `?readiness=channel_off` shows. */
-const MCP_OFF = { key: "channels.mcp.enabled", value: "false", level: "mandatory" };
-const policyWithMcpOff = (() => {
+/** The page with `off` switched off in your rules: the band's facts, and Status naming the switch. */
+function switchedOff(flat, off) {
+  const changed = structuredClone(flat);
+  changed.channels_off = off;
+  const rules = changed.diagnostics.find((item) => item.id === "authority");
+  rules.detail = `${rules.detail} ${off.policy}`;
+  return changed;
+}
+
+/** The switch settings your rules author on the `?readiness=` pages that turn channels off. */
+const SWITCH_SETTING = {
+  mcp: { key: "channels.mcp.enabled", value: "false", level: "mandatory" },
+  cli: { key: "channels.cli.enabled", value: "false", level: "mandatory" }
+};
+
+/**
+ * The policy as the service compiles it with your rules switching `off` off: the headline names the
+ * switch, and each capability says who may still use it or, with every channel off, that nothing may.
+ */
+function policySwitchedOff(off) {
   const view = structuredClone(policyView);
-  view.layers.find((layer) => layer.kind === "user").settings.push(MCP_OFF);
+  const user = view.layers.find((layer) => layer.kind === "user");
+  for (const channel of ["mcp", "cli"]) if (off[channel]) user.settings.push(SWITCH_SETTING[channel]);
+  view.headline = `${view.headline} ${off.policy}`;
+  for (const line of view.capabilities) {
+    if (off.mcp && off.cli) {
+      Object.assign(line, { state: "unavailable", detail: `Not available. ${off.held}` });
+    } else if (line.state !== "unavailable") {
+      line.detail = `${line.detail} ${off.capability}`;
+    }
+    if (line.state !== "unavailable" || (off.mcp && off.cli)) {
+      line.decided_by = [...new Set([...line.decided_by, "user"])];
+    }
+  }
   return view;
-})();
+}
+
+/** The policy each `?readiness=` page shows. */
+const policyFor = (scene) => (CHANNELS_OFF[scene] ? policySwitchedOff(CHANNELS_OFF[scene]) : policyView);
 
 // `?agents=connected` shows Integrations when every agent found on this computer has Ghostlight.
 const allConnected = (flat) => ({
@@ -546,7 +605,7 @@ const fixtureFor = (choice) => `window.__GHOSTLIGHT_PREVIEW__ = ${JSON.stringify
 window.__GHOSTLIGHT_SETUP_STATES__ = ${JSON.stringify(setupStates)};
 window.__GHOSTLIGHT_SETUP_START__ = ${JSON.stringify(choice.stage)};
 window.__GHOSTLIGHT_SCRIPT__ = ${JSON.stringify(script)};
-window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ? policyWithMcpOff : policyView)};
+window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(policyFor(choice.scene))};
 (() => {
   const preview = window.__GHOSTLIGHT_PREVIEW__;
   const listeners = [];
@@ -581,13 +640,21 @@ window.__GHOSTLIGHT_POLICY__ = ${JSON.stringify(choice.scene === "channel_off" ?
     const connected = preview.browsers.length > 0;
     const starts = !connected && preview.no_browser && preview.no_browser !== ${JSON.stringify(NO_BROWSER)}
       ? ${JSON.stringify(STARTS_ON_REQUEST)} : null;
+    // Policy refuses every agent that could ask: every channel is off, or every connected agent's is.
+    const off = preview.channels_off ?? {};
+    const agentsOn = channel => preview.sessions.some(session => session.channel === channel);
+    const anyAgent = agentsOn("mcp") || agentsOn("cli");
+    const turnedOff = Boolean(off.mcp && off.cli)
+      || (anyAgent && (!agentsOn("mcp") || Boolean(off.mcp)) && (!agentsOn("cli") || Boolean(off.cli)));
     const state = runtime === "ended" ? "session_ended"
       : runtime === "held" ? "paused"
-        : !connected && !starts ? "not_connected"
-          : configuration.local_policy_valid === false || configuration.managed_authority_valid === false ? "policy_invalid"
-            : preview.operations.length > 0 ? "working" : "ready";
+        : turnedOff ? "turned_off"
+          : !connected && !starts ? "not_connected"
+            : configuration.local_policy_valid === false || configuration.managed_authority_valid === false ? "policy_invalid"
+              : preview.operations.length > 0 ? "working" : "ready";
     const words = READINESS[state];
-    const detail = state === "ready" && starts ? "Starts " + starts + " when an agent asks." : words.detail;
+    const readyLine = [starts && "Starts " + starts + " when an agent asks.", off.ready].filter(Boolean).join(" ");
+    const detail = state === "turned_off" ? off.held : state === "ready" && readyLine ? readyLine : words.detail;
     return { state, word: words.word, detail, tone: words.tone, invites_control: true };
   };
   preview.readiness = resolveReadiness();

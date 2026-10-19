@@ -208,7 +208,11 @@ workbench shows waiting becoming running once.
    before any browser work, through the one completion path, and an unset switch is on. The
    refusal says which switch is off and whose policy turned it off. The channel is declared by
    Ghostlight's own peer, so a switch is a guardrail for well-behaved agents, not a barrier
-   against other software running as the same user (ADR-0202 Decision 22a).
+   against other software running as the same user (ADR-0202 Decision 22a). The window reads the
+   same switches: the band says Turned off, held, while every connected agent's channel or every
+   channel is off, and otherwise Ready with the agents still able to work named; the Policy
+   headline, the capability lines and the Status rules check name the switch; and a refused
+   call's row says "Your policy turns off work from MCP agents.", not the model's sentence.
 5. Tool calls cannot author host or capability policy. Obsolete request fields fail before effects.
    Started work keeps one immutable configured authority snapshot even if configuration changes.
 6. A configured invalid cold source fails closed. An invalid replacement retains last valid for

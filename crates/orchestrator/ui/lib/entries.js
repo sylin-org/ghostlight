@@ -38,7 +38,7 @@
       capability: record.capability,
       startedAt: existing?.startedAt,
       endedAt: record.timestamp_ms,
-      phase: record.complete === false && existing && !existing.settled ? existing.phase : record.allowed ? "completed" : "blocked",
+      phase: record.complete === false && existing && !existing.settled ? existing.phase : isRefusal(record) ? "blocked" : "completed",
       allowed: record.allowed,
       reason: record.reason,
       // Kept so a refusal can name the rule that caused it rather than only that it happened.
@@ -82,15 +82,22 @@
   /** Whether the work has not settled yet, running or pending. */
   const isUnsettled = entry => isRunning(entry) || isPending(entry);
 
-  /** Whether policy refused the action: the one outcome drawn in the full red treatment. */
-  const isBlocked = entry => entry.phase === "blocked" || entry.allowed === false;
-
   /**
    * The terminal statuses a record names, in the service's wire words (work/result.rs `Status`).
    */
   const STATUS = Object.freeze({
     succeeded: "succeeded", blocked: "blocked", failed: "failed", cancelled: "cancelled", unknown: "unknown"
   });
+
+  /**
+   * Whether a record is a refusal: its decision refused the action and its status says blocked. A
+   * call that did not match the catalog was refused too, but its status says it failed, and it is
+   * drawn as the failure it is rather than as a policy block.
+   */
+  const isRefusal = record => record.allowed === false && record.status === STATUS.blocked;
+
+  /** Whether policy or a person refused the action: the one outcome drawn in the full red treatment. */
+  const isBlocked = entry => entry.phase === "blocked" || isRefusal(entry);
 
   /**
    * Whether a permitted action settled without doing what it was asked: it failed, or what it did

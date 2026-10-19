@@ -19,6 +19,7 @@ pub struct LayerEvidence {
 mod tests {
     use super::*;
     use crate::governance::{manifest, AuthorityTier, GovernanceFacade, PolicyLayer};
+    use crate::intake::session::IntakeChannel;
 
     #[test]
     fn positive_evidence_preserves_ordered_grants_and_every_layer() {
@@ -66,7 +67,7 @@ mod tests {
         assert!(decision.allowed);
         assert!(open.layers.is_empty());
         assert_eq!(
-            crate::language::history::permission(&open),
+            crate::language::history::permission(&open, IntakeChannel::Mcp, None),
             "Allowed without configured policy."
         );
         snapshot.layers.push(PolicyLayer {
@@ -81,7 +82,10 @@ mod tests {
             snapshot.authorize_with_evidence(CapabilitySet::WRITE, Some("https://example.com/"));
         assert!(!decision.allowed);
         assert!(!refused.layers[0].allowed);
-        assert!(crate::language::history::permission(&refused).starts_with("Refused"));
+        assert!(
+            crate::language::history::permission(&refused, IntakeChannel::Mcp, Some("user"))
+                .starts_with("Refused")
+        );
         let (decision, protected) =
             snapshot.authorize_with_evidence(CapabilitySet::READ, Some("chrome://extensions"));
         assert!(!decision.allowed);

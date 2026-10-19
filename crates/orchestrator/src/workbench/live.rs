@@ -43,7 +43,7 @@ use crate::browser::{BrowserPort, BrowserSummary};
 use crate::diagnostics::DiagnosticsHub;
 use crate::governance::effective::PolicyChip;
 use crate::governance::manifest::BrowserStartup;
-use crate::governance::{GovernanceDiagnostics, GovernanceFacade};
+use crate::governance::{AuthoritySnapshot, GovernanceDiagnostics, GovernanceFacade};
 use crate::install::HarnessRegistry;
 use crate::intake::desktop::TrayModel;
 use crate::intake::session::IntakeChannel;
@@ -82,6 +82,8 @@ pub(super) struct Gathered {
     pub audit_health: AuditHealth,
     /// Whether the authority requires receipts to be saved.
     pub audit_required: bool,
+    /// The published authority this look read, the one the executor enforces per request.
+    pub enforced: Arc<AuthoritySnapshot>,
     /// The one aggregate answer.
     pub readiness: ReadinessSummary,
 }
@@ -336,7 +338,9 @@ impl Live {
         let authority = self.governance.diagnostics();
         let runtime_state = self.governance.runtime_state();
         let audit_health = self.projection.audit_health();
-        let audit_required = self.governance.snapshot().requires_audit();
+        let enforced = self.governance.snapshot();
+        let audit_required = enforced.requires_audit();
+        let agents_on = |channel| sessions.iter().any(|session| session.channel == channel);
         let readiness = ReadinessSummary::resolve(&readiness::ReadinessFacts {
             audit_required_unavailable: audit_required && audit_health.unavailable(),
             browser_connected: !browsers.is_empty(),
@@ -345,6 +349,9 @@ impl Live {
             paused: runtime_state == RuntimeControlState::Held,
             authority_invalid: !authority.authority_valid,
             working: !operations.is_empty(),
+            channels_off: enforced.channels_off(),
+            agents_on_mcp: agents_on(IntakeChannel::Mcp),
+            agents_on_cli: agents_on(IntakeChannel::Cli),
         });
         Gathered {
             runtime_note: self.runtime_note(runtime_state),
@@ -359,6 +366,7 @@ impl Live {
             runtime_state,
             audit_health,
             audit_required,
+            enforced,
             readiness,
         }
     }

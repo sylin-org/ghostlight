@@ -4,8 +4,12 @@
 //! which prints it in a terminal. Both read this one answer, so they share one vocabulary.
 //!
 //! The states are ordered by what a person needs to hear first. A person's own pause or ended
-//! session comes first: it is what they did, and the control beside the word undoes it. No browser
-//! comes next, but only when Ghostlight cannot start one itself; a browser an agent's request
+//! session comes first: it is what they did, and the control beside the word undoes it. A policy
+//! that turns off the channel of every connected agent, or every channel, comes next: like a pause
+//! it was chosen, so it is held rather than in need of attention, and it refuses those agents
+//! whatever the browser or the rest of the policy says, which is the order the executor checks.
+//! While another channel can still work the answer stays Ready and says which agents are off.
+//! No browser comes next, but only when Ghostlight cannot start one itself; a browser an agent's request
 //! starts is nothing to report, so that answer is Ready and says which browser starts. An invalid
 //! policy comes after: the control beside the word cannot fix it, and it refuses everything, so it
 //! outranks missing history, which refuses only what policy says must be recorded.
@@ -15,6 +19,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::channel_switch::ChannelsOff;
+
 /// The aggregate answer, in the order it takes precedence.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +29,8 @@ pub enum Readiness {
     SessionEnded,
     /// A person paused browser work.
     Paused,
+    /// Policy turns off the channel of every connected agent, or every channel.
+    TurnedOff,
     /// No browser is connected and Ghostlight would start none, so no browser work can happen.
     NotConnected,
     /// A configured policy is not valid, so governance refuses every governed request.
@@ -40,6 +48,7 @@ impl Readiness {
     pub const ALL: &'static [Readiness] = &[
         Readiness::SessionEnded,
         Readiness::Paused,
+        Readiness::TurnedOff,
         Readiness::NotConnected,
         Readiness::PolicyInvalid,
         Readiness::HistoryUnavailable,
@@ -54,6 +63,7 @@ impl Readiness {
             Readiness::NotConnected => "Not connected",
             Readiness::SessionEnded => "Session ended",
             Readiness::Paused => "Paused",
+            Readiness::TurnedOff => "Turned off",
             Readiness::PolicyInvalid => "Policy not valid",
             Readiness::HistoryUnavailable => "History unavailable",
             Readiness::Working => "Working",
@@ -63,8 +73,9 @@ impl Readiness {
 
     /// One sentence explaining the word, and where it is true, what to do about it.
     ///
-    /// A Ready with no browser connected says which browser starts instead; [`explain`] gives the
-    /// sentence for a resolved answer.
+    /// A Ready with no browser connected says which browser starts instead, Turned off names whose
+    /// policy turned off which work, and a Ready with one channel off says which agents can work;
+    /// [`explain`] gives the sentence for a resolved answer.
     #[must_use]
     pub const fn detail(self) -> &'static str {
         match self {
@@ -75,6 +86,9 @@ impl Readiness {
                 "This session was ended. Start a new session to let agents work again."
             }
             Readiness::Paused => "Browser work is paused. Resume when you are ready.",
+            Readiness::TurnedOff => {
+                "A policy turns off work from the agents that are connected. Open Policy to see the switches."
+            }
             Readiness::PolicyInvalid => "A configured policy is not valid, so Ghostlight refuses all browser work. Open Policy to see what applies. A policy file still in schema 3 needs ghostlight policy migrate <file>.",
             Readiness::HistoryUnavailable => "Policy requires saved history. Ghostlight checks storage automatically before new browser work can proceed.",
             Readiness::Working => "An agent is working in your browser right now.",
@@ -87,7 +101,7 @@ impl Readiness {
     pub const fn tone(self) -> &'static str {
         match self {
             Readiness::NotConnected => "offline",
-            Readiness::SessionEnded | Readiness::Paused => "held",
+            Readiness::SessionEnded | Readiness::Paused | Readiness::TurnedOff => "held",
             Readiness::PolicyInvalid | Readiness::HistoryUnavailable => "attention",
             Readiness::Working => "working",
             Readiness::Ready => "quiet",
@@ -123,6 +137,24 @@ pub struct ReadinessFacts<'a> {
     pub authority_invalid: bool,
     /// Whether at least one operation is running.
     pub working: bool,
+    /// The channel switches the policy in force turns off.
+    pub channels_off: ChannelsOff<'a>,
+    /// Whether a connected agent works over MCP.
+    pub agents_on_mcp: bool,
+    /// Whether a connected agent works from the command line.
+    pub agents_on_cli: bool,
+}
+
+/// Whether policy refuses every agent that could ask: every channel is off, or every connected
+/// agent's channel is.
+const fn turned_off(facts: &ReadinessFacts<'_>) -> bool {
+    let off = &facts.channels_off;
+    if off.all() {
+        return true;
+    }
+    (facts.agents_on_mcp || facts.agents_on_cli)
+        && (!facts.agents_on_mcp || off.mcp.is_some())
+        && (!facts.agents_on_cli || off.cli.is_some())
 }
 
 /// Resolve the one answer.
@@ -133,6 +165,9 @@ pub const fn resolve(facts: &ReadinessFacts<'_>) -> Readiness {
     }
     if facts.paused {
         return Readiness::Paused;
+    }
+    if turned_off(facts) {
+        return Readiness::TurnedOff;
     }
     if !facts.browser_connected && facts.starts.is_none() {
         return Readiness::NotConnected;
@@ -150,11 +185,28 @@ pub const fn resolve(facts: &ReadinessFacts<'_>) -> Readiness {
 }
 
 /// The sentence for `state`, the answer `facts` resolved to: its [`Readiness::detail`], except
-/// that a Ready with no browser connected names the browser an agent's request starts.
+/// that Turned off names whose policy turned off which work, and a Ready names the browser an
+/// agent's request starts while none is connected and which agents can work while one channel is
+/// off.
 #[must_use]
 pub fn explain(state: Readiness, facts: &ReadinessFacts<'_>) -> String {
-    match (state, facts.browser_connected, facts.starts) {
-        (Readiness::Ready, false, Some(browser)) => starts_when_asked(browser),
+    match state {
+        Readiness::TurnedOff => facts
+            .channels_off
+            .said()
+            .unwrap_or_else(|| state.detail().to_owned()),
+        Readiness::Ready => {
+            let starts = facts
+                .starts
+                .filter(|_| !facts.browser_connected)
+                .map(starts_when_asked);
+            match (starts, facts.channels_off.ready_line()) {
+                (Some(starts), Some(line)) => format!("{starts} {line}"),
+                (Some(starts), None) => starts,
+                (None, Some(line)) => line.to_owned(),
+                (None, None) => state.detail().to_owned(),
+            }
+        }
         _ => state.detail().to_owned(),
     }
 }
@@ -168,6 +220,7 @@ pub fn starts_when_asked(browser: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language::outcome::PolicyAuthor;
 
     fn connected() -> ReadinessFacts<'static> {
         ReadinessFacts {
@@ -326,6 +379,120 @@ mod tests {
             };
             assert_eq!(resolve(&facts), expected);
         }
+    }
+
+    const MCP_OFF: ChannelsOff<'static> = ChannelsOff {
+        mcp: Some(PolicyAuthor::User),
+        cli: None,
+        organization: None,
+    };
+
+    #[test]
+    fn one_channel_off_holds_when_every_connected_agent_is_on_it() {
+        let facts = ReadinessFacts {
+            channels_off: MCP_OFF,
+            agents_on_mcp: true,
+            ..connected()
+        };
+        let state = resolve(&facts);
+        assert_eq!(state, Readiness::TurnedOff);
+        // Chosen, like a pause: held, not in need of attention.
+        assert_eq!(state.tone(), "held");
+        assert_eq!(
+            explain(state, &facts),
+            "Your policy turns off work from MCP agents."
+        );
+        let organization = ReadinessFacts {
+            channels_off: ChannelsOff {
+                mcp: Some(PolicyAuthor::Organization),
+                organization: Some("Northwind"),
+                ..MCP_OFF
+            },
+            ..facts
+        };
+        assert_eq!(
+            explain(resolve(&organization), &organization),
+            "Northwind's policy turns off work from MCP agents."
+        );
+    }
+
+    #[test]
+    fn one_channel_off_stays_ready_while_another_agent_can_work() {
+        let facts = ReadinessFacts {
+            channels_off: MCP_OFF,
+            agents_on_mcp: true,
+            agents_on_cli: true,
+            ..connected()
+        };
+        let state = resolve(&facts);
+        assert_eq!(state, Readiness::Ready);
+        assert_eq!(
+            explain(state, &facts),
+            "MCP agents are turned off; command-line agents can work."
+        );
+        // A browser that starts on request is named before it.
+        let starts = ReadinessFacts {
+            browser_connected: false,
+            starts: Some("Google Chrome"),
+            ..facts
+        };
+        assert_eq!(
+            explain(resolve(&starts), &starts),
+            "Starts Google Chrome when an agent asks. MCP agents are turned off; command-line agents can work."
+        );
+        // Work running from the channel still on reads as working.
+        let working = ReadinessFacts {
+            working: true,
+            ..facts
+        };
+        assert_eq!(resolve(&working), Readiness::Working);
+    }
+
+    #[test]
+    fn an_off_channel_with_no_connected_agent_stays_ready_and_says_so() {
+        let facts = ReadinessFacts {
+            channels_off: MCP_OFF,
+            ..connected()
+        };
+        let state = resolve(&facts);
+        assert_eq!(state, Readiness::Ready);
+        assert_eq!(
+            explain(state, &facts),
+            "MCP agents are turned off; command-line agents can work."
+        );
+    }
+
+    #[test]
+    fn both_channels_off_hold_with_or_without_a_connected_agent_or_a_browser() {
+        let both = ChannelsOff {
+            cli: Some(PolicyAuthor::User),
+            ..MCP_OFF
+        };
+        for facts in [
+            ReadinessFacts {
+                channels_off: both,
+                ..connected()
+            },
+            ReadinessFacts {
+                channels_off: both,
+                agents_on_cli: true,
+                ..ReadinessFacts::default()
+            },
+        ] {
+            let state = resolve(&facts);
+            assert_eq!(state, Readiness::TurnedOff);
+            assert_eq!(
+                explain(state, &facts),
+                "Your policy turns off work from MCP agents and the command line."
+            );
+        }
+        // The person's own pause still comes first.
+        let paused = ReadinessFacts {
+            channels_off: both,
+            paused: true,
+            ..connected()
+        };
+        assert_eq!(resolve(&paused), Readiness::Paused);
     }
 
     #[test]

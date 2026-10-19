@@ -18,7 +18,7 @@ the push.
 | u1 teal-means-live | window | n-d-02, j-27, j-24, j-34 (window) | landed (this commit) |
 | u2 only-running-work-glows | window | n-d-01, j-25, window-10, window-9 (time format), owner-1 | landed (this commit) |
 | u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | landed (this commit) |
-| u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | todo |
+| u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | landed (this commit) |
 | u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | todo |
 | u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | todo |
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
@@ -218,3 +218,36 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   overlap at 880 and 720px, and the settings test reads the breakpoint from extension/kit.css.
 - u3 (window-9): the Settings rail stacks below 720px of shell width, so at the 720 minimum in
   Standard text the rail sits beside the section; Large text stacks it from about 828px.
+- u4 (n-s-02): the held state's word is "Turned off". It comes right after Pause and before Not
+  connected, the order the executor checks (the channel first), so a person is not sent to open a
+  browser that would not help. Both switches off hold whether or not an agent is connected; one
+  switch off with no connected agent stays Ready and says "MCP agents are turned off;
+  command-line agents can work.". The tray takes the held icon from the tone, and its tooltip the
+  word. The switches are read through `AuthoritySnapshot::channels_off`, which calls the
+  executor's own `channel_refusal`; the words are in the new `language/channel_switch.rs`.
+- u4 (n-s-02), Right now: with one channel off every capability something can still use keeps
+  its badge (what the rules allow) and adds "Only command-line work may use it: MCP agents are
+  turned off."; a capability the rules refuse says only why. With both off every line is Not
+  available, naming whose policy did it. The policy tab's hover says the headline, so it names the
+  switch too.
+- u4 (n-d-05): a history record keeps no organization name, so an organization's channel refusal
+  says "Your organization's policy turns off ..." rather than "Northwind's"; the refusal line
+  under it names the organization from the passport. The band, Policy and Status read the live
+  policy and do say "Northwind's policy".
+- u4 (n-d-05): the .hero-reason line is gone for every refusal, not only where the refusal line
+  says who decided: every refusal sentence the window shows already says why, so the line only
+  ever repeated it as a code. A refusal with no sentence says "Blocked". "Permission details"
+  says every reason no policy layer decided in words from a closed table in
+  language/history.rs ("Refused: you paused Ghostlight."), and a channel refusal in the row's
+  own words ("Refused. Your policy turns off work from MCP agents.").
+- u4 (n-d-05): a refusal is a record whose decision refused it and whose status says blocked. The
+  service records an invalid call as failed, so it now draws as a failure. The preview had called
+  it blocked; its fixture now says failed, as the service does.
+- u4 (n-d-05), the later part: the same mechanism gives the pause and stop directives a person's
+  sentence in the window: "You paused Ghostlight." and "You ended the session.", followed by
+  whatever the model's sentence went on to say about the action. The model keeps its directives.
+- u4: the preview gains `?readiness=turned_off` (both switches off), and `?readiness=channel_off`
+  now shows the Ready line, the Policy headline and capability lines, and the Status rules line
+  that the service gives. governance/mod.rs (the snapshot's switches and the tier word),
+  workbench/live.rs and the evidence tests are outside the lane's file list; no other lane owns
+  them. INTENT, ACCEPTANCE item 4 and LANGUAGE say what the window shows.

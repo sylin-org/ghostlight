@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::language::channel_switch::ChannelsOff;
 use crate::language::readiness::Readiness;
 
 /// The word the Ghostlight window wears while others can watch it, the state Settings > Sharing
@@ -427,6 +428,21 @@ pub const fn status_rules_valid(own: bool, organization: bool) -> &'static str {
     }
 }
 
+/// What that check says while every policy that applies is valid: [`status_rules_valid`], then
+/// the channels those rules turn off, in the words the Policy page's headline uses.
+#[must_use]
+pub fn status_rules_in_force(
+    own: bool,
+    organization: bool,
+    channels_off: ChannelsOff<'_>,
+) -> String {
+    let valid = status_rules_valid(own, organization);
+    match channels_off.policy_line() {
+        Some(line) => format!("{valid} {line}"),
+        None => valid.to_owned(),
+    }
+}
+
 /// The label of the Status check that says whether history is saving.
 pub const STATUS_HISTORY_LABEL: &str = "History";
 
@@ -656,6 +672,22 @@ mod tests {
             assert!(sentence.is_ascii(), "{sentence}");
             assert!(sentence.ends_with('.'), "{sentence}");
         }
+    }
+
+    #[test]
+    fn the_rules_check_names_a_switched_off_channel() {
+        let mcp_off = ChannelsOff {
+            mcp: Some(crate::language::outcome::PolicyAuthor::User),
+            ..ChannelsOff::default()
+        };
+        assert_eq!(
+            status_rules_in_force(true, false, mcp_off),
+            "Your rules are valid. MCP agents are turned off. Command-line work may continue."
+        );
+        assert_eq!(
+            status_rules_in_force(true, false, ChannelsOff::default()),
+            "Your rules are valid."
+        );
     }
 
     #[test]

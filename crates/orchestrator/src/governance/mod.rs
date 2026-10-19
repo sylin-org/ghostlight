@@ -27,6 +27,7 @@ use crate::browser::adapter::{RuntimeControlIntent, RuntimeControlState};
 use crate::browser::BrowserPort;
 use crate::install::record::atomic_replace;
 use crate::intake::session::IntakeChannel;
+use crate::language::channel_switch::ChannelsOff;
 use crate::language::outcome::PolicyAuthor;
 use file_state::FileState;
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,9 @@ pub const MCP_CHANNEL_ENABLED_KEY: &str = "channels.mcp.enabled";
 
 /// The switch for work from the command line: `false` refuses every request on the `cli` channel.
 pub const CLI_CHANNEL_ENABLED_KEY: &str = "channels.cli.enabled";
+
+/// The tier word a record's `policy_tier` gives the organization's layer, in audit and history.
+pub const MANAGED_TIER: &str = "managed";
 
 /// The policy key that switches `channel` on or off (ADR-0202 Decision 22a). Unset means on.
 #[must_use]
@@ -447,7 +451,7 @@ enum AuthorityTier {
 impl AuthorityTier {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::Managed => "managed",
+            Self::Managed => MANAGED_TIER,
             Self::User => "user",
         }
     }
@@ -524,6 +528,24 @@ impl AuthoritySnapshot {
             AuthorityTier::User => PolicyAuthor::User,
         };
         Some((decision, author))
+    }
+
+    /// The channel switches this authority turns off, read through [`Self::channel_refusal`], the
+    /// check the executor makes per request, so what a person is told and what is enforced are one
+    /// answer. The organization's name comes from its layer, for the sentences that name it.
+    #[must_use]
+    pub fn channels_off(&self) -> ChannelsOff<'_> {
+        let author = |channel| self.channel_refusal(channel).map(|(_, author)| author);
+        ChannelsOff {
+            mcp: author(IntakeChannel::Mcp),
+            cli: author(IntakeChannel::Cli),
+            organization: self
+                .layers
+                .iter()
+                .find(|layer| layer.tier == AuthorityTier::Managed)
+                .and_then(|layer| layer.manifest.organization.as_ref())
+                .map(|organization| organization.name.as_str()),
+        }
     }
 
     /// Opaque version recorded in audit.
@@ -1041,16 +1063,19 @@ impl Published {
         let name = organization
             .and_then(|policy| policy.organization.as_ref())
             .map(|organization| organization.name.clone());
+        let channels_off = snapshot.channels_off();
         let chip = effective::chip(
             situation,
             name.as_deref(),
             matches!(passport.freshness, ManagedPolicyFreshness::LastKnownGood),
+            channels_off,
         );
 
         let inputs = effective::Inputs {
             organization,
             user,
             valid,
+            channels_off,
             sacred_hosts: snapshot.sacred_hosts().to_vec(),
             organization_source: sources.managed.path.as_ref().map_or_else(
                 || organization.map(|_| passport_source(&passport)),

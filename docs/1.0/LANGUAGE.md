@@ -300,6 +300,10 @@ Refusals say what is true, and their next steps suggest only what the caller can
   turns off work from MCP agents.`, or `the organization's`, and `from the command line.` for
   `ghostlight call`. It keeps no next step, because the caller cannot turn the switch back on.
   The connection stays open, so every call on it hears the same refusal (ADR-0202 Decision 22a).
+  The window's row and its permission details say it to the person instead: `Your policy turns
+  off work from MCP agents.`, or `Your organization's policy`. In the same way a pause or a stop
+  reads `You paused Ghostlight.` or `You ended the session.` in the window, while the model keeps
+  its directive (`language/history.rs`).
 - A refusal of Ghostlight's own control page names the origin as the caller wrote it (scheme,
   host and port, never a path) and says other ports on this computer are not affected. It keeps
   no next step, because no policy lifts it. History records the reason and the host, never the

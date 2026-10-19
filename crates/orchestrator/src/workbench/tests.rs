@@ -635,6 +635,44 @@ fn an_invalid_policy_reads_as_not_ready_on_every_surface() {
 }
 
 #[test]
+fn switched_off_channels_are_said_on_the_band_and_in_the_rules_check() {
+    use crate::language::readiness::Readiness;
+
+    let path = temporary_policy("channels-off");
+    for (switched, state, detail, rules) in [
+        (
+            r#"[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"}]"#,
+            Readiness::Ready,
+            "MCP agents are turned off; command-line agents can work.",
+            "Your rules are valid. MCP agents are turned off. Command-line work may continue.",
+        ),
+        (
+            r#"[{"key":"channels.mcp.enabled","value":false,"level":"mandatory"},{"key":"channels.cli.enabled","value":false,"level":"mandatory"}]"#,
+            Readiness::TurnedOff,
+            "Your policy turns off work from MCP agents and the command line.",
+            "Your rules are valid. MCP agents and the command line are turned off, so no agent may work.",
+        ),
+    ] {
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"schema":4,"name":"mine","version":"1","grants":[{{"id":"all","hosts":{{"allow":["*"]}},"allowed":["read"]}}],"config":{switched}}}"#
+            ),
+        )
+        .unwrap();
+        let facade = facade_over(
+            GovernanceFacade::new(Some(path.to_path_buf()), None),
+            ControlledBrowser::new(true, false),
+        );
+        let snapshot = facade.snapshot();
+        assert_eq!(snapshot.readiness.state, state);
+        assert_eq!(snapshot.readiness.word, state.word());
+        assert_eq!(snapshot.readiness.detail, detail);
+        assert_eq!(authority_card(&snapshot).detail, rules);
+    }
+}
+
+#[test]
 fn a_failed_reload_that_keeps_the_last_valid_policy_stays_ready() {
     use crate::governance::effective::Situation;
     use crate::language::readiness::Readiness;

@@ -344,7 +344,7 @@ pub enum TrayState {
     Ready,
     /// An agent is working in the browser.
     Working,
-    /// Browser work is paused or the session ended.
+    /// Browser work is paused, the session ended, or policy turned off every agent's channel.
     Paused,
     /// Something needs the person's attention.
     Attention,
@@ -359,7 +359,7 @@ impl TrayState {
         match readiness {
             Readiness::Ready | Readiness::NotConnected => Self::Ready,
             Readiness::Working => Self::Working,
-            Readiness::Paused | Readiness::SessionEnded => Self::Paused,
+            Readiness::Paused | Readiness::SessionEnded | Readiness::TurnedOff => Self::Paused,
             Readiness::PolicyInvalid | Readiness::HistoryUnavailable => Self::Attention,
         }
     }

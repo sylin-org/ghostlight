@@ -836,6 +836,7 @@ impl WorkbenchFacade {
             authority,
             audit_health,
             audit_required,
+            enforced,
             ..
         } = gathered;
         let mut diagnostics = vec![DiagnosticItem::passing(
@@ -884,9 +885,10 @@ impl WorkbenchFacade {
             DiagnosticItem::passing(
                 "authority",
                 words::STATUS_RULES_LABEL,
-                words::status_rules_valid(
+                &words::status_rules_in_force(
                     authority.local_policy_active,
                     authority.managed_authority_active,
+                    enforced.channels_off(),
                 ),
             )
         });
@@ -1908,7 +1910,9 @@ pub struct HistoryItem {
     pub status: String,
     /// Effect class.
     pub effect: String,
-    /// Ghostlight-authored sentence naming what happened.
+    /// Ghostlight-authored sentence naming what happened, as a person reads it: the record's
+    /// summary, or the person's words for one that speaks to the model
+    /// ([`crate::language::history::for_the_person`]).
     pub summary: String,
     /// How long the work took, in milliseconds.
     pub duration_ms: u64,
@@ -1949,12 +1953,21 @@ impl From<AuditRecord> for HistoryItem {
             });
         let requirements = value.capabilities;
         let capability = requirements.label();
+        // A record that kept no channel arrived on the default one: an undeclared channel is MCP.
+        let channel = value
+            .channel
+            .or_else(|| provenance.as_ref().map(|details| details.channel))
+            .unwrap_or_default();
+        let tier = value.policy_tier.as_deref();
         let permission_explanations = value
             .permissions
             .checks
             .iter()
-            .map(crate::language::history::permission)
+            .map(|check| crate::language::history::permission(check, channel, tier))
             .collect();
+        let summary =
+            crate::language::history::for_the_person(&value.summary, value.reason, channel, tier)
+                .unwrap_or(value.summary);
         Self {
             storage: crate::language::audit_health::Storage::Saved,
             storage_detail: if value.unconfirmed_history_steps > 0 {
@@ -1980,7 +1993,7 @@ impl From<AuditRecord> for HistoryItem {
             denial_id: value.denial_id,
             status: value.status,
             effect: value.effect,
-            summary: value.summary,
+            summary,
             duration_ms: value.duration_ms,
             observed: value.observed,
             channel: value.channel,

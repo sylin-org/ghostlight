@@ -2513,8 +2513,12 @@ test("a failed, a kept and a refused action each say their outcome in the senten
       "click, failed: Could not find that control."],
     [{ invocation: "k", tool: "browser_tabs", status: "blocked", summary: "Kept the tab open." },
       "tabs, kept: Kept the tab open."],
-    [{ invocation: "r", tool: "browser_execute", allowed: false, status: "blocked", reason: "denied_by_policy", summary: "" },
-      "execute, blocked: denied by policy"]
+    [{ invocation: "r", tool: "browser_execute", allowed: false, status: "blocked", reason: "channel_denied",
+      summary: "Your policy turns off work from MCP agents." },
+      "execute, blocked: Your policy turns off work from MCP agents."],
+    // A refusal with no sentence says its outcome word, never its reason code.
+    [{ invocation: "e", tool: "browser_execute", allowed: false, status: "blocked", reason: "denied_by_policy", summary: "" },
+      "execute, blocked: Blocked"]
   ];
   for (const [record, sentence] of cases) {
     shown.pass(SAID_GAP);
@@ -2540,6 +2544,34 @@ test("a failed row reads like a refused one: its sentence in the soft red on the
   assert.equal(naming(":root")[0].declarations["--danger-soft"], "#fca5a5");
   assert.ok(!RULES.some((rule) => rule.selectors.some((selector) => selector.includes("outcome-glyph"))),
     "no mark sits beside the time");
+});
+
+test("a call that did not match the catalog is drawn as the failure it is, not as a policy block", () => {
+  const record = settledRead({ invocation: "invalid-1", tool: "browser_click", capability: "action",
+    allowed: false, reason: "invalid_request", status: "failed", effect: "none",
+    summary: "The call does not match the Ghostlight catalog." });
+  const entry = Entries.entryFromRecord(record, null);
+  assert.equal(Entries.isBlocked(entry), false);
+  assert.equal(Entries.isFailed(entry), true);
+  const { shown, cell, cells: details } = rowOf(record);
+  const [row] = queueRows(shown);
+  assert.match(row.className, /\bfailed\b/);
+  assert.doesNotMatch(row.className, /\bblocked\b/);
+  assert.ok(cell("row-tool").textContent.endsWith(", failed"), cell("row-tool").textContent);
+  assert.ok(!details.wearing("hero-refusal").length, "no policy line under a failure");
+  assert.ok(details.wearing("hero-meta")[0].textContent.includes("failed"), "the meta line agrees");
+});
+
+test("a refusal says why once, in its sentence, and who decided on its refusal line, never as a code", () => {
+  const record = settledRead({ invocation: "off-1", tool: "browser_read", allowed: false, reason: "channel_denied",
+    status: "blocked", policy_tier: "user", denial_id: "deny-1",
+    summary: "Your policy turns off work from MCP agents." });
+  const { shown, cells: details } = rowOf(record);
+  const [row] = queueRows(shown);
+  assert.equal(details.wearing("hero-activity")[0].textContent, "Your policy turns off work from MCP agents.");
+  assert.equal(details.wearing("hero-reason").length, 0, "no second line repeats the reason");
+  assert.ok(details.wearing("hero-refusal")[0].textContent.startsWith("Refused by your own rules"));
+  assert.doesNotMatch(row.innerHTML, /channel[ _]denied/);
 });
 
 test("a screen reader hears each row's outcome on its button", () => {

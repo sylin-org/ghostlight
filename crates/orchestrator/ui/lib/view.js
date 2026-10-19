@@ -177,7 +177,7 @@
     function sentence(entry) {
       if (entry.summary) return entry.summary;
       if (!entry.settled) return entry.activity;
-      if (isBlocked(entry)) return entry.reason ? words(entry.reason) : "blocked";
+      if (isBlocked(entry)) return OUTCOME_WORD.blocked;
       return EFFECT_STORY[entry.effect] || (entry.status ? words(entry.status) : "completed");
     }
 
@@ -449,9 +449,9 @@
       if (entry.settled && entry.endedAt && !resting) meta.push(`<span><i></i>${escapeHtml(agoSaid(entry.endedAt))}</span>`);
       if (entry.tool) meta.push(`<span class="hero-tool-name"><i></i>${escapeHtml(entry.tool)}</span>`);
 
-      const reason = isBlocked(entry) && entry.reason
-        ? `<p class="hero-reason">${escapeHtml(words(entry.reason))}</p>${refusalMarkup(entry)}`
-        : "";
+      // The sentence already says why a refusal happened, so the reason is not said again as a
+      // code; the refusal line says who decided and where to look.
+      const reason = isBlocked(entry) ? refusalMarkup(entry) : "";
 
       return `<div class="hero-tool" title="${escapeHtml(entry.tool ?? "")}">${escapeHtml(toolWords(entry.tool))}`
         + (label ? `<span class="cap-label">${escapeHtml(label)}</span>` : "") + "</div>"

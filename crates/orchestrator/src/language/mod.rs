@@ -6,6 +6,7 @@ pub mod area;
 pub mod audit;
 pub mod audit_health;
 pub mod capability_map;
+pub mod channel_switch;
 pub mod composition;
 pub mod control;
 pub mod coverage;

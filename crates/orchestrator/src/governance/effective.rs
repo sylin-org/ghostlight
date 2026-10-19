@@ -14,7 +14,8 @@
 use serde::Serialize;
 
 use super::{manifest, Capability, CapabilitySet, ManagedPolicyPassport};
-use crate::language::outcome::OWN_CONTROL_PAGE_CEILING;
+use crate::language::channel_switch::ChannelsOff;
+use crate::language::outcome::{PolicyAuthor, OWN_CONTROL_PAGE_CEILING};
 
 /// Which layers are in force right now.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -254,7 +255,12 @@ pub struct PolicyChip {
 
 /// Author the policy tab's state.
 #[must_use]
-pub fn chip(situation: Situation, organization: Option<&str>, stale: bool) -> PolicyChip {
+pub fn chip(
+    situation: Situation,
+    organization: Option<&str>,
+    stale: bool,
+    channels_off: ChannelsOff<'_>,
+) -> PolicyChip {
     let detail = headline(
         situation,
         organization
@@ -265,6 +271,7 @@ pub fn chip(situation: Situation, organization: Option<&str>, stale: bool) -> Po
                 contacts: Vec::new(),
             })
             .as_ref(),
+        channels_off,
     );
     let tone = match situation {
         Situation::FailingClosed => ChipTone::Failing,
@@ -289,6 +296,8 @@ pub(super) struct Inputs<'a> {
     pub(super) organization: Option<&'a manifest::Manifest>,
     pub(super) user: Option<&'a manifest::Manifest>,
     pub(super) valid: bool,
+    /// The channel switches the same publication's snapshot enforces.
+    pub(super) channels_off: ChannelsOff<'a>,
     pub(super) sacred_hosts: Vec<String>,
     pub(super) organization_source: Option<String>,
     pub(super) organization_document: Option<String>,
@@ -334,7 +343,7 @@ const fn layer_word(kind: LayerKind) -> &'static str {
 pub(super) fn compile(inputs: &Inputs<'_>) -> EffectiveAuthority {
     let organization = inputs.organization.and_then(identity);
     let situation = situation(inputs);
-    let headline = headline(situation, organization.as_ref());
+    let headline = headline(situation, organization.as_ref(), inputs.channels_off);
     let capabilities = Capability::ALL
         .into_iter()
         .map(|capability| capability_line(capability, inputs, organization.as_ref()))
@@ -431,7 +440,20 @@ fn situation(inputs: &Inputs<'_>) -> Situation {
     }
 }
 
-fn headline(situation: Situation, organization: Option<&OrganizationIdentity>) -> String {
+/// The situation's sentence, followed by the switched-off channels a valid policy turns off.
+fn headline(
+    situation: Situation,
+    organization: Option<&OrganizationIdentity>,
+    channels_off: ChannelsOff<'_>,
+) -> String {
+    let said = situation_sentence(situation, organization);
+    match channels_off.policy_line() {
+        Some(line) if situation != Situation::FailingClosed => format!("{said} {line}"),
+        _ => said,
+    }
+}
+
+fn situation_sentence(situation: Situation, organization: Option<&OrganizationIdentity>) -> String {
     let named = organization.map(|identity| identity.name.as_str());
     match situation {
         Situation::AllOpen => {
@@ -500,7 +522,23 @@ fn capability_line(
         .collect::<Vec<_>>()
         .join(" and ");
 
-    let detail = match state {
+    let switched = inputs.channels_off;
+    if switched.all() {
+        // Every channel is off, so no request reaches this capability whatever the rules allow.
+        return CapabilityLine {
+            capability,
+            label,
+            covers,
+            state: CapabilityState::Unavailable,
+            detail: format!("Not available. {}", switched.said().unwrap_or_default()),
+            decided_by: with_switches(decided_by, switched),
+        };
+    }
+
+    let mut detail = match state {
+        CapabilityState::Available if switched.any() => {
+            "Available on ordinary websites.".to_owned()
+        }
         CapabilityState::Available => {
             "Available on ordinary websites. Nothing narrows it.".to_owned()
         }
@@ -529,6 +567,13 @@ fn capability_line(
             format!("Not available. {refusal}")
         }
     };
+    // A switch narrows who may do it rather than where: said on every line something can still
+    // use, and its layer named among the deciders.
+    let usable = state != CapabilityState::Unavailable;
+    if let Some(line) = switched.capability_line().filter(|_| usable) {
+        detail = format!("{detail} {line}");
+        decided_by = with_switches(decided_by, switched);
+    }
 
     CapabilityLine {
         capability,
@@ -538,6 +583,20 @@ fn capability_line(
         detail,
         decided_by,
     }
+}
+
+/// `decided_by` with every layer that turned a channel switch off, in authority order.
+fn with_switches(mut decided_by: Vec<LayerKind>, switched: ChannelsOff<'_>) -> Vec<LayerKind> {
+    for (kind, author) in [
+        (LayerKind::Organization, PolicyAuthor::Organization),
+        (LayerKind::User, PolicyAuthor::User),
+    ] {
+        if [switched.mcp, switched.cli].contains(&Some(author)) && !decided_by.contains(&kind) {
+            decided_by.push(kind);
+        }
+    }
+    decided_by.sort_by_key(|kind| *kind != LayerKind::Organization);
+    decided_by
 }
 
 /// How widely one layer admits a capability, and which way its rules point.
@@ -740,6 +799,8 @@ mod tests {
         UserLayerSource, OWN_CONTROL_PAGE_CEILING,
     };
     use crate::governance::{manifest, ManagedPolicyPassport};
+    use crate::language::channel_switch::ChannelsOff;
+    use crate::language::outcome::PolicyAuthor;
 
     fn policy(text: &str) -> manifest::Manifest {
         manifest::parse(text, "test").expect("test policy parses")
@@ -768,6 +829,7 @@ mod tests {
             organization,
             user,
             valid: true,
+            channels_off: ChannelsOff::default(),
             sacred_hosts: Vec::new(),
             organization_source: None,
             organization_document: None,
@@ -817,6 +879,71 @@ mod tests {
                 OWN_CONTROL_PAGE_CEILING
             ]
         );
+    }
+
+    #[test]
+    fn one_channel_off_is_named_in_the_headline_and_on_every_usable_line() {
+        let mine = policy(
+            r#"{"schema":4,"name":"mine","version":"1","grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write"]}]}"#,
+        );
+        let mut switched = inputs(None, Some(&mine));
+        switched.channels_off = ChannelsOff {
+            mcp: Some(PolicyAuthor::User),
+            ..ChannelsOff::default()
+        };
+        let view = compile(&switched);
+        assert_eq!(
+            view.headline,
+            "You set the rules on this machine. MCP agents are turned off. Command-line work may continue."
+        );
+        let read = &view.capabilities[0];
+        assert_eq!(read.state, CapabilityState::Available);
+        assert_eq!(
+            read.detail,
+            "Available on ordinary websites. Only command-line work may use it: MCP agents are turned off."
+        );
+        assert_eq!(read.decided_by, [LayerKind::User]);
+        // A capability nothing may use says only why, with no promise about who may use it.
+        let execute = &view.capabilities[3];
+        assert_eq!(execute.state, CapabilityState::Unavailable);
+        assert_eq!(
+            execute.detail,
+            "Not available. You do not allow it anywhere."
+        );
+    }
+
+    #[test]
+    fn both_channels_off_leave_nothing_available_and_say_whose_policy_did_it() {
+        let organization = policy(
+            r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
+        );
+        let mut switched = inputs(Some(&organization), None);
+        switched.channels_off = ChannelsOff {
+            mcp: Some(PolicyAuthor::Organization),
+            cli: Some(PolicyAuthor::Organization),
+            organization: Some("Northwind"),
+        };
+        let view = compile(&switched);
+        assert_eq!(
+            view.headline,
+            "Northwind sets the rules on this machine. MCP agents and the command line are turned off, so no agent may work."
+        );
+        for line in &view.capabilities {
+            assert_eq!(
+                line.state,
+                CapabilityState::Unavailable,
+                "{:?}",
+                line.capability
+            );
+            assert_eq!(
+                line.detail,
+                "Not available. Northwind's policy turns off work from MCP agents and the command line."
+            );
+            assert_eq!(line.decided_by, [LayerKind::Organization]);
+        }
+        // An invalid policy says only that it is invalid.
+        switched.valid = false;
+        assert!(!compile(&switched).headline.contains("turned off"));
     }
 
     #[test]

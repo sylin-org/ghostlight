@@ -120,6 +120,48 @@ fn a_channel_switch_refuses_only_its_channel_and_names_its_layer() {
     }
 }
 
+#[test]
+fn the_switches_a_person_reads_are_the_ones_the_executor_checks() {
+    let local = temporary("channel-read");
+    let managed = temporary("channel-read-managed");
+    fs::write(
+        &local,
+        policy(
+            "mine",
+            all_open_grant(),
+            &format!(
+                r#"[{{"key":"{MCP_CHANNEL_ENABLED_KEY}","value":false,"level":"mandatory"}}]"#
+            ),
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &managed,
+        r#"{"schema":4,"name":"org","version":"1","organization":{"name":"Northwind"},"grants":[{"id":"all","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
+    )
+    .unwrap();
+    let facade = GovernanceFacade::new(Some(local.to_path_buf()), Some(managed.to_path_buf()));
+    let snapshot = facade.snapshot();
+    let off = snapshot.channels_off();
+    assert_eq!(
+        (off.mcp, off.cli, off.organization),
+        (Some(PolicyAuthor::User), None, Some("Northwind"))
+    );
+    for channel in [IntakeChannel::Mcp, IntakeChannel::Cli] {
+        assert_eq!(
+            off.off(channel),
+            snapshot.channel_refusal(channel).map(|(_, author)| author),
+            "{channel:?}"
+        );
+    }
+    let authority = facade.effective_authority();
+    assert_eq!(
+        authority.headline,
+        "Northwind sets the rules, and you have narrowed them further. MCP agents are turned off. Command-line work may continue."
+    );
+    assert_eq!(facade.policy_chip().detail, authority.headline);
+}
+
 /// The workspace forbids raw memory access everywhere except the two audited crates (ADR-0105
 /// amendment 2026-08-24, ADR-0199 Decision 3). Every workspace member but `crates/win-peer`
 /// (which allows it) and `crates/relay` (which denies it, so only the `os` module's expectation
