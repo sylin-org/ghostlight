@@ -6,6 +6,15 @@
 - Amended by [ADR-0203](0203-one-owner-for-each-fact.md) (2026-10-19): the precedence claim is
   withdrawn, and the skill carries no bounds.
 
+## Amendment by ADR-0203 (2026-10-19)
+
+Consequences, second item: the claim that explicit client configuration overrides a same-named
+plugin server is withdrawn. Nothing verified it against a client. A plugin registration and an
+installer-written entry are two registrations, and whether a client then starts both servers is
+ADR-0203's question 1. The skill keeps only guidance the catalog and the server instructions
+cannot carry, and restates no bound, default or enumeration. The plugin's version is checked and
+raised in one place, the plugin step in `docs/RELEASE.md`. See ADR-0203 Decision 10.7.
+
 ## Context
 
 Ghostlight reaches MCP clients three ways today: installer-written client configuration, the

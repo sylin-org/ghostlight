@@ -45,6 +45,8 @@ of those tabs, it goes back into the group (ADR-0201).
 - Do not run `npx ghostlight` until the cutover, and remove any agent entry you wrote that starts
   `npx -y ghostlight`. npm still serves 1.3.14, which would put 1.x back over 2.0 and start a
   second service. The agents the 2.0 install sets up start `~/.ghostlight/bin/ghostlight` directly.
+- If you added the Ghostlight plugin in Claude Code or ZCode, disable it until the cutover. Its
+  server is `npx -y ghostlight`, so for as long as npm serves 1.3.14 it puts 1.x back the same way.
 
 The 2.0.0 release notes follow.
 

@@ -146,6 +146,11 @@ If you added the 1.x Ghostlight extension to Claude Desktop, remove it or instal
 from this release. Claude Desktop runs a bundle's installer on every start, so a 1.x bundle would
 put 1.x back.
 
+If you added the Ghostlight plugin in Claude Code or ZCode, disable it before you run the install,
+and keep it disabled until `npm view ghostlight version` says `2.0.0`. Its server is
+`npx -y ghostlight`, and while npm still serves 1.3.14 it would put 1.x back over 2.0. The agents
+the 2.0 install sets up start `~/.ghostlight/bin/ghostlight` directly.
+
 The install replaces the Windows setup program's Start-menu shortcut and its Installed apps entry
 with Ghostlight 2.0's own, so there is no old uninstaller to run afterwards. It also removes the
 folders 1.x left that 2.0 reads nothing from: the 1.x window's web view data and the emptied 1.x

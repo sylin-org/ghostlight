@@ -54,6 +54,9 @@ One Ghostlight version comprises three executable images and what delivers them:
   which installs into `~/.ghostlight/bin` and never replaces a newer copy with an older one);
 - the self-contained Windows Claude Desktop MCPB, of which 2.0.0 is the final release, because
   MCPB runs its bundled installer on every Claude Desktop start (ADR-0197 Decision 16);
+- the Ghostlight plugin (`packaging/plugin/ghostlight/`) for Claude-schema and ZCode
+  marketplaces, at its own version (ADR-0144). The marketplaces read it from `main`, so it reaches
+  its users when `main` advances, and its version moves only in the plugin step (Candidate gates);
 - the independently delivered but contract-matched `Ghostlight in Browser` Chromium adapter from
   the Chrome Web Store, at its own version (the store ZIP is in the candidate); and
 - checksums, GitHub build-provenance attestations, one SBOM per workspace crate, license notices,
@@ -124,6 +127,21 @@ every packaged extension file (ADR-0200 Decision 16). Review each release's diff
 rather than against an empty one. ADR-0102's own acceptance item 9 states the boundary more strictly
 than its decision body does; reconciling the two in a marked amendment is a G0 item in the
 [1.x release gate record](RELEASE-CHECKLIST.md).
+
+### The plugin
+
+This step is the one place the plugin's version is checked and raised. Its marketplaces serve
+the files `main` holds under the version those files name, so an edit that reaches `main` at an
+unchanged version ships with no version to tell it apart. Before the candidate commit is
+chosen, compare the plugin with `main`:
+
+```sh
+git diff --stat main -- packaging/plugin/ghostlight .claude-plugin/marketplace.json marketplace.json
+```
+
+When a file differs and the version still equals `main`'s, raise the version on `dev` in the four
+places the integrity script pins: both manifests and both catalog entries. The raise is in the
+candidate commit, so it reaches `main` with the release and never before.
 
 ### Desktop and package
 
@@ -249,6 +267,7 @@ The cutover, in one sitting, in this order:
 
 1. Publish `v2.0.0` as GitHub's latest release.
 2. Fast-forward `main` to that commit, because the short commands fetch their scripts from `main`.
+   This also publishes the plugin at the version its step set (Candidate gates, The plugin).
 3. Publish the npm launcher with `scripts/publish-npm.ps1`. It refuses unless the GitHub release
    `v2.0.0` exists. Until it runs, npm's latest stays 1.3.14, so
    `npx ghostlight deployment install --restore` resolves a launcher with no 2.0 `--restore`. The

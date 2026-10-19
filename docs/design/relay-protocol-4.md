@@ -66,7 +66,7 @@ The peer sends one opening. The service answers with one reply. Both are single 
 
 ```
 {"relay": 4, "role": "mcp", "edge": {"program": "edge", "revision": 4, "build": "2.0.0"},
- "reason": "agent", "channel": "mcp", "resume": "..."}
+ "channel": "mcp", "resume": "..."}
 ```
 
 | Field | Meaning |
@@ -74,7 +74,7 @@ The peer sends one opening. The service answers with one reply. Both are single 
 | `relay` | The relay revision the peer speaks: 4. |
 | `role` | `mcp`, `browser`, `control`, `desktop` or `command`. |
 | `edge` | The connecting program: `program` is `edge`, `service` (a process of the service image, such as a one-shot command) or `desktop`; `revision` is that program's own revision, which moves only when its protocol does; `build` is its version string. |
-| `reason` | Why the peer started the service, when it had to (section 7). |
+| `reason` | A start reason (section 7). No 2.0 peer sets it and readers ignore it: the start reason travels only as `serve --reason`. It stays in relay 4, and its fixtures still carry it to show that a reader accepts it (ADR-0203 Decision 13). |
 | `resume` | The resume token the service last handed this session. |
 | `origin` | For `browser`, the origin of the extension that opened the port. |
 | `channel` | For `mcp`, how the client reached the edge: `mcp` for the stdio edge, `cli` for the command line. For `desktop`, what the shell shows: `window` while it shows its window to a person or is about to, `tray` for the icon alone. The service sets the window state from it, and a `tray` shell that finds the desktop place taken brings no window forward. |
@@ -174,8 +174,9 @@ handshake and listings again, and resume by token; browser edges exit on the nex
 
 Every start of the service carries a reason: `agent`, `browser`, `command`, `person`, `recover` or
 `update`. A starter passes it as `serve --reason <word>`; `serve` without one of the six is a usage
-error. The service writes `state/quit` when a person quits (the tray, the workbench, or control
-`quit` with reason `quit`), before it exits. In order, a starting service refuses a wrong image
+error. The command line is the only place the reason travels: no opening carries it (section 4).
+The service writes `state/quit` when a person quits (the tray, the workbench, or control `quit`
+with reason `quit`), before it exits. In order, a starting service refuses a wrong image
 and an elevated token, then, for a `browser` or `recover` start, exits 0 at once while that file
 exists. It then takes `run/service.lock`: a start that finds the lock held waits for it, an
 `update` up to 30 s and any other start up to 5 s, and then exits 0. Only after it holds the lock

@@ -135,11 +135,12 @@ governance still checks the new address, the action's `landing` fact carries the
 the unchanged `document_generation`, and view handles expire because the rendered page may have
 moved. An address in another origin always starts a new generation. An explicit
 `browser_navigate` or `browser_history` call always starts one too.
-Typed semantic selectors (name, optional role, optional exact match) are accepted wherever target
-handles are, including `selector_present` waits, so drivers can prefer what a control is called
-over stashing handles. A selector's `role` is one of `button`, `link`, `checkbox`, `radio`,
-`textbox`, `searchbox`, `combobox`, `listbox`, `slider`, `spinbutton`, `tab`, `menuitem` or
-`option`; each is a role an observed control can have.
+Typed semantic selectors (name, optional role, optional exact match) are accepted in place of a
+target handle by `browser_click`, `browser_type_text`, `browser_upload`, each `browser_fill_form`
+field, and the `selector_present` wait, so drivers can prefer what a control is called over
+stashing handles. Every other call that takes a target takes a handle. A selector's `role` is one
+of `button`, `link`, `checkbox`, `radio`, `textbox`, `searchbox`, `combobox`, `listbox`, `slider`,
+`spinbutton`, `tab`, `menuitem` or `option`; each is a role an observed control can have.
 
 View handles are returned by screenshots. They bind rendered coordinates to one tab, document
 generation, viewport origin, viewport size, device scale, and zoom. Coordinate input is rejected
