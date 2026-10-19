@@ -31,6 +31,10 @@ pub mod mode {
 
 /// Read bounded text from one target, or from the top document.
 ///
+/// The URL and title describe the tab. A target in an embedded document reports the top
+/// document's URL as the tree holds it and no title, so the landing check, the observed host
+/// and the agent's `url` fact are the tab's, and an embedded host never enters the record.
+///
 /// # Errors
 ///
 /// Returns the failure of the read, including the document's own.
@@ -48,12 +52,18 @@ pub fn read_text(
         .call(&doc, world::read_text(local.as_deref(), None, max_chars))?;
     let answers = one(l, &mut reach, tab_id, plan)?;
     let text: Text = value(&answers[0])?;
+    let tree = reach.get().tree();
+    let (title, url) = if doc == *tree.top() {
+        (text.title, text.url)
+    } else {
+        (String::new(), tree.top_url().to_owned())
+    };
     Ok(BrowserOutcome::Text {
         tab_id,
         text: text.text,
         truncated: text.truncated,
-        title: text.title,
-        url: text.url,
+        title,
+        url,
     })
 }
 

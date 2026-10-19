@@ -23,7 +23,8 @@ pub struct DocumentInventory {
     pub documents: Vec<PhysicalDocument>,
     /// Document identities of explicitly targeted locators, points, or current focus.
     pub subjects: Vec<String>,
-    /// A requested subject could not be bound to a current document.
+    /// A requested point or the focus could not be bound to a current document. A locator never
+    /// sets it: it binds, fails the description as stale, or is left to `incomplete`.
     pub unresolved: bool,
     /// Browser metadata omitted documents or was otherwise incomplete.
     pub incomplete: bool,

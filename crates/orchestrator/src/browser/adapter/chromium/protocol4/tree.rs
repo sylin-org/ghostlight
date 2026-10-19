@@ -307,6 +307,21 @@ impl FrameTree {
         self.index_of(doc).is_some()
     }
 
+    /// Whether a real document of the tree lives in this frame, whatever loader it holds.
+    #[must_use]
+    pub fn holds_frame(&self, frame_id: &str) -> bool {
+        self.real_documents()
+            .any(|document| document.doc.frame_id == frame_id)
+    }
+
+    /// The URL of the top document, as the inventory reported it or the authority admitted it.
+    #[must_use]
+    pub fn top_url(&self) -> &str {
+        self.real_documents()
+            .find(|document| document.doc == self.top)
+            .map_or("", |document| document.url.as_str())
+    }
+
     /// The real document the authority names, whether or not the adapter can address it.
     #[must_use]
     pub fn real_ref(&self, id: &str) -> Option<FrameRef> {

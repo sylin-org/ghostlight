@@ -26,6 +26,7 @@ use super::wire::{self, primitive_name};
 use super::world::{self, EffectClass};
 use crate::browser::transport::{SocketWriter, DELIVERY_TIMEOUT};
 use crate::browser::{lock, BrowserDispatch, BrowserError, CONTROL_DELIVERY_TIMEOUT};
+use crate::workspace::StaleReason;
 
 /// How long a cancelled primitive may take to report what it did.
 pub const CANCEL_GRACE: Duration = Duration::from_millis(500);
@@ -348,6 +349,7 @@ pub struct Link<'a> {
     dispatch: BrowserDispatch<'a>,
     effect_started: bool,
     refused_invalid: bool,
+    one_locator: bool,
     committed: Vec<String>,
     last_tab: Option<wire::Tab>,
 }
@@ -372,9 +374,19 @@ impl<'a> Link<'a> {
             dispatch,
             effect_started: false,
             refused_invalid: false,
+            one_locator: false,
             committed: Vec::new(),
             last_tab: None,
         }
+    }
+
+    /// Note that the command names exactly one locator.
+    ///
+    /// Its documents are then that locator's document and the documents above it, so a
+    /// receipt saying a document changed means the locator's document was replaced or removed,
+    /// and the failure is a stale locator that navigated.
+    pub fn names_one_locator(&mut self) {
+        self.one_locator = true;
     }
 
     /// The workspace the command belongs to.
@@ -700,7 +712,7 @@ impl<'a> Link<'a> {
         let decoded = match (receipt.ok, receipt.failure) {
             (Some(ok), None) => serde_json::from_value(ok)
                 .map_err(|error| BrowserError::Protocol(error.to_string())),
-            (None, Some(failure)) => Err(Self::failure::<P>(failure, receipt.message)),
+            (None, Some(failure)) => Err(self.failure::<P>(failure, receipt.message)),
             _ => Err(BrowserError::Protocol(ONE_OF_OK_AND_FAILURE.into())),
         };
         decoded
@@ -723,11 +735,15 @@ impl<'a> Link<'a> {
         }
     }
 
-    /// The error a receipt's failure code stands for.
-    fn failure<P: Spec>(failure: wire::Failure, message: Option<String>) -> BrowserError {
+    /// The error a receipt's failure code stands for. A document change is a stale locator for
+    /// a command that names one locator, and an unavailable document otherwise.
+    fn failure<P: Spec>(&self, failure: wire::Failure, message: Option<String>) -> BrowserError {
         let message = message.unwrap_or_else(|| failure_code(failure));
         match failure {
             wire::Failure::LocalInterlock => BrowserError::LocalInterlock(message),
+            wire::Failure::DocumentChanged if self.one_locator => {
+                BrowserError::stale(StaleReason::Navigated)
+            }
             wire::Failure::DocumentChanged => BrowserError::DocumentUnavailable,
             wire::Failure::Cancelled => BrowserError::CancelledBeforeDispatch,
             wire::Failure::Timeout => BrowserError::DeadlineBeforeDispatch,

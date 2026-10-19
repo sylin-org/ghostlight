@@ -20,6 +20,7 @@ use super::{reach, route, value, Reach};
 use crate::browser::adapter::documents::DocumentInventory;
 use crate::browser::adapter::{BrowserOutcome, BrowserReadiness, PhysicalPoint};
 use crate::browser::BrowserError;
+use crate::workspace::StaleReason;
 
 /// The most preparation time a description may spend letting the page settle, in milliseconds.
 const SETTLE_CAP_MS: u64 = 1_000;
@@ -62,14 +63,19 @@ pub struct Subjects<'a> {
 ///
 /// With a preparation budget the top document first gets up to [`SETTLE_CAP_MS`] to settle,
 /// and a failure there changes nothing. A locator is current only while its frame still holds
-/// the loader that minted it. A point is routed from the top page down. The focus is the first
-/// document in tree order that holds it. Anything that cannot be bound marks the inventory
-/// unresolved; an inventory the extension could not complete is marked incomplete.
+/// the loader that minted it: a frame that holds another loader, or that a complete inventory
+/// no longer has, replaced or removed the locator's document. A locator whose frame an
+/// incomplete inventory does not show binds nothing, and the incomplete mark says so. A point
+/// is routed from the top page down. The focus is the first document in tree order that holds
+/// it. A point or focus that cannot be bound marks the inventory unresolved; an inventory the
+/// extension could not complete is marked incomplete.
 ///
 /// # Errors
 ///
-/// Returns the failure of a primitive after the settle, and
-/// [`BrowserError::DocumentUnavailable`] for an inventory that is not one tree.
+/// Returns the failure of a primitive after the settle,
+/// [`BrowserError::DocumentUnavailable`] for an inventory that is not one tree, and
+/// [`BrowserError::StaleLocator`] for a locator that is malformed (`unknown`) or whose document
+/// was replaced or removed (`navigated`), before anything is read.
 pub fn describe_documents(
     l: &mut Link<'_>,
     tab_id: u64,
@@ -102,12 +108,12 @@ pub fn describe_documents(
         None => unresolved = true,
     };
     for locator in subjects.locators {
-        bind(
-            Locator::decode(locator)
-                .ok()
-                .map(|target| target.doc)
-                .filter(|doc| tree.contains(doc)),
-        );
+        let doc = Locator::decode(locator)?.doc;
+        if tree.contains(&doc) {
+            bind(Some(doc));
+        } else if inventory.complete || tree.holds_frame(&doc.frame_id) {
+            return Err(BrowserError::stale(StaleReason::Navigated));
+        }
     }
     for point in subjects.points {
         let at = Point {

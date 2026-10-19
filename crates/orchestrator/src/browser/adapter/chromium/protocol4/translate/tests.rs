@@ -756,7 +756,7 @@ fn describing_documents_binds_locators_points_and_focus_to_current_documents() {
         &port,
         BrowserCommand::DescribeDocuments {
             tab_id: 12,
-            locators: vec!["T:t1:locator_a1_1".into(), "C:c0:locator_a1_2".into()],
+            locators: vec!["T:t1:locator_a1_1".into()],
             points: vec![PhysicalPoint { x: 110.0, y: 620.0 }],
             focused: true,
             settle_ms: 300,
@@ -770,7 +770,7 @@ fn describing_documents_binds_locators_points_and_focus_to_current_documents() {
             inventory: DocumentInventory {
                 documents: documents(),
                 subjects: vec!["T.t1".into(), "C.c1".into(), "D.d1".into()],
-                unresolved: true,
+                unresolved: false,
                 incomplete: false,
             },
         }
@@ -783,6 +783,164 @@ fn describing_documents_binds_locators_points_and_focus_to_current_documents() {
     assert_eq!(calls[3].calls[0].message["x"], 10);
     assert_eq!(calls[3].calls[0].message["page"], false);
     assert_eq!(frames_of(&calls[4]), ["T", "C", "D"]);
+}
+
+/// Describe the documents of tab 12 for one locator, with no settle.
+fn describe_locator(
+    port: &RelayBrowserPort,
+    locator: &str,
+) -> Result<BrowserOutcome, BrowserError> {
+    call(
+        port,
+        BrowserCommand::DescribeDocuments {
+            tab_id: 12,
+            locators: vec![locator.into()],
+            points: vec![],
+            focused: false,
+            settle_ms: 0,
+        },
+    )
+}
+
+#[test]
+fn a_target_in_a_reloaded_iframe_is_refused_as_navigated() {
+    for locator in [
+        "C:c0:locator_a1_2",
+        "T:t0:locator_a1_1",
+        "R:r1:locator_a1_3",
+    ] {
+        let (port, fake) = port(inventory(), Box::new(|_| vec![]));
+        assert_eq!(
+            describe_locator(&port, locator),
+            Err(BrowserError::stale(StaleReason::Navigated)),
+            "{locator}"
+        );
+        assert!(
+            calls_seen(&fake).is_empty(),
+            "nothing is read for {locator}"
+        );
+    }
+    let (port, _fake) = port(inventory(), Box::new(|_| vec![]));
+    assert_eq!(
+        describe_locator(&port, "not a locator"),
+        Err(BrowserError::stale(StaleReason::Unknown))
+    );
+}
+
+#[test]
+fn an_incomplete_inventory_keeps_document_unavailable() {
+    let incomplete = json!({"frames": [frame("T", "t1", None, TOP)], "complete": false,
+                            "unseen": []});
+    let (port, _fake) = port(incomplete, Box::new(|_| vec![]));
+    assert_eq!(
+        describe_locator(&port, "C:c1:locator_a1_2"),
+        Ok(BrowserOutcome::Documents {
+            tab_id: 12,
+            inventory: DocumentInventory {
+                documents: vec![physical("T.t1", None, TOP)],
+                subjects: vec![],
+                unresolved: false,
+                incomplete: true,
+            },
+        }),
+        "a frame the extension could not show may still hold the locator's document"
+    );
+    assert_eq!(
+        describe_locator(&port, "T:t0:locator_a1_1"),
+        Err(BrowserError::stale(StaleReason::Navigated)),
+        "a frame that holds another loader is stale however complete the inventory"
+    );
+}
+
+#[test]
+fn a_targeted_read_in_an_iframe_reports_the_tabs_url_and_host() {
+    let (port, _fake) = port(
+        inventory(),
+        Box::new(|call| {
+            call.calls
+                .iter()
+                .map(|world| {
+                    let child = world
+                        .frame
+                        .as_ref()
+                        .is_some_and(|frame| frame.frame_id == "C");
+                    returned(if child {
+                        json!({"text": "Inside", "truncated": false, "title": "Embedded",
+                               "url": CHILD})
+                    } else {
+                        json!({"text": "Outside", "truncated": false, "title": "Top page",
+                               "url": "https://example.com/moved"})
+                    })
+                })
+                .collect()
+        }),
+    );
+    let read = |locator: &str| {
+        unwrap_scoped(
+            call(
+                &port,
+                scoped(
+                    scope(&["T.t1", "C.c1"], false),
+                    BrowserCommand::ReadText {
+                        tab_id: 12,
+                        locator: Some(locator.into()),
+                        max_chars: 100,
+                    },
+                ),
+            )
+            .unwrap(),
+        )
+        .1
+    };
+    assert_eq!(
+        read("C:c1:locator_a1_2"),
+        BrowserOutcome::Text {
+            tab_id: 12,
+            text: "Inside".into(),
+            truncated: false,
+            title: String::new(),
+            url: TOP.into(),
+        },
+        "the embedded document's host and title stay out"
+    );
+    assert_eq!(
+        read("T:t1:locator_a1_1"),
+        BrowserOutcome::Text {
+            tab_id: 12,
+            text: "Outside".into(),
+            truncated: false,
+            title: "Top page".into(),
+            url: "https://example.com/moved".into(),
+        },
+        "the top document reports its own title and URL"
+    );
+}
+
+#[test]
+fn a_document_change_on_a_one_locator_call_is_a_navigated_target() {
+    let (port, _fake) = port_with(Box::new(|correlation, _| {
+        Reply::Now(FakeExtension::failed(
+            correlation,
+            wire::Failure::DocumentChanged,
+        ))
+    }));
+    let read = |command| call(&port, scoped(scope(&["T.t1", "C.c1"], false), command));
+    assert_eq!(
+        read(BrowserCommand::ReadText {
+            tab_id: 12,
+            locator: Some("C:c1:locator_a1_2".into()),
+            max_chars: 100,
+        }),
+        Err(BrowserError::stale(StaleReason::Navigated))
+    );
+    assert_eq!(
+        read(BrowserCommand::DescribeTargets {
+            tab_id: 12,
+            locators: vec!["T:t1:locator_a1_1".into(), "C:c1:locator_a1_2".into()],
+        }),
+        Err(BrowserError::DocumentUnavailable),
+        "a change among several locators' documents names none of them"
+    );
 }
 
 mod forms;

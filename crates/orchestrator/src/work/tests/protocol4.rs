@@ -331,7 +331,7 @@ fn a_flow_step_the_page_refuses_names_that_steps_own_gesture() {
 }
 
 #[test]
-fn a_document_that_changed_before_input_is_unavailable_not_unknown() {
+fn a_document_that_changed_before_input_is_a_stale_target_not_unknown() {
     let (executor, _fake, workspace) = opened(primitive_fault(
         |primitive| matches!(primitive, wire::Primitive::Input(_)),
         wire::Failure::DocumentChanged,
@@ -343,12 +343,13 @@ fn a_document_that_changed_before_input_is_unavailable_not_unknown() {
         "browser_click",
         json!({"target": target}),
     );
-    assert_plain(
-        &result,
-        Status::Failed,
-        "Document access could not be verified.",
-        "document_unavailable",
+    assert_eq!(
+        result.summary,
+        "That target belongs to an older version of the page."
     );
+    assert_eq!(result.effect, Effect::None, "{}", result.summary);
+    assert!(result.repeat_safe, "{}", result.summary);
+    assert_eq!(result.facts["stale"], "navigated", "{}", result.summary);
 }
 
 #[test]

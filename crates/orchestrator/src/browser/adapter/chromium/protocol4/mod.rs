@@ -46,14 +46,18 @@ const NESTED_DOCUMENTS: &str = "nested document execution is invalid";
 /// Carry one unit of browser work over a protocol-4 connection.
 ///
 /// Work inside a document scope runs with that scope admitted, and answers with what it read
-/// alongside what the scope reached. A stale locator's lookup is bound to the document of the one
-/// locator the command named.
+/// alongside what the scope reached. A command that names one locator tells the [`Link`], so a
+/// document change the browser reports is that locator gone stale, and a stale locator's lookup
+/// is bound to that locator's document.
 ///
 /// # Errors
 ///
 /// Returns the failure of the first primitive that failed, as the [`Link`] maps it.
 pub fn run(command: BrowserCommand, l: &mut Link<'_>) -> Result<BrowserOutcome, BrowserError> {
     let subject = command.sole_locator().map(str::to_owned);
+    if subject.is_some() {
+        l.names_one_locator();
+    }
     carry(command, l).map_err(|error| bind_lookup(error, subject.as_deref()))
 }
 
