@@ -612,3 +612,11 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   binary six times as a stand-in that appends from four threads and exits mid-append, and reads
   every line back as JSON; it failed on the first run before the fix. The edge's log already
   writes one buffer per line, so `crates/relay` is unchanged. No golden or journey changed.
+- F6b, recovery counts launches: landed (this commit). The CI review saw
+  `no_browser_is_launched_while_the_session_is_ending` and its app-container sibling fail on
+  runners without a display, because they called the real launch and told a refusal from an
+  attempt by the error it returned. The launch gate in `browser/recovery.rs` now takes the start
+  of the browser as a closure, and the system mechanism passes `start_ordinary_browser`, which
+  holds the executable check, the display probe and the spawn. Proves: the two tests count the
+  starts the gate reaches: zero while the session ends or inside an app container, one otherwise,
+  on any runner, and nothing is spawned. No golden or journey changed.

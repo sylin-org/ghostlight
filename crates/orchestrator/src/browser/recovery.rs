@@ -321,9 +321,9 @@ impl RecoveryMechanism for SystemRecoveryMechanism {
         self.launch_unless_ending(
             session::session_ending(),
             self.leaves_startup_to_the_person(),
-            browser,
             deadline,
             cancelled,
+            || start_ordinary_browser(browser, deadline, cancelled),
         )
     }
 
@@ -333,16 +333,16 @@ impl RecoveryMechanism for SystemRecoveryMechanism {
 }
 
 impl SystemRecoveryMechanism {
-    /// Launch `browser`, unless the session is ending: then nothing is started and the call ends
-    /// as cancelled (ADR-0199 Decision 13). In a service `contained` in an app container nothing
-    /// is started either, and startup is left to the person.
+    /// Run `start`, the launch of a browser, unless the session is ending: then nothing is started
+    /// and the call ends as cancelled (ADR-0199 Decision 13). In a service `contained` in an app
+    /// container nothing is started either, and startup is left to the person.
     fn launch_unless_ending(
         &self,
         session_ending: bool,
         contained: bool,
-        browser: &RecoveryCandidate,
         deadline: Instant,
         cancelled: &AtomicBool,
+        start: impl FnOnce() -> Result<(), MechanismError>,
     ) -> Result<(), MechanismError> {
         ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
         if session_ending {
@@ -351,30 +351,40 @@ impl SystemRecoveryMechanism {
         if contained {
             return Err(MechanismError::LeftToThePerson);
         }
-        let executable = browser.ordinary_executable.as_ref().ok_or_else(|| {
-            MechanismError::Failed((
-                RecoveryFailure::LaunchFailed,
-                format!(
-                    "{} has no ordinary executable Ghostlight can verify",
-                    browser.name
-                ),
-            ))
-        })?;
-        let environment = crate::browser::session::graphical_session_environment()
-            .map_err(|error| {
-                MechanismError::Failed((RecoveryFailure::LaunchFailed, error.to_string()))
-            })?
-            .ok_or(MechanismError::LeftToThePerson)?;
-        ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
-        let mut command = ordinary_browser_command(executable);
-        command.envs(environment.values());
-        start_reaped(command).map(drop).map_err(|error| {
-            MechanismError::Failed((
-                RecoveryFailure::LaunchFailed,
-                format!("{}: {error}", executable.display()),
-            ))
-        })
+        start()
     }
+}
+
+/// Start `browser`'s ordinary executable in the person's graphical session. With no display
+/// reachable from the service nothing is started, and startup is left to the person.
+fn start_ordinary_browser(
+    browser: &RecoveryCandidate,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> Result<(), MechanismError> {
+    let executable = browser.ordinary_executable.as_ref().ok_or_else(|| {
+        MechanismError::Failed((
+            RecoveryFailure::LaunchFailed,
+            format!(
+                "{} has no ordinary executable Ghostlight can verify",
+                browser.name
+            ),
+        ))
+    })?;
+    let environment = crate::browser::session::graphical_session_environment()
+        .map_err(|error| {
+            MechanismError::Failed((RecoveryFailure::LaunchFailed, error.to_string()))
+        })?
+        .ok_or(MechanismError::LeftToThePerson)?;
+    ensure_live(deadline, cancelled).map_err(MechanismError::Wait)?;
+    let mut command = ordinary_browser_command(executable);
+    command.envs(environment.values());
+    start_reaped(command).map(drop).map_err(|error| {
+        MechanismError::Failed((
+            RecoveryFailure::LaunchFailed,
+            format!("{}: {error}", executable.display()),
+        ))
+    })
 }
 
 /// Where a flight goes when a repair or a launch of `browser` did not happen: a lost wait ends
@@ -2661,51 +2671,44 @@ mod tests {
         assert!(lock(&recovery.flights).scopes.is_empty());
     }
 
+    /// Launch attempts that reach the start of a browser, counted in place of a process.
+    fn counted_launch(
+        session_ending: bool,
+        contained: bool,
+        cancelled: &AtomicBool,
+    ) -> (Result<(), MechanismError>, usize) {
+        let starts = AtomicUsize::new(0);
+        let answer = SystemRecoveryMechanism.launch_unless_ending(
+            session_ending,
+            contained,
+            Instant::now() + Duration::from_secs(5),
+            cancelled,
+            || {
+                starts.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        (answer, starts.load(Ordering::SeqCst))
+    }
+
     #[test]
     fn no_browser_is_launched_while_the_session_is_ending() {
-        let browser = candidate_without_executable(
-            "Chromium",
-            BrowserPackage::Native,
-            NativeHostState::Current,
-        );
-        let deadline = Instant::now() + Duration::from_secs(5);
         let cancelled = AtomicBool::new(false);
-
-        let refused = SystemRecoveryMechanism
-            .launch_unless_ending(true, false, &browser, deadline, &cancelled)
-            .unwrap_err();
-        assert!(matches!(
-            refused,
-            MechanismError::Wait(RecoveryWaitError::Cancelled)
-        ));
-
-        // The browser has no executable, so a launch that is attempted fails before it looks for
-        // a display or starts anything, on any host; that failure is how the test tells an
-        // attempt from a refusal.
-        let attempted = SystemRecoveryMechanism
-            .launch_unless_ending(false, false, &browser, deadline, &cancelled)
-            .unwrap_err();
-        assert!(matches!(attempted, MechanismError::Failed(_)));
+        assert_eq!(
+            counted_launch(true, false, &cancelled),
+            (Err(MechanismError::Wait(RecoveryWaitError::Cancelled)), 0)
+        );
+        assert_eq!(counted_launch(false, false, &cancelled), (Ok(()), 1));
     }
 
     #[test]
     fn a_service_inside_an_app_container_starts_no_browser() {
-        let browser = candidate_without_executable(
-            "Chromium",
-            BrowserPackage::Native,
-            NativeHostState::Current,
-        );
-        let deadline = Instant::now() + Duration::from_secs(5);
         let cancelled = AtomicBool::new(false);
-
-        // A browser with no executable fails any launch that is attempted, so this answer shows
-        // that none was.
         assert_eq!(
-            SystemRecoveryMechanism
-                .launch_unless_ending(false, true, &browser, deadline, &cancelled)
-                .unwrap_err(),
-            MechanismError::LeftToThePerson
+            counted_launch(false, true, &cancelled),
+            (Err(MechanismError::LeftToThePerson), 0)
         );
+        let browser = candidate("Chromium", BrowserPackage::Native, NativeHostState::Current);
         assert_eq!(
             settled(MechanismError::LeftToThePerson, browser.clone()).unwrap(),
             FlightPhase::Complete(RecoveryDecision::Manual {
