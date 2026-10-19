@@ -420,6 +420,7 @@ impl Run {
             config: roots.config,
             roaming: roots.roaming,
             codex_config: roots.codex_config,
+            claude_config_dir: None,
             crush_config: None,
             edge,
             path_entries: Vec::new(),

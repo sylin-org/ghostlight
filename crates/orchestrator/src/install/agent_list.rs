@@ -14,8 +14,8 @@ use toml_edit::{DocumentMut, Table};
 
 use super::{
     harness_roots, manual_json_setup, manual_setup, AgentRow, ConfigDialect, HarnessContext,
-    JsonDialect, Packages, APP_DATA_VARIABLE, CODEX_HOME_VARIABLE, CRUSH_CONFIG_VARIABLE, ROSTER,
-    SERVER_NAME, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
+    JsonDialect, Packages, APP_DATA_VARIABLE, CLAUDE_CONFIG_VARIABLE, CODEX_HOME_VARIABLE,
+    CRUSH_CONFIG_VARIABLE, ROSTER, SERVER_NAME, USER_PROFILE_VARIABLE, XDG_CONFIG_HOME_VARIABLE,
 };
 use crate::language::self_check::golden::{check_golden_with, repository_path};
 
@@ -38,7 +38,11 @@ const END: &str = "<!-- END agent list -->";
 const LINUX_HOME: &str = "~";
 
 /// The variables that name one agent's own file or directory, in place of its default.
-const OVERRIDES: [&str; 2] = [CODEX_HOME_VARIABLE, CRUSH_CONFIG_VARIABLE];
+const OVERRIDES: [&str; 3] = [
+    CLAUDE_CONFIG_VARIABLE,
+    CODEX_HOME_VARIABLE,
+    CRUSH_CONFIG_VARIABLE,
+];
 
 /// The format of a JSON configuration; Ghostlight reads it as JSONC.
 const JSON: &str = "JSON";
@@ -114,6 +118,8 @@ impl Platform {
             config: roots.config,
             roaming: roots.roaming,
             codex_config: roots.codex_config,
+            claude_config_dir: overrides
+                .then(|| PathBuf::from(self.variable(CLAUDE_CONFIG_VARIABLE))),
             crush_config: overrides.then(|| PathBuf::from(self.variable(CRUSH_CONFIG_VARIABLE))),
             edge: PathBuf::new(),
             path_entries: Vec::new(),

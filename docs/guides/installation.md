@@ -109,7 +109,7 @@ The catalog holds 20 agents on 23 hosts.
 | Agent | Host id | Target | Entry | Windows | Linux |
 | --- | --- | --- | --- | --- | --- |
 | Codex | `codex` | User | `mcp_servers.ghostlight` (TOML) | `%CODEX_HOME%\config.toml` when CODEX_HOME is set, else `%USERPROFILE%\.codex\config.toml` | `$CODEX_HOME/config.toml` when CODEX_HOME is set, else `~/.codex/config.toml` |
-| Claude Code | `claude-code` | User | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.claude.json` | `~/.claude.json` |
+| Claude Code | `claude-code` | User | `mcpServers.ghostlight` (JSON) | `%CLAUDE_CONFIG_DIR%\.claude.json` when CLAUDE_CONFIG_DIR is set, else `%USERPROFILE%\.claude.json` | `$CLAUDE_CONFIG_DIR/.claude.json` when CLAUDE_CONFIG_DIR is set, else `~/.claude.json` |
 | Claude Desktop | `claude-desktop` | User | `mcpServers.ghostlight` (JSON) | `%APPDATA%\Claude\claude_desktop_config.json` | `$XDG_CONFIG_HOME/Claude/claude_desktop_config.json` |
 | Cursor | `cursor` | User | `mcpServers.ghostlight` (JSON) | `%USERPROFILE%\.cursor\mcp.json` | `~/.cursor/mcp.json` |
 | Visual Studio Code | `vscode` | User | `servers.ghostlight` (JSON) | `%APPDATA%\Code\User\mcp.json` | `$XDG_CONFIG_HOME/Code/User/mcp.json` |

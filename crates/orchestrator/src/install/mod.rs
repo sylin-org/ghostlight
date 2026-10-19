@@ -91,6 +91,11 @@ const LOCAL_APP_DATA_VARIABLE: &str = "LOCALAPPDATA";
 const XDG_CONFIG_HOME_VARIABLE: &str = "XDG_CONFIG_HOME";
 /// The variable that names Codex's own directory, which holds its `config.toml`.
 const CODEX_HOME_VARIABLE: &str = "CODEX_HOME";
+/// The variable that names Claude Code's own directory: Claude Code reads its [`CLAUDE_CODE_FILE`]
+/// there in place of the person's home.
+const CLAUDE_CONFIG_VARIABLE: &str = "CLAUDE_CONFIG_DIR";
+/// The file Claude Code keeps its user-scope MCP servers in, in its own directory or the home.
+const CLAUDE_CODE_FILE: &str = ".claude.json";
 /// The variable that names Crush's whole configuration file, in place of its default.
 const CRUSH_CONFIG_VARIABLE: &str = "CRUSH_GLOBAL_CONFIG";
 // Codex filters its stdio child's environment. Linux demand-start needs the invoking
@@ -398,6 +403,7 @@ fn isolated_context(directory: &Path, edge: &Path, state: &Path) -> HarnessConte
         config: directory.join("config"),
         roaming: directory.join("config"),
         codex_config: directory.join("codex").join("config.toml"),
+        claude_config_dir: None,
         crush_config: None,
         edge: edge.to_path_buf(),
         path_entries: Vec::new(),
@@ -687,6 +693,9 @@ struct HarnessContext {
     config: PathBuf,
     roaming: PathBuf,
     codex_config: PathBuf,
+    /// The directory [`CLAUDE_CONFIG_VARIABLE`] names, when it is set and not empty: Claude Code
+    /// reads its [`CLAUDE_CODE_FILE`] there in place of the home.
+    claude_config_dir: Option<PathBuf>,
     /// The file [`CRUSH_CONFIG_VARIABLE`] names, when it is set: Crush reads it in place of its
     /// default file.
     crush_config: Option<PathBuf>,
@@ -782,6 +791,9 @@ impl HarnessContext {
             config: roots.config,
             roaming: roots.roaming,
             codex_config: roots.codex_config,
+            claude_config_dir: env::var_os(CLAUDE_CONFIG_VARIABLE)
+                .filter(|directory| !directory.is_empty())
+                .map(PathBuf::from),
             crush_config: env::var_os(CRUSH_CONFIG_VARIABLE).map(PathBuf::from),
             edge,
             path_entries,
@@ -1092,7 +1104,13 @@ const ROSTER: &[AgentRow] = &[
         target: "User",
         monogram: monogram!("claude-code.svg"),
         download_url: Some("https://claude.com/product/claude-code"),
-        path: |context| context.home.join(".claude.json"),
+        path: |context| {
+            context
+                .claude_config_dir
+                .as_ref()
+                .unwrap_or(&context.home)
+                .join(CLAUDE_CODE_FILE)
+        },
         candidates: &[],
         executables: &["claude"],
         dialect: ConfigDialect::Json(JsonDialect::McpServers),
@@ -3238,6 +3256,7 @@ mod tests {
             config: directory.join("config"),
             roaming: directory.join("config"),
             codex_config: directory.join("codex/config.toml"),
+            claude_config_dir: None,
             crush_config: None,
             edge: edge(directory),
             path_entries: Vec::new(),
@@ -3400,6 +3419,7 @@ mod tests {
             config: directory.join("config"),
             roaming: directory.join("config"),
             codex_config: directory.join("codex/config.toml"),
+            claude_config_dir: None,
             crush_config: None,
             edge,
             path_entries: vec![binary_directory],
@@ -3809,6 +3829,50 @@ mod tests {
                 );
             }
             assert!(!definition.accepts_config_path(&directory.join("settings.json")));
+        }
+    }
+
+    /// Claude Code reads `.claude.json` in the directory `CLAUDE_CONFIG_DIR` names, else in the
+    /// home (Claude Code 2.1). Ghostlight sets up, finds and removes its entry in that file, and
+    /// never writes the other one.
+    #[test]
+    fn claude_code_is_set_up_and_removed_in_the_file_claude_code_reads() {
+        for named in [false, true] {
+            let directory = temporary(&format!("claude-config-dir-{named}"));
+            let own = directory.join("claude-profile");
+            let context = HarnessContext {
+                claude_config_dir: named.then(|| own.clone()),
+                ..context(&directory)
+            };
+            let (read, unread) = if named {
+                (own.join(".claude.json"), context.home.join(".claude.json"))
+            } else {
+                (context.home.join(".claude.json"), own.join(".claude.json"))
+            };
+            fs::create_dir_all(read.parent().unwrap()).unwrap();
+            fs::write(&read, "{\"theme\": \"dark\"}\n").unwrap();
+            let registry = HarnessRegistry::with_context(context);
+
+            let installed = registry
+                .apply("claude-code", HarnessAction::Install)
+                .unwrap();
+            assert!(installed.changed, "{named}");
+            assert!(has_entry(&read), "{named}");
+            assert!(fs::read_to_string(&read).unwrap().contains("dark"));
+            let found = registry
+                .summaries()
+                .into_iter()
+                .find(|summary| summary.id == "claude-code")
+                .unwrap();
+            assert_eq!(found.state, HarnessState::Installed, "{named}");
+            assert!(found.can_uninstall, "{named}");
+
+            let removed = registry
+                .apply("claude-code", HarnessAction::Uninstall)
+                .unwrap();
+            assert!(removed.changed, "{named}");
+            assert!(!has_entry(&read), "{named}");
+            assert!(!unread.exists(), "{named}");
         }
     }
 

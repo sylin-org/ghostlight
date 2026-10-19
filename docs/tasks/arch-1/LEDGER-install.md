@@ -337,3 +337,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   the pin: the plugin's server must be `npx -y <npm package>@<its major>`, read from
   `packaging/npm/package.json`. The plugin version is unchanged; RELEASE.md's plugin step raises
   it before the candidate commit. No code, golden or journey changes; `linux.txt` is unaffected.
+- F3, Claude Code's own directory (linux-2's L2-04 side finding): Claude Code 2.1 reads its user
+  servers from `.claude.json` in `CLAUDE_CONFIG_DIR` when that is set and not empty, else in the
+  home (read from the installed Claude Code itself, not a table). The installer wrote only the
+  home file, so a person with `CLAUDE_CONFIG_DIR` set never saw the entry. The roster now reads
+  the variable from the environment of the process that looks, the same way Codex's
+  `CODEX_HOME` is read (ADR-0117), so setup, inspection and uninstall all use the file Claude
+  Code reads. Proof: `claude_code_is_set_up_and_removed_in_the_file_claude_code_reads` sets up,
+  finds and removes the entry in each location and never writes the other. The guide's agent
+  table regenerates. No result, catalog or writer golden changes; `linux.txt` is unaffected (its
+  context sets no variable). Not handled: Claude Code's legacy `.config.json`, which it prefers
+  when that file exists and is not empty. No journey needed.
