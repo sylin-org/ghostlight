@@ -5,10 +5,20 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `landed` (with com
 
 ## RESUME HERE
 
-Opened 2026-10-18. The re-walk's agreed list is split into the slices below. The window slices
-run in order, u0 to u7. The native, extension, outcome and docs lanes run beside them. Next: the
-lanes, then the coordinator's integration gate, the in-place deploy, the owner's validation and
-the push.
+Closed 2026-10-19. Every slice landed and was reviewed twice: a usage limit stopped the first
+run, and its resume reviewed every slice again, which found and fixed gaps in k1, u0 and u4. The
+integration review ran the full gate green and found two items, both fixed and re-reviewed: the
+tray tooltip's period (j-32) and the band saying Working for waiting work. t1 (page targets for
+fill, upload and scroll) landed during the batch at the owner's request. Deployed in place at
+7cf3b39e on 2026-10-19 and checked live: a fill and a targeted scroll on the sylin.org demo form,
+the band at rest in ink, history rows with their outcome words and "Earlier session", the search
+button in the queue head, and the Integrations pane with the app icon and its text only.
+
+For the owner's validation: the Ready lamp in ink, the light-taskbar tray mascot at 100% and 150%,
+and two calls the integration review left to the owner: the extension's setup pages still use teal
+at rest, and the popup has no Turned off state for a switched-off channel. Held: n-d-09. Found at
+the live check, outside this batch: Claude Desktop rewrote its settings at 01:03 on 2026-10-19
+without an mcpServers list, so the window rightly shows it as found, not connected.
 
 ## Slices
 
