@@ -1752,21 +1752,15 @@ fn restore_tabs(
             unrestored.extend(tabs.into_iter().cloned());
             continue;
         };
-        // A session already working in another browser cannot hold these tabs: they are stale.
-        if intake
-            .workspaces
-            .pin_browser(workspace.as_str(), browser)
-            .is_err()
-        {
-            continue;
-        }
         let Ok(lease) = intake.workspaces.acquire(workspace) else {
             unrestored.extend(tabs.into_iter().cloned());
             continue;
         };
+        // The first tab restored binds the session to its browser. A tab of another browser, or
+        // one another session now controls, is refused and stays stale.
         for tab in tabs {
             if let Some(physical) = live.iter().find(|live| live.tab_id == tab.tab_id) {
-                let _ = lease.restore_tab(&tab.handle, physical);
+                let _ = lease.restore_tab(&tab.handle, browser, physical);
             }
         }
     }
@@ -2168,9 +2162,6 @@ mod tests {
         let governance = GovernanceFacade::new(Some(policy), None);
         let workspaces = WorkspaceStore::default();
         let workspace = workspaces.admit("test".into(), IntakeChannel::Mcp);
-        workspaces
-            .pin_browser(workspace.as_str(), FAKE_BROWSER)
-            .unwrap();
         let tab = PhysicalTab {
             tab_id: 7,
             url: "https://allowed.example/".into(),
@@ -2179,7 +2170,7 @@ mod tests {
             readiness: BrowserReadiness::Complete,
         };
         let lease = workspaces.acquire(&workspace).unwrap();
-        let selected = lease.add_tab(&tab).unwrap();
+        let selected = lease.add_tab(FAKE_BROWSER, &tab).unwrap();
         let selected = lease.apply_landing(&selected.handle, &tab).unwrap();
         drop(lease);
         let browser = Arc::new(FakeBrowser::default());
@@ -2297,9 +2288,6 @@ mod tests {
         use crate::browser::adapter::{BrowserReadiness, PhysicalTab};
 
         let workspace = workspaces.admit(RELEASED_CLIENT.into(), IntakeChannel::Mcp);
-        workspaces
-            .pin_browser(workspace.as_str(), FAKE_BROWSER)
-            .unwrap();
         let lease = workspaces.acquire(&workspace).unwrap();
         for &tab_id in ids {
             let tab = PhysicalTab {
@@ -2309,7 +2297,7 @@ mod tests {
                 active: true,
                 readiness: BrowserReadiness::Complete,
             };
-            let added = lease.add_tab(&tab).unwrap();
+            let added = lease.add_tab(FAKE_BROWSER, &tab).unwrap();
             lease.apply_landing(&added.handle, &tab).unwrap();
         }
         drop(lease);
@@ -2394,18 +2382,18 @@ mod tests {
 
         let workspaces = WorkspaceStore::default();
         let workspace = workspaces.admit("dialogs".into(), IntakeChannel::Mcp);
-        workspaces
-            .pin_browser(workspace.as_str(), FAKE_BROWSER)
-            .unwrap();
         let lease = workspaces.acquire(&workspace).unwrap();
         lease
-            .add_tab(&PhysicalTab {
-                tab_id: 4,
-                url: "https://example.com/".into(),
-                title: "Example".into(),
-                active: true,
-                readiness: BrowserReadiness::Complete,
-            })
+            .add_tab(
+                FAKE_BROWSER,
+                &PhysicalTab {
+                    tab_id: 4,
+                    url: "https://example.com/".into(),
+                    title: "Example".into(),
+                    active: true,
+                    readiness: BrowserReadiness::Complete,
+                },
+            )
             .unwrap();
         drop(lease);
         let sink =

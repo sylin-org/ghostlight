@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1 and C2 have landed. C3a is next, then C4. ux-2 has closed, so every slice whose "After" is met can
+C1, C2 and C3a have landed. C4 is next. ux-2 has closed, so every slice whose "After" is met can
 start.
 
 ## Slices
@@ -16,8 +16,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
 | C1 | fix(audit): the durable record keeps only what may be retained | candidate | ux-2 closes | see Notes | landed (fe18e597) |
-| C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | see Notes | landed (this commit) |
-| C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | - | todo |
+| C2 | fix(workspace): a tab binding has one lifecycle | candidate | ux-2 closes | see Notes | landed (7bd0bf20) |
+| C3a | fix(work): a session's browser is bound by its first tab | candidate | C2 | see Notes | landed (this commit) |
 | C4 | fix(workspace): a remembered tab is pending until its browser confirms it | candidate | C3a | two commits | todo |
 | C5 | fix(service): a service end decides its sessions' tabs once | candidate | C4 | - | todo |
 | C6 | fix(language): a held tab is described truthfully | candidate | C2 | - | todo |
@@ -80,3 +80,27 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   and `a_held_tab_still_refuses_reads_actions_history_and_focus` in `work/tests/tabs.rs`;
   `a_read_that_holds_a_tab_announces_the_hold` in `work/tests/presentation.rs`. No golden changed
   and no journey is needed. The hold words stay as they are until C6.
+- C3a, one frame, one browser: until a tab binds the session, a frame keeps its own first browser
+  choice (`FrameFindings::target`), so one call never crosses to two browsers. An open chooses its
+  browser before it sends `OpenTab`, and the tab it opens binds that browser through `add_tab` or
+  `restore_tab`, which now take the browser. The ADR does not name this; without it an open could
+  bind one browser while its tab opened in another when the attended browser changed mid-call.
+- C3a, `pin_browser` goes: the only writers of a workspace's browser are `add_tab` and
+  `restore_tab`, which refuse a tab of another browser (`BrowserPinned`). Tests that needed a
+  pinned session bind a tab instead. Cross-lane: one `add_tab` call site in surface's
+  `workbench/tests.rs`, a signature change only.
+- C3a, the resume path: `restore_tabs` no longer pins before it restores. A resume that confirms no
+  tab binds no browser. C4 rewrites this path.
+- C3a, proofs: `listing_tabs_in_an_empty_session_binds_no_browser`,
+  `an_empty_session_lists_at_once_without_a_browser`,
+  `an_empty_session_opens_in_the_browser_its_list_named`,
+  `recording_status_in_an_empty_session_binds_no_browser` and `a_pinned_session_is_never_rebound`
+  in `work/tests/availability.rs`; `a_fresh_service_waits_for_the_returning_browser_instead_of_recovering`
+  now expects no binding after its list and waits on the open. Deleted
+  `listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence`, which tested the empty list's
+  wait and refusal. No golden changed.
+- C3a, journeys for the coordinator: `tests/cli-journey.mjs` (an empty list answers at once with
+  exit 0; the no-browser refusal is now pinned through `browser_record` status) and
+  `tests/process-journey.mjs` (an empty list asks the browser nothing). D2: LANGUAGE's "refuses
+  without one" narrows to sessions that hold tabs, and ARCHITECTURE says the first tab binds the
+  browser.

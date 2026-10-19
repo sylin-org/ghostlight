@@ -93,9 +93,13 @@ async function mainFlow() {
     const accepted = await browser.connect();
     assert.equal(accepted.control_state, "active");
     assert.ok(accepted.service_epoch);
+    // The session holds no tab yet, so its list answers without asking the browser.
+    const asked = browser.requested("list_tabs").length;
     const tabs = await mcp.facts("browser_tabs", { action: "list" });
     assert.equal(tabs.status, "succeeded");
-    assert.equal(browser.requested("list_tabs").length >= 1, true);
+    assert.deepEqual(tabs.facts.tabs, []);
+    assert.equal(tabs.facts.browsers.length, 1);
+    assert.equal(browser.requested("list_tabs").length, asked);
     const opened = await mcp.facts("browser_navigate", { url: "https://example.com/" });
     assert.equal(opened.status, "succeeded");
     const handle = opened.facts.tab;

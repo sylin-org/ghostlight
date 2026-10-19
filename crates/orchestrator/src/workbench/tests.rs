@@ -2499,18 +2499,18 @@ fn each_browser_counts_the_tabs_of_the_sessions_that_work_in_it() {
     let workspaces = crate::workspace::WorkspaceStore::default();
     for (tab_id, label) in [(1, "first"), (2, "second")] {
         let workspace = workspaces.admit(label.into(), IntakeChannel::Mcp);
-        workspaces
-            .pin_browser(workspace.as_str(), "browser-1")
-            .unwrap();
         let lease = workspaces.acquire(&workspace).unwrap();
         lease
-            .add_tab(&PhysicalTab {
-                tab_id,
-                url: "https://example.com/".into(),
-                title: "test".into(),
-                active: true,
-                readiness: BrowserReadiness::Complete,
-            })
+            .add_tab(
+                "browser-1",
+                &PhysicalTab {
+                    tab_id,
+                    url: "https://example.com/".into(),
+                    title: "test".into(),
+                    active: true,
+                    readiness: BrowserReadiness::Complete,
+                },
+            )
             .unwrap();
     }
     workspaces.admit("elsewhere".into(), IntakeChannel::Mcp);

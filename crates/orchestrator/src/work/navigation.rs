@@ -58,11 +58,18 @@ impl ApplicationExecutor {
         // a dispatching query, and only this workspace's bound tabs are named -- the person's
         // unbound tabs stay private. A browser on its way back, such as an idle MV3 worker that
         // suspended its relay, gets the same bounded wait at the browser seam that every other
-        // crossing gets, before the same policy-owned recovery.
-        let live = match self.dispatch(context, BrowserCommand::ListTabs) {
-            Ok(BrowserOutcome::Tabs { tabs }) => tabs,
-            Ok(_) => return self.protocol_failure(context, decision, None),
-            Err(error) => return self.browser_failure(context, decision, error, None),
+        // crossing gets, before the same policy-owned recovery. A session that holds no tab
+        // already knows its answer, so it asks no browser: it never waits, starts one or binds
+        // one, and the browser it names can still be chosen for its first tab.
+        let empty = lease.tabs().is_ok_and(|tabs| tabs.is_empty());
+        let live = if empty {
+            Vec::new()
+        } else {
+            match self.dispatch(context, BrowserCommand::ListTabs) {
+                Ok(BrowserOutcome::Tabs { tabs }) => tabs,
+                Ok(_) => return self.protocol_failure(context, decision, None),
+                Err(error) => return self.browser_failure(context, decision, error, None),
+            }
         };
         match lease.tabs() {
             Ok(bindings) => {
@@ -183,9 +190,15 @@ impl ApplicationExecutor {
             Ok(label) => label,
             Err(error) => return self.workspace_failure(context, error),
         };
+        // The open chooses its browser before it opens, so the tab it opens binds the session to
+        // the browser that holds it.
+        let browser = match self.admitted_browser(context) {
+            Ok(browser) => browser,
+            Err(error) => return self.browser_failure(context, decision, error, None),
+        };
         if reuse == ReusePolicy::Domain {
             if let Some(terminal) =
-                self.reuse_released_tab(context, lease, decision, &opener_claim, url)
+                self.reuse_released_tab(context, lease, decision, &browser, &opener_claim, url)
             {
                 return terminal;
             }
@@ -207,7 +220,7 @@ impl ApplicationExecutor {
             Ok(_) => return self.protocol_failure(context, decision, None),
             Err(error) => return self.browser_failure(context, decision, error, None),
         };
-        let controlled = match lease.add_tab(&tab) {
+        let controlled = match lease.add_tab(&browser, &tab) {
             Ok(tab) => tab,
             // The browser already opened the page, so the refusal must not claim nothing happened.
             Err(error) => return self.workspace_failure_after_effect(context, error, tab.tab_id),
@@ -226,8 +239,8 @@ impl ApplicationExecutor {
     /// one fits this open.
     ///
     /// The service makes the whole choice and sends the adapter an exact tab id (ADR-0196
-    /// Decision 9). Candidates come only from the released pool, in the browser this session
-    /// works in, on the requested host, so a tab the person opened is never one. They were also
+    /// Decision 9). Candidates come only from the released pool, in `browser`, the one this open
+    /// chose, on the requested host, so a tab the person opened is never one. They were also
     /// released by a session whose opener claimed this session's `opener_claim`, so a client
     /// reuses only its own tabs. The kept tab left its group when its session ended (ADR-0201), so `AdoptTab` puts it
     /// back in this client's group as it loads the page. A candidate is used only while the live
@@ -238,16 +251,11 @@ impl ApplicationExecutor {
         context: &InvocationContext<'_>,
         lease: &WorkspaceLease,
         decision: Decision,
+        browser: &str,
         opener_claim: &str,
         url: &str,
     ) -> Option<Terminal> {
-        let browser = match self.admitted_browser(context) {
-            Ok(browser) => browser,
-            Err(error) => return Some(self.browser_failure(context, decision, error, None)),
-        };
-        let mut candidate = self
-            .workspaces
-            .claim_released(&browser, opener_claim, url)?;
+        let mut candidate = self.workspaces.claim_released(browser, opener_claim, url)?;
         let live = match self.dispatch(context, BrowserCommand::ListTabs) {
             Ok(BrowserOutcome::Tabs { tabs }) => tabs,
             Ok(_) => return Some(self.protocol_failure(context, decision, None)),
@@ -260,12 +268,10 @@ impl ApplicationExecutor {
             {
                 break tab.clone();
             }
-            candidate = self
-                .workspaces
-                .claim_released(&browser, opener_claim, url)?;
+            candidate = self.workspaces.claim_released(browser, opener_claim, url)?;
         };
         let focus_window = holds_no_tab(lease);
-        let controlled = match lease.add_tab(&released) {
+        let controlled = match lease.add_tab(browser, &released) {
             Ok(controlled) => controlled,
             // Another session already took this tab; nothing happened yet, so open a fresh one.
             Err(WorkspaceError::PhysicalTabOwned) => return None,
@@ -420,6 +426,12 @@ impl ApplicationExecutor {
                         Some(url),
                     );
                 }
+                // A handle can be the first this session names, so the recovery chooses its
+                // browser before it opens, as every open does.
+                let browser = match self.admitted_browser(context) {
+                    Ok(browser) => browser,
+                    Err(error) => return self.browser_failure(context, decision, error, None),
+                };
                 let (tab, commits) = match self.dispatch(
                     context,
                     BrowserCommand::OpenTab {
@@ -436,7 +448,7 @@ impl ApplicationExecutor {
                     Ok(_) => return self.protocol_failure(context, decision, None),
                     Err(error) => return self.browser_failure(context, decision, error, None),
                 };
-                let controlled = match lease.restore_tab(handle, &tab) {
+                let controlled = match lease.restore_tab(handle, &browser, &tab) {
                     Ok(controlled) => controlled,
                     Err(error) => {
                         return self.workspace_failure_after_effect(context, error, tab.tab_id)

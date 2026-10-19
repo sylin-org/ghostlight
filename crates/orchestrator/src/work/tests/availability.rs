@@ -13,6 +13,7 @@ use std::time::Instant;
 use crate::browser::adapter::chromium::protocol4::assets::page_assets;
 use crate::browser::adapter::chromium::protocol4::fake::{FakeExtension, Reply};
 
+use super::protocol4::ordinary;
 use super::*;
 use crate::browser::{
     BrowserPort, HeartbeatSettings, RelayBrowserPort, RELAY_RETURN_WINDOW, RETURN_GRACE,
@@ -21,7 +22,8 @@ use crate::browser::{
 /// The browser identity every scripted extension here announces.
 const RELAY_BROWSER: &str = "browser_relay";
 
-/// Attach one scripted extension that lists no tabs, announcing itself attended when asked.
+/// Attach one scripted extension that answers as an ordinary browser does, announcing itself
+/// attended when asked.
 fn attach(port: &RelayBrowserPort, attended: bool) -> FakeExtension {
     let (service, extension) = ghostlight_relay::endpoint::pair().unwrap();
     let mut hello = FakeExtension::hello(RELAY_BROWSER);
@@ -29,7 +31,7 @@ fn attach(port: &RelayBrowserPort, attended: bool) -> FakeExtension {
     let fake = FakeExtension::connect(
         extension,
         &hello,
-        Box::new(|correlation, _| Reply::Now(FakeExtension::ok(correlation, json!({"tabs": []})))),
+        Box::new(|correlation, primitive| Reply::Now(ordinary(correlation, primitive))),
     );
     port.attach(service).unwrap();
     fake
@@ -139,6 +141,25 @@ fn navigate_for(
     )
 }
 
+/// Bind one tab of `browser` to the session, as its first open would, so the session works in
+/// that browser and its calls cross to it.
+fn bind_tab(workspaces: &WorkspaceStore, workspace: &crate::workspace::WorkspaceId, browser: &str) {
+    workspaces
+        .acquire(workspace)
+        .unwrap()
+        .add_tab(
+            browser,
+            &PhysicalTab {
+                tab_id: 12,
+                url: "https://example.com/".into(),
+                title: "Example".into(),
+                active: true,
+                readiness: BrowserReadiness::Complete,
+            },
+        )
+        .unwrap();
+}
+
 /// Wait until the port has dropped the browser's registration after its stream closed.
 fn await_unregistered(port: &RelayBrowserPort) {
     let until = Instant::now() + Duration::from_secs(5);
@@ -160,9 +181,7 @@ fn a_pinned_browser_that_reconnects_takes_the_call() {
         relay_fixture(Arc::clone(&port), GovernanceFacade::new(None, None));
 
     let first = attach(&port, false);
-    workspaces
-        .pin_browser(workspace.as_str(), RELAY_BROWSER)
-        .unwrap();
+    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
     first.close();
     await_unregistered(&port);
     let second = attach_later(&port, Duration::from_millis(300));
@@ -188,9 +207,7 @@ fn a_silent_pinned_browser_that_answers_again_takes_the_call() {
     let (executor, workspaces, workspace) =
         relay_fixture(Arc::clone(&port), GovernanceFacade::new(None, None));
     let fake = Arc::new(attach(&port, false));
-    workspaces
-        .pin_browser(workspace.as_str(), RELAY_BROWSER)
-        .unwrap();
+    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
 
     fake.acknowledge_heartbeats(false);
     let until = Instant::now() + Duration::from_secs(5);
@@ -212,7 +229,8 @@ fn a_silent_pinned_browser_that_answers_again_takes_the_call() {
 }
 
 /// Right after a service start, the browser's relay is still reconnecting. A session with no
-/// browser yet waits for it inside the grace, and recovery never runs.
+/// browser yet waits for it inside the grace when it opens its first tab, and recovery never
+/// runs. Its list before that answers at once and binds nothing.
 #[test]
 fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
     let port = Arc::new(RelayBrowserPort::new("service_test".into(), page_assets()));
@@ -223,6 +241,10 @@ fn a_fresh_service_waits_for_the_returning_browser_instead_of_recovering() {
 
     let listed = list_tabs(&executor, &workspace);
     assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+
+    let opened = navigate(&executor, &workspace);
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
     assert_eq!(
         workspaces.browser_of(workspace.as_str()).as_deref(),
         Some(RELAY_BROWSER)
@@ -352,9 +374,7 @@ fn a_pinned_browser_closed_long_ago_is_started_again_and_takes_the_call() {
     }
 
     let first = attach(&port, false);
-    workspaces
-        .pin_browser(workspace.as_str(), RELAY_BROWSER)
-        .unwrap();
+    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
     assert_eq!(
         port.installed_browser_of(RELAY_BROWSER).as_deref(),
         Some(RELAY_INSTALLED)
@@ -397,9 +417,7 @@ fn a_pinned_browser_that_returns_within_the_grace_starts_nothing() {
     }
 
     let first = attach(&port, false);
-    workspaces
-        .pin_browser(workspace.as_str(), RELAY_BROWSER)
-        .unwrap();
+    bind_tab(&workspaces, &workspace, RELAY_BROWSER);
     first.close();
     await_unregistered(&port);
     let second = attach_later(&port, Duration::from_millis(300));
@@ -425,9 +443,7 @@ fn closed_session_browser(
     let (mut executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
     browser.connect(vec![]);
     browser.remember_installed("browser_chrome", "chromium");
-    workspaces
-        .pin_browser(workspace.as_str(), "browser_chrome")
-        .unwrap();
+    bind_tab(&workspaces, &workspace, "browser_chrome");
     let launches = Arc::new(AtomicUsize::new(0));
     {
         let (browser, launches) = (Arc::clone(&browser), Arc::clone(&launches));
@@ -578,9 +594,7 @@ fn a_pinned_browser_with_no_known_installed_browser_is_never_started() {
     let (governance, _policy) = on_demand_startup();
     let (executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
     browser.connect(vec![]);
-    workspaces
-        .pin_browser(workspace.as_str(), "browser_chrome")
-        .unwrap();
+    bind_tab(&workspaces, &workspace, "browser_chrome");
     let mut executor = executor;
     let launches = Arc::new(AtomicUsize::new(0));
     {
@@ -605,9 +619,7 @@ fn a_call_that_reaches_the_session_browser_names_it_in_the_record() {
     let mut chrome = summary("browser_chrome", true);
     chrome.name = Some("Google Chrome".into());
     browser.connect(vec![chrome]);
-    workspaces
-        .pin_browser(workspace.as_str(), "browser_chrome")
-        .unwrap();
+    bind_tab(&workspaces, &workspace, "browser_chrome");
     browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
 
     let listed = executor.execute(
@@ -623,8 +635,8 @@ fn a_call_that_reaches_the_session_browser_names_it_in_the_record() {
     );
 }
 
-/// A session pinned to a connected browser, as the record tests below need it: the browser is
-/// named, so a record that names it would say so.
+/// A session whose one tab binds it to a connected browser, as the record tests below need it:
+/// the browser is named, so a record that names it would say so.
 fn pinned_to_chrome() -> (
     ApplicationExecutor,
     Arc<FakeBrowser>,
@@ -635,9 +647,7 @@ fn pinned_to_chrome() -> (
     let mut chrome = summary("browser_chrome", true);
     chrome.name = Some("Google Chrome".into());
     browser.connect(vec![chrome]);
-    workspaces
-        .pin_browser(workspace.as_str(), "browser_chrome")
-        .unwrap();
+    bind_tab(&workspaces, &workspace, "browser_chrome");
     (executor, browser, workspace, audit)
 }
 
@@ -763,9 +773,7 @@ fn a_record_names_the_browser_a_command_was_written_to_whatever_the_failure() {
 fn a_pinned_browser_absent_while_another_is_connected_is_the_wrong_profile() {
     let (executor, browser, workspaces, workspace, audit) = fixture();
     browser.connect(vec![summary("browser_edge", true)]);
-    workspaces
-        .pin_browser(workspace.as_str(), "browser_chrome")
-        .unwrap();
+    bind_tab(&workspaces, &workspace, "browser_chrome");
 
     let refused = executor.execute(
         &workspace,
@@ -803,9 +811,7 @@ fn a_pinned_browser_absent_with_nothing_connected_is_not_connected_and_never_rec
     let (executor, browser, workspaces, workspace, audit) = fixture();
     browser.connect(vec![]);
     browser.set_returning(true);
-    workspaces
-        .pin_browser(workspace.as_str(), "browser_chrome")
-        .unwrap();
+    bind_tab(&workspaces, &workspace, "browser_chrome");
 
     let refused = executor.execute(
         &workspace,
@@ -977,4 +983,148 @@ fn a_launched_browser_that_timed_out_keeps_its_own_step_with_an_extension_or_a_f
             ]
         );
     }
+}
+
+/// A browser tab the scripted fake opens, at `url`.
+fn opened_tab(id: u64, url: &str) -> Result<BrowserOutcome, BrowserError> {
+    Ok(BrowserOutcome::TabOpened {
+        tab: tab(id, url),
+        committed_urls: vec![url.into()],
+    })
+}
+
+/// Listing the tabs of a session that holds none asks no browser and binds none, so the
+/// browser the list names can still be chosen for the first tab.
+#[test]
+fn listing_tabs_in_an_empty_session_binds_no_browser() {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+
+    let listed = list_tabs(&executor, &workspace);
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(listed.facts["tabs"], json!([]));
+    assert_eq!(
+        listed.facts["browsers"],
+        json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
+    );
+    assert!(browser.routed().is_empty(), "the list asked a browser");
+    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+}
+
+/// An empty session's list is known without a browser. With none connected, one said to be on
+/// its way back, and browser startup left to the person, it still answers at once: no wait, no
+/// recovery, and the next step is to open the first tab.
+#[test]
+fn an_empty_session_lists_at_once_without_a_browser() {
+    let (governance, _policy) = manual_startup();
+    let (executor, browser, workspaces, workspace, _) = fixture_with_governance(governance);
+    browser.connect(vec![]);
+    browser.set_returning(true);
+
+    let began = Instant::now();
+    let listed = list_tabs(&executor, &workspace);
+    assert!(
+        began.elapsed() < RETURN_GRACE / 2,
+        "the list waited {:?}",
+        began.elapsed()
+    );
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(listed.facts["tabs"], json!([]));
+    assert_eq!(listed.facts["browsers"], json!([]));
+    assert_eq!(
+        listed.next_steps,
+        crate::language::outcome::Outcome::TabsListed { count: 0 }.next_steps()
+    );
+    assert!(browser.calls().is_empty());
+    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+}
+
+/// A session that listed first opens its first tab in the browser it then names, even when the
+/// list would have chosen another one, and that tab binds the session there.
+#[test]
+fn an_empty_session_opens_in_the_browser_its_list_named() {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.connect(vec![
+        summary("browser_chrome", true),
+        summary("browser_edge", false),
+    ]);
+
+    let listed = list_tabs(&executor, &workspace);
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    assert_eq!(
+        listed.facts["browsers"][1]["browser"],
+        json!("browser_edge")
+    );
+
+    browser.push(opened_tab(7, "https://example.com/"));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com","new_tab":true,"browser":"browser_edge"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
+    assert_eq!(browser.routed(), vec!["browser_edge"]);
+    assert_eq!(
+        workspaces.browser_of(workspace.as_str()).as_deref(),
+        Some("browser_edge")
+    );
+}
+
+/// A recording status crosses to a browser but binds no tab, so it binds no browser either.
+#[test]
+fn recording_status_in_an_empty_session_binds_no_browser() {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.connect(vec![summary(FAKE_BROWSER, true)]);
+    browser.push(Ok(BrowserOutcome::RecordingNotFound));
+
+    let status = executor.execute(
+        &workspace,
+        "browser_record",
+        json!({"action":"status"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(status.facts["reason"], "not_found", "{}", status.summary);
+    assert_eq!(browser.routed(), vec![FAKE_BROWSER]);
+    assert_eq!(workspaces.browser_of(workspace.as_str()), None);
+}
+
+/// The browser a session's first tab bound stays its browser, after that tab closes too: a call
+/// that names another browser is refused, and neither a list nor a later open moves it.
+#[test]
+fn a_pinned_session_is_never_rebound() {
+    let (executor, browser, workspaces, workspace, _) = fixture();
+    browser.connect(vec![
+        summary("browser_chrome", true),
+        summary("browser_edge", false),
+    ]);
+    browser.push(opened_tab(7, "https://example.com/"));
+    let opened = navigate(&executor, &workspace);
+    assert_eq!(opened.status, Status::Succeeded, "{}", opened.summary);
+    assert_eq!(
+        workspaces.browser_of(workspace.as_str()).as_deref(),
+        Some("browser_chrome")
+    );
+    workspaces.apply_browser_close("browser_chrome", 7);
+
+    let listed = list_tabs(&executor, &workspace);
+    assert_eq!(listed.status, Status::Succeeded, "{}", listed.summary);
+    let refused = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com","new_tab":true,"browser":"browser_edge"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(refused.status, Status::Failed);
+    assert_eq!(refused.effect, Effect::None);
+    assert_eq!(refused.facts["reason"], json!("browser_pinned"));
+
+    browser.connect(vec![summary("browser_edge", true)]);
+    let elsewhere = navigate_within_a_second(&executor, &workspace);
+    assert_eq!(elsewhere.facts["reason"], json!("browser_wrong_profile"));
+    assert_eq!(browser.routed(), vec!["browser_chrome"]);
+    assert_eq!(
+        workspaces.browser_of(workspace.as_str()).as_deref(),
+        Some("browser_chrome")
+    );
 }

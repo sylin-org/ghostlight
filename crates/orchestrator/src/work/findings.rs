@@ -22,6 +22,11 @@ pub(super) struct Findings {
     pub(super) observed: Observed,
     /// The browser that received a command of this frame, by name.
     pub(super) reached: Option<String>,
+    /// The browser this frame's crossings go to, by id, once the frame chose one.
+    ///
+    /// Until a tab binds the workspace to a browser, the frame's own first choice holds for the
+    /// rest of the frame, so one frame never crosses to two browsers.
+    pub(super) target: Option<String>,
     /// Every governance check of this frame.
     pub(super) permissions: PermissionTrace,
     /// Scoped reads and recording coverage, merged.
@@ -80,6 +85,16 @@ impl FrameFindings {
     /// The browser this frame has reached so far, if any.
     pub(super) fn reached(&self) -> Option<String> {
         self.0.borrow().reached.clone()
+    }
+
+    /// Remember the browser this frame's crossings go to.
+    pub(super) fn target(&self, browser: &str) {
+        self.0.borrow_mut().target = Some(browser.into());
+    }
+
+    /// The browser this frame chose for its crossings, if it chose one.
+    pub(super) fn targeted(&self) -> Option<String> {
+        self.0.borrow().target.clone()
     }
 
     /// Keep the evidence of one governance check.

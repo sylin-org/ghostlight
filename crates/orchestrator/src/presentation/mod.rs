@@ -501,17 +501,19 @@ mod tests {
             Arc::new(ConnectionEvidence::claimed("client", IntakeChannel::Mcp)),
             None,
         );
-        store.pin_browser(workspace.as_str(), FAKE_BROWSER).unwrap();
         let lease = store.acquire(&workspace).unwrap();
         for tab_id in tabs {
             lease
-                .add_tab(&PhysicalTab {
-                    tab_id: *tab_id,
-                    title: String::new(),
-                    url: "https://example.com/".into(),
-                    active: false,
-                    readiness: BrowserReadiness::Complete,
-                })
+                .add_tab(
+                    FAKE_BROWSER,
+                    &PhysicalTab {
+                        tab_id: *tab_id,
+                        title: String::new(),
+                        url: "https://example.com/".into(),
+                        active: false,
+                        readiness: BrowserReadiness::Complete,
+                    },
+                )
                 .unwrap();
         }
         drop(lease);

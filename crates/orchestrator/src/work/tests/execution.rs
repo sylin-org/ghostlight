@@ -1539,62 +1539,6 @@ fn a_named_browser_opens_there_and_a_named_stranger_is_refused() {
 }
 
 #[test]
-fn listing_tabs_waits_for_a_waking_relay_then_refuses_from_absence() {
-    let (executor, browser, _, workspace, _) = fixture();
-    browser.connect(vec![]);
-    browser.set_returning(true);
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(7, "https://example.com/")],
-    }));
-
-    // A suspended MV3 worker reattaches shortly after the read begins.
-    {
-        let browser = browser.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(300));
-            browser.connect(vec![summary(FAKE_BROWSER, true)]);
-        });
-    }
-    let woke = executor.execute(
-        &workspace,
-        "browser_tabs",
-        json!({"action":"list"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(woke.status, Status::Succeeded);
-    assert_eq!(woke.facts["tabs"], json!([]));
-    assert_eq!(
-        woke.facts["browsers"],
-        json!([{"browser":FAKE_BROWSER,"name":null,"attended":true}])
-    );
-
-    // With no evidence that a browser is coming back, the read does not wait at all: it
-    // refuses honestly through recovery instead of answering from remembered state.
-    let policy = temporary_policy("manual-browser-startup");
-    fs::write(
-        &policy,
-        all_open_policy_with(r#"[{"key":"browser.startup","value":"manual","level":"mandatory"}]"#),
-    )
-    .unwrap();
-    let (executor, browser, _, workspace, _) =
-        fixture_with_governance(GovernanceFacade::new(Some(policy.to_path_buf()), None));
-    browser.connect(vec![]);
-    let started = std::time::Instant::now();
-    let absent = executor.execute(
-        &workspace,
-        "browser_tabs",
-        json!({"action":"list"}),
-        &CancellationToken::default(),
-    );
-    assert_eq!(absent.status, Status::Failed);
-    assert_eq!(absent.facts["reason"], "browser_startup_manual");
-    assert!(
-        started.elapsed() < crate::browser::RETURN_GRACE,
-        "no evidence of a returning browser, no wait"
-    );
-}
-
-#[test]
 fn listing_tabs_reports_live_titles_and_drops_bindings_that_are_gone() {
     let (executor, browser, _, workspace, _) = fixture();
     browser.connect(vec![summary(FAKE_BROWSER, true)]);
@@ -1776,7 +1720,6 @@ fn repeated_policy_denials_remain_independent_requests() {
     assert!(browser.calls().is_empty());
     assert_eq!(governance.runtime_state(), RuntimeControlState::Active);
     policy.set(json!(["read"]));
-    browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
     let allowed = executor.execute(
         &workspace,
         "browser_tabs",
@@ -1784,7 +1727,8 @@ fn repeated_policy_denials_remain_independent_requests() {
         &CancellationToken::default(),
     );
     assert_eq!(allowed.status, Status::Succeeded);
-    assert_eq!(browser.calls().len(), 1);
+    // The session holds no tab, so its list is answered without a browser.
+    assert!(browser.calls().is_empty());
 }
 
 #[test]
@@ -2447,7 +2391,7 @@ fn a_tab_whose_landing_is_not_yet_known_is_refused_rather_than_checked_by_capabi
     let handle = workspaces
         .acquire(&workspace)
         .unwrap()
-        .add_tab(&tab(8, ""))
+        .add_tab(FAKE_BROWSER, &tab(8, ""))
         .unwrap()
         .handle;
 
@@ -3293,10 +3237,7 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
     }
     assert_eq!(browser.calls().len(), dispatched);
 
-    // A's own listing never shows B's tab, even though the browser reports it.
-    browser.push(Ok(BrowserOutcome::Tabs {
-        tabs: vec![tab(42, "https://example.com/")],
-    }));
+    // A's own listing never shows B's tab. A holds no tab, so it asks no browser at all.
     let listed = executor.execute(
         &workspace_a,
         "browser_tabs",
@@ -3305,6 +3246,7 @@ fn a_session_never_reaches_another_sessions_tabs_and_is_never_told_to_switch() {
     );
     assert_eq!(listed.status, Status::Succeeded);
     assert_eq!(listed.facts["tabs"], json!([]));
+    assert_eq!(browser.calls().len(), dispatched);
 
     // B still owns and reads its tab.
     browser.push(Ok(BrowserOutcome::Text {

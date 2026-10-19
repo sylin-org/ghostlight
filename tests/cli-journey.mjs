@@ -14,6 +14,7 @@ import { buildVersion, createHome, repository, startReason, until } from "./lib/
 
 const catalogNames = JSON.parse(readFileSync(join(repository, "docs", "1.0", "catalog.json"), "utf8")).map((tool) => tool.name);
 const LIST = '{"action":"list"}';
+const RECORDING_STATUS = '{"action":"status"}';
 const EXIT_FAILED = 4;
 
 // The machine's persistent native-host registration, as one comparable string. The journey
@@ -121,29 +122,40 @@ try {
   assert.equal(diagnosis.service.running, true);
   console.log("PASS status and doctor report the running service");
 
+  // A session that holds no tab already knows its tabs, so its list answers at once with none,
+  // asks no browser and binds none.
   const listed = call(["browser_tabs", LIST]);
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.equal(listed.stdout.trim(), "Listed 0 tabs in this session.");
+  const rendered = call(["browser_tabs", LIST, "--json"]);
+  assert.equal(rendered.status, 0, rendered.stderr);
+  const answered = JSON.parse(rendered.stdout.trim());
+  assert.equal(answered.status, "succeeded");
+  assert.deepEqual(answered.facts.tabs, []);
+
+  const recording = call(["browser_record", RECORDING_STATUS]);
   // A live read has nothing to read without a connected browser: it refuses instead of answering
   // from remembered state. Which honest answer arrives depends on this machine's installed
   // browsers, so the journey pins the closed language contract, not the inventory: plural evidence
   // asks the person to open a named browser, unusable registrations name the choice-free remedy,
   // and no refusal ever says Ghostlight declined to choose.
-  assert.equal(listed.status, EXIT_FAILED, listed.stderr);
-  const rendered = call(["browser_tabs", LIST, "--json"]);
-  assert.equal(rendered.status, EXIT_FAILED);
-  const result = JSON.parse(rendered.stdout.trim());
+  assert.equal(recording.status, EXIT_FAILED, recording.stderr);
+  const refused = call(["browser_record", RECORDING_STATUS, "--json"]);
+  assert.equal(refused.status, EXIT_FAILED);
+  const result = JSON.parse(refused.stdout.trim());
   assert.equal(result.status, "failed");
   if (result.facts.reason === "browser_startup_manual") {
     assert.match(
-      listed.stdout.trim(),
+      recording.stdout.trim(),
       /^No browser is connected\. Ask the user to open a .+ browser window with the Ghostlight extension installed, then repeat the call\.$/
     );
-    assert.ok(result.facts.browsers.length >= 1, listed.stdout);
+    assert.ok(result.facts.browsers.length >= 1, recording.stdout);
     if (result.facts.browsers.length === 1) assert.equal(result.facts.browser, result.facts.browsers[0]);
   } else if (result.facts.reason === "native_host_unavailable") {
-    assert.equal(listed.stdout.trim(), "The browser cannot use Ghostlight's native messaging registration.");
-    assert.ok(result.facts.details.length >= 1, listed.stdout);
+    assert.equal(recording.stdout.trim(), "The browser cannot use Ghostlight's native messaging registration.");
+    assert.ok(result.facts.details.length >= 1, recording.stdout);
   } else if (result.facts.reason === "browser_absent") {
-    assert.equal(listed.stdout.trim(), "No supported Chromium browser is installed.");
+    assert.equal(recording.stdout.trim(), "No supported Chromium browser is installed.");
   } else {
     assert.fail(`unexpected no-browser reason: ${result.facts.reason}`);
   }
@@ -153,14 +165,12 @@ try {
   assert.notEqual(rejected.status, 0);
   assert.equal(rejected.stdout.trim(), "The call does not match the Ghostlight catalog.");
 
-  // One process, one session: even refusals from an earlier line share the workspace with later
-  // ones.
+  // One process, one session: an earlier line shares the workspace with later ones.
   const batch = call(["--stdin"], `browser_tabs ${LIST}\nbrowser_tabs ${LIST}\n\nbrowser_tabs ${LIST}\n`);
-  // Every line refuses for the same honest reason; the batch reports the failure.
-  assert.equal(batch.status, EXIT_FAILED, batch.stderr);
+  assert.equal(batch.status, 0, batch.stderr);
   const lines = batch.stdout.trim().split("\n").filter((line) => line.trim());
   assert.equal(lines.length, 3, "every line of the batch is answered");
-  for (const line of lines) assert.match(line, /No browser is connected|native messaging registration|No supported Chromium browser/);
+  for (const line of lines) assert.equal(line, "Listed 0 tabs in this session.");
 
   // Retrieving the catalog invokes nothing and is deliberately not an audited action.
   const tabRecords = await until(() => {

@@ -117,7 +117,13 @@ fn each_flow_step_record_holds_only_its_own_checks_and_coverage() {
 
 #[test]
 fn a_flow_record_names_the_browser_its_last_step_reached() {
-    let (executor, browser, _, workspace, audit) = fixture();
+    let (executor, browser, workspaces, workspace, audit) = fixture();
+    // The session holds a tab, so its list asks the browser.
+    workspaces
+        .acquire(&workspace)
+        .unwrap()
+        .add_tab(FAKE_BROWSER, &tab(7, "https://example.com/"))
+        .unwrap();
     browser.push(Ok(BrowserOutcome::Tabs { tabs: vec![] }));
     let result = executor.execute(
         &workspace,

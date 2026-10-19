@@ -1392,18 +1392,28 @@ impl ApplicationExecutor {
         self.target_browser(context)
     }
 
-    /// Decide which browser this invocation belongs to, and bind the workspace to it.
+    /// Decide which browser this invocation's next crossing goes to.
     ///
     /// Resolution happens at the seam rather than at admission because a call that never reaches
-    /// a browser must not need one: listing this workspace's tabs answers truthfully with no
+    /// a browser must not need one: listing an empty session's tabs answers truthfully with no
     /// browser connected at all.
     ///
-    /// The binding is what makes the choice stable. It is taken once, on the first crossing, and
-    /// every later crossing in this workspace reads it back instead of choosing again. When the
-    /// bound browser is gone, the call waits for it and may start that same browser again, but
-    /// never moves the session to another one.
+    /// The session's browser is the one its first tab bound, when [`WorkspaceLease::add_tab`] or
+    /// [`WorkspaceLease::restore_tab`] took it. A crossing reads that binding and never writes it,
+    /// so a crossing that binds no tab, such as a recording status, leaves the session free to
+    /// open its first tab in any browser. Until a tab binds one, the frame keeps its own first
+    /// choice, so one frame never crosses to two browsers. When the chosen browser is gone, the
+    /// call waits for it and may start that same browser again, but never moves to another one.
     fn target_browser(&self, context: &InvocationContext<'_>) -> Result<String, BrowserError> {
-        let pinned = self.workspaces.browser_of(context.workspace.as_str());
+        // The workspace vanished between admission and dispatch. Nothing physical should happen
+        // for a workspace that no longer exists.
+        if !self.workspaces.contains(context.workspace.as_str()) {
+            return Err(BrowserError::CancelledBeforeDispatch);
+        }
+        let pinned = self
+            .workspaces
+            .browser_of(context.workspace.as_str())
+            .or_else(|| context.findings.targeted());
         let chosen = match choose_browser(
             context.requested_browser,
             pinned.as_deref(),
@@ -1416,16 +1426,8 @@ impl ApplicationExecutor {
             },
             Err(error) => return Err(error),
         };
-        match self
-            .workspaces
-            .pin_browser(context.workspace.as_str(), &chosen)
-        {
-            Ok(()) => Ok(chosen),
-            Err(WorkspaceError::BrowserPinned) => Err(BrowserError::BrowserPinned),
-            // The workspace vanished between admission and dispatch. Nothing physical should
-            // happen for a workspace that no longer exists.
-            Err(_) => Err(BrowserError::CancelledBeforeDispatch),
-        }
+        context.findings.target(&chosen);
+        Ok(chosen)
     }
 
     /// Wait a bounded grace for the browser this session already works in, then start that

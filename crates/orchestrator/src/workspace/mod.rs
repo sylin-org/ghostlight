@@ -545,8 +545,10 @@ struct WorkspaceState {
     connections: HashMap<String, Arc<ConnectionEvidence>>,
     /// What owns this workspace, when it outlives the connection that opened it (ADR-0106).
     session: Option<SessionMarker>,
-    /// Which browser this workspace works in, once its first work chose one.
+    /// Which browser this workspace works in, once its first tab bound one.
     ///
+    /// Only binding a tab writes it ([`WorkspaceLease::add_tab`] and
+    /// [`WorkspaceLease::restore_tab`]), so a call that binds no tab leaves the choice open.
     /// A workspace lives in one browser for its whole life. Its tabs, targets, and views are all
     /// physical things inside that one browser, and physical tab ids only mean anything there, so
     /// a workspace that could span two browsers could not name its own tabs unambiguously. When
@@ -655,18 +657,14 @@ impl AggregateState {
         }
     }
 
-    /// Whether a workspace other than `current`, working in the same browser, controls the tab.
+    /// Whether a workspace other than `current`, working in `browser`, controls the tab.
     ///
     /// Physical tab ids are unique inside one browser and nowhere else: Chrome's tab 5 and Edge's
     /// tab 5 are different tabs and must not refuse each other.
-    fn controlled_elsewhere(&self, current: &WorkspaceId, physical_id: u64) -> bool {
-        let browser = self
-            .workspaces
-            .get(current)
-            .and_then(|workspace| workspace.browser.as_deref());
+    fn controlled_elsewhere(&self, current: &WorkspaceId, browser: &str, physical_id: u64) -> bool {
         self.workspaces.iter().any(|(id, workspace)| {
             id != current
-                && workspace.browser.as_deref() == browser
+                && workspace.browser.as_deref() == Some(browser)
                 && workspace
                     .tabs
                     .values()
@@ -674,11 +672,58 @@ impl AggregateState {
         })
     }
 
-    /// The browser a workspace works in, if its first work chose one.
-    fn browser_of(&self, workspace: &WorkspaceId) -> Option<String> {
-        self.workspaces
-            .get(workspace)
-            .and_then(|state| state.browser.clone())
+    /// Check that `current` may bind the physical tab `physical_id` of `browser`.
+    ///
+    /// # Errors
+    ///
+    /// [`WorkspaceError::UnknownWorkspace`] when the workspace is gone,
+    /// [`WorkspaceError::BrowserPinned`] when its first tab bound a different browser, and
+    /// [`WorkspaceError::PhysicalTabOwned`] when another workspace in that browser controls the
+    /// tab.
+    fn admit_tab(
+        &self,
+        current: &WorkspaceId,
+        browser: &str,
+        physical_id: u64,
+    ) -> Result<(), WorkspaceError> {
+        let workspace = self
+            .workspaces
+            .get(current)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        if workspace
+            .browser
+            .as_deref()
+            .is_some_and(|bound| bound != browser)
+        {
+            return Err(WorkspaceError::BrowserPinned);
+        }
+        if self.controlled_elsewhere(current, browser, physical_id) {
+            return Err(WorkspaceError::PhysicalTabOwned);
+        }
+        Ok(())
+    }
+
+    /// Bind an admitted physical tab of `browser` to `current` under `handle`.
+    ///
+    /// The tab leaves the released pool, and the first tab binds the workspace's browser, which
+    /// no later tab changes. Whatever the handle carried before goes with it, so the binding
+    /// starts clean at generation 0. Call [`Self::admit_tab`] first.
+    fn bind_tab(
+        &mut self,
+        current: &WorkspaceId,
+        browser: &str,
+        handle: &TabHandle,
+        value: TabState,
+    ) -> Result<SelectedTab, WorkspaceError> {
+        self.forget_released(browser, value.physical_id);
+        let workspace = self
+            .workspaces
+            .get_mut(current)
+            .ok_or(WorkspaceError::UnknownWorkspace)?;
+        workspace.browser.get_or_insert_with(|| browser.into());
+        workspace.forget_tab(handle);
+        workspace.tabs.insert(handle.clone(), value.clone());
+        Ok(selected(handle, &value))
     }
 }
 
@@ -1115,8 +1160,13 @@ impl WorkspaceStore {
             .filter(|label| !label.is_empty())
     }
 
-    /// Apply an asynchronous committed landing through the aggregate before later content use.
-    /// Which browser this workspace works in, if its first work already chose one.
+    /// Whether the workspace is still admitted: a released or reaped one is gone.
+    #[must_use]
+    pub fn contains(&self, workspace: &str) -> bool {
+        self.lock().workspaces.contains_key(workspace)
+    }
+
+    /// Which browser this workspace works in, once its first tab bound one.
     #[must_use]
     pub fn browser_of(&self, workspace: &str) -> Option<String> {
         self.lock()
@@ -1157,32 +1207,6 @@ impl WorkspaceStore {
             .unwrap_or_default();
         bindings.sort();
         bindings
-    }
-
-    /// Bind a workspace to the browser its work belongs to.
-    ///
-    /// The first binding wins for the life of the workspace. Re-binding the same browser is the
-    /// ordinary case and succeeds; naming a different one is refused rather than obeyed, because
-    /// the tabs already open would stay behind in the browser that owns them.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WorkspaceError::UnknownWorkspace`] when the workspace is gone, and
-    /// [`WorkspaceError::BrowserPinned`] when it already works in a different browser.
-    pub fn pin_browser(&self, workspace: &str, browser: &str) -> Result<(), WorkspaceError> {
-        let mut state = self.lock();
-        let workspace = state
-            .workspaces
-            .get_mut(workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        match workspace.browser.as_deref() {
-            Some(pinned) if pinned == browser => Ok(()),
-            Some(_) => Err(WorkspaceError::BrowserPinned),
-            None => {
-                workspace.browser = Some(browser.into());
-                Ok(())
-            }
-        }
     }
 
     /// Invalidate agent references after an unrelated page change, without governing browsing.
@@ -1416,25 +1440,25 @@ impl WorkspaceLease {
         self.store.target_owner(&self.workspace, requested)
     }
 
-    /// Add a physical tab under a new opaque handle.
+    /// Add a physical tab of `browser` under a new opaque handle.
     ///
-    /// The tab is refused when another workspace in the same browser already controls it. Once
-    /// added it is this workspace's tab, so it leaves the released pool.
-    pub fn add_tab(&self, tab: &PhysicalTab) -> Result<SelectedTab, WorkspaceError> {
+    /// The workspace's first tab binds it to `browser` for its life; a tab of any other browser
+    /// is then refused with [`WorkspaceError::BrowserPinned`]. The tab is refused when another
+    /// workspace in the same browser already controls it. Once added it is this workspace's tab,
+    /// so it leaves the released pool.
+    pub fn add_tab(&self, browser: &str, tab: &PhysicalTab) -> Result<SelectedTab, WorkspaceError> {
         let mut state = self.store.lock();
-        if state.controlled_elsewhere(&self.workspace, tab.tab_id) {
-            return Err(WorkspaceError::PhysicalTabOwned);
-        }
-        if let Some(browser) = state.browser_of(&self.workspace) {
-            state.forget_released(&browser, tab.tab_id);
-        }
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        let handle = TabHandle(short_handle("tab_", |candidate| {
-            workspace.tabs.contains_key(&TabHandle(candidate.into()))
-        }));
+        state.admit_tab(&self.workspace, browser, tab.tab_id)?;
+        let handle = {
+            let tabs = &state
+                .workspaces
+                .get(&self.workspace)
+                .ok_or(WorkspaceError::UnknownWorkspace)?
+                .tabs;
+            TabHandle(short_handle("tab_", |candidate| {
+                tabs.contains_key(&TabHandle(candidate.into()))
+            }))
+        };
         let value = TabState {
             physical_id: tab.tab_id,
             generation: 0,
@@ -1444,8 +1468,7 @@ impl WorkspaceLease {
             held: false,
             dialog: None,
         };
-        workspace.tabs.insert(handle.clone(), value.clone());
-        Ok(selected(&handle, &value))
+        state.bind_tab(&self.workspace, browser, &handle, value)
     }
 
     /// Apply one governed committed document and invalidate prior targets by generation.
@@ -1686,16 +1709,18 @@ impl WorkspaceLease {
     /// history, and the caller's handle keeps referring to "this workspace's tab slot". The
     /// binding starts at generation 0 with nothing the handle carried before, so no target, view,
     /// snapshot or image of the earlier page answers for the new one.
+    ///
+    /// The tab is a physical tab of `browser`, and binds the workspace to it as
+    /// [`Self::add_tab`] does, with the same refusals.
     pub fn restore_tab(
         &self,
         handle: &str,
+        browser: &str,
         tab: &PhysicalTab,
     ) -> Result<SelectedTab, WorkspaceError> {
         let handle = TabHandle(handle.into());
         let mut state = self.store.lock();
-        if state.controlled_elsewhere(&self.workspace, tab.tab_id) {
-            return Err(WorkspaceError::PhysicalTabOwned);
-        }
+        state.admit_tab(&self.workspace, browser, tab.tab_id)?;
         if state
             .workspaces
             .iter()
@@ -1703,14 +1728,6 @@ impl WorkspaceLease {
         {
             return Err(WorkspaceError::NotOwnedTab);
         }
-        if let Some(browser) = state.browser_of(&self.workspace) {
-            state.forget_released(&browser, tab.tab_id);
-        }
-        let workspace = state
-            .workspaces
-            .get_mut(&self.workspace)
-            .ok_or(WorkspaceError::UnknownWorkspace)?;
-        workspace.forget_tab(&handle);
         let value = TabState {
             physical_id: tab.tab_id,
             generation: 0,
@@ -1720,8 +1737,7 @@ impl WorkspaceLease {
             held: false,
             dialog: None,
         };
-        workspace.tabs.insert(handle.clone(), value.clone());
-        Ok(selected(&handle, &value))
+        state.bind_tab(&self.workspace, browser, &handle, value)
     }
 
     /// Map observed browser targets to opaque generation-bound handles.
@@ -2111,16 +2127,9 @@ mod tests {
 
     const TEST_BROWSER: &str = "browser_test";
 
-    /// Admit a workspace already working in one browser, the way real work arrives here.
-    ///
-    /// Nothing physical exists in a workspace until its first crossing binds it to a browser, so
-    /// a test that exercises physical tabs starts from the same state.
-    fn admit_in_browser(store: &WorkspaceStore) -> WorkspaceId {
-        let workspace = store.admit("test".into(), IntakeChannel::Mcp);
-        store
-            .pin_browser(workspace.as_str(), TEST_BROWSER)
-            .expect("a fresh workspace binds to its first browser");
-        workspace
+    /// Admit one test workspace. Its first tab binds it to [`TEST_BROWSER`].
+    fn admit_test(store: &WorkspaceStore) -> WorkspaceId {
+        store.admit("test".into(), IntakeChannel::Mcp)
     }
 
     fn physical(id: u64, url: &str) -> PhysicalTab {
@@ -2230,10 +2239,9 @@ mod tests {
     fn a_workspace_outlives_its_connection_and_dies_with_its_owner() {
         let store = WorkspaceStore::default();
         let owned = store.resume_or_admit("shell".into(), IntakeChannel::Cli, marker(4312, 100));
-        store.pin_browser(owned.as_str(), TEST_BROWSER).unwrap();
         let lease = store.acquire(&owned).unwrap();
         let tab = lease
-            .add_tab(&physical(41, "https://example.com/"))
+            .add_tab(TEST_BROWSER, &physical(41, "https://example.com/"))
             .unwrap();
         lease
             .apply_landing(&tab.handle, &physical(41, "https://example.com/"))
@@ -2292,10 +2300,9 @@ mod tests {
         tabs: &[(u64, &str)],
     ) -> WorkspaceId {
         let workspace = store.admit(client.into(), IntakeChannel::Mcp);
-        store.pin_browser(workspace.as_str(), browser).unwrap();
         let lease = store.acquire(&workspace).unwrap();
         for (id, url) in tabs {
-            let tab = lease.add_tab(&physical(*id, url)).unwrap();
+            let tab = lease.add_tab(browser, &physical(*id, url)).unwrap();
             lease
                 .apply_landing(&tab.handle, &physical(*id, url))
                 .unwrap();
@@ -2445,11 +2452,10 @@ mod tests {
         const SHELL: &str = "shell";
         let store = WorkspaceStore::default();
         let owned = store.resume_or_admit(SHELL.into(), IntakeChannel::Cli, marker(4312, 100));
-        store.pin_browser(owned.as_str(), TEST_BROWSER).unwrap();
         let lease = store.acquire(&owned).unwrap();
         for id in [1, 2, 3, 4, 5] {
             let tab = lease
-                .add_tab(&physical(id, "https://example.com/"))
+                .add_tab(TEST_BROWSER, &physical(id, "https://example.com/"))
                 .unwrap();
             lease
                 .apply_landing(&tab.handle, &physical(id, "https://example.com/"))
@@ -2476,7 +2482,7 @@ mod tests {
         store
             .acquire(&taker)
             .unwrap()
-            .add_tab(&physical(3, "https://example.com/"))
+            .add_tab(TEST_BROWSER, &physical(3, "https://example.com/"))
             .unwrap();
         assert_eq!(
             claimed_by(&store, TEST_BROWSER, SHELL, "https://example.com/"),
@@ -2503,18 +2509,26 @@ mod tests {
         let _chrome = workspace_with_tabs(&store, "browser_chrome", &[(5, "https://a.test/")]);
         let edge = workspace_with_tabs(&store, "browser_edge", &[]);
         let edge_lease = store.acquire(&edge).unwrap();
-        assert!(edge_lease.add_tab(&physical(5, "https://b.test/")).is_ok());
+        assert!(edge_lease
+            .add_tab("browser_edge", &physical(5, "https://b.test/"))
+            .is_ok());
         drop(edge_lease);
 
         let second_chrome = workspace_with_tabs(&store, "browser_chrome", &[]);
         let lease = store.acquire(&second_chrome).unwrap();
         assert_eq!(
-            lease.add_tab(&physical(5, "https://a.test/")).unwrap_err(),
+            lease
+                .add_tab("browser_chrome", &physical(5, "https://a.test/"))
+                .unwrap_err(),
             WorkspaceError::PhysicalTabOwned
         );
         assert_eq!(
             lease
-                .restore_tab("tab_restored_too", &physical(5, "https://a.test/"))
+                .restore_tab(
+                    "tab_restored_too",
+                    "browser_chrome",
+                    &physical(5, "https://a.test/")
+                )
                 .unwrap_err(),
             WorkspaceError::PhysicalTabOwned
         );
@@ -2523,9 +2537,11 @@ mod tests {
     #[test]
     fn a_same_document_change_keeps_targets_and_expires_views() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
         let tab = lease
             .apply_landing(&tab.handle, &physical(7, "https://example.com/"))
             .unwrap();
@@ -2600,9 +2616,11 @@ mod tests {
     #[test]
     fn a_control_keeps_its_handle_within_a_document() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let tab = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com"))
             .unwrap();
@@ -2633,9 +2651,11 @@ mod tests {
     #[test]
     fn a_new_generation_mints_new_handles_and_old_ones_are_forgotten() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let mut current = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com/0"))
             .unwrap();
@@ -2683,9 +2703,11 @@ mod tests {
     #[test]
     fn the_record_limit_evicts_earlier_generations_before_the_current_one() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let first = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com/1"))
             .unwrap();
@@ -2738,9 +2760,11 @@ mod tests {
     #[test]
     fn a_retired_handle_refuses_with_the_word_that_says_why() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let mut current = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com/0"))
             .unwrap();
@@ -2809,9 +2833,11 @@ mod tests {
     #[test]
     fn recovered_controls_get_handles_on_the_stale_handles_tab() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let tab = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com"))
             .unwrap();
@@ -2858,9 +2884,11 @@ mod tests {
     #[test]
     fn reading_a_removed_control_again_revives_its_handle() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let tab = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com"))
             .unwrap();
@@ -2889,9 +2917,11 @@ mod tests {
     #[test]
     fn a_re_render_the_page_proves_keeps_one_handle_and_one_record() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let tab = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com"))
             .unwrap();
@@ -2956,9 +2986,11 @@ mod tests {
                 && suffix.bytes().all(|byte| HANDLE_ALPHABET.contains(&byte))
         };
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         assert!(
             shaped(tab.handle.as_str(), "tab_"),
             "{}",
@@ -3054,7 +3086,9 @@ mod tests {
         let first = store.admit("first".into(), IntakeChannel::Mcp);
         let second = store.admit("second".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&first).unwrap();
-        let tab = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         let tab = lease
             .apply_landing(&tab.handle, &physical(1, "https://example.com"))
             .unwrap();
@@ -3100,7 +3134,7 @@ mod tests {
         let handles = |workspace: &WorkspaceId, physical_id: u64| {
             let lease = store.acquire(workspace).unwrap();
             let tab = lease
-                .add_tab(&physical(physical_id, "https://example.com"))
+                .add_tab(TEST_BROWSER, &physical(physical_id, "https://example.com"))
                 .unwrap();
             let targets = lease
                 .register_targets(
@@ -3144,7 +3178,9 @@ mod tests {
         let store = WorkspaceStore::default();
         let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(1, "https://example.com")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(1, "https://example.com"))
+            .unwrap();
         let targets = lease
             .register_targets(
                 &tab,
@@ -3171,9 +3207,13 @@ mod tests {
         let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
         assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
-        let first = lease.add_tab(&physical(1, "about:blank")).unwrap();
+        let first = lease
+            .add_tab(TEST_BROWSER, &physical(1, "about:blank"))
+            .unwrap();
         assert_eq!(lease.select_tab(None).unwrap().handle, first.handle);
-        let second = lease.add_tab(&physical(2, "about:blank")).unwrap();
+        let second = lease
+            .add_tab(TEST_BROWSER, &physical(2, "about:blank"))
+            .unwrap();
         assert_eq!(
             lease.select_tab(None).unwrap_err(),
             WorkspaceError::AmbiguousTab,
@@ -3193,9 +3233,11 @@ mod tests {
     #[test]
     fn decisive_close_receipt_tolerates_an_earlier_async_close_event() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
         store.apply_browser_close(TEST_BROWSER, 7);
         assert!(lease.confirm_tab_closed(&tab.handle).is_ok());
         assert_eq!(lease.select_tab(None).unwrap_err(), WorkspaceError::NoTab);
@@ -3212,7 +3254,7 @@ mod tests {
         TargetHandle,
     ) {
         let tab = lease
-            .add_tab(&physical(physical_id, "about:blank"))
+            .add_tab(TEST_BROWSER, &physical(physical_id, "about:blank"))
             .unwrap();
         let tab = lease
             .apply_landing(
@@ -3265,7 +3307,7 @@ mod tests {
     #[test]
     fn a_tab_the_person_closes_leaves_no_snapshot_or_image() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
         let _ = tab_with_everything(&lease, 7);
 
@@ -3287,7 +3329,7 @@ mod tests {
     fn a_recreated_handle_never_serves_the_closed_pages_capture_or_diff() {
         for closed_first in [false, true] {
             let store = WorkspaceStore::default();
-            let workspace = admit_in_browser(&store);
+            let workspace = admit_test(&store);
             let lease = store.acquire(&workspace).unwrap();
             let (old, image, view, target) = tab_with_everything(&lease, 7);
             if closed_first {
@@ -3295,7 +3337,11 @@ mod tests {
             }
 
             let restored = lease
-                .restore_tab(old.handle.as_str(), &physical(9, "about:blank"))
+                .restore_tab(
+                    old.handle.as_str(),
+                    TEST_BROWSER,
+                    &physical(9, "about:blank"),
+                )
                 .unwrap();
             assert_eq!(restored.generation, 0);
             let landed = lease
@@ -3329,7 +3375,9 @@ mod tests {
         let store = WorkspaceStore::default();
         let workspace = store.admit("test".into(), IntakeChannel::Mcp);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
         let tab = lease
             .apply_landing(&tab.handle, &physical(7, "https://example.com"))
             .unwrap();
@@ -3415,9 +3463,11 @@ mod tests {
     #[test]
     fn snapshots_supersede_per_tab_go_stale_on_commit_and_die_with_the_tab() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
         let whole = super::SnapshotScope {
             root: None,
             max_depth: 6,
@@ -3473,9 +3523,11 @@ mod tests {
             None,
             "closure removes snapshots"
         );
-        let other = admit_in_browser(&store);
+        let other = admit_test(&store);
         let other_lease = store.acquire(&other).unwrap();
-        let stranger = other_lease.add_tab(&physical(9, "about:blank")).unwrap();
+        let stranger = other_lease
+            .add_tab(TEST_BROWSER, &physical(9, "about:blank"))
+            .unwrap();
         assert_eq!(
             other_lease.previous_snapshot(&stranger, &whole),
             None,
@@ -3486,9 +3538,11 @@ mod tests {
     #[test]
     fn captured_images_supersede_respect_the_ceiling_and_expire() {
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let lease = store.acquire(&workspace).unwrap();
-        let tab = lease.add_tab(&physical(7, "about:blank")).unwrap();
+        let tab = lease
+            .add_tab(TEST_BROWSER, &physical(7, "about:blank"))
+            .unwrap();
         let first = lease
             .register_image(&tab, "image/jpeg", "AAAA", 3)
             .unwrap()
@@ -3530,7 +3584,7 @@ mod tests {
         use std::time::{Duration, Instant};
 
         let store = WorkspaceStore::default();
-        let workspace = admit_in_browser(&store);
+        let workspace = admit_test(&store);
         let first_lease = store.acquire(&workspace).unwrap();
 
         // 1. Contention with deadline expiry:

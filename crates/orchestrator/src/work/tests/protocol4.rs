@@ -60,7 +60,7 @@ fn page(world: &wire::WorldCall) -> Value {
 }
 
 /// The browser's answer to one request when nothing goes wrong.
-fn ordinary(correlation: &str, primitive: &wire::Primitive) -> wire::Receipt {
+pub(super) fn ordinary(correlation: &str, primitive: &wire::Primitive) -> wire::Receipt {
     let effect = |value: Value| wire::Receipt {
         dispatched: true,
         ..FakeExtension::ok(correlation, value)
