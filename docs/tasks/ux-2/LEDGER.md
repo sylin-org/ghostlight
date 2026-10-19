@@ -20,7 +20,7 @@ the push.
 | u3 band-and-rows-at-every-width | window | j-14, window-11, n-s-04, j-26, window-9 (Settings breakpoint), n-d-08 | landed (this commit) |
 | u4 a-switched-off-channel-is-said | window | n-s-02, n-d-05 | landed (this commit) |
 | u5 policy-reads-plainly | window | n-s-01, n-d-03, j-15, n-s-07, j-16, j-18 | landed (this commit) |
-| u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | landed (this commit); the tray tooltip's period (j-32) needs crates/desktop, see Notes |
+| u6 one-word-per-act | window | j-08, j-28, j-29, j-32, window-9 (Notifications), window-7, window-3 | landed (this commit); j-32 landed in the integration pass, see Notes |
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | landed (this commit) |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
 | n2 the-tray-keeps-the-mascot | native | j-11 (owner) | landed (this commit) |
@@ -315,14 +315,12 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   come from `TrayItemId::label` and `TrayItemId::intent`, both by the runtime state; the shell's
   four entry ids are unchanged, so crates/desktop needs nothing. The desktop goldens were
   regenerated and did not change: their trays are Ready and Paused.
-- u6 (j-32), open for the native lane: the tray tooltip's "Ready. Ghostlight is running; ..." is
-  not made here. `each_golden_decodes_to_its_frame` in crates/desktop/src/link.rs pins the
-  tooltip of tests/golden/desktop/workbench.json as "Ready -- Ghostlight is running; ...", and
-  this lane may not edit crates/desktop. One commit changes `tray_tooltip` in
-  language/workbench.rs (`format!("{}. {line}", ...)` in both arms, and its two tests),
-  regenerates the desktop goldens and updates that assertion. Others can watch reads "On: anyone
-  on this computer can open this view" and "Off: only this window shows Ghostlight", the re-walk's
-  colon form. The navigate pill's arrow is the kit's arrow path as an SVG, and
+- u6 (j-32): the tray tooltip says the band's word as its own sentence, "Ready. Ghostlight is
+  running; ...". `tray_tooltip` in language/workbench.rs joins them with a period in both arms,
+  the desktop goldens are regenerated, and `each_golden_decodes_to_its_frame` in
+  crates/desktop/src/link.rs pins the new tooltip. This landed in the integration pass. Others
+  can watch reads "On: anyone on this computer can open this view" and "Off: only this window
+  shows Ghostlight", the re-walk's colon form. The navigate pill's arrow is the kit's arrow path as an SVG, and
   tests/golden/protocol4/assets.sha256 is regenerated.
 - u6 (j-28): Set up everything and its caption are hidden whenever nothing is left for it to do,
   in the window as on a watching page; once a press leaves nothing to do, focus moves to Re-check.

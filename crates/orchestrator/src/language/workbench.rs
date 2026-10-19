@@ -391,9 +391,9 @@ pub fn service_line(counts: Option<ConnectionCounts>) -> String {
 pub fn tray_tooltip(readiness: Readiness, counts: ConnectionCounts) -> String {
     let line = service_line(Some(counts));
     if counts.browsers == 0 && counts.agents > 0 {
-        format!("{} -- {line} {NO_BROWSER}.", readiness.word())
+        format!("{}. {line} {NO_BROWSER}.", readiness.word())
     } else {
-        format!("{} -- {line}", readiness.word())
+        format!("{}. {line}", readiness.word())
     }
 }
 
@@ -1175,11 +1175,11 @@ mod tests {
         let both = counts(2, 2).unwrap();
         assert_eq!(
             tray_tooltip(Readiness::Ready, both),
-            "Ready -- Ghostlight is running; 2 agents and 2 browsers connected."
+            "Ready. Ghostlight is running; 2 agents and 2 browsers connected."
         );
         assert_eq!(
             tray_tooltip(Readiness::Paused, both),
-            "Paused -- Ghostlight is running; 2 agents and 2 browsers connected."
+            "Paused. Ghostlight is running; 2 agents and 2 browsers connected."
         );
     }
 
@@ -1187,11 +1187,11 @@ mod tests {
     fn the_tray_tooltip_says_when_no_browser_is_connected() {
         assert_eq!(
             tray_tooltip(Readiness::NotConnected, counts(1, 0).unwrap()),
-            "Not connected -- Ghostlight is running; 1 agent connected. No browser connected."
+            "Not connected. Ghostlight is running; 1 agent connected. No browser connected."
         );
         assert_eq!(
             tray_tooltip(Readiness::Ready, counts(0, 0).unwrap()),
-            "Ready -- Ghostlight is running; nothing is connected yet."
+            "Ready. Ghostlight is running; nothing is connected yet."
         );
     }
 }

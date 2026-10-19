@@ -1,7 +1,7 @@
 {
   "kind": "tray_model",
   "model": {
-    "tooltip": "Paused -- Ghostlight is running; 2 agents and 2 browsers connected.",
+    "tooltip": "Paused. Ghostlight is running; 2 agents and 2 browsers connected.",
     "items": [
       {
         "id": "open",

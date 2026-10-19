@@ -638,7 +638,7 @@ mod tests {
         let tray = golden_tray();
         assert_eq!(
             tray.tooltip,
-            "Ready -- Ghostlight is running; 2 agents and 2 browsers connected."
+            "Ready. Ghostlight is running; 2 agents and 2 browsers connected."
         );
         assert_eq!(tray.state, TrayState::Ready);
         assert_eq!(
