@@ -142,6 +142,20 @@ where to get the bundle, the install command, what to try, and what each result 
 
 ## Notes
 
+**CachyOS check, 2026-10-19.** The development build at e9646471 was deployed on test-01 (it had
+run 7abbdc39); `ghostlight doctor` reads Ready, with Chromium registered and every agent
+connected. A first real task (`browser_navigate` to the demo desk) failed: "The Ghostlight adapter
+did not connect in time after the browser started." No browser relay had run since 2026-10-18
+21:22. Cause, on this machine: Chromium started with the session at 08:29:09, and the drive that
+holds the repository (`/run/media/test/WORKBENCH`, /dev/sdb2) mounted at 08:30:27, so the unpacked
+2.0 extension's folder was missing at browser start and Chromium dropped the extension from the
+profile. The profile still holds the 1.x store extension, disabled. Owed: the owner loads
+`extension/` unpacked again (the browser's own data is the owner's). An unpacked extension stays
+only if its folder is there when the browser starts. Seen on the way, for windows-claude: the
+extension probe counts the disabled 1.x store copy as holding the extension, so the refusal said to
+open a window of the browser, which cannot help; and the morning service's diagnostics file ends in
+a cut-off record at its exit.
+
 **Scope, 2026-10-19.** The owner, while Part 1 started: "you shouldn't try to install
 dependencies, I think - just make sure Ghostlight is working for this OS specifically. I'll deploy
 ghostlight on different Linux environments, and validate against that." Asked whether the release
