@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a and C10b have landed, and C22 landed with C13. C11 is
-next. ux-2 has closed, so every slice whose "After" is met can start.
+C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a, C10b and C11 have landed, and C22 landed with C13.
+C12a is next. ux-2 has closed, so every slice whose "After" is met can start.
 
 ## Slices
 
@@ -25,8 +25,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C13 | fix(provenance): the opener is named once | candidate | C7 | see Notes | landed (c78d4bd3) |
 | C9 | fix(work): a duration wait says what its deadline did | candidate | A1, A2 | see Notes | landed (565293f6) |
 | C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | see Notes | landed (51d1e05d, review fixup) |
-| C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | see Notes | landed (this commit) |
-| C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | - | todo |
+| C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | see Notes | landed (56d0f7c8) |
+| C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | see Notes | landed (this commit) |
 | C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | - | todo |
 | C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | - | todo |
 | C21 | feat(adapter): the service reads the browser's life | candidate | C4, B1 | lands with B1; cross-lane `protocol4/wire.rs` | todo |
@@ -419,3 +419,51 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   later stage, and `a_refused_recording_save_records_its_deciding_check`, in
   `work/tests/catalog_authority.rs`. No catalog, result or audit golden changed. No journey is
   needed.
+- C11, the cause: `CancelCause::Quit` carries a closed `QuitCause` in `language/outcome.rs`. It
+  names the four quit reasons and the two other ends that begin the drain, the end of the sign-in
+  session and the idle exit, because the drain now keeps the cause its quit began with and a call
+  refused by it reads that cause. A call cancelled before it started gets "Try the call again in a
+  moment." after a quit, a replace, an idle exit or an unknown reason (the edge reconnects after
+  each), and no step after an uninstall or a sign-out (the edge exits). Only
+  `CancelledBeforeStart` gains the step; a call cancelled before or after dispatch keeps its
+  steps. The summary and the audit word are unchanged, and `EdgeFailure::Expired` reads the same
+  step from its one constant.
+- C11, the CI race: a session that opened before the quit's end had its queue stopped by the end,
+  and a call that arrived after that met `Refused::Closed`, which ended the stream with no answer.
+  The queue now keeps the cause it stopped for, and `admit` refuses with
+  `Refused::Cancelled(cause)` whether the queue stopped or the drain refuses. `LiveSession::handle`
+  answers every call it does not queue on the thread that reads the stream, through
+  `execute_prepared` with `Admission::Cancelled(cause)`, before the loop can reach the stream's
+  close, and no longer ends the session. A call cancelled at admission takes no lease and skips the
+  channel preflight, so it says it was cancelled.
+- C11, the token with `initialize`: it is written ahead of the `initialize` answer, before the
+  session's source is read, and even after a service end sealed the stream: a fresh session holds
+  no tab, so it is the token the end would hand it. Before, a stream sealed before its
+  `initialize` got no token at all, and a held source read delayed it.
+- C11, the bound: `ResumeState::encode` never writes past `MAX_RESUME_TOKEN_BYTES` (64 KiB, what
+  `decode` reads). A state too large keeps its first tabs, as many as fit; a tab left out reads as
+  no longer open after a restart.
+- C11, an unreadable token resumes `ResumeState::unreadable()`: the oldest revision, no claim, no
+  tab. Its diagnostics line is `harness_attached` at warn with the decode error, an existing event
+  (the vocabulary is install's bridge). The test hub's sink is off, so no test reads the line.
+- C11, proofs: in `service/mod.rs` `a_call_during_a_quit_gets_a_tool_result_and_an_audit_line`
+  (quit, replace and an unknown reason, each once while the drain waits on work in flight and once
+  after the end stopped the queue, with no sleep: each step waits on an answer or the quit signal),
+  `a_call_during_an_uninstall_gets_no_retry_step`,
+  `an_unreadable_token_resumes_an_initialized_session_without_tabs` and
+  `an_answered_initialize_always_has_a_token` (a held source read, and a stream sealed by a
+  replace before its `initialize`); `a_quitting_service_takes_no_new_connection` keeps the old
+  test's readiness check. In `intake/mcp/tests.rs`
+  `an_unknown_revision_resumes_at_the_oldest_supported_revision`,
+  `an_unreadable_token_resumes_an_initialized_session_at_the_oldest_revision` and
+  `a_token_never_outgrows_the_opening_cap`; in `service/admission.rs`
+  `a_stopped_queue_refuses_later_requests_for_the_cause_it_first_stopped_for`; in
+  `language/outcome.rs` the next steps for every `QuitCause`. Deleted
+  `a_quit_answers_new_invocations_with_shutting_down`,
+  `a_service_error_for_a_call_is_an_internal_error_naming_its_code` and
+  `the_quit_refusal_is_plain_ascii_and_says_nothing_was_sent`; the bound of a protocol refusal's
+  message is now proved on the parse error's detail. No catalog, result or audit golden changed.
+  No journey is needed: the service tests run over real relay streams. D2: LANGUAGE says a call
+  during a quit is a cancelled tool result with its retry step, and ARCHITECTURE says the token is
+  published with the `initialize` answer, bounded, and that an unreadable token resumes at the
+  oldest revision with no tab.

@@ -147,13 +147,17 @@ struct InvocationStage {
 }
 
 /// How the session queue took a request: queued for its worker, or refused because the queue was
-/// full, which the executor answers through the completion path without running it.
+/// full or could admit nothing more, which the executor answers through the completion path
+/// without running it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Admission {
     /// The request waited its turn in the session queue.
     Queued,
     /// The session queue was full; the request is refused for capacity.
     OverCapacity,
+    /// The session admitted nothing more when the request arrived, because Ghostlight was
+    /// quitting; the request is cancelled before it started, for this cause.
+    Cancelled(CancelCause),
 }
 
 impl PreparedInvocation {
@@ -338,6 +342,7 @@ impl ApplicationExecutor {
         let cancellation = &prepared.cancellation;
         let started = prepared.received;
         let capacity_refused = admission == Admission::OverCapacity;
+        let refused_at_admission = admission != Admission::Queued;
         let gate = CompletionGate::default();
         let operation = match &prepared.decoded {
             Ok(operation) => operation,
@@ -381,7 +386,7 @@ impl ApplicationExecutor {
         };
         let deadline = prepared.deadline;
         let requires_lease = operation_requires_workspace_lease(operation);
-        let lease = if requires_lease && !capacity_refused {
+        let lease = if requires_lease && !refused_at_admission {
             if let Ok(lease) = self.workspaces.acquire(workspace) {
                 Some(lease)
             } else {
@@ -414,6 +419,8 @@ impl ApplicationExecutor {
                 observed: Observed::default(),
                 audit: refusal.audit(),
             }
+        } else if let Admission::Cancelled(by) = admission {
+            cancelled_before_start(&invocation, by)
         } else if let Some(terminal) = self.channel_preflight(&context) {
             terminal
         } else if (!requires_lease || lease.is_some())
@@ -441,24 +448,7 @@ impl ApplicationExecutor {
                 self.run_without_workspace_lease(&context, operation)
             }
         } else if let Some(by) = cancellation.cause() {
-            let refusal = Refusal::CancelledBeforeStart { by };
-            let summary = refusal.summary();
-            Terminal {
-                result: InvocationResult::new(
-                    &invocation,
-                    Status::Cancelled,
-                    Effect::None,
-                    Readiness::NotApplicable,
-                    true,
-                    &summary,
-                    json!({"reason":"cancelled"}),
-                    refusal.next_steps(),
-                ),
-                decision: Decision::permitted(),
-                physical_id: None,
-                observed: Observed::default(),
-                audit: refusal.audit(),
-            }
+            cancelled_before_start(&invocation, by)
         } else if Instant::now() >= deadline {
             let refusal = Refusal::DeadlineBeforeStart;
             let summary = refusal.summary();
@@ -2367,6 +2357,28 @@ impl<'a> Completion<'a> {
             provenance: context.provenance,
             findings: context.findings.take(),
         }
+    }
+}
+
+/// The terminal of `invocation` when it was cancelled by `by` before it started: nothing ran,
+/// so it is safe to repeat.
+fn cancelled_before_start(invocation: &InvocationId, by: CancelCause) -> Terminal {
+    let refusal = Refusal::CancelledBeforeStart { by };
+    Terminal {
+        result: InvocationResult::new(
+            invocation,
+            Status::Cancelled,
+            Effect::None,
+            Readiness::NotApplicable,
+            true,
+            &refusal.summary(),
+            json!({"reason":"cancelled"}),
+            refusal.next_steps(),
+        ),
+        decision: Decision::permitted(),
+        physical_id: None,
+        observed: Observed::default(),
+        audit: refusal.audit(),
     }
 }
 

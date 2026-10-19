@@ -1,20 +1,15 @@
 //! What Ghostlight says on its MCP intake.
 //!
-//! Four kinds of words live here: the refusals of a relay opening, the messages of the JSON-RPC
-//! errors the MCP session engine answers itself, the sentences of the failure templates a
-//! MCP edge sends when it cannot reach the service, and the sentence the service answers to work
-//! that arrives during a quit. The MCP edge authors no words, so all of them come from this
-//! module.
+//! Three kinds of words live here: the refusals of a relay opening, the messages of the JSON-RPC
+//! errors the MCP session engine answers itself, and the sentences of the failure templates a
+//! MCP edge sends when it cannot reach the service. The MCP edge authors no words, so all of them
+//! come from this module. A call that arrives during a quit is answered as a tool result, in
+//! [`super::outcome`]'s words.
+
+use super::outcome::REPEAT_IN_A_MOMENT;
 
 /// Longest message a JSON-RPC error carries, in characters.
 const MAX_ERROR_MESSAGE_CHARS: usize = 500;
-
-/// The service's stable reason code for an invocation that arrives after a quit has begun.
-pub const SHUTTING_DOWN_CODE: &str = "shutting_down";
-
-/// What the service says to an invocation that arrives after a quit has begun.
-pub const SHUTTING_DOWN_MESSAGE: &str =
-    "Ghostlight is quitting and takes no new work. Nothing was sent. Try the call again in a moment.";
 
 /// Why the service refused a relay opening, so the peer can tell the person.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,13 +74,6 @@ pub enum ProtocolRefusal {
     MissingToolName,
     /// `tools/call` carried arguments that are not an object.
     ArgumentsNotObject,
-    /// The service answered a forwarded request with an error code and message.
-    Service {
-        /// The service's stable reason code.
-        code: String,
-        /// The service's own message.
-        message: String,
-    },
 }
 
 impl ProtocolRefusal {
@@ -108,7 +96,6 @@ impl ProtocolRefusal {
             Self::DiscoveryCapabilities => "server/discover requires client capabilities".into(),
             Self::MissingToolName => "tools/call requires params.name".into(),
             Self::ArgumentsNotObject => "params.arguments must be an object".into(),
-            Self::Service { code, message } => format!("{code}: {message}"),
         };
         message.chars().take(MAX_ERROR_MESSAGE_CHARS).collect()
     }
@@ -142,7 +129,7 @@ impl EdgeFailure {
             Self::CutOff => {
                 &["Read the page to see whether the call took effect before repeating it."]
             }
-            Self::Expired => &["Try the call again in a moment."],
+            Self::Expired => &[REPEAT_IN_A_MOMENT],
         }
     }
 
@@ -166,7 +153,7 @@ impl EdgeFailure {
 
 #[cfg(test)]
 mod tests {
-    use super::{EdgeFailure, ProtocolRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
+    use super::{EdgeFailure, ProtocolRefusal};
 
     #[test]
     fn every_failure_sentence_is_plain_ascii() {
@@ -176,13 +163,6 @@ mod tests {
             assert!(failure.call_next_steps().iter().all(|step| step.is_ascii()));
             assert!(failure.call_summary().ends_with('.'));
         }
-    }
-
-    #[test]
-    fn the_quit_refusal_is_plain_ascii_and_says_nothing_was_sent() {
-        assert!(SHUTTING_DOWN_MESSAGE.is_ascii());
-        assert!(SHUTTING_DOWN_MESSAGE.contains("Nothing was sent"));
-        assert!(SHUTTING_DOWN_MESSAGE.ends_with('.'));
     }
 
     #[test]
@@ -202,13 +182,9 @@ mod tests {
     }
 
     #[test]
-    fn a_service_refusal_names_its_code_and_stays_bounded() {
-        let refusal = ProtocolRefusal::Service {
-            code: SHUTTING_DOWN_CODE.into(),
-            message: "x".repeat(2_000),
-        };
-        let message = refusal.message();
-        assert!(message.starts_with("shutting_down: x"));
+    fn a_parse_refusal_carries_the_parsers_detail_and_stays_bounded() {
+        let message = ProtocolRefusal::Parse("x".repeat(2_000)).message();
+        assert!(message.starts_with("Parse error: x"));
         assert_eq!(message.chars().count(), 500);
     }
 }

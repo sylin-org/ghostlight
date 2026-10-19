@@ -37,9 +37,13 @@ mod lean;
 
 /// The newest MCP revision this engine serves, offered when a client asks for an unknown one.
 pub const LATEST_REVISION: &str = "2025-11-25";
+/// The oldest MCP revision this engine serves. A resumed session whose revision this engine does
+/// not serve, or whose token cannot be read, continues at it, because its results also carry the
+/// lean JSON as text, which a client of any revision reads.
+pub const OLDEST_REVISION: &str = "2024-11-05";
 /// Every initialized MCP revision this engine serves, oldest first.
 pub const SUPPORTED_REVISIONS: [&str; 4] =
-    ["2024-11-05", "2025-03-26", "2025-06-18", LATEST_REVISION];
+    [OLDEST_REVISION, "2025-03-26", "2025-06-18", LATEST_REVISION];
 /// The first MCP revision whose clients read `structuredContent`; earlier ones get the lean JSON
 /// in the text block as well (ADR-0198 Decision 24).
 const STRUCTURED_CONTENT_REVISION: &str = "2025-06-18";
@@ -52,7 +56,9 @@ pub const DISCOVERY_REVISION: &str = "2026-07-28";
 
 const JSONRPC_VERSION: &str = "2.0";
 const RESUME_TOKEN_PREFIX: &str = "rs1.";
-const MAX_RESUME_TOKEN_BYTES: usize = 64 * 1024;
+/// The longest resume token an opening may carry: [`ResumeState::decode`] reads none longer, and
+/// [`ResumeState::encode`] writes none longer.
+pub const MAX_RESUME_TOKEN_BYTES: usize = 64 * 1024;
 
 /// The JSON-RPC methods this engine knows.
 pub mod method {
@@ -211,11 +217,19 @@ impl McpSession {
     }
 
     /// A session continued from a resume token: initialized, with its revision and client.
+    ///
+    /// The client negotiated its revision with an earlier service, so it is never offered another
+    /// one. A revision this engine does not serve continues at [`OLDEST_REVISION`].
     #[must_use]
     pub fn resumed(state: ResumeState) -> Self {
         let mut session = Self::new();
         session.phase = Phase::Ready;
-        session.revision = Some(negotiate(&state.revision));
+        session.revision = Some(
+            SUPPORTED_REVISIONS
+                .into_iter()
+                .find(|served| *served == state.revision)
+                .unwrap_or(OLDEST_REVISION),
+        );
         session.claim = state.claim.as_deref().and_then(bounded_claim);
         session
     }
@@ -291,24 +305,6 @@ impl McpSession {
                     success(
                         client_id,
                         call_tool_result(revision, text, result, is_error, content),
-                    )
-                })
-                .into_iter()
-                .collect(),
-            ServiceResponse::Error {
-                id: Some(id),
-                code: service_code,
-                message,
-            } => self
-                .finish_call(&id)
-                .map(|client_id| {
-                    rpc_error(
-                        client_id,
-                        code::INTERNAL_ERROR,
-                        &ProtocolRefusal::Service {
-                            code: service_code,
-                            message,
-                        },
                     )
                 })
                 .into_iter()
@@ -591,25 +587,60 @@ pub enum ResumeError {
     /// The token does not decode to a resume state.
     #[error("resume token does not hold a resume state")]
     Content,
-    /// The token names an MCP revision this engine does not serve.
-    #[error("resume token names an unsupported MCP revision")]
-    Revision,
 }
 
 impl ResumeState {
-    /// Encode the state as an opaque token: a version prefix and base64url JSON.
+    /// What an opening whose token cannot be read resumes (ADR-0203 Decision 1): the client
+    /// initialized with an earlier service and will not initialize again, so its session continues
+    /// at [`OLDEST_REVISION`], naming no client and owning no tab.
     #[must_use]
-    pub fn encode(&self) -> String {
-        let json = serde_json::to_vec(self).unwrap_or_default();
-        format!("{RESUME_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(json))
+    pub fn unreadable() -> Self {
+        Self {
+            revision: OLDEST_REVISION.into(),
+            claim: None,
+            owned_tabs: Vec::new(),
+        }
     }
 
-    /// Decode a token written by [`ResumeState::encode`].
+    /// Encode the state as an opaque token: a version prefix and base64url JSON, never longer
+    /// than [`MAX_RESUME_TOKEN_BYTES`].
+    ///
+    /// A state too large for that keeps its first tabs, as many as fit. A tab left out is not
+    /// restored after a restart, and its handle then reads as no longer open.
+    #[must_use]
+    pub fn encode(&self) -> String {
+        let token = |tabs: usize| {
+            let kept = Self {
+                owned_tabs: self.owned_tabs[..tabs].to_vec(),
+                ..self.clone()
+            };
+            let json = serde_json::to_vec(&kept).unwrap_or_default();
+            format!("{RESUME_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(json))
+        };
+        let whole = token(self.owned_tabs.len());
+        if whole.len() <= MAX_RESUME_TOKEN_BYTES {
+            return whole;
+        }
+        // The most tabs that fit: `fits` always fits, since with no tab the state is a served
+        // revision and a bounded claim, and `over` never does.
+        let (mut fits, mut over) = (0, self.owned_tabs.len());
+        while over - fits > 1 {
+            let middle = fits + (over - fits) / 2;
+            if token(middle).len() <= MAX_RESUME_TOKEN_BYTES {
+                fits = middle;
+            } else {
+                over = middle;
+            }
+        }
+        token(fits)
+    }
+
+    /// Decode a token written by [`ResumeState::encode`]. A revision this engine does not serve
+    /// still decodes; [`McpSession::resumed`] decides where it continues.
     ///
     /// # Errors
     ///
-    /// Returns a [`ResumeError`] when the token is malformed, too long, or names a revision this
-    /// engine does not serve.
+    /// Returns a [`ResumeError`] when the token is malformed or too long.
     pub fn decode(token: &str) -> Result<Self, ResumeError> {
         if token.len() > MAX_RESUME_TOKEN_BYTES {
             return Err(ResumeError::TooLong);
@@ -620,11 +651,7 @@ impl ResumeState {
         let json = URL_SAFE_NO_PAD
             .decode(body)
             .map_err(|_| ResumeError::Encoding)?;
-        let state: Self = serde_json::from_slice(&json).map_err(|_| ResumeError::Content)?;
-        if !SUPPORTED_REVISIONS.contains(&state.revision.as_str()) {
-            return Err(ResumeError::Revision);
-        }
-        Ok(state)
+        serde_json::from_slice(&json).map_err(|_| ResumeError::Content)
     }
 }
 
@@ -751,7 +778,6 @@ fn refusal(id: Value, why: &ProtocolRefusal) -> Value {
         | ProtocolRefusal::DiscoveryCapabilities
         | ProtocolRefusal::MissingToolName
         | ProtocolRefusal::ArgumentsNotObject => code::INVALID_PARAMS,
-        ProtocolRefusal::Service { .. } => code::INTERNAL_ERROR,
     };
     rpc_error(id, error_code, why)
 }

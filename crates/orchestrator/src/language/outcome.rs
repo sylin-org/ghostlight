@@ -1413,9 +1413,54 @@ pub enum CancelCause {
     Client,
     /// The agent's session ended while the call waited or ran: its connection closed.
     SessionEnded,
-    /// Ghostlight quit while the call waited or ran.
-    Quit,
+    /// Ghostlight quit while the call waited or ran, or before it was admitted, for this reason.
+    Quit(QuitCause),
 }
+
+/// Why Ghostlight was ending when it cancelled a call. It decides whether repeating the call
+/// helps: the edge reconnects after a quit, a replacement or a reason this build does not know,
+/// and leaves after an uninstall or the end of the person's sign-in session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum QuitCause {
+    /// The person quit Ghostlight. The next call starts it again.
+    Quit,
+    /// A newer Ghostlight is taking over, and it serves the next call.
+    Replace,
+    /// Ghostlight is being removed, so nothing answers a repeated call.
+    Uninstall,
+    /// The person's sign-in session on this computer is ending, so nothing answers a repeated
+    /// call.
+    SignOut,
+    /// No stream of any role was open for the idle limit. The next call starts Ghostlight again.
+    Idle,
+    /// The quit named a reason this build does not know. The edge reconnects, as after a quit.
+    Unknown,
+}
+
+impl QuitCause {
+    /// Every cause, for tests that cover each.
+    pub const ALL: [Self; 6] = [
+        Self::Quit,
+        Self::Replace,
+        Self::Uninstall,
+        Self::SignOut,
+        Self::Idle,
+        Self::Unknown,
+    ];
+
+    /// Whether a Ghostlight answers the same call repeated in a moment.
+    #[must_use]
+    pub const fn repeat_helps(self) -> bool {
+        matches!(
+            self,
+            Self::Quit | Self::Replace | Self::Idle | Self::Unknown
+        )
+    }
+}
+
+/// The step of work that never started because Ghostlight was ending, when a Ghostlight answers
+/// the call repeated in a moment.
+pub(crate) const REPEAT_IN_A_MOMENT: &str = "Try the call again in a moment.";
 
 /// Why a browser job did not complete in Ghostlight's product language.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1589,7 +1634,7 @@ impl Refusal {
                 CancelCause::SessionEnded => {
                     "The agent's session ended before the browser job started."
                 }
-                CancelCause::Quit => "Ghostlight quit before the browser job started.",
+                CancelCause::Quit(_) => "Ghostlight quit before the browser job started.",
             },
             Self::DeadlineBeforeStart => {
                 "The browser job deadline expired while waiting for the workspace."
@@ -1642,7 +1687,7 @@ impl Refusal {
                 Some(CancelCause::SessionEnded) => {
                     "The agent's session ended before anything reached the browser."
                 }
-                Some(CancelCause::Quit) => "Ghostlight quit before anything reached the browser.",
+                Some(CancelCause::Quit(_)) => "Ghostlight quit before anything reached the browser.",
             },
             Self::BrowserUnavailable { reason } => match reason {
                 BrowserUnavailableReason::NotAnswering => {
@@ -1703,7 +1748,7 @@ impl Refusal {
             Self::CancelledAfterDispatch { by: Some(CancelCause::SessionEnded) } => {
                 "The agent's session ended before the browser confirmed what the sent command did."
             }
-            Self::CancelledAfterDispatch { by: Some(CancelCause::Quit) } => {
+            Self::CancelledAfterDispatch { by: Some(CancelCause::Quit(_)) } => {
                 "Ghostlight quit before the browser confirmed what the sent command did."
             }
             Self::LandingDeniedUnknown => {
@@ -1742,6 +1787,9 @@ impl Refusal {
             Self::Capacity | Self::DeadlineBeforeStart => vec![
                 "Repeat the call when the current Ghostlight action has finished.".into(),
             ],
+            Self::CancelledBeforeStart {
+                by: CancelCause::Quit(quit),
+            } if quit.repeat_helps() => vec![REPEAT_IN_A_MOMENT.into()],
             Self::AuthorityBlocked { reason, .. } => match reason {
                 // Policy is the one thing the caller can ask about. The human controls are
                 // pinned step-free by ADR-0126, a storage outage recovers by itself, and an
@@ -2534,9 +2582,9 @@ mod tests {
     use super::{
         workspace_refusal, ActionSubject, BlockedReason, BrowserRecoveryReason,
         BrowserUnavailableReason, CancelCause, CaptureKind, CheckFailure, DialogKind, EmptyObject,
-        ExtensionAdvice, ImageSize, Observed, Outcome, PolicyAuthor, Refusal, SavedTo, StaleHelp,
-        TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE, HUMAN_STOP_DIRECTIVE,
-        TARGET_LABEL_MAX_CHARS,
+        ExtensionAdvice, ImageSize, Observed, Outcome, PolicyAuthor, QuitCause, Refusal, SavedTo,
+        StaleHelp, TargetNoun, TargetRole, WorkspaceReason, HUMAN_PAUSE_DIRECTIVE,
+        HUMAN_STOP_DIRECTIVE, REPEAT_IN_A_MOMENT, TARGET_LABEL_MAX_CHARS,
     };
     use crate::intake::session::IntakeChannel;
     use crate::language::area::{LeftOut, LeftOutKey};
@@ -3448,7 +3496,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::CancelledBeforeStart {
-                    by: CancelCause::Quit,
+                    by: CancelCause::Quit(QuitCause::Quit),
                 },
                 "Ghostlight quit before the browser job started.",
             ),
@@ -3544,7 +3592,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::CancelledBeforeDispatch {
-                    by: Some(CancelCause::Quit),
+                    by: Some(CancelCause::Quit(QuitCause::Quit)),
                 },
                 "Ghostlight quit before anything reached the browser.",
             ),
@@ -3566,7 +3614,7 @@ Changes are \"unsaved\".".into()),
             ),
             (
                 Refusal::CancelledAfterDispatch {
-                    by: Some(CancelCause::Quit),
+                    by: Some(CancelCause::Quit(QuitCause::Quit)),
                 },
                 "Ghostlight quit before the browser confirmed what the sent command did.",
             ),
@@ -3682,10 +3730,26 @@ Changes are \"unsaved\".".into()),
             Refusal::LocalInterlock.next_steps(),
             vec!["The tab stays open because the user chose to keep Ghostlight's tabs; continue without closing it."]
         );
-        for by in [None, Some(CancelCause::Client), Some(CancelCause::Quit)] {
+        for by in [
+            None,
+            Some(CancelCause::Client),
+            Some(CancelCause::Quit(QuitCause::Quit)),
+        ] {
             assert!(Refusal::CancelledBeforeDispatch { by }
                 .next_steps()
                 .is_empty());
+        }
+        for quit in QuitCause::ALL {
+            let by = CancelCause::Quit(quit);
+            let steps = Refusal::CancelledBeforeStart { by }.next_steps();
+            if matches!(quit, QuitCause::Uninstall | QuitCause::SignOut) {
+                assert!(steps.is_empty(), "{quit:?}");
+            } else {
+                assert_eq!(steps, vec![REPEAT_IN_A_MOMENT], "{quit:?}");
+            }
+        }
+        for by in [CancelCause::Client, CancelCause::SessionEnded] {
+            assert!(Refusal::CancelledBeforeStart { by }.next_steps().is_empty());
         }
         for (reason, step) in [
             (

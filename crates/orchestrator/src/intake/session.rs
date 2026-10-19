@@ -211,15 +211,6 @@ pub enum ServiceResponse {
         /// Content that travels beside the envelope.
         content: Vec<ServiceContent>,
     },
-    /// A failure before or instead of an invocation.
-    Error {
-        /// The id given to `Invoke`, when the failure belongs to one invocation.
-        id: Option<InvocationId>,
-        /// Stable reason code.
-        code: String,
-        /// Bounded detail in the service's words.
-        message: String,
-    },
 }
 
 #[cfg(test)]

@@ -67,15 +67,17 @@ use crate::install;
 use crate::install::icons::{self, IconCache, IconPlaces};
 use crate::intake::desktop::{DesktopFrame, ShellView, TrayItemId, TrayModel};
 use crate::intake::listener::{self, control, Judgement};
-use crate::intake::mcp::{failure_templates, McpSession, OwnedTab, ResumeState, Step};
+use crate::intake::mcp::{
+    failure_templates, McpSession, OwnedTab, ResumeState, Step, OLDEST_REVISION,
+};
 use crate::language::catalog_for;
 use crate::language::environment::{ELEVATED_SERVICE, QUIT_HELD};
-use crate::language::intake::{OpeningRefusal, SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
-use crate::language::outcome::{CancelCause, DialogKind};
+use crate::language::intake::OpeningRefusal;
+use crate::language::outcome::{CancelCause, DialogKind, QuitCause};
 use crate::language::workbench::{TRAY_HINT_BODY, TRAY_HINT_TITLE};
 use crate::presentation::{BrowserPresentation, PresentationReactor};
 use crate::provenance::{Attribution, ConnectionEvidence, SourceReader};
-use crate::work::{Admission, ApplicationExecutor, InvocationId, PreparedInvocation};
+use crate::work::{Admission, ApplicationExecutor, PreparedInvocation};
 use crate::workbench::setup::SetupProgress;
 use crate::workbench::web::{PendingWorkbench, WorkbenchAddress, WorkbenchServer};
 use crate::workbench::{
@@ -687,7 +689,7 @@ impl Quit {
     /// refuse new work, and once the work in flight has finished or `grace` has passed, end every
     /// session ([`Farewell::end`]) and make the quit signal.
     pub fn begin(&self, reason: QuitReason, grace: Duration) {
-        if !self.drain.begin_quit() {
+        if !self.drain.begin_quit(quit_cause(reason)) {
             return;
         }
         self.farewell.shells.close();
@@ -740,7 +742,7 @@ impl Quit {
     /// once, and neither waits for work in flight nor sets the latch, since a sign-out is not a
     /// person's Quit and the caller has already armed the fallback exit that bounds this stop.
     pub fn session_end(&self) {
-        self.drain.begin_quit();
+        self.drain.begin_quit(QuitCause::SignOut);
         self.farewell.shells.close();
         let signal = Arc::clone(&self.signal);
         let farewell = Arc::clone(&self.farewell);
@@ -769,7 +771,7 @@ impl Quit {
     /// next edge, command or person starts the service again for its own reason. A quit or a
     /// session end already under way is left to finish alone.
     fn idle_exit(&self, idle: Duration) {
-        if !self.drain.begin_quit() {
+        if !self.drain.begin_quit(QuitCause::Idle) {
             return;
         }
         self.farewell.shells.close();
@@ -807,6 +809,16 @@ impl Quit {
 impl WorkbenchQuitPort for Quit {
     fn quit(&self) {
         self.begin(QuitReason::Quit, QUIT_GRACE);
+    }
+}
+
+/// What a call that a quit for `reason` cancels is told about it.
+fn quit_cause(reason: QuitReason) -> QuitCause {
+    match reason {
+        QuitReason::Quit => QuitCause::Quit,
+        QuitReason::Replace => QuitCause::Replace,
+        QuitReason::Uninstall => QuitCause::Uninstall,
+        QuitReason::Unknown => QuitCause::Unknown,
     }
 }
 
@@ -936,7 +948,7 @@ impl Farewell {
             wire.goodbye(goodbye);
         }
         self.shells.say_goodbye(goodbye);
-        self.release_all_but(&kept, &streams, until);
+        self.release_all_but(&kept, &streams, until, quit_cause(reason));
         self.browser.say_goodbye(goodbye);
     }
 
@@ -962,13 +974,15 @@ impl Farewell {
     /// Release every workspace but `kept` and close its confirmed tabs before `until`, then wait
     /// until then for the releases that closing sessions began before the end took over.
     ///
-    /// The work of each session that ends is cancelled first, so a running call can finish and
-    /// give its workspace up. Workspaces no call holds are released before any is waited for.
+    /// The work of each session that ends is cancelled first, for `quit`, so a running call can
+    /// finish and give its workspace up. Workspaces no call holds are released before any is
+    /// waited for.
     fn release_all_but(
         &self,
         kept: &HashSet<WorkspaceId>,
         streams: &[Arc<McpWire>],
         until: Instant,
+        quit: QuitCause,
     ) {
         let ending: Vec<WorkspaceId> = self
             .workspaces
@@ -978,7 +992,7 @@ impl Farewell {
             .collect();
         for live in streams.iter().filter_map(|wire| wire.live.get()) {
             if ending.contains(&live.workspace) {
-                live.queue.stop(CancelCause::Quit);
+                live.queue.stop(CancelCause::Quit(quit));
             }
         }
         let mut held = Vec::new();
@@ -1413,10 +1427,21 @@ fn serve_mcp(
             return Ok(());
         }
     };
-    let resumed = requested
-        .resume
-        .as_deref()
-        .and_then(|token| ResumeState::decode(token).ok());
+    // A client that sent a token initialized with an earlier service and never initializes
+    // again, so a token that cannot be read still resumes an initialized session.
+    let resumed = requested.resume.as_deref().map(|token| {
+        ResumeState::decode(token).unwrap_or_else(|error| {
+            intake.diagnostics.sink().emit(
+                ghostlight_bridge::diagnostics::event::HARNESS_ATTACHED,
+                ghostlight_bridge::diagnostics::Level::Warn,
+                None,
+                &format!(
+                    "{error}; the session resumes at MCP revision {OLDEST_REVISION} with no tab"
+                ),
+            );
+            ResumeState::unreadable()
+        })
+    });
     listener::accept(&connection, &intake.accepted(Role::Mcp))?;
     let accepted = Accepted {
         attribution: Attribution::accepted(IntakeChannel::of_opening(requested.channel.as_deref())),
@@ -1463,15 +1488,18 @@ fn serve_mcp(
                 }
                 Ok(())
             };
-            for step in wire.accept(&line) {
+            let initialized_before = wire.is_initialized();
+            let steps = wire.accept(&line);
+            if !initialized_before && wire.is_initialized() {
+                wire.announce_initialized();
+            }
+            for step in steps {
                 match step {
                     Step::Reply(reply) => wire.send(&reply),
                     Step::Forward(request) => {
                         open_when_initialized(&mut live)?;
                         if let Some(live) = &live {
-                            if !live.handle(intake, &wire, request) {
-                                return Ok(());
-                            }
+                            live.handle(intake, &wire, request);
                         }
                     }
                 }
@@ -1584,6 +1612,15 @@ impl McpWire {
         if !resume.sealed {
             self.write_resume(&mut resume, owned_tabs(workspaces, workspace));
         }
+    }
+
+    /// Hand the edge the first token of a session that has just been initialized, ahead of the
+    /// `initialize` answer, so a client that holds its answer always has a token to resume with
+    /// (ADR-0203 Decision 1). A fresh session holds no tab, so this token is the one a service end
+    /// would hand it, and it is written even after an end handed the stream its last.
+    fn announce_initialized(&self) {
+        let mut resume = lock(&self.resume);
+        self.write_resume(&mut resume, Vec::new());
     }
 
     /// Hand the edge the last resume token of this service, with the session's tabs only when
@@ -1847,8 +1884,13 @@ impl LiveSession {
             .context("start bounded session worker")
     }
 
-    /// Serve one request the engine forwarded. Returns false when the session must end.
-    fn handle(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>, request: ServiceRequest) -> bool {
+    /// Serve one request the engine forwarded.
+    ///
+    /// A call the queue does not take is answered here, on the thread that reads the stream, so
+    /// its answer is written before the stream can close: over capacity, it is refused; while
+    /// Ghostlight quits, it is cancelled before it started, with the quit's cause. Each goes
+    /// through the one completion path and its audit line.
+    fn handle(&self, intake: &Arc<Intake>, wire: &Arc<McpWire>, request: ServiceRequest) {
         match request {
             ServiceRequest::Catalog => {
                 let tools = self.advertised.advertise(&intake.governance.snapshot());
@@ -1867,25 +1909,20 @@ impl LiveSession {
                     self.workspace.clone(),
                     Arc::clone(&self.connection),
                 ));
-                match self.queue.admit(Arc::clone(&request), bytes) {
-                    Ok(()) => {}
+                let (admission, _flight) = match self.queue.admit(Arc::clone(&request), bytes) {
+                    Ok(()) => return,
                     Err(Refused::Full) => match self.queue.begin_unqueued() {
-                        Ok(_flight) => {
-                            let result = intake
-                                .executor
-                                .execute_prepared(&request, Admission::OverCapacity);
-                            deliver_result(wire, result);
-                            wire.publish_resume(&intake.workspaces, &self.workspace);
-                        }
-                        Err(_) => refuse_while_quitting(wire, request.id.clone()),
+                        Ok(flight) => (Admission::OverCapacity, Some(flight)),
+                        Err(by) => (Admission::Cancelled(by), None),
                     },
-                    Err(Refused::ShuttingDown) => refuse_while_quitting(wire, request.id.clone()),
-                    Err(Refused::Closed) => return false,
-                }
+                    Err(Refused::Cancelled(by)) => (Admission::Cancelled(by), None),
+                };
+                let result = intake.executor.execute_prepared(&request, admission);
+                deliver_result(wire, result);
+                wire.publish_resume(&intake.workspaces, &self.workspace);
             }
             ServiceRequest::Cancel { id } => self.queue.cancel(&id),
         }
-        true
     }
 
     /// Stop the workers, detach the connection, and release a workspace nobody owns unless a
@@ -1895,11 +1932,13 @@ impl LiveSession {
     /// because the session ended otherwise.
     fn close(self, intake: &Intake) {
         self.watch_stop.store(true, Ordering::SeqCst);
-        self.queue.stop(if intake.quit.drain.is_quitting() {
-            CancelCause::Quit
-        } else {
-            CancelCause::SessionEnded
-        });
+        self.queue.stop(
+            intake
+                .quit
+                .drain
+                .cause()
+                .map_or(CancelCause::SessionEnded, CancelCause::Quit),
+        );
         if let Some(watch) = self.watch {
             let _ = watch.join();
         }
@@ -1941,15 +1980,6 @@ fn remember_resumed_tabs(workspaces: &WorkspaceStore, workspace: &WorkspaceId, o
             workspaces.remember_tab(workspace, &tab.handle, &tab.browser_id, tab.tab_id, url);
         }
     }
-}
-
-/// Answer an invocation that arrived after a quit began.
-fn refuse_while_quitting(wire: &McpWire, id: InvocationId) {
-    wire.render(ServiceResponse::Error {
-        id: Some(id),
-        code: SHUTTING_DOWN_CODE.into(),
-        message: SHUTTING_DOWN_MESSAGE.into(),
-    });
 }
 
 /// Take the service lock at `path`, asking again until `wait` has passed while another process
@@ -4925,19 +4955,118 @@ mod tests {
         let _ = carrier.join();
     }
 
-    #[test]
-    fn a_quit_answers_new_invocations_with_shutting_down() {
-        use crate::language::intake::{SHUTTING_DOWN_CODE, SHUTTING_DOWN_MESSAGE};
+    /// Call `browser_tabs` list under `id` and return its tool result and the audit lines of its
+    /// invocation. The audit line is written before the result is delivered.
+    fn listed_with_audit(home: &TestHome, socket: &mut Connection, id: u64) -> (Value, Vec<Value>) {
+        send_line(
+            socket,
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
+            }),
+        );
+        let (called, _) = response(socket, id);
+        let result = called["result"]["structuredContent"].clone();
+        assert!(
+            result.is_object(),
+            "a tool result, not a protocol error: {called}"
+        );
+        let records = audit_lines(home)
+            .into_iter()
+            .filter(|record| record["invocation"] == result["invocation"])
+            .collect();
+        (result, records)
+    }
 
-        let (_home, host, quit_requested) = quittable_host("quit-refuses");
+    /// The tool results and audit lines of two calls made during a quit for `reason`: one while
+    /// the quit drains work in flight, and one after its end stopped the session's queue.
+    ///
+    /// Each step waits on what it needs: the session is open once its first call is answered,
+    /// the drain refuses work once `begin` returns, and the end has run once the quit signal is
+    /// made. The answers are written by the thread that reads the stream, so nothing races them.
+    fn calls_during_a_quit(reason: QuitReason) -> Vec<(Value, Vec<Value>)> {
+        let home = TestHome::new("quit-calls");
+        let served = serve_fake(&home);
         let mut socket = open_mcp(None);
         initialize(&mut socket);
+        let (opened, _) = listed_with_audit(&home, &mut socket, 2);
+        assert_eq!(opened["status"], "succeeded", "{opened}");
 
+        let running = served.intake.quit.drain.admit().unwrap();
+        served.intake.quit.begin(reason, PATIENCE);
+        let draining = listed_with_audit(&home, &mut socket, 3);
+        drop(running);
+        served
+            .quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("the quit ends once its work in flight finishes");
+        let ended = listed_with_audit(&home, &mut socket, 4);
+        vec![draining, ended]
+    }
+
+    #[test]
+    fn a_call_during_a_quit_gets_a_tool_result_and_an_audit_line() {
+        for reason in [QuitReason::Quit, QuitReason::Replace, QuitReason::Unknown] {
+            for (result, records) in calls_during_a_quit(reason) {
+                assert_eq!(result["status"], "cancelled", "{reason:?}: {result}");
+                assert_eq!(result["effect"], "none", "{result}");
+                assert_eq!(result["repeat_safe"], true, "{result}");
+                assert_eq!(
+                    result["summary"],
+                    "Ghostlight quit before the browser job started."
+                );
+                assert_eq!(
+                    result["next_steps"],
+                    json!(["Try the call again in a moment."]),
+                    "{reason:?}"
+                );
+                assert_eq!(records.len(), 1, "{reason:?}: {records:?}");
+                assert_eq!(records[0]["status"], "cancelled", "{records:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_call_during_an_uninstall_gets_no_retry_step() {
+        for (result, records) in calls_during_a_quit(QuitReason::Uninstall) {
+            assert_eq!(result["status"], "cancelled", "{result}");
+            assert_eq!(
+                result["summary"],
+                "Ghostlight quit before the browser job started."
+            );
+            assert!(result.get("next_steps").is_none(), "{result}");
+            assert_eq!(records.len(), 1, "{records:?}");
+        }
+    }
+
+    #[test]
+    fn a_quitting_service_takes_no_new_connection() {
+        let (_home, host, quit_requested) = quittable_host("quit-refuses");
         host.begin_quit(QuitReason::Quit, Duration::from_secs(5));
         quit_requested
             .recv_timeout(Duration::from_secs(5))
             .expect("an idle service asks the desktop to exit at once");
+        let mut readiness = opening(Role::Control);
+        readiness.control = Some(Control::Readiness);
+        let (_, reply) = dial(&readiness);
+        assert!(!reply.accepted, "{reply:?}");
+        assert_eq!(reply.code, Some(RefusalCode::ShuttingDown));
+        drop(host);
+    }
 
+    #[test]
+    fn an_unreadable_token_resumes_an_initialized_session_without_tabs() {
+        let home = TestHome::new("unreadable-token");
+        let served = serve_fake(&home);
+        let mut socket = open_mcp(Some("rs1.***".into()));
+        let resumed = next_resume(&mut socket);
+        assert_eq!(resumed.revision, crate::intake::mcp::OLDEST_REVISION);
+        assert_eq!(resumed.claim, None);
+        assert!(resumed.owned_tabs.is_empty());
+
+        // The client initialized with an earlier service, so its next line is a call.
         send_line(
             &mut socket,
             json!({
@@ -4947,20 +5076,64 @@ mod tests {
                 "params": {"name": "browser_tabs", "arguments": {"action": "list"}}
             }),
         );
-        let (refused, _) = response(&mut socket, 2);
+        let (called, _) = response(&mut socket, 2);
+        let result = &called["result"];
         assert_eq!(
-            refused["error"]["message"],
-            format!("{SHUTTING_DOWN_CODE}: {SHUTTING_DOWN_MESSAGE}")
+            result["structuredContent"]["status"], "succeeded",
+            "{called}"
         );
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Result: ")),
+            "the oldest revision also reads the result as text: {called}"
+        );
+        assert_eq!(served.intake.workspaces.summaries().len(), 1);
+    }
 
-        // A quitting service takes no new connection either.
-        let mut readiness = opening(Role::Control);
-        readiness.control = Some(Control::Readiness);
-        let (_, reply) = dial(&readiness);
-        assert!(!reply.accepted, "{reply:?}");
-        assert_eq!(reply.code, Some(RefusalCode::ShuttingDown));
+    #[test]
+    fn an_answered_initialize_always_has_a_token() {
+        // Before the session's source is read, which opens its workspace.
+        let home = TestHome::new("initialize-token-held");
+        let held = Arc::new(HeldRead::default());
+        let _release = Release(Arc::clone(&held));
+        let served = serve_reading(&home, held.reader());
+        let mut socket = open_mcp(None);
+        let (initialized, tokens) = initialize(&mut socket);
+        assert!(initialized["result"].is_object(), "{initialized}");
+        let state =
+            ResumeState::decode(tokens.first().expect("a token before the answer")).unwrap();
+        assert_eq!(state.revision, "2025-06-18");
+        assert_eq!(state.claim.as_deref(), Some("relay test"));
+        assert!(state.owned_tabs.is_empty());
+        held.release();
         drop(socket);
-        drop(host);
+        drop(served);
+        drop(home);
+
+        // After a quit handed every stream its last token, to a stream not yet initialized.
+        let home = TestHome::new("initialize-token-quit");
+        let served = serve_fake(&home);
+        let mut socket = open_mcp(None);
+        // A ping is answered once the stream is enrolled for the quit's last tokens.
+        send_line(
+            &mut socket,
+            json!({"jsonrpc": "2.0", "id": 9, "method": "ping"}),
+        );
+        response(&mut socket, 9);
+        served
+            .intake
+            .quit
+            .begin(QuitReason::Replace, Duration::ZERO);
+        served
+            .quit_requested
+            .recv_timeout(PATIENCE)
+            .expect("an idle service ends at once");
+        let (initialized, tokens) = initialize(&mut socket);
+        assert!(initialized["result"].is_object(), "{initialized}");
+        let state =
+            ResumeState::decode(tokens.first().expect("a token before the answer")).unwrap();
+        assert!(state.owned_tabs.is_empty());
     }
 
     #[test]

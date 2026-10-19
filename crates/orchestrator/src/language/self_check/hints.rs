@@ -37,7 +37,7 @@ use crate::language::field_problem::{ControlRef, FieldProblems, RejectedControl,
 use crate::language::outcome::{
     ActionSubject, BlockedReason, BrowserRecoveryReason, BrowserUnavailableReason, CancelCause,
     CaptureKind, CheckFailure, DialogKind, EmptyObject, ExtensionAdvice, ImageSize, Outcome,
-    PolicyAuthor, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
+    PolicyAuthor, QuitCause, Refusal, SavedTo, StaleHelp, TargetNoun, TargetRole, WorkspaceReason,
 };
 use crate::language::page_refusal::{PageGesture, PageRefusal};
 use crate::workspace::StaleReason;
@@ -1020,22 +1020,16 @@ fn refusal_samples() -> Vec<Refusal> {
         },
         Refusal::TabHeld { host: None },
     ];
-    for by in [
-        CancelCause::Client,
-        CancelCause::SessionEnded,
-        CancelCause::Quit,
-    ] {
+    let causes = [CancelCause::Client, CancelCause::SessionEnded]
+        .into_iter()
+        .chain(QuitCause::ALL.map(CancelCause::Quit));
+    for by in causes {
         samples.push(Refusal::CancelledBeforeStart { by });
+        samples.push(Refusal::CancelledBeforeDispatch { by: Some(by) });
+        samples.push(Refusal::CancelledAfterDispatch { by: Some(by) });
     }
-    for by in [
-        None,
-        Some(CancelCause::Client),
-        Some(CancelCause::SessionEnded),
-        Some(CancelCause::Quit),
-    ] {
-        samples.push(Refusal::CancelledBeforeDispatch { by });
-        samples.push(Refusal::CancelledAfterDispatch { by });
-    }
+    samples.push(Refusal::CancelledBeforeDispatch { by: None });
+    samples.push(Refusal::CancelledAfterDispatch { by: None });
     for refusal in PageRefusal::ALL {
         samples.push(Refusal::PageRefused {
             refusal,

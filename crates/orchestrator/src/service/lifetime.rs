@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use ghostlight_relay::protocol::StartReason;
 
+use crate::language::outcome::QuitCause;
+
 /// How long a quit lets in-flight invocations finish before the service exits anyway.
 pub const QUIT_GRACE: Duration = Duration::from_secs(10);
 
@@ -106,9 +108,9 @@ impl Clock for HandClock {
     }
 }
 
-/// A quit has begun, so no new invocation is admitted.
+/// A quit has begun for this cause, so no new invocation is admitted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ShuttingDown;
+pub struct ShuttingDown(pub QuitCause);
 
 /// Counts invocations in flight and refuses new ones once a quit has begun.
 #[derive(Default)]
@@ -120,7 +122,8 @@ pub struct Drain {
 #[derive(Default)]
 struct DrainState {
     in_flight: usize,
-    quitting: bool,
+    /// Why the quit under way began, once one has.
+    quitting: Option<QuitCause>,
 }
 
 /// One invocation in flight. Dropping it tells the drain the invocation has finished.
@@ -129,11 +132,11 @@ pub struct InFlight {
 }
 
 impl Drain {
-    /// Admit one invocation, or refuse it because a quit has begun.
+    /// Admit one invocation, or refuse it because a quit has begun, naming the quit's cause.
     pub fn admit(self: &Arc<Self>) -> Result<InFlight, ShuttingDown> {
         let mut state = lock(&self.state);
-        if state.quitting {
-            return Err(ShuttingDown);
+        if let Some(cause) = state.quitting {
+            return Err(ShuttingDown(cause));
         }
         state.in_flight += 1;
         Ok(InFlight {
@@ -141,14 +144,24 @@ impl Drain {
         })
     }
 
-    /// Refuse new invocations from now on. Returns whether this call began the quit.
-    pub fn begin_quit(&self) -> bool {
+    /// Refuse new invocations from now on, for `cause`. Returns whether this call began the
+    /// quit; a quit already under way keeps the cause it began with.
+    pub fn begin_quit(&self, cause: QuitCause) -> bool {
         let mut state = lock(&self.state);
-        !std::mem::replace(&mut state.quitting, true)
+        if state.quitting.is_some() {
+            return false;
+        }
+        state.quitting = Some(cause);
+        true
     }
 
     /// Whether a quit has begun.
     pub fn is_quitting(&self) -> bool {
+        self.cause().is_some()
+    }
+
+    /// Why the quit under way began, once one has.
+    pub fn cause(&self) -> Option<QuitCause> {
         lock(&self.state).quitting
     }
 
@@ -248,9 +261,17 @@ mod tests {
     fn a_quit_refuses_new_work_and_waits_for_work_in_flight() {
         let drain = Arc::new(Drain::default());
         let running = drain.admit().unwrap();
-        assert!(drain.begin_quit());
-        assert!(!drain.begin_quit(), "only the first quit begins the drain");
-        assert_eq!(drain.admit().err(), Some(ShuttingDown));
+        assert!(drain.begin_quit(QuitCause::Replace));
+        assert!(
+            !drain.begin_quit(QuitCause::Uninstall),
+            "only the first quit begins the drain"
+        );
+        assert_eq!(
+            drain.admit().err(),
+            Some(ShuttingDown(QuitCause::Replace)),
+            "the drain keeps the cause its quit began with"
+        );
+        assert_eq!(drain.cause(), Some(QuitCause::Replace));
 
         let started = Instant::now();
         assert!(!drain.wait_idle(Duration::from_millis(100)));
@@ -268,7 +289,7 @@ mod tests {
     #[test]
     fn an_idle_drain_is_empty_at_once() {
         let drain = Arc::new(Drain::default());
-        drain.begin_quit();
+        drain.begin_quit(QuitCause::Quit);
         let started = Instant::now();
         assert!(drain.wait_idle(Duration::from_secs(5)));
         assert!(started.elapsed() < Duration::from_secs(1));

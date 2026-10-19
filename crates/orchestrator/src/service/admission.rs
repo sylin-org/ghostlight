@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use super::lifetime::{Drain, InFlight};
+use super::lifetime::{Drain, InFlight, ShuttingDown};
 use crate::language::outcome::CancelCause;
 use crate::work::{InvocationId, PreparedInvocation};
 
@@ -87,14 +87,18 @@ struct State {
     active: HashMap<InvocationId, Active>,
     bytes: [usize; 2],
     counts: [usize; 2],
-    stopped: bool,
+    /// Why the queue stopped admitting, once it has.
+    stopped: Option<CancelCause>,
 }
 
+/// Why the queue did not admit a request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Refused {
+    /// The request's lane or the service's budget is full.
     Full,
-    Closed,
-    ShuttingDown,
+    /// The queue admits nothing more, for this cause: Ghostlight is quitting, or the queue was
+    /// stopped. The request is answered as cancelled before it started.
+    Cancelled(CancelCause),
 }
 
 pub(super) struct SessionQueue {
@@ -114,9 +118,12 @@ impl SessionQueue {
         }
     }
 
-    /// Count an invocation that runs outside the queue, or refuse it because a quit has begun.
-    pub(super) fn begin_unqueued(&self) -> Result<InFlight, Refused> {
-        self.drain.admit().map_err(|_| Refused::ShuttingDown)
+    /// Count an invocation that runs outside the queue, or refuse it because a quit has begun,
+    /// naming the cause it is cancelled for.
+    pub(super) fn begin_unqueued(&self) -> Result<InFlight, CancelCause> {
+        self.drain
+            .admit()
+            .map_err(|ShuttingDown(quit)| CancelCause::Quit(quit))
     }
 
     /// Queue `request` in its lane, reserving `bytes` of the session's and the service's budget.
@@ -129,10 +136,10 @@ impl SessionQueue {
         bytes: usize,
     ) -> Result<(), Refused> {
         let mut state = super::lock(&self.state);
-        if state.stopped {
-            return Err(Refused::Closed);
+        if let Some(cause) = state.stopped {
+            return Err(Refused::Cancelled(cause));
         }
-        let flight = self.begin_unqueued()?;
+        let flight = self.begin_unqueued().map_err(Refused::Cancelled)?;
         let lane = usize::from(request.independent());
         let count_limit = if lane == 0 {
             SESSION_WORK
@@ -174,7 +181,7 @@ impl SessionQueue {
             if let Some(request) = state.queues[usize::from(independent)].pop_front() {
                 return Some(request);
             }
-            if state.stopped {
+            if state.stopped.is_some() {
                 return None;
             }
             state = self
@@ -226,10 +233,11 @@ impl SessionQueue {
     }
 
     /// Admit nothing more and cancel every admitted request for `cause`, the session's end or
-    /// Ghostlight's quit. Queued requests still drain through their workers as cancelled.
+    /// Ghostlight's quit. Queued requests still drain through their workers as cancelled, and a
+    /// request that arrives later is refused for the first cause.
     pub(super) fn stop(&self, cause: CancelCause) {
         let mut state = super::lock(&self.state);
-        state.stopped = true;
+        state.stopped.get_or_insert(cause);
         for active in state.active.values() {
             active.request.cancel(cause);
         }
@@ -238,14 +246,14 @@ impl SessionQueue {
 
     pub(super) fn wait_idle_or_timeout(&self, timeout: Duration) -> bool {
         let state = super::lock(&self.state);
-        if state.stopped {
+        if state.stopped.is_some() {
             return false;
         }
         let (state, _) = self
             .available
             .wait_timeout(state, timeout)
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        !state.stopped
+        state.stopped.is_none()
     }
 }
 
@@ -254,6 +262,7 @@ mod tests {
     use super::*;
     use crate::intake::mcp::{McpSession, Step};
     use crate::intake::session::{IntakeChannel, ServiceRequest};
+    use crate::language::outcome::QuitCause;
     use crate::provenance::ConnectionEvidence;
     use crate::workspace::WorkspaceStore;
     use serde_json::json;
@@ -394,15 +403,31 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_queue_refuses_later_requests_for_the_cause_it_first_stopped_for() {
+        let queue = SessionQueue::new(QueueBudget::default(), Arc::default());
+        let quit = CancelCause::Quit(QuitCause::Replace);
+        queue.stop(quit);
+        queue.stop(CancelCause::SessionEnded);
+        assert_eq!(
+            queue.admit(request(false), 512),
+            Err(Refused::Cancelled(quit))
+        );
+    }
+
+    #[test]
     fn a_quit_refuses_admission_and_a_finished_request_leaves_the_drain() {
         let drain = Arc::new(Drain::default());
         let queue = SessionQueue::new(QueueBudget::default(), drain.clone());
         let running = request(false);
         queue.admit(Arc::clone(&running), 512).unwrap();
         assert_eq!(drain.in_flight(), 1);
-        drain.begin_quit();
-        assert_eq!(queue.admit(request(false), 512), Err(Refused::ShuttingDown));
-        assert_eq!(queue.begin_unqueued().err(), Some(Refused::ShuttingDown));
+        drain.begin_quit(QuitCause::Uninstall);
+        let quit = CancelCause::Quit(QuitCause::Uninstall);
+        assert_eq!(
+            queue.admit(request(false), 512),
+            Err(Refused::Cancelled(quit))
+        );
+        assert_eq!(queue.begin_unqueued().err(), Some(quit));
         assert_eq!(queue.next(false).unwrap().id, running.id);
         assert_eq!(drain.in_flight(), 1, "a request runs until it completes");
         queue.complete(&running.id);
