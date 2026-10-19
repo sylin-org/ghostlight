@@ -1885,7 +1885,10 @@ impl GovernanceFacade {
 
     /// A facade under the managed authority at `paths`, over an optional user policy.
     #[cfg(test)]
-    fn with_managed_paths(local_policy: Option<PathBuf>, paths: managed::ManagedPaths) -> Self {
+    pub(crate) fn with_managed_paths(
+        local_policy: Option<PathBuf>,
+        paths: managed::ManagedPaths,
+    ) -> Self {
         Self::publishing(
             PolicySources::new(local_policy),
             Some(managed::ManagedAuthority::from_paths(paths)),

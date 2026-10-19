@@ -6,8 +6,8 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a, C10b, C11 and C12a have landed, and C22 landed with
-C13. C19a is next. ux-2 has closed, so every slice whose "After" is met can start.
+C1, C2, C3a, C4, C5, C6, C7, C13, C9, C10a, C10b, C11, C12a and C19a have landed, and C22 landed
+with C13. C21 is next, with B1. ux-2 has closed, so every slice whose "After" is met can start.
 
 ## Slices
 
@@ -27,8 +27,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | C10a | fix(work): closing and listing a tab look at its host | candidate | C2 | see Notes | landed (51d1e05d, review fixup) |
 | C10b | fix(work): every authority check of a frame is on the frame's path | candidate | ux-2 closes | see Notes | landed (56d0f7c8) |
 | C11 | fix(service): a call during a quit and a token that cannot be read both get an honest answer | candidate | ux-2 closes | see Notes | landed (8c216920) |
-| C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | see Notes | landed (this commit) |
-| C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | - | todo |
+| C12a | feat(language): history rows carry one closed outcome class | candidate | ux-2 closes | see Notes | landed (a35d7b58) |
+| C19a | fix(audit): a step that never started carries the policy sequence | candidate | ux-2 closes | see Notes | landed (this commit) |
 | C21 | feat(adapter): the service reads the browser's life | candidate | C4, B1 | lands with B1; cross-lane `protocol4/wire.rs` | todo |
 | C3b | fix(browser): a pinned wait reads its own browser | none | C3a | - | todo |
 | C3c | refactor(browser): one browser start, recorded in the launch guard | none | C3b | - | todo |
@@ -493,3 +493,23 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   and `the_class_crosses_to_the_window_as_one_closed_word` in `language/history.rs`. Composition's
   own cause mapping and `unconfirmed_cause` moved there. No catalog, result or audit golden
   changed. No journey is needed.
+- C19a, one writer of the line: `AuditRecord::not_started` builds the whole line of a step that
+  never started, `with_policy` included, so it carries `policy_seq` under managed governance as
+  every other line does. The executor's `record_preparation` calls it and no longer spells a status,
+  an effect or a decision of its own. Its decision is still `invalid_request` with no attribution,
+  so only `policy_seq` is added to the line.
+- C19a, the words: `Effect::stored_name` sits beside `Status::stored_name`, and both read one
+  serialized-name helper in `work/result.rs`. `UnexecutedStatus` moved from `work/composition.rs`
+  to `work/result.rs` and is the one spelling of `not_started`, for the flow row and the audit
+  line. The audit tests' own `wire` helper went for the two stored names. Not changed, because
+  they are other lanes' readers of the stored word: the surface test literal in
+  `workbench/history.rs` and the window's label in `ui/lib/view.js`.
+- C19a, cross-lane: `GovernanceFacade::with_managed_paths` (test-only) became `pub(crate)` so a work
+  and an audit test can run under a signed organization policy. The policy lane is closed.
+- C19a, proofs: `a_not_started_step_carries_policy_seq_under_managed_policy` in
+  `work/tests/execution.rs` (the step's line and the flow's both carry the sequence) and
+  `the_not_started_line_matches_its_golden` in `audit/record_tests.rs`. The audit golden
+  `tests/golden/audit/not-started.json` is new, written with `GHOSTLIGHT_AUDIT_GOLDEN_UPDATE=1`,
+  and also joins the unknown-fields read test. The other audit goldens and the catalog and result
+  goldens did not change. No journey is needed. D2: the SIEM guide may name the not-started line
+  and say it carries `policy_seq` under managed governance.

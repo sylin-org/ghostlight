@@ -2,7 +2,6 @@
 
 use std::time::Instant;
 
-use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::governance::Decision;
@@ -11,19 +10,11 @@ use crate::language::coverage::{qualify, Coverage};
 use crate::language::history::OutcomeClass;
 use crate::language::outcome::Outcome;
 
-use super::result::Readiness;
+use super::result::{Readiness, UnexecutedStatus};
 use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
 
 /// The key inside a result's `facts` that holds its coverage.
 const COVERAGE: &str = "coverage";
-
-/// A step without an invocation must not masquerade as a failed child operation.
-#[derive(Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum UnexecutedStatus {
-    NotStarted,
-    NotRun,
-}
 
 pub(super) struct Composition {
     pub progress: CompositionProgress,

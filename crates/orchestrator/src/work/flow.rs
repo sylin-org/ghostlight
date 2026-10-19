@@ -9,9 +9,10 @@ use crate::language::history::{CompositionKind, StepReceipt};
 use crate::language::{Operation, RunFlow};
 use crate::workspace::{TabHandle, WorkspaceLease};
 
-use super::{result::Readiness, ApplicationExecutor, Effect, InvocationContext, Status, Terminal};
+use super::result::{Readiness, UnexecutedStatus};
+use super::{ApplicationExecutor, Effect, InvocationContext, Status, Terminal};
 
-use super::composition::{terminal_row, unexecuted_row, Composition, UnexecutedStatus};
+use super::composition::{terminal_row, unexecuted_row, Composition};
 
 const FLOW_RESULT_BUDGET_BYTES: usize = 100_000;
 

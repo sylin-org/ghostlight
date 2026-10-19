@@ -1,0 +1,43 @@
+{
+  "timestamp_ms": 1790000000000,
+  "invocation": "invocation_00000000000000000000000000000004",
+  "workspace": "workspace_00000000000000000000000000000001",
+  "tool": "browser_read",
+  "capabilities": [],
+  "authority": "authority_00000000000000000000000000000001",
+  "policy_seq": 1,
+  "allowed": false,
+  "reason": "invalid_request",
+  "status": "not_started",
+  "effect": "none",
+  "summary": "This step could not start.",
+  "step": {
+    "parent": "flow",
+    "position": 1,
+    "total": 2,
+    "preparation_failed": true
+  },
+  "permissions": {
+    "checks": [],
+    "truncated": false
+  },
+  "duration_ms": 0,
+  "observed": {
+    "host": null,
+    "readiness": null,
+    "count": null,
+    "width": null,
+    "height": null
+  },
+  "channel": "mcp",
+  "provenance": {
+    "connection_id": "connection_00000000000000000000000000000001",
+    "observed_at_ms": 1790000000000,
+    "channel": "mcp",
+    "claimed_agent": "claude-code",
+    "source": {
+      "agent": "claude-desktop",
+      "image": "claude.exe"
+    }
+  }
+}

@@ -13,7 +13,10 @@ use crate::governance::{evidence, AuthoritySnapshot, CapabilitySet, Decision, Re
 use crate::intake::session::IntakeChannel;
 use crate::language::audit::{AuditProjection, AuditRefusal};
 use crate::language::audit_health::{AuditHealth, Storage, StorageFailure};
-use crate::language::outcome::Observed;
+use crate::language::history::StepReceipt;
+use crate::language::outcome::{Observed, Outcome};
+use crate::provenance::Attribution;
+use crate::work::result::{Effect, UnexecutedStatus};
 use crate::workbench::WorkbenchProjection;
 
 /// A failed destination receives at most one recovery attempt per interval.
@@ -183,6 +186,39 @@ impl AuditRecord {
             provenance: None,
             browser: None,
         }
+    }
+
+    /// The record of a composition step whose input could not be prepared, so no operation
+    /// started.
+    ///
+    /// It needs no capability and reached no browser. It is refused as an invalid request under
+    /// the composition's snapshot, whose policy sequence it carries as every record does.
+    #[must_use]
+    pub fn not_started(
+        invocation: &str,
+        workspace: &str,
+        tool: &'static str,
+        snapshot: &AuthoritySnapshot,
+        attribution: &Attribution,
+        step: StepReceipt,
+    ) -> Self {
+        let decision = Decision::refused(ReasonCode::InvalidRequest);
+        let mut record = Self::now(
+            invocation,
+            workspace,
+            tool,
+            CapabilitySet::EMPTY,
+            snapshot.id(),
+            decision,
+            &UnexecutedStatus::NotStarted.stored_name(),
+            &Effect::None.stored_name(),
+            &Outcome::StepNotStarted.audit(),
+            0,
+        )
+        .with_provenance(Some(attribution))
+        .with_policy(snapshot, decision);
+        record.step = Some(step);
+        record
     }
 
     /// Attach the name of the browser that received the work's commands, if one did.

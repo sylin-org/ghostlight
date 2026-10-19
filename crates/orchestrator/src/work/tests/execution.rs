@@ -1036,6 +1036,50 @@ fn flow_stops_after_a_refused_child_without_reverting_prior_effects() {
     assert!(!result.repeat_safe);
 }
 
+/// A flow step whose arguments never decode has its own audit line, and that line carries the
+/// managed policy's publish sequence as every other line of the flow does.
+#[test]
+fn a_not_started_step_carries_policy_seq_under_managed_policy() {
+    use crate::governance::managed::ManagedPaths;
+    use crate::work::result::UnexecutedStatus;
+
+    let root = Scratch::named("not-started-managed");
+    let governance = GovernanceFacade::with_managed_paths(
+        None,
+        ManagedPaths::signed(
+            &root,
+            r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"org","hosts":{"allow":["*"]},"allowed":["read","action","write","execute"]}]}"#,
+        ),
+    );
+    let sequence = governance.snapshot().managed_sequence();
+    assert!(sequence.is_some(), "the signed bundle is in force");
+    let (executor, browser, _workspaces, workspace, audit) = fixture_with_governance(governance);
+
+    let result = executor.execute(
+        &workspace,
+        "browser_flow",
+        json!({"steps":[{"id":"bad","tool":"browser_read","arguments":{"max_chars":"lots"}}]}),
+        &CancellationToken::default(),
+    );
+
+    assert!(browser.calls().is_empty(), "{}", result.summary);
+    assert_eq!(result.facts["progress"]["counts"]["not_started"], 1);
+    let records = audit.0.lock().unwrap();
+    assert_eq!(
+        records.len(),
+        2,
+        "one line for the step and one for the flow"
+    );
+    let step = &records[0];
+    assert!(step.step.is_some_and(|step| step.preparation_failed));
+    assert_eq!(step.status, UnexecutedStatus::NotStarted.stored_name());
+    assert_eq!(step.effect, Effect::None.stored_name());
+    assert_eq!(step.reason, crate::governance::ReasonCode::InvalidRequest);
+    assert_eq!(step.policy_seq, sequence);
+    assert_eq!(records[1].tool, "browser_flow");
+    assert_eq!(records[1].policy_seq, sequence);
+}
+
 #[test]
 fn flow_error_policy_controls_runtime_argument_failures() {
     // A tab handle resolves but is not a numeric read limit. A missing field fails

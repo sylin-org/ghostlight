@@ -27,14 +27,11 @@ impl Status {
     /// The name an audit record stores for this status.
     #[must_use]
     pub fn stored_name(self) -> String {
-        serde_json::to_value(self)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "unknown".into())
+        stored_name(self)
     }
 
     /// The status an audit record stored as `name`, or `None` for a word no settled call ends
-    /// with, such as a step that never started.
+    /// with, such as [`UnexecutedStatus::NotStarted`]'s.
     #[must_use]
     pub fn from_stored_name(name: &str) -> Option<Self> {
         use serde::de::value::{Error, StrDeserializer};
@@ -54,6 +51,43 @@ pub enum Effect {
     Partial,
     /// Dispatch occurred but the effect cannot be determined.
     Unknown,
+}
+
+impl Effect {
+    /// The name an audit record stores for this effect.
+    #[must_use]
+    pub fn stored_name(self) -> String {
+        stored_name(self)
+    }
+}
+
+/// The status of a composition step that has no invocation of its own.
+///
+/// A flow row carries it, and the audit record of a step that never started stores
+/// [`Self::NotStarted`]'s name where a settled call stores its [`Status`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnexecutedStatus {
+    /// Its input could not be prepared, so the step never started.
+    NotStarted,
+    /// The composition stopped before reaching it.
+    NotRun,
+}
+
+impl UnexecutedStatus {
+    /// The name a flow row and an audit record store for this status.
+    #[must_use]
+    pub fn stored_name(self) -> String {
+        stored_name(self)
+    }
+}
+
+/// The serialized name of a closed status or effect word.
+fn stored_name(word: impl Serialize) -> String {
+    serde_json::to_value(word)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".into())
 }
 
 /// Product-facing readiness after governed completion.

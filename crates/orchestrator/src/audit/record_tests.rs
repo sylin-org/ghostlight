@@ -18,6 +18,10 @@ const REFUSAL_GOLDEN: &str = "tests/golden/audit/refusal.json";
 /// A two-step flow: one child receipt, then the parent, relative to the repository root.
 const FLOW_GOLDEN: &str = "tests/golden/audit/flow.json";
 
+/// A flow step whose arguments never decoded, under an organization's signed policy, relative to
+/// the repository root.
+const NOT_STARTED_GOLDEN: &str = "tests/golden/audit/not-started.json";
+
 /// The time every golden line carries.
 const GOLDEN_TIME_MS: u64 = 1_790_000_000_000;
 
@@ -319,14 +323,6 @@ fn fixed(mut record: AuditRecord, duration_ms: u64) -> AuditRecord {
     record
 }
 
-/// A status or effect as the service writes it into the line.
-fn wire(value: impl serde::Serialize) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .expect("a status or effect is a plain string")
-}
-
 /// The connection evidence a record carries, as the service attaches it: an MCP connection whose
 /// client claimed to be Claude Code, started by Claude Desktop's installed app.
 fn golden_connection() -> crate::provenance::ConnectionEvidence {
@@ -367,8 +363,8 @@ fn navigate_succeeded() -> AuditRecord {
         CapabilitySet::READ,
         snapshot.id(),
         decision,
-        &wire(Status::Succeeded),
-        &wire(Effect::Applied),
+        &Status::Succeeded.stored_name(),
+        &Effect::Applied.stored_name(),
         &Outcome::PageNavigated {
             host: Some("example.com".into()),
         }
@@ -505,6 +501,39 @@ fn flow_ran() -> Vec<AuditRecord> {
     vec![fixed(child, 38), fixed(parent, 951)]
 }
 
+/// The line of a flow step that never started, written under an organization's signed policy, so
+/// it carries the policy's publish sequence.
+fn step_not_started() -> AuditRecord {
+    use crate::governance::managed::ManagedPaths;
+    use crate::language::history::{CompositionKind, StepReceipt};
+
+    let root = crate::scratch::Scratch::named("audit-golden-managed");
+    let snapshot = crate::governance::GovernanceFacade::with_managed_paths(
+        None,
+        ManagedPaths::signed(
+            &root,
+            r#"{"schema":4,"name":"org","version":"1","grants":[{"id":"org","hosts":{"allow":["*"]},"allowed":["read"]}]}"#,
+        ),
+    )
+    .snapshot();
+    let connection = golden_connection();
+    let record = AuditRecord::not_started(
+        "invocation_00000000000000000000000000000004",
+        "workspace_00000000000000000000000000000001",
+        "browser_read",
+        &snapshot,
+        connection.attribution(),
+        StepReceipt {
+            parent: CompositionKind::Flow,
+            position: 1,
+            total: 2,
+            preparation_failed: true,
+        },
+    );
+    assert!(record.policy_seq.is_some(), "the signed policy is in force");
+    fixed(record, 0)
+}
+
 #[test]
 fn the_success_line_matches_its_golden() {
     check_golden_with(
@@ -567,8 +596,23 @@ fn read(value: &serde_json::Value) -> AuditRecord {
 }
 
 #[test]
+fn the_not_started_line_matches_its_golden() {
+    check_golden_with(
+        NOT_STARTED_GOLDEN,
+        &golden_text(&step_not_started()),
+        UPDATE_VARIABLE,
+        "the audit line",
+    );
+}
+
+#[test]
 fn a_line_with_unknown_fields_at_every_level_reads_as_the_same_record() {
-    for golden in [SUCCESS_GOLDEN, REFUSAL_GOLDEN, FLOW_GOLDEN] {
+    for golden in [
+        SUCCESS_GOLDEN,
+        REFUSAL_GOLDEN,
+        FLOW_GOLDEN,
+        NOT_STARTED_GOLDEN,
+    ] {
         for line in golden_lines(golden) {
             let expected = read(&line);
             let mut extended = line.clone();

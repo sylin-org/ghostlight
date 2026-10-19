@@ -75,10 +75,7 @@ impl ApplicationExecutor {
             });
         }
         let status = terminal.result.status.stored_name();
-        let effect = serde_json::to_value(terminal.result.effect)
-            .ok()
-            .and_then(|value| value.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "unknown".into());
+        let effect = terminal.result.effect.stored_name();
         self.diagnostics.sink().emit(
             if terminal.result.status == Status::Failed {
                 ghostlight_bridge::diagnostics::event::OPERATION_FAILED
@@ -174,20 +171,14 @@ impl ApplicationExecutor {
         tool: &str,
         step: StepReceipt,
     ) -> language::audit_health::Storage {
-        let mut record = AuditRecord::now(
+        let record = AuditRecord::not_started(
             context.invocation.as_str(),
             context.workspace.as_str(),
             language::audit::tool_name(tool),
-            CapabilitySet::EMPTY,
-            context.snapshot.id(),
-            Decision::refused(ReasonCode::InvalidRequest),
-            "not_started",
-            "none",
-            &Outcome::StepNotStarted.audit(),
-            0,
-        )
-        .with_provenance(Some(context.provenance.attribution()));
-        record.step = Some(step);
+            context.snapshot,
+            context.provenance.attribution(),
+            step,
+        );
         self.audit
             .record_with_provenance(&record, Some(context.provenance))
     }

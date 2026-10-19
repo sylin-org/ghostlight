@@ -606,8 +606,19 @@ mod tests {
                 class
             );
         }
-        let mut never_started = record(Status::Failed, permitted, &quiet);
-        never_started.status = "not_started".into();
+        let never_started = AuditRecord::not_started(
+            "invocation_x",
+            "workspace_x",
+            "browser_read",
+            &crate::governance::GovernanceFacade::new(None).snapshot(),
+            &crate::provenance::Attribution::accepted(crate::intake::session::IntakeChannel::Mcp),
+            StepReceipt {
+                parent: CompositionKind::Flow,
+                position: 1,
+                total: 1,
+                preparation_failed: true,
+            },
+        );
         assert_eq!(OutcomeClass::recorded(&never_started), OutcomeClass::Failed);
         assert_eq!(OutcomeClass::Succeeded.step_cause(None), None);
     }
