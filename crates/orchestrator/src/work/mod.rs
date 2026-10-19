@@ -66,8 +66,8 @@ use crate::presentation::PresentationReactor;
 use crate::provenance::ConnectionEvidence;
 use crate::workbench::WorkbenchProjection;
 use crate::workspace::{
-    SelectedTab, SelectedTarget, SelectedView, StaleReason, StaleTargetContext, WorkspaceError,
-    WorkspaceId, WorkspaceLease, WorkspaceStore,
+    SelectedTab, SelectedTarget, SelectedView, StaleReason, StaleTargetContext, TabHold,
+    WorkspaceError, WorkspaceId, WorkspaceLease, WorkspaceStore,
 };
 use findings::{Findings, Frame, FrameFindings, StaleOffer};
 use item::candidate_item;
@@ -635,8 +635,14 @@ impl ApplicationExecutor {
     ) -> Terminal {
         let landing = self.authorize_commits(context, landing_requirements, physical, commits);
         if !landing.allowed {
-            self.hold(context, lease, selected);
-            return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), Some(&physical.url));
+            return self.hold(
+                context,
+                lease,
+                selected,
+                landing,
+                &physical.url,
+                Effect::Applied,
+            );
         }
         let change = DocumentChange::between(&selected.url, physical, commits);
         let resulting = match change {
@@ -697,14 +703,37 @@ impl ApplicationExecutor {
     ///
     /// Every path that finds its tab on a refused page comes here, a read as well as an action,
     /// so the hold always shows. The tab then refuses reading and acting until a navigation
-    /// lands it on an allowed page or it is closed (ADR-0203 Decision 2.4).
-    fn hold(&self, context: &InvocationContext<'_>, lease: &WorkspaceLease, tab: &SelectedTab) {
-        let _ = lease.hold_tab(&tab.handle);
+    /// lands it on an allowed page or it is closed (ADR-0203 Decision 2.4). The hold keeps
+    /// `landing`, the refusal of the page at `url`, so every later refusal on the tab names that
+    /// host and records that decision (Decision 5.5). `effect` is what the call already did.
+    fn hold(
+        &self,
+        context: &InvocationContext<'_>,
+        lease: &WorkspaceLease,
+        tab: &SelectedTab,
+        landing: Decision,
+        url: &str,
+        effect: Effect,
+    ) -> Terminal {
+        let hold = TabHold {
+            denial: landing,
+            host: observed_host(url),
+        };
+        let _ = lease.hold_tab(&tab.handle, hold);
         self.emit(DomainEvent::HoldEntered {
             invocation: context.invocation.into(),
             workspace: context.workspace.as_str().into(),
             physical_id: tab.physical_id,
         });
+        self.blocked_at(
+            context,
+            landing,
+            Some(tab.physical_id),
+            effect,
+            false,
+            json!({"tab":tab.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
+            Some(url),
+        )
     }
 
     /// Authorize and resolve one controlled tab, executing the closure only when allowed (ADR-0176).
@@ -2121,6 +2150,11 @@ impl ApplicationExecutor {
             _ => None,
         };
         let offer = context.findings.take_offer();
+        // A held tab repeats the refusal of the page that held it, never a pause.
+        let held = match &error {
+            WorkspaceError::Held(hold) => Some(hold.denial),
+            _ => None,
+        };
         let mut reason = match error {
             WorkspaceError::NotOwnedTab
             | WorkspaceError::NotOwnedTarget
@@ -2136,12 +2170,15 @@ impl ApplicationExecutor {
             reason: reason.clone(),
         };
         let summary = refusal.summary();
-        let status = if error == WorkspaceError::Held {
+        let status = if held.is_some() {
             Status::Blocked
         } else {
             Status::Failed
         };
         let mut facts = json!({"reason":reason.as_fact()});
+        if let Some(denial) = held {
+            facts = with_denial_facts(denial, facts);
+        }
         if let WorkspaceReason::StaleTarget { reason, .. } = &reason {
             facts[STALE_FACT] = Value::String(reason.word().into());
         }
@@ -2177,13 +2214,9 @@ impl ApplicationExecutor {
                 facts,
                 refusal.next_steps(),
             ),
-            decision: if status == Status::Blocked {
-                Decision::refused(ReasonCode::RuntimeHold)
-            } else {
-                Decision::permitted()
-            },
+            decision: held.unwrap_or_else(Decision::permitted),
             physical_id: acted_on,
-            observed: Observed::default(),
+            observed: refusal.observed(),
             audit: refusal.audit(),
         }
     }

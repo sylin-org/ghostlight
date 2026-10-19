@@ -965,7 +965,7 @@
         },
         "user_authorized_credentials": {
           "default": false,
-          "description": "True only when the user explicitly authorized credential entry for this request. Never overrides policy or Pause/Stop.",
+          "description": "True only when the user explicitly authorized credential entry for this request. Never overrides policy or the person's Pause or End session.",
           "type": "boolean"
         },
         "visual_settle": {
@@ -1099,7 +1099,7 @@
         },
         "user_authorized_credentials": {
           "default": false,
-          "description": "True only when the user explicitly authorized credential entry for this request. Never overrides policy or Pause/Stop.",
+          "description": "True only when the user explicitly authorized credential entry for this request. Never overrides policy or the person's Pause or End session.",
           "type": "boolean"
         },
         "visual_settle": {

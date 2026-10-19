@@ -244,7 +244,7 @@ impl WorkspaceReason {
             | Self::TabUnavailable
             | Self::StaleTarget { .. }
             | Self::StaleView
-            | Self::TabHeld
+            | Self::TabHeld { .. }
             | Self::WorkspaceBusy
             | Self::WorkspaceClosed => self.clone(),
         }

@@ -733,12 +733,12 @@ fn a_flow_that_opens_a_tab_acts_in_it_without_naming_it() {
 }
 
 /// Open a tab on example.com and let a navigation of it land on a host the policy refuses, which
-/// holds the tab. Returns the held tab's handle.
+/// holds the tab. Returns the held tab's handle and the refused landing's result.
 fn held_tab(
     executor: &ApplicationExecutor,
     browser: &FakeBrowser,
     workspace: &crate::workspace::WorkspaceId,
-) -> String {
+) -> (String, crate::work::result::InvocationResult) {
     let handle = open_at(executor, browser, workspace, 7, "https://example.com/");
     browser.push(Ok(BrowserOutcome::Navigated {
         tab: tab(7, "https://elsewhere.test/"),
@@ -752,7 +752,7 @@ fn held_tab(
     );
     assert_eq!(landed.status, Status::Blocked, "{}", landed.summary);
     assert_eq!(landed.facts["held"], true);
-    handle
+    (handle, landed)
 }
 
 #[test]
@@ -760,7 +760,7 @@ fn a_held_tab_can_be_navigated_to_an_allowed_page_and_is_released() {
     for named in [true, false] {
         let policy = example_com_only();
         let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
-        let handle = held_tab(&executor, &browser, &workspace);
+        let (handle, _) = held_tab(&executor, &browser, &workspace);
 
         // The destination is authorized on its own, so a refused one sends nothing.
         let before = browser.calls().len();
@@ -822,7 +822,7 @@ fn a_held_tab_can_be_navigated_to_an_allowed_page_and_is_released() {
 fn a_held_tab_can_be_closed() {
     let policy = example_com_only();
     let (executor, browser, workspaces, workspace, _) = fixture_with_governance(policy.facade());
-    let handle = held_tab(&executor, &browser, &workspace);
+    let (handle, _) = held_tab(&executor, &browser, &workspace);
 
     browser.push(Ok(BrowserOutcome::TabClosed { tab_id: 7 }));
     let closed = executor.execute(
@@ -844,7 +844,7 @@ fn a_held_tab_can_be_closed() {
 fn a_held_tab_still_refuses_reads_actions_history_and_focus() {
     let policy = example_com_only();
     let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
-    let handle = held_tab(&executor, &browser, &workspace);
+    let (handle, _) = held_tab(&executor, &browser, &workspace);
     let before = browser.calls().len();
     for (tool, input) in [
         ("browser_read", json!({"tab":handle})),
@@ -866,6 +866,93 @@ fn a_held_tab_still_refuses_reads_actions_history_and_focus() {
         assert_eq!(refused.facts["reason"], "tab_held", "{tool}");
         assert_eq!(refused.effect, Effect::None, "{tool}");
     }
+    assert_eq!(
+        browser.calls().len(),
+        before,
+        "nothing reached the held tab"
+    );
+}
+
+#[test]
+fn a_held_tab_refusal_names_the_refused_host_and_the_calls_that_clear_it() {
+    let policy = example_com_only();
+    let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
+    let (handle, landed) = held_tab(&executor, &browser, &workspace);
+    for input in [json!({"tab":handle}), json!({})] {
+        let refused = executor.execute(
+            &workspace,
+            "browser_read",
+            input.clone(),
+            &CancellationToken::default(),
+        );
+        assert_eq!(refused.status, Status::Blocked, "{input}");
+        assert_eq!(refused.facts["reason"], "tab_held");
+        assert_eq!(
+            refused.summary,
+            "That tab shows elsewhere.test, which this session may not use, so Ghostlight will not read or act on it there."
+        );
+        assert_eq!(
+            refused.next_steps,
+            vec!["Call browser_navigate with the tab and an allowed url to leave the page, or browser_tabs with action close to close the tab."]
+        );
+        // The refusal explains itself the way the landing that held the tab did.
+        assert_eq!(refused.facts["denial_id"], landed.facts["denial_id"]);
+        assert_eq!(refused.facts["policy_rule"], landed.facts["policy_rule"]);
+    }
+}
+
+#[test]
+fn a_held_tab_is_audited_with_its_landing_denial_not_a_pause() {
+    let policy = example_com_only();
+    let (executor, browser, _, workspace, audit) = fixture_with_governance(policy.facade());
+    let (handle, landed) = held_tab(&executor, &browser, &workspace);
+    let refused = executor.execute(
+        &workspace,
+        "browser_press_key",
+        json!({"tab":handle,"key":"Enter"}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(refused.status, Status::Blocked, "{}", refused.summary);
+    let records = audit.0.lock().unwrap();
+    let record_of = |invocation: String| {
+        records
+            .iter()
+            .find(|record| record.invocation == invocation)
+            .cloned()
+            .expect("every call is audited")
+    };
+    let landing = record_of(landed.invocation.to_string());
+    let held = record_of(refused.invocation.to_string());
+    assert!(!held.allowed);
+    assert_eq!(held.reason, landing.reason);
+    assert_ne!(held.reason, crate::governance::ReasonCode::RuntimeHold);
+    assert_eq!(held.policy_rule, landing.policy_rule);
+    assert!(held.denial_id.is_some());
+    assert_eq!(held.denial_id, landing.denial_id);
+    assert_eq!(held.observed.host.as_deref(), Some("elsewhere.test"));
+    assert!(held.summary.contains("elsewhere.test"), "{}", held.summary);
+    assert!(!held.summary.contains("paused"), "{}", held.summary);
+}
+
+#[test]
+fn a_flow_step_on_a_held_tab_is_blocked_by_policy() {
+    let policy = example_com_only();
+    let (executor, browser, _, workspace, _) = fixture_with_governance(policy.facade());
+    let (handle, _) = held_tab(&executor, &browser, &workspace);
+    let before = browser.calls().len();
+    let result = executor.execute(
+        &workspace,
+        "browser_flow",
+        json!({"on_error":"continue","steps":[
+            {"id":"first","tool":"browser_read","arguments":{"tab":handle}},
+            {"id":"second","tool":"browser_read","arguments":{"tab":handle}}
+        ]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(result.facts["progress"]["issue"]["cause"], "policy_blocked");
+    // A pause stops a flow; a policy refusal lets it continue, so the second step ran.
+    assert_eq!(result.facts["progress"]["stopped"], false, "{result:?}");
+    assert_eq!(result.facts["steps"][1]["status"], "blocked", "{result:?}");
     assert_eq!(
         browser.calls().len(),
         before,

@@ -9,9 +9,7 @@ use crate::governance::Decision;
 use crate::language::audit::AuditRefusal;
 use crate::language::composition::{CompositionProgress, StepCause, StepCounts, StepIssue};
 use crate::language::coverage::{qualify, Coverage};
-use crate::language::outcome::{
-    BlockedReason, BrowserUnavailableReason, CheckFailure, Outcome, WorkspaceReason,
-};
+use crate::language::outcome::{BlockedReason, BrowserUnavailableReason, CheckFailure, Outcome};
 
 use super::result::Readiness;
 use super::{Effect, InvocationContext, InvocationResult, Status, Terminal};
@@ -248,14 +246,9 @@ fn child_cause(terminal: &Terminal) -> Option<StepCause> {
         Some(A::AuthorityBlocked {
             cause: BlockedReason::AuditUnavailable,
         }) => StepCause::AuditUnavailable,
-        Some(
-            A::AuthorityBlocked {
-                cause: BlockedReason::Hold,
-            }
-            | A::WorkspaceUnusable {
-                cause: WorkspaceReason::TabHeld,
-            },
-        ) => StepCause::Paused,
+        Some(A::AuthorityBlocked {
+            cause: BlockedReason::Hold,
+        }) => StepCause::Paused,
         Some(A::AuthorityBlocked {
             cause: BlockedReason::SessionEnded,
         }) => StepCause::SessionEnded,

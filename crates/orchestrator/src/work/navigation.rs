@@ -495,8 +495,14 @@ impl ApplicationExecutor {
                 let landing =
                     self.authorize_commits(context, Capability::Read, &tab, &committed_urls);
                 if !landing.allowed {
-                    self.hold(context, lease, &selected);
-                    return self.blocked_at(context, landing, Some(selected.physical_id), Effect::Applied, false, json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}), Some(&tab.url));
+                    return self.hold(
+                        context,
+                        lease,
+                        &selected,
+                        landing,
+                        &tab.url,
+                        Effect::Applied,
+                    );
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
                     Ok(tab) => tab,
@@ -617,16 +623,7 @@ impl ApplicationExecutor {
                 let landing =
                     self.authorize_commits(context, Capability::Action, &tab, &committed_urls);
                 if !landing.allowed {
-                    self.hold(context, lease, selected);
-                    return self.blocked_at(
-                        context,
-                        landing,
-                        Some(selected.physical_id),
-                        Effect::Applied,
-                        false,
-                        json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
-                        Some(&tab.url),
-                    );
+                    return self.hold(context, lease, selected, landing, &tab.url, Effect::Applied);
                 }
                 let governed = match lease.apply_landing(&selected.handle, &tab) {
                     Ok(tab) => tab,

@@ -55,15 +55,13 @@ impl ApplicationExecutor {
                     }) if tab_id == selected.physical_id => {
                         let landing = self.authorize_landing(context, Capability::Read, &url);
                         if !landing.allowed {
-                            self.hold(context, lease, selected);
-                            return self.blocked_at(
+                            return self.hold(
                                 context,
+                                lease,
+                                selected,
                                 landing,
-                                Some(tab_id),
+                                &url,
                                 Effect::None,
-                                false,
-                                json!({"tab":selected.handle.as_str(),"reason":landing.reason.as_str(),"held":true}),
-                                Some(&url),
                             );
                         }
                         let words = word_count(&text);

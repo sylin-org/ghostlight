@@ -692,7 +692,7 @@ fn hover_schema() -> Value {
 fn credential_authorization() -> (&'static str, Value) {
     (
         "user_authorized_credentials",
-        boolean(false, "True only when the user explicitly authorized credential entry for this request. Never overrides policy or Pause/Stop."),
+        boolean(false, "True only when the user explicitly authorized credential entry for this request. Never overrides policy or the person's Pause or End session."),
     )
 }
 

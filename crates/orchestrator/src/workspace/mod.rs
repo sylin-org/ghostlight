@@ -9,6 +9,7 @@ use crate::browser::adapter::{
     ViewportGeometry,
 };
 
+use crate::governance::Decision;
 use crate::intake::session::SessionMarker;
 use crate::language::outcome::{DialogKind, TargetRole};
 use crate::provenance::{ConnectionDetails, ConnectionEvidence};
@@ -356,8 +357,21 @@ pub struct SelectedTab {
     pub title: String,
     /// Last governed readiness.
     pub readiness: BrowserReadiness,
-    /// Whether runtime governance holds the tab.
-    pub held: bool,
+    /// Why the tab is held, while it shows a page governance refused.
+    pub hold: Option<TabHold>,
+}
+
+/// Why a tab is held: the refusal of the page it shows (ADR-0203 Decisions 2.4 and 5.5).
+///
+/// A tab is held from the moment governance refuses the page it landed on or was found on, until
+/// a landing the service sees clears it or the tab is closed. Every refusal on the held tab names
+/// this host and records this decision, so the hold is never mistaken for the person's Pause.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TabHold {
+    /// The decision that refused the page.
+    pub denial: Decision,
+    /// The host of the refused page, when its address has one.
+    pub host: Option<String>,
 }
 
 /// Immutable current target facts used at a browser-effect boundary.
@@ -655,7 +669,8 @@ struct TabState {
     url: String,
     title: String,
     readiness: BrowserReadiness,
-    held: bool,
+    /// Why the tab is held, while it shows a page governance refused.
+    hold: Option<TabHold>,
     /// The URL the binding is remembered by while it waits for its browser to confirm it, or none
     /// once it is confirmed (ADR-0203 Decision 1).
     ///
@@ -677,7 +692,7 @@ impl TabState {
             url: String::new(),
             title: String::new(),
             readiness: BrowserReadiness::Unknown,
-            held: false,
+            hold: None,
             pending: None,
         }
     }
@@ -868,7 +883,7 @@ impl AggregateState {
         let tabs: Vec<_> = workspace
             .confirmed_tabs()
             .map(|(_, tab)| tab)
-            .filter(|tab| !tab.held && !tab.url.is_empty())
+            .filter(|tab| tab.hold.is_none() && !tab.url.is_empty())
             .map(|tab| {
                 (
                     tab.physical_id,
@@ -1664,7 +1679,7 @@ impl WorkspaceStore {
             {
                 tab.generation = tab.generation.saturating_add(1);
                 tab.readiness = BrowserReadiness::Loading;
-                tab.held = false;
+                tab.hold = None;
                 tab.url = url.into();
                 tab.title.clear();
                 workspace.targets.prune_tab(handle, tab.generation);
@@ -1707,7 +1722,7 @@ impl WorkspaceStore {
             .workspaces
             .values_mut()
             .flat_map(|workspace| workspace.tabs.values_mut())
-            .find(|tab| tab.is_confirmed_tab(browser, physical_id) && !tab.held)
+            .find(|tab| tab.is_confirmed_tab(browser, physical_id) && tab.hold.is_none())
         {
             tab.readiness = readiness;
         }
@@ -1906,8 +1921,8 @@ impl WorkspaceLease {
     /// it there.
     pub fn select_tab(&self, requested: Option<&str>) -> Result<SelectedTab, WorkspaceError> {
         let tab = self.select_tab_to_leave(requested)?;
-        if tab.held {
-            return Err(WorkspaceError::Held);
+        if let Some(hold) = tab.hold {
+            return Err(WorkspaceError::Held(hold));
         }
         Ok(tab)
     }
@@ -2005,7 +2020,7 @@ impl WorkspaceLease {
         known.url.clone_from(&tab.url);
         known.title = bounded(&tab.title, TAB_TITLE_CHARS);
         known.readiness = tab.readiness;
-        known.held = false;
+        known.hold = None;
         let current = selected(handle, known);
         workspace.targets.prune_tab(handle, current.generation);
         Ok(current)
@@ -2057,14 +2072,14 @@ impl WorkspaceLease {
     /// Hold a tab whose page governance refused, after a landing or a read found it there.
     ///
     /// Only [`Self::select_tab_to_leave`] selects the tab while it is held, and a governed landing
-    /// clears the hold.
-    pub fn hold_tab(&self, handle: &TabHandle) -> Result<(), WorkspaceError> {
+    /// clears the hold. `hold` is the refusal every later refusal on the tab repeats.
+    pub fn hold_tab(&self, handle: &TabHandle, hold: TabHold) -> Result<(), WorkspaceError> {
         let mut state = self.store.lock();
         let workspace = state
             .workspaces
             .get_mut(&self.workspace)
             .ok_or(WorkspaceError::UnknownWorkspace)?;
-        workspace.confirmed_mut(handle)?.held = true;
+        workspace.confirmed_mut(handle)?.hold = Some(hold);
         Ok(())
     }
 
@@ -2300,8 +2315,8 @@ impl WorkspaceLease {
                 return Err(WorkspaceError::TargetTabMismatch);
             }
         }
-        if tab.held {
-            return Err(WorkspaceError::Held);
+        if let Some(hold) = &tab.hold {
+            return Err(WorkspaceError::Held(hold.clone()));
         }
         Ok(SelectedTarget {
             handle,
@@ -2527,7 +2542,7 @@ fn selected(handle: &TabHandle, tab: &TabState) -> SelectedTab {
         url: tab.url.clone(),
         title: tab.title.clone(),
         readiness: tab.readiness,
-        held: tab.held,
+        hold: tab.hold.clone(),
     }
 }
 
@@ -2536,7 +2551,7 @@ fn bounded(value: &str, maximum: usize) -> String {
 }
 
 /// Workspace invariant or recovery failure.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum WorkspaceError {
     /// MCP workspace is no longer admitted.
     #[error("workspace is no longer admitted")]
@@ -2586,9 +2601,9 @@ pub enum WorkspaceError {
     /// Image rectangle is invalid or extends outside the captured view.
     #[error("view region is outside the captured image")]
     ViewRegionOutOfBounds,
-    /// Runtime governance holds the tab.
-    #[error("tab is held by runtime governance")]
-    Held,
+    /// The tab shows a page governance refused, for the reason the hold keeps.
+    #[error("tab is held on a page governance refused")]
+    Held(TabHold),
     /// Physical tab is already controlled by another workspace.
     #[error("physical tab is already controlled")]
     PhysicalTabOwned,
@@ -2604,7 +2619,7 @@ mod tests {
     use crate::language::outcome::TargetRole;
 
     use super::{
-        short_handle, BindingState, ReleasedTabs, SnapshotScope, StaleReason, TargetBook,
+        short_handle, BindingState, ReleasedTabs, SnapshotScope, StaleReason, TabHold, TargetBook,
         TargetHandle, WorkspaceError, WorkspaceId, WorkspaceStore, HANDLE_ALPHABET,
         HANDLE_SUFFIX_CHARS,
     };
@@ -2953,7 +2968,17 @@ mod tests {
             .into_iter()
             .find(|tab| tab.physical_id == 5)
             .unwrap();
-        lease.hold_tab(&held.handle).unwrap();
+        lease
+            .hold_tab(
+                &held.handle,
+                TabHold {
+                    denial: crate::governance::Decision::refused(
+                        crate::governance::ReasonCode::HostDenied,
+                    ),
+                    host: None,
+                },
+            )
+            .unwrap();
         drop(lease);
         // The reaper releases the workspace of a caller that is gone, and the browser keeps every
         // tab open. The held tab still never joins the pool.

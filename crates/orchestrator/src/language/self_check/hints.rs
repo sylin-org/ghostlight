@@ -559,7 +559,10 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
         WorkspaceReason::AmbiguousTab,
         WorkspaceReason::TabUnavailable,
         WorkspaceReason::StaleView,
-        WorkspaceReason::TabHeld,
+        WorkspaceReason::TabHeld {
+            host: Some("elsewhere.test".into()),
+        },
+        WorkspaceReason::TabHeld { host: None },
         WorkspaceReason::WorkspaceBusy,
         WorkspaceReason::OwnershipMismatch {
             owner: Some("Claude Code".into()),
@@ -605,7 +608,7 @@ fn workspace_reasons() -> Vec<WorkspaceReason> {
             | WorkspaceReason::TabUnavailable
             | WorkspaceReason::StaleTarget { .. }
             | WorkspaceReason::StaleView
-            | WorkspaceReason::TabHeld
+            | WorkspaceReason::TabHeld { .. }
             | WorkspaceReason::WorkspaceBusy
             | WorkspaceReason::OwnershipMismatch { .. }
             | WorkspaceReason::WorkspaceClosed => {}

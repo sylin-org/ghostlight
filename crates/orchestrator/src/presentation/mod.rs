@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use crate::browser::{addressed_tab, BrowserError, BrowserPort};
 use crate::events::{DenialPresentation, DomainEvent};
+use crate::language::presentation as presentation_words;
 use crate::workspace::WorkspaceStore;
 
 /// How long one presentation may take, including the tab lookup a protocol-4 notice needs.
@@ -229,8 +230,8 @@ impl PresentationReactor {
             DomainEvent::HoldEntered { physical_id, .. } => (
                 PresentationKind::Denial,
                 current(),
-                "Ghostlight held this action",
-                Some("A runtime guardrail paused browser work."),
+                presentation_words::HOLD_PHASE,
+                Some(presentation_words::HOLD_DETAIL),
                 Some(*physical_id),
                 None,
                 false,
