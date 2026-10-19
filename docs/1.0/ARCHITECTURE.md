@@ -1070,10 +1070,11 @@ The extension also ships a bundled setup page, `setup.html`, and one stylesheet 
 once when the first connection finds the service absent, and from the setup buttons of the popup
 and the options page. It loads nothing from the network, holds the setup command and the words
 for this computer's step, and offers Open Ghostlight, which sends `show_requested`. The words of
-the extension's pages live in the extension and are frozen with it: the packaged set is hashed in
-`tests/golden/extension-2.0.0.files.sha256` and `tests/guards/extension-freeze.test.mjs` fails
-when a packaged file is added, removed or changed. A packaged file changes only with a recorded
-owner decision to withdraw the store submission and resubmit.
+the extension's pages live in the extension and ship in its package. The packaged set is recorded
+in `tests/golden/extension-2.0.0.files.sha256`, and `tests/guards/extension-freeze.test.mjs`
+fails when a packaged file is added, removed or changed against that record. An extension change
+regenerates the record in the same commit. Once a store submission is staged, changing a packaged
+file means resubmitting, which is the owner's call (ADR-0200 Decision 16).
 
 Workspace tab grouping is browser mechanism. `OpenTab` carries the governed URL, the owning
 workspace already present on every browser request, and the presentation-only exact title

@@ -24,7 +24,7 @@ the push.
 | u7 search-finds-rows | window | n-d-04, j-30, j-31 | todo |
 | n1 light-taskbar-tray-glyph | native | j-11 | landed (this commit) |
 | n2 the-tray-keeps-the-mascot | native | j-11 (owner) | landed (this commit) |
-| e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit), j-24 (options switches) | landed (this commit) |
+| e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit), j-24 (options switches) | landed (6b8f1d56, this commit); j-33 needs the window lane's breakpoint change, see Notes |
 | o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | landed (this commit) |
 | k1 brand-reference-for-2-0 | docs | j-37 | landed (this commit) |
 
@@ -153,3 +153,18 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
 - e1: the freeze guard's head comment, its rule text and the kit's header now say what AGENTS.md
   says: an extension change regenerates the package record, and once a submission is staged,
   changing a packaged file means resubmitting, which is the owner's call.
+- e1 review, open dependency for the window lane (j-33): the kit's one-column layout now runs
+  below 980px, but crates/orchestrator/ui/styles.css still lifts the setup view's companion with
+  `@media (min-width: 761px) { #setup-root .gl-companion { ... transform: translateY(-50%) } }`,
+  written for the old 760px breakpoint. From 761 to 979px the view is one column and the
+  companion rides up onto the column above it (measured at 880x800: 121px over the last agent
+  row and Skip on ?setup=agent, 76px on ?setup=computer). The kit cannot override it, because
+  the id selector outranks anything the kit can scope to. The window lane changes that rule to
+  `(min-width: 980px)` and the pinned `(min-width: 761px)` in tests/workbench-settings.test.mjs
+  ("every width rule asks the shell ..."); better, that test reads the breakpoint from
+  extension/kit.css so the two cannot drift again. Then it checks the setup view at 761 to 979px
+  for overlap, not only for scrolling. The extension lane did not edit either file: both belong
+  to the window lane, which has them open.
+- e1 review: docs/1.0/ARCHITECTURE.md's extension setup-page paragraph now says what AGENTS.md
+  and the freeze guard say. It had said the pages are frozen and change only with an owner
+  decision to withdraw the submission.
