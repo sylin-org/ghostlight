@@ -2024,7 +2024,7 @@ fn unowned_entry_refusal(command: Option<&str>, args: Option<&[&str]>) -> Harnes
     }
 }
 
-/// "no arguments", "1 argument" or "<n> arguments".
+/// The state of Ghostlight's entry in `definition`'s own configuration file.
 fn registration_state(
     context: &HarnessContext,
     definition: &HarnessDefinition,

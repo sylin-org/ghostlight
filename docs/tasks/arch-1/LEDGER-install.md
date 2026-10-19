@@ -289,3 +289,12 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   writer golden was regenerated with `GHOSTLIGHT_AGENTS_GOLDEN_UPDATE=1` and is byte-identical:
   the state words and details did not change. The native goldens are unaffected, so `linux.txt`
   is unaffected. No journey is needed.
+- I10, a defect and its repair: `e97d4618` staged `language/outcome.rs` as a whole file, so it also
+  carried core's uncommitted held-tab hunks (`Refusal::TabHeld { host }`, `held_tab_summary`, a unit
+  `WorkspaceReason::TabHeld`, and a test of `TabHold`'s new fields) without their dependents in
+  `audit.rs`, `self_check/hints.rs`, `workspace/mod.rs` and `work/`. `e97d4618` alone does not
+  build. The fixup after it stages a hunk-filtered `outcome.rs`: C6's file plus only I10's two
+  hunks (the `deployment` import and the `BrowserAbsent` step), so the held-tab host C6 gave the
+  refusal is back. Core's hunks stay in the working tree for core's own slice. The fixup also
+  drops a doc line the move of `argument_count_phrase` left above `registration_state`. The gate
+  ran on an export of the fixup's tree, not on the shared working tree.

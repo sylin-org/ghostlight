@@ -1541,12 +1541,6 @@ pub enum Refusal {
     LandingDeniedUnknown,
     /// The selected workspace resource is unusable.
     WorkspaceUnusable { reason: WorkspaceReason },
-    /// The selected tab shows a page governance refused, on `host` when its address has one
-    /// (ADR-0203 Decisions 2.4 and 5.5).
-    ///
-    /// The host is for the model and the audit's observed host. The closed audit facts keep the
-    /// workspace cause `tab_held` alone, as audit v2 has always written it.
-    TabHeld { host: Option<String> },
     /// Explicit local files could not be prepared safely.
     FilesUnreadable,
     /// A screenshot exceeded the result bound.
@@ -1710,7 +1704,6 @@ impl Refusal {
                 "The new tab's final state is unknown after its landing was blocked."
             }
             Self::WorkspaceUnusable { reason } => return reason.summary(),
-            Self::TabHeld { host } => return held_tab_summary(host.as_deref()),
             Self::FilesUnreadable => "The selected local files could not be prepared safely.",
             Self::CaptureTooLarge => "The screenshot was too large to return.",
             Self::TabNotShowing => {
@@ -1852,7 +1845,6 @@ impl Refusal {
                 BrowserRecoveryReason::LaunchFailed => vec![ASK_FOR_THAT_BROWSER.into()],
             },
             Self::WorkspaceUnusable { reason } => reason.next_steps(),
-            Self::TabHeld { .. } => vec![LEAVE_HELD_TAB.into()],
             Self::FilesUnreadable => vec![
                 "Confirm each path is an existing file within Ghostlight's upload limits.".into(),
             ],
@@ -1891,7 +1883,10 @@ impl Refusal {
     #[must_use]
     pub fn observed(&self) -> Observed {
         match self {
-            Self::AuthorityBlocked { host, .. } | Self::TabHeld { host } => Observed {
+            Self::AuthorityBlocked { host, .. }
+            | Self::WorkspaceUnusable {
+                reason: WorkspaceReason::TabHeld { host },
+            } => Observed {
                 host: host.clone(),
                 ..Observed::default()
             },
@@ -1942,15 +1937,6 @@ pub enum StaleHelp {
 /// (ADR-0203 Decision 2.4). Each is authorized on its own, never on the page the tab shows.
 const LEAVE_HELD_TAB: &str = "Call browser_navigate with the tab and an allowed url to leave the page, or browser_tabs with action close to close the tab.";
 
-/// Say what a held tab shows and what Ghostlight will not do there, naming the refused host when
-/// it is known.
-fn held_tab_summary(host: Option<&str>) -> String {
-    match host {
-        Some(host) => format!("That tab shows {host}, which this session may not use, so Ghostlight will not read or act on it there."),
-        None => "That tab shows a page this session may not use, so Ghostlight will not read or act on it there.".into(),
-    }
-}
-
 /// Stable language reason for an unusable workspace resource.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1969,8 +1955,13 @@ pub enum WorkspaceReason {
     },
     /// The view no longer matches current rendered coordinates.
     StaleView,
-    /// The selected tab shows a page governance refused. [`Refusal::TabHeld`] names its host.
-    TabHeld,
+    /// The selected tab shows a page governance refused, on `host` when its address has one.
+    ///
+    /// The serialized reason keeps only the word: the host is the audit's observed host.
+    TabHeld {
+        #[serde(skip)]
+        host: Option<String>,
+    },
     /// Another invocation owns the workspace lease.
     WorkspaceBusy,
     /// The selected resource belongs elsewhere.
@@ -2000,7 +1991,12 @@ impl WorkspaceReason {
             }
             .into(),
             Self::StaleView => "The page has moved since that screenshot was taken.".into(),
-            Self::TabHeld => held_tab_summary(None),
+            Self::TabHeld { host: Some(host) } => {
+                format!("That tab shows {host}, which this session may not use, so Ghostlight will not read or act on it there.")
+            }
+            Self::TabHeld { host: None } => {
+                "That tab shows a page this session may not use, so Ghostlight will not read or act on it there.".into()
+            }
             Self::WorkspaceBusy => {
                 "Another Ghostlight action is already using this session.".into()
             }
@@ -2023,7 +2019,7 @@ impl WorkspaceReason {
             Self::TabUnavailable => "tab_unavailable",
             Self::StaleTarget { .. } => "stale_target",
             Self::StaleView => "stale_view",
-            Self::TabHeld => "tab_held",
+            Self::TabHeld { .. } => "tab_held",
             Self::WorkspaceBusy => "workspace_busy",
             Self::OwnershipMismatch { .. } => "ownership_mismatch",
             Self::WorkspaceClosed => "workspace_closed",
@@ -2064,7 +2060,7 @@ impl WorkspaceReason {
             Self::StaleView => {
                 vec!["Call browser_screenshot to obtain a current view handle.".into()]
             }
-            Self::TabHeld => vec![LEAVE_HELD_TAB.into()],
+            Self::TabHeld { .. } => vec![LEAVE_HELD_TAB.into()],
             Self::WorkspaceBusy => {
                 vec!["Wait for the active Ghostlight invocation to finish.".into()]
             }
@@ -2095,7 +2091,7 @@ impl From<WorkspaceError> for WorkspaceReason {
             WorkspaceError::StaleView
             | WorkspaceError::ViewPointOutOfBounds
             | WorkspaceError::ViewRegionOutOfBounds => Self::StaleView,
-            WorkspaceError::Held(_) => Self::TabHeld,
+            WorkspaceError::Held(hold) => Self::TabHeld { host: hold.host },
             WorkspaceError::Busy => Self::WorkspaceBusy,
             WorkspaceError::NotOwnedTab
             | WorkspaceError::NotOwnedTarget
@@ -3906,7 +3902,7 @@ Changes are \"unsaved\".".into()),
             vec!["Call browser_screenshot to obtain a current view handle."]
         );
         assert_eq!(
-            WorkspaceReason::TabHeld.next_steps(),
+            WorkspaceReason::TabHeld { host: None }.next_steps(),
             vec!["Call browser_navigate with the tab and an allowed url to leave the page, or browser_tabs with action close to close the tab."]
         );
         assert_eq!(
@@ -4211,11 +4207,11 @@ Changes are \"unsaved\".".into()),
                     denial: crate::governance::Decision::refused(
                         crate::governance::ReasonCode::HostDenied,
                     ),
-                    authority: "authority_test".into(),
-                    requirements: crate::governance::CapabilitySet::READ,
-                    url: "https://elsewhere.test/".into(),
+                    host: Some("elsewhere.test".into()),
                 }),
-                WorkspaceReason::TabHeld,
+                WorkspaceReason::TabHeld {
+                    host: Some("elsewhere.test".into()),
+                },
             ),
             (WorkspaceError::Busy, WorkspaceReason::WorkspaceBusy),
             (
