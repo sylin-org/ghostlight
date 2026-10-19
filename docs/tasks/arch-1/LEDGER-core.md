@@ -620,3 +620,11 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   holds the executable check, the display probe and the spawn. Proves: the two tests count the
   starts the gate reaches: zero while the session ends or inside an app container, one otherwise,
   on any runner, and nothing is spawned. No golden or journey changed.
+- F8 (linux-claude, L2-12): after a service replace, the client of a resumed session that offers
+  tools was never sent `tools/list_changed`: `AdvertisedCatalog` started empty and compared
+  nothing until the client listed again, which a client that listed with the previous service does
+  not do, so a tool a newer service or a changed policy adds never reached a running agent. A
+  resumed session that offers tools now marks its client's catalog as given by an earlier service,
+  contents unknown, and the session watch tells the client once to list again; a session standing
+  by is told nothing. Proves: `a_resumed_session_is_told_to_list_its_tools_again`, which fails
+  without the fix, and the catalog watch's unit test.

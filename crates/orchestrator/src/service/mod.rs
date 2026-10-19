@@ -1476,6 +1476,11 @@ fn serve_mcp(
     let mut live = match resumed_tabs {
         Some(kept) => {
             let live = LiveSession::open(intake, &wire, &accepted)?;
+            // Its client listed tools from an earlier service and will not list them again, so
+            // the session watch tells it to, unless the session stands by with no tools.
+            if !wire.stands_by() {
+                live.advertised.given_earlier();
+            }
             remember_resumed_tabs(&intake.workspaces, &live.workspace, &kept);
             wire.publish_resume(
                 &intake.workspaces,
@@ -1821,7 +1826,8 @@ struct AdvertisedCatalog(Mutex<Option<Advertised>>);
 
 struct Advertised {
     authority: String,
-    tools: Vec<ToolDefinition>,
+    /// None when an earlier service gave the client its catalog, which this one never saw.
+    tools: Option<Vec<ToolDefinition>>,
 }
 
 impl AdvertisedCatalog {
@@ -1830,15 +1836,25 @@ impl AdvertisedCatalog {
         let tools = catalog_for(authority);
         *lock(&self.0) = Some(Advertised {
             authority: authority.id().to_owned(),
-            tools: tools.clone(),
+            tools: Some(tools.clone()),
         });
         tools
     }
 
+    /// Remember that an earlier service gave the client a catalog this one never saw: the client
+    /// of a resumed session listed its tools before the restart and does not list them again on
+    /// its own. The next comparison therefore tells it to, whatever the authority is now.
+    fn given_earlier(&self) {
+        *lock(&self.0) = Some(Advertised {
+            authority: String::new(),
+            tools: None,
+        });
+    }
+
     /// The catalog `authority` admits when it differs from the one given, and `None` otherwise.
     ///
-    /// Nothing is compared until the client has asked for a catalog, and the catalog is rebuilt
-    /// only when the authority itself changed.
+    /// Nothing is compared until the client has a catalog, from this service or an earlier one, and
+    /// the catalog is rebuilt only when the authority itself changed.
     fn changed_by(&self, authority: &AuthoritySnapshot) -> Option<Vec<ToolDefinition>> {
         let mut guard = lock(&self.0);
         let advertised = guard.as_mut()?;
@@ -1847,10 +1863,10 @@ impl AdvertisedCatalog {
         }
         advertised.authority = authority.id().to_owned();
         let tools = catalog_for(authority);
-        if tools == advertised.tools {
+        if advertised.tools.as_ref() == Some(&tools) {
             return None;
         }
-        advertised.tools.clone_from(&tools);
+        advertised.tools = Some(tools.clone());
         Some(tools)
     }
 }
@@ -4011,6 +4027,18 @@ mod tests {
         );
     }
 
+    /// After a service restart, the client of a resumed session already holds the catalog an
+    /// earlier service gave and does not list it again on its own, so the new service tells it to:
+    /// a tool a newer service or a changed policy adds reaches a running agent.
+    #[test]
+    fn a_resumed_session_is_told_to_list_its_tools_again() {
+        let home = TestHome::new("resumed-relist");
+        let _served = serve_fake(&home);
+        let mut resumed = open_mcp(Some(claude_code_token(false)));
+        until_list_changed(&mut resumed);
+        assert!(!list_tools(&mut resumed, 2).is_empty());
+    }
+
     #[test]
     fn harness_attached_names_the_source_file_and_never_the_claim() {
         let attribution = Attribution {
@@ -6090,6 +6118,14 @@ mod tests {
             advertised.changed_by(&governance.snapshot()).is_none(),
             "one change is told once"
         );
+
+        let resumed = AdvertisedCatalog::default();
+        resumed.given_earlier();
+        assert!(
+            resumed.changed_by(&governance.snapshot()).is_some(),
+            "a catalog an earlier service gave is told to list again"
+        );
+        assert!(resumed.changed_by(&governance.snapshot()).is_none());
     }
 
     /// An opening for the shell of this build.
