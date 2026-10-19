@@ -7,8 +7,17 @@
 #
 # GHOSTLIGHT_VERSION installs exactly that release instead of the latest one, found by its tag
 # (v<version>) through the GitHub releases API. A prerelease is installable this way and no other:
-# the latest release never is. Reviewers and the owner use it before a cutover:
-#   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.sh | GHOSTLIGHT_VERSION=2.0.0-rc.1 sh
+# the latest release never is:
+#   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.sh | GHOSTLIGHT_VERSION=2.0.0 sh
+#
+# GHOSTLIGHT_FROM installs from a release bundle on this machine instead of GitHub, for testing a
+# build before it is released. It names a folder: the release workflow's `release-candidate`
+# artifact, unpacked (SHA256SUMS beside an assets folder), or a folder of release downloads
+# (SHA256SUMS beside the images). Every image is checked against SHA256SUMS exactly as a download
+# is, and anything it does not bind is refused. A bundle is only as trustworthy as its source; with
+# the GitHub CLI installed, the build provenance is checked as well. It cannot be combined with
+# GHOSTLIGHT_VERSION:
+#   curl -fsSL https://raw.githubusercontent.com/sylin-org/ghostlight/<revision>/scripts/get.sh | GHOSTLIGHT_FROM=~/Downloads/release-candidate sh
 #
 # --restore installs this release over a development installation (a build the development loop
 # installed), whatever version it is: the one allowed move down. It runs the downloaded service
@@ -43,7 +52,36 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 sums="$temporary/SHA256SUMS"
-if [ -n "${GHOSTLIGHT_VERSION:-}" ]; then
+from=${GHOSTLIGHT_FROM:-}
+if [ -n "$from" ]; then
+  if [ -n "${GHOSTLIGHT_VERSION:-}" ]; then
+    echo "ghostlight: GHOSTLIGHT_FROM and GHOSTLIGHT_VERSION cannot be combined" >&2
+    exit 1
+  fi
+  if [ ! -d "$from" ]; then
+    echo "ghostlight: GHOSTLIGHT_FROM is not a folder: ${from}" >&2
+    exit 1
+  fi
+  # The release workflow's bundle keeps its images in assets/; a folder of release downloads keeps
+  # them beside SHA256SUMS.
+  images=$from
+  if [ -d "$from/assets" ]; then
+    images="$from/assets"
+  fi
+  if [ ! -f "$from/SHA256SUMS" ]; then
+    echo "ghostlight: ${from} has no SHA256SUMS" >&2
+    exit 1
+  fi
+  cp "$from/SHA256SUMS" "$sums"
+  # The bundle's manifest names its version; a folder of downloads names none.
+  version=""
+  if [ -f "$from/release-candidate.json" ]; then
+    version=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$from/release-candidate.json" | head -n 1)
+  fi
+  if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+    version=""
+  fi
+elif [ -n "${GHOSTLIGHT_VERSION:-}" ]; then
   # A requested version is installed exactly, whatever the latest release is, prerelease included.
   version=$GHOSTLIGHT_VERSION
   if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
@@ -92,8 +130,10 @@ else
     exit 1
   fi
 fi
-release_root="https://github.com/${repository}/releases/download/${tag}"
-curl -fsSL --proto '=https' --tlsv1.2 -o "$sums" "${release_root}/SHA256SUMS"
+if [ -z "$from" ]; then
+  release_root="https://github.com/${repository}/releases/download/${tag}"
+  curl -fsSL --proto '=https' --tlsv1.2 -o "$sums" "${release_root}/SHA256SUMS"
+fi
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -122,7 +162,16 @@ for component in ghostlight ghostlight-service ghostlight-desktop; do
     exit 1
   fi
   downloaded="$temporary/$component"
-  curl -fsSL --proto '=https' --tlsv1.2 -o "$downloaded" "${release_root}/${asset}"
+  if [ -n "$from" ]; then
+    if [ ! -f "$images/$asset" ]; then
+      echo "ghostlight: ${images} has no ${asset}" >&2
+      exit 1
+    fi
+    # The copy is what runs, so the copy is what is checked.
+    cp "$images/$asset" "$downloaded"
+  else
+    curl -fsSL --proto '=https' --tlsv1.2 -o "$downloaded" "${release_root}/${asset}"
+  fi
   if [ "$(sha256_file "$downloaded")" != "$expected" ]; then
     echo "ghostlight: checksum verification failed for ${asset}" >&2
     exit 1
@@ -133,10 +182,15 @@ for component in ghostlight ghostlight-service ghostlight-desktop; do
   chmod 0755 "$downloaded"
 done
 
+product="Ghostlight${version:+ ${version}}"
+obtained="downloaded"
+if [ -n "$from" ]; then
+  obtained="copied from ${from}"
+fi
 if [ "$provenance_for_all" -eq 1 ]; then
-  echo "Ghostlight ${version} downloaded. Checksums and build provenance verified."
+  echo "${product} ${obtained}. Checksums and build provenance verified."
 else
-  echo "Ghostlight ${version} downloaded. Checksums verified."
+  echo "${product} ${obtained}. Checksums verified."
 fi
 
 # The verified service installs the whole set (the edge, the service and the shell) into the
@@ -149,7 +203,7 @@ if ! "$service" deployment install $restore >/dev/null; then
 fi
 
 if [ "${GHOSTLIGHT_NO_REGISTER:-0}" = "1" ]; then
-  echo "Ghostlight ${version} is installed. Run 'ghostlight install' to connect your browsers and agents."
+  echo "${product} is installed. Run 'ghostlight install' to connect your browsers and agents."
 else
   # The same verified service hands `install` to the copy it just installed, which prints the
   # install summary in this console.

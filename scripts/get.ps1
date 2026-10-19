@@ -6,8 +6,17 @@
 #
 # GHOSTLIGHT_VERSION installs exactly that release instead of the latest one, found by its tag
 # (v<version>) through the GitHub releases API. A prerelease is installable this way and no other:
-# the latest release never is. Reviewers and the owner use it before a cutover:
-#   $env:GHOSTLIGHT_VERSION = "2.0.0-rc.1"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/v2.0.0-rc.1/scripts/get.ps1 | iex
+# the latest release never is:
+#   $env:GHOSTLIGHT_VERSION = "2.0.0"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/main/scripts/get.ps1 | iex
+#
+# GHOSTLIGHT_FROM installs from a release bundle on this machine instead of GitHub, for testing a
+# build before it is released. It names a folder: the release workflow's `release-candidate`
+# artifact, unpacked (SHA256SUMS beside an assets folder), or a folder of release downloads
+# (SHA256SUMS beside the images). Every image is checked against SHA256SUMS exactly as a download
+# is, and anything it does not bind is refused. A bundle is only as trustworthy as its source; with
+# the GitHub CLI installed, the build provenance is checked as well. It cannot be combined with
+# GHOSTLIGHT_VERSION:
+#   $env:GHOSTLIGHT_FROM = "$HOME\Downloads\release-candidate"; irm https://raw.githubusercontent.com/sylin-org/ghostlight/<revision>/scripts/get.ps1 | iex
 #
 # -Restore installs this release over a development installation (a build the development loop
 # installed), whatever version it is: the one allowed move down. It runs the downloaded
@@ -51,7 +60,32 @@
     }
 
     $requested = $env:GHOSTLIGHT_VERSION
-    if ([string]::IsNullOrWhiteSpace($requested)) {
+    $from = $env:GHOSTLIGHT_FROM
+    $local = -not [string]::IsNullOrWhiteSpace($from)
+    if ($local) {
+        if (-not [string]::IsNullOrWhiteSpace($requested)) {
+            throw "GHOSTLIGHT_FROM and GHOSTLIGHT_VERSION cannot be combined."
+        }
+        if (-not (Test-Path -LiteralPath $from -PathType Container)) {
+            throw "GHOSTLIGHT_FROM is not a folder: $from"
+        }
+        $from = (Resolve-Path -LiteralPath $from).ProviderPath
+        # The release workflow's bundle keeps its images in assets; a folder of release downloads
+        # keeps them beside SHA256SUMS.
+        $images = Join-Path $from "assets"
+        if (-not (Test-Path -LiteralPath $images -PathType Container)) { $images = $from }
+        $localSums = Join-Path $from "SHA256SUMS"
+        if (-not (Test-Path -LiteralPath $localSums -PathType Leaf)) {
+            throw "$from has no SHA256SUMS."
+        }
+        # The bundle's manifest names its version; a folder of downloads names none.
+        $version = $null
+        $manifest = Join-Path $from "release-candidate.json"
+        if (Test-Path -LiteralPath $manifest -PathType Leaf) {
+            $named = (Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json).PSObject.Properties['version']
+            if ($named -and "$($named.Value)" -match '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') { $version = "$($named.Value)" }
+        }
+    } elseif ([string]::IsNullOrWhiteSpace($requested)) {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/latest"
         if ($release.draft -or $release.prerelease -or $release.tag_name -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
             throw "GitHub did not return a stable three-part Ghostlight release."
@@ -77,34 +111,52 @@
             throw "Ghostlight release v$version does not exist."
         }
     }
-    $tag = $release.tag_name
-    $releaseRoot = "https://github.com/$repository/releases/download/$tag/"
-    $assets = @{}
-    foreach ($asset in $release.assets) {
-        if ($asset.browser_download_url -notlike "$releaseRoot*") {
-            throw "Release asset uses an unexpected download location: $($asset.browser_download_url)"
+    if (-not $local) {
+        $tag = $release.tag_name
+        $releaseRoot = "https://github.com/$repository/releases/download/$tag/"
+        $assets = @{}
+        foreach ($asset in $release.assets) {
+            if ($asset.browser_download_url -notlike "$releaseRoot*") {
+                throw "Release asset uses an unexpected download location: $($asset.browser_download_url)"
+            }
+            $assets[$asset.name] = $asset.browser_download_url
         }
-        $assets[$asset.name] = $asset.browser_download_url
-    }
-    if (-not $assets.ContainsKey("SHA256SUMS")) {
-        throw "Release $tag has no SHA256SUMS asset."
+        if (-not $assets.ContainsKey("SHA256SUMS")) {
+            throw "Release $tag has no SHA256SUMS asset."
+        }
     }
 
     $downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "ghostlight-download-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $downloadDirectory | Out-Null
     $provenanceForAll = $true
     try {
-        $sumLines = Read-ReleaseText -Uri $assets["SHA256SUMS"] -Path (Join-Path $downloadDirectory "SHA256SUMS")
+        if ($local) {
+            $sumsCopy = Join-Path $downloadDirectory "SHA256SUMS"
+            Copy-Item -LiteralPath $localSums -Destination $sumsCopy
+            $sumLines = [System.IO.File]::ReadAllLines($sumsCopy)
+        } else {
+            $sumLines = Read-ReleaseText -Uri $assets["SHA256SUMS"] -Path (Join-Path $downloadDirectory "SHA256SUMS")
+        }
         foreach ($component in @("ghostlight", "ghostlight-service", "ghostlight-desktop")) {
             $assetName = "$component-x86_64-pc-windows-msvc.exe"
-            if (-not $assets.ContainsKey($assetName)) {
+            if ($local) {
+                $source = Join-Path $images $assetName
+                if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                    throw "$images has no $assetName."
+                }
+            } elseif (-not $assets.ContainsKey($assetName)) {
                 throw "Release $tag is missing $assetName."
             }
             $expected = Get-BoundChecksum -Lines $sumLines -AssetName $assetName
             $destination = Join-Path $downloadDirectory "$component.exe"
             $temporary = "$destination.$PID.download"
             try {
-                Invoke-WebRequest -Uri $assets[$assetName] -OutFile $temporary -UseBasicParsing
+                if ($local) {
+                    # The copy is what runs, so the copy is what is checked.
+                    Copy-Item -LiteralPath $source -Destination $temporary
+                } else {
+                    Invoke-WebRequest -Uri $assets[$assetName] -OutFile $temporary -UseBasicParsing
+                }
                 $observed = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant()
                 if ($observed -ne $expected) {
                     throw "Checksum verification failed for $assetName."
@@ -125,10 +177,12 @@
             }
         }
 
+        $product = if ($version) { "Ghostlight $version" } else { "Ghostlight" }
+        $obtained = if ($local) { "copied from $from" } else { "downloaded" }
         if ($provenanceForAll) {
-            Write-Host "Ghostlight $version downloaded. Checksums and build provenance verified."
+            Write-Host "$product $obtained. Checksums and build provenance verified."
         } else {
-            Write-Host "Ghostlight $version downloaded. Checksums verified."
+            Write-Host "$product $obtained. Checksums verified."
         }
 
         # The verified service installs the whole set (the edge, the service and the shell) into
@@ -140,7 +194,7 @@
         if ($LASTEXITCODE -ne 0) { throw "Ghostlight installation failed with exit code $LASTEXITCODE." }
 
         if ($env:GHOSTLIGHT_NO_REGISTER -eq "1") {
-            Write-Host "Ghostlight $version is installed. Run 'ghostlight install' to connect your browsers and agents."
+            Write-Host "$product is installed. Run 'ghostlight install' to connect your browsers and agents."
         } else {
             # The same verified service hands `install` to the copy it just installed, which prints
             # the install summary in this console.

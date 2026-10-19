@@ -108,6 +108,7 @@ function run(label, changes = {}, version, arguments_ = [], settings = {}) {
   delete environment.INSTALLER_INSTALL_FAILS;
   delete environment.GHOSTLIGHT_VERSION;
   delete environment.GHOSTLIGHT_NO_REGISTER;
+  delete environment.GHOSTLIGHT_FROM;
   if (version) environment.GHOSTLIGHT_VERSION = version;
   Object.assign(environment, settings);
   const result = spawnSync("sh", [join(root, "scripts/get.sh"), ...arguments_], { env: environment, encoding: "utf8", timeout: 15000 });
@@ -195,4 +196,63 @@ for (const damaged of names) {
   assert.equal(existsSync(join(corrupt.userDirectory, ".ghostlight/bin")), false, `a corrupt ${damaged} installs nothing`);
   assert.deepEqual(corrupt.commands, [], "a corrupt download runs nothing");
 }
-console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, a failed install reported by the downloaded doctor, restore, invalid release, absent, unreachable or malformed requested version, checksum refusal\nEvidence: ${area}`);
+// A release bundle on this machine installs without asking the network for anything. Its folder is
+// the release workflow's artifact (SHA256SUMS beside assets/, with a manifest naming the version) or
+// a folder of release downloads (SHA256SUMS beside the images). The folder's name has a space.
+function bundle(label, { layout = "candidate", images = bodies, checksums = sums } = {}) {
+  const folder = join(area, label, "release candidate");
+  const assets = layout === "candidate" ? join(folder, "assets") : folder;
+  mkdirSync(assets, { recursive: true });
+  if (checksums !== null) writeFileSync(join(folder, "SHA256SUMS"), checksums);
+  for (const [name, body] of Object.entries(images)) writeFileSync(join(assets, `${name}-${target}`), body);
+  writeFileSync(join(assets, "ghostlight-x86_64-pc-windows-msvc.exe"), "the other system's image");
+  if (layout === "candidate") {
+    writeFileSync(join(folder, "release-candidate.json"),
+      JSON.stringify({ schemaVersion: 1, version: "2.0.0", status: "release-candidate", artifacts: [] }, null, 2) + "\n");
+  }
+  return folder;
+}
+const candidate = bundle("local-bundle");
+const fromBundle = run("local-bundle", {}, undefined, [], { GHOSTLIGHT_FROM: candidate });
+assert.equal(fromBundle.status, 0, fromBundle.stderr);
+assert.deepEqual(fromBundle.requests, [], "a local bundle asks the network for nothing");
+assert.deepEqual(fromBundle.commands, ["downloaded service: deployment install", "downloaded service: install"]);
+assert.ok(fromBundle.stdout.includes(`Ghostlight 2.0.0 copied from ${candidate}. Checksums verified.`), fromBundle.stdout);
+for (const name of names) {
+  assert.equal(readFileSync(join(fromBundle.userDirectory, ".ghostlight/bin", name), "utf8"), bodies[name]);
+}
+const downloads = bundle("local-downloads", { layout: "flat" });
+const fromDownloads = run("local-downloads", {}, undefined, ["--restore"], { GHOSTLIGHT_FROM: downloads });
+assert.equal(fromDownloads.status, 0, fromDownloads.stderr);
+assert.deepEqual(fromDownloads.requests, []);
+assert.deepEqual(fromDownloads.commands, ["downloaded service: deployment install --restore", "downloaded service: install"]);
+assert.ok(fromDownloads.stdout.includes(`Ghostlight copied from ${downloads}. Checksums verified.`), fromDownloads.stdout);
+const unregistered = run("local-no-register", {}, undefined, [], { GHOSTLIGHT_FROM: bundle("local-no-register"), GHOSTLIGHT_NO_REGISTER: "1" });
+assert.equal(unregistered.status, 0, unregistered.stderr);
+assert.deepEqual(unregistered.commands, ["downloaded service: deployment install"]);
+assert.ok(unregistered.stdout.includes("Ghostlight 2.0.0 is installed. Run 'ghostlight install'"), unregistered.stdout);
+// Whatever SHA256SUMS does not bind, a bundle installs nothing and runs nothing.
+const withoutLine = asset => sums.split("\n").filter(line => !line.endsWith(`  ${asset}`)).join("\n");
+for (const [label, options, said] of [
+  ["local-corrupt", { images: { ...bodies, "ghostlight-service": "wrong bytes" } }, `ghostlight: checksum verification failed for ghostlight-service-${target}`],
+  ["local-missing-image", { images: { ghostlight: bodies.ghostlight, "ghostlight-service": bodies["ghostlight-service"] } }, ` has no ghostlight-desktop-${target}`],
+  ["local-unbound", { checksums: withoutLine(`ghostlight-desktop-${target}`) }, `ghostlight: invalid checksum for ghostlight-desktop-${target}`],
+  ["local-no-sums", { checksums: null }, "release candidate has no SHA256SUMS"]
+]) {
+  const refused = run(label, {}, undefined, [], { GHOSTLIGHT_FROM: bundle(label, options) });
+  assert.notEqual(refused.status, 0);
+  assert.ok(refused.stderr.trim().endsWith(said), refused.stderr);
+  assert.deepEqual(refused.requests, []);
+  assert.deepEqual(refused.commands, [], `${label} runs nothing`);
+  assert.equal(existsSync(join(refused.userDirectory, ".ghostlight")), false, `${label} installs nothing`);
+}
+const combined = run("local-and-version", {}, "2.0.0", [], { GHOSTLIGHT_FROM: bundle("local-and-version") });
+assert.notEqual(combined.status, 0);
+assert.equal(combined.stderr.trim(), "ghostlight: GHOSTLIGHT_FROM and GHOSTLIGHT_VERSION cannot be combined");
+assert.deepEqual(combined.requests, []);
+const nowhere = join(area, "no such folder");
+const absentFolder = run("local-absent", {}, undefined, [], { GHOSTLIGHT_FROM: nowhere });
+assert.notEqual(absentFolder.status, 0);
+assert.equal(absentFolder.stderr.trim(), `ghostlight: GHOSTLIGHT_FROM is not a folder: ${nowhere}`);
+assert.deepEqual(absentFolder.requests, []);
+console.log(`PASS shell installer: requested version by tag (prerelease too), latest release, CDN delivery, all three images, install in the console, a failed install reported by the downloaded doctor, restore, invalid release, absent, unreachable or malformed requested version, checksum refusal, a local bundle in both layouts with nothing asked of the network, and its refusals\nEvidence: ${area}`);

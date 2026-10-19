@@ -5,8 +5,10 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). Statuses: `todo`, `done` (with commi
 
 ## RESUME HERE
 
-Opened 2026-10-19 by windows-claude. Part 1 starts now. Part 2 starts when windows-claude's
-message says the head is ready (arch-1 integrated, deployed on Windows and pushed).
+Opened 2026-10-19 by windows-claude. Part 1 started the same day. The owner then narrowed this
+machine's part to CachyOS (Notes, "Scope, 2026-10-19"): L2-01 and L2-03 are out of this batch,
+and the owner validates the other Linux environments. Part 2 starts when windows-claude's message
+says the head is ready (arch-1 integrated, deployed on Windows and pushed).
 
 ## Files this batch owns
 
@@ -19,10 +21,10 @@ message says the head is ready (arch-1 integrated, deployed on Windows and pushe
 
 | Task | What | Status |
 | --- | --- | --- |
-| L2-01 | Alpine (musl) gets a working Ghostlight from the release | todo |
-| L2-02 | The install scripts install from a local release bundle | todo |
-| L2-03 | Bluefin readiness: Flatpak browsers, SELinux, read-only /usr | todo |
-| L2-04 | What Claude Code does with the plugin and the installer's entry together | todo |
+| L2-01 | Alpine (musl) gets a working Ghostlight from the release | blocked: owner, CachyOS only |
+| L2-02 | The install scripts install from a local release bundle | done |
+| L2-03 | Bluefin readiness: Flatpak browsers, SELinux, read-only /usr | blocked: owner, CachyOS only |
+| L2-04 | What Claude Code does with the plugin and the installer's entry together | done |
 
 **L2-01.** The release builds `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu` only. On
 Alpine the glibc images cannot start: their interpreter `/lib64/ld-linux-x86-64.so.2` is absent
@@ -43,6 +45,25 @@ verifies `SHA256SUMS` exactly as the GitHub path does and refuses anything unver
 in each script's head and in the installation guide's testing section. Tests for both scripts;
 the PowerShell side is checked by CI's Windows jobs.
 
+Result, 2026-10-19, done. `GHOSTLIGHT_FROM=<folder>` in `get.sh` and `get.ps1` names the release
+workflow's unpacked `release-candidate` artifact (SHA256SUMS beside `assets`, with
+`release-candidate.json` naming the version) or a folder of release downloads (SHA256SUMS beside
+the images). Each image is copied into the script's temporary folder and the copy is checked
+against SHA256SUMS by the same rules as a download: one well-formed line per image, and the hash.
+Anything unbound, missing or different is refused before anything runs, and the scripts ask the
+network for nothing (`gh attestation verify` still runs when the GitHub CLI is present). It
+cannot be combined with `GHOSTLIGHT_VERSION`; `--restore` and `GHOSTLIGHT_NO_REGISTER` work with
+it. Documented in both script heads, the installation guide ("Test a build before its release")
+and RELEASE.md's cutover steps 1 to 3, which no longer publish `v2.0.0-rc.1`. Tests:
+`tests/installer-shell.mjs` passes here (both layouts, restore, no-register, corrupt, missing,
+unbound, no SHA256SUMS, version combination, absent folder, and no request in any of them).
+`tests/installer-powershell.ps1` gains a local bundle install with no web request, a corrupt image
+refused with the installation unchanged, and the version combination refused; it runs on CI's
+Windows job. Here, `get.ps1` in PowerShell 7.6.5 was run against stub images: the install and the
+seven refusals behave as in `get.sh`. Found on the way, for Part 2: the bundle's extension ZIP is
+the store upload, without the development key, so an unpacked copy of it gets an ID the browser
+registration refuses. Testers load `extension/` from the bundle's revision instead (guide).
+
 **L2-03.** Bluefin is Fedora Atomic: read-only `/usr`, SELinux enforcing, browsers from Flathub,
 Homebrew for command-line tools, GNOME. Check Ghostlight against each part you can reach here: a
 Flathub Chrome or Chromium on this machine (ADR-0165's host activation), an agent installed from
@@ -60,6 +81,42 @@ both servers start, the parent process of each, and whether a `notifications/too
 from the second server is honored. Report the facts in the chat; windows-claude builds the
 installer and service side of "works regardless" from them.
 
+Result, 2026-10-19, done (reported in the chat). Claude Code 2.1.303 on test-01, in an isolated
+`CLAUDE_CONFIG_DIR` under the session's scratch folder. The plugin came from this repository's
+marketplace (`ghostlight@sylin-org-plugins` 1.0.1, server `npx -y ghostlight`); the installer's
+entry was written as `ghostlight install` writes it (`/home/test/.ghostlight/bin/ghostlight`,
+args `["mcp"]`, env `{}`). npm still serves 1.3.14, so `npx` was a PATH stand-in that logged each
+start and ran this repository's 2.0 launcher, which runs the installed edge. No login was used: a
+local stand-in for the Messages API on 127.0.0.1 answered each turn and recorded the tools each
+request offered the model.
+
+1. **Both start.** `plugin:ghostlight:ghostlight` and `ghostlight` both connect, 1 ms apart, in
+   print mode, in the interactive TUI and in `claude mcp list`. Each request offers the model 46
+   Ghostlight tools: 23 `mcp__ghostlight__*` and 23 `mcp__plugin_ghostlight_ghostlight__*`.
+2. **The duplicate rule.** Claude Code drops the plugin's server ("Suppressing plugin MCP server
+   ... duplicates manually-configured ...") only when a configured server has the same command and
+   the same args. Args count: `npx -y ghostlight mcp`, or `npx` with no args, beside the plugin's
+   `npx -y ghostlight` starts both. The name does not count (an entry named `foo` suppressed it),
+   and neither does `env`. `${HOME}` in a plugin's command is expanded before the comparison: a
+   scratch copy of the plugin with `${HOME}/.ghostlight/bin/ghostlight` and `["mcp"]` was
+   suppressed by the installer's entry. The configured server always wins.
+3. **Parents.** The installer's edge is a child of the Claude Code process. The plugin's edge is
+   its great-grandchild: Claude Code, `npm exec ghostlight` (npx), the npm launcher (node), then
+   `ghostlight mcp`. The real npx chain was read from npx running this repository's package with
+   an isolated npm cache and `--offline`.
+4. **list_changed.** Honored as a re-list: "Received tools/list_changed notification, refreshing
+   tools", and a `tools/list` within 4 ms, in print mode and the TUI (the notification was
+   injected by a logging proxy in front of the plugin's server). Additions reach the model: a server
+   whose first `tools/list` had no tools and whose re-list had 23 was offered with 0 tools on the
+   first turn and 23 on the next. Removals do not: after a re-list answered with no tools, or one,
+   the next turn still offered all 23. So a second server keeps itself out only by answering its
+   first `tools/list` with no tools, and can add its tools later.
+
+Side finding, not in this batch's files: the installer writes Claude Code's entry to
+`~/.claude.json` (`install/mod.rs`, the Claude Code path), but a Claude Code with
+`CLAUDE_CONFIG_DIR` set reads `$CLAUDE_CONFIG_DIR/.claude.json`, so that person's Claude Code
+never sees the entry.
+
 ## Part 2: the full test (after windows-claude's go)
 
 | Task | What | Status |
@@ -67,8 +124,8 @@ installer and service side of "works regardless" from them.
 | L2-10 | The full gate and every journey on the go head | todo |
 | L2-11 | The release workflow's bundle, built and verified | todo |
 | L2-12 | A clean install from the bundle, and real use | todo |
-| L2-13 | The same with a Flathub browser | todo |
-| L2-14 | Alpine from the bundle | todo |
+| L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
+| L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
 | L2-15 | The owner's steps for Bluefin and Alpine | todo |
 
 **L2-11.** Dispatch the release workflow on the go head, download the bundle, and run
@@ -84,3 +141,32 @@ demo stages from an agent, the window and the tray, idle exit, a restart of the 
 where to get the bundle, the install command, what to try, and what each result means.
 
 ## Notes
+
+**CachyOS check, 2026-10-19.** The development build at e9646471 was deployed on test-01 (it had
+run 7abbdc39); `ghostlight doctor` reads Ready, with Chromium registered and every agent
+connected. A first real task (`browser_navigate` to the demo desk) failed: "The Ghostlight adapter
+did not connect in time after the browser started." No browser relay had run since 2026-10-18
+21:22. Cause, on this machine: Chromium started with the session at 08:29:09, and the drive that
+holds the repository (`/run/media/test/WORKBENCH`, /dev/sdb2) mounted at 08:30:27, so the unpacked
+2.0 extension's folder was missing at browser start and Chromium dropped the extension from the
+profile. The profile still holds the 1.x store extension, disabled. Owed: the owner loads
+`extension/` unpacked again (the browser's own data is the owner's). An unpacked extension stays
+only if its folder is there when the browser starts. Seen on the way, for windows-claude: the
+extension probe counts the disabled 1.x store copy as holding the extension, so the refusal said to
+open a window of the browser, which cannot help; and the morning service's diagnostics file ends in
+a cut-off record at its exit.
+Then the owner loaded `extension/` unpacked again, the browser relay started and connected, and
+the first task passed through this session's Ghostlight tools: `browser_navigate` opened the demo
+desk, `browser_find` found "Ring the bell", `browser_click` opened its prompt, `browser_dialog`
+answered it, and `browser_read` showed the page's readout of the answer. `ghostlight status` reads
+"2 agents and 1 browser connected". Closing the tab was kept by preserve-tabs, as the owner set it.
+
+**Scope, 2026-10-19.** The owner, while Part 1 started: "you shouldn't try to install
+dependencies, I think - just make sure Ghostlight is working for this OS specifically. I'll deploy
+ghostlight on different Linux environments, and validate against that." Asked whether the release
+workflow should still build musl images on CI for Alpine, the owner chose "CachyOS only". So
+nothing is installed on this machine (no podman, Flatpak or Alpine root), and L2-01, L2-03, L2-13
+and L2-14 are out of this batch. Known and unchanged: the release's Linux images are
+`x86_64-unknown-linux-gnu` only, and they cannot start on Alpine, whose musl system has no
+`/lib64/ld-linux-x86-64.so.2` (test-03, September). L2-15's page still gives the owner's steps
+for the other environments.
