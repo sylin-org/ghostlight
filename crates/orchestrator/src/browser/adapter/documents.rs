@@ -39,7 +39,8 @@ pub struct DocumentScope {
     pub allowed: Vec<String>,
     /// Exact routed subjects, when the primitive names particular documents.
     pub subjects: Vec<String>,
-    /// Stop retained recording when this admitted document set changes.
+    /// Watch this admitted document set: a recording stops when it changes, and a diagnostics
+    /// read is bound to it, so retained entries reset when it changes.
     pub watch_changes: bool,
     /// Require the complete admitted tree to stay fixed for a broad restricted operation.
     pub strict_tree: bool,

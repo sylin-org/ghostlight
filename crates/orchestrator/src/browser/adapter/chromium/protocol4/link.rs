@@ -253,12 +253,14 @@ impl Spec for wire::RecordingOp {
     const NAME: &'static str = primitive_name::RECORDING;
     const CLASS: Class = Class::Read;
 
-    /// Only an export into a page changes anything.
+    /// An export into a page attaches a file, and an export to Downloads saves one. Either
+    /// changes the browser, so a receipt lost after it was sent leaves the save unknown.
     fn carries_effect(&self) -> bool {
         matches!(
             self,
             Self::Export {
-                destination: wire::RecordingTarget::Page { .. },
+                destination: wire::RecordingTarget::Page { .. }
+                    | wire::RecordingTarget::Download { .. },
                 ..
             }
         )

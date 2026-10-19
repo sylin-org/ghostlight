@@ -5,10 +5,12 @@
 //! [`RecordingIndex`](super::super::link::RecordingIndex), so a workspace reaches only the
 //! recording it started and never names it.
 //!
-//! A diagnostics read is bound to the documents the authority admitted: the extension resets a
-//! tab's retained entries when the binding changes, so entries gathered under one admitted set
-//! never reach a request admitted for another. A recording started under a watching scope stops
-//! when the admitted documents change.
+//! A diagnostics read under a watching scope is bound to the documents the authority admitted:
+//! the extension resets a tab's retained entries when the binding changes, so entries gathered
+//! under one admitted set never reach a request admitted for another. A read the authority did
+//! not ask to watch sends no binding: its policy admits every document, so there is no other set
+//! to keep entries from, and an iframe that reloads leaves the tab's history in place. A
+//! recording started under a watching scope stops when the admitted documents change.
 
 use std::fmt::Write as _;
 
@@ -47,8 +49,8 @@ pub struct DiagnosticsRead {
     pub limit: u16,
 }
 
-/// Read the diagnostics retained for one tab, bound to the admitted documents and guarded by
-/// the scope.
+/// Read the diagnostics retained for one tab, guarded by the scope, and bound to the admitted
+/// documents when the scope watches them.
 ///
 /// # Errors
 ///
@@ -66,7 +68,7 @@ pub fn read_diagnostics(
         match_text: read.match_text,
         after: read.after,
         limit: read.limit,
-        binding: scope.map(binding),
+        binding: scope.filter(|scope| scope.watches()).map(binding),
         guard: scope.map(Scope::guard),
     })?;
     let entries = facts

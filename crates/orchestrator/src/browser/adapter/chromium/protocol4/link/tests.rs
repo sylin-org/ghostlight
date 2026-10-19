@@ -755,6 +755,39 @@ fn a_save_the_page_did_not_take_is_told_apart_from_one_that_could_not_be_made() 
     );
 }
 
+/// A save to Downloads writes a file, so a receipt that never comes leaves its effect unknown. A
+/// recording handed back to the service changes nothing, and the same silence is a plain
+/// deadline.
+#[test]
+fn a_downloads_save_whose_receipt_is_lost_reads_as_after_dispatch() {
+    let (port, fake) = port(Box::new(|_, _| Reply::Never));
+    recordings(&port).learn(WORKSPACE, "recording_1");
+    let cancelled = AtomicBool::new(false);
+    for (destination, expected) in [
+        (
+            RecordingDestination::Download {
+                file_name: "flow.gif".into(),
+            },
+            BrowserError::DeadlineAfterDispatch,
+        ),
+        (
+            RecordingDestination::Client,
+            BrowserError::DeadlineBeforeDispatch,
+        ),
+    ] {
+        let save = BrowserCommand::ExportRecording {
+            destination,
+            max_output_bytes: 4096,
+        };
+        let deadline = Instant::now() + Duration::from_millis(300);
+        assert_eq!(
+            port.call(FOUR, WORKSPACE, save, deadline, &cancelled),
+            Err(expected)
+        );
+    }
+    assert_eq!(fake.wait(|seen| seen.cancels.len() == 2).requests.len(), 2);
+}
+
 #[test]
 fn a_workspace_reaches_only_its_one_recording_without_naming_it() {
     let next = Arc::new(Mutex::new(answer(

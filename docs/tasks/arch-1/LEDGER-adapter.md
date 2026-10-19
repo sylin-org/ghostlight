@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-A1 has landed. A2 is next, then A3 and A4. ux-2 has closed, so every slice can start.
+A1 and A2 have landed. A3 is next, then A4. ux-2 has closed, so every slice can start.
 
 ## Slices
 
@@ -14,8 +14,8 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 
 | Slice | Subject | Gate | After | Note | Status |
 | --- | --- | --- | --- | --- | --- |
-| A1 | fix(adapter): an embedded document's change is stale, and a targeted read reports the tab | candidate | none | see Notes | landed (this commit) |
-| A2 | fix(adapter): a Downloads save carries effect, and diagnostics bind only when asked | candidate | none | - | todo |
+| A1 | fix(adapter): an embedded document's change is stale, and a targeted read reports the tab | candidate | none | see Notes | landed (fa3bcb02 and a9d40c83) |
+| A2 | fix(adapter): a Downloads save carries effect, and diagnostics bind only when asked | candidate | none | see Notes | landed (this commit) |
 | A3 | refactor(adapter): no content command runs without a scope | none | none | - | todo |
 | A4 | refactor(adapter): the authority's budgets reach the adapter as values | none | ux-2 closes (`assets.sha256`) | cross-lane work's `DOCUMENT_TREE_NODE_LIMIT` | todo |
 
@@ -44,3 +44,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   export is a navigated target, pinned by
   `a_document_change_during_a_page_export_is_a_navigated_target` in
   `protocol4/translate/tests/points.rs`.
+- A2, effect: a Downloads save now carries effect, so runtime control admits it like any other
+  effect, and a pause refuses it before anything is sent. Work already reported a delivered
+  Downloads save as applied and not repeat-safe, so the two now agree.
+- A2, binding: `Scope::watches` names the authority's `watch_changes`, and the doc of
+  `DocumentScope.watch_changes` says it also binds a diagnostics read. Work sets it when its
+  policy does not admit every document, so no work file changes.
+- A2, proofs: `a_downloads_save_whose_receipt_is_lost_reads_as_after_dispatch` in
+  `protocol4/link/tests.rs`; `an_unrestricted_diagnostics_read_sends_no_binding` and
+  `a_restricted_read_still_binds_its_documents`, which replaces
+  `the_diagnostics_binding_follows_the_admitted_set`, in `protocol4/translate/tests.rs`. The
+  work-level proof is C9's. No journey is needed.

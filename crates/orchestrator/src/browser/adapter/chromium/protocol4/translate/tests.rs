@@ -648,17 +648,46 @@ fn a_recording_started_under_a_watching_scope_watches_the_admitted_documents() {
     }
 }
 
-#[test]
-fn the_diagnostics_binding_follows_the_admitted_set() {
-    let (port, fake) = port(inventory(), Box::new(|_| vec![]));
-    let read = || BrowserCommand::ReadDiagnostics {
+fn read_console() -> BrowserCommand {
+    BrowserCommand::ReadDiagnostics {
         tab_id: 12,
         source: DiagnosticSource::Console,
         detail: DiagnosticDetail::All,
         match_text: None,
         after: None,
         limit: 50,
-    };
+    }
+}
+
+/// The binding and guard of every diagnostics read the extension received.
+fn diagnostics_reads(fake: &FakeExtension) -> Vec<(Option<String>, bool)> {
+    fake.wait(|_| true)
+        .requests
+        .iter()
+        .filter_map(|(_, primitive)| match primitive {
+            wire::Primitive::Diagnostics(wire::DiagnosticsOp::Read { binding, guard, .. }) => {
+                Some((binding.clone(), guard.is_some()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Under a policy that admits every document the authority does not watch them, so a read
+/// binds nothing and a reloaded iframe never resets the tab's retained entries.
+#[test]
+fn an_unrestricted_diagnostics_read_sends_no_binding() {
+    let (port, fake) = port(inventory(), Box::new(|_| vec![]));
+    let mut admitted = scope(&["T.t1", "C.c1", "D.d1"], false);
+    admitted.watch_changes = false;
+    let (_, result) = unwrap_scoped(call(&port, scoped(admitted, read_console())).unwrap());
+    assert!(matches!(result, BrowserOutcome::DiagnosticsRead { .. }));
+    assert_eq!(diagnostics_reads(&fake), [(None, true)]);
+}
+
+#[test]
+fn a_restricted_read_still_binds_its_documents() {
+    let (port, fake) = port(inventory(), Box::new(|_| vec![]));
     for allowed in [
         &["T.t1"][..],
         &["T.t1"][..],
@@ -666,7 +695,7 @@ fn the_diagnostics_binding_follows_the_admitted_set() {
         &["T.t1", "C.c1"][..],
     ] {
         let (_, result) =
-            unwrap_scoped(call(&port, scoped(scope(allowed, false), read())).unwrap());
+            unwrap_scoped(call(&port, scoped(scope(allowed, false), read_console())).unwrap());
         assert!(matches!(
             result,
             BrowserOutcome::DiagnosticsRead {
@@ -675,17 +704,11 @@ fn the_diagnostics_binding_follows_the_admitted_set() {
             }
         ));
     }
-    let seen = fake.wait(|_| true);
-    let bindings: Vec<String> = seen
-        .requests
-        .iter()
-        .filter_map(|(_, primitive)| match primitive {
-            wire::Primitive::Diagnostics(wire::DiagnosticsOp::Read { binding, guard, .. }) => {
-                assert!(guard.is_some());
-                binding.clone()
-            }
-            _ => None,
-        })
+    let reads = diagnostics_reads(&fake);
+    assert!(reads.iter().all(|(_, guarded)| *guarded));
+    let bindings: Vec<String> = reads
+        .into_iter()
+        .filter_map(|(binding, _)| binding)
         .collect();
     assert_eq!(bindings.len(), 4);
     assert_eq!(bindings[0], bindings[1]);

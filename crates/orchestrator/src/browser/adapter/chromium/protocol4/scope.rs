@@ -179,6 +179,13 @@ impl Scope {
         ids
     }
 
+    /// Whether the authority asked to watch the admitted documents. It does when its policy
+    /// does not admit every document, so a change of the admitted set matters.
+    #[must_use]
+    pub const fn watches(&self) -> bool {
+        self.watch
+    }
+
     /// The documents a recording must stop at when they change: every real document of the
     /// tree, or `None` when the authority did not ask to watch them.
     #[must_use]
