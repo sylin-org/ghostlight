@@ -10,8 +10,9 @@
 //! link libraries, with a `// SAFETY:` note at each call site.
 //!
 //! The crate holds this process's token in `token` (whether it is elevated, since the service
-//! refuses to run elevated, and whose it is), owner-private file creation in `private_file` (the
-//! one creator for a file that holds a secret or a record about the person), the shell's item
+//! refuses to run elevated, and whose it is), owner-private files in `private_file` (the one
+//! creator for a file that holds a secret or a record about the person, and the check that no one
+//! else can read a file), the shell's item
 //! identifier list of a file in `item_id_list` (named by the installer's Start-menu shortcut),
 //! whether the process sits in the visible window station in `window_station` (the service starts
 //! the shell only where a person could see it), announcing a change of the user's environment
@@ -44,6 +45,15 @@ mod window_station;
 #[cfg(target_os = "windows")]
 pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     private_file::create(path)
+}
+
+/// Whether the access list of the file at `path` lets anyone other than the current user and
+/// SYSTEM read its contents, or rewrite the list or take ownership so they could. A file with no
+/// access list answers true, as does a granting entry whose trustee cannot be read; deny entries
+/// are not subtracted, so the answer never understates who can read.
+#[cfg(target_os = "windows")]
+pub fn others_can_read(path: &std::path::Path) -> std::io::Result<bool> {
+    private_file::others_can_read(path)
 }
 
 /// Whether this process runs with an elevated token. `false` where the platform has no such

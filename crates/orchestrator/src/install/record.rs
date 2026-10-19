@@ -497,19 +497,16 @@ pub fn create_private(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
-/// Assert that only the current user can read the file at `path`: on Windows its access list is
-/// protected and grants the current user and SYSTEM alone, on Unix its mode is 0600.
+/// Assert that only the current user can read the file at `path`: on Windows no trustee but the
+/// current user and SYSTEM is granted read access, on Unix its mode is 0600.
 #[cfg(test)]
 pub(crate) fn assert_owner_only(path: &Path) {
     #[cfg(windows)]
-    {
-        assert_eq!(
-            windows_access_list(path),
-            format!("D:P(A;;FA;;;{})(A;;FA;;;SY)", windows_user_sid()),
-            "{}",
-            path.display()
-        );
-    }
+    assert!(
+        !ghostlight_win_peer::others_can_read(path).unwrap(),
+        "another account can read {}",
+        path.display()
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -518,68 +515,10 @@ pub(crate) fn assert_owner_only(path: &Path) {
     }
 }
 
-/// The access list of the file at `path` in the system's descriptor language, as `icacls`
-/// saves it.
-#[cfg(all(test, windows))]
-fn windows_access_list(path: &Path) -> String {
-    let saved = crate::scratch::Scratch::file("saved.acl");
-    let status = std::process::Command::new("icacls")
-        .arg(path)
-        .arg("/save")
-        .arg(saved.path())
-        .stdout(std::process::Stdio::null())
-        .status()
-        .unwrap();
-    assert!(status.success(), "icacls could not read {}", path.display());
-    let units: Vec<u16> = fs::read(saved.path())
-        .unwrap()
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .collect();
-    let text = String::from_utf16(&units).unwrap();
-    text.lines().nth(1).unwrap_or_default().trim().to_owned()
-}
-
-/// The user running the tests, as an access list in SDDL names them: the security identifier
-/// `whoami` prints, or its SDDL alias. SDDL writes a machine's built-in Administrator (relative
-/// id 500) as `LA` and its built-in Guest (501) as `LG`; a CI runner is often the Administrator.
-#[cfg(all(test, windows))]
-fn windows_user_sid() -> String {
-    let output = std::process::Command::new("whoami")
-        .args(["/user", "/fo", "csv", "/nh"])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "whoami could not name the user");
-    let text = String::from_utf8_lossy(&output.stdout);
-    let sid = text.trim().rsplit(',').next().unwrap_or_default();
-    sddl_trustee(sid.trim_matches('"'))
-}
-
-/// `sid` as SDDL writes it in an access list: the alias for a machine account SDDL abbreviates,
-/// otherwise the identifier itself.
-#[cfg(all(test, windows))]
-fn sddl_trustee(sid: &str) -> String {
-    const MACHINE_ACCOUNT: &str = "S-1-5-21-";
-    match sid.rsplit_once('-') {
-        Some((_, "500")) if sid.starts_with(MACHINE_ACCOUNT) => "LA".to_owned(),
-        Some((_, "501")) if sid.starts_with(MACHINE_ACCOUNT) => "LG".to_owned(),
-        _ => sid.to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
-
-    #[cfg(windows)]
-    #[test]
-    fn an_access_list_names_the_builtin_accounts_by_their_sddl_alias() {
-        assert_eq!(sddl_trustee("S-1-5-21-1-2-3-500"), "LA");
-        assert_eq!(sddl_trustee("S-1-5-21-1-2-3-501"), "LG");
-        assert_eq!(sddl_trustee("S-1-5-21-1-2-3-1001"), "S-1-5-21-1-2-3-1001");
-        assert_eq!(sddl_trustee("S-1-5-18-500"), "S-1-5-18-500");
-    }
 
     fn record(version: &str, sha: &str) -> InstallRecord {
         InstallRecord {

@@ -371,3 +371,18 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   own question over an installed browser, and the advice it resolves to). Limits: with setup
   complete the refusal stays the plain one, as before. No golden, catalog or wording changes;
   `linux.txt` is unaffected. No journey needed.
+- F6a, owner-only is effective access (the CI review's motivating case): the test check
+  `assert_owner_only` compared the access list `icacls` saves with an expected SDDL string, so it
+  broke whenever SDDL chose another spelling for the same list (the built-in Administrator is
+  `LA`) and said nothing about who could read. It now asks win-peer's new `others_can_read`,
+  which reads the file's access list and translates every granting entry to its trustee: a
+  trustee other than the current user and SYSTEM holding a right that reads the contents
+  (`FILE_READ_DATA`, `GENERIC_READ`, `GENERIC_ALL`) or reaches them (`WRITE_DAC`, `WRITE_OWNER`)
+  answers yes, as do a missing list and an entry it cannot attribute. `sddl_trustee`, its test,
+  `windows_access_list` and `windows_user_sid` are gone; the Unix 0600 check is unchanged. Proof:
+  `only_an_owner_private_file_is_closed_to_everyone_else` creates a file the product's way and
+  sees it closed, then creates files that grant others read, full, list-rewrite and generic read
+  access, and one with no list, and sees each open, while a write-only grant stays closed. The
+  existing callers (install, managed policy, migration backup) now run the effective check.
+  Limits: deny entries are not subtracted, so the answer can overstate but never understate. No
+  golden or journey changes; `linux.txt` is unaffected (the code is Windows-only).

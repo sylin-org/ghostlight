@@ -1,5 +1,6 @@
 //! This process's own token, read through the audited FFI boundary: whether it is elevated and
-//! which user it belongs to. Every other module that needs a token fact asks this one.
+//! which user it belongs to, and the text of a SID. Every other module that needs a token fact
+//! asks this one.
 
 use std::ffi::c_void;
 use std::io;
@@ -65,6 +66,30 @@ impl Drop for LocalMemory {
     }
 }
 
+/// The SID at `sid` as a SID string (`S-1-5-21-...`).
+///
+/// # Safety
+///
+/// `sid` points at a valid SID that stays live for the call.
+pub(crate) unsafe fn sid_text(sid: *const c_void) -> io::Result<String> {
+    let mut text = null_mut();
+    // SAFETY: the caller guarantees sid is a valid SID, and text is writable.
+    if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let _memory = LocalMemory(text.cast());
+    let mut length = 0;
+    // SAFETY: a successful conversion returns a NUL-terminated UTF-16 string, owned above until
+    // this function returns.
+    unsafe {
+        while *text.add(length) != 0 {
+            length += 1;
+        }
+        String::from_utf16(std::slice::from_raw_parts(text, length))
+            .map_err(|_| io::Error::other("invalid SID"))
+    }
+}
+
 /// This process's token, opened for query and closed once when it drops.
 pub(crate) struct ProcessToken(Handle);
 
@@ -102,22 +127,8 @@ impl ProcessToken {
         // SAFETY: a successful user query wrote a TOKEN_USER at the start of the aligned buffer,
         // which is at least that long and outlives the borrow.
         let user = unsafe { &*buffer.as_ptr().cast::<TokenUser>() };
-        let mut text = null_mut();
-        // SAFETY: user.sid points at the SID inside the live buffer, and text is writable.
-        if unsafe { ConvertSidToStringSidW(user.sid, &mut text) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let _memory = LocalMemory(text.cast());
-        let mut length = 0;
-        // SAFETY: a successful conversion returns a NUL-terminated UTF-16 string, owned above
-        // until this function returns.
-        unsafe {
-            while *text.add(length) != 0 {
-                length += 1;
-            }
-            String::from_utf16(std::slice::from_raw_parts(text, length))
-                .map_err(|_| io::Error::other("invalid user SID"))
-        }
+        // SAFETY: user.sid points at the SID inside the buffer, which lives until this returns.
+        unsafe { sid_text(user.sid) }
     }
 
     /// Read one token information class of at least `at_least` bytes into storage aligned for
