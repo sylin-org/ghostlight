@@ -10,7 +10,6 @@ use crate::browser::BrowserError;
 use crate::governance::Decision;
 use serde_json::{json, Value};
 
-use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet};
 use crate::language::{
     field_echo::{self, HeldField},
@@ -166,6 +165,9 @@ impl ApplicationExecutor {
                 return self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         };
+        for (target, _) in &resolved {
+            self.indicate_target(context, selected.physical_id, &target.locator, None);
+        }
         let fields = resolved
             .into_iter()
             .map(|(target, value)| PhysicalField {
@@ -371,13 +373,7 @@ impl ApplicationExecutor {
                 return self.browser_failure(context, decision, error, Some(selected.physical_id))
             }
         };
-        self.emit(DomainEvent::TargetIndicated {
-            invocation: context.invocation.into(),
-            workspace: context.workspace.as_str().into(),
-            physical_id: selected.physical_id,
-            locator: target.locator.clone(),
-            click: None,
-        });
+        self.indicate_target(context, selected.physical_id, &target.locator, None);
         match self.dispatch(
             context,
             BrowserCommand::TypeText {
@@ -571,6 +567,9 @@ impl ApplicationExecutor {
             }
         };
         let expected_count = files.len();
+        if let Some(locator) = &target_locator {
+            self.indicate_target(context, selected.physical_id, locator, None);
+        }
         let dispatch = if dropping {
             let (point, viewport) = drop.expect("validated drop geometry");
             BrowserCommand::DropImageAt {

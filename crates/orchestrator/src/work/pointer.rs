@@ -3,7 +3,6 @@
 use crate::browser::adapter::{BrowserCommand, BrowserOutcome, ClickShape};
 use serde_json::json;
 
-use crate::events::DomainEvent;
 use crate::governance::{Capability, CapabilitySet};
 use crate::language::{
     outcome::{Outcome, TargetRole},
@@ -57,16 +56,15 @@ impl ApplicationExecutor {
         let (command, facts, clicked) = match location {
             ResolvedLocation::Target { tab, target } => {
                 let clicked = Clicked::Target(target.role);
-                self.emit(DomainEvent::TargetIndicated {
-                    invocation: context.invocation.into(),
-                    workspace: context.workspace.as_str().into(),
-                    physical_id: tab.physical_id,
-                    locator: target.locator.clone(),
-                    click: Some(ClickShape {
+                self.indicate_target(
+                    context,
+                    tab.physical_id,
+                    &target.locator,
+                    Some(ClickShape {
                         clicks: value.click_count,
                         button: value.button.clone(),
                     }),
-                });
+                );
                 let command = if value.modifiers.is_empty() {
                     BrowserCommand::Activate {
                         tab_id: tab.physical_id,
@@ -171,6 +169,9 @@ impl ApplicationExecutor {
             value.target.as_deref(),
             Capability::Read,
             |selected, locator, revealed_role, decision| {
+                if let Some(locator) = &locator {
+                    self.indicate_target(context, selected.physical_id, locator, None);
+                }
                 match self.dispatch(
                     context,
                     BrowserCommand::Scroll {
@@ -454,13 +455,7 @@ impl ApplicationExecutor {
         };
         let (command, facts) = match location {
             ResolvedLocation::Target { tab, target } => {
-                self.emit(DomainEvent::TargetIndicated {
-                    invocation: context.invocation.into(),
-                    workspace: context.workspace.as_str().into(),
-                    physical_id: tab.physical_id,
-                    locator: target.locator.clone(),
-                    click: None,
-                });
+                self.indicate_target(context, tab.physical_id, &target.locator, None);
                 (
                     BrowserCommand::Hover {
                         tab_id: tab.physical_id,
@@ -527,13 +522,7 @@ impl ApplicationExecutor {
                 Ok(value) => value,
                 Err(error) => return self.workspace_failure(context, error),
             };
-            self.emit(DomainEvent::TargetIndicated {
-                invocation: context.invocation.into(),
-                workspace: context.workspace.as_str().into(),
-                physical_id: selected.physical_id,
-                locator: source.locator.clone(),
-                click: None,
-            });
+            self.indicate_target(context, selected.physical_id, &source.locator, None);
             dragged_from = Some(source.role);
             dragged_onto = Some(destination.role);
             let facts = json!({"tab":selected.handle.as_str(),"source_target":source.handle.as_str(),"destination_target":destination.handle.as_str(),"dragged":true});

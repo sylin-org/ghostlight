@@ -164,3 +164,163 @@ fn direct_and_composed_reads_render_only_their_dispatched_tabs() {
         );
     }
 }
+
+/// Every action with a control under it tells the page which one, so its feedback lands there: a
+/// fill names each field, an upload its input and a targeted scroll its target. The target binds
+/// the feedback to its tab, so the scroll that follows draws no second cue in the middle of the
+/// page. A scroll with no target names nothing and cues the page itself.
+#[test]
+fn fill_upload_and_a_targeted_scroll_indicate_their_targets() {
+    let (mut executor, browser, _, workspace, _) = fixture();
+    let signals = Arc::new(PageSignals::default());
+    executor.presentation = PresentationReactor::new(signals.clone());
+    browser.push(Ok(BrowserOutcome::TabOpened {
+        tab: tab(7, "https://example.com/"),
+        committed_urls: vec!["https://example.com/".into()],
+    }));
+    let opened = executor.execute(
+        &workspace,
+        "browser_navigate",
+        json!({"url":"https://example.com/"}),
+        &CancellationToken::default(),
+    );
+    let tab_handle = opened.facts["tab"].as_str().unwrap().to_owned();
+    let control = |locator: &str, role: &str, name: &str| ObservedTarget {
+        locator: locator.into(),
+        role: role.into(),
+        name: name.into(),
+        state: vec![],
+        credential_class: false,
+        ..Default::default()
+    };
+    let controls = vec![
+        control("name-1", "textbox", "Name"),
+        control("email-1", "textbox", "Email"),
+        control("file-1", "button", "Attachment"),
+    ];
+    browser.push(Ok(BrowserOutcome::targets(7, controls.clone())));
+    let inspected = executor.execute(
+        &workspace,
+        "browser_inspect",
+        json!({"tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    let handle = |index: usize| inspected.facts["items"][index]["target"].clone();
+    let targets = |signals: &[PresentationSignal],
+                   invocation: &str|
+     -> Vec<(PresentationActivity, Option<u64>, Option<String>)> {
+        signals
+            .iter()
+            .filter(|signal| {
+                signal.invocation == invocation && signal.signal == PresentationKind::Target
+            })
+            .map(|signal| (signal.activity, signal.tab_id, signal.locator.clone()))
+            .collect()
+    };
+
+    signals.0.lock().unwrap().clear();
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
+        tab_id: 7,
+        targets: controls[..2].to_vec(),
+    }));
+    browser.push(Ok(BrowserOutcome::Filled {
+        rebound: false,
+        tab: tab(7, "https://example.com/"),
+        filled_count: 2,
+        held: Vec::new(),
+        submitted: false,
+        committed_urls: Vec::new(),
+    }));
+    let filled = executor.execute(
+        &workspace,
+        "browser_fill_form",
+        json!({"tab":tab_handle,"fields":[{"target":handle(0),"value":"Ada"},{"target":handle(1),"value":"ada@example.com"}]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(filled.status, Status::Succeeded, "{filled:?}");
+    let fill_signals = signals.0.lock().unwrap().clone();
+    assert_eq!(
+        targets(&fill_signals, filled.invocation.as_str()),
+        [
+            (PresentationActivity::Fill, Some(7), Some("name-1".into())),
+            (PresentationActivity::Fill, Some(7), Some("email-1".into())),
+        ]
+    );
+    assert!(fill_signals.iter().all(|signal| signal.click.is_none()));
+    assert!(!serde_json::to_string(&fill_signals)
+        .unwrap()
+        .contains("ada@example.com"));
+
+    signals.0.lock().unwrap().clear();
+    browser.push(Ok(BrowserOutcome::TargetsDescribed {
+        rebound: false,
+        tab_id: 7,
+        targets: controls[2..].to_vec(),
+    }));
+    browser.push(Ok(BrowserOutcome::FilesUploaded {
+        tab_id: 7,
+        uploaded_count: 1,
+        uploaded_bytes: 1,
+        subject: None,
+    }));
+    let uploaded = executor.execute(
+        &workspace,
+        "browser_upload",
+        json!({"tab":tab_handle,"target":handle(2),"files":[{"name":"note.txt","data_base64":"eA=="}]}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(uploaded.status, Status::Succeeded, "{uploaded:?}");
+    assert_eq!(
+        targets(&signals.0.lock().unwrap(), uploaded.invocation.as_str()),
+        [(PresentationActivity::Upload, Some(7), Some("file-1".into()))]
+    );
+
+    signals.0.lock().unwrap().clear();
+    browser.push(Ok(BrowserOutcome::Scrolled {
+        tab_id: 7,
+        x: 0.0,
+        y: 400.0,
+        subject: None,
+    }));
+    let revealed = executor.execute(
+        &workspace,
+        "browser_scroll",
+        json!({"tab":tab_handle,"target":handle(2)}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(revealed.status, Status::Succeeded, "{revealed:?}");
+    let scroll_signals = signals.0.lock().unwrap().clone();
+    assert_eq!(
+        targets(&scroll_signals, revealed.invocation.as_str()),
+        [(PresentationActivity::Scroll, Some(7), Some("file-1".into()))]
+    );
+    assert!(
+        !scroll_signals
+            .iter()
+            .any(|signal| signal.signal == PresentationKind::Start && signal.tab_id == Some(7)),
+        "a targeted scroll cues only its target: {scroll_signals:?}"
+    );
+
+    signals.0.lock().unwrap().clear();
+    browser.push(Ok(BrowserOutcome::Scrolled {
+        tab_id: 7,
+        x: 0.0,
+        y: 800.0,
+        subject: None,
+    }));
+    let scrolled = executor.execute(
+        &workspace,
+        "browser_scroll",
+        json!({"tab":tab_handle}),
+        &CancellationToken::default(),
+    );
+    assert_eq!(scrolled.status, Status::Succeeded, "{scrolled:?}");
+    let page_signals = signals.0.lock().unwrap().clone();
+    assert!(targets(&page_signals, scrolled.invocation.as_str()).is_empty());
+    assert!(page_signals
+        .iter()
+        .any(|signal| signal.signal == PresentationKind::Start
+            && signal.activity == PresentationActivity::Scroll
+            && signal.tab_id == Some(7)));
+}

@@ -2149,6 +2149,24 @@ impl ApplicationExecutor {
         self.presentation.react(&event);
         self.workbench.react(&event);
     }
+
+    /// Say which control on tab `physical_id` is about to receive a governed physical action, so
+    /// the page's feedback lands on it. Only a click describes its `click` shape.
+    fn indicate_target(
+        &self,
+        context: &InvocationContext<'_>,
+        physical_id: u64,
+        locator: &str,
+        click: Option<crate::browser::adapter::ClickShape>,
+    ) {
+        self.emit(DomainEvent::TargetIndicated {
+            invocation: context.invocation.into(),
+            workspace: context.workspace.as_str().into(),
+            physical_id,
+            locator: locator.into(),
+            click,
+        });
+    }
 }
 
 fn denial_presentation(tool: &str, result: &InvocationResult) -> DenialPresentation {

@@ -217,15 +217,28 @@ impl PresentationReactor {
                 physical_id,
                 locator,
                 ..
-            } => (
-                PresentationKind::Target,
-                current(),
-                activity_label(current()),
-                None,
-                Some(*physical_id),
-                Some(locator.clone()),
-                false,
-            ),
+            } => {
+                // The target binds the feedback to its tab, so the command that follows does
+                // not start the activity there again: a targeted scroll keeps its cue on the
+                // target and draws no second one in the middle of the page.
+                if let Some(active) = self
+                    .activities
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get_mut(event.invocation())
+                {
+                    active.tab = Some(*physical_id);
+                }
+                (
+                    PresentationKind::Target,
+                    current(),
+                    activity_label(current()),
+                    None,
+                    Some(*physical_id),
+                    Some(locator.clone()),
+                    false,
+                )
+            }
             DomainEvent::HoldEntered { physical_id, .. } => (
                 PresentationKind::Denial,
                 current(),

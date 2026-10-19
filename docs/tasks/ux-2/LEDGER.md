@@ -27,6 +27,7 @@ the push.
 | e1 extension-share | extension | j-33, n-d-02 (popup eyebrow), j-08 (ended step), n-d-06, j-34 (kit), j-24 (options switches) | landed (6b8f1d56, this commit); j-33 needs the window lane's breakpoint change, see Notes |
 | o1 a-failed-check-leads-with-the-failure | outcome | n-d-07 | landed (this commit) |
 | k1 brand-reference-for-2-0 | docs | j-37 | landed (this commit) |
+| t1 page-targets-for-fill-upload-scroll | coordinator | k1 follow-up (owner) | landed (this commit) |
 
 Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's light-mode look.
 
@@ -61,6 +62,14 @@ Held: n-d-09 (the taskbar app icon on a light taskbar) waits for the owner's lig
   table says that. Code follow-up for the owner, outside this lane: perform_fill, upload_files
   and perform_scroll would emit TargetIndicated for their resolved targets; if that lands, the
   table's rows return.
+- t1 (k1 follow-up): the owner asked for it on 2026-10-19 ("Do this task here"). A fill now
+  names each field it sets, an upload names its input, and a scroll names its target when the
+  call gives one, all through one executor helper that the click, hover, drag and type sites now
+  share. A target also binds the invocation's feedback to its tab, so the scroll command that
+  follows does not start the activity again: a targeted scroll draws its chevrons and glow on the
+  element only, not a second set at the viewport centre. The vocabulary table's field splash,
+  scroll cue and target glow rows say so. An image dropped at a point and the zoom frame still
+  name no element.
 - n1 (j-11): both light-taskbar frames, 16 and 32 pixels, are now the monochrome tray glyph
   in crates/desktop/assets (tray-glyph-16.png drawn by hand, tray-glyph-32.png smooth): one
   silhouette in the night colour with its eyes cut out and no sparkles. Since no light frame is
