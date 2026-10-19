@@ -33,16 +33,18 @@ the setup steps. Until the first request that reaches a browser succeeds, and wh
 extension, an agent's browser call that finds no browser connected says in its answer where the
 extension comes from. Ghostlight
 started by an agent shows only its tray icon and opens no window. Ghostlight is local by
-construction: no telemetry, no activation service, no hidden network dependency; the only network
-traffic is the explicit binary download from the release channel.
+construction: no telemetry, no activation service, no hidden network dependency. At each launch,
+`npx` asks the npm registry which `ghostlight` package to run, and the launcher downloads the
+programs from the GitHub release only when the installed set needs them. The npm launcher row of
+[the data flows](../../../docs/trust/data-flows.md) names each case in which it downloads.
 
 ## Notes for specific clients
 
 - ZCode reads `timeoutMs` per server; Claude Code does not, and configures timeouts globally.
 - Claude Code on native Windows may need the command wrapped as
   `cmd /c npx -y ghostlight` depending on version; ZCode spawns `npx` directly.
-- If Ghostlight is also registered through the installer, the explicit client configuration
-  entry wins over the plugin's same-named server. Both can coexist; removing either is safe.
+- If Ghostlight is also registered through the installer, Claude Code holds two registrations
+  named `ghostlight`. Which of them it starts, and whether it starts both, has not been verified.
 
 ## Versioning
 

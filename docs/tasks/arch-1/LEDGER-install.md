@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3 and I7 have landed. ux-2 has closed, so I9a, I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
+I1, I3, I7 and I9a have landed. ux-2 has closed, so I9b, I4, I5, I6, I8, I10, I12 and I13 can start,
 and I2 can start now that I1 is in. I11 is held for the owner's question 1 (what the plugin
 registers) and the live check on a test machine.
 
@@ -19,7 +19,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I1 | fix(install): one owner-private creator for secrets and records | candidate | none | see Notes | landed (this commit) |
 | I3 | fix(install): Ghostlight owns the command, and the client keeps its own keys | candidate | ux-2 closes (`install/mod.rs`) | see Notes | landed (this commit) |
 | I7 | fix(deployment): a same-version install restores a missing shell | candidate | none | see Notes | landed (this commit) |
-| I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | - | todo |
+| I9a | docs(plugin): the plugin README withdraws the precedence claim | candidate | none | see Notes | landed (this commit) |
 | I9b | fix(plugin): the skill says only what the catalog cannot | candidate | none | - | todo |
 | I11 | fix(plugin): the plugin registers what question 1 decides | candidate | owner question 1 (the plugin) and the live check | held for the owner | todo (held for the owner's question 1) |
 | I4 | fix(install): one rule says Ghostlight has an entry to remove | none | ux-2 closes (`install/mod.rs`) | - | todo |
@@ -67,3 +67,11 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   directory left to remove): `a_same_version_install_with_a_missing_shell_and_a_migration_restores_the_shell`.
 - I7 changes no golden. It needs no new journey: the installer journeys on a test machine cover
   the place-in-bin path it reuses. `linux.txt` is unaffected.
+- I9a, the double registration: the README's client note now says only that Claude Code then holds
+  two registrations named `ghostlight` and that which one it starts is unverified. I11 replaces
+  that line with question 1's answer and the live check. Not a changed decision.
+- I9a, the network sentence: "the only network traffic is the binary download" was false too, since
+  `npx` asks the npm registry at every launch. The README now says so and points to the npm
+  launcher row of `docs/trust/data-flows.md` for when the launcher downloads. Within the slice's
+  Changes.
+- I9a changes no code, golden or journey. `linux.txt` is unaffected.
