@@ -9,8 +9,9 @@
 //! a security-sensitive path: every foreign function is declared by hand below against system
 //! link libraries, with a `// SAFETY:` note at each call site.
 //!
-//! The crate holds whether the process token is elevated in `elevation` (the service refuses to
-//! run elevated), owner-private file creation in `private_file` (ADR-0160), the shell's item
+//! The crate holds this process's token in `token` (whether it is elevated, since the service
+//! refuses to run elevated, and whose it is), owner-private file creation in `private_file` (the
+//! one creator for a file that holds a secret or a record about the person), the shell's item
 //! identifier list of a file in `item_id_list` (named by the installer's Start-menu shortcut),
 //! whether the process sits in the visible window station in `window_station` (the service starts
 //! the shell only where a person could see it), announcing a change of the user's environment
@@ -20,8 +21,6 @@
 //! session listener live in the relay's audited `os` module (ADR-0199 Decisions 3 and 14).
 //! Non-Windows targets compile the portable surface returning an empty answer.
 
-#[cfg(target_os = "windows")]
-mod elevation;
 #[cfg(target_os = "windows")]
 mod item_id_list;
 #[cfg(target_os = "windows")]
@@ -35,10 +34,13 @@ mod scratch;
 #[cfg(target_os = "windows")]
 mod settings_change;
 #[cfg(target_os = "windows")]
+mod token;
+#[cfg(target_os = "windows")]
 mod window_station;
 
-/// Create a new file with a protected current-user/SYSTEM DACL before it can contain secrets.
-/// Existing paths are refused. Runtime publication belongs to the caller (ADR-0160).
+/// Create a new file whose protected access list admits only the current user and SYSTEM. The
+/// list is set as the file is created, so nothing written to it is ever open to anyone else. An
+/// existing path, a link included, is refused.
 #[cfg(target_os = "windows")]
 pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     private_file::create(path)
@@ -48,7 +50,7 @@ pub fn create_private_file(path: &std::path::Path) -> std::io::Result<std::fs::F
 /// notion.
 pub fn is_elevated() -> std::io::Result<bool> {
     #[cfg(target_os = "windows")]
-    return elevation::is_elevated();
+    return token::ProcessToken::current()?.is_elevated();
     #[cfg(not(target_os = "windows"))]
     Ok(false)
 }

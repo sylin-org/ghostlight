@@ -6,7 +6,7 @@ Ground rules: [BOOTSTRAP.md](BOOTSTRAP.md). The specification of each slice is i
 
 ## RESUME HERE
 
-I1, I3, I7, I9a, I9b, I4, I5, I2, I6, I8, I10 and I12 have landed. I13 can start. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
+I1, I3, I7, I9a, I9b, I4, I5, I2, I6, I8, I10, I12 and I13 have landed. I11 is held for the owner's question 1 (what the plugin registers) and the live check on
 a test machine.
 
 ## Slices
@@ -28,7 +28,7 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
 | I8 | fix(packaging): the carriers agree with the service's rule and words | none | none | cross-lane the installer journeys; see Notes | landed (this commit) |
 | I10 | refactor(install): install words in language/deployment, and the browser list composed once | none | ux-2 closes (`install/mod.rs`) | cross-lane `language/outcome.rs`; see Notes | landed (this commit) |
 | I12 | refactor(diagnostics): one spelling of the edge's logs, and no name nobody writes | none | none | see Notes | landed (this commit) |
-| I13 | refactor(win-peer): one token module for its two callers | none | none | - | todo |
+| I13 | refactor(win-peer): one token module for its two callers | none | none | see Notes | landed (this commit) |
 
 ## Notes
 
@@ -311,3 +311,16 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   only component that writes through it. `parse_window`'s doc line, which sat above
   `op_and_detail`, moved to its function.
 - I12 changes no golden and needs no journey. `linux.txt` is unaffected.
+- I13, the module: `win-peer`'s `token` owns `ProcessToken` (opened once, closed on drop), its
+  `is_elevated` and `user_sid`, and one aligned size-probed read of a token information class
+  that both use. `elevation.rs` went; `is_elevated` and `private_file` ask `token`.
+  `private_file` keeps only the access list and `CreateFileW`, and reads `token::LocalMemory` for
+  the descriptor block, so `LocalFree` is declared once. The relay's own token code stays
+  separate, as the ADR says.
+- I13, the elevation read now probes the size first, as the user read did, instead of passing a
+  fixed-size buffer. Same answer; one path. Extra proof in `token.rs`:
+  `the_process_token_says_whether_it_is_elevated_and_whose_it_is`.
+- I13, the words: the manifest and lib doc name the crate's current jobs and no longer cite
+  ADR-0160; `create_private_file`'s doc and `private_file`'s comments no longer speak of a
+  runtime token file. No caller outside win-peer changed. It changes no golden and needs no
+  journey. `linux.txt` is unaffected; the module is Windows-only and Linux compiles none of it.
