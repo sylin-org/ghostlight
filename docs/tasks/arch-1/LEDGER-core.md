@@ -592,3 +592,14 @@ In the ADR's order. "After" names what a slice waits for, including the ux-2-fir
   test machine with Claude Code, the plugin and the installer's entry: the model is offered 23
   Ghostlight tools, not 46; after the entry that holds them is disabled in `/mcp`, the other
   entry's 23 arrive on the next turn.
+- F1 review fix: a resumed session keeps the role its client saw. `ResumeState::standby` says
+  whether the session stood by, a promotion writes the token again before `list_changed`, and
+  `Toolsets::seat` seats a resumed session by its token's role, so after a replace the edge that
+  stood by cannot come back first and offer a second set at the next catalog change. Every MCP
+  connection is now seated, so a resumed session that is no agent's offers the tools. ADR-0203's
+  amendment item 5 and ARCHITECTURE follow. Proves:
+  `resumed_connections_keep_the_role_their_clients_saw_in_either_order` (former standby first,
+  then a policy change), the promotion test's token check in `service/mod.rs`, and
+  `a_resumed_session_tells_its_seating_whether_it_stood_by` in `intake/mcp/tests.rs`. No golden
+  changed. For the coordinator, on the same test machine: with both entries, replace the service,
+  then change the policy; the model still has 23 Ghostlight tools.

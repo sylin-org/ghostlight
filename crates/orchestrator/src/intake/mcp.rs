@@ -16,7 +16,8 @@
 //!
 //! A session can stand by: its instructions then say that Ghostlight is already connected to this
 //! agent, and the service answers its catalog with no tools until it is promoted. Whether it stands
-//! by is the service's [`Seating`] decision, asked once with the name the client claims (ADR-0203,
+//! by is the service's [`Seating`] decision, asked once with the name the client claims and, for a
+//! session a resume token continues, whether its client was offered the tools (ADR-0203,
 //! amendment of 2026-10-19).
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -184,16 +185,18 @@ impl Handled {
 }
 
 /// The service's decision whether a session stands by, asked once with the bounded name its
-/// client claims, or none: true when another connection of the same agent already offers the
-/// tools.
+/// client claims, or none, and, for a session a resume token continues, whether it stood by when
+/// the token was written: true when the session must not offer its client the tools.
 pub struct Seating(Box<StandsBy>);
 
 /// The decision a [`Seating`] makes.
-type StandsBy = dyn FnOnce(Option<&str>) -> bool + Send;
+type StandsBy = dyn FnOnce(Option<&str>, Option<bool>) -> bool + Send;
 
 impl Seating {
     /// The decision `stands_by` makes.
-    pub fn new(stands_by: impl FnOnce(Option<&str>) -> bool + Send + 'static) -> Self {
+    pub fn new(
+        stands_by: impl FnOnce(Option<&str>, Option<bool>) -> bool + Send + 'static,
+    ) -> Self {
         Self(Box::new(stands_by))
     }
 }
@@ -250,7 +253,8 @@ impl McpSession {
         }
     }
 
-    /// A session continued from a resume token: initialized, with its revision and client.
+    /// A session continued from a resume token: initialized, with its revision, its client and
+    /// whether it stood by, until its [`Seating`] decides.
     ///
     /// The client negotiated its revision with an earlier service, so it is never offered another
     /// one. A revision this engine does not serve continues at [`OLDEST_REVISION`].
@@ -265,6 +269,7 @@ impl McpSession {
                 .unwrap_or(OLDEST_REVISION),
         );
         session.claim = state.claim.as_deref().and_then(bounded_claim);
+        session.standby = state.standby;
         session
     }
 
@@ -275,12 +280,12 @@ impl McpSession {
         self.claim.as_deref()
     }
 
-    /// Let `seating` decide whether this session stands by: now for a session that is already
-    /// initialized, which a resume token continued, and otherwise when its `initialize` arrives,
-    /// before it is answered.
+    /// Let `seating` decide whether this session stands by: now, with whether it stood by, for a
+    /// session that is already initialized, which a resume token continued, and otherwise when its
+    /// `initialize` arrives, before it is answered.
     pub fn seat(&mut self, seating: Seating) {
         if self.is_initialized() {
-            self.standby = (seating.0)(self.claim());
+            self.standby = (seating.0)(self.claim(), Some(self.standby));
         } else {
             self.seating = Some(seating);
         }
@@ -321,7 +326,8 @@ impl McpSession {
     }
 
     /// What a later connection needs to continue this session, once it is initialized: the tabs
-    /// it owns and the extension life of each of their browsers that names one.
+    /// it owns, the extension life of each of their browsers that names one, and whether it
+    /// stands by.
     #[must_use]
     pub fn resume_state(
         &self,
@@ -333,6 +339,7 @@ impl McpSession {
             claim: self.claim.clone(),
             owned_tabs,
             lives,
+            standby: self.standby,
         })
     }
 
@@ -548,7 +555,7 @@ impl McpSession {
             self.claim = bounded_claim(name);
         }
         if let Some(seating) = self.seating.take() {
-            self.standby = (seating.0)(self.claim());
+            self.standby = (seating.0)(self.claim(), None);
         }
         self.revision = Some(revision);
         self.phase = Phase::Initialized;
@@ -657,6 +664,11 @@ pub struct ResumeState {
     /// earlier build wrote, is confirmed by its URL digest.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub lives: BTreeMap<String, String>,
+    /// Whether the session stood by, so its client was offered no tools (ADR-0203, amendment of
+    /// 2026-10-19). A resumed session keeps that role whatever order the edges reconnect in,
+    /// since its client never drops a tool it was given. Omitted when it offered them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub standby: bool,
 }
 
 /// Why a resume token was not accepted.
@@ -679,7 +691,7 @@ pub enum ResumeError {
 impl ResumeState {
     /// What an opening whose token cannot be read resumes (ADR-0203 Decision 1): the client
     /// initialized with an earlier service and will not initialize again, so its session continues
-    /// at [`OLDEST_REVISION`], naming no client and owning no tab.
+    /// at [`OLDEST_REVISION`], naming no client, owning no tab and offering the tools.
     #[must_use]
     pub fn unreadable() -> Self {
         Self {
@@ -687,6 +699,7 @@ impl ResumeState {
             claim: None,
             owned_tabs: Vec::new(),
             lives: BTreeMap::new(),
+            standby: false,
         }
     }
 

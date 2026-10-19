@@ -12,6 +12,11 @@
 //! catalog is empty. When the connection that offers them ends, the first that stands by is
 //! promoted and tells its client that its tool list changed.
 //!
+//! A connection a resume token continues keeps the role its client saw, whatever order the edges
+//! reconnect in after a restart: one that stood by stands by again, and one that offered the tools
+//! offers them. Its client never drops a tool it was given, and lists the tools again on every
+//! catalog change, so only the one it already gave them may offer them.
+//!
 //! The process comes from the operating system, never from the client. The claim only keeps
 //! connections apart: a source that hosts other agents, such as an editor whose terminal runs an
 //! agent, is not the claimed agent's own app, so those connections never stand by. Two separate
@@ -37,10 +42,15 @@ struct AgentApp {
 }
 
 impl AgentApp {
-    /// The agent app of an MCP connection whose source is `observation` and whose client claims
-    /// `claim`; none when the source is not the claimed agent's own app.
-    fn of(observation: &Observation, claim: Option<&str>) -> Option<Self> {
-        let agent = claimed_agent(claim, IntakeChannel::Mcp)?;
+    /// The agent app of a connection on `channel` whose source is `observation` and whose client
+    /// claims `claim`; none when the source was not read or is not the claimed agent's own app.
+    fn of(
+        channel: IntakeChannel,
+        observation: Option<&Observation>,
+        claim: Option<&str>,
+    ) -> Option<Self> {
+        let observation = observation?;
+        let agent = claimed_agent(claim, channel)?;
         (observation.source.agent.as_deref() == Some(agent.as_str())).then_some(Self {
             process: observation.process,
             agent,
@@ -100,14 +110,17 @@ impl Toolsets {
         }
     }
 
-    /// Seat connection `id` as `agent`'s: it stands by, and true is returned, when another
-    /// connection of that agent already offers the tools.
-    fn seat(&self, id: u64, agent: Option<AgentApp>) -> bool {
+    /// Seat connection `id` as `agent`'s: it stands by, and true is returned, when `stood_by`
+    /// says a resumed connection stood by, or, for a fresh one, when another connection of that
+    /// agent already offers the tools. A connection that is no agent's never stands by.
+    fn seat(&self, id: u64, agent: Option<AgentApp>, stood_by: Option<bool>) -> bool {
         let mut members = lock(&self.members);
         let stands_by = agent.is_some()
-            && members
-                .iter()
-                .any(|member| member.id != id && member.offers && member.agent == agent);
+            && stood_by.unwrap_or_else(|| {
+                members
+                    .iter()
+                    .any(|member| member.id != id && member.offers && member.agent == agent)
+            });
         if let Some(member) = members.iter_mut().find(|member| member.id == id) {
             member.agent = agent;
             member.offers = !stands_by;
@@ -139,13 +152,20 @@ impl Toolsets {
 }
 
 impl Seat {
-    /// The decision that seats this MCP connection, whose source is `observation`, once its
-    /// client's claim is known.
-    pub(super) fn seating(&self, observation: &Observation) -> Seating {
+    /// The decision that seats this connection, on `channel` and whose source is `observation`,
+    /// once its client's claim is known.
+    pub(super) fn seating(
+        &self,
+        channel: IntakeChannel,
+        observation: Option<&Observation>,
+    ) -> Seating {
         let toolsets = Arc::clone(&self.toolsets);
         let id = self.id;
-        let observation = observation.clone();
-        Seating::new(move |claim| toolsets.seat(id, AgentApp::of(&observation, claim)))
+        let observation = observation.cloned();
+        Seating::new(move |claim, stood_by| {
+            let agent = AgentApp::of(channel, observation.as_ref(), claim);
+            toolsets.seat(id, agent, stood_by)
+        })
     }
 }
 

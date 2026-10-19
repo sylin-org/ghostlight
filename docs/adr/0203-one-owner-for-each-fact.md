@@ -1719,10 +1719,16 @@ keeps its tools back only by answering its first `tools/list` with none.
    never waits on it, so the edge's opening deadline is untouched. A fresh session's `initialize`
    answer does wait on it, because the read decides the instructions. The first request waited on
    the same read before, so a session is not slower overall.
-5. **A resumed session** is seated by the same rule, in the order the edges reconnect. Its client
-   keeps whatever tools it was offered, and its calls are served either way. A known limit: after a
-   `replace`, the connection that comes back first offers the tools, even when it was the one
-   standing by. If the other one later ends, the agent has no Ghostlight tools until it restarts.
+5. **A resumed session keeps the role its client saw.** Its resume token says whether it stood by,
+   and a promotion hands the edge a new token before it sends `list_changed`. After a restart, a
+   session that stood by stands by again and one that offered the tools offers them, whatever
+   order the edges reconnect in. Seating it by the fresh rule would let the first edge back offer
+   the tools, and its client would add a second set at the next catalog change, since it lists
+   the tools again then and never drops one. Its calls are served either way. A token that cannot
+   be read resumes offering the tools. Known limits: when the edge that offered the tools does not
+   come back, the one that stood by keeps standing by, and the agent has no Ghostlight tools until
+   one of its server entries restarts. A fresh connection of the same agent that opens before the
+   former holder returns offers the tools too.
 6. **Where it lives.** `service/toolset.rs` holds the live connections and decides, under one lock,
    which one offers the tools. The session engine (`intake/mcp.rs`) keeps whether its own session
    stands by, for its instructions and its catalog. The relay's ancestor walk now returns each

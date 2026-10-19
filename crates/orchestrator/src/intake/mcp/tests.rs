@@ -11,7 +11,7 @@ use ghostlight_relay::protocol::{Failure, Templates};
 use serde_json::{json, Value};
 
 use super::{
-    failure_templates, negotiate, McpSession, OwnedTab, ResumeError, ResumeState, Step,
+    failure_templates, negotiate, McpSession, OwnedTab, ResumeError, ResumeState, Seating, Step,
     LATEST_REVISION, MAX_RESUME_TOKEN_BYTES, OLDEST_REVISION, RESUME_TOKEN_PREFIX,
     SUPPORTED_REVISIONS,
 };
@@ -700,6 +700,7 @@ fn an_unknown_revision_resumes_at_the_oldest_supported_revision() {
             url_digest: Some("digest".into()),
         }],
         lives: BTreeMap::new(),
+        standby: false,
     };
     let decoded = ResumeState::decode(&unknown.encode()).expect("the token decodes");
     assert_eq!(decoded, unknown, "the claim and the tabs are kept");
@@ -714,6 +715,41 @@ fn an_unknown_revision_resumes_at_the_oldest_supported_revision() {
         OLDEST_REVISION
     );
     assert_eq!(OLDEST_REVISION, SUPPORTED_REVISIONS[0]);
+}
+
+#[test]
+fn a_resumed_session_tells_its_seating_whether_it_stood_by() {
+    for stood_by in [false, true] {
+        let token = ResumeState {
+            standby: stood_by,
+            ..ResumeState::unreadable()
+        }
+        .encode();
+        let mut resumed = McpSession::resumed(ResumeState::decode(&token).unwrap());
+        let (tell, told) = std::sync::mpsc::channel();
+        resumed.seat(Seating::new(move |_, seen| {
+            tell.send(seen).unwrap();
+            seen.unwrap_or_default()
+        }));
+        assert_eq!(told.try_recv(), Ok(Some(stood_by)));
+        assert_eq!(resumed.stands_by(), stood_by);
+        let state = resumed.resume_state(Vec::new(), BTreeMap::new()).unwrap();
+        assert_eq!(state.standby, stood_by, "the next token keeps the role");
+    }
+    let mut promoted = McpSession::resumed(ResumeState {
+        standby: true,
+        ..ResumeState::unreadable()
+    });
+    assert_eq!(
+        promoted.promote().len(),
+        1,
+        "a promotion says the list changed"
+    );
+    let state = promoted.resume_state(Vec::new(), BTreeMap::new()).unwrap();
+    assert!(
+        !state.standby,
+        "a promoted session's token offers the tools"
+    );
 }
 
 #[test]

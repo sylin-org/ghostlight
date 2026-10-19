@@ -1471,11 +1471,7 @@ fn serve_mcp(
     let wire = Arc::new(McpWire::new(Arc::clone(&writer), session));
     let _enrolled = intake.quit.enroll(Arc::clone(&wire));
     let seat = intake.toolsets.enter(Arc::clone(&wire));
-    if let (IntakeChannel::Mcp, Some(observation)) =
-        (accepted.attribution.channel, observation.as_ref())
-    {
-        wire.seat(seat.seating(observation));
-    }
+    wire.seat(seat.seating(accepted.attribution.channel, observation.as_ref()));
 
     let mut live = match resumed_tabs {
         Some(kept) => {
@@ -1566,6 +1562,8 @@ struct McpWire {
 #[derive(Default)]
 struct Resume {
     last: Option<String>,
+    /// The tabs the last token restores, so a promotion writes the same tabs again.
+    kept: KeptTabs,
     /// Nothing is published once a service end has handed the stream its last token.
     sealed: bool,
 }
@@ -1609,9 +1607,17 @@ impl McpWire {
         lock(&self.session).stands_by()
     }
 
-    /// Stop standing by and tell the client its tool list changed.
+    /// Stop standing by, hand the edge a token that says so, and then tell the client its tool
+    /// list changed. A restart after the promotion resumes the session offering the tools its
+    /// client was told about.
     fn promote(&self) {
         let lines = lock(&self.session).promote();
+        let mut resume = lock(&self.resume);
+        if !resume.sealed {
+            let kept = resume.kept.clone();
+            self.write_resume(&mut resume, kept);
+        }
+        drop(resume);
         for line in &lines {
             self.send(line);
         }
@@ -1697,27 +1703,29 @@ impl McpWire {
     /// Write the token that restores `kept`, unless it is the one last written or the session is
     /// not initialized yet.
     fn write_resume(&self, resume: &mut Resume, kept: KeptTabs) {
-        let Some(state) = lock(&self.session).resume_state(kept.owned, kept.lives) else {
+        let Some(state) = lock(&self.session).resume_state(kept.owned.clone(), kept.lives.clone())
+        else {
             return;
         };
         let token = state.encode();
-        if resume.last.as_deref() == Some(token.as_str()) {
-            return;
-        }
-        if self
-            .writer
-            .native(&McpFrame::Resume {
-                token: token.clone(),
-            })
-            .is_ok()
-        {
+        if resume.last.as_deref() != Some(token.as_str()) {
+            if self
+                .writer
+                .native(&McpFrame::Resume {
+                    token: token.clone(),
+                })
+                .is_err()
+            {
+                return;
+            }
             resume.last = Some(token);
         }
+        resume.kept = kept;
     }
 }
 
 /// What a resume token restores: the tabs, and the extension life of each of their browsers.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct KeptTabs {
     owned: Vec<OwnedTab>,
     lives: BTreeMap<String, String>,
@@ -2418,6 +2426,7 @@ impl BrowserEventSink for ServiceBrowserEvents {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -3109,25 +3118,51 @@ mod tests {
 
     /// Serve the relay listener over a fake browser and publish it in `home`.
     fn serve_fake(home: &TestHome) -> Served {
-        serve(home, false, SourceReader::system())
+        serve(home, false, SourceReader::system(), None)
     }
 
     /// Serve the relay listener over a fake browser, reading each session's source with
     /// `sources`.
     fn serve_reading(home: &TestHome, sources: SourceReader) -> Served {
-        serve(home, false, sources)
+        serve(home, false, sources, None)
+    }
+
+    /// Serve the relay listener over a fake browser, reading each session's source with
+    /// `sources` and governing with the user policy at `policy`.
+    fn serve_governed(home: &TestHome, sources: SourceReader, policy: PathBuf) -> Served {
+        serve(home, false, sources, Some(policy))
+    }
+
+    /// Write a user policy named `name` at `path` that allows the classes `allowed` on every host.
+    fn write_policy(path: &Path, name: &str, allowed: Value) {
+        std::fs::write(
+            path,
+            serde_json::to_vec(&json!({
+                "schema": 4,
+                "name": name,
+                "version": "1",
+                "grants": [{"id": "all", "hosts": {"allow": ["*"]}, "allowed": allowed}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
     }
 
     /// Serve the relay listener with the relay port as the session's browser port, so sessions
     /// meet browsers only as protocol-4 extensions attach, for their calls as well as their
     /// resumed tabs.
     fn serve_relayed(home: &TestHome) -> Served {
-        serve(home, true, SourceReader::system())
+        serve(home, true, SourceReader::system(), None)
     }
 
-    /// Serve the relay listener in `home`; `relayed` puts the relay port behind the sessions, and
-    /// `sources` reads each session's source.
-    fn serve(home: &TestHome, relayed: bool, sources: SourceReader) -> Served {
+    /// Serve the relay listener in `home`; `relayed` puts the relay port behind the sessions,
+    /// `sources` reads each session's source, and `policy` is the user policy, if any.
+    fn serve(
+        home: &TestHome,
+        relayed: bool,
+        sources: SourceReader,
+        policy: Option<PathBuf>,
+    ) -> Served {
         use crate::audit::{AuditRecorder, JsonlAuditSink};
         use crate::governance::GovernanceFacade;
         use crate::presentation::{BrowserPresentation, PresentationReactor};
@@ -3146,7 +3181,7 @@ mod tests {
             browser.clone()
         };
         let workspaces = WorkspaceStore::default();
-        let governance = GovernanceFacade::new(None);
+        let governance = GovernanceFacade::new(policy);
         let diagnostics = crate::diagnostics::DiagnosticsHub::for_tests();
         let projection = WorkbenchProjection::default();
         let audit = Arc::new(AuditRecorder::new(
@@ -3704,6 +3739,7 @@ mod tests {
             claim: Some("returning client".into()),
             owned_tabs: Vec::new(),
             lives: BTreeMap::new(),
+            standby: false,
         }
         .encode()
     }
@@ -3896,20 +3932,82 @@ mod tests {
         assert!(none.is_empty());
 
         drop(entry);
-        loop {
-            if let McpFrame::Message { line } =
-                frame::read_frame::<McpFrame>(&mut plugin).unwrap().unwrap()
-            {
-                let message: Value = serde_json::from_str(&line).unwrap();
-                if message["method"] == "notifications/tools/list_changed" {
-                    break;
-                }
-            }
-        }
+        let tokens = until_list_changed(&mut plugin);
+        let last = tokens.last().expect("the promotion writes a token");
+        assert!(
+            !ResumeState::decode(last).unwrap().standby,
+            "a restart after the promotion resumes it offering the tools"
+        );
         assert_eq!(
             list_tools(&mut plugin, 3),
             offered,
             "the agent keeps one working set of tools"
+        );
+    }
+
+    /// Read frames on `socket` until it is told its tool list changed, and return the resume
+    /// tokens handed on the way.
+    fn until_list_changed(socket: &mut Connection) -> Vec<String> {
+        let mut tokens = Vec::new();
+        loop {
+            match frame::read_frame::<McpFrame>(socket).unwrap().unwrap() {
+                McpFrame::Message { line } => {
+                    let message: Value = serde_json::from_str(&line).unwrap();
+                    if message["method"] == "notifications/tools/list_changed" {
+                        return tokens;
+                    }
+                }
+                McpFrame::Resume { token } => tokens.push(token),
+                McpFrame::Goodbye { .. } | McpFrame::Unknown => {}
+            }
+        }
+    }
+
+    /// A resume token for a Claude Code session that owned no tabs and stood by when `standby`.
+    fn claude_code_token(standby: bool) -> String {
+        ResumeState {
+            revision: "2025-06-18".into(),
+            claim: Some(CLAUDE_CODE.into()),
+            owned_tabs: Vec::new(),
+            lives: BTreeMap::new(),
+            standby,
+        }
+        .encode()
+    }
+
+    #[test]
+    fn resumed_connections_keep_the_role_their_clients_saw_in_either_order() {
+        let home = TestHome::new("toolset-resumed");
+        let policy = home.path().join("policy.json");
+        write_policy(
+            &policy,
+            "rules",
+            json!(["read", "action", "write", "execute"]),
+        );
+        let served = serve_governed(
+            &home,
+            scripted(vec![running(CLAUDE_CODE, 40), running(CLAUDE_CODE, 40)]),
+            policy.clone(),
+        );
+
+        // After a replace, the edge that stood by reconnects first.
+        let mut plugin = open_mcp(Some(claude_code_token(true)));
+        assert!(next_resume(&mut plugin).standby);
+        let mut entry = open_mcp(Some(claude_code_token(false)));
+        assert!(!next_resume(&mut entry).standby);
+        let offered = list_tools(&mut entry, 2);
+        assert!(!offered.is_empty(), "the former holder offers the tools");
+        assert!(list_tools(&mut plugin, 2).is_empty());
+
+        // A policy change tells the holder, and a re-list still offers no second set.
+        write_policy(&policy, "narrower", json!(["read"]));
+        served.intake.governance.refresh_tick();
+        until_list_changed(&mut entry);
+        let narrowed = list_tools(&mut entry, 3);
+        assert!(!narrowed.is_empty() && narrowed.len() < offered.len());
+        assert!(
+            list_tools(&mut plugin, 3).is_empty(),
+            "the client that stood by is never offered a second set"
         );
     }
 
@@ -4138,6 +4236,7 @@ mod tests {
             claim: Some("returning client".into()),
             owned_tabs: vec![kept.clone(), gone.clone()],
             lives: BTreeMap::new(),
+            standby: false,
         }
         .encode();
 
@@ -4234,6 +4333,7 @@ mod tests {
                 .map(|life| BTreeMap::from([(tab.browser_id.clone(), life.to_owned())]))
                 .unwrap_or_default(),
             owned_tabs: vec![tab],
+            standby: false,
         }
         .encode()
     }
@@ -5959,19 +6059,7 @@ mod tests {
 
         let directory = temp_home("catalog");
         let path = directory.join("policy.json");
-        let write = |name: &str, allowed: Value| {
-            std::fs::write(
-                &path,
-                serde_json::to_vec(&json!({
-                    "schema": 4,
-                    "name": name,
-                    "version": "1",
-                    "grants": [{"id": "all", "hosts": {"allow": ["*"]}, "allowed": allowed}]
-                }))
-                .unwrap(),
-            )
-            .unwrap();
-        };
+        let write = |name: &str, allowed: Value| write_policy(&path, name, allowed);
         write("rules", json!(["read", "action", "write", "execute"]));
         let governance = GovernanceFacade::new(Some(path.clone()));
         let advertised = AdvertisedCatalog::default();

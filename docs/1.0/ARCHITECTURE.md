@@ -389,7 +389,8 @@ catalog is empty. Its calls are still served. When the connection that offers th
 the service is not ending, the first that stands by is promoted and sends
 `notifications/tools/list_changed`. Two processes, a source that could not be read, a source that
 is not the claimed agent's own app (an editor whose terminal runs the agent) and the command line
-never stand by.
+never stand by. A session a resume token continues keeps the role its client saw, whatever order
+the edges reconnect in: the token says whether it stood by, and a promotion writes a new one.
 
 The browser side is adapter protocol 4, carried opaquely by the browser relay. Its messages are
 hello, primitive request, receipt, browser event, cancel, and presentation. It carries a closed
@@ -645,17 +646,17 @@ An MCP session's resume token is written by the service and opaque to the edge, 
 memory and never reads it. It carries the session's revision, its client claim, and each tab with
 its own browser and a digest of the tab's URL (the SHA-256 of `TabState.url` bounded to 8192
 characters, as the adapter bounds a tab's URL), so the edge holds no page text. It carries the life
-of each kept tab's browser, when one life covers them. It is published with the `initialize`
-answer, after each call and on the session watch's one-second tick, so a close or a commit outside
-a call reaches it, and it is never written past 64 KiB (`MAX_RESUME_TOKEN_BYTES`, what the reader
-accepts): a token too large keeps its first tabs, and a tab left out reads as no longer open after
-a restart. A resumed session's tabs enter as pending bindings, each with its own browser. A token
-written before digests resumes with every tab stale, and a token that does not decode still resumes
-an initialized session at the oldest supported revision with no claim and no tabs, with a
-diagnostics line. The token stays unsigned: it is a hint and never authority. A same-user program
-that writes one can bind only a tab whose id shows the URL it names, or, carrying the browser's
-current life, a tab of the current run; that program can already act as the user (ADR-0199
-Decision 5, ADR-0203).
+of each kept tab's browser, when one life covers them, and whether the session stood by. It is
+published with the `initialize` answer, after each call, on a promotion and on the session watch's
+one-second tick, so a close or a commit outside a call reaches it, and it is never written past
+64 KiB (`MAX_RESUME_TOKEN_BYTES`, what the reader accepts): a token too large keeps its first tabs,
+and a tab left out reads as no longer open after a restart. A resumed session's tabs enter as
+pending bindings, each with its own browser. A token written before digests resumes with every tab
+stale, and a token that does not decode still resumes an initialized session at the oldest supported
+revision with no claim and no tabs, with a diagnostics line. The token stays unsigned: it is a hint
+and never authority. A same-user program that writes one can bind only a tab whose id shows the URL
+it names, or, carrying the browser's current life, a tab of the current run; that program can
+already act as the user (ADR-0199 Decision 5, ADR-0203).
 
 Physical tab ids are unique inside one browser only. Ownership checks compare a tab id within the
 browser its workspace works in, so Chrome's tab 5 and Edge's tab 5 never refuse each other.
