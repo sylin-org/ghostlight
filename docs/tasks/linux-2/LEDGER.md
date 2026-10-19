@@ -126,7 +126,7 @@ never sees the entry.
 | L2-12 | A clean install from the bundle, and real use | todo |
 | L2-13 | The same with a Flathub browser | blocked: owner, CachyOS only |
 | L2-14 | Alpine from the bundle | blocked: owner, CachyOS only |
-| L2-15 | The owner's steps for Bluefin and Alpine | todo |
+| L2-15 | The owner's steps for Bluefin and Alpine | done |
 | L2-16 | CI installs the candidate from its bundle and uses it, as a person on Linux does | done |
 
 **L2-11.** Dispatch the release workflow on the go head, download the bundle, and run
@@ -140,6 +140,13 @@ demo stages from an agent, the window and the tray, idle exit, a restart of the 
 
 **L2-15.** A short page under `docs/testing/` with the owner's exact steps for Bluefin and Alpine:
 where to get the bundle, the install command, what to try, and what each result means.
+
+Result, 2026-10-19, done:
+[docs/testing/linux-other-environments-2026-10-19.md](../../testing/linux-other-environments-2026-10-19.md).
+It takes the bundle from the L2-11 run below and the extension from the bundle's revision. For
+Bluefin it states that a Flathub browser cannot start Ghostlight by design (ADR-0197 Decision 22)
+and how to go further with a layered native Chromium, and it lists the SELinux, tray and uninstall
+checks. For Alpine it states the expected failure and why.
 
 **L2-16.** Assigned by windows-claude in the chat ([0060]), approved by the owner in the CI review
 of 2026-10-19: CI does not prove the path real people take. A job in `release.yml`, after the
