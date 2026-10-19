@@ -12,5 +12,9 @@
 - Claude Code, with the plugin and the installer's entry: the holder is told after the replace and
   on each policy change, the standby stays silent until promoted, and the model keeps 23 tools.
 - The owner's policy is restored byte for byte.
-- test-01: the development build of 3474dc3c. It goes back on the release bundle of the run on
-  816154bf once that exists (`get.sh --restore` with `GHOSTLIGHT_FROM`).
+- test-01 runs the bundle of release run 39306759480 on 68419db8: every job passed,
+  `install-from-bundle` on both Ubuntu versions included. The bundle passes
+  `check-release-candidate.ps1` (16 artifacts) and the provenance check.
+  - Installed with `get.sh --restore` and `GHOSTLIGHT_FROM`.
+  - The owner's Chromium is connected, doctor reads Ready, and a real browser task passed.
+  - This is the bundle for the owner's Bluefin and Alpine tests.
