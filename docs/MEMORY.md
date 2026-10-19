@@ -87,6 +87,11 @@ the owner wants, and what this project learned the hard way.
   stays the owner's: ask before changing it, even in a cleanup the owner asked for (owner,
   2026-10-18). How the 2026-09 campaign ran (lanes, escalation, evidence format) is in
   [the fleet campaign](testing/fleet-acceptance-2026-09.md).
+- **Remove deprecated content.** On a machine, retired installs, superseded versions, stale build
+  output and what removed apps and browsers left behind are deleted, not kept "just in case"
+  (owner, 2026-10-19, during the test-02 cleanup: "always remove deprecated content"). Look before
+  deleting, and remove a retired install with its own uninstall first. This is about machine
+  content: the documentation corpus, ADRs and archive tags stay, as AGENTS.md says.
 - **Coordinated machines may commit and push as the owner.** The owner authorized provisioning
   the local Ghostlight Git credentials to the four dedicated machines. Use the owner's verified
   identity and secure credential helpers; never put tokens or private keys in task messages,
@@ -335,7 +340,9 @@ the owner wants, and what this project learned the hard way.
   a separate desktop test installation. A separate build directory only avoids locked files.
   A sandboxed run (a bubblewrap home, a test home with its own browser profile, Chrome for
   Testing) is a false integration test: acceptance always uses the real installation and the
-  system browser the person uses (owner, 2026-10-17, on the Linux batch).
+  system browser the person uses (owner, 2026-10-17, on the Linux batch). Restated on 2026-10-19
+  on test-02: "never use isolated/sandboxed/etc Chromium instances. Always use the real user
+  browser."
   The same holds when another session is asked for a check: ask for it on the real installation,
   never in a scratch home (owner, 2026-10-19: "There's an ongoing mandate to USE this environment
   for tests and validation. Isolation makes the process brittle and wasteful.").
